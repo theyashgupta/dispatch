@@ -1,0 +1,23 @@
+{
+  "class": "marker-done",
+  "session": "ak-fixture",
+  "covers": [
+    "marker-print — MARK-02 DONE fire, drops any flip-back baseline (Agent Done never flips)"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ All done — Postgres is configured and the migrations ran clean.",
+        "  AK_STATUS: DONE — configured postgres and ran 3 migrations",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "in_progress"
+    }
+  ]
+}

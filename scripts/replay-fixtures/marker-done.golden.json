@@ -1,0 +1,14 @@
+[
+  {
+    "decision": {
+      "kind": "applyMarker",
+      "column": "agent_done",
+      "reason": "configured postgres and ran 3 migrations",
+      "key": "DONE configured postgres and ran 3 migrations"
+    },
+    "next": {
+      "agentView": "⏺ All done — Postgres is configured and the migrations ran clean.",
+      "markerFreeStreak": 0
+    }
+  }
+]

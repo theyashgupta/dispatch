@@ -1,0 +1,20 @@
+[
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "agentView": "⏺ Reading the codebase to plan the change.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "setOutputChanged"
+    },
+    "next": {
+      "agentView": "⏺ Reading the codebase to plan the change.\n⏺ Found the watcher module; drafting the refactor.",
+      "markerFreeStreak": 0
+    }
+  }
+]

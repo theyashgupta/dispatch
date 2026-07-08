@@ -1,0 +1,38 @@
+[
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "agentView": "⏺ The work is complete and pushed to the review branch.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "agentView": "⏺ The work is complete and pushed to the review branch.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "agentView": "⏺ The work is complete and pushed to the review branch.",
+      "markerFreeStreak": 1
+    }
+  },
+  {
+    "decision": {
+      "kind": "clearLastMarker"
+    },
+    "next": {
+      "agentView": "⏺ The work is complete and pushed to the review branch.",
+      "markerFreeStreak": 0
+    }
+  }
+]

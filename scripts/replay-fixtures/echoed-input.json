@@ -1,0 +1,23 @@
+{
+  "class": "echoed-input",
+  "session": "ak-fixture",
+  "covers": [
+    "echoed-marker — the line-start anchor rejects an AK_STATUS echoed mid-line in the prompt/kickoff"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ Starting on the ticket now.",
+        " ❯ reminder: when you are blocked, print AK_STATUS: NEEDS_INPUT — which db to use",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "in_progress"
+    }
+  ]
+}

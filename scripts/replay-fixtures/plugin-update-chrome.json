@@ -1,0 +1,41 @@
+{
+  "class": "plugin-update-chrome",
+  "session": "ak-fixture",
+  "covers": [
+    "chrome — a plugin-update / notification repaint (and a spinner line) add no ⏺ block, so the agent-output view is unchanged and no card flips"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ Understood — I'll hold here.",
+        "  AK_STATUS: NEEDS_INPUT — confirm the plan",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT confirm the plan"
+    },
+    {
+      "pane": [
+        "⏺ Understood — I'll hold here.",
+        "  AK_STATUS: NEEDS_INPUT — confirm the plan",
+        "",
+        "  ⓘ Plugin updated: superpowers 2.1.4 — restart to apply",
+        "✻ Compacting conversation… (esc to interrupt)",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT confirm the plan"
+    }
+  ]
+}

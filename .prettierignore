@@ -1,0 +1,7 @@
+node_modules/
+.planning/
+CLAUDE.md
+dist/
+src/web/dist/
+package-lock.json
+docs/superpowers/

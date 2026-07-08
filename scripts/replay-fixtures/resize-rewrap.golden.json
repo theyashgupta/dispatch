@@ -1,0 +1,47 @@
+[
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Standing by.",
+        "width": 200,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Standing by.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Standing by.",
+        "width": 120,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Standing by.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Standing by.",
+        "width": 120,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Standing by.",
+      "markerFreeStreak": 0
+    }
+  }
+]

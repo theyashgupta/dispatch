@@ -1,0 +1,156 @@
+/** Board columns in display order. */
+export type Column =
+  "todo" | "in_progress" | "needs_input" | "agent_done" | "in_review" | "done";
+
+/** The six columns in board order, for the frontend to iterate. */
+export const COLUMNS: readonly Column[] = [
+  "todo",
+  "in_progress",
+  "needs_input",
+  "agent_done",
+  "in_review",
+  "done",
+] as const;
+
+export interface Card {
+  /** Internal card id (can equal issueId in Phase 1). */
+  id: string;
+  /** Linear issue id — the upsert key for the poller. */
+  issueId: string;
+  /** Human-readable Linear identifier, e.g. "PROP-123". */
+  identifier: string;
+  title: string;
+  description: string | null;
+  /** Linear issue permalink; optional so pre-Phase-7 cards backfill on the next poll. */
+  url?: string;
+  /** Linear priority integer: 0 none, 1 urgent, 2 high, 3 normal, 4 low. */
+  priority: number;
+  column: Column;
+  /** ISO timestamp; secondary sort key. */
+  updatedAt: string;
+  /** Set when the issue disappeared from Linear while the card was past To Do. */
+  goneFromLinear?: boolean;
+
+  /** Per-ticket workspace folder containing the git worktrees. */
+  workspacePath?: string;
+  /** Branch name used for the ticket's worktrees. */
+  branch?: string;
+  /** tmux session name hosting the claude REPL. */
+  tmuxSession?: string;
+  /** Port of the per-session ttyd instance. */
+  ttydPort?: number;
+  /**
+   * Set when the card's `ak-<identifier>` tmux session is gone — by boot reconcile (session
+   * absent from the live `list-sessions` set after a reboot) AND by the Plan-02 watcher's
+   * runtime dead-session detector (3 consecutive failed captures). Cleared by completeStart on
+   * a successful restart. Drives the "Session lost" card line + Restart affordance.
+   */
+  sessionLost?: boolean;
+
+  /**
+   * Normalized dedup key of the last consumed AK_STATUS marker (`kind + " " + reason`) —
+   * layout-independent so a repaint/rewrap never re-fires. Cleared by the watcher once the
+   * marker text leaves the pane and the card is out of the attention columns, so a genuinely
+   * re-printed identical marker fires again.
+   */
+  lastMarker?: string;
+  /** Human-readable status: the marker reason/summary, a reattach note, or absent when cleared. */
+  statusReason?: string;
+
+  /** Current provisioning step text while a start saga runs, e.g. "Creating worktrees…". */
+  provisioningStep?: string | null;
+  /** Structured start failure; card stays in To Do and renders an error state + Retry. */
+  startError?: StartError | null;
+  /** Non-fatal start warning surfaced on the card, e.g. the fetch-fallback notice. */
+  startWarning?: string | null;
+  /** ISO timestamp of the last observed ⏺-view divergence for a live session (ATTN-02 unseen-activity dot). */
+  outputChangedAt?: string;
+  /** Non-fatal Done-cleanup failure surfaced like startWarning; absent in the quiet/success state (LIFE-01). */
+  cleanupWarning?: string;
+  /** Optional extra direction text captured at Start; reused by Retry and the Phase-3 detail panel. */
+  extraDirection?: string | null;
+  /** Structured ttyd (terminal) failure surfaced in the detail panel; null/absent when the terminal is healthy. */
+  terminalError?: TerminalError | null;
+  /** Fixed resume-failure copy rendered by the session-lost UI; null/absent when no resume has failed. */
+  resumeError?: string | null;
+}
+
+/**
+ * A ttyd (terminal) failure surfaced in the detail panel. Drives the terminal
+ * region's error state + Reconnect affordance.
+ */
+export interface TerminalError {
+  /** "spawn" = ttyd failed to start / readiness timed out; "died" = process exited while tracked. */
+  variant: "spawn" | "died";
+  /** ttyd stderr / diagnostic shown in the panel's mono block. Never contains secrets. */
+  stderr?: string;
+}
+
+/**
+ * A structured failure from the start saga. Drives the card error heading
+ * "Start failed — <step>" and the DetailPanel's full-stderr view.
+ */
+export interface StartError {
+  /** The failed saga step name, e.g. "creating worktrees" — drives the card heading. */
+  step: string;
+  /** FULL underlying git/tmux stderr (or last-captured pane text); the Card clamps to ~3 lines client-side, the DetailPanel shows all. Never contains secrets. */
+  stderr: string;
+  /** Selects the UI-SPEC copy variant for the error. */
+  variant?: "config" | "branch-conflict" | "repl-timeout" | "generic";
+}
+
+/**
+ * Session record payload shared by completeStart and attachExistingSession.
+ * ttydPort stays absent/null until Phase 3.
+ */
+export interface SessionFields {
+  /** Per-ticket workspace folder containing the git worktrees. */
+  workspacePath: string;
+  /** Branch name used for the ticket's worktrees. */
+  branch: string;
+  /** tmux session name hosting the claude REPL. */
+  tmuxSession: string;
+  /** Port of the per-session ttyd instance (Phase 3). */
+  ttydPort?: number;
+}
+
+/**
+ * Full board state. This exact shape is both the SSE payload and the
+ * persisted contents of ~/.agent-kanban/board.json.
+ */
+export interface BoardSnapshot {
+  cards: Card[];
+  syncedAt: string | null;
+  /** Non-fatal sync problem from the last poll cycle (e.g. truncated pull); null when healthy. */
+  syncWarning?: string | null;
+  /**
+   * Static poll interval (ms) from config, broadcast so the client can compute sync staleness
+   * (`now - syncedAt > 2×pollIntervalMs`). A FLAT field — not a `meta` envelope; `syncedAt`
+   * already carries lastSyncAt. Non-secret; never carries the Linear key.
+   */
+  pollIntervalMs?: number;
+  /** Editor availability flags — booleans only, checked once at boot; absolute paths stay backend-only. */
+  editors?: { code: boolean; cursor: boolean };
+}
+
+/** Contents of ~/.agent-kanban/config.json. */
+export interface Config {
+  linearApiKey: string;
+  port?: number;
+  pollIntervalMs?: number;
+  repoPaths?: string[];
+  baseBranches?: string[];
+  workspaceRoot?: string;
+}
+
+/** Result of reconciling a Linear poll against the current board. */
+export interface ReconcileResult {
+  /** Cards to create or update in place. */
+  upserts: Card[];
+  /** Card ids to remove (issue gone while still in To Do). */
+  removeIds: string[];
+  /** Card ids to flag goneFromLinear (issue gone, card past To Do). */
+  goneIds: string[];
+  /** Card ids to CLEAR goneFromLinear on (issue reappeared while the card was past To Do). */
+  reappearedIds: string[];
+}

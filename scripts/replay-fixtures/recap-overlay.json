@@ -1,0 +1,40 @@
+{
+  "class": "recap-overlay",
+  "session": "ak-fixture",
+  "covers": [
+    "recap — the ※ full-screen overlay guard makes the tick a no-op (no false flip-back, no dedup-key wipe)"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ Understood — I'll wait for your decision.",
+        "  AK_STATUS: NEEDS_INPUT — which db to use",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT which db to use"
+    },
+    {
+      "pane": [
+        "※ recap: agent-kanban · replay-gate corpus (disable recaps in /config)",
+        "",
+        "  A summary of the last hour of work on the watcher restructure …",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT which db to use"
+    }
+  ]
+}

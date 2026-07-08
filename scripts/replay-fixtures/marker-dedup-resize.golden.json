@@ -1,0 +1,59 @@
+[
+  {
+    "decision": {
+      "kind": "applyMarker",
+      "column": "needs_input",
+      "reason": "need the api key from the vault",
+      "key": "NEEDS_INPUT need the api key from the vault"
+    },
+    "next": {
+      "agentView": "⏺ I need a credential to continue.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ I need a credential to continue.",
+        "width": 200,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ I need a credential to continue.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ I need a credential to continue.",
+        "width": 200,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ I need a credential to continue.",
+      "markerFreeStreak": 1
+    }
+  },
+  {
+    "decision": {
+      "kind": "clearLastMarker"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ I need a credential to continue.",
+        "width": 200,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ I need a credential to continue.",
+      "markerFreeStreak": 0
+    }
+  }
+]

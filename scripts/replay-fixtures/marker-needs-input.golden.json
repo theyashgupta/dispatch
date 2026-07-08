@@ -1,0 +1,20 @@
+[
+  {
+    "decision": {
+      "kind": "applyMarker",
+      "column": "needs_input",
+      "reason": "which database should I use, Postgres or MySQL?",
+      "key": "NEEDS_INPUT which database should I use, Postgres or MySQL?"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Understood — I'll configure the database next.",
+        "width": 200,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Understood — I'll configure the database next.",
+      "markerFreeStreak": 0
+    }
+  }
+]

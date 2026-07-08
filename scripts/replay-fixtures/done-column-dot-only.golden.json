@@ -1,0 +1,20 @@
+[
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "agentView": "⏺ I need a decision before touching the auth flow.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "setOutputChanged"
+    },
+    "next": {
+      "agentView": "⏺ I need a decision before touching the auth flow.\n⏺ Wrapped up the leftover cleanup while parked.",
+      "markerFreeStreak": 0
+    }
+  }
+]

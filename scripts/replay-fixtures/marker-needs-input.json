@@ -1,0 +1,23 @@
+{
+  "class": "marker-needs-input",
+  "session": "ak-fixture",
+  "covers": [
+    "marker-print — MARK-01 NEEDS_INPUT fire, snapshots the flip-back baseline"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ Understood — I'll configure the database next.",
+        "  AK_STATUS: NEEDS_INPUT — which database should I use, Postgres or MySQL?",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "in_progress"
+    }
+  ]
+}

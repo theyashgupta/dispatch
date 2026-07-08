@@ -1,0 +1,32 @@
+[
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Got it — standing by for your answer.",
+        "width": 200,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Got it — standing by for your answer.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Got it — standing by for your answer.",
+        "width": 200,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Got it — standing by for your answer.",
+      "markerFreeStreak": 0
+    }
+  }
+]

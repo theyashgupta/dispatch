@@ -1,0 +1,41 @@
+[
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Understood — waiting on you.",
+        "width": 200,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Understood — waiting on you.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "setOutputChanged"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Understood — waiting on you.",
+        "width": 200,
+        "height": 50,
+        "divergentTicks": 1
+      },
+      "agentView": "⏺ Understood — waiting on you.\n⏺ Thanks — I'll use OAuth with PKCE and wire the callback.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "flipBack"
+    },
+    "next": {
+      "agentView": "⏺ Understood — waiting on you.\n⏺ Thanks — I'll use OAuth with PKCE and wire the callback.",
+      "markerFreeStreak": 0
+    }
+  }
+]

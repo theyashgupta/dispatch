@@ -1,0 +1,14 @@
+[
+  {
+    "decision": {
+      "kind": "applyMarker",
+      "column": "agent_done",
+      "reason": "finished the feature, ready for review",
+      "key": "DONE finished the feature, ready for review"
+    },
+    "next": {
+      "agentView": "⏺ Implementation complete — the review branch is ready.",
+      "markerFreeStreak": 0
+    }
+  }
+]

@@ -1,0 +1,39 @@
+{
+  "class": "todo-skip",
+  "session": "ak-fixture",
+  "covers": [
+    "shell step-0 guard — a To Do card (interrupted saga awaiting Retry) is never scanned: even a marker parked on the pane produces nothing and every per-session map stays untouched (agentView is never even seeded)"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ All done — the migration script is ready to run.",
+        "  AK_STATUS: DONE — wrote the migration script",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "todo"
+    },
+    {
+      "pane": [
+        "⏺ All done — the migration script is ready to run.",
+        "  AK_STATUS: DONE — wrote the migration script",
+        "",
+        "⏺ Also tidied the README while waiting.",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "todo"
+    }
+  ]
+}

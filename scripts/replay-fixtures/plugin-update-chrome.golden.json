@@ -1,0 +1,32 @@
+[
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Understood — I'll hold here.",
+        "width": 200,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Understood — I'll hold here.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Understood — I'll hold here.",
+        "width": 200,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Understood — I'll hold here.",
+      "markerFreeStreak": 0
+    }
+  }
+]

@@ -1,0 +1,41 @@
+{
+  "class": "done-column-dot-only",
+  "session": "ak-fixture",
+  "covers": [
+    "done-column bail — a Done card is dot-only: a marker parked on the pane NEVER fires (no applyMarker, no flip-back, no dedup bookkeeping)",
+    "ATTN-02 — first observation seeds the dot baseline (no fire); a later ⏺ divergence fires setOutputChanged and re-baselines forward",
+    "geometry laziness — paneNeedsSize is false for done, so the harness threads NaN geometry and the decisions must not change"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ I need a decision before touching the auth flow.",
+        "  AK_STATUS: NEEDS_INPUT — should sessions persist across restarts?",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "done"
+    },
+    {
+      "pane": [
+        "⏺ I need a decision before touching the auth flow.",
+        "  AK_STATUS: NEEDS_INPUT — should sessions persist across restarts?",
+        "",
+        "⏺ Wrapped up the leftover cleanup while parked.",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "done"
+    }
+  ]
+}

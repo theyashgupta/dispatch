@@ -1,0 +1,23 @@
+{
+  "class": "in-review-needs-input-marker",
+  "session": "ak-fixture",
+  "covers": [
+    "in-review marker eligibility (REV-03) — a fresh NEEDS_INPUT marker moves an in_review card to needs_input and snapshots the flip-back baseline, confirming the NEEDS_INPUT branch behaves for in_review"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ I've paused — need a decision before continuing the review fixes.",
+        "  AK_STATUS: NEEDS_INPUT — should I rebase onto main or merge?",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "in_review"
+    }
+  ]
+}

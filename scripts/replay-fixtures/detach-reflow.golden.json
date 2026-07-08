@@ -1,0 +1,47 @@
+[
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Working — awaiting your call.",
+        "width": 200,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Working — awaiting your call.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Working — awaiting your call.",
+        "width": 200,
+        "height": 30,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Working — awaiting your call.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Working — awaiting your call.",
+        "width": 200,
+        "height": 30,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Working — awaiting your call.",
+      "markerFreeStreak": 0
+    }
+  }
+]

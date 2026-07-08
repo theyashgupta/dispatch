@@ -1,0 +1,55 @@
+{
+  "class": "resize-rewrap",
+  "session": "ak-fixture",
+  "covers": [
+    "resize — a width change re-snapshots the flip-back baseline at the new geometry, never flips",
+    "idle-no-change — a repeated identical tick is a pure no-op"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ Standing by.",
+        "  AK_STATUS: NEEDS_INPUT — which port",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT which port"
+    },
+    {
+      "pane": [
+        "⏺ Standing by.",
+        "  AK_STATUS: NEEDS_INPUT — which port",
+        "",
+        "──────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 120,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT which port"
+    },
+    {
+      "pane": [
+        "⏺ Standing by.",
+        "  AK_STATUS: NEEDS_INPUT — which port",
+        "",
+        "──────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 120,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT which port"
+    }
+  ]
+}

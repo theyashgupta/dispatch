@@ -1,0 +1,39 @@
+{
+  "class": "ghost-suggestion",
+  "session": "ak-fixture",
+  "covers": [
+    "ghost — a dim ❯ suggested-reply painted into the input-box interior is stripped, never reaches the ⏺ view, never flips"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ Got it — standing by for your answer.",
+        "  AK_STATUS: NEEDS_INPUT — pick a region",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT pick a region"
+    },
+    {
+      "pane": [
+        "⏺ Got it — standing by for your answer.",
+        "  AK_STATUS: NEEDS_INPUT — pick a region",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ us-east-1, the primary region",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT pick a region"
+    }
+  ]
+}

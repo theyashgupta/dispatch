@@ -1,0 +1,6 @@
+# Revisions to ignore in `git blame` (mass reformatting, no logic change).
+# Enable locally with: git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub honors this file automatically.
+
+# style: apply prettier formatting across repo (Phase 9)
+c5b23710b97469c127341bf632f6b4eae0dfe8b9

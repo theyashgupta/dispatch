@@ -1,0 +1,136 @@
+/*
+ * UI-SPEC design tokens — Phase 1 UI Design Contract.
+ * All tokens are :root CSS custom properties so P2–P5 inherit them without refactor.
+ * Aesthetic: dark, dense, Linear-like dev-tool. No animation-heavy chrome.
+ */
+
+:root {
+  /* Color — 60/30/10 dark theme, one accent + one semantic (destructive). */
+  --bg: #0b0c0e; /* Dominant (60%): app background, error/first-run screens */
+  --surface-column: #131417; /* Secondary (30%): column surface, slide-over */
+  --surface-card: #1a1b1f; /* Secondary (30%): elevated card surface */
+  --surface-card-hover: #202126; /* Card hover lift (no accent) */
+  --border: #26272b; /* Borders / dividers */
+  --accent: #5e6ad2; /* Accent (10%): drag/selection/focus ONLY */
+  --destructive: #e5484d; /* Sync-failure / disconnected / config error */
+  --text: #e8e9ea; /* Primary text: titles, headings, description body */
+  --text-muted: #8a8f98; /* Muted: identifiers, headers, counts, timestamps */
+
+  /* Spacing — 8-point scale. */
+  --space-xs: 4px; /* icon-to-text gaps, inline badge padding */
+  --space-sm: 8px; /* inter-card gap, column inner gap, card padding */
+  --space-lg: 16px; /* column inner padding, board gutter */
+  --space-xl: 24px; /* slide-over/error screen block spacing */
+  --space-2xl: 32px; /* error/first-run outer padding; strip + header height */
+  --space-3xl: 48px; /* empty-state vertical centering offset */
+
+  /* Typography — 4 chrome sizes + 1 markdown heading cap, exactly 2 weights. */
+  --font-body: 13px; /* card title, description body */
+  --font-label: 12px; /* identifier, column header, count, sync strip, badges */
+  --font-heading: 15px; /* slide-over panel title */
+  --font-md-h1: 14px; /* description-heading cap — one step below the 15px panel title */
+  --font-display: 20px; /* first-run / startup-error title */
+
+  --weight-regular: 400;
+  --weight-semibold: 600;
+
+  --line-body: 1.5;
+  --line-label: 1.4;
+  --line-heading: 1.3;
+  --line-display: 1.2;
+
+  /* Font stacks. */
+  --font-ui: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Chrome dimensions. */
+  --strip-height: 32px;
+  --column-header-height: 32px;
+  --radius: 6px;
+
+  /* Priority signal palette (card stripe) */
+  --prio-urgent: #e5484d;
+  --prio-high: #ef8e3b;
+  --prio-medium: #d9b23c;
+  --prio-low: #6b7280;
+
+  /* Column-identity signal palette (header underline + count chip) */
+  --col-todo: #8a8f98;
+  --col-in-progress: #5e6ad2;
+  --col-needs-input: #ef8e3b;
+  --col-agent-done: #3fb950;
+  --col-in-review: #a371f7;
+  --col-done: #6b7280;
+
+  /* Status signal palette (sync-strip dot) */
+  --status-ok: #3fb950;
+  --status-stale: #ef8e3b;
+  --status-down: #e5484d;
+
+  /* Dimensions */
+  --stripe-width: 3px;
+  --panel-width: 480px; /* desktop default; swapped per breakpoint below */
+  --board-gutter-lg: 24px; /* wider board gutter at >=1600px (large displays) */
+}
+
+/* Panel-width breakpoint swaps — DetailPanel reads --panel-width; PANEL-03
+   holds because only the token value changes, never the JSX tree. */
+@media (min-width: 1600px) {
+  :root {
+    --panel-width: 560px;
+  }
+}
+@media (max-width: 1023px) {
+  :root {
+    --panel-width: 440px;
+  }
+}
+@media (max-width: 767px) {
+  :root {
+    --panel-width: 100vw;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--font-body);
+  line-height: var(--line-body);
+  font-weight: var(--weight-regular);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Full-viewport, no page scroll — the board owns the remaining height. */
+#root {
+  height: 100vh;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* Markdown description body: the UI-SPEC margin-collapse rule — the first and
+   last rendered blocks must not leak their outer margins into the panel's own
+   block spacing. Inline styles cannot express child-position selectors, so
+   this one structural rule lives here beside the tokens it complements. */
+.md-body > :first-child {
+  margin-top: 0;
+}
+.md-body > :last-child {
+  margin-bottom: 0;
+}

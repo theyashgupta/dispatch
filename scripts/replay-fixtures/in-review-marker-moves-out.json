@@ -1,0 +1,23 @@
+{
+  "class": "in-review-marker-moves-out",
+  "session": "ak-fixture",
+  "covers": [
+    "in-review marker eligibility (REV-03) — a fresh DONE marker still moves an in_review card OUT to agent_done; the todo/done exclusion guards leave in_review marker-eligible"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ Implementation complete — the review branch is ready.",
+        "  AK_STATUS: DONE — finished the feature, ready for review",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "in_review"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "class": "unseen-dot-first-divergence",
+  "session": "ak-fixture",
+  "covers": [
+    "unseen-dot — ATTN-02 seeds the dot baseline on first sight (no fire), then stamps setOutputChanged on the FIRST agent-output divergence (no 2-tick debounce)"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ Reading the codebase to plan the change.",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "in_progress"
+    },
+    {
+      "pane": [
+        "⏺ Reading the codebase to plan the change.",
+        "",
+        "⏺ Found the watcher module; drafting the refactor.",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "in_progress"
+    }
+  ]
+}

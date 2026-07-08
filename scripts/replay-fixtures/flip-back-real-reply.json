@@ -1,0 +1,58 @@
+{
+  "class": "flip-back-real-reply",
+  "session": "ak-fixture",
+  "covers": [
+    "real-⏺-reply — a new ⏺ agent block must diverge from the baseline for TWO consecutive ticks before the card flips back (2-tick debounce)"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ Understood — waiting on you.",
+        "  AK_STATUS: NEEDS_INPUT — which auth flow",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT which auth flow"
+    },
+    {
+      "pane": [
+        "⏺ Understood — waiting on you.",
+        "  AK_STATUS: NEEDS_INPUT — which auth flow",
+        "",
+        "⏺ Thanks — I'll use OAuth with PKCE and wire the callback.",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT which auth flow"
+    },
+    {
+      "pane": [
+        "⏺ Understood — waiting on you.",
+        "  AK_STATUS: NEEDS_INPUT — which auth flow",
+        "",
+        "⏺ Thanks — I'll use OAuth with PKCE and wire the callback.",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT which auth flow"
+    }
+  ]
+}

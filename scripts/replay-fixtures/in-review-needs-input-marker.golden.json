@@ -1,0 +1,20 @@
+[
+  {
+    "decision": {
+      "kind": "applyMarker",
+      "column": "needs_input",
+      "reason": "should I rebase onto main or merge?",
+      "key": "NEEDS_INPUT should I rebase onto main or merge?"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ I've paused — need a decision before continuing the review fixes.",
+        "width": 200,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ I've paused — need a decision before continuing the review fixes.",
+      "markerFreeStreak": 0
+    }
+  }
+]

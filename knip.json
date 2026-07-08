@@ -1,0 +1,12 @@
+{
+  "entry": [
+    "src/server/bootstrap/index.ts",
+    "src/web/main.tsx",
+    "src/web/index.html"
+  ],
+  "project": ["src/**/*.{ts,tsx}"],
+  "ignore": ["src/web/dist/**"],
+  "ignoreExportsUsedInFile": true,
+  "ignoreDependencies": ["@dnd-kit/sortable"],
+  "ignoreBinaries": ["which", "ttyd"]
+}

@@ -1,0 +1,55 @@
+{
+  "class": "detach-reflow",
+  "session": "ak-fixture",
+  "covers": [
+    "detach — a height change at constant width re-snapshots the baseline (NEW-03), never flips",
+    "geometry-NaN — a session that vanished mid-tick (NaN geometry) leaves the baseline untouched"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ Working — awaiting your call.",
+        "  AK_STATUS: NEEDS_INPUT — approve the plan",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT approve the plan"
+    },
+    {
+      "pane": [
+        "⏺ Working — awaiting your call.",
+        "  AK_STATUS: NEEDS_INPUT — approve the plan",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 30,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT approve the plan"
+    },
+    {
+      "pane": [
+        "⏺ Working — awaiting your call.",
+        "  AK_STATUS: NEEDS_INPUT — approve the plan",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": null,
+      "height": null,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT approve the plan"
+    }
+  ]
+}
