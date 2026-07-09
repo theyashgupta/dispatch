@@ -33,6 +33,8 @@ export interface Card {
 
   /** Per-ticket workspace folder containing the git worktrees. */
   workspacePath?: string;
+  /** Chosen workspace snapshot at start — absolute repo paths so resume/restart/cleanup never re-read the folder registry. */
+  workspace?: { folder: string; repos: { path: string; base: string }[] };
   /** Branch name used for the ticket's worktrees. */
   branch?: string;
   /** tmux session name hosting the claude REPL. */
@@ -131,6 +133,20 @@ export interface BoardSnapshot {
   pollIntervalMs?: number;
   /** Editor availability flags — booleans only, checked once at boot; absolute paths stay backend-only. */
   editors?: { code: boolean; cursor: boolean };
+  /** Registered workspace-folder paths, broadcast so the start modal has a live, fast read. */
+  workspaceFolders?: string[];
+  /** Folder used on the last successful start, preselected in the modal; null when none yet. */
+  lastUsed?: string | null;
+}
+
+/**
+ * A git repo surfaced by folder discovery: its absolute path, display name, and
+ * detected base branch. The shape the discover/add workspace endpoints return.
+ */
+export interface DiscoveredRepo {
+  path: string;
+  name: string;
+  base: string;
 }
 
 /** Contents of ~/.dispatch/config.json. */

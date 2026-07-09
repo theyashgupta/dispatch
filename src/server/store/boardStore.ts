@@ -52,6 +52,14 @@ class BoardStore extends EventEmitter {
     code: false,
     cursor: false,
   };
+  /**
+   * Registered workspace-folder paths, persisted in board.json and broadcast on every snapshot so
+   * the start modal reads them live. Runtime state (unlike the boot-only pollIntervalMs/editors), so
+   * every mutation goes through the enqueue queue to broadcast the change.
+   */
+  private workspaceFolders: string[] = [];
+  /** Folder used on the last successful start, preselected in the modal; null when none yet. */
+  private lastUsedFolder: string | null = null;
   /** Serializes every mutation so mutate -> persist -> emit runs to completion before the next. */
   private queue: Promise<void> = Promise.resolve();
   /**
@@ -129,6 +137,11 @@ class BoardStore extends EventEmitter {
       }
       this.syncedAt =
         typeof parsed.syncedAt === "string" ? parsed.syncedAt : null;
+      this.workspaceFolders = Array.isArray(parsed.workspaceFolders)
+        ? parsed.workspaceFolders
+        : [];
+      this.lastUsedFolder =
+        typeof parsed.lastUsed === "string" ? parsed.lastUsed : null;
       console.log(
         `[store] loaded ${this.cards.size} card(s) from ${BOARD_PATH}.`,
       );
@@ -139,6 +152,8 @@ class BoardStore extends EventEmitter {
       );
       this.cards.clear();
       this.syncedAt = null;
+      this.workspaceFolders = [];
+      this.lastUsedFolder = null;
     }
   }
 
@@ -157,6 +172,8 @@ class BoardStore extends EventEmitter {
       syncWarning: this.syncWarning,
       pollIntervalMs: this.pollIntervalMs ?? undefined,
       editors: this.editors,
+      workspaceFolders: this.workspaceFolders,
+      lastUsed: this.lastUsedFolder,
     };
   }
 
@@ -238,6 +255,57 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.extraDirection = text;
+    });
+  }
+
+  /**
+   * Register a workspace folder (runtime write — broadcasts via the queue). Re-adding an already
+   * registered folder is a no-op: the modal treats "add an existing folder" as merely selecting it,
+   * so a duplicate must not grow the list or emit a spurious change.
+   */
+  addWorkspaceFolder(path: string): Promise<void> {
+    return this.enqueue(() => {
+      if (!this.workspaceFolders.includes(path)) {
+        this.workspaceFolders.push(path);
+      }
+    });
+  }
+
+  /**
+   * Unregister a workspace folder. If it was the last-used folder, retarget lastUsed to the first
+   * remaining folder (or null) so the modal never preselects a folder that no longer exists.
+   */
+  removeWorkspaceFolder(path: string): Promise<void> {
+    return this.enqueue(() => {
+      this.workspaceFolders = this.workspaceFolders.filter((f) => f !== path);
+      if (this.lastUsedFolder === path) {
+        this.lastUsedFolder = this.workspaceFolders[0] ?? null;
+      }
+    });
+  }
+
+  /**
+   * Remember the folder of a SUCCESSFUL start so the modal preselects it next time. Called only on
+   * a completed start, not on mere selection, so an abandoned modal never changes the default.
+   */
+  setLastUsedFolder(path: string): Promise<void> {
+    return this.enqueue(() => {
+      this.lastUsedFolder = path;
+    });
+  }
+
+  /**
+   * Attach the chosen workspace (folder + absolute repo/base pairs) to a card BEFORE the saga runs,
+   * so Retry re-submits the persisted value and resume/restart/cleanup never re-read the registry.
+   * No-op if the id is unknown (mirrors setExtraDirection).
+   */
+  setCardWorkspace(
+    id: string,
+    workspace: { folder: string; repos: { path: string; base: string }[] },
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) card.workspace = workspace;
     });
   }
 
