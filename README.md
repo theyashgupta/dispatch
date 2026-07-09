@@ -17,9 +17,7 @@ each in its own git worktree, each with a real terminal in your browser.
 
 ---
 
-I was running six Claude Code agents in parallel by hand: six fixed workspace folders, six tmux windows, a mental map of which agent was waiting on me and which one was still grinding. Every new ticket meant cutting worktrees, launching a session, pasting context, and then remembering to check on it.
-
-Dispatch replaces that ritual with a board. Tickets assigned to you in Linear appear in **To Do** on their own. Dragging one to **In Progress** provisions an isolated workspace (a git worktree per repo), starts a plain `claude` REPL inside tmux, and hands it the ticket. From there the board tells you what actually needs your attention, and clicking a card gives you the real terminal, not a chat transcript.
+Dispatch puts a board in front of your agents. Tickets assigned to you in Linear appear in **To Do** on their own. Dragging one to **In Progress** cuts a worktree per repo, starts a plain `claude` REPL in tmux, and hands it the ticket. The board tells you which sessions actually need you, and clicking a card gives you the real terminal, not a chat transcript.
 
 One user, one machine, localhost only. That's the design, not a limitation we're working around.
 
