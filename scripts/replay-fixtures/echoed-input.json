@@ -1,6 +1,6 @@
 {
   "class": "echoed-input",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "echoed-marker — the line-start anchor rejects an DISPATCH_STATUS echoed mid-line in the prompt/kickoff"
   ],

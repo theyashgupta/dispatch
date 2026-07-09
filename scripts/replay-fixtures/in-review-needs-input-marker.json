@@ -1,6 +1,6 @@
 {
   "class": "in-review-needs-input-marker",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "in-review marker eligibility (REV-03) — a fresh NEEDS_INPUT marker moves an in_review card to needs_input and snapshots the flip-back baseline, confirming the NEEDS_INPUT branch behaves for in_review"
   ],

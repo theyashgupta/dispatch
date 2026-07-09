@@ -1,6 +1,6 @@
 {
   "class": "flip-back-real-reply",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "real-⏺-reply — a new ⏺ agent block must diverge from the baseline for TWO consecutive ticks before the card flips back (2-tick debounce)"
   ],

@@ -1,6 +1,6 @@
 {
   "class": "marker-needs-input",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "marker-print — MARK-01 NEEDS_INPUT fire, snapshots the flip-back baseline"
   ],

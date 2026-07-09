@@ -1,6 +1,6 @@
 {
   "class": "plugin-update-chrome",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "chrome — a plugin-update / notification repaint (and a spinner line) add no ⏺ block, so the agent-output view is unchanged and no card flips"
   ],

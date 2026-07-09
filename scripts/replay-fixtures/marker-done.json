@@ -1,6 +1,6 @@
 {
   "class": "marker-done",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "marker-print — MARK-02 DONE fire, drops any flip-back baseline (Agent Done never flips)"
   ],

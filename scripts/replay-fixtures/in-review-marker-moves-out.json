@@ -1,6 +1,6 @@
 {
   "class": "in-review-marker-moves-out",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "in-review marker eligibility (REV-03) — a fresh DONE marker still moves an in_review card OUT to agent_done; the todo/done exclusion guards leave in_review marker-eligible"
   ],

@@ -1,6 +1,6 @@
 {
   "class": "ghost-suggestion",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "ghost — a dim ❯ suggested-reply painted into the input-box interior is stripped, never reaches the ⏺ view, never flips"
   ],

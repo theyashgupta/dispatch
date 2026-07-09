@@ -1,6 +1,6 @@
 {
   "class": "detach-reflow",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "detach — a height change at constant width re-snapshots the baseline (NEW-03), never flips",
     "geometry-NaN — a session that vanished mid-tick (NaN geometry) leaves the baseline untouched"

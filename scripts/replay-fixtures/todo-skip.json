@@ -1,6 +1,6 @@
 {
   "class": "todo-skip",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "shell step-0 guard — a To Do card (interrupted saga awaiting Retry) is never scanned: even a marker parked on the pane produces nothing and every per-session map stays untouched (agentView is never even seeded)"
   ],

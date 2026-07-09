@@ -1,6 +1,6 @@
 {
   "class": "recap-overlay",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "recap — the ※ full-screen overlay guard makes the tick a no-op (no false flip-back, no dedup-key wipe)"
   ],

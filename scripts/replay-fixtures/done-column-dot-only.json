@@ -1,6 +1,6 @@
 {
   "class": "done-column-dot-only",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "done-column bail — a Done card is dot-only: a marker parked on the pane NEVER fires (no applyMarker, no flip-back, no dedup bookkeeping)",
     "ATTN-02 — first observation seeds the dot baseline (no fire); a later ⏺ divergence fires setOutputChanged and re-baselines forward",

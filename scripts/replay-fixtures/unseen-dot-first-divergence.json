@@ -1,6 +1,6 @@
 {
   "class": "unseen-dot-first-divergence",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "unseen-dot — ATTN-02 seeds the dot baseline on first sight (no fire), then stamps setOutputChanged on the FIRST agent-output divergence (no 2-tick debounce)"
   ],

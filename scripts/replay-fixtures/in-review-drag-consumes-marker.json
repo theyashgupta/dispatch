@@ -1,6 +1,6 @@
 {
   "class": "in-review-drag-consumes-marker",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "drag-wins (MARK-04) — dragging a marker-carrying card INTO in_review consumes the marker: the still-visible marker is deduped against the persisted lastMarker so the card never bounces back out",
     "marker-free-clear (IN-06) — once the consumed marker scrolls off, in_review is out-of-attention so the stale dedup key clears only after TWO consecutive marker-free ticks"

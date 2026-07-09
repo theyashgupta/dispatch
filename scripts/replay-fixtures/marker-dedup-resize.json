@@ -1,6 +1,6 @@
 {
   "class": "marker-dedup-resize",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "dedup — a wider capture that reveals more of a hard-wrapped reason upgrades the key monotonically (never re-fires); an identical re-seen marker is deduped",
     "marker-free-clear — a card dragged out of its attention column with a stale key and no marker clears the key only after TWO consecutive marker-free ticks (IN-06)"

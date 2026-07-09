@@ -1,6 +1,6 @@
 {
   "class": "resize-rewrap",
-  "session": "ak-fixture",
+  "session": "dsp-fixture",
   "covers": [
     "resize — a width change re-snapshots the flip-back baseline at the new geometry, never flips",
     "idle-no-change — a repeated identical tick is a pure no-op"
