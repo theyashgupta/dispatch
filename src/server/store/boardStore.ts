@@ -389,7 +389,7 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Apply a parsed AK_STATUS marker (Phase 4, MARK-01/02) in ONE atomic mutation: set the target
+   * Apply a parsed DISPATCH_STATUS marker (Phase 4, MARK-01/02) in ONE atomic mutation: set the target
    * column, the status reason/summary, AND the dedup key `lastMarker` together. Modeled on
    * recordTtydExit — a single enqueue so the SSE broadcast never carries a torn frame with the
    * column moved but the reason/marker not yet applied (WR-01). Callers pass column="needs_input"

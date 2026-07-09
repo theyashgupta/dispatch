@@ -51,7 +51,7 @@ the server. Dragging a ticket into In Progress is the only asynchronous action: 
 start saga, which provisions an isolated workspace of git worktrees, launches a detached tmux
 session running the Claude REPL, and spawns a per-session ttyd so the terminal can be embedded
 in the detail-panel iframe. A pane watcher samples the tmux transcript every couple of
-seconds, parses the `AK_STATUS` marker protocol, and writes at most one card decision per tick
+seconds, parses the `DISPATCH_STATUS` marker protocol, and writes at most one card decision per tick
 back through the store — which is how a card reaches Needs Input or Done without human action.
 
 The backend is restart-safe by design: tmux and ttyd, not the backend process, are the source
@@ -127,8 +127,8 @@ failed mutation logs only the error, never card fields, marker reasons, or pane 
 
 ### Marker Protocol
 
-The agent tells the board its state out-of-band through the `AK_STATUS` marker protocol: it prints
-a standalone `AK_STATUS: NEEDS_INPUT — <reason>` or `AK_STATUS: DONE — <summary>` line, the watcher
+The agent tells the board its state out-of-band through the `DISPATCH_STATUS` marker protocol: it prints
+a standalone `DISPATCH_STATUS: NEEDS_INPUT — <reason>` or `DISPATCH_STATUS: DONE — <summary>` line, the watcher
 scrapes the visible tmux pane, and `adapters/markers/parse.ts` turns that text into at most one card
 decision. The parser (`parse.ts`) is a pure, import-free module — no subprocess, no store — mirroring
 `kickoff.ts`'s "pure string builder" discipline, so both ends of the protocol are trivially reasoned
@@ -138,15 +138,15 @@ about and side-effect-free (`MARK-01`).
 tolerance envelope for agents that deviate from the kickoff template:
 
 - The **LINE-START anchor** (`^\s*`) is the primary false-positive guard. The pane echoes the user's
-  typed input and the kickoff template itself, where `AK_STATUS:` appears MID-line (after `❯ … : ` or
+  typed input and the kickoff template itself, where `DISPATCH_STATUS:` appears MID-line (after `❯ … : ` or
   `- When blocked …: `); the anchor rejects those and matches ONLY the agent's own output line
-  (`AK_STATUS:` at line start under the 2-space `⏺`-block indent).
+  (`DISPATCH_STATUS:` at line start under the 2-space `⏺`-block indent).
 - An **optional leading `⏺ ` glyph** is tolerated: when the marker is the first line of an agent
-  message the TUI prefixes the bullet, so the marker starts `⏺ AK_STATUS: …`. Echoed copies stay
+  message the TUI prefixes the bullet, so the marker starts `⏺ DISPATCH_STATUS: …`. Echoed copies stay
   mid-line and are still rejected by the anchor.
 - The **separator** accepts an em-dash (**U+2014** `—`, the exact kickoff wording), an en-dash
   (U+2013 `–`, a common LLM substitution), OR a plain hyphen `-`. The separator + reason are OPTIONAL:
-  a bare `AK_STATUS: DONE` still fires the column move with an empty summary.
+  a bare `DISPATCH_STATUS: DONE` still fires the column move with an empty summary.
 - The **reason/summary is captured as an OPAQUE string** (trim only) — never eval'd, parsed as code,
   or template-executed (`T-04-02`, see [Security Threat Model](#security-threat-model)). Untrusted
   agent text stays inert.
@@ -201,7 +201,7 @@ change to the tokens (`NEEDS_INPUT`/`DONE`), the placeholders (`<one-line reason
 ### Watcher Discriminator
 
 The pane watcher (`adapters/markers/watcher.ts`) is one 2s self-rescheduling loop that scrapes every
-active session's visible tmux pane, parses `AK_STATUS` markers, and applies AT MOST ONE atomic store
+active session's visible tmux pane, parses `DISPATCH_STATUS` markers, and applies AT MOST ONE atomic store
 decision per card per tick (move to Needs Input / Agent Done, or flip a Needs-Input card back to In
 Progress once the agent responds). The loop shape mirrors `adapters/poller.ts`: a self-rescheduling
 `setTimeout` (never a fixed-interval timer, which could overlap if a tick's serial captures run
@@ -575,7 +575,7 @@ three of them carry traps that a refactor must not paraphrase away.
 `tmux new-session -d -s <name> -c <cwd> -x 200 -y 50 <...commandArgv>`. The explicit `-x 200 -y 50`
 geometry is required for sane `capture-pane` output BEFORE any client attaches: without it the
 detached pane has a tiny default size, the claude TUI paints into that cramped geometry, and both
-readiness detection and `AK_STATUS` marker parsing become unreliable. It is load-bearing, not
+readiness detection and `DISPATCH_STATUS` marker parsing become unreliable. It is load-bearing, not
 cosmetic.
 
 **Submit Enter is a SEPARATE send-keys AFTER the paste settles (`NEW-06`).** The kickoff prompt is
@@ -852,7 +852,7 @@ is a behavior change, not a refactor.
 =<session>`; port parsed from stderr `Listening on port: N`; loopback bind mandatory; orphan-sweep
    fingerprint (`basename(argv0)==="ttyd"` AND argv includes `tmux`+`attach`); iframe src
    `http://127.0.0.1:${ttydPort}`.
-7. **AK_STATUS marker protocol.** `parse.ts` `MARKER_RE` and the kickoff wording in `kickoff.ts` must
+7. **DISPATCH_STATUS marker protocol.** `parse.ts` `MARKER_RE` and the kickoff wording in `kickoff.ts` must
    stay byte-identical to each other (em-dash **U+2014**, the `NEEDS_INPUT`/`DONE` tokens, the
    `<one-line reason>`/`<one-line summary>` placeholders). Dedup semantics (`markerKey`,
    `sameMarkerKey` prefix rule) unchanged.

@@ -47,7 +47,7 @@ Linear ──poll──▶ board store (board.json) ──SSE──▶ React boa
                       │                        drag to In Progress
                       ▼                              ▼
               2s pane watcher ◀──── tmux session (claude REPL)
-              AK_STATUS markers          │
+              DISPATCH_STATUS markers    │
                                          ├── git worktree per repo
                                          └── ttyd ──▶ <iframe> terminal
 ```
@@ -55,8 +55,8 @@ Linear ──poll──▶ board store (board.json) ──SSE──▶ React boa
 The kickoff prompt asks the agent to print standalone status lines:
 
 ```
-AK_STATUS: NEEDS_INPUT — should the status line use plain text or a flash animation?
-AK_STATUS: DONE — built the board UI, committed on branch YAS-22
+DISPATCH_STATUS: NEEDS_INPUT — should the status line use plain text or a flash animation?
+DISPATCH_STATUS: DONE — built the board UI, committed on branch YAS-22
 ```
 
 The watcher parses those from the visible pane (it survives TUI repaints, recap overlays, and prompt echoes), applies one atomic board mutation per tick, and a manual drag always wins over a marker.

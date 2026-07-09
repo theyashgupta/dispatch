@@ -48,7 +48,7 @@ export interface Card {
   sessionLost?: boolean;
 
   /**
-   * Normalized dedup key of the last consumed AK_STATUS marker (`kind + " " + reason`) —
+   * Normalized dedup key of the last consumed DISPATCH_STATUS marker (`kind + " " + reason`) —
    * layout-independent so a repaint/rewrap never re-fires. Cleared by the watcher once the
    * marker text leaves the pane and the card is out of the attention columns, so a genuinely
    * re-printed identical marker fires again.

@@ -1,5 +1,5 @@
 const MARKER_RE =
-  /^\s*(?:⏺\s*)?AK_STATUS:\s*(NEEDS_INPUT|DONE)\b(?:\s*[—–-]\s*(.*))?\s*$/;
+  /^\s*(?:⏺\s*)?DISPATCH_STATUS:\s*(NEEDS_INPUT|DONE)\b(?:\s*[—–-]\s*(.*))?\s*$/;
 
 export interface Marker {
   kind: "NEEDS_INPUT" | "DONE";
@@ -63,7 +63,7 @@ export function sameMarkerKey(
 }
 
 /**
- * Return the LAST (lowest / most recent) AK_STATUS marker in the pane, or null if none.
+ * Return the LAST (lowest / most recent) DISPATCH_STATUS marker in the pane, or null if none.
  *
  * Last-match-wins: a pane may hold several markers over the transcript; the most recent state is
  * the one at the bottom. Dedup happens in the watcher via markerKey() equality against

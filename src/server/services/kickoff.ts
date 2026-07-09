@@ -59,7 +59,7 @@ export function buildKickoff(
     ``,
     `## Status protocol (required)`,
     `Print these as standalone lines, in the exact format shown, as the LAST line of a reply:`,
-    `- When blocked and needing human input: AK_STATUS: NEEDS_INPUT — <one-line reason>`,
-    `- When the task is complete: AK_STATUS: DONE — <one-line summary>`,
+    `- When blocked and needing human input: DISPATCH_STATUS: NEEDS_INPUT — <one-line reason>`,
+    `- When the task is complete: DISPATCH_STATUS: DONE — <one-line summary>`,
   ].join("\n");
 }
