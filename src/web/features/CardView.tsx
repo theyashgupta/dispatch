@@ -26,6 +26,7 @@ interface CardViewProps {
   rootRef?: React.Ref<HTMLDivElement>;
   domProps?: React.HTMLAttributes<HTMLDivElement>;
   onSelect?: (id: string) => void;
+  onStartRequest?: (id: string) => void;
 }
 
 function errorCopy(card: CardModel): { heading: string; detail?: string } {
@@ -54,6 +55,7 @@ export function CardView({
   rootRef,
   domProps,
   onSelect,
+  onStartRequest,
 }: CardViewProps) {
   const { resuming, resumeFailed, watchdogFired, failureCopy, onResume } =
     useResumeFeedback(card);
@@ -340,9 +342,13 @@ export function CardView({
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                startCard(card.id, card.extraDirection ?? "").catch((err) => {
-                  console.error("restart startCard failed", err);
-                });
+                if (card.workspace) {
+                  startCard(card.id, card.extraDirection ?? "").catch((err) => {
+                    console.error("restart startCard failed", err);
+                  });
+                } else {
+                  onStartRequest?.(card.id);
+                }
               }}
               style={{ alignSelf: "flex-start" }}
             >

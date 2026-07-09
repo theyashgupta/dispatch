@@ -164,6 +164,7 @@ export function Board({
             cards={cards.filter((card) => card.column === column)}
             selectedCardId={selectedCardId}
             onSelectCard={handleSelectCard}
+            onStartRequest={onStartRequest}
             isCarousel={isCarousel}
             phone={isPhone}
             large={isLarge}

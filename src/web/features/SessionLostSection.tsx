@@ -7,13 +7,25 @@ import { Notice } from "../primitives/Notice.js";
 
 interface SessionLostSectionProps {
   card: CardModel;
+  onStartRequest?: (id: string) => void;
 }
 
-export function SessionLostSection({ card }: SessionLostSectionProps) {
+export function SessionLostSection({
+  card,
+  onStartRequest,
+}: SessionLostSectionProps) {
   const { resuming, resumeFailed, watchdogFired, failureCopy, onResume } =
     useResumeFeedback(card);
   const canResume = card.column === "in_review" && Boolean(card.workspacePath);
   const workspaceGone = card.column === "in_review" && !card.workspacePath;
+
+  function handleRestart() {
+    if (card.workspace) {
+      startCard(card.id, card.extraDirection ?? "").catch(console.error);
+    } else {
+      onStartRequest?.(card.id);
+    }
+  }
 
   let helper: string;
   if (canResume) {
@@ -85,11 +97,7 @@ export function SessionLostSection({ card }: SessionLostSectionProps) {
           {resumeFailed && (
             <Button
               variant="secondary"
-              onClick={() =>
-                startCard(card.id, card.extraDirection ?? "").catch(
-                  console.error,
-                )
-              }
+              onClick={handleRestart}
               style={{ alignSelf: "flex-start" }}
             >
               <RotateCw size={12} strokeWidth={2} aria-hidden="true" />
@@ -100,9 +108,7 @@ export function SessionLostSection({ card }: SessionLostSectionProps) {
       ) : (
         <Button
           variant="secondary"
-          onClick={() =>
-            startCard(card.id, card.extraDirection ?? "").catch(console.error)
-          }
+          onClick={handleRestart}
           style={{ alignSelf: "flex-start" }}
         >
           <RotateCw size={12} strokeWidth={2} aria-hidden="true" />

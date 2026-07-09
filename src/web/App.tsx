@@ -106,6 +106,7 @@ export function App() {
         card={selectedCard}
         editors={board?.editors}
         onClose={() => setSelectedCardId(null)}
+        onStartRequest={setStartCardId}
       />
       {startCard && (
         <StartModal

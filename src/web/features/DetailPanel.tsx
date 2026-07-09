@@ -11,9 +11,15 @@ interface DetailPanelProps {
   card: CardModel | null;
   editors?: { code: boolean; cursor: boolean };
   onClose: () => void;
+  onStartRequest?: (id: string) => void;
 }
 
-export function DetailPanel({ card, editors, onClose }: DetailPanelProps) {
+export function DetailPanel({
+  card,
+  editors,
+  onClose,
+  onStartRequest,
+}: DetailPanelProps) {
   const open = card != null;
 
   const [detailsExpanded, setDetailsExpanded] = useState(false);
@@ -173,7 +179,7 @@ export function DetailPanel({ card, editors, onClose }: DetailPanelProps) {
           {c?.tmuxSession && !c.sessionLost && <TerminalRegion card={c} />}
 
           {c?.sessionLost === true && c.column !== "done" && (
-            <SessionLostSection card={c} />
+            <SessionLostSection card={c} onStartRequest={onStartRequest} />
           )}
         </div>
       </aside>
