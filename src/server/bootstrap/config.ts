@@ -104,7 +104,7 @@ export function loadConfig(): Config {
   const workspaceRoot =
     typeof parsed.workspaceRoot === "string" &&
     parsed.workspaceRoot.trim() !== ""
-      ? parsed.workspaceRoot
+      ? parsed.workspaceRoot.trim()
       : DEFAULT_WORKSPACE_ROOT;
 
   const config: Config = {
