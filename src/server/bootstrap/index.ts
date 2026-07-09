@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   const port = config.port ?? DEFAULT_PORT;
   app.listen(port, "127.0.0.1", () => {
     console.log(
-      `[server] agent-kanban backend listening on http://127.0.0.1:${port}`,
+      `[server] Dispatch backend listening on http://127.0.0.1:${port}`,
     );
 
     startPoller(config);

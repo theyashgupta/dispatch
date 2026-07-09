@@ -90,7 +90,7 @@ npm install
 npm run dev
 ```
 
-The first run writes a config template to `~/.agent-kanban/config.json` and exits. Fill it in:
+The first run writes a config template to `~/.dispatch/config.json` and exits. Fill it in:
 
 ```jsonc
 {
@@ -99,7 +99,7 @@ The first run writes a config template to `~/.agent-kanban/config.json` and exit
   "pollIntervalMs": 60000, // Linear poll interval
   "repoPaths": ["/abs/path/to/repo"], // repos to cut worktrees from
   "baseBranches": ["main"], // base branch per repo (index-aligned)
-  "workspaceRoot": "~/agent-kanban-workspaces",
+  "workspaceRoot": "~/dispatch-workspaces",
 }
 ```
 

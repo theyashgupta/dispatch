@@ -841,7 +841,7 @@ is a behavior change, not a refactor.
 3. **REST route paths + status codes.** `GET /api/board`, `GET /api/events`,
    `POST /api/cards/:id/{move,start,resume,terminal,open-editor,cleanup}`; the `202/400/409/204` codes and
    the `{ error, variant? }` 400 body. Vite proxy matches `^/api/` only (regex, deliberately not `/api`).
-4. **Persistence format + location.** `~/.agent-kanban/{board.json,config.json}`; `board.json` ===
+4. **Persistence format + location.** `~/.dispatch/{board.json,config.json}`; `board.json` ===
    `BoardSnapshot` JSON; atomic writes via `write-file-atomic`; config at mode `0600`; the `"//"`-keyed
    config template.
 5. **tmux invocations (argv-exact).** Session name `ak-<identifier>`;

@@ -133,7 +133,7 @@ export function StartModal({ card, onClose }: StartModalProps) {
                   color: "var(--text-muted)",
                 }}
               >
-                Set repoPaths and baseBranches in ~/.agent-kanban/config.json,
+                Set repoPaths and baseBranches in ~/.dispatch/config.json,
                 then restart the backend.
               </div>
             </>

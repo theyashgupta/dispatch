@@ -8,7 +8,7 @@ export class StartupError extends Error {
   }
 }
 
-/** The four binaries agent-kanban needs at runtime (spec + BOARD-05). */
+/** The four binaries Dispatch needs at runtime (spec + BOARD-05). */
 const REQUIRED_BINARIES = ["tmux", "ttyd", "claude", "git"] as const;
 
 /** Per-binary install guidance surfaced when a binary is missing. */
@@ -48,7 +48,7 @@ export async function checkBinaries(): Promise<void> {
     );
     throw new StartupError(
       `Missing required tools: ${missing.join(", ")}.\n` +
-        `agent-kanban needs all of tmux, ttyd, claude, git on PATH.\n` +
+        `Dispatch needs all of tmux, ttyd, claude, git on PATH.\n` +
         `${lines.join("\n")}\n` +
         `Install the missing tool(s) and restart.`,
     );

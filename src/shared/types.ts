@@ -116,7 +116,7 @@ export interface SessionFields {
 
 /**
  * Full board state. This exact shape is both the SSE payload and the
- * persisted contents of ~/.agent-kanban/board.json.
+ * persisted contents of ~/.dispatch/board.json.
  */
 export interface BoardSnapshot {
   cards: Card[];
@@ -133,7 +133,7 @@ export interface BoardSnapshot {
   editors?: { code: boolean; cursor: boolean };
 }
 
-/** Contents of ~/.agent-kanban/config.json. */
+/** Contents of ~/.dispatch/config.json. */
 export interface Config {
   linearApiKey: string;
   port?: number;
