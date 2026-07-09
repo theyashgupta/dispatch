@@ -119,7 +119,9 @@ export function Modal({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") control.current.requestClose();
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        control.current.requestClose();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

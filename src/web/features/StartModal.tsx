@@ -100,8 +100,18 @@ function FolderPicker({
   const [triggerFocus, setTriggerFocus] = useState(false);
   const [inputFocus, setInputFocus] = useState(false);
   const [addRowHover, setAddRowHover] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const showAdd = firstRun || adding;
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
 
   async function submitAdd() {
     const path = value.trim();
@@ -126,6 +136,7 @@ function FolderPicker({
 
   return (
     <div
+      ref={rootRef}
       style={{
         position: "relative",
         display: "flex",
@@ -193,6 +204,8 @@ function FolderPicker({
             borderRadius: "var(--radius)",
             display: "flex",
             flexDirection: "column",
+            maxHeight: "240px",
+            overflowY: "auto",
           }}
         >
           {folders.map((f) => (
@@ -667,7 +680,7 @@ export function StartModal({ card, onClose }: StartModalProps) {
               <div
                 style={{
                   fontSize: "var(--font-label)",
-                  fontWeight: "var(--weight-regular)",
+                  fontWeight: "var(--weight-semibold)",
                   lineHeight: "var(--line-label)",
                   color: "var(--text-muted)",
                 }}
