@@ -867,7 +867,7 @@ is a behavior change, not a refactor.
 10. **Linear GraphQL contract.** Query shape (unstarted `state.type`, `first:100`, cursor pagination),
     `RATELIMITED`-in-400-body detection, raw `Authorization` key (never logged), fail-closed on missing
     connection.
-11. **Client-side persisted keys.** localStorage `ak.unseen.lastOpened`; the `isUnseen` ISO-string
+11. **Client-side persisted keys.** localStorage `dsp.unseen.lastOpened`; the `isUnseen` ISO-string
     comparison; the seed-on-reconnect discipline in the notification + unseen-dot logic.
 12. **Preserved import edges (no cycles).** `watcher → ttyd → store` (via `trackedTtydSessions()` export,
     `killTtyd` wired in watcher); everything → pure `shared/types.ts`. Relocation must not introduce a

@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-const STORAGE_KEY = "ak.unseen.lastOpened";
+const STORAGE_KEY = "dsp.unseen.lastOpened";
 
 export type LastOpenedMap = Record<string, string>;
 
