@@ -106,20 +106,6 @@ function stderrOf(err: unknown): string {
   return e.stderr && e.stderr.length > 0 ? e.stderr : e.message;
 }
 
-/** Index-aligned (repoPath, baseBranch) pairs from config; throws a config error if unusable. */
-function repoPairs(config: Config): { repoPath: string; base: string }[] {
-  const repoPaths = config.repoPaths ?? [];
-  const baseBranches = config.baseBranches ?? [];
-  if (repoPaths.length === 0 || repoPaths.length !== baseBranches.length) {
-    throw new StartStepError(
-      "creating worktrees",
-      "repoPaths and baseBranches must be non-empty and index-aligned in config.json",
-      "config",
-    );
-  }
-  return repoPaths.map((repoPath, i) => ({ repoPath, base: baseBranches[i] }));
-}
-
 const prepareWorkspace: SagaStep = {
   name: "preparing workspace",
   statusText: "Preparing workspace…",
@@ -174,7 +160,7 @@ const createWorktrees: SagaStep = {
   name: "creating worktrees",
   statusText: "Creating worktrees…",
   async run(ctx) {
-    for (const { repoPath, base } of repoPairs(ctx.config)) {
+    for (const { path: repoPath, base } of ctx.card.workspace?.repos ?? []) {
       await worktreePrune(repoPath);
 
       const worktreePath = buildWorktreePath(ctx.workspacePath, repoPath);
@@ -306,7 +292,9 @@ const sendKickoff: SagaStep = {
   statusText: "Sending kickoff…",
   async run(ctx) {
     const session = "dsp-" + ctx.identifier;
-    const repoNames = (ctx.config.repoPaths ?? []).map((p) => path.basename(p));
+    const repoNames = (ctx.card.workspace?.repos ?? []).map((r) =>
+      path.basename(r.path),
+    );
     const kickoff = buildKickoff(ctx.card, ctx.extraDirection, repoNames, {
       restarted: ctx.restarted,
     });
