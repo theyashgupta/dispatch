@@ -96,6 +96,9 @@ export async function startSession(
         branch: card.identifier,
         tmuxSession: session,
       });
+      if (card.workspace?.folder) {
+        await store.setLastUsedFolder(card.workspace.folder);
+      }
       if (ctx.warnings.length > 0) {
         await store.setStartWarning(cardId, ctx.warnings.join("; "));
       }
