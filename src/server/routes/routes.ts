@@ -102,6 +102,13 @@ apiRouter.post("/cards/:id/start", async (req, res) => {
       path: r.path,
       base: r.base,
     }));
+    if (repos.some((r) => r.base.startsWith("-"))) {
+      res.status(400).json({
+        error: "invalid base branch",
+        variant: "config",
+      });
+      return;
+    }
     if (!(await restatRepos(repos))) {
       res.status(400).json({
         error: "Can't start — a selected repo is missing",

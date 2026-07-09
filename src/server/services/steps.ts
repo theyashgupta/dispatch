@@ -161,6 +161,13 @@ const createWorktrees: SagaStep = {
   statusText: "Creating worktrees…",
   async run(ctx) {
     for (const { path: repoPath, base } of ctx.card.workspace?.repos ?? []) {
+      if (base.startsWith("-")) {
+        throw new StartStepError(
+          "creating worktrees",
+          "base branch must not start with '-'",
+          "config",
+        );
+      }
       await worktreePrune(repoPath);
 
       const worktreePath = buildWorktreePath(ctx.workspacePath, repoPath);
