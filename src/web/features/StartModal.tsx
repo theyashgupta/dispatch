@@ -482,6 +482,7 @@ export function StartModal({ card, onClose }: StartModalProps) {
     setRepos(list);
     setChecked(Object.fromEntries(list.map((r) => [r.path, true])));
     setBaseOverride({});
+    setError(null);
   }, []);
 
   const selectFolder = useCallback(
@@ -687,15 +688,17 @@ export function StartModal({ card, onClose }: StartModalProps) {
                     repo={r}
                     checked={checked[r.path] ?? false}
                     base={baseOverride[r.path] ?? r.base}
-                    onToggle={() =>
+                    onToggle={() => {
+                      setError(null);
                       setChecked((prev) => ({
                         ...prev,
                         [r.path]: !prev[r.path],
-                      }))
-                    }
-                    onBaseChange={(b) =>
-                      setBaseOverride((prev) => ({ ...prev, [r.path]: b }))
-                    }
+                      }));
+                    }}
+                    onBaseChange={(b) => {
+                      setError(null);
+                      setBaseOverride((prev) => ({ ...prev, [r.path]: b }));
+                    }}
                   />
                 ))}
               </div>
