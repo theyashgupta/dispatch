@@ -8,7 +8,7 @@
     {
       "pane": [
         "⏺ Understood — I'll configure the database next.",
-        "  AK_STATUS: NEEDS_INPUT — which database should I use, Postgres or MySQL?",
+        "  DISPATCH_STATUS: NEEDS_INPUT — which database should I use, Postgres or MySQL?",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",

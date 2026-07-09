@@ -9,7 +9,7 @@
     {
       "pane": [
         "⏺ Working — awaiting your call.",
-        "  AK_STATUS: NEEDS_INPUT — approve the plan",
+        "  DISPATCH_STATUS: NEEDS_INPUT — approve the plan",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",
@@ -24,7 +24,7 @@
     {
       "pane": [
         "⏺ Working — awaiting your call.",
-        "  AK_STATUS: NEEDS_INPUT — approve the plan",
+        "  DISPATCH_STATUS: NEEDS_INPUT — approve the plan",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",
@@ -39,7 +39,7 @@
     {
       "pane": [
         "⏺ Working — awaiting your call.",
-        "  AK_STATUS: NEEDS_INPUT — approve the plan",
+        "  DISPATCH_STATUS: NEEDS_INPUT — approve the plan",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",

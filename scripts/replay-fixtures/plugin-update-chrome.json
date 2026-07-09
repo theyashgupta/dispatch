@@ -8,7 +8,7 @@
     {
       "pane": [
         "⏺ Understood — I'll hold here.",
-        "  AK_STATUS: NEEDS_INPUT — confirm the plan",
+        "  DISPATCH_STATUS: NEEDS_INPUT — confirm the plan",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",
@@ -23,7 +23,7 @@
     {
       "pane": [
         "⏺ Understood — I'll hold here.",
-        "  AK_STATUS: NEEDS_INPUT — confirm the plan",
+        "  DISPATCH_STATUS: NEEDS_INPUT — confirm the plan",
         "",
         "  ⓘ Plugin updated: superpowers 2.1.4 — restart to apply",
         "✻ Compacting conversation… (esc to interrupt)",

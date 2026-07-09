@@ -9,7 +9,7 @@
     {
       "pane": [
         "⏺ Standing by.",
-        "  AK_STATUS: NEEDS_INPUT — which port",
+        "  DISPATCH_STATUS: NEEDS_INPUT — which port",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",
@@ -24,7 +24,7 @@
     {
       "pane": [
         "⏺ Standing by.",
-        "  AK_STATUS: NEEDS_INPUT — which port",
+        "  DISPATCH_STATUS: NEEDS_INPUT — which port",
         "",
         "──────────────────────────────────",
         " ❯ ",
@@ -39,7 +39,7 @@
     {
       "pane": [
         "⏺ Standing by.",
-        "  AK_STATUS: NEEDS_INPUT — which port",
+        "  DISPATCH_STATUS: NEEDS_INPUT — which port",
         "",
         "──────────────────────────────────",
         " ❯ ",

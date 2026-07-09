@@ -8,7 +8,7 @@
     {
       "pane": [
         "⏺ Understood — I'll wait for your decision.",
-        "  AK_STATUS: NEEDS_INPUT — which db to use",
+        "  DISPATCH_STATUS: NEEDS_INPUT — which db to use",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",

@@ -9,7 +9,7 @@
     {
       "pane": [
         "⏺ The work is complete and pushed to the review branch.",
-        "  AK_STATUS: DONE — ready for review, all checks pass",
+        "  DISPATCH_STATUS: DONE — ready for review, all checks pass",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",
@@ -24,7 +24,7 @@
     {
       "pane": [
         "⏺ The work is complete and pushed to the review branch.",
-        "  AK_STATUS: DONE — ready for review, all checks pass",
+        "  DISPATCH_STATUS: DONE — ready for review, all checks pass",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",

@@ -10,7 +10,7 @@
     {
       "pane": [
         "⏺ I need a decision before touching the auth flow.",
-        "  AK_STATUS: NEEDS_INPUT — should sessions persist across restarts?",
+        "  DISPATCH_STATUS: NEEDS_INPUT — should sessions persist across restarts?",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",
@@ -24,7 +24,7 @@
     {
       "pane": [
         "⏺ I need a decision before touching the auth flow.",
-        "  AK_STATUS: NEEDS_INPUT — should sessions persist across restarts?",
+        "  DISPATCH_STATUS: NEEDS_INPUT — should sessions persist across restarts?",
         "",
         "⏺ Wrapped up the leftover cleanup while parked.",
         "",

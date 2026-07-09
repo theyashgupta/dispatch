@@ -8,7 +8,7 @@
     {
       "pane": [
         "⏺ I've paused — need a decision before continuing the review fixes.",
-        "  AK_STATUS: NEEDS_INPUT — should I rebase onto main or merge?",
+        "  DISPATCH_STATUS: NEEDS_INPUT — should I rebase onto main or merge?",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",

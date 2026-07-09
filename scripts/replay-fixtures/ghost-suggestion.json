@@ -8,7 +8,7 @@
     {
       "pane": [
         "⏺ Got it — standing by for your answer.",
-        "  AK_STATUS: NEEDS_INPUT — pick a region",
+        "  DISPATCH_STATUS: NEEDS_INPUT — pick a region",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",
@@ -23,7 +23,7 @@
     {
       "pane": [
         "⏺ Got it — standing by for your answer.",
-        "  AK_STATUS: NEEDS_INPUT — pick a region",
+        "  DISPATCH_STATUS: NEEDS_INPUT — pick a region",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ us-east-1, the primary region",

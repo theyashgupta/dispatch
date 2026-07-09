@@ -8,7 +8,7 @@
     {
       "pane": [
         "⏺ All done — the migration script is ready to run.",
-        "  AK_STATUS: DONE — wrote the migration script",
+        "  DISPATCH_STATUS: DONE — wrote the migration script",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",
@@ -22,7 +22,7 @@
     {
       "pane": [
         "⏺ All done — the migration script is ready to run.",
-        "  AK_STATUS: DONE — wrote the migration script",
+        "  DISPATCH_STATUS: DONE — wrote the migration script",
         "",
         "⏺ Also tidied the README while waiting.",
         "",

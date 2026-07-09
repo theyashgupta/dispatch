@@ -8,7 +8,7 @@
     {
       "pane": [
         "⏺ All done — Postgres is configured and the migrations ran clean.",
-        "  AK_STATUS: DONE — configured postgres and ran 3 migrations",
+        "  DISPATCH_STATUS: DONE — configured postgres and ran 3 migrations",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",

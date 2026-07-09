@@ -9,7 +9,7 @@
     {
       "pane": [
         "⏺ I need a credential to continue.",
-        "  AK_STATUS: NEEDS_INPUT — need the api key from the vault",
+        "  DISPATCH_STATUS: NEEDS_INPUT — need the api key from the vault",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",
@@ -24,7 +24,7 @@
     {
       "pane": [
         "⏺ I need a credential to continue.",
-        "  AK_STATUS: NEEDS_INPUT — need the api key from the vault",
+        "  DISPATCH_STATUS: NEEDS_INPUT — need the api key from the vault",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",

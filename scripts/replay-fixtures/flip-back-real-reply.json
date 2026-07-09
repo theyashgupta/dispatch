@@ -8,7 +8,7 @@
     {
       "pane": [
         "⏺ Understood — waiting on you.",
-        "  AK_STATUS: NEEDS_INPUT — which auth flow",
+        "  DISPATCH_STATUS: NEEDS_INPUT — which auth flow",
         "",
         "──────────────────────────────────────────────────────────────────────",
         " ❯ ",
@@ -23,7 +23,7 @@
     {
       "pane": [
         "⏺ Understood — waiting on you.",
-        "  AK_STATUS: NEEDS_INPUT — which auth flow",
+        "  DISPATCH_STATUS: NEEDS_INPUT — which auth flow",
         "",
         "⏺ Thanks — I'll use OAuth with PKCE and wire the callback.",
         "",
@@ -40,7 +40,7 @@
     {
       "pane": [
         "⏺ Understood — waiting on you.",
-        "  AK_STATUS: NEEDS_INPUT — which auth flow",
+        "  DISPATCH_STATUS: NEEDS_INPUT — which auth flow",
         "",
         "⏺ Thanks — I'll use OAuth with PKCE and wire the callback.",
         "",
