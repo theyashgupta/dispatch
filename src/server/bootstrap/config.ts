@@ -4,14 +4,14 @@ import path from "node:path";
 import type { Config } from "../../shared/types.js";
 import { StartupError } from "./binaryCheck.js";
 
-const CONFIG_DIR = path.join(os.homedir(), ".agent-kanban");
+const CONFIG_DIR = path.join(os.homedir(), ".dispatch");
 export const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 
 const DEFAULT_PORT = 4700;
 const DEFAULT_POLL_INTERVAL_MS = 60_000;
 const DEFAULT_WORKSPACE_ROOT = path.join(
   os.homedir(),
-  "agent-kanban-workspaces",
+  "dispatch-workspaces",
 );
 
 /**
@@ -19,7 +19,7 @@ const DEFAULT_WORKSPACE_ROOT = path.join(
  * so a user can read the guidance and still have the file parse cleanly after editing.
  */
 const CONFIG_TEMPLATE = {
-  "//": "agent-kanban config. Fill in linearApiKey, then restart. This file is kept at mode 0600 (owner read/write only).",
+  "//": "Dispatch config. Fill in linearApiKey, then restart. This file is kept at mode 0600 (owner read/write only).",
   "// linearApiKey":
     "Required. Linear personal API key: Linear -> Settings -> Security & access -> Personal API keys -> New key.",
   linearApiKey: "",

@@ -13,7 +13,7 @@ import type {
 } from "../../shared/types.js";
 import { reconcile, type LinearIssue } from "./mapping.js";
 
-const BOARD_DIR = path.join(os.homedir(), ".agent-kanban");
+const BOARD_DIR = path.join(os.homedir(), ".dispatch");
 export const BOARD_PATH = path.join(BOARD_DIR, "board.json");
 
 /**
