@@ -24,12 +24,6 @@ const CONFIG_TEMPLATE = {
   port: DEFAULT_PORT,
   "// pollIntervalMs": "Linear poll interval in ms. Default 60000 (60s).",
   pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
-  "// repoPaths":
-    "Phase 2+. Absolute paths to the work repos worktrees are created from. May stay empty for now.",
-  repoPaths: [] as string[],
-  "// baseBranches":
-    "Phase 2+. Base branch per repo (index-aligned with repoPaths). May stay empty for now.",
-  baseBranches: [] as string[],
   "// workspaceRoot": "Phase 2+. Root folder for per-ticket workspaces.",
   workspaceRoot: DEFAULT_WORKSPACE_ROOT,
 };
@@ -37,8 +31,9 @@ const CONFIG_TEMPLATE = {
 /**
  * Load and validate the config, or bootstrap it.
  * - Missing file: create the dir (0o700), write the 0o600 template, print guidance, exit(1).
- * - Existing file: parse, REQUIRE linearApiKey (throw StartupError if empty), warn (not throw)
- *   on empty repoPaths/baseBranches, apply defaults for port/pollIntervalMs, tighten perms to 0o600.
+ * - Existing file: parse, REQUIRE linearApiKey (throw StartupError if empty), apply defaults for
+ *   port/pollIntervalMs, tighten perms to 0o600. Retired repoPaths/baseBranches keys are ignored
+ *   with a one-line notice when still present on disk.
  * The API key value is never logged (presence is logged as a boolean only).
  */
 export function loadConfig(): Config {
@@ -100,15 +95,9 @@ export function loadConfig(): Config {
     );
   }
 
-  const repoPaths = Array.isArray(parsed.repoPaths)
-    ? (parsed.repoPaths as string[])
-    : [];
-  const baseBranches = Array.isArray(parsed.baseBranches)
-    ? (parsed.baseBranches as string[])
-    : [];
-  if (repoPaths.length === 0 || baseBranches.length === 0) {
+  if (parsed.repoPaths !== undefined || parsed.baseBranches !== undefined) {
     process.stderr.write(
-      "[config] repoPaths/baseBranches are empty — required in Phase 2 (orchestration). Continuing.\n",
+      "[config] repoPaths is no longer used — add a workspace folder from the start modal.\n",
     );
   }
 
@@ -125,8 +114,6 @@ export function loadConfig(): Config {
       typeof parsed.pollIntervalMs === "number"
         ? parsed.pollIntervalMs
         : DEFAULT_POLL_INTERVAL_MS,
-    repoPaths,
-    baseBranches,
     workspaceRoot,
   };
 
