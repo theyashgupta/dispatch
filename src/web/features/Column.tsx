@@ -29,6 +29,7 @@ interface ColumnProps {
   cards: CardModel[];
   selectedCardId?: string | null;
   onSelectCard?: (id: string) => void;
+  onStartRequest?: (id: string) => void;
   isCarousel?: boolean;
   phone?: boolean;
   large?: boolean;
@@ -39,6 +40,7 @@ export function Column({
   cards,
   selectedCardId,
   onSelectCard,
+  onStartRequest,
   isCarousel,
   phone,
   large,
@@ -128,6 +130,7 @@ export function Column({
               card={card}
               selected={card.id === selectedCardId}
               onSelect={onSelectCard}
+              onStartRequest={onStartRequest}
             />
           ))
         )}

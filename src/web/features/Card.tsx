@@ -9,9 +9,15 @@ interface CardProps {
   card: CardModel;
   selected?: boolean;
   onSelect?: (id: string) => void;
+  onStartRequest?: (id: string) => void;
 }
 
-export function Card({ card, selected = false, onSelect }: CardProps) {
+export function Card({
+  card,
+  selected = false,
+  onSelect,
+  onStartRequest,
+}: CardProps) {
   const [hover, setHover] = useState(false);
   const showGone = deriveShowGone(card);
 
@@ -32,6 +38,7 @@ export function Card({ card, selected = false, onSelect }: CardProps) {
       dimmed={isDragging}
       rootRef={setNodeRef}
       onSelect={onSelect}
+      onStartRequest={onStartRequest}
       domProps={{
         ...listeners,
         ...attributes,
