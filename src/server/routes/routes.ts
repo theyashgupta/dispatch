@@ -93,6 +93,8 @@ apiRouter.post("/cards/:id/start", async (req, res) => {
     rawRepos.length > 0 &&
     rawRepos.every(
       (r) =>
+        r !== null &&
+        typeof r === "object" &&
         typeof (r as { path?: unknown }).path === "string" &&
         typeof (r as { base?: unknown }).base === "string",
     );
