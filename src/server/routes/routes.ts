@@ -9,7 +9,12 @@ import { cleanupWorkspace } from "../services/cleanup.js";
 import { ensureTerminal } from "../services/terminal.js";
 import { editorPath, launchEditor } from "../adapters/editors.js";
 import { getOrchestrationConfig } from "../services/config-holder.js";
-import { validateOrchestrationConfig } from "../services/validateConfig.js";
+import {
+  expandPath,
+  validateFolder,
+  discoverRepos,
+  restatRepos,
+} from "../services/workspaces.js";
 
 export const apiRouter = Router();
 
@@ -46,7 +51,7 @@ apiRouter.post("/cards/:id/move", async (req, res) => {
   res.status(200).json(store.snapshot());
 });
 
-apiRouter.post("/cards/:id/start", (req, res) => {
+apiRouter.post("/cards/:id/start", async (req, res) => {
   const { id } = req.params;
 
   const card = store.getCard(id);
@@ -74,15 +79,44 @@ apiRouter.post("/cards/:id/start", (req, res) => {
       .json({ error: "orchestration config is not loaded", variant: "config" });
     return;
   }
-  const configError = validateOrchestrationConfig(config);
-  if (configError) {
-    res.status(400).json({ error: configError, variant: "config" });
-    return;
-  }
 
-  const body = req.body as { extraDirection?: unknown } | undefined;
+  const body = req.body as
+    { extraDirection?: unknown; folder?: unknown; repos?: unknown } | undefined;
   const extraDirection =
     typeof body?.extraDirection === "string" ? body.extraDirection : "";
+
+  const folder = body?.folder;
+  const rawRepos = body?.repos;
+  const hasWorkspacePayload =
+    typeof folder === "string" &&
+    Array.isArray(rawRepos) &&
+    rawRepos.length > 0 &&
+    rawRepos.every(
+      (r) =>
+        typeof (r as { path?: unknown }).path === "string" &&
+        typeof (r as { base?: unknown }).base === "string",
+    );
+
+  if (hasWorkspacePayload) {
+    const repos = (rawRepos as { path: string; base: string }[]).map((r) => ({
+      path: r.path,
+      base: r.base,
+    }));
+    if (!(await restatRepos(repos))) {
+      res.status(400).json({
+        error: "Can't start — a selected repo is missing",
+        variant: "config",
+      });
+      return;
+    }
+    await store.setCardWorkspace(id, { folder, repos });
+  } else if (!card.workspace) {
+    res.status(400).json({
+      error: "No workspace selected for this ticket",
+      variant: "config",
+    });
+    return;
+  }
 
   void startSession(id, extraDirection, config);
   res.status(202).json({ started: true });
@@ -212,4 +246,62 @@ apiRouter.post("/cards/:id/cleanup", (req, res) => {
     console.error(`[cleanup] failed for card ${id}:`, (err as Error).message);
   });
   res.status(202).json({ cleaning: true });
+});
+
+apiRouter.get("/workspace-folders", (_req, res) => {
+  const snap = store.snapshot();
+  res.status(200).json({
+    folders: snap.workspaceFolders ?? [],
+    lastUsed: snap.lastUsed ?? null,
+  });
+});
+
+apiRouter.post("/workspace-folders", async (req, res) => {
+  const rawPath = (req.body as { path?: unknown } | undefined)?.path;
+  if (typeof rawPath !== "string" || rawPath.trim() === "") {
+    res.status(400).json({ error: "path is required" });
+    return;
+  }
+
+  const abs = expandPath(rawPath);
+  const status = await validateFolder(abs);
+  if (status === "missing") {
+    res.status(400).json({ error: "Folder doesn't exist" });
+    return;
+  }
+  if (status === "not-a-folder") {
+    res.status(400).json({ error: "Not a folder" });
+    return;
+  }
+
+  const repos = await discoverRepos(abs);
+  if (repos.length === 0) {
+    res.status(400).json({ error: "No git repositories found in this folder" });
+    return;
+  }
+
+  await store.addWorkspaceFolder(abs);
+  res.status(200).json({ repos });
+});
+
+apiRouter.get("/workspace-folders/discover", async (req, res) => {
+  const rawPath = req.query.path;
+  if (typeof rawPath !== "string" || rawPath.trim() === "") {
+    res.status(400).json({ error: "path is required" });
+    return;
+  }
+
+  const repos = await discoverRepos(expandPath(rawPath));
+  res.status(200).json({ repos });
+});
+
+apiRouter.delete("/workspace-folders", async (req, res) => {
+  const rawPath = (req.body as { path?: unknown } | undefined)?.path;
+  if (typeof rawPath !== "string" || rawPath.trim() === "") {
+    res.status(400).json({ error: "path is required" });
+    return;
+  }
+
+  await store.removeWorkspaceFolder(expandPath(rawPath));
+  res.status(200).json({ ok: true });
 });
