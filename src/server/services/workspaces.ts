@@ -3,11 +3,7 @@ import path from "node:path";
 import fsp from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import type { DiscoveredRepo } from "../../shared/types.js";
-import {
-  originHeadRef,
-  branchExists,
-  currentBranch,
-} from "../adapters/git.js";
+import { originHeadRef, branchExists, currentBranch } from "../adapters/git.js";
 
 /**
  * Normalize a user-supplied folder path to a canonical absolute form BEFORE any validate/persist/
@@ -65,7 +61,7 @@ export async function discoverRepos(
   const repoPaths: string[] = [];
   if (await hasGitEntry(absPath)) repoPaths.push(absPath);
 
-  let children: Dirent[] = [];
+  let children: Dirent[];
   try {
     children = await fsp.readdir(absPath, { withFileTypes: true });
   } catch {
