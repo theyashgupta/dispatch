@@ -7,13 +7,6 @@ interface GlyphProps {
   style?: CSSProperties;
 }
 
-/**
- * Dispatch routing mark: three tracks merging into a single outbound arrow.
- *
- * @remarks Strokes use `currentColor` so the mark inherits surrounding text
- * color and scales via `size` (legible down to 16px). The path geometry is the
- * same one baked into `favicon.svg`.
- */
 export function Glyph({ size = 16, title, className, style }: GlyphProps) {
   return (
     <svg
