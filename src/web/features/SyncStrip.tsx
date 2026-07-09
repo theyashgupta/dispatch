@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ConnectionStatus } from "../hooks/useBoardStream.js";
+import { Glyph } from "../primitives/Glyph.js";
 
 interface SyncStripProps {
   syncedAt: string | null;
@@ -73,35 +74,62 @@ export function SyncStrip({
 
   return (
     <div
-      role="status"
-      aria-live="polite"
       style={{
         height: "var(--strip-height)",
         flex: "0 0 var(--strip-height)",
         display: "flex",
         alignItems: "center",
+        justifyContent: "space-between",
         padding: "0 var(--space-lg)",
         borderBottom: "1px solid var(--border)",
         background: "var(--surface-column)",
         fontSize: "var(--font-label)",
         fontWeight: "var(--weight-semibold)",
         lineHeight: "var(--line-label)",
-        color: disconnected ? "var(--destructive)" : "var(--text-muted)",
         userSelect: "none",
       }}
     >
-      <span
-        title={dotTitle}
+      <div
         style={{
-          width: "6px",
-          height: "6px",
-          borderRadius: "50%",
-          background: dotColor,
-          marginRight: "var(--space-xs)",
-          flex: "0 0 auto",
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--space-xs)",
+          color: "var(--text)",
         }}
-      />
-      {text}
+      >
+        <Glyph size={16} />
+        <span
+          style={{
+            fontWeight: 800,
+            fontSize: "12px",
+            letterSpacing: "0.18em",
+          }}
+        >
+          DISPATCH
+        </span>
+      </div>
+      <div
+        role="status"
+        aria-live="polite"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          color: disconnected ? "var(--destructive)" : "var(--text-muted)",
+        }}
+      >
+        <span
+          title={dotTitle}
+          style={{
+            width: "6px",
+            height: "6px",
+            borderRadius: "50%",
+            background: dotColor,
+            marginRight: "var(--space-xs)",
+            flex: "0 0 auto",
+          }}
+        />
+        {text}
+      </div>
     </div>
   );
 }
