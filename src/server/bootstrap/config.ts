@@ -9,10 +9,7 @@ export const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 
 const DEFAULT_PORT = 4700;
 const DEFAULT_POLL_INTERVAL_MS = 60_000;
-const DEFAULT_WORKSPACE_ROOT = path.join(
-  os.homedir(),
-  "dispatch-workspaces",
-);
+const DEFAULT_WORKSPACE_ROOT = path.join(os.homedir(), "dispatch-workspaces");
 
 /**
  * First-run template. Uses "//" keys as inline documentation (valid JSON, ignored on load)
