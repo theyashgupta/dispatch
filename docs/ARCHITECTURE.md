@@ -928,7 +928,11 @@ importers). The invariant home for `BOARD-05` remains [Startup Preflight](#start
 backend fails fast and EXITS on a missing binary or missing/incomplete config — it never serves a
 degraded state — so there is no backend signal for a mirrored error screen; a total connection
 failure surfaces as the SyncStrip "Disconnected" state instead. The component file and its
-knip-ignore entry are both gone.
+knip-ignore entry are both gone. The `board === null` / disconnected pre-board state now renders a
+PRESENTATIONAL Dispatch brand lockup in `App.tsx` (a routing `Glyph`, the `DISPATCH` wordmark, and
+the current connection-status text) — this is purely cosmetic startup chrome, not a revived error
+screen: there is still no backend degraded-serving signal and nothing mirrors a preflight failure
+back to the browser.
 
 ### Primitive Interaction-State Normalization (`FE-02`)
 

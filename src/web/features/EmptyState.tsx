@@ -1,4 +1,5 @@
 import type { Column as ColumnId } from "../../shared/types.js";
+import { Glyph } from "../primitives/Glyph.js";
 
 interface EmptyStateProps {
   column: ColumnId;
@@ -42,6 +43,7 @@ export function EmptyState({ column }: EmptyStateProps) {
         textAlign: "center",
       }}
     >
+      <Glyph size={48} style={{ opacity: 0.08, alignSelf: "center" }} />
       <div
         style={{
           fontSize: "var(--font-body)",

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useBoardStream } from "./hooks/useBoardStream.js";
 import { useTransitionNotifications } from "./hooks/useTransitionNotifications.js";
 import { SyncStrip } from "./features/SyncStrip.js";
+import { Glyph } from "./primitives/Glyph.js";
 import { Board } from "./features/Board.js";
 import { DetailPanel } from "./features/DetailPanel.js";
 import { StartModal } from "./features/StartModal.js";
@@ -25,6 +26,59 @@ export function App() {
   const [cleanupCardId, setCleanupCardId] = useState<string | null>(null);
   const cleanupCard =
     board?.cards.find((card) => card.id === cleanupCardId) ?? null;
+
+  if (board === null) {
+    const statusText =
+      connection === "disconnected"
+        ? "Disconnected — reconnecting…"
+        : "Connecting…";
+    return (
+      <div
+        style={{
+          height: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "var(--space-xl)",
+          color: "var(--text)",
+          userSelect: "none",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "var(--space-sm)",
+          }}
+        >
+          <Glyph size={44} />
+          <span
+            style={{
+              fontWeight: 800,
+              fontSize: "var(--font-display)",
+              letterSpacing: "0.18em",
+            }}
+          >
+            DISPATCH
+          </span>
+        </div>
+        <div
+          style={{
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            color:
+              connection === "disconnected"
+                ? "var(--destructive)"
+                : "var(--text-muted)",
+          }}
+        >
+          {statusText}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
