@@ -342,7 +342,7 @@ the cleanup mutation clears `tmuxSession` moments later anyway.
 
 **Boot reconcile — persisted-name comparison (`IN-01`).** For every card that still holds a session,
 reconcile compares against the PERSISTED session name (`card.tmuxSession`), falling back to the
-derived `ak-<identifier>` ONLY when absent. Linear identifiers change when an issue moves teams: the
+derived `dsp-<identifier>` ONLY when absent. Linear identifiers change when an issue moves teams: the
 poller upserts the new identifier while `tmuxSession` still names the old, live session, so a
 derived-name comparison would diverge and mark a running card lost. Comparing against the recorded
 truth avoids that.
@@ -380,7 +380,7 @@ divergence (detailed in [Watcher Discriminator](#watcher-discriminator)).
 **Tolerant swallow-to-default (`NEW-10`).** The three tmux query/teardown adapters never let a
 dead/absent server crash a caller — they degrade to a safe default. `hasSession` returns `false` on
 any error (a dead tmux server means "no session", and this is the idempotency probe: an existing
-`ak-<id>` session → reattach, never recreate). `listSessions` returns an EMPTY Set on BOTH no-server
+`dsp-<id>` session → reattach, never recreate). `listSessions` returns an EMPTY Set on BOTH no-server
 conditions — `no server running on <sock>` (server dead) and `error connecting to <sock> (No such
 file or directory)` (socket absent) — which IS the entire boot-reconcile tolerance requirement.
 `killSession` swallows failure so the rollback/undo path is idempotent (killing an already-gone
@@ -420,7 +420,7 @@ incapable of moving the card, which is exactly why it is safe to run on an In Re
 ### Terminal ttyd
 
 The per-session ttyd manager (`adapters/ttyd.ts`) spawns, tracks, and reuses a writable,
-loopback-only web terminal attached to an existing `ak-<identifier>` tmux session, so the live
+loopback-only web terminal attached to an existing `dsp-<identifier>` tmux session, so the live
 `claude` REPL can be embedded in the detail-panel iframe (`TERM-01`). Its invocation is fixed and
 load-bearing: `ttyd -W -i 127.0.0.1 -p 0 -t disableLeaveAlert=true tmux attach -t =<session>`.
 
@@ -430,7 +430,7 @@ an all-interfaces bind would expose an unauthenticated writable shell to the LAN
 routable interface. This is the same control recorded as `T-03-01`/`T-03-02` in the
 [Security Threat Model](#security-threat-model) — `@see` that table for the STRIDE home; this
 section records the operational shape. The spawn is argv-array only (never a shell string): only
-fixed strings plus the caller-validated `session` (`ak-` + a route-checked identifier) enter argv,
+fixed strings plus the caller-validated `session` (`dsp-` + a route-checked identifier) enter argv,
 which is the injection defense.
 
 **Kernel-assigned port, parsed from stderr.** `-p 0` lets the kernel pick a free port (no
@@ -460,13 +460,13 @@ error — a kill is teardown, not death (delete-before-kill teardown ordering li
 **Orphan-sweep fingerprint.** The boot-time sweep (`killAkTtydOrphans`, `RESIL-01`) kills every
 untracked `ttyd … tmux attach` process — after any restart the in-memory maps are empty, ports were
 cleared on load, and the panel re-ensures on open, so a fresh spawn always beats adopting a
-possibly-broken ttyd. Because ttyd rewrites its own proctitle and STRIPS the `=ak-<session>` target,
-ak-scoping is impossible; the fingerprint is deliberately `basename(argv[0]) === "ttyd"` AND argv
+possibly-broken ttyd. Because ttyd rewrites its own proctitle and STRIPS the `=dsp-<session>` target,
+dsp-scoping is impossible; the fingerprint is deliberately `basename(argv[0]) === "ttyd"` AND argv
 includes both `tmux` and `attach`, with own pid/ppid skipped. This is the app's unique signature on
 this single-user host — a full-command-line substring match would self-match the backend, so the
 sweep parses `ps` and inspects `argv[0]` instead. It logs only the killed COUNT (never PIDs or argv,
 `T-04-04`) and tolerates a `ps` failure by returning 0 rather than crashing boot. Broadening this
-fingerprint to over-match a non-ak `ttyd`/user process is a denial-of-service hazard — keep it
+fingerprint to over-match a non-dsp `ttyd`/user process is a denial-of-service hazard — keep it
 exact.
 
 ### Panel Iframe Identity
@@ -566,7 +566,7 @@ the module cache, and retries a single time before rethrowing to the fire-and-fo
 
 The tmux adapter (`adapters/tmux.ts`) is argv-only — every call routes through `run()`
 (`adapters/exec.ts`) as an `execFile` argv array, never a shell string, and only fixed
-server-generated strings enter argv (session names are `ak-` + a route-validated identifier; ticket
+server-generated strings enter argv (session names are `dsp-` + a route-validated identifier; ticket
 text reaches tmux ONLY as the load-buffer FILE, never as a command-line element, `T-04-01`). The
 exact command shapes are machine-verified against tmux 3.6a and pinned as do-not-change contract 5;
 three of them carry traps that a refactor must not paraphrase away.
@@ -588,7 +588,7 @@ after the paste settles, is the only reliable submit.
 **The `=<name>:` exact-name trap (`NEW-13`).** Every pane target that names a specific session uses
 the `=<name>:` form (e.g. `capture-pane -t =<session>:`, `ttyd … attach -t =<session>`). The leading
 `=` forces EXACT-name matching — tmux target resolution otherwise falls back to PREFIX/fuzzy
-matching, so with `ak-ABC-1` gone and `ak-ABC-10` alive, a bare `-t ak-ABC-1` would silently attach
+matching, so with `dsp-ABC-1` gone and `dsp-ABC-10` alive, a bare `-t dsp-ABC-1` would silently attach
 the WRONG ticket's session. The trailing `:` makes it a session-qualified pane target. Commands that
 take NO target (`list-sessions`) carry no `=` prefix. Dropping either the `=` or the `:` is a
 correctness bug, not a style choice.
@@ -602,7 +602,7 @@ false-flip guard homed in [Watcher Discriminator](#watcher-discriminator).
 ### Orchestration Saga
 
 Dragging a ticket into In Progress runs the start saga (`services/startSession.ts` +
-`services/steps.ts`), which turns a validated start request into a live `ak-<identifier>`
+`services/steps.ts`), which turns a validated start request into a live `dsp-<identifier>`
 claude session by driving four do/undo steps **forward** through the single-writer store —
 `preparing workspace → creating worktrees → starting claude → sending kickoff` — and, on ANY
 failure, compensating in **reverse** so the card is left exactly where it started, still in To Do
@@ -620,7 +620,7 @@ store (`store.isStarting` / `beginStart`, no await between) — the drag-Start +
 otherwise launch two sagas whose rollbacks tear down each other's resources. The guard lives in
 the store rather than a module-local `Set` specifically so the poller's `reconcile` can see it and
 refuse to remove an actively-provisioning card whose Linear issue vanished mid-saga (`CR-01`),
-which would otherwise orphan a live session. A live `ak-<identifier>` session that already exists
+which would otherwise orphan a live session. A live `dsp-<identifier>` session that already exists
 at start time is authoritative: the runner reattaches idempotently and never kills-and-recreates
 (tmux is the source of truth). On the error path the card stays in To Do —
 `setProvisioning`/`setStartError` never promote it — so no forward promotion happens when a start
@@ -844,7 +844,7 @@ is a behavior change, not a refactor.
 4. **Persistence format + location.** `~/.dispatch/{board.json,config.json}`; `board.json` ===
    `BoardSnapshot` JSON; atomic writes via `write-file-atomic`; config at mode `0600`; the `"//"`-keyed
    config template.
-5. **tmux invocations (argv-exact).** Session name `ak-<identifier>`;
+5. **tmux invocations (argv-exact).** Session name `dsp-<identifier>`;
    `new-session -d -s <name> -c <cwd> -x 200 -y 50 <argv>`; `capture-pane -p -J -t =<name>:`; exact-name
    `=` targeting; `load-buffer -b`/`paste-buffer -b -p -d`; separate `send-keys Enter`. Geometry `200×50`
    is load-bearing for readiness/marker parsing.
@@ -894,10 +894,10 @@ table records the security invariants that ride on it, not the rule itself.
 | T-02-16 | Tampering / Elevation                   | `routes/routes.ts` (`/start`)                                                                                                       | Defense-in-depth identifier gate: the Linear-sourced identifier is re-validated against `^[A-Za-z0-9]+-\d+$` at the route before it enters filesystem paths, branch names, and tmux session names in the saga (the saga re-checks too).                                                                                                                                                                                                                                                                                                         |
 | T-02-17 | Information Disclosure                  | `services/validateConfig.ts`                                                                                                        | Every config-error string names the offending FIELD only (`repoPaths`/`baseBranches`/`workspaceRoot`) — it NEVER echoes a configured value; paths, branch names, and especially the Linear API key never reach a 400 body.                                                                                                                                                                                                                                                                                                                      |
 | T-03-01 | Spoofing / Elevation                    | `adapters/ttyd.ts`                                                                                                                  | `-W` (writable) AND `-i 127.0.0.1` (loopback-only bind) are BOTH mandatory — a missing `-W` is a dead terminal, and an all-interfaces bind would expose an unauthenticated writable shell to the LAN. Never bind a routable interface.                                                                                                                                                                                                                                                                                                          |
-| T-03-02 | Tampering / Elevation                   | `adapters/ttyd.ts`, `routes/routes.ts` (`/terminal`)                                                                                | argv-array spawn only (never a shell string): only fixed strings + the caller-validated `session` (`ak-` + a route-checked identifier) enter argv; the terminal route additionally re-validates the identifier before it enters the ttyd attach argv.                                                                                                                                                                                                                                                                                           |
+| T-03-02 | Tampering / Elevation                   | `adapters/ttyd.ts`, `routes/routes.ts` (`/terminal`)                                                                                | argv-array spawn only (never a shell string): only fixed strings + the caller-validated `session` (`dsp-` + a route-checked identifier) enter argv; the terminal route additionally re-validates the identifier before it enters the ttyd attach argv.                                                                                                                                                                                                                                                                                           |
 | T-03-03 | Spoofing                                | `routes/routes.ts` (`/terminal`)                                                                                                    | `/terminal` lives on `apiRouter`, so it inherits the router-wide Origin/Host loopback gate — no new mount, no second gate.                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | T-03-07 | Denial of Service                       | `adapters/ttyd.ts`                                                                                                                  | Single-flight spawn: `ensureTtyd` records the in-flight promise SYNCHRONOUSLY (before its first await) so a StrictMode double-effect or two near-simultaneous POSTs share ONE spawn — otherwise the loser leaks an orphan ttyd that later fires a FALSE `died` signal; the exit handler reconciles only the tracked child.                                                                                                                                                                                                                      |
-| T-04-01 | Tampering / Elevation                   | `adapters/markers/watcher.ts`, `adapters/exec.ts`                                                                                   | Session names entering `capture-pane -t =<name>` are `ak-` + a route-validated identifier and travel argv-only via `run()`; captured pane text is inert stdout, never a command.                                                                                                                                                                                                                                                                                                                                                                |
+| T-04-01 | Tampering / Elevation                   | `adapters/markers/watcher.ts`, `adapters/exec.ts`                                                                                   | Session names entering `capture-pane -t =<name>` are `dsp-` + a route-validated identifier and travel argv-only via `run()`; captured pane text is inert stdout, never a command.                                                                                                                                                                                                                                                                                                                                                                |
 | T-04-02 | Tampering                               | `adapters/markers/parse.ts`                                                                                                         | The marker reason/summary is captured as an OPAQUE string (trim only) — never eval'd, parsed as code, or template-executed; untrusted agent text stays inert.                                                                                                                                                                                                                                                                                                                                                                                   |
 | T-04-04 | Information Disclosure                  | `adapters/markers/watcher.ts`, `adapters/ttyd.ts`                                                                                   | Content-free logging: logs only counts / error messages — NEVER pane text, card fields, the reason/summary, PIDs, argv, or session contents.                                                                                                                                                                                                                                                                                                                                                                                                    |
 | T-06-01 | Tampering                               | `adapters/editors.ts`                                                                                                               | `launchEditor` hands the server-owned `workspacePath` to the argv-array chokepoint (`exec.run`) as a SINGLE argv element — never interpolated, never a shell string, never a client path.                                                                                                                                                                                                                                                                                                                                                       |

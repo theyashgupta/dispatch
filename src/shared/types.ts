@@ -40,7 +40,7 @@ export interface Card {
   /** Port of the per-session ttyd instance. */
   ttydPort?: number;
   /**
-   * Set when the card's `ak-<identifier>` tmux session is gone — by boot reconcile (session
+   * Set when the card's `dsp-<identifier>` tmux session is gone — by boot reconcile (session
    * absent from the live `list-sessions` set after a reboot) AND by the Plan-02 watcher's
    * runtime dead-session detector (3 consecutive failed captures). Cleared by completeStart on
    * a successful restart. Drives the "Session lost" card line + Restart affordance.

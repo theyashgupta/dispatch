@@ -282,7 +282,7 @@ const startClaude: SagaStep = {
   name: "starting claude",
   statusText: "Starting Claude…",
   async run(ctx) {
-    const session = "ak-" + ctx.identifier;
+    const session = "dsp-" + ctx.identifier;
     await preSeedTrust(ctx.workspacePath);
 
     const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
@@ -296,7 +296,7 @@ const startClaude: SagaStep = {
   },
   async undo(ctx) {
     if (ctx.tmuxSessionCreated) {
-      await killSession("ak-" + ctx.identifier).catch(() => {});
+      await killSession("dsp-" + ctx.identifier).catch(() => {});
     }
   },
 };
@@ -305,14 +305,14 @@ const sendKickoff: SagaStep = {
   name: "sending kickoff",
   statusText: "Sending kickoff…",
   async run(ctx) {
-    const session = "ak-" + ctx.identifier;
+    const session = "dsp-" + ctx.identifier;
     const repoNames = (ctx.config.repoPaths ?? []).map((p) => path.basename(p));
     const kickoff = buildKickoff(ctx.card, ctx.extraDirection, repoNames, {
       restarted: ctx.restarted,
     });
     const tmpFile = path.join(
       os.tmpdir(),
-      `ak-kickoff-${ctx.identifier}-${Date.now()}.txt`,
+      `dsp-kickoff-${ctx.identifier}-${Date.now()}.txt`,
     );
     await fsp.writeFile(tmpFile, kickoff, "utf8");
     try {

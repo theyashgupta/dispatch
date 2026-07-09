@@ -293,7 +293,7 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Idempotent reattach to a live `ak-<id>` session ("already running"): copy the session
+   * Idempotent reattach to a live `dsp-<id>` session ("already running"): copy the session
    * fields, promote the card to "in_progress", surface a transient reattach status, and clear
    * any provisioning step / start error. No-op if the id is unknown.
    */
@@ -361,7 +361,7 @@ class BoardStore extends EventEmitter {
    * precedent — a split write would broadcast a torn frame that briefly renders a To-Do-looking
    * card with no session and no lost line). Clearing `tmuxSession` removes the card from
    * cardsWithSession() (freeing the watcher) and makes the DetailPanel terminal region disappear
-   * (Pitfall 5); the session name stays derivable as `ak-` + identifier for restart. Called at
+   * (Pitfall 5); the session name stays derivable as `dsp-` + identifier for restart. Called at
    * BOTH boot (reconcileSessions) and RUNTIME (Plan 02's watcher dead-session detector, per tick).
    * No-op if the id is unknown. SECURITY: never logs card contents.
    */

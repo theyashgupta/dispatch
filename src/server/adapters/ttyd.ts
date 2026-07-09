@@ -11,7 +11,7 @@ interface TtydProc {
   port: number;
 }
 
-/** Live ttyd processes, keyed by tmux session name ("ak-<identifier>"). In-memory only. */
+/** Live ttyd processes, keyed by tmux session name ("dsp-<identifier>"). In-memory only. */
 const procs = new Map<string, TtydProc>();
 
 /**
@@ -192,23 +192,23 @@ export function killTtyd(session: string): void {
 /**
  * Boot-time orphan sweep (Phase 5, RESIL-01): kill every untracked `ttyd … tmux attach`
  * process by fingerprint, returning the killed COUNT. After any restart the procs/inFlight
- * maps are empty, so every live ak-ttyd is untracked; ports were already cleared on load and
+ * maps are empty, so every live dsp-ttyd is untracked; ports were already cleared on load and
  * the panel re-ensures on open, so a fresh spawn beats adopting a possibly-broken ttyd.
  *
  * Fingerprint (RESEARCH Probe 2/3): match iff basename(argv[0]) === "ttyd" AND argv includes
- * "tmux" AND "attach". ttyd rewrites its own proctitle and STRIPS the `=ak-<session>` target,
- * so ak-scoping is impossible — the fingerprint is the app's unique signature on this
+ * "tmux" AND "attach". ttyd rewrites its own proctitle and STRIPS the `=dsp-<session>` target,
+ * so dsp-scoping is impossible — the fingerprint is the app's unique signature on this
  * single-user host. The basename check excludes the backend's own node/ps/shell commands that
  * merely mention "ttyd" (Pitfall 1); a full-command-line substring match would self-match the
  * backend (Pitfall 2), so we parse `ps` and inspect argv[0] instead. Own pid/ppid are skipped
  * explicitly. Tolerant: `ps` failure returns 0, never crashes
  * boot. SECURITY: logs the count only — never PIDs or argv (T-04-04 precedent).
  * @remarks TERM-01 / RESIL-01 orphan sweep: keep the fingerprint EXACT — broadening it
- * over-matches a non-ak ttyd/user process (denial of service).
+ * over-matches a non-dsp ttyd/user process (denial of service).
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
-export async function killAkTtydOrphans(): Promise<number> {
+export async function killDspTtydOrphans(): Promise<number> {
   let out: string;
   try {
     ({ stdout: out } = await execFileP("ps", ["-axww", "-o", "pid=,command="]));

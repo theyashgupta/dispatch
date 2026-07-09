@@ -29,7 +29,7 @@ export async function resumeSession(cardId: string): Promise<void> {
     const card = store.getCard(cardId);
     if (!card?.workspacePath) return;
     await store.clearResumeError(cardId);
-    const session = "ak-" + card.identifier;
+    const session = "dsp-" + card.identifier;
 
     if (await hasSession(`=${session}`)) {
       await store.resumeSession(cardId, { session });
@@ -57,7 +57,7 @@ export async function resumeSession(cardId: string): Promise<void> {
     await ensureTerminal(cardId, session);
   } catch (err) {
     const card = store.getCard(cardId);
-    if (card) await killSession(`=ak-${card.identifier}`);
+    if (card) await killSession(`=dsp-${card.identifier}`);
     await store.recordResumeFailure(cardId);
     const step = err instanceof StartStepError ? err.step : "unknown step";
     console.error(`[resume] failed for card ${cardId} (${step})`);

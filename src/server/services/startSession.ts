@@ -46,7 +46,7 @@ export async function startSession(
     const card = store.getCard(cardId);
     if (!card) return;
 
-    const session = "ak-" + card.identifier;
+    const session = "dsp-" + card.identifier;
     const workspacePath = path.join(
       config.workspaceRoot ?? "",
       card.identifier,

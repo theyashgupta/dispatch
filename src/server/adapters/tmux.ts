@@ -3,7 +3,7 @@ import { run } from "./exec.js";
 /**
  * True if tmux session `name` exists (`has-session -t <name>` exits 0).
  * Swallows failure into `false` (never rethrows) — a dead tmux server means "no session",
- * and this is the idempotency probe (an existing `ak-<id>` session → reattach, never recreate).
+ * and this is the idempotency probe (an existing `dsp-<id>` session → reattach, never recreate).
  * @remarks Tolerant swallow-to-default (NEW-10): any error → `false`, never rethrown.
  * @see docs/ARCHITECTURE.md#resilience-and-reconcile
  */
@@ -129,7 +129,7 @@ export async function paneSize(
 
 /**
  * Load a file into a NAMED tmux buffer (`load-buffer -b <bufferName> <filePath>`).
- * Per-session buffer names (`ak-<identifier>`) so parallel starts can't clobber each other.
+ * Per-session buffer names (`dsp-<identifier>`) so parallel starts can't clobber each other.
  * @remarks NEW-09: per-session NAMED buffers keep parallel kickoffs from clobbering each other.
  * @see docs/ARCHITECTURE.md#tmux-invocations
  */
