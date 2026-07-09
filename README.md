@@ -1,6 +1,6 @@
 <div align="center">
 
-# Dispatch
+<img src="docs/assets/hero-banner.png" width="720" alt="Dispatch">
 
 **Drag a ticket. Dispatch an agent.**
 
