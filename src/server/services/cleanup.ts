@@ -4,7 +4,6 @@ import { store } from "../store/boardStore.js";
 import { killTtyd } from "../adapters/ttyd.js";
 import { killSession } from "../adapters/tmux.js";
 import { worktreeRemove, worktreePrune } from "../adapters/git.js";
-import { getOrchestrationConfig } from "./config-holder.js";
 import { worktreePath as buildWorktreePath } from "./workspace-paths.js";
 
 /**
@@ -24,7 +23,8 @@ export async function cleanupWorkspace(cardId: string): Promise<void> {
 
   const session = card.tmuxSession;
   const workspacePath = card.workspacePath;
-  const repoPaths = getOrchestrationConfig()?.repoPaths ?? [];
+  const repoPaths = card.workspace?.repos.map((r) => r.path) ?? [];
+  const isLegacyWorkspace = Boolean(workspacePath) && !card.workspace;
 
   const failures: string[] = [];
 
@@ -64,6 +64,11 @@ export async function cleanupWorkspace(cardId: string): Promise<void> {
     await store.recordCleanupWarning(
       cardId,
       "Cleanup incomplete — some worktrees may remain.",
+    );
+  } else if (isLegacyWorkspace) {
+    await store.recordCleanupWarning(
+      cardId,
+      "Cleanup kept worktree registrations — this ticket predates per-ticket workspaces.",
     );
   } else {
     await store.finishCleanup(cardId);
