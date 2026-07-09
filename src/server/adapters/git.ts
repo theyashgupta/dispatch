@@ -53,6 +53,37 @@ export async function revParseVerify(
 }
 
 /**
+ * The default branch name from `origin/HEAD` (e.g. `refs/remotes/origin/main` -> `main`), or null.
+ * `origin/HEAD` is frequently unset on local clones, so a missing symref swallows into null (never
+ * rethrows) — this is a probe, not an operation. The caller owns the fallback order.
+ */
+export async function originHeadRef(repoPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await run(
+      "git",
+      ["symbolic-ref", "refs/remotes/origin/HEAD"],
+      { cwd: repoPath },
+    );
+    const ref = stdout.trim();
+    const name = ref.slice(ref.lastIndexOf("/") + 1);
+    return name || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The currently checked-out branch name via `rev-parse --abbrev-ref HEAD` — the reliable final
+ * fallback when no default branch can be detected from the remote or the conventional names.
+ */
+export async function currentBranch(repoPath: string): Promise<string> {
+  const { stdout } = await run("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd: repoPath,
+  });
+  return stdout.trim();
+}
+
+/**
  * True if `worktreePath` is ALREADY registered as a worktree of `repoPath` (restart idempotency,
  * 05-RESEARCH Probe 4: `git worktree add` on an existing path fails fatal exit 128). Parses
  * `git worktree list --porcelain`, whose per-worktree stanza opens with a literal
