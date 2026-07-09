@@ -1,4 +1,4 @@
-import type { Column } from "../../shared/types.js";
+import type { Column, DiscoveredRepo } from "../../shared/types.js";
 
 /**
  * Optimistically move a card to a column: POST /api/cards/:id/move.
@@ -30,15 +30,25 @@ export type StartResult =
  *
  * On success the modal closes immediately and the card's SSE-driven status line
  * takes over — there is no client-side optimistic move for this transition.
+ *
+ * A fresh start passes the chosen `folder` + `repos` (checked repos with their
+ * per-ticket base). Restart/retry callers omit both so the body stays exactly
+ * `{ extraDirection }` and the backend reuses the persisted `card.workspace`.
  */
 export async function startCard(
   id: string,
   extraDirection: string,
+  folder?: string,
+  repos?: { path: string; base: string }[],
 ): Promise<StartResult> {
+  const body =
+    folder !== undefined || repos !== undefined
+      ? { extraDirection, folder, repos }
+      : { extraDirection };
   const res = await fetch(`/api/cards/${encodeURIComponent(id)}/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ extraDirection }),
+    body: JSON.stringify(body),
   });
   if (res.ok) {
     return { ok: true };
@@ -55,6 +65,90 @@ export async function startCard(
     };
   }
   throw new Error(`startCard failed: ${res.status} ${res.statusText}`);
+}
+
+/**
+ * List the registered workspace folders: GET /api/workspace-folders.
+ * Read on modal open so the folder dropdown has the authoritative registry plus
+ * the last-used folder to preselect. Resolves the parsed body on 2xx; throws on
+ * any non-2xx so the caller can surface a load failure.
+ */
+export async function getWorkspaceFolders(): Promise<{
+  folders: string[];
+  lastUsed: string | null;
+}> {
+  const res = await fetch("/api/workspace-folders");
+  if (!res.ok) {
+    throw new Error(
+      `getWorkspaceFolders failed: ${res.status} ${res.statusText}`,
+    );
+  }
+  return (await res.json()) as { folders: string[]; lastUsed: string | null };
+}
+
+/**
+ * Register + discover a workspace folder: POST /api/workspace-folders { path }.
+ * The server owns all path normalization/validation/discovery — the client only
+ * forwards the typed path and renders the result. Mirrors startCard's 200/400
+ * discrimination so the modal can show the inline validation error verbatim:
+ * 200 → { ok:true, repos }; 400 → { ok:false, error } (parsed body); else throws.
+ */
+export async function addWorkspaceFolder(
+  path: string,
+): Promise<
+  { ok: true; repos: DiscoveredRepo[] } | { ok: false; error: string }
+> {
+  const res = await fetch("/api/workspace-folders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (res.ok) {
+    const body = (await res.json()) as { repos: DiscoveredRepo[] };
+    return { ok: true, repos: body.repos };
+  }
+  if (res.status === 400) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: body.error ?? "Couldn't add folder." };
+  }
+  throw new Error(`addWorkspaceFolder failed: ${res.status} ${res.statusText}`);
+}
+
+/**
+ * Re-discover an already-registered folder: GET /api/workspace-folders/discover?path=.
+ * Fired on folder switch/selection to refresh the repo checklist; a registered
+ * folder whose directory was deleted returns { repos: [] } (200), which renders
+ * the empty-checklist notice. Resolves the parsed body on 2xx; throws on non-2xx.
+ */
+export async function discoverFolder(
+  path: string,
+): Promise<{ repos: DiscoveredRepo[] }> {
+  const res = await fetch(
+    `/api/workspace-folders/discover?path=${encodeURIComponent(path)}`,
+  );
+  if (!res.ok) {
+    throw new Error(`discoverFolder failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as { repos: DiscoveredRepo[] };
+}
+
+/**
+ * Drop a folder from the registry: DELETE /api/workspace-folders { path }.
+ * The client half of the frictionless remove-✕ (no confirmation, no filesystem
+ * touch); the endpoint is idempotent so a double-remove is harmless. Resolves on
+ * 2xx; throws on any non-2xx so the caller can log (the SSE snapshot reconciles).
+ */
+export async function removeWorkspaceFolder(path: string): Promise<void> {
+  const res = await fetch("/api/workspace-folders", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `removeWorkspaceFolder failed: ${res.status} ${res.statusText}`,
+    );
+  }
 }
 
 /**
