@@ -1,10 +1,17 @@
 /** Board columns in display order. */
 export type Column =
-  "todo" | "in_progress" | "needs_input" | "agent_done" | "in_review" | "done";
+  | "todo"
+  | "in_planning"
+  | "in_progress"
+  | "needs_input"
+  | "agent_done"
+  | "in_review"
+  | "done";
 
-/** The six columns in board order, for the frontend to iterate. */
+/** The seven columns in board order, for the frontend to iterate. */
 export const COLUMNS: readonly Column[] = [
   "todo",
+  "in_planning",
   "in_progress",
   "needs_input",
   "agent_done",
@@ -75,6 +82,19 @@ export interface Card {
   terminalError?: TerminalError | null;
   /** Fixed resume-failure copy rendered by the session-lost UI; null/absent when no resume has failed. */
   resumeError?: string | null;
+
+  /**
+   * Session methodology stage. Absent is treated as `implementation` everywhere in routing (locked
+   * rule) so existing cards need no migration; set at session start and flipped to `implementation`
+   * on the In Planning → In Progress handoff.
+   */
+  mode?: "planning" | "implementation";
+  /**
+   * A planning session emitted DONE and is ready to hand off. Survives Needs Input round-trips (the
+   * flag is not touched by marker routing), and is cleared on the implementation handoff and on any
+   * restart/re-provision so a stale badge never outlives its plan.
+   */
+  planReady?: boolean;
 }
 
 /**
@@ -147,6 +167,16 @@ export interface DiscoveredRepo {
   path: string;
   name: string;
   base: string;
+}
+
+/**
+ * A methodology playbook surfaced by the loader/picker: its display `name`, the `stage` it applies
+ * to, and its markdown `body` spliced into the kickoff. Selected by `name`, never a client path.
+ */
+export interface Playbook {
+  name: string;
+  stage: "planning" | "implementation";
+  body: string;
 }
 
 /** Contents of ~/.dispatch/config.json. */
