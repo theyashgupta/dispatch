@@ -35,7 +35,10 @@ function toStartError(err: unknown, stepName: string): StartError {
  * module-local Set) so the poller's reconcile can see it and refuse to remove a card whose start
  * is in flight (CR-01). Column/mode are derived from whether `targetColumn` was EXPLICITLY present
  * in the request — an explicit target is honored, an absent target preserves an existing card's
- * mode/column (the bare-Restart signature), and a modeless card falls back to in_progress. This is
+ * mode (the bare-Restart signature), and a modeless card falls back to in_progress. The column is
+ * preserved only for an In Planning card (a planning restart); a restart from any other column —
+ * notably the attention columns, whose stale state belonged to the dead session — lands back in
+ * in_progress, the pre-existing restart behavior. This is
  * deliberately decoupled from the session-lost flag (which drives only the restart wording) because
  * a bare Restart and a deliberate re-provision both arrive session-lost and only presence tells
  * them apart. A request carrying neither `playbook` nor `targetColumn` falls back to the intent
@@ -69,7 +72,7 @@ export async function startSession(
       column = targetColumn;
       mode = targetColumn === "in_planning" ? "planning" : "implementation";
     } else if (card.mode !== undefined) {
-      column = card.column;
+      column = card.column === "in_planning" ? "in_planning" : "in_progress";
       mode = card.mode;
     } else {
       column = "in_progress";
