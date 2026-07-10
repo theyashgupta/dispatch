@@ -95,6 +95,18 @@ export interface Card {
    * restart/re-provision so a stale badge never outlives its plan.
    */
   planReady?: boolean;
+  /**
+   * The playbook name and target column captured when a start request carries them, persisted
+   * BEFORE the saga runs (the extraDirection precedent) so Retry after a failed start and a bare
+   * Restart reproduce the original start — playbook body and planning target included — instead of
+   * degrading to a playbook-less implementation start. `targetColumn` is consumed once a session
+   * lands (completeStart/attachExistingSession — `mode` becomes authoritative); the playbook name
+   * survives so a later restart re-resolves the body from disk.
+   */
+  startIntent?: {
+    playbook?: string;
+    targetColumn?: "in_planning" | "in_progress";
+  };
 }
 
 /**

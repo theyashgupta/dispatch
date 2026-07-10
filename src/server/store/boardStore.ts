@@ -259,6 +259,25 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Persist the start intent (playbook name + target column) captured at Start, BEFORE the saga
+   * runs (the setExtraDirection precedent), so Retry after a failed start and a bare Restart can
+   * reproduce the original planning start instead of silently degrading to a playbook-less
+   * implementation session. No-op if the id is unknown.
+   */
+  setStartIntent(
+    id: string,
+    intent: {
+      playbook?: string;
+      targetColumn?: "in_planning" | "in_progress";
+    },
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) card.startIntent = intent;
+    });
+  }
+
+  /**
    * Register a workspace folder (runtime write — broadcasts via the queue). Re-adding an already
    * registered folder is a no-op: the modal treats "add an existing folder" as merely selecting it,
    * so a duplicate must not grow the list or emit a spurious change.
@@ -367,7 +386,9 @@ class BoardStore extends EventEmitter {
    *
    * `opts` uses the same asymmetric defaulting as completeStart: `column` defaults to "in_progress"
    * when omitted; `mode` is assigned only when provided so reattaching a live planning session never
-   * yanks it to In Progress nor wipes its mode.
+   * yanks it to In Progress nor wipes its mode. `startIntent.targetColumn` is consumed here exactly
+   * as in completeStart — a landed session makes `mode` authoritative, so a stale target can never
+   * drag a later bare Restart back to a column the card has since left.
    */
   attachExistingSession(
     id: string,
@@ -383,6 +404,9 @@ class BoardStore extends EventEmitter {
         card.ttydPort = s.ttydPort;
         card.column = opts?.column ?? "in_progress";
         if (opts?.mode !== undefined) card.mode = opts.mode;
+        if (card.startIntent?.targetColumn !== undefined) {
+          card.startIntent = { playbook: card.startIntent.playbook };
+        }
         card.statusReason = "Already running — reattached";
         card.provisioningStep = null;
         card.startError = null;
@@ -585,6 +609,8 @@ class BoardStore extends EventEmitter {
    * when explicitly provided — an omitted `mode` preserves whatever the card already carries, so a
    * planning restart keeps its planning identity instead of being silently downgraded. `planReady`
    * is always cleared: a fresh or re-provisioned session has no stale Plan-ready badge to show.
+   * `startIntent.targetColumn` is consumed here — once the session lands, `mode` is authoritative
+   * and only the playbook name survives for a later restart to re-resolve from disk.
    */
   completeStart(
     id: string,
@@ -600,6 +626,9 @@ class BoardStore extends EventEmitter {
         card.ttydPort = s.ttydPort;
         card.column = opts?.column ?? "in_progress";
         if (opts?.mode !== undefined) card.mode = opts.mode;
+        if (card.startIntent?.targetColumn !== undefined) {
+          card.startIntent = { playbook: card.startIntent.playbook };
+        }
         card.planReady = undefined;
         card.provisioningStep = null;
         card.startError = null;

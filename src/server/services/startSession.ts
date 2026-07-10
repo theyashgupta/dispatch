@@ -38,7 +38,11 @@ function toStartError(err: unknown, stepName: string): StartError {
  * mode/column (the bare-Restart signature), and a modeless card falls back to in_progress. This is
  * deliberately decoupled from the session-lost flag (which drives only the restart wording) because
  * a bare Restart and a deliberate re-provision both arrive session-lost and only presence tells
- * them apart.
+ * them apart. A request carrying neither `playbook` nor `targetColumn` falls back to the intent
+ * persisted at the original start (`card.startIntent`), so Retry after a failed planning start and
+ * a bare Restart reproduce the chosen playbook and planning target instead of silently degrading to
+ * a playbook-less implementation session; a request carrying either field is a fresh, complete
+ * intent and never mixes with the stored one.
  * @see docs/ARCHITECTURE.md#orchestration-saga
  */
 export async function startSession(
@@ -53,7 +57,12 @@ export async function startSession(
     const card = store.getCard(cardId);
     if (!card) return;
 
-    const targetColumn = opts?.targetColumn;
+    const stored =
+      opts?.playbook === undefined && opts?.targetColumn === undefined
+        ? card.startIntent
+        : undefined;
+    const playbookName = opts?.playbook ?? stored?.playbook;
+    const targetColumn = opts?.targetColumn ?? stored?.targetColumn;
     let column: Column;
     let mode: "planning" | "implementation" | undefined;
     if (targetColumn !== undefined) {
@@ -65,6 +74,13 @@ export async function startSession(
     } else {
       column = "in_progress";
       mode = undefined;
+    }
+
+    if (opts?.playbook !== undefined || opts?.targetColumn !== undefined) {
+      await store.setStartIntent(cardId, {
+        playbook: opts.playbook,
+        targetColumn: opts.targetColumn,
+      });
     }
 
     const session = "dsp-" + card.identifier;
@@ -90,8 +106,8 @@ export async function startSession(
       return;
     }
 
-    const playbookBody = opts?.playbook
-      ? (await loadPlaybooks()).find((p) => p.name === opts.playbook)?.body
+    const playbookBody = playbookName
+      ? (await loadPlaybooks()).find((p) => p.name === playbookName)?.body
       : undefined;
 
     await store.setExtraDirection(cardId, extraDirection);
