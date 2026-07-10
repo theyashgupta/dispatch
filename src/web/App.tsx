@@ -5,7 +5,7 @@ import { SyncStrip } from "./features/SyncStrip.js";
 import { Glyph } from "./primitives/Glyph.js";
 import { Board } from "./features/Board.js";
 import { DetailPanel } from "./features/DetailPanel.js";
-import { StartModal } from "./features/StartModal.js";
+import { StartModal, type StartRequest } from "./features/StartModal.js";
 import { CleanupModal } from "./features/CleanupModal.js";
 import { cleanupCard as cleanupCardApi } from "./lib/api.js";
 
@@ -19,9 +19,17 @@ export function App() {
   const selectedCard =
     board?.cards.find((card) => card.id === selectedCardId) ?? null;
 
-  const [startCardId, setStartCardId] = useState<string | null>(null);
+  const [startRequest, setStartRequest] = useState<StartRequest | null>(null);
   const startCard =
-    board?.cards.find((card) => card.id === startCardId) ?? null;
+    board?.cards.find((card) => card.id === startRequest?.cardId) ?? null;
+
+  const requestStart = (req: string | StartRequest) => {
+    setStartRequest(
+      typeof req === "string"
+        ? { cardId: req, targetColumn: "in_progress", variant: "full" }
+        : req,
+    );
+  };
 
   const [cleanupCardId, setCleanupCardId] = useState<string | null>(null);
   const cleanupCard =
@@ -99,23 +107,27 @@ export function App() {
         board={board}
         selectedCardId={selectedCard ? selectedCardId : null}
         onSelectCard={setSelectedCardId}
-        onStartRequest={setStartCardId}
+        onStartRequest={requestStart}
         onCleanupRequest={setCleanupCardId}
       />
       <DetailPanel
         card={selectedCard}
         editors={board?.editors}
         onClose={() => setSelectedCardId(null)}
-        onStartRequest={setStartCardId}
+        onStartRequest={requestStart}
       />
-      {startCard && (
+      {startCard && startRequest && (
         <StartModal
-          key={startCardId}
+          key={startRequest.cardId}
           card={startCard}
-          stage="implementation"
-          variant="full"
-          targetColumn="in_progress"
-          onClose={() => setStartCardId(null)}
+          stage={
+            startRequest.targetColumn === "in_planning"
+              ? "planning"
+              : "implementation"
+          }
+          variant={startRequest.variant}
+          targetColumn={startRequest.targetColumn}
+          onClose={() => setStartRequest(null)}
         />
       )}
       {cleanupCard && (
