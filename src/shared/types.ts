@@ -207,9 +207,34 @@ export interface Config {
   repoPaths?: string[];
   baseBranches?: string[];
   workspaceRoot?: string;
-  /** Writable-config groundwork (Phase 23): nested per-source credentials. `linearApiKey` stays the resolved read. */
-  sources?: { linear?: { apiKey: string } };
+  /** Writable-config groundwork (Phase 23): nested per-source credentials plus the live filter block. `linearApiKey` stays the resolved read. */
+  sources?: { linear?: { apiKey: string; filters?: SourceFilters } };
 }
+
+/**
+ * The runtime-mutable filter selection for a source. An empty array (or `currentCycle: false`) means
+ * the dimension is UNCONSTRAINED — the query-builder omits it entirely rather than sending a
+ * match-nothing `in: []`. The default (all empty) reproduces the assigned-to-me / unstarted pull
+ * byte-for-byte (FILT-05).
+ */
+export interface SourceFilters {
+  assignees: string[];
+  projects: string[];
+  teams: string[];
+  currentCycle: boolean;
+}
+
+/**
+ * The assigned-to-me default injected when a config carries no `filters` block. Every dimension is
+ * empty so the builder emits today's exact `viewer.assignedIssues` / `state.type=unstarted` query
+ * (FILT-05); consumed by the config loader and the registry live-filters accessor.
+ */
+export const DEFAULT_FILTERS: SourceFilters = {
+  assignees: [],
+  projects: [],
+  teams: [],
+  currentCycle: false,
+};
 
 /**
  * The subset of a source-issue the poller maps onto a card. `description` is nullable (issues can

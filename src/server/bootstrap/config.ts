@@ -2,7 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import writeFileAtomic from "write-file-atomic";
-import type { Config } from "../../shared/types.js";
+import type { Config, SourceFilters } from "../../shared/types.js";
+import { DEFAULT_FILTERS } from "../../shared/types.js";
 import { StartupError } from "./binaryCheck.js";
 import { CONFIG_PATH, DISPATCH_DIR } from "../services/paths.js";
 
@@ -48,6 +49,34 @@ function readNestedKey(parsed: Record<string, unknown>): string {
   }
   const apiKey = (linear as Record<string, unknown>).apiKey;
   return typeof apiKey === "string" ? apiKey.trim() : "";
+}
+
+/**
+ * Read a `sources.linear.filters` block from a parsed config, coercing to the well-formed
+ * SourceFilters shape (string arrays + boolean). Returns DEFAULT_FILTERS whenever the block is
+ * absent or malformed, so a Phase-22-migrated config that has `apiKey` but no `filters` still yields
+ * today's assigned-to-me pull (Pitfall P6 / FILT-05). Idempotent: a config already carrying a valid
+ * block is echoed back unchanged.
+ */
+function readNestedFilters(parsed: Record<string, unknown>): SourceFilters {
+  const sources = parsed.sources;
+  if (typeof sources !== "object" || sources === null || Array.isArray(sources))
+    return DEFAULT_FILTERS;
+  const linear = (sources as Record<string, unknown>).linear;
+  if (typeof linear !== "object" || linear === null || Array.isArray(linear))
+    return DEFAULT_FILTERS;
+  const filters = (linear as Record<string, unknown>).filters;
+  if (typeof filters !== "object" || filters === null || Array.isArray(filters))
+    return DEFAULT_FILTERS;
+  const f = filters as Record<string, unknown>;
+  const strArray = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  return {
+    assignees: strArray(f.assignees),
+    projects: strArray(f.projects),
+    teams: strArray(f.teams),
+    currentCycle: f.currentCycle === true,
+  };
 }
 
 /**
@@ -190,6 +219,7 @@ export function loadConfig(): Config {
         ? parsed.pollIntervalMs
         : DEFAULT_POLL_INTERVAL_MS,
     workspaceRoot,
+    sources: { linear: { apiKey: rawKey, filters: readNestedFilters(parsed) } },
   };
 
   const hasKey = config.linearApiKey.length > 0;
