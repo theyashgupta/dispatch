@@ -51,6 +51,34 @@ function readNestedKey(parsed: Record<string, unknown>): string {
 }
 
 /**
+ * Build the nested-shape object for the flat→nested boot migration. config.json is a user-edited
+ * file, so unknown top-level keys are expected and carried forward verbatim, and any pre-existing
+ * non-linear `sources` entries are preserved; the migration only rewrites what it owns — the flat
+ * `linearApiKey` becomes `sources.linear.apiKey`, and the retired `repoPaths`/`baseBranches` keys
+ * plus the first-run template's "//" doc keys (guidance written for the pre-migration shape) are
+ * dropped deliberately.
+ */
+function buildMigratedConfig(
+  parsed: Record<string, unknown>,
+  flatKey: string,
+): Record<string, unknown> {
+  const retired = new Set(["linearApiKey", "repoPaths", "baseBranches"]);
+  const migrated: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (retired.has(key) || key.startsWith("//")) continue;
+    migrated[key] = value;
+  }
+  const priorSources =
+    typeof parsed.sources === "object" &&
+    parsed.sources !== null &&
+    !Array.isArray(parsed.sources)
+      ? (parsed.sources as Record<string, unknown>)
+      : {};
+  migrated.sources = { ...priorSources, linear: { apiKey: flatKey } };
+  return migrated;
+}
+
+/**
  * Load and validate the config, or bootstrap it.
  * - Missing file: create the dir (0o700), write the 0o600 template, print guidance, exit(1).
  * - Existing file: parse, REQUIRE linearApiKey (throw StartupError if empty), apply defaults for
@@ -117,27 +145,7 @@ export function loadConfig(): Config {
     typeof parsed.linearApiKey === "string" ? parsed.linearApiKey.trim() : "";
 
   if (nestedKey === "" && flatKey !== "") {
-    const migrated = {
-      sources: { linear: { apiKey: flatKey } },
-      port: typeof parsed.port === "number" ? parsed.port : DEFAULT_PORT,
-      pollIntervalMs:
-        typeof parsed.pollIntervalMs === "number"
-          ? parsed.pollIntervalMs
-          : DEFAULT_POLL_INTERVAL_MS,
-      workspaceRoot:
-        typeof parsed.workspaceRoot === "string" &&
-        parsed.workspaceRoot.trim() !== ""
-          ? parsed.workspaceRoot.trim()
-          : DEFAULT_WORKSPACE_ROOT,
-    };
-    if (
-      typeof migrated.sources.linear.apiKey !== "string" ||
-      migrated.sources.linear.apiKey === ""
-    ) {
-      throw new StartupError(
-        `Config migration produced an invalid shape for ${CONFIG_PATH}; the existing file was left unchanged. Set the "linearApiKey" field and restart.`,
-      );
-    }
+    const migrated = buildMigratedConfig(parsed, flatKey);
     writeFileAtomic.sync(
       CONFIG_PATH,
       JSON.stringify(migrated, null, 2) + "\n",
