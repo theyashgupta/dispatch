@@ -123,6 +123,10 @@ More detail lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), including the
 
 Dispatch is young and shaped by one person's daily use. It works well for that person. Issues and PRs are welcome, especially around Linux support, other ticket sources, and other agent CLIs.
 
+## Roadmap
+
+What's planned and why lives in the issue tracker. See the [`roadmap` label](https://github.com/theyashgupta/dispatch/issues?q=label%3Aroadmap).
+
 ## License
 
 [MIT](LICENSE) © Yash Gupta
