@@ -13,7 +13,7 @@ export function GoneBadge() {
         whiteSpace: "nowrap",
       }}
     >
-      Gone from Linear
+      Out of sync scope
     </span>
   );
 }
