@@ -11,7 +11,7 @@ each in its own git worktree, each with a real terminal in your browser.
 [![Node](https://img.shields.io/badge/node-%E2%89%A522.22-brightgreen)](https://nodejs.org)
 [![Made with tmux + ttyd](https://img.shields.io/badge/made%20with-tmux%20%2B%20ttyd-1f2937)](https://github.com/tsl0922/ttyd)
 
-![Dispatch demo: drag a ticket to In Progress and a live Claude Code session spins up](docs/assets/hero.gif)
+![Dispatch demo: drag a ticket, pick its workspace, and a live Claude Code session plans then implements in the same conversation](docs/assets/hero.gif)
 
 </div>
 
