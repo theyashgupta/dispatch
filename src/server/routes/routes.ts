@@ -103,6 +103,19 @@ apiRouter.post("/cards/:id/start", async (req, res) => {
         ? "in_progress"
         : undefined;
 
+  if (playbook !== undefined) {
+    const stage =
+      targetColumn === "in_planning" ||
+      (targetColumn === undefined && card.mode === "planning")
+        ? "planning"
+        : "implementation";
+    const known = (await loadPlaybooks(stage)).some((p) => p.name === playbook);
+    if (!known) {
+      res.status(400).json({ error: "unknown playbook", variant: "config" });
+      return;
+    }
+  }
+
   const folder = body?.folder;
   const rawRepos = body?.repos;
   const hasWorkspacePayload =
@@ -193,6 +206,10 @@ apiRouter.post("/cards/:id/kickoff", async (req, res) => {
     ? (await loadPlaybooks("implementation")).find((p) => p.name === playbook)
         ?.body
     : undefined;
+  if (playbook !== undefined && playbookBody === undefined) {
+    res.status(409).json({ error: "unknown playbook" });
+    return;
+  }
 
   try {
     await sendFollowupKickoff(

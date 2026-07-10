@@ -110,7 +110,11 @@ export async function startSession(
     }
 
     const playbookBody = playbookName
-      ? (await loadPlaybooks()).find((p) => p.name === playbookName)?.body
+      ? (
+          await loadPlaybooks(
+            mode === "planning" ? "planning" : "implementation",
+          )
+        ).find((p) => p.name === playbookName)?.body
       : undefined;
 
     await store.setExtraDirection(cardId, extraDirection);
