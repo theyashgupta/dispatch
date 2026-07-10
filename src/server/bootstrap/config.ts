@@ -3,8 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import type { Config } from "../../shared/types.js";
 import { StartupError } from "./binaryCheck.js";
+import { DISPATCH_DIR } from "../services/paths.js";
 
-const CONFIG_DIR = path.join(os.homedir(), ".dispatch");
+export const CONFIG_DIR = DISPATCH_DIR;
 export const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 
 const DEFAULT_PORT = 4700;
