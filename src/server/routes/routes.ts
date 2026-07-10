@@ -175,6 +175,11 @@ apiRouter.post("/cards/:id/kickoff", async (req, res) => {
     return;
   }
 
+  if (card.column !== "in_planning" || card.planReady !== true) {
+    res.status(409).json({ error: "card is not ready to hand off" });
+    return;
+  }
+
   const body = req.body as { playbook?: unknown; extra?: unknown } | undefined;
   if (body?.playbook !== undefined && typeof body.playbook !== "string") {
     res.status(400).json({ error: "invalid playbook" });
