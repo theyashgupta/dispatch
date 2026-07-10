@@ -146,14 +146,21 @@ export function loadConfig(): Config {
 
   if (nestedKey === "" && flatKey !== "") {
     const migrated = buildMigratedConfig(parsed, flatKey);
-    writeFileAtomic.sync(
-      CONFIG_PATH,
-      JSON.stringify(migrated, null, 2) + "\n",
-      {
-        mode: 0o600,
-      },
-    );
-    fs.chmodSync(CONFIG_PATH, 0o600);
+    try {
+      writeFileAtomic.sync(
+        CONFIG_PATH,
+        JSON.stringify(migrated, null, 2) + "\n",
+        {
+          mode: 0o600,
+        },
+      );
+      fs.chmodSync(CONFIG_PATH, 0o600);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code ?? "write failed";
+      process.stderr.write(
+        `[config] could not rewrite ${CONFIG_PATH} to the nested shape (${code}) — continuing with the flat key.\n`,
+      );
+    }
   }
 
   const rawKey = nestedKey !== "" ? nestedKey : flatKey;
