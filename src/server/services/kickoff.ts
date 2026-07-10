@@ -21,23 +21,47 @@ function workspaceOrientation(repoNames: string[], identifier: string): string {
 }
 
 /**
+ * Substitute a playbook body's `{extra}` token with the extra direction, byte-safely: a non-empty
+ * direction replaces the token in place; an empty direction DROPS the entire blank-line-delimited
+ * block carrying the token and collapses the resulting blank lines. This is what lets code.md's lone
+ * `## Extra direction`/`{extra}` block reproduce today's kickoff exactly — present when a direction
+ * exists, wholly absent (header included) when it does not (PBK-03).
+ */
+function substitutePlaybookBody(body: string, direction: string): string {
+  const token = "{extra}";
+  if (direction) return body.split(token).join(direction);
+  return body
+    .split(/\n\s*\n/)
+    .filter((block) => block.trim() !== "" && !block.includes(token))
+    .join("\n\n")
+    .trim();
+}
+
+/**
  * Build the multi-line kickoff prompt: ticket line, description, optional extra direction,
  * workspace orientation, and the required Phase-4 status protocol. Pure — joined with "\n".
  *
  * @remarks The two status-protocol lines are byte-identical to `parse.ts` MARKER_RE (NEW-08) and
  * their separator is an em-dash U+2014 whose paste fidelity is verified — do NOT swap it for a
- * hyphen (NEW-07). The wording is a contract between this file and the marker parser.
+ * hyphen (NEW-07). The wording is a contract between this file and the marker parser. The extra-
+ * direction slot is now the ONLY playbook-sourced region; when `opts.playbookBody` is absent the
+ * assembler falls back to today's exact `## Extra direction` block so a playbook-less kickoff is
+ * unchanged.
  * @see docs/ARCHITECTURE.md#marker-protocol
  */
 export function buildKickoff(
   card: Card,
   extraDirection: string,
   repoNames: string[],
-  opts: { restarted?: boolean } = {},
+  opts: { restarted?: boolean; playbookBody?: string } = {},
 ): string {
   const description = card.description?.trim() || "(no description provided)";
   const extra = extraDirection.trim();
   const url = card.url?.trim();
+  const substituted =
+    opts.playbookBody !== undefined
+      ? substitutePlaybookBody(opts.playbookBody, extra)
+      : null;
 
   return [
     ...(url ? [`Linear ticket: ${url}`, ``] : []),
@@ -45,7 +69,13 @@ export function buildKickoff(
     ``,
     `## Description`,
     description,
-    ...(extra ? [``, `## Extra direction`, extra] : []),
+    ...(substituted !== null
+      ? substituted
+        ? [``, ...substituted.split("\n")]
+        : []
+      : extra
+        ? [``, `## Extra direction`, extra]
+        : []),
     ...(opts.restarted
       ? [
           ``,
