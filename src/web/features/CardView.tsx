@@ -5,6 +5,7 @@ import { formatAge, nowMs } from "../lib/formatAge.js";
 import { useResumeFeedback } from "../hooks/useResumeFeedback.js";
 import { GoneBadge } from "./GoneBadge.js";
 import { PlanReadyBadge } from "./PlanReadyBadge.js";
+import { SourceBadge } from "./SourceBadge.js";
 import { Button } from "../primitives/Button.js";
 import { Field } from "../primitives/Field.js";
 import { Notice } from "../primitives/Notice.js";
@@ -165,6 +166,7 @@ export function CardView({
           </span>
         </div>
         <div style={{ display: "flex", gap: "var(--space-xs)" }}>
+          <SourceBadge source={card.source ?? "linear"} />
           {card.planReady && <PlanReadyBadge />}
           {showGone && <GoneBadge />}
         </div>
