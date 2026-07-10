@@ -1,4 +1,11 @@
-import type { Column, DiscoveredRepo, Playbook } from "../../shared/types.js";
+import type {
+  Column,
+  DiscoveredRepo,
+  FilterCapabilities,
+  FilterOption,
+  Playbook,
+  SourceFilters,
+} from "../../shared/types.js";
 
 /**
  * Optimistically move a card to a column: POST /api/cards/:id/move.
@@ -293,4 +300,97 @@ export async function openEditor(
   if (!res.ok) {
     throw new Error(`openEditor failed: ${res.status} ${res.statusText}`);
   }
+}
+
+/**
+ * Read the Linear source's persisted filters plus its capability descriptor:
+ * GET /api/sources/linear/filters. Fired once on settings-modal open (never on
+ * the poll loop) to seed the draft and decide which dimensions to render (SRC-06).
+ * The apiKey never crosses this boundary — the route returns only { filters,
+ * capabilities }. Resolves the parsed body on 2xx; throws on any non-2xx so the
+ * modal can surface a load failure (mirrors getPlaybooks/getWorkspaceFolders).
+ */
+export async function getLinearFilters(): Promise<{
+  filters: SourceFilters;
+  capabilities: FilterCapabilities;
+}> {
+  const res = await fetch("/api/sources/linear/filters");
+  if (!res.ok) {
+    throw new Error(`getLinearFilters failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as {
+    filters: SourceFilters;
+    capabilities: FilterCapabilities;
+  };
+}
+
+/**
+ * List the live workspace options for one multi-select dimension:
+ * GET /api/sources/linear/options?dimension=. Fired per dropdown on modal open so
+ * the picker reflects the current workspace. Resolves the parsed `options` array on
+ * 2xx; throws on any non-2xx (incl. the 502 upstream-failure) so the modal renders
+ * its per-dimension "Couldn't load options" line for that field.
+ */
+export async function getLinearOptions(
+  dimension: "assignees" | "projects" | "teams",
+): Promise<FilterOption[]> {
+  const res = await fetch(
+    `/api/sources/linear/options?dimension=${encodeURIComponent(dimension)}`,
+  );
+  if (!res.ok) {
+    throw new Error(`getLinearOptions failed: ${res.status} ${res.statusText}`);
+  }
+  const body = (await res.json()) as { options: FilterOption[] };
+  return body.options;
+}
+
+/**
+ * Count the tickets a draft filter would match: POST /api/sources/linear/preview.
+ * Advisory only — it drives the debounced match-count line and must NEVER block
+ * Save, so ANY failure (a non-2xx incl. the 502 upstream error, or a network
+ * throw) resolves to `null` (the "preview unavailable" sentinel) instead of
+ * rejecting. Resolves `{ count, more }` on 2xx.
+ */
+export async function previewLinearFilters(
+  filters: SourceFilters,
+): Promise<{ count: number; more: boolean } | null> {
+  try {
+    const res = await fetch("/api/sources/linear/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filters }),
+    });
+    if (!res.ok) {
+      return null;
+    }
+    return (await res.json()) as { count: number; more: boolean };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persist the Linear source's filter draft: PUT /api/sources/linear/filters.
+ * The server validates the shape (rejecting unknown dimensions) and re-polls
+ * race-free. Mirrors addWorkspaceFolder's 200/400 discrimination so the modal
+ * shows the inline validation error verbatim: 200 → { ok:true }; 400 →
+ * { ok:false, error } (parsed body); any other status throws so the caller can
+ * surface a network/unexpected failure.
+ */
+export async function saveLinearFilters(
+  filters: SourceFilters,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await fetch("/api/sources/linear/filters", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filters }),
+  });
+  if (res.ok) {
+    return { ok: true };
+  }
+  if (res.status === 400) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: body.error ?? "Couldn't save filters." };
+  }
+  throw new Error(`saveLinearFilters failed: ${res.status} ${res.statusText}`);
 }
