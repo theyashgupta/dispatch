@@ -1,5 +1,10 @@
 import { Router } from "express";
-import { COLUMNS, type Column } from "../../shared/types.js";
+import {
+  COLUMNS,
+  DEFAULT_FILTERS,
+  type Column,
+  type SourceFilters,
+} from "../../shared/types.js";
 import { store } from "../store/boardStore.js";
 import { sseHandler } from "./sse.js";
 import { isLocalRequest } from "./loopback.js";
@@ -8,7 +13,17 @@ import { resumeSession } from "../services/resumeSession.js";
 import { cleanupWorkspace } from "../services/cleanup.js";
 import { ensureTerminal } from "../services/terminal.js";
 import { editorPath, launchEditor } from "../adapters/editors.js";
-import { getOrchestrationConfig } from "../services/config-holder.js";
+import {
+  getOrchestrationConfig,
+  updateSourceFilters,
+} from "../services/config-holder.js";
+import {
+  getSourceCapabilities,
+  listSourceOptions,
+  countSourceMatches,
+  SourceNotFound,
+} from "../adapters/source-gateway.js";
+import { pollNow } from "../adapters/poller.js";
 import {
   expandPath,
   validateFolder,
@@ -423,4 +438,103 @@ apiRouter.delete("/workspace-folders", async (req, res) => {
 
   await store.removeWorkspaceFolder(expandPath(rawPath));
   res.status(200).json({ ok: true });
+});
+
+/**
+ * Validate an untrusted PUT/POST filter body before it can reach the secret-adjacent config file or
+ * an upstream query. It rejects any non-array/non-boolean shape AND any key beyond the four declared
+ * dimensions, so an unknown dimension can never be persisted or forwarded to Linear (tampering guard).
+ */
+function isValidFilters(x: unknown): x is SourceFilters {
+  if (typeof x !== "object" || x === null || Array.isArray(x)) return false;
+  const o = x as Record<string, unknown>;
+  const allowed = new Set(["assignees", "projects", "teams", "currentCycle"]);
+  if (Object.keys(o).some((k) => !allowed.has(k))) return false;
+  const isStrArray = (v: unknown): boolean =>
+    Array.isArray(v) && v.every((s) => typeof s === "string");
+  return (
+    isStrArray(o.assignees) &&
+    isStrArray(o.projects) &&
+    isStrArray(o.teams) &&
+    typeof o.currentCycle === "boolean"
+  );
+}
+
+apiRouter.get("/sources/:source/filters", (req, res) => {
+  const { source } = req.params;
+  try {
+    const capabilities = getSourceCapabilities(source);
+    const filters =
+      getOrchestrationConfig()?.sources?.linear?.filters ?? DEFAULT_FILTERS;
+    res.status(200).json({ filters, capabilities });
+  } catch (err) {
+    if (err instanceof SourceNotFound) {
+      res.status(404).json({ error: "unknown source" });
+      return;
+    }
+    throw err;
+  }
+});
+
+apiRouter.get("/sources/:source/options", async (req, res) => {
+  const { source } = req.params;
+  const dimension = req.query.dimension;
+  if (
+    dimension !== "assignees" &&
+    dimension !== "projects" &&
+    dimension !== "teams"
+  ) {
+    res.status(400).json({ error: "invalid dimension" });
+    return;
+  }
+  try {
+    const options = await listSourceOptions(source, dimension);
+    res.status(200).json({ options });
+  } catch (err) {
+    if (err instanceof SourceNotFound) {
+      res.status(404).json({ error: "unknown source" });
+      return;
+    }
+    res.status(502).json({ error: "source options unavailable" });
+  }
+});
+
+apiRouter.post("/sources/:source/preview", async (req, res) => {
+  const { source } = req.params;
+  const filters = (req.body as { filters?: unknown } | undefined)?.filters;
+  if (!isValidFilters(filters)) {
+    res.status(400).json({ error: "invalid filters" });
+    return;
+  }
+  try {
+    const { count, more } = await countSourceMatches(source, filters);
+    res.status(200).json({ count, more });
+  } catch (err) {
+    if (err instanceof SourceNotFound) {
+      res.status(404).json({ error: "unknown source" });
+      return;
+    }
+    res.status(502).json({ error: "preview unavailable" });
+  }
+});
+
+apiRouter.put("/sources/:source/filters", (req, res) => {
+  const { source } = req.params;
+  try {
+    getSourceCapabilities(source);
+  } catch (err) {
+    if (err instanceof SourceNotFound) {
+      res.status(404).json({ error: "unknown source" });
+      return;
+    }
+    throw err;
+  }
+  const filters = (req.body as { filters?: unknown } | undefined)?.filters;
+  if (!isValidFilters(filters)) {
+    res.status(400).json({ error: "invalid filters" });
+    return;
+  }
+  updateSourceFilters(source, filters);
+  pollNow();
+  res.status(200).json({ filters });
 });
