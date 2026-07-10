@@ -70,6 +70,12 @@ export interface SagaContext {
    * already-registered worktree is expected (createWorktrees skips it rather than failing exit 128).
    */
   restarted: boolean;
+  /**
+   * Body of the selected playbook, resolved server-side by name; threaded into buildKickoff so the
+   * saga kickoff uses it. Undefined ⇒ the playbook-less fallback that keeps the code.md path byte-
+   * identical to today's kickoff.
+   */
+  playbookBody?: string;
   /** Non-fatal notices (e.g. fetch-fallback) surfaced on the card after a successful start. */
   warnings: string[];
 }
@@ -304,6 +310,7 @@ const sendKickoff: SagaStep = {
     );
     const kickoff = buildKickoff(ctx.card, ctx.extraDirection, repoNames, {
       restarted: ctx.restarted,
+      playbookBody: ctx.playbookBody,
     });
     const tmpFile = path.join(
       os.tmpdir(),
@@ -321,6 +328,32 @@ const sendKickoff: SagaStep = {
   },
   async undo() {},
 };
+
+/**
+ * Paste an already-assembled follow-up prompt into the live `dsp-<identifier>` session using the
+ * EXACT bracketed-paste-then-separate-Enter sequence sendKickoff uses (NEW-05/06), so the live
+ * implementation handoff lands the same way the saga kickoff does. Owning the tmux paste here keeps
+ * it inside services, so the /kickoff route never imports adapters (route→adapters boundary).
+ */
+export async function sendFollowupKickoff(
+  identifier: string,
+  body: string,
+): Promise<void> {
+  const session = "dsp-" + identifier;
+  const tmpFile = path.join(
+    os.tmpdir(),
+    `dsp-followup-${identifier}-${Date.now()}.txt`,
+  );
+  await fsp.writeFile(tmpFile, body, "utf8");
+  try {
+    await loadBuffer(session, tmpFile);
+    await pasteBuffer(session, session);
+    await sleep(PASTE_SETTLE_MS);
+    await sendKeys(session, ["Enter"]);
+  } finally {
+    await fsp.unlink(tmpFile).catch(() => {});
+  }
+}
 
 /** The four steps, in forward execution order. */
 export const steps: SagaStep[] = [

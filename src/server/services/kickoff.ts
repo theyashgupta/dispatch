@@ -38,6 +38,21 @@ function substitutePlaybookBody(body: string, direction: string): string {
 }
 
 /**
+ * The Phase-4 status-protocol block, the SINGLE source of the marker contract. Its two
+ * DISPATCH_STATUS lines are byte-identical to `parse.ts` MARKER_RE (NEW-08) and their separator is
+ * an em-dash U+2014 whose paste fidelity is verified — do NOT swap it for a hyphen (NEW-07). Shared
+ * by both the saga kickoff and the implementation-handoff follow-up so one definition owns the
+ * contract and a playbook body can neither alter nor suppress it.
+ * @see docs/ARCHITECTURE.md#marker-protocol
+ */
+const STATUS_PROTOCOL = [
+  `## Status protocol (required)`,
+  `Print these as standalone lines, in the exact format shown, as the LAST line of a reply:`,
+  `- When blocked and needing human input: DISPATCH_STATUS: NEEDS_INPUT — <one-line reason>`,
+  `- When the task is complete: DISPATCH_STATUS: DONE — <one-line summary>`,
+];
+
+/**
  * Build the multi-line kickoff prompt: ticket line, description, optional extra direction,
  * workspace orientation, and the required Phase-4 status protocol. Pure — joined with "\n".
  *
@@ -87,9 +102,30 @@ export function buildKickoff(
     `## Workspace`,
     workspaceOrientation(repoNames, card.identifier),
     ``,
-    `## Status protocol (required)`,
-    `Print these as standalone lines, in the exact format shown, as the LAST line of a reply:`,
-    `- When blocked and needing human input: DISPATCH_STATUS: NEEDS_INPUT — <one-line reason>`,
-    `- When the task is complete: DISPATCH_STATUS: DONE — <one-line summary>`,
+    ...STATUS_PROTOCOL,
+  ].join("\n");
+}
+
+/**
+ * Assemble the implementation-handoff follow-up pasted into the SAME live session: the substituted
+ * playbook body, the fixed approved-plan line, and the shared status-protocol reminder. Unlike
+ * buildKickoff it re-emits no ticket header / description / workspace — the live session already
+ * carries that context. An undefined body reduces to just the extra direction (or nothing) ahead of
+ * the fixed lines; the shared STATUS_PROTOCOL keeps the marker contract byte-identical either way.
+ */
+export function buildFollowupKickoff(
+  playbookBody: string | undefined,
+  extraDirection: string,
+): string {
+  const extra = extraDirection.trim();
+  const lead =
+    playbookBody !== undefined
+      ? substitutePlaybookBody(playbookBody, extra)
+      : extra;
+  return [
+    ...(lead ? [...lead.split("\n"), ``] : []),
+    `The approved plan from the planning phase is in this workspace.`,
+    ``,
+    ...STATUS_PROTOCOL,
   ].join("\n");
 }
