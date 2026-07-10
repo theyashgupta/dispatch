@@ -90,10 +90,13 @@ export interface Card {
    */
   mode?: "planning" | "implementation";
   /**
-   * Originating ticket source. Absent is treated as `"linear"` everywhere (the reconcile scoping
-   * filter, the CardView marker) so existing board.json cards need no migration write.
+   * Originating ticket source (a registered TicketSource.id — "linear" is the only value today).
+   * Typed as string, not a literal union, because reconcile stamps whatever source id it is handed;
+   * narrowing here would just hide that behind a cast. Absent is treated as `"linear"` everywhere
+   * (the reconcile scoping filter, the CardView marker) so existing board.json cards need no
+   * migration write.
    */
-  source?: "linear";
+  source?: string;
   /**
    * A planning session emitted DONE and is ready to hand off. Survives Needs Input round-trips (the
    * flag is not touched by marker routing), and is cleared on the implementation handoff and on any

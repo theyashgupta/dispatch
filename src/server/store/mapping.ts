@@ -13,7 +13,7 @@ function newTodoCard(issue: SourceIssue, sourceId: string): Card {
     column: "todo",
     updatedAt: issue.updatedAt,
     goneFromLinear: false,
-    source: sourceId as "linear",
+    source: sourceId,
   };
 }
 
