@@ -362,10 +362,18 @@ class BoardStore extends EventEmitter {
 
   /**
    * Idempotent reattach to a live `dsp-<id>` session ("already running"): copy the session
-   * fields, promote the card to "in_progress", surface a transient reattach status, and clear
+   * fields, promote the card to its target column, surface a transient reattach status, and clear
    * any provisioning step / start error. No-op if the id is unknown.
+   *
+   * `opts` uses the same asymmetric defaulting as completeStart: `column` defaults to "in_progress"
+   * when omitted; `mode` is assigned only when provided so reattaching a live planning session never
+   * yanks it to In Progress nor wipes its mode.
    */
-  attachExistingSession(id: string, s: SessionFields): Promise<void> {
+  attachExistingSession(
+    id: string,
+    s: SessionFields,
+    opts?: { column?: Column; mode?: "planning" | "implementation" },
+  ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) {
@@ -373,7 +381,8 @@ class BoardStore extends EventEmitter {
         card.branch = s.branch;
         card.tmuxSession = s.tmuxSession;
         card.ttydPort = s.ttydPort;
-        card.column = "in_progress";
+        card.column = opts?.column ?? "in_progress";
+        if (opts?.mode !== undefined) card.mode = opts.mode;
         card.statusReason = "Already running — reattached";
         card.provisioningStep = null;
         card.startError = null;
@@ -472,6 +481,10 @@ class BoardStore extends EventEmitter {
    * and a card the user parked in Done stays parked. Cards in in_progress / needs_input /
    * agent_done remain eligible (an Agent Done card CAN move to Needs Input on a new distinct
    * marker — intended). SECURITY: never logs card, reason, or pane contents.
+   *
+   * A DONE marker on a planning-mode card does NOT move it: the plan is complete in place, so the
+   * card keeps its In Planning column and gains `planReady` (the badge + handoff affordance) rather
+   * than sliding into Agent Done. NEEDS_INPUT stays identical for both modes (shared column).
    * @see docs/ARCHITECTURE.md#single-writer-store
    */
   applyMarker(
@@ -483,6 +496,12 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const c = this.cards.get(id);
       if (!c || c.column === "todo" || c.column === "done") return;
+      if (column === "agent_done" && c.mode === "planning") {
+        c.planReady = true;
+        c.statusReason = statusReason;
+        c.lastMarker = markerKey;
+        return;
+      }
       c.column = column;
       c.statusReason = statusReason;
       c.lastMarker = markerKey;
@@ -506,8 +525,10 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Flip a Needs-Input card back to In Progress once the agent responds (Phase 4, MARK-03): set
-   * column="in_progress" and clear statusReason in ONE atomic mutation. `lastMarker` is left
+   * Flip a Needs-Input card back to its working column once the agent responds (Phase 4, MARK-03):
+   * clear statusReason in ONE atomic mutation. The target is mode-aware — a planning-mode card
+   * returns to In Planning, everything else to In Progress — so the shared Needs Input column routes
+   * each card home. `lastMarker` is left
    * UNTOUCHED so the still-visible NEEDS_INPUT marker line cannot re-fire on the next tick (the
    * watcher dedups on `lastMarker`). No-op if the id is unknown.
    *
@@ -520,7 +541,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const c = this.cards.get(id);
       if (c && c.column === "needs_input") {
-        c.column = "in_progress";
+        c.column = c.mode === "planning" ? "in_planning" : "in_progress";
         c.statusReason = undefined;
       }
     });
@@ -555,11 +576,21 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Successful start: copy the session fields, promote the card to "in_progress", and clear
+   * Successful start: copy the session fields, promote the card to its target column, and clear
    * the provisioning step, start error, start warning, and the session-lost flag (so a restart
    * returns the card to its normal running appearance). No-op if the id is unknown.
+   *
+   * The `opts` defaulting is deliberately ASYMMETRIC. `column` defaults to "in_progress" when
+   * omitted, so the existing start caller lands cards exactly as before. `mode` is assigned ONLY
+   * when explicitly provided — an omitted `mode` preserves whatever the card already carries, so a
+   * planning restart keeps its planning identity instead of being silently downgraded. `planReady`
+   * is always cleared: a fresh or re-provisioned session has no stale Plan-ready badge to show.
    */
-  completeStart(id: string, s: SessionFields): Promise<void> {
+  completeStart(
+    id: string,
+    s: SessionFields,
+    opts?: { column?: Column; mode?: "planning" | "implementation" },
+  ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) {
@@ -567,7 +598,9 @@ class BoardStore extends EventEmitter {
         card.branch = s.branch;
         card.tmuxSession = s.tmuxSession;
         card.ttydPort = s.ttydPort;
-        card.column = "in_progress";
+        card.column = opts?.column ?? "in_progress";
+        if (opts?.mode !== undefined) card.mode = opts.mode;
+        card.planReady = undefined;
         card.provisioningStep = null;
         card.startError = null;
         card.startWarning = null;
@@ -597,6 +630,24 @@ class BoardStore extends EventEmitter {
         card.ttydPort = undefined;
         card.resumeError = null;
         card.statusReason = "Resumed — reattached";
+      }
+    });
+  }
+
+  /**
+   * Hand a completed plan off to implementation in ONE atomic mutation: move the card to In
+   * Progress, flip `mode` to "implementation", drop the Plan-ready badge, and clear the planning
+   * status reason. Called after the live-session follow-up paste succeeds, so the same conversation
+   * continues building — no re-provisioning. No-op if the id is unknown.
+   */
+  handoffToImplementation(id: string): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) {
+        card.column = "in_progress";
+        card.mode = "implementation";
+        card.planReady = undefined;
+        card.statusReason = undefined;
       }
     });
   }

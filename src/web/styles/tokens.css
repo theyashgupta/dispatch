@@ -56,6 +56,7 @@
 
   /* Column-identity signal palette (header underline + count chip) */
   --col-todo: #8a8f98;
+  --col-in-planning: #38b2ac;
   --col-in-progress: #5e6ad2;
   --col-needs-input: #ef8e3b;
   --col-agent-done: #3fb950;
