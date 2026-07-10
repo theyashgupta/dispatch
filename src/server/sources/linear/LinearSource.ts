@@ -192,10 +192,10 @@ async function fetchAllIssues(
   return { issues, truncated: lastHasNextPage };
 }
 
-const USERS_QUERY = `query Users($onlyActive: UserFilter) { users(filter: $onlyActive, first: ${PAGE_SIZE}) { nodes { id name displayName } } }`;
+const USERS_QUERY = `query Users($onlyActive: UserFilter) { users(filter: $onlyActive, first: ${PAGE_SIZE}) { nodes { id name displayName } pageInfo { hasNextPage } } }`;
 const ACTIVE_USERS: Record<string, unknown> = { active: { eq: true } };
-const TEAMS_QUERY = `query Teams { teams(first: ${PAGE_SIZE}) { nodes { id name } } }`;
-const PROJECTS_QUERY = `query Projects { projects(first: ${PAGE_SIZE}) { nodes { id name } } }`;
+const TEAMS_QUERY = `query Teams { teams(first: ${PAGE_SIZE}) { nodes { id name } pageInfo { hasNextPage } } }`;
+const PROJECTS_QUERY = `query Projects { projects(first: ${PAGE_SIZE}) { nodes { id name } pageInfo { hasNextPage } } }`;
 
 /**
  * The Linear TicketSource: owns the GraphQL query, cursor paging, prefix-less auth, and RATELIMITED
@@ -224,30 +224,44 @@ export class LinearSource implements TicketSource {
     return fetchAllIssues(this.apiKey, useViewerScope, filter);
   }
 
+  /**
+   * List one dropdown dimension as a single 250-item page. `truncated` mirrors the connection's
+   * hasNextPage so a larger workspace gets an honest "first 250" disclosure in the settings UI
+   * instead of silently missing options.
+   */
   async listOptions(
     dimension: "assignees" | "projects" | "teams",
-  ): Promise<FilterOption[]> {
+  ): Promise<{ options: FilterOption[]; truncated: boolean }> {
     if (dimension === "assignees") {
       const data = await postGraphQL(this.apiKey, USERS_QUERY, {
         onlyActive: ACTIVE_USERS,
       });
-      return (data.users?.nodes ?? []).map((n) => ({
-        id: n.id,
-        label: n.displayName ?? n.name ?? n.id,
-      }));
+      return {
+        options: (data.users?.nodes ?? []).map((n) => ({
+          id: n.id,
+          label: n.displayName ?? n.name ?? n.id,
+        })),
+        truncated: data.users?.pageInfo?.hasNextPage ?? false,
+      };
     }
     if (dimension === "teams") {
       const data = await postGraphQL(this.apiKey, TEAMS_QUERY, {});
-      return (data.teams?.nodes ?? []).map((n) => ({
-        id: n.id,
-        label: n.name ?? n.id,
-      }));
+      return {
+        options: (data.teams?.nodes ?? []).map((n) => ({
+          id: n.id,
+          label: n.name ?? n.id,
+        })),
+        truncated: data.teams?.pageInfo?.hasNextPage ?? false,
+      };
     }
     const data = await postGraphQL(this.apiKey, PROJECTS_QUERY, {});
-    return (data.projects?.nodes ?? []).map((n) => ({
-      id: n.id,
-      label: n.name ?? n.id,
-    }));
+    return {
+      options: (data.projects?.nodes ?? []).map((n) => ({
+        id: n.id,
+        label: n.name ?? n.id,
+      })),
+      truncated: data.projects?.pageInfo?.hasNextPage ?? false,
+    };
   }
 
   async countMatches(

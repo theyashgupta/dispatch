@@ -74,6 +74,11 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     projects: false,
     teams: false,
   });
+  const [optTruncated, setOptTruncated] = useState<Record<MultiDim, boolean>>({
+    assignees: false,
+    projects: false,
+    teams: false,
+  });
   const [preview, setPreview] = useState<PreviewState>({ status: "counting" });
   const [cycleFocus, setCycleFocus] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -97,9 +102,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     for (const dim of MULTI_DIMS) {
       void (async () => {
         try {
-          const opts = await getLinearOptions(dim);
+          const { options: opts, truncated } = await getLinearOptions(dim);
           if (!active) return;
           setOptions((prev) => ({ ...prev, [dim]: opts }));
+          setOptTruncated((prev) => ({ ...prev, [dim]: truncated }));
         } catch (err) {
           console.error("getLinearOptions failed", err);
           if (!active) return;
@@ -299,6 +305,18 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                     }}
                   >
                     Couldn't load options — reopen settings to retry.
+                  </span>
+                )}
+                {optTruncated[dim] && (
+                  <span
+                    style={{
+                      fontFamily: "var(--font-ui)",
+                      fontSize: "var(--font-body)",
+                      lineHeight: "var(--line-body)",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    Showing first 250 options.
                   </span>
                 )}
               </div>

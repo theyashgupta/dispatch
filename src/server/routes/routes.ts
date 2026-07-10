@@ -488,8 +488,8 @@ apiRouter.get("/sources/:source/options", async (req, res) => {
     return;
   }
   try {
-    const options = await listSourceOptions(source, dimension);
-    res.status(200).json({ options });
+    const { options, truncated } = await listSourceOptions(source, dimension);
+    res.status(200).json({ options, truncated });
   } catch (err) {
     if (err instanceof SourceNotFound) {
       res.status(404).json({ error: "unknown source" });

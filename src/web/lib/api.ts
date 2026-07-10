@@ -328,20 +328,25 @@ export async function getLinearFilters(): Promise<{
  * List the live workspace options for one multi-select dimension:
  * GET /api/sources/linear/options?dimension=. Fired per dropdown on modal open so
  * the picker reflects the current workspace. Resolves the parsed `options` array on
- * 2xx; throws on any non-2xx (incl. the 502 upstream-failure) so the modal renders
- * its per-dimension "Couldn't load options" line for that field.
+ * 2xx plus a `truncated` flag (true when the source capped the list at its first
+ * page) so the modal can disclose the cap; throws on any non-2xx (incl. the 502
+ * upstream-failure) so the modal renders its per-dimension "Couldn't load options"
+ * line for that field.
  */
 export async function getLinearOptions(
   dimension: "assignees" | "projects" | "teams",
-): Promise<FilterOption[]> {
+): Promise<{ options: FilterOption[]; truncated: boolean }> {
   const res = await fetch(
     `/api/sources/linear/options?dimension=${encodeURIComponent(dimension)}`,
   );
   if (!res.ok) {
     throw new Error(`getLinearOptions failed: ${res.status} ${res.statusText}`);
   }
-  const body = (await res.json()) as { options: FilterOption[] };
-  return body.options;
+  const body = (await res.json()) as {
+    options: FilterOption[];
+    truncated?: boolean;
+  };
+  return { options: body.options, truncated: body.truncated === true };
 }
 
 /**

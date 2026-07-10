@@ -36,7 +36,7 @@ export interface TicketSource {
   readonly capabilities: FilterCapabilities;
   listOptions(
     dimension: Exclude<FilterDimension, "cycle">,
-  ): Promise<FilterOption[]>;
+  ): Promise<{ options: FilterOption[]; truncated: boolean }>;
   countMatches(
     filters: SourceFilters,
   ): Promise<{ count: number; more: boolean }>;

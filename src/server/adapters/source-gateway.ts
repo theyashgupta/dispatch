@@ -39,7 +39,7 @@ export function getSourceCapabilities(sourceId: string): FilterCapabilities {
 export function listSourceOptions(
   sourceId: string,
   dimension: Exclude<FilterDimension, "cycle">,
-): Promise<FilterOption[]> {
+): Promise<{ options: FilterOption[]; truncated: boolean }> {
   return resolveSource(sourceId).listOptions(dimension);
 }
 
