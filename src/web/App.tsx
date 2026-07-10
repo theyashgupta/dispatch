@@ -112,6 +112,9 @@ export function App() {
         <StartModal
           key={startCardId}
           card={startCard}
+          stage="implementation"
+          variant="full"
+          targetColumn="in_progress"
           onClose={() => setStartCardId(null)}
         />
       )}

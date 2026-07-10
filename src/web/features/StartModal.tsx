@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
-import type { Card as CardModel, DiscoveredRepo } from "../../shared/types.js";
+import type {
+  Card as CardModel,
+  DiscoveredRepo,
+  Playbook,
+} from "../../shared/types.js";
 import {
   addWorkspaceFolder,
   discoverFolder,
+  getPlaybooks,
   getWorkspaceFolders,
   removeWorkspaceFolder,
+  sendKickoff,
   startCard,
 } from "../lib/api.js";
 import { Button } from "../primitives/Button.js";
@@ -14,10 +20,26 @@ import { IconButton } from "../primitives/IconButton.js";
 import { Modal, type ModalControl } from "../primitives/Modal.js";
 import { Notice } from "../primitives/Notice.js";
 
+export interface StartRequest {
+  cardId: string;
+  targetColumn: "in_planning" | "in_progress";
+  variant: "full" | "handoff";
+}
+
 interface StartModalProps {
   card: CardModel;
+  stage: "planning" | "implementation";
+  variant: "full" | "handoff";
+  targetColumn: "in_planning" | "in_progress";
   onClose: () => void;
 }
+
+const PLAYBOOK_DEFAULT = "Default";
+
+const PLAYBOOK_STAGE_DEFAULT: Record<"planning" | "implementation", string> = {
+  planning: "Plan",
+  implementation: "Code",
+};
 
 const focusRing = (on: boolean): string =>
   on ? "0 0 0 2px var(--accent)" : "none";
@@ -311,6 +333,154 @@ function FolderPicker({
   );
 }
 
+interface PlaybookRowProps {
+  name: string;
+  onSelect: () => void;
+}
+
+function PlaybookRow({ name, onSelect }: PlaybookRowProps) {
+  const [hover, setHover] = useState(false);
+  const [focus, setFocus] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onFocus={(e) => setFocus(e.currentTarget.matches(":focus-visible"))}
+      onBlur={() => setFocus(false)}
+      style={{
+        textAlign: "left",
+        padding: "var(--space-sm)",
+        background: hover ? "var(--surface-card-hover)" : "transparent",
+        border: "none",
+        borderRadius: "var(--radius)",
+        color: "var(--text)",
+        fontFamily: "var(--font-ui)",
+        fontSize: "var(--font-body)",
+        lineHeight: "var(--line-body)",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        cursor: "pointer",
+        outline: "none",
+        boxShadow: focusRing(focus),
+      }}
+    >
+      {name}
+    </button>
+  );
+}
+
+interface PlaybookPickerProps {
+  names: string[];
+  selected: string | null;
+  onSelect: (name: string) => void;
+}
+
+function PlaybookPicker({ names, selected, onSelect }: PlaybookPickerProps) {
+  const [open, setOpen] = useState(false);
+  const [triggerFocus, setTriggerFocus] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  return (
+    <div
+      ref={rootRef}
+      style={{
+        position: "relative",
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-xs)",
+      }}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        onFocus={(e) =>
+          setTriggerFocus(e.currentTarget.matches(":focus-visible"))
+        }
+        onBlur={() => setTriggerFocus(false)}
+        style={{
+          height: "32px",
+          padding: "0 var(--space-sm)",
+          background: "var(--surface-card)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius)",
+          color: "var(--text)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "var(--space-sm)",
+          cursor: "pointer",
+          outline: "none",
+          boxShadow: focusRing(triggerFocus),
+        }}
+      >
+        <span
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-body)",
+            lineHeight: "var(--line-body)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            minWidth: 0,
+          }}
+        >
+          {selected}
+        </span>
+        <ChevronDown
+          size={12}
+          strokeWidth={2}
+          aria-hidden="true"
+          style={{ color: "var(--text-muted)", flex: "0 0 auto" }}
+        />
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            right: 0,
+            marginTop: "var(--space-xs)",
+            zIndex: 1,
+            background: "var(--surface-card)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius)",
+            display: "flex",
+            flexDirection: "column",
+            maxHeight: "240px",
+            overflowY: "auto",
+          }}
+        >
+          {names.map((name) => (
+            <PlaybookRow
+              key={name}
+              name={name}
+              onSelect={() => {
+                onSelect(name);
+                setOpen(false);
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface RepoRowProps {
   repo: DiscoveredRepo;
   checked: boolean;
@@ -471,7 +641,13 @@ function RepoRow({
   );
 }
 
-export function StartModal({ card, onClose }: StartModalProps) {
+export function StartModal({
+  card,
+  stage,
+  variant,
+  targetColumn,
+  onClose,
+}: StartModalProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modalRef = useRef<ModalControl>(null);
   const [extraDirection, setExtraDirection] = useState(
@@ -483,6 +659,9 @@ export function StartModal({ card, onClose }: StartModalProps) {
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [focused, setFocused] = useState<"textarea" | null>(null);
+
+  const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
+  const [selectedPlaybook, setSelectedPlaybook] = useState<string | null>(null);
 
   const [folders, setFolders] = useState<string[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
@@ -514,6 +693,7 @@ export function StartModal({ card, onClose }: StartModalProps) {
   );
 
   useEffect(() => {
+    if (variant !== "full") return;
     let active = true;
     void (async () => {
       try {
@@ -535,7 +715,35 @@ export function StartModal({ card, onClose }: StartModalProps) {
     return () => {
       active = false;
     };
-  }, [applyRepos]);
+  }, [applyRepos, variant]);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const list = await getPlaybooks(stage);
+        if (!active) return;
+        const sorted = [...list].sort((a, b) => a.name.localeCompare(b.name));
+        setPlaybooks(sorted);
+        if (sorted.length === 0) {
+          setSelectedPlaybook(PLAYBOOK_DEFAULT);
+          return;
+        }
+        const preferred = sorted.find(
+          (p) => p.name === PLAYBOOK_STAGE_DEFAULT[stage],
+        );
+        setSelectedPlaybook((preferred ?? sorted[0]).name);
+      } catch (err) {
+        console.error("getPlaybooks failed", err);
+        if (!active) return;
+        setPlaybooks([]);
+        setSelectedPlaybook(PLAYBOOK_DEFAULT);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [stage]);
 
   const addFolder = useCallback(
     async (path: string): Promise<string | null> => {
@@ -576,12 +784,21 @@ export function StartModal({ card, onClose }: StartModalProps) {
     [folders, selectedFolder, lastUsed, selectFolder],
   );
 
+  const playbookNames =
+    playbooks.length > 0 ? playbooks.map((p) => p.name) : [PLAYBOOK_DEFAULT];
+  const playbookArg =
+    selectedPlaybook && selectedPlaybook !== PLAYBOOK_DEFAULT
+      ? selectedPlaybook
+      : undefined;
+
   const checkedCount = (repos ?? []).filter((r) => checked[r.path]).length;
   const startDisabled =
-    submitting ||
-    (error?.isConfig ?? false) ||
-    selectedFolder === null ||
-    checkedCount === 0;
+    variant === "handoff"
+      ? submitting
+      : submitting ||
+        (error?.isConfig ?? false) ||
+        selectedFolder === null ||
+        checkedCount === 0;
 
   async function handleStart() {
     if (startDisabled) return;
@@ -591,12 +808,20 @@ export function StartModal({ card, onClose }: StartModalProps) {
       const chosen = (repos ?? [])
         .filter((r) => checked[r.path])
         .map((r) => ({ path: r.path, base: baseOverride[r.path] ?? r.base }));
-      const result = await startCard(
-        card.id,
-        extraDirection,
-        selectedFolder ?? undefined,
-        chosen,
-      );
+      const result =
+        variant === "handoff"
+          ? await sendKickoff(card.id, {
+              playbook: playbookArg,
+              extra: extraDirection,
+            })
+          : await startCard(
+              card.id,
+              extraDirection,
+              selectedFolder ?? undefined,
+              chosen,
+              playbookArg,
+              targetColumn,
+            );
       if (result.ok) {
         modalRef.current?.requestClose();
         return;
@@ -606,7 +831,7 @@ export function StartModal({ card, onClose }: StartModalProps) {
         isConfig: result.variant === "config",
       });
     } catch (err) {
-      console.error("startCard failed", err);
+      console.error("start failed", err);
       setError({
         text: "Couldn't reach the server. Try again.",
         isConfig: false,
@@ -642,32 +867,15 @@ export function StartModal({ card, onClose }: StartModalProps) {
         </div>
       }
     >
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-lg)",
-          flex: "0 0 auto",
-        }}
-      >
+      {variant === "full" && (
         <div
           style={{
             display: "flex",
             flexDirection: "column",
-            gap: "var(--space-xs)",
+            gap: "var(--space-lg)",
+            flex: "0 0 auto",
           }}
         >
-          <Field>Workspace</Field>
-          <FolderPicker
-            folders={folders}
-            selected={selectedFolder}
-            onSelect={(p) => void selectFolder(p)}
-            onRemove={removeFolder}
-            onAdd={addFolder}
-          />
-        </div>
-
-        {selectedFolder !== null && repos !== null && (
           <div
             style={{
               display: "flex",
@@ -675,49 +883,84 @@ export function StartModal({ card, onClose }: StartModalProps) {
               gap: "var(--space-xs)",
             }}
           >
-            <Field>Repositories</Field>
-            {repos.length === 0 ? (
-              <div
-                style={{
-                  fontSize: "var(--font-label)",
-                  fontWeight: "var(--weight-semibold)",
-                  lineHeight: "var(--line-label)",
-                  color: "var(--text-muted)",
-                }}
-              >
-                No git repositories found in this folder
-              </div>
-            ) : (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "var(--space-sm)",
-                }}
-              >
-                {repos.map((r) => (
-                  <RepoRow
-                    key={r.path}
-                    repo={r}
-                    checked={checked[r.path] ?? false}
-                    base={baseOverride[r.path] ?? r.base}
-                    onToggle={() => {
-                      setError(null);
-                      setChecked((prev) => ({
-                        ...prev,
-                        [r.path]: !prev[r.path],
-                      }));
-                    }}
-                    onBaseChange={(b) => {
-                      setError(null);
-                      setBaseOverride((prev) => ({ ...prev, [r.path]: b }));
-                    }}
-                  />
-                ))}
-              </div>
-            )}
+            <Field>Workspace</Field>
+            <FolderPicker
+              folders={folders}
+              selected={selectedFolder}
+              onSelect={(p) => void selectFolder(p)}
+              onRemove={removeFolder}
+              onAdd={addFolder}
+            />
           </div>
-        )}
+
+          {selectedFolder !== null && repos !== null && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "var(--space-xs)",
+              }}
+            >
+              <Field>Repositories</Field>
+              {repos.length === 0 ? (
+                <div
+                  style={{
+                    fontSize: "var(--font-label)",
+                    fontWeight: "var(--weight-semibold)",
+                    lineHeight: "var(--line-label)",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  No git repositories found in this folder
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "var(--space-sm)",
+                  }}
+                >
+                  {repos.map((r) => (
+                    <RepoRow
+                      key={r.path}
+                      repo={r}
+                      checked={checked[r.path] ?? false}
+                      base={baseOverride[r.path] ?? r.base}
+                      onToggle={() => {
+                        setError(null);
+                        setChecked((prev) => ({
+                          ...prev,
+                          [r.path]: !prev[r.path],
+                        }));
+                      }}
+                      onBaseChange={(b) => {
+                        setError(null);
+                        setBaseOverride((prev) => ({ ...prev, [r.path]: b }));
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--space-xs)",
+          flex: "0 0 auto",
+        }}
+      >
+        <Field>Playbook</Field>
+        <PlaybookPicker
+          names={playbookNames}
+          selected={selectedPlaybook}
+          onSelect={setSelectedPlaybook}
+        />
       </div>
 
       <div
