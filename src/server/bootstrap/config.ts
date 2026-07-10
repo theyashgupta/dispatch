@@ -4,7 +4,7 @@ import path from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import type { Config } from "../../shared/types.js";
 import { StartupError } from "./binaryCheck.js";
-import { CONFIG_DIR, CONFIG_PATH } from "../services/paths.js";
+import { CONFIG_PATH, DISPATCH_DIR } from "../services/paths.js";
 
 const DEFAULT_PORT = 4700;
 const DEFAULT_POLL_INTERVAL_MS = 60_000;
@@ -90,7 +90,7 @@ function buildMigratedConfig(
  */
 export function loadConfig(): Config {
   if (!fs.existsSync(CONFIG_PATH)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(DISPATCH_DIR, { recursive: true, mode: 0o700 });
     fs.writeFileSync(
       CONFIG_PATH,
       JSON.stringify(CONFIG_TEMPLATE, null, 2) + "\n",
