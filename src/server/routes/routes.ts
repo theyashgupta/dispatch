@@ -189,10 +189,17 @@ apiRouter.post("/cards/:id/kickoff", async (req, res) => {
         ?.body
     : undefined;
 
-  await sendFollowupKickoff(
-    card.identifier,
-    buildFollowupKickoff(playbookBody, extra),
-  );
+  try {
+    await sendFollowupKickoff(
+      card.identifier,
+      buildFollowupKickoff(playbookBody, extra),
+    );
+  } catch {
+    res
+      .status(409)
+      .json({ error: "the live session is gone — resume it and retry" });
+    return;
+  }
   await store.handoffToImplementation(id);
   res.status(202).json({ handedOff: true });
 });
