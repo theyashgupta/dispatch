@@ -1,22 +1,7 @@
-import type { Card, ReconcileResult } from "../../shared/types.js";
+import type { Card, ReconcileResult, SourceIssue } from "../../shared/types.js";
 
-/**
- * The subset of a Linear issue the poller maps onto a card. `description` is nullable (issues can
- * have none); `priority` is the raw Linear integer (RESEARCH assumption A2: 1 urgent .. 4 low,
- * 0 none — verify on first real pull); `updatedAt` is an ISO string used as the To Do tiebreaker.
- */
-export interface LinearIssue {
-  id: string;
-  identifier: string;
-  title: string;
-  url: string;
-  description: string | null;
-  priority: number;
-  updatedAt: string;
-}
-
-/** Build a fresh To Do card for a newly-seen Linear issue. In Phase 1 card.id == issueId. */
-function newTodoCard(issue: LinearIssue): Card {
+/** Build a fresh To Do card for a newly-seen source issue, stamped with its origin source. */
+function newTodoCard(issue: SourceIssue, sourceId: string): Card {
   return {
     id: issue.id,
     issueId: issue.id,
@@ -28,6 +13,7 @@ function newTodoCard(issue: LinearIssue): Card {
     column: "todo",
     updatedAt: issue.updatedAt,
     goneFromLinear: false,
+    source: sourceId as "linear",
   };
 }
 
@@ -75,13 +61,16 @@ function isStartingCard(
  * issue whose card is in To Do is refreshed in place (clearing goneFromLinear); a card past To Do
  * is untouched (a reappearing gone-flagged card emits a flag-only correction); an absent issue is
  * removed only while in To Do, else kept and flagged goneFromLinear (CR-01: an in-flight-start card
- * is flagged, never removed). Does no I/O, no clock read, and no sorting.
+ * is flagged, never removed). Does no I/O, no clock read, and no sorting. Removal/gone decisions are
+ * scoped to the syncing source: the caller passes a `current` pre-filtered to `sourceId`'s cards, so
+ * SYNC-03 removals can never touch another source's card; new cards are stamped with `sourceId`.
  * @see docs/ARCHITECTURE.md#linear-sync
  */
 export function reconcile(
-  issues: LinearIssue[],
+  issues: SourceIssue[],
   current: Map<string, Card>,
   inFlightStartIds: ReadonlySet<string> = new Set(),
+  sourceId: string = "linear",
 ): ReconcileResult {
   const seen = new Set(issues.map((i) => i.id));
   const upserts: Card[] = [];
@@ -90,7 +79,7 @@ export function reconcile(
   for (const issue of issues) {
     const existing = current.get(issue.id);
     if (!existing) {
-      upserts.push(newTodoCard(issue));
+      upserts.push(newTodoCard(issue, sourceId));
       continue;
     }
     if (existing.column === "todo") {

@@ -1,6 +1,6 @@
 import type { Config } from "../../shared/types.js";
 import { store } from "../store/boardStore.js";
-import type { LinearIssue } from "../store/mapping.js";
+import type { SourceIssue } from "../../shared/types.js";
 
 const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 const DEFAULT_POLL_INTERVAL_MS = 60_000;
@@ -125,7 +125,7 @@ async function fetchPage(
  */
 async function fetchAllIssues(
   apiKey: string,
-): Promise<{ issues: LinearIssue[]; truncated: boolean }> {
+): Promise<{ issues: SourceIssue[]; truncated: boolean }> {
   const nodes: IssueNode[] = [];
   let after: string | null = null;
   let lastHasNextPage = false;
