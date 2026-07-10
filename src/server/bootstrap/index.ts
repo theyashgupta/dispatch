@@ -6,6 +6,7 @@ import { apiRouter } from "../routes/routes.js";
 import { setOrchestrationConfig } from "../services/config-holder.js";
 import { seedPlaybooks } from "../services/playbooks.js";
 import { startPoller } from "../adapters/poller.js";
+import { buildRegistry, getLinearSource } from "../sources/registry.js";
 import { startMarkerWatcher } from "../adapters/markers/watcher.js";
 import { reconcileSessions } from "./reconcile.js";
 import { resolveEditors } from "../adapters/editors.js";
@@ -17,6 +18,7 @@ async function main(): Promise<void> {
   await checkBinaries();
   const config = loadConfig();
   setOrchestrationConfig(config);
+  buildRegistry(config);
 
   await seedPlaybooks();
 
@@ -38,7 +40,7 @@ async function main(): Promise<void> {
       `[server] Dispatch backend listening on http://127.0.0.1:${port}`,
     );
 
-    startPoller(config);
+    startPoller(config, getLinearSource());
 
     startMarkerWatcher();
   });
