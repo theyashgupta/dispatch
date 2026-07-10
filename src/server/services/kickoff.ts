@@ -25,11 +25,21 @@ function workspaceOrientation(repoNames: string[], identifier: string): string {
  * direction replaces the token in place; an empty direction DROPS the entire blank-line-delimited
  * block carrying the token and collapses the resulting blank lines. This is what lets code.md's lone
  * `## Extra direction`/`{extra}` block reproduce today's kickoff exactly — present when a direction
- * exists, wholly absent (header included) when it does not (PBK-03).
+ * exists, wholly absent (header included) when it does not (PBK-03). A body missing the token can
+ * never swallow a non-empty direction: the legacy `## Extra direction` block is appended after the
+ * body instead, so typed direction always reaches the kickoff. The append fires only when the token
+ * is absent, so the seeded playbooks (which carry it) keep their byte-exact substitution path.
  */
 function substitutePlaybookBody(body: string, direction: string): string {
   const token = "{extra}";
-  if (direction) return body.split(token).join(direction);
+  if (direction) {
+    if (!body.includes(token)) {
+      const trimmed = body.trimEnd();
+      const extraBlock = `## Extra direction\n${direction}`;
+      return trimmed ? `${trimmed}\n\n${extraBlock}` : extraBlock;
+    }
+    return body.split(token).join(direction);
+  }
   return body
     .split(/\n\s*\n/)
     .filter((block) => block.trim() !== "" && !block.includes(token))
