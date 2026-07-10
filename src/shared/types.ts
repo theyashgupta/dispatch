@@ -90,6 +90,11 @@ export interface Card {
    */
   mode?: "planning" | "implementation";
   /**
+   * Originating ticket source. Absent is treated as `"linear"` everywhere (the reconcile scoping
+   * filter, the CardView marker) so existing board.json cards need no migration write.
+   */
+  source?: "linear";
+  /**
    * A planning session emitted DONE and is ready to hand off. Survives Needs Input round-trips (the
    * flag is not touched by marker routing), and is cleared on the implementation handoff and on any
    * restart/re-provision so a stale badge never outlives its plan.
@@ -199,6 +204,23 @@ export interface Config {
   repoPaths?: string[];
   baseBranches?: string[];
   workspaceRoot?: string;
+  /** Writable-config groundwork (Phase 23): nested per-source credentials. `linearApiKey` stays the resolved read. */
+  sources?: { linear?: { apiKey: string } };
+}
+
+/**
+ * The subset of a source-issue the poller maps onto a card. `description` is nullable (issues can
+ * have none); `priority` is the raw Linear integer (RESEARCH assumption A2: 1 urgent .. 4 low,
+ * 0 none — verify on first real pull); `updatedAt` is an ISO string used as the To Do tiebreaker.
+ */
+export interface SourceIssue {
+  id: string;
+  identifier: string;
+  title: string;
+  url: string;
+  description: string | null;
+  priority: number;
+  updatedAt: string;
 }
 
 /** Result of reconciling a Linear poll against the current board. */

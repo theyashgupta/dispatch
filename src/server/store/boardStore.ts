@@ -8,10 +8,11 @@ import type {
   Card,
   Column,
   SessionFields,
+  SourceIssue,
   StartError,
   TerminalError,
 } from "../../shared/types.js";
-import { reconcile, type LinearIssue } from "./mapping.js";
+import { reconcile } from "./mapping.js";
 
 const BOARD_DIR = path.join(os.homedir(), ".dispatch");
 export const BOARD_PATH = path.join(BOARD_DIR, "board.json");
@@ -775,15 +776,18 @@ class BoardStore extends EventEmitter {
    * SKIPPED for the cycle and a warning is recorded on the sync status instead.
    */
   applyIssues(
-    issues: LinearIssue[],
+    issues: SourceIssue[],
     syncedAt: string,
-    opts: { partial?: boolean } = {},
+    opts: { partial?: boolean; source?: string } = {},
   ): Promise<void> {
     return this.enqueue(() => {
+      const src = opts.source ?? "linear";
       const current = new Map(
-        [...this.cards.values()].map((c) => [c.issueId, c] as const),
+        [...this.cards.values()]
+          .filter((c) => (c.source ?? "linear") === src)
+          .map((c) => [c.issueId, c] as const),
       );
-      const r = reconcile(issues, current, this.inFlightStarts);
+      const r = reconcile(issues, current, this.inFlightStarts, src);
       for (const card of r.upserts) this.cards.set(card.id, card);
       for (const id of r.reappearedIds) {
         const card = this.cards.get(id);
