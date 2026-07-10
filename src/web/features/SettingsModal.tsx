@@ -78,6 +78,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [cycleFocus, setCycleFocus] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -89,6 +90,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         setCapabilities(caps);
       } catch (err) {
         console.error("getLinearFilters failed", err);
+        if (!active) return;
+        setLoadError(true);
       }
     })();
     for (const dim of MULTI_DIMS) {
@@ -175,12 +178,22 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             flex: "0 0 auto",
           }}
         >
-          <Button variant="primary" onClick={handleSave} disabled={saving}>
+          <Button
+            variant="primary"
+            onClick={handleSave}
+            disabled={saving || !draft}
+          >
             Save Filters
           </Button>
         </div>
       }
     >
+      {loadError && (
+        <Notice
+          tone="destructive"
+          label="Couldn't load filters — reopen settings to retry."
+        />
+      )}
       {capabilities && draft && (
         <div
           style={{
