@@ -167,7 +167,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         ? "preview unavailable"
         : preview.more
           ? "Matches 250+ tickets"
-          : `Matches ${preview.count} tickets`;
+          : `Matches ${preview.count} ${preview.count === 1 ? "ticket" : "tickets"}`;
 
   return (
     <Modal

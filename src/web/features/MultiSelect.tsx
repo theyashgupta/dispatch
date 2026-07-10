@@ -207,7 +207,7 @@ export function MultiSelect({
                 color: "var(--text-muted)",
               }}
             >
-              {emptyText}
+              {loadError ? "Couldn't load options" : emptyText}
             </span>
           )}
           {!loading &&
