@@ -7,6 +7,7 @@ import { Board } from "./features/Board.js";
 import { DetailPanel } from "./features/DetailPanel.js";
 import { StartModal, type StartRequest } from "./features/StartModal.js";
 import { CleanupModal } from "./features/CleanupModal.js";
+import { SettingsModal } from "./features/SettingsModal.js";
 import { cleanupCard as cleanupCardApi } from "./lib/api.js";
 
 export function App() {
@@ -34,6 +35,8 @@ export function App() {
   const [cleanupCardId, setCleanupCardId] = useState<string | null>(null);
   const cleanupCard =
     board?.cards.find((card) => card.id === cleanupCardId) ?? null;
+
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   if (board === null) {
     const statusText =
@@ -102,6 +105,7 @@ export function App() {
         connection={connection}
         pollIntervalMs={board?.pollIntervalMs ?? null}
         syncWarning={board?.syncWarning ?? null}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
       <Board
         board={board}
@@ -143,6 +147,7 @@ export function App() {
           onClose={() => setCleanupCardId(null)}
         />
       )}
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }
