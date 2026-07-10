@@ -82,10 +82,11 @@ function readNestedFilters(parsed: Record<string, unknown>): SourceFilters {
 /**
  * Build the nested-shape object for the flat→nested boot migration. config.json is a user-edited
  * file, so unknown top-level keys are expected and carried forward verbatim, and any pre-existing
- * non-linear `sources` entries are preserved; the migration only rewrites what it owns — the flat
- * `linearApiKey` becomes `sources.linear.apiKey`, and the retired `repoPaths`/`baseBranches` keys
- * plus the first-run template's "//" doc keys (guidance written for the pre-migration shape) are
- * dropped deliberately.
+ * `sources` entries are preserved — including keys already inside `sources.linear` (a `filters`
+ * block written against a still-flat file must survive re-migration, not silently reset the board
+ * scope); the migration only rewrites what it owns — the flat `linearApiKey` becomes
+ * `sources.linear.apiKey`, and the retired `repoPaths`/`baseBranches` keys plus the first-run
+ * template's "//" doc keys (guidance written for the pre-migration shape) are dropped deliberately.
  */
 function buildMigratedConfig(
   parsed: Record<string, unknown>,
@@ -103,7 +104,16 @@ function buildMigratedConfig(
     !Array.isArray(parsed.sources)
       ? (parsed.sources as Record<string, unknown>)
       : {};
-  migrated.sources = { ...priorSources, linear: { apiKey: flatKey } };
+  const priorLinear =
+    typeof priorSources.linear === "object" &&
+    priorSources.linear !== null &&
+    !Array.isArray(priorSources.linear)
+      ? (priorSources.linear as Record<string, unknown>)
+      : {};
+  migrated.sources = {
+    ...priorSources,
+    linear: { ...priorLinear, apiKey: flatKey },
+  };
   return migrated;
 }
 
