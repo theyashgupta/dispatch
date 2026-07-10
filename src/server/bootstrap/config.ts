@@ -56,7 +56,9 @@ function readNestedKey(parsed: Record<string, unknown>): string {
  * - Existing file: parse, REQUIRE linearApiKey (throw StartupError if empty), apply defaults for
  *   port/pollIntervalMs, tighten perms to 0o600. Retired repoPaths/baseBranches keys are ignored
  *   with a one-line notice when still present on disk.
- * The API key value is never logged (presence is logged as a boolean only).
+ * The API key value is never logged (presence is logged as a boolean only) — JSON parse failures
+ * report the error position but never the parser message, because V8 embeds a snippet of the input
+ * around the failure point and a mis-quoted key sits exactly there.
  */
 export function loadConfig(): Config {
   if (!fs.existsSync(CONFIG_PATH)) {
@@ -94,8 +96,9 @@ export function loadConfig(): Config {
   try {
     parsedUnknown = JSON.parse(raw);
   } catch (err) {
+    const pos = /position (\d+)/.exec((err as Error).message)?.[1];
     throw new StartupError(
-      `Config at ${CONFIG_PATH} is not valid JSON (${(err as Error).message}). Fix it and restart.`,
+      `Config at ${CONFIG_PATH} is not valid JSON${pos ? ` (near position ${pos})` : ""}. Fix it and restart.`,
     );
   }
   if (
