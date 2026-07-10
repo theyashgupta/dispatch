@@ -46,7 +46,10 @@ function toStartError(err: unknown, stepName: string): StartError {
  * persisted at the original start (`card.startIntent`), so Retry after a failed planning start and
  * a bare Restart reproduce the chosen playbook and planning target instead of silently degrading to
  * a playbook-less implementation session; a request carrying either field is a fresh, complete
- * intent and never mixes with the stored one.
+ * intent and never mixes with the stored one. Route validation only covers names arriving in the
+ * request body, so a stored playbook name that no longer resolves (renamed or deleted since the
+ * original start) is surfaced as a start warning via the same channel as the fetch-fallback
+ * notice — the warning must ride `ctx.warnings` because `completeStart` clears `startWarning`.
  * @see docs/ARCHITECTURE.md#orchestration-saga
  */
 export async function startSession(
@@ -117,6 +120,10 @@ export async function startSession(
           )
         ).find((p) => p.name === playbookName)?.body
       : undefined;
+    const warnings: string[] = [];
+    if (playbookName !== undefined && playbookBody === undefined) {
+      warnings.push("saved playbook not found — started without it");
+    }
 
     await store.setExtraDirection(cardId, extraDirection);
 
@@ -132,7 +139,7 @@ export async function startSession(
       tmuxSessionCreated: false,
       restarted: card.sessionLost === true,
       playbookBody,
-      warnings: [],
+      warnings,
     };
 
     const done: SagaStep[] = [];
