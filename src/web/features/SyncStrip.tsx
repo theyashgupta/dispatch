@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
+import { Settings } from "lucide-react";
 import type { ConnectionStatus } from "../hooks/useBoardStream.js";
 import { Glyph } from "../primitives/Glyph.js";
+import { IconButton } from "../primitives/IconButton.js";
 
 interface SyncStripProps {
   syncedAt: string | null;
   connection: ConnectionStatus;
   pollIntervalMs: number | null;
   syncWarning: string | null;
+  onOpenSettings?: () => void;
 }
 
 function formatSynced(syncedTs: number, now: number): string {
@@ -23,6 +26,7 @@ export function SyncStrip({
   connection,
   pollIntervalMs,
   syncWarning,
+  onOpenSettings,
 }: SyncStripProps) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -109,26 +113,37 @@ export function SyncStrip({
         </span>
       </div>
       <div
-        role="status"
-        aria-live="polite"
         style={{
           display: "flex",
           alignItems: "center",
-          color: disconnected ? "var(--destructive)" : "var(--text-muted)",
+          gap: "var(--space-sm)",
         }}
       >
-        <span
-          title={dotTitle}
+        <div
+          role="status"
+          aria-live="polite"
           style={{
-            width: "6px",
-            height: "6px",
-            borderRadius: "50%",
-            background: dotColor,
-            marginRight: "var(--space-xs)",
-            flex: "0 0 auto",
+            display: "flex",
+            alignItems: "center",
+            color: disconnected ? "var(--destructive)" : "var(--text-muted)",
           }}
-        />
-        {text}
+        >
+          <span
+            title={dotTitle}
+            style={{
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              background: dotColor,
+              marginRight: "var(--space-xs)",
+              flex: "0 0 auto",
+            }}
+          />
+          {text}
+        </div>
+        <IconButton aria-label="Sync filters" onClick={onOpenSettings}>
+          <Settings size={16} />
+        </IconButton>
       </div>
     </div>
   );
