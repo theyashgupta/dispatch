@@ -16,6 +16,7 @@ import type {
 } from "../../shared/types.js";
 import { Column } from "./Column.js";
 import { CardView } from "./CardView.js";
+import type { StartRequest } from "./StartModal.js";
 import { useLastOpened } from "../hooks/useUnseenActivity.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { moveCard } from "../lib/api.js";
@@ -25,7 +26,7 @@ interface BoardProps {
   board: BoardSnapshot | null;
   selectedCardId?: string | null;
   onSelectCard?: (id: string) => void;
-  onStartRequest?: (id: string) => void;
+  onStartRequest?: (req: string | StartRequest) => void;
   onCleanupRequest?: (id: string) => void;
 }
 
@@ -107,8 +108,28 @@ export function Board({
     const card = cards.find((c) => c.id === cardId);
     if (!card) return;
 
-    if (card.column === "todo" && targetColumn === "in_progress") {
-      onStartRequest?.(cardId);
+    if (
+      card.column === "todo" &&
+      (targetColumn === "in_progress" || targetColumn === "in_planning")
+    ) {
+      onStartRequest?.({ cardId, targetColumn, variant: "full" });
+      return;
+    }
+
+    if (card.column === "in_planning" && targetColumn === "in_progress") {
+      if (card.planReady && card.tmuxSession) {
+        onStartRequest?.({
+          cardId,
+          targetColumn: "in_progress",
+          variant: "handoff",
+        });
+      } else if (!card.tmuxSession) {
+        onStartRequest?.({
+          cardId,
+          targetColumn: "in_progress",
+          variant: "full",
+        });
+      }
       return;
     }
 
