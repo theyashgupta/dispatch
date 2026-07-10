@@ -70,6 +70,12 @@ export interface SagaContext {
    * already-registered worktree is expected (createWorktrees skips it rather than failing exit 128).
    */
   restarted: boolean;
+  /**
+   * Body of the selected playbook, resolved server-side by name; threaded into buildKickoff so the
+   * saga kickoff uses it. Undefined ⇒ the playbook-less fallback that keeps the code.md path byte-
+   * identical to today's kickoff.
+   */
+  playbookBody?: string;
   /** Non-fatal notices (e.g. fetch-fallback) surfaced on the card after a successful start. */
   warnings: string[];
 }
@@ -304,6 +310,7 @@ const sendKickoff: SagaStep = {
     );
     const kickoff = buildKickoff(ctx.card, ctx.extraDirection, repoNames, {
       restarted: ctx.restarted,
+      playbookBody: ctx.playbookBody,
     });
     const tmpFile = path.join(
       os.tmpdir(),

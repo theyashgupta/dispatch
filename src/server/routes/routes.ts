@@ -82,9 +82,24 @@ apiRouter.post("/cards/:id/start", async (req, res) => {
   }
 
   const body = req.body as
-    { extraDirection?: unknown; folder?: unknown; repos?: unknown } | undefined;
+    | {
+        extraDirection?: unknown;
+        folder?: unknown;
+        repos?: unknown;
+        playbook?: unknown;
+        targetColumn?: unknown;
+      }
+    | undefined;
   const extraDirection =
     typeof body?.extraDirection === "string" ? body.extraDirection : "";
+  const playbook =
+    typeof body?.playbook === "string" ? body.playbook : undefined;
+  const targetColumn =
+    body?.targetColumn === "in_planning"
+      ? "in_planning"
+      : body?.targetColumn === "in_progress"
+        ? "in_progress"
+        : undefined;
 
   const folder = body?.folder;
   const rawRepos = body?.repos;
@@ -128,7 +143,7 @@ apiRouter.post("/cards/:id/start", async (req, res) => {
     return;
   }
 
-  void startSession(id, extraDirection, config);
+  void startSession(id, extraDirection, config, { playbook, targetColumn });
   res.status(202).json({ started: true });
 });
 
