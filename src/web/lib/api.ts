@@ -1,4 +1,4 @@
-import type { Column, DiscoveredRepo } from "../../shared/types.js";
+import type { Column, DiscoveredRepo, Playbook } from "../../shared/types.js";
 
 /**
  * Optimistically move a card to a column: POST /api/cards/:id/move.
@@ -34,17 +34,25 @@ export type StartResult =
  * A fresh start passes the chosen `folder` + `repos` (checked repos with their
  * per-ticket base). Restart/retry callers omit both so the body stays exactly
  * `{ extraDirection }` and the backend reuses the persisted `card.workspace`.
+ *
+ * `playbook` (a name, never a path) and `targetColumn` are passed through exactly
+ * as supplied — this function applies no default. A modal-driven start always
+ * supplies an explicit `targetColumn` so the server honors it (Case 1); the bare
+ * Restart caller supplies neither, and `JSON.stringify` drops the resulting
+ * `undefined` keys so that absence reaches the server as the preserve-column signal.
  */
 export async function startCard(
   id: string,
   extraDirection: string,
   folder?: string,
   repos?: { path: string; base: string }[],
+  playbook?: string,
+  targetColumn?: "in_planning" | "in_progress",
 ): Promise<StartResult> {
   const body =
     folder !== undefined || repos !== undefined
-      ? { extraDirection, folder, repos }
-      : { extraDirection };
+      ? { extraDirection, folder, repos, playbook, targetColumn }
+      : { extraDirection, playbook, targetColumn };
   const res = await fetch(`/api/cards/${encodeURIComponent(id)}/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -65,6 +73,58 @@ export async function startCard(
     };
   }
   throw new Error(`startCard failed: ${res.status} ${res.statusText}`);
+}
+
+/**
+ * List the playbooks for a methodology stage: GET /api/playbooks?stage=.
+ * Read fresh on every start-modal open so the picker reflects the on-disk
+ * markdown without a cache. Resolves the parsed `playbooks` array on 2xx; throws
+ * on any non-2xx so the modal can surface a load failure (mirrors getWorkspaceFolders).
+ */
+export async function getPlaybooks(
+  stage: "planning" | "implementation",
+): Promise<Playbook[]> {
+  const res = await fetch(`/api/playbooks?stage=${encodeURIComponent(stage)}`);
+  if (!res.ok) {
+    throw new Error(`getPlaybooks failed: ${res.status} ${res.statusText}`);
+  }
+  const body = (await res.json()) as { playbooks: Playbook[] };
+  return body.playbooks;
+}
+
+/**
+ * Send a follow-up kickoff into a card's live session: POST /api/cards/:id/kickoff.
+ * The In Planning → In Progress live hand-off: the server splices the chosen
+ * implementation `playbook` (a name, never a path; omitted for the Default option)
+ * plus the `extra` direction and sends it into the same tmux session — no
+ * re-provisioning. Mirrors startCard's discrimination so a dead-session reject
+ * (400/409 with `{ error, variant }`) falls through to session-lost treatment;
+ * any other status throws for a network/unexpected failure.
+ */
+export async function sendKickoff(
+  id: string,
+  opts: { playbook?: string; extra: string },
+): Promise<StartResult> {
+  const res = await fetch(`/api/cards/${encodeURIComponent(id)}/kickoff`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ playbook: opts.playbook, extra: opts.extra }),
+  });
+  if (res.ok) {
+    return { ok: true };
+  }
+  if (res.status === 400 || res.status === 409) {
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      variant?: string;
+    };
+    return {
+      ok: false,
+      error: body.error ?? "Hand-off failed.",
+      variant: body.variant,
+    };
+  }
+  throw new Error(`sendKickoff failed: ${res.status} ${res.statusText}`);
 }
 
 /**
