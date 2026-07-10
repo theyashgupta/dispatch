@@ -1,12 +1,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import writeFileAtomic from "write-file-atomic";
 import type { Config } from "../../shared/types.js";
 import { StartupError } from "./binaryCheck.js";
-import { DISPATCH_DIR } from "../services/paths.js";
-
-export const CONFIG_DIR = DISPATCH_DIR;
-export const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
+import { CONFIG_DIR, CONFIG_PATH } from "../services/paths.js";
 
 const DEFAULT_PORT = 4700;
 const DEFAULT_POLL_INTERVAL_MS = 60_000;
@@ -28,6 +26,29 @@ const CONFIG_TEMPLATE = {
   "// workspaceRoot": "Phase 2+. Root folder for per-ticket workspaces.",
   workspaceRoot: DEFAULT_WORKSPACE_ROOT,
 };
+
+/**
+ * Read a non-empty `sources.linear.apiKey` from a parsed config object, or "" when the nested shape is
+ * absent or blank. Checked FIRST during load so an already-migrated file is detected before the flat
+ * key, which is what keeps the boot migration idempotent — a second boot never re-wraps an existing
+ * `sources` block into `sources.linear.sources.linear`.
+ */
+function readNestedKey(parsed: Record<string, unknown>): string {
+  const sources = parsed.sources;
+  if (
+    typeof sources !== "object" ||
+    sources === null ||
+    Array.isArray(sources)
+  ) {
+    return "";
+  }
+  const linear = (sources as Record<string, unknown>).linear;
+  if (typeof linear !== "object" || linear === null || Array.isArray(linear)) {
+    return "";
+  }
+  const apiKey = (linear as Record<string, unknown>).apiKey;
+  return typeof apiKey === "string" ? apiKey.trim() : "";
+}
 
 /**
  * Load and validate the config, or bootstrap it.
@@ -88,8 +109,43 @@ export function loadConfig(): Config {
   }
   const parsed = parsedUnknown as Record<string, unknown>;
 
-  const rawKey =
+  const nestedKey = readNestedKey(parsed);
+  const flatKey =
     typeof parsed.linearApiKey === "string" ? parsed.linearApiKey.trim() : "";
+
+  if (nestedKey === "" && flatKey !== "") {
+    const migrated = {
+      sources: { linear: { apiKey: flatKey } },
+      port: typeof parsed.port === "number" ? parsed.port : DEFAULT_PORT,
+      pollIntervalMs:
+        typeof parsed.pollIntervalMs === "number"
+          ? parsed.pollIntervalMs
+          : DEFAULT_POLL_INTERVAL_MS,
+      workspaceRoot:
+        typeof parsed.workspaceRoot === "string" &&
+        parsed.workspaceRoot.trim() !== ""
+          ? parsed.workspaceRoot.trim()
+          : DEFAULT_WORKSPACE_ROOT,
+    };
+    if (
+      typeof migrated.sources.linear.apiKey !== "string" ||
+      migrated.sources.linear.apiKey === ""
+    ) {
+      throw new StartupError(
+        `Config migration produced an invalid shape for ${CONFIG_PATH}; the existing file was left unchanged. Set the "linearApiKey" field and restart.`,
+      );
+    }
+    writeFileAtomic.sync(
+      CONFIG_PATH,
+      JSON.stringify(migrated, null, 2) + "\n",
+      {
+        mode: 0o600,
+      },
+    );
+    fs.chmodSync(CONFIG_PATH, 0o600);
+  }
+
+  const rawKey = nestedKey !== "" ? nestedKey : flatKey;
   if (rawKey === "") {
     throw new StartupError(
       `Linear API key missing in ${CONFIG_PATH}. Set the "linearApiKey" field and restart.`,
