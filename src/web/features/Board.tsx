@@ -189,6 +189,12 @@ export function Board({
             isCarousel={isCarousel}
             phone={isPhone}
             large={isLarge}
+            dropDisabled={
+              column === "in_progress" &&
+              activeCard?.column === "in_planning" &&
+              Boolean(activeCard.tmuxSession) &&
+              !activeCard.planReady
+            }
           />
         ))}
       </div>

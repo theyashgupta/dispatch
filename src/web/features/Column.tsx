@@ -35,6 +35,7 @@ interface ColumnProps {
   isCarousel?: boolean;
   phone?: boolean;
   large?: boolean;
+  dropDisabled?: boolean;
 }
 
 export function Column({
@@ -46,8 +47,10 @@ export function Column({
   isCarousel,
   phone,
   large,
+  dropDisabled,
 }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column });
+  const highlight = isOver && !dropDisabled;
 
   const sizing = isCarousel
     ? {
@@ -65,10 +68,10 @@ export function Column({
         ...sizing,
         display: "flex",
         flexDirection: "column",
-        background: isOver
+        background: highlight
           ? "color-mix(in srgb, var(--accent) 12%, var(--surface-column))"
           : "var(--surface-column)",
-        border: isOver ? "1px solid var(--accent)" : "1px solid transparent",
+        border: highlight ? "1px solid var(--accent)" : "1px solid transparent",
         borderRadius: "var(--radius)",
         padding: "0 var(--space-lg) var(--space-lg)",
         overflow: "hidden",

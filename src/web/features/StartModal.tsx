@@ -159,6 +159,12 @@ function FolderPicker({
   return (
     <div
       ref={rootRef}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && open) {
+          e.preventDefault();
+          setOpen(false);
+        }
+      }}
       style={{
         position: "relative",
         display: "flex",
@@ -395,6 +401,12 @@ function PlaybookPicker({ names, selected, onSelect }: PlaybookPickerProps) {
   return (
     <div
       ref={rootRef}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && open) {
+          e.preventDefault();
+          setOpen(false);
+        }
+      }}
       style={{
         position: "relative",
         display: "flex",
@@ -958,7 +970,7 @@ export function StartModal({
         <Field>Playbook</Field>
         <PlaybookPicker
           names={playbookNames}
-          selected={selectedPlaybook}
+          selected={selectedPlaybook ?? PLAYBOOK_STAGE_DEFAULT[stage]}
           onSelect={setSelectedPlaybook}
         />
       </div>
