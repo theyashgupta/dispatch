@@ -16,6 +16,8 @@ import {
   restatRepos,
 } from "../services/workspaces.js";
 import { loadPlaybooks } from "../services/playbooks.js";
+import { buildFollowupKickoff } from "../services/kickoff.js";
+import { sendFollowupKickoff } from "../services/steps.js";
 
 export const apiRouter = Router();
 
@@ -145,6 +147,54 @@ apiRouter.post("/cards/:id/start", async (req, res) => {
 
   void startSession(id, extraDirection, config, { playbook, targetColumn });
   res.status(202).json({ started: true });
+});
+
+apiRouter.post("/cards/:id/kickoff", async (req, res) => {
+  const { id } = req.params;
+
+  const card = store.getCard(id);
+  if (!card) {
+    res.status(400).json({ error: `unknown card id: ${id}` });
+    return;
+  }
+
+  if (!/^[A-Za-z0-9]+-\d+$/.test(card.identifier)) {
+    res
+      .status(400)
+      .json({ error: `invalid ticket identifier: ${card.identifier}` });
+    return;
+  }
+
+  if (store.isStarting(id)) {
+    res.status(409).json({ error: "a start is in flight for this card" });
+    return;
+  }
+
+  if (!card.tmuxSession) {
+    res.status(409).json({ error: "card has no live session to hand off" });
+    return;
+  }
+
+  const body = req.body as { playbook?: unknown; extra?: unknown } | undefined;
+  if (body?.playbook !== undefined && typeof body.playbook !== "string") {
+    res.status(400).json({ error: "invalid playbook" });
+    return;
+  }
+  const playbook =
+    typeof body?.playbook === "string" ? body.playbook : undefined;
+  const extra = typeof body?.extra === "string" ? body.extra : "";
+
+  const playbookBody = playbook
+    ? (await loadPlaybooks("implementation")).find((p) => p.name === playbook)
+        ?.body
+    : undefined;
+
+  await sendFollowupKickoff(
+    card.identifier,
+    buildFollowupKickoff(playbookBody, extra),
+  );
+  await store.handoffToImplementation(id);
+  res.status(202).json({ handedOff: true });
 });
 
 apiRouter.post("/cards/:id/resume", (req, res) => {
