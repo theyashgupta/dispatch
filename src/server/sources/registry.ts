@@ -12,16 +12,18 @@ export function buildRegistry(config: Config): void {
   sources.set(linear.id, linear);
 }
 
-/** Look up a source by id (poller/boot read the linear source through this). */
-export function getSource(id: string): TicketSource | undefined {
+/** Look up a source by id (the by-id accessor the boot convenience getters read through). */
+function getSource(id: string): TicketSource | undefined {
   return sources.get(id);
 }
 
 /** The single Linear source; throws if buildRegistry() has not run (a boot-order bug). */
 export function getLinearSource(): TicketSource {
-  const linear = sources.get("linear");
+  const linear = getSource("linear");
   if (!linear) {
-    throw new Error("linear source not built — buildRegistry() must run at boot");
+    throw new Error(
+      "linear source not built — buildRegistry() must run at boot",
+    );
   }
   return linear;
 }
