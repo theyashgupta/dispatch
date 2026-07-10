@@ -15,7 +15,9 @@ let pending: ReturnType<typeof setTimeout> | null = null;
  * Run one poll of the active source, then reschedule the next. The captured `gen` is the race guard:
  * a settings save bumps `generation` and starts its own poll, so any older in-flight fetch that
  * returns (or rejects) afterwards is discarded here — it neither applies its now-stale scope to the
- * board nor reschedules, leaving the newer poll in sole control (Pitfall P3).
+ * board nor reschedules, leaving the newer poll in sole control (Pitfall P3). The guard is
+ * re-checked after the store apply too: a save landing during that await must not let the stale
+ * poll reschedule, or its timer and the new poll's timer would each perpetuate a chain forever.
  */
 async function pollOnce(): Promise<void> {
   const source = currentSource;
@@ -33,6 +35,7 @@ async function pollOnce(): Promise<void> {
       partial: truncated,
       source: source.id,
     });
+    if (gen !== generation) return;
     backoffMs = baseIntervalMs;
     scheduleNext(baseIntervalMs);
   } catch (err) {
@@ -52,9 +55,17 @@ async function pollOnce(): Promise<void> {
   }
 }
 
-/** Arm the next self-rescheduling tick. `unref` keeps the timer from holding the process open. */
+/**
+ * Arm the next self-rescheduling tick, stamped with the current generation. The stamp covers the
+ * window clearTimeout cannot: if the timer already fired and its callback sits queued when pollNow
+ * bumps the generation, the clear is a no-op — the stale tick must abort itself here or it would
+ * start a second self-perpetuating poll chain. `unref` keeps the timer from holding the process open.
+ */
 function scheduleNext(delayMs: number): void {
-  pending = setTimeout(() => void pollOnce(), delayMs);
+  const gen = generation;
+  pending = setTimeout(() => {
+    if (gen === generation) void pollOnce();
+  }, delayMs);
   pending.unref?.();
 }
 
