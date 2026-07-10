@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { ChevronDown } from "lucide-react";
 import type { FilterOption } from "../../shared/types.js";
 
@@ -71,6 +72,7 @@ interface MultiSelectProps {
   loadError: boolean;
   emptyText: string;
   onChange: (next: string[]) => void;
+  triggerRef?: RefObject<HTMLButtonElement | null>;
 }
 
 export function MultiSelect({
@@ -82,6 +84,7 @@ export function MultiSelect({
   loadError,
   emptyText,
   onChange,
+  triggerRef,
 }: MultiSelectProps) {
   const [open, setOpen] = useState(false);
   const [triggerFocus, setTriggerFocus] = useState(false);
@@ -119,6 +122,7 @@ export function MultiSelect({
       style={{ position: "relative" }}
     >
       <button
+        ref={triggerRef}
         type="button"
         aria-label={label}
         aria-expanded={open}
@@ -147,8 +151,9 @@ export function MultiSelect({
         <span
           style={{
             fontFamily: "var(--font-ui)",
-            fontSize: "var(--font-body)",
-            lineHeight: "var(--line-body)",
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            lineHeight: "var(--line-label)",
             color: hasSelection ? "var(--text)" : "var(--text-muted)",
             overflow: "hidden",
             textOverflow: "ellipsis",

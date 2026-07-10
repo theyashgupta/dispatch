@@ -55,6 +55,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ onClose }: SettingsModalProps) {
   const modalRef = useRef<ModalControl>(null);
+  const firstTriggerRef = useRef<HTMLButtonElement>(null);
   const [draft, setDraft] = useState<SourceFilters | null>(null);
   const [capabilities, setCapabilities] = useState<FilterCapabilities | null>(
     null,
@@ -169,12 +170,15 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           ? "Matches 250+ tickets"
           : `Matches ${preview.count} ${preview.count === 1 ? "ticket" : "tickets"}`;
 
+  const firstMultiDim = capabilities?.dimensions.find((d) => d !== "cycle");
+
   return (
     <Modal
       ariaLabel="Sync filters"
       title="Sync filters"
       onClose={onClose}
       controlRef={modalRef}
+      initialFocusRef={firstTriggerRef}
       dialogStyle={{ maxHeight: "80vh" }}
       footer={
         <div
@@ -195,10 +199,16 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       }
     >
       {loadError && (
-        <Notice
-          tone="destructive"
-          label="Couldn't load filters — reopen settings to retry."
-        />
+        <span
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-body)",
+            lineHeight: "var(--line-body)",
+            color: "var(--text-muted)",
+          }}
+        >
+          Couldn't load filters — reopen settings to retry.
+        </span>
       )}
       {capabilities && draft && (
         <div
@@ -206,7 +216,9 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             display: "flex",
             flexDirection: "column",
             gap: "var(--space-lg)",
-            flex: "0 0 auto",
+            flex: "0 1 auto",
+            minHeight: 0,
+            overflowY: "auto",
           }}
         >
           {capabilities.dimensions.map((dim) =>
@@ -291,6 +303,9 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                   loading={optLoading[dim]}
                   loadError={optError[dim]}
                   emptyText={MULTI_COPY[dim].emptyText}
+                  triggerRef={
+                    dim === firstMultiDim ? firstTriggerRef : undefined
+                  }
                   onChange={(next) =>
                     setDraft((prev) => (prev ? { ...prev, [dim]: next } : prev))
                   }
