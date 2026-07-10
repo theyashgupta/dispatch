@@ -64,7 +64,8 @@ interface GraphQLData {
 
 /**
  * POST a GraphQL operation with the raw-key auth header and shared error handling. Throws the
- * RateLimited sentinel on a RATELIMITED response so the poll loop can back off, and a plain Error on
+ * RateLimited sentinel on an HTTP 429 (checked before any body parsing, since a proxy/CDN 429 may
+ * not be JSON) or a RATELIMITED GraphQL error so the poll loop can back off, and a plain Error on
  * any other failure. The API key is passed raw in Authorization (assumption A4 — no scheme prefix)
  * and never logged; the filter always arrives as a typed `$filter` variable, never interpolated
  * (tampering and info-disclosure guards).
@@ -79,6 +80,10 @@ async function postGraphQL(
     headers: { "Content-Type": "application/json", Authorization: apiKey },
     body: JSON.stringify({ query, variables }),
   });
+
+  if (res.status === 429) {
+    throw new RateLimited();
+  }
 
   let json: unknown;
   try {
