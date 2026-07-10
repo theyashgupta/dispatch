@@ -774,6 +774,11 @@ class BoardStore extends EventEmitter {
    * `partial` marks a truncated pull (pagination cap hit): the issue list is incomplete,
    * so absence proves nothing — upserts still apply, but removals and gone-flags are
    * SKIPPED for the cycle and a warning is recorded on the sync status instead.
+   *
+   * The cards Map stays keyed by raw upstream id, so the per-source reconcile filter
+   * alone cannot stop a cross-source id collision: an upsert whose id already belongs
+   * to a DIFFERENT source's card is skipped with a warning rather than clobbering that
+   * card (which could carry a live session's tmux/workspace state).
    */
   applyIssues(
     issues: SourceIssue[],
@@ -788,7 +793,16 @@ class BoardStore extends EventEmitter {
           .map((c) => [c.issueId, c] as const),
       );
       const r = reconcile(issues, current, this.inFlightStarts, src);
-      for (const card of r.upserts) this.cards.set(card.id, card);
+      for (const card of r.upserts) {
+        const existing = this.cards.get(card.id);
+        if (existing && (existing.source ?? "linear") !== src) {
+          console.warn(
+            `[store] skipped upsert of ${card.id} from source ${src} — id already owned by source ${existing.source ?? "linear"}.`,
+          );
+          continue;
+        }
+        this.cards.set(card.id, card);
+      }
       for (const id of r.reappearedIds) {
         const card = this.cards.get(id);
         if (card) card.goneFromLinear = false;
