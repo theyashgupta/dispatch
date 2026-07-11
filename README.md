@@ -7,9 +7,11 @@
 A local kanban board that turns your Linear tickets into live Claude Code sessions:
 each in its own git worktree, each with a real terminal in your browser.
 
+[![CI](https://github.com/theyashgupta/dispatch/actions/workflows/ci.yml/badge.svg)](https://github.com/theyashgupta/dispatch/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522.22-brightgreen)](https://nodejs.org)
 [![Made with tmux + ttyd](https://img.shields.io/badge/made%20with-tmux%20%2B%20ttyd-1f2937)](https://github.com/tsl0922/ttyd)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 ![Dispatch demo: drag a ticket to In Progress and a live Claude Code session spins up](docs/assets/hero.gif)
 
@@ -125,7 +127,7 @@ Dispatch is young and shaped by one person's daily use. It works well for that p
 
 ## Contributing
 
-Bugs and features go through the [issue forms](https://github.com/theyashgupta/dispatch/issues/new/choose); open-ended questions and ideas live in [Discussions](https://github.com/theyashgupta/dispatch/discussions). Before sending a PR, read [CONTRIBUTING.md](CONTRIBUTING.md) — it covers dev setup, the `npm run check` gate, and how behavior is verified while a proper test suite is still being built out (test contributions welcome). Security issues go through [private reporting](SECURITY.md), never a public issue. Everyone participating agrees to the [Code of Conduct](CODE_OF_CONDUCT.md).
+New contributors: the [good first issues](https://github.com/theyashgupta/dispatch/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) are the place to start. Bugs and features go through the [issue forms](https://github.com/theyashgupta/dispatch/issues/new/choose); open-ended questions and ideas live in [Discussions](https://github.com/theyashgupta/dispatch/discussions). Before sending a PR, read [CONTRIBUTING.md](CONTRIBUTING.md) — it covers dev setup, the `npm run check` gate, and how behavior is verified while a proper test suite is still being built out (test contributions welcome). Security issues go through [private reporting](SECURITY.md), never a public issue. Everyone participating agrees to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

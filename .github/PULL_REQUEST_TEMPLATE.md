@@ -19,6 +19,11 @@ say how to run them. Delete lines that don't apply.
 
 - [ ] If I changed watcher decision logic, I re-recorded the replay fixtures (`tsx scripts/replay-watcher.ts --record`) and the diff is intentional.
 - [ ] If I added or changed a cross-module invariant, it has a durable home (JSDoc in `src/**` or `docs/ARCHITECTURE.md`) and `npm run check` still passes.
+- [ ] I enabled **Allow edits from maintainers** so small fixups don't need a round-trip.
+
+## Screenshots / recording
+
+<!-- For any UI change, show before → after. A short clip of the board behavior is even better. Delete this section if the change isn't visual. -->
 
 ## Notes for the reviewer
 

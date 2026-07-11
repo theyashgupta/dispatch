@@ -38,3 +38,10 @@ body:
           required: true
         - label: This fits "one user, one machine, localhost only" — it's not asking Dispatch to become multi-user or hosted.
           required: false
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributions
+      options:
+        - label: I'm willing to open a PR to build this.
+          required: false

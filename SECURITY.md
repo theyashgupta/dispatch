@@ -34,8 +34,9 @@ Please include:
 - Steps to reproduce, ideally against a default localhost setup.
 - The version or commit SHA (`git rev-parse --short HEAD`).
 
-You'll get an acknowledgement within a few days. This is a solo-maintained project, so fixes are
-best-effort — but security reports jump the queue. Once a fix ships, you'll be credited in the advisory
+You'll get an acknowledgement within a few days, even if it's just "thanks, looking into it." This is a
+solo-maintained project, so fixes are best-effort — but security reports jump the queue, and the aim is
+to resolve verified issues within about 90 days. Once a fix ships, you'll be credited in the advisory
 unless you'd rather stay anonymous.
 
 ## Supported versions

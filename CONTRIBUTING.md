@@ -12,6 +12,17 @@ the [MIT License](LICENSE).
 - **Suggest a feature.** Use the feature form, or float it in [Discussions](https://github.com/theyashgupta/dispatch/discussions) first if it's open-ended.
 - **Send a PR.** Small and focused merges fastest. For anything large, open an issue first so we agree on the shape before you build it.
 - **Add tests.** Dispatch has no test suite yet and wants one. Unit and end-to-end tests are wide-open, welcome contributions — pick any module and start.
+- **Improve docs or triage.** Fixing a typo, clarifying the README, or reproducing and confirming an open bug all count — you don't have to write code to help.
+
+## Finding something to work on
+
+New here? Start with an issue that's already scoped for newcomers:
+
+- [**Good first issues**](https://github.com/theyashgupta/dispatch/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) — small, self-contained, no deep codebase context needed.
+- [**Help wanted**](https://github.com/theyashgupta/dispatch/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) — anything where an extra pair of hands is welcome.
+- [**By area**](https://github.com/theyashgupta/dispatch/labels?q=area) — browse the `area:*` labels (`area:linear`, `area:tmux`, `area:board`, `area:ui`, `area:worktree`) to find a subsystem you want to live in.
+
+You don't need to ask for permission to start. Comment on the issue so others know it's taken, then open a PR. For anything large or structural, open an issue first so we agree on the shape before you build it.
 
 ## Dev setup
 
@@ -119,7 +130,16 @@ The conventions that matter are written down in [`docs/standards/`](docs/standar
 the frontend design system, folder structure, and how we comment. Match the surrounding code, and skim
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before changing anything structural.
 
+## AI-assisted contributions
+
+Dispatch is built with agents, so using one to help write a PR is completely fine — that's the whole
+point of the tool. Two conditions: you understand and stand behind every line you submit as if you'd
+typed it yourself, and the PR is _yours_, not an autonomous agent's dropped over the wall. PRs that are
+clearly unreviewed agent output — wrong-shaped changes, invented APIs, `npm run check` never run — get
+closed without much ceremony. Bring judgment, not just generation.
+
 ## Scope
 
 Dispatch is one user, one machine, localhost only — that's the design, not a limitation to fix. PRs that
-turn it into a multi-user or hosted service are out of scope. Everything else is fair game.
+turn it into a multi-user or hosted service are out of scope. Changes to the core Linear / tmux /
+worktree integration model should be discussed in an issue first. Everything else is fair game.
