@@ -123,6 +123,10 @@ More detail lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), including the
 
 Dispatch is young and shaped by one person's daily use. It works well for that person. Issues and PRs are welcome, especially around Linux support, other ticket sources, and other agent CLIs.
 
+## Contributing
+
+Bugs and features go through the [issue forms](https://github.com/theyashgupta/dispatch/issues/new/choose); open-ended questions and ideas live in [Discussions](https://github.com/theyashgupta/dispatch/discussions). Before sending a PR, read [CONTRIBUTING.md](CONTRIBUTING.md) — it covers dev setup, the `npm run check` gate, and how Dispatch proves behavior without unit tests. Security issues go through [private reporting](SECURITY.md), never a public issue. Everyone participating agrees to the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
 [MIT](LICENSE) © Yash Gupta

@@ -1,0 +1,73 @@
+name: Bug report
+description: Something in Dispatch behaves wrong or breaks.
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Dispatch is one user, one machine, localhost only — the more of your
+        setup you share, the faster this gets fixed.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you see, and what did you expect instead?
+      placeholder: Dragged a ticket to In Progress; the card stuck on "provisioning" and no session started.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact sequence. A reliable repro is the single most useful thing here.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: >
+        Console output from `npm run dev`, the failing card's error, or the contents of
+        `~/.dispatch/board.json` if state looks wrong. Redact your Linear API key.
+      render: shell
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Dispatch version / commit
+      description: The `version` in package.json, or the commit SHA you're on (`git rev-parse --short HEAD`).
+      placeholder: 0.1.0 / a1b2c3d
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Other (note it below)
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Output of `node --version`, `tmux -V`, `ttyd --version`, and `claude --version`.
+      render: shell
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: I'm running Dispatch on localhost as designed (not exposed to a network).
+          required: true
