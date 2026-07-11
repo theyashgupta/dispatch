@@ -25,7 +25,11 @@ import {
 } from "../adapters/tmux.js";
 import { preSeedTrust } from "../adapters/claude-trust.js";
 import { resolveBinaryPath } from "../adapters/resolve-binary.js";
+import { store } from "../store/board.store.js";
 import { buildKickoff } from "./kickoff.js";
+import { getHooksRuntime } from "./config-holder.js";
+import { mintHookToken } from "./hook-tokens.js";
+import { HOOK_SETTINGS_PATH } from "./paths.js";
 import { worktreePath as buildWorktreePath } from "./workspace-paths.js";
 
 /** Linear identifier shape (defense-in-depth; the route also validates before we reach here). */
@@ -277,6 +281,14 @@ export async function awaitReplReady(session: string): Promise<void> {
   throw new StartStepError("starting claude", lastPane, "repl-timeout");
 }
 
+/**
+ * Saga Step 3: launch the claude REPL in a detached tmux session. When the installed CLI meets
+ * the hooks capability floor, the launch carries the dispatch settings layer (`--settings`) plus
+ * the three per-session `DISPATCH_*` env vars via tmux `-e`; the token is minted and persisted
+ * BEFORE the session exists because the kickoff paste fires the UserPromptSubmit hook (the
+ * flip-back it triggers no-ops — the card is never in needs_input during the saga). Below floor
+ * the launch is byte-identical to the pre-hooks argv, and the pane watcher carries status alone.
+ */
 const startClaude: SagaStep = {
   name: "starting claude",
   statusText: "Starting Claude…",
@@ -285,10 +297,32 @@ const startClaude: SagaStep = {
     await preSeedTrust(ctx.workspacePath);
 
     const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
-    await newSession(session, ctx.workspacePath, [
-      claudePath,
-      "--dangerously-skip-permissions",
-    ]);
+    const runtime = getHooksRuntime();
+    if (runtime?.capable) {
+      const previousToken = store.getCard(ctx.card.id)?.hookToken;
+      const token = mintHookToken(ctx.card.id, previousToken);
+      await store.setHookToken(ctx.card.id, token);
+      await newSession(
+        session,
+        ctx.workspacePath,
+        [
+          claudePath,
+          "--settings",
+          HOOK_SETTINGS_PATH,
+          "--dangerously-skip-permissions",
+        ],
+        {
+          DISPATCH_HOOK_PORT: String(runtime.port),
+          DISPATCH_HOOK_TOKEN: token,
+          DISPATCH_CARD_ID: ctx.card.id,
+        },
+      );
+    } else {
+      await newSession(session, ctx.workspacePath, [
+        claudePath,
+        "--dangerously-skip-permissions",
+      ]);
+    }
     ctx.tmuxSessionCreated = true;
 
     await awaitReplReady(session);

@@ -3,6 +3,9 @@ import { hasSession, killSession, newSession } from "../adapters/tmux.js";
 import { preSeedTrust } from "../adapters/claude-trust.js";
 import { resolveBinaryPath } from "../adapters/resolve-binary.js";
 import { awaitReplReady, StartStepError } from "./steps.js";
+import { getHooksRuntime } from "./config-holder.js";
+import { mintHookToken, registerHookToken } from "./hook-tokens.js";
+import { HOOK_SETTINGS_PATH } from "./paths.js";
 import { REATTACH_STATUS_CLEAR_MS } from "./start-session.js";
 import { ensureTerminal } from "./terminal.js";
 
@@ -17,7 +20,12 @@ import { ensureTerminal } from "./terminal.js";
  * idempotently re-adopts. Fire-and-forget from the route (202 already sent); all state reaches the
  * UI via the store's SSE broadcast. On failure the partial tmux is torn down and
  * `recordResumeFailure` restores `sessionLost` plus the failure notice in one SSE-visible
- * mutation, so the panel re-enables Resume and renders the spec'd error copy. SECURITY: errors
+ * mutation, so the panel re-enables Resume and renders the spec'd error copy. Hook injection
+ * mirrors the start saga: a relaunch on a hooks-capable CLI mints a FRESH token (new session =
+ * new token, persisted before the session exists) and carries `--settings` plus the three
+ * `DISPATCH_*` env vars; a reattach re-registers the card's persisted token so an in-memory
+ * registry lost to a backend restart re-learns the live session's secret; below the capability
+ * floor the relaunch argv is byte-identical to the pre-hooks shape. SECURITY: errors
  * are logged content-free — no stderr or pane text leaks (the pane payload rides
  * StartStepError.message, so only the step name may be logged).
  * @see docs/ARCHITECTURE.md#in-review-lifecycle
@@ -32,6 +40,7 @@ export async function resumeSession(cardId: string): Promise<void> {
     const session = "dsp-" + card.identifier;
 
     if (await hasSession(`=${session}`)) {
+      if (card.hookToken) registerHookToken(card.hookToken, cardId);
       await store.resumeSession(cardId, { session });
       setTimeout(
         () => void store.setStatusReason(cardId, null),
@@ -43,11 +52,33 @@ export async function resumeSession(cardId: string): Promise<void> {
 
     await preSeedTrust(card.workspacePath);
     const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
-    await newSession(session, card.workspacePath, [
-      claudePath,
-      "--continue",
-      "--dangerously-skip-permissions",
-    ]);
+    const runtime = getHooksRuntime();
+    if (runtime?.capable) {
+      const token = mintHookToken(cardId, card.hookToken);
+      await store.setHookToken(cardId, token);
+      await newSession(
+        session,
+        card.workspacePath,
+        [
+          claudePath,
+          "--continue",
+          "--settings",
+          HOOK_SETTINGS_PATH,
+          "--dangerously-skip-permissions",
+        ],
+        {
+          DISPATCH_HOOK_PORT: String(runtime.port),
+          DISPATCH_HOOK_TOKEN: token,
+          DISPATCH_CARD_ID: cardId,
+        },
+      );
+    } else {
+      await newSession(session, card.workspacePath, [
+        claudePath,
+        "--continue",
+        "--dangerously-skip-permissions",
+      ]);
+    }
     await awaitReplReady(session);
     await store.resumeSession(cardId, { session });
     setTimeout(
