@@ -86,12 +86,29 @@ async function applyPromptSubmit(cardId: string): Promise<void> {
 export async function applyHookEvent(
   cardId: string,
   body:
-    { hook_event_name?: unknown; last_assistant_message?: unknown } | undefined,
+    | {
+        hook_event_name?: unknown;
+        last_assistant_message?: unknown;
+        session_id?: unknown;
+      }
+    | undefined,
 ): Promise<void> {
   if (getHooksRuntime()?.statusChannel === "pane") return;
 
   if (store.getCard(cardId)?.hookRoutedAt == null) {
     await store.markHookRouted(cardId, new Date().toISOString());
+  }
+
+  const sid = body?.session_id;
+  if (typeof sid === "string" && sid.length > 0) {
+    const recorded = store.getCard(cardId)?.claudeSessionId;
+    if (recorded == null) {
+      await store.setClaudeSessionId(cardId, sid);
+    } else if (recorded !== sid) {
+      console.warn(
+        `[hook] session_id mismatch card=${cardId} recorded=${recorded} incoming=${sid}`,
+      );
+    }
   }
 
   const event = body?.hook_event_name;
