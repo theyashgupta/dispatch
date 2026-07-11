@@ -4,7 +4,7 @@ import { resumeCard } from "../lib/api.js";
 import {
   RESUME_WATCHDOG_MS,
   resumeFailureCopy,
-} from "../lib/resumeFeedback.js";
+} from "../lib/resume-feedback.js";
 
 interface ResumeFeedback {
   resuming: boolean;

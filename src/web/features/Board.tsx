@@ -20,7 +20,7 @@ import type { StartRequest } from "./StartModal.js";
 import { useLastOpened } from "../hooks/useUnseenActivity.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { moveCard } from "../lib/api.js";
-import { deriveShowDot, deriveShowGone } from "../lib/cardBadges.js";
+import { deriveShowDot, deriveShowGone } from "../lib/card-badges.js";
 
 interface BoardProps {
   board: BoardSnapshot | null;

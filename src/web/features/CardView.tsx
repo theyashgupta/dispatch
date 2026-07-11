@@ -1,7 +1,7 @@
 import { Activity, AlertTriangle, Play, RotateCw } from "lucide-react";
 import type { Card as CardModel } from "../../shared/types.js";
 import { startCard } from "../lib/api.js";
-import { formatAge, nowMs } from "../lib/formatAge.js";
+import { formatAge, nowMs } from "../lib/format-age.js";
 import { useResumeFeedback } from "../hooks/useResumeFeedback.js";
 import { GoneBadge } from "./GoneBadge.js";
 import { PlanReadyBadge } from "./PlanReadyBadge.js";
