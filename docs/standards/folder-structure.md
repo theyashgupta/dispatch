@@ -2,7 +2,7 @@
 
 The target source layout for Dispatch. The tool is too small for per-feature folders but big enough that the flat `src/web/*` directory has become noisy, so the standard is capability folders on the backend plus a light layered split on the frontend, with a single lint-enforced import direction.
 
-The layer names below are authoritative: backend `bootstrap / routes / services / adapters / store` and frontend `primitives / features / hooks / lib / styles`. Where earlier research proposed other names (`http/`, `components/ui` + `components/board`), those were rationale only — these names win.
+The layer names below are authoritative: backend `bootstrap / routes / services / adapters / sources / store` and frontend `primitives / features / hooks / lib / styles`. Where earlier research proposed other names (`http/`, `components/ui` + `components/board`), those were rationale only — these names win.
 
 ## Backend target tree — `src/server/`
 
@@ -12,10 +12,11 @@ src/server/
 ├── routes/        # HTTP transport: route handlers (thin), SSE broadcaster, loopback/DNS-rebinding guard
 ├── services/      # orchestration: the start/cleanup saga, kickoff, config validation, rollback
 ├── adapters/      # subprocess + external I/O: tmux, ttyd, git, the exec chokepoint, claude-trust, marker parse/watcher, Linear poller, editors
+├── sources/       # ticket sources: provider seam (linear.source.ts), source registry, per-source filters
 └── store/         # single-writer state: board.store (never split) + Linear→Card mapping
 ```
 
-### Current → target mapping (backend)
+### Original → target mapping (backend, historical — the left column describes the pre-restructure tree)
 
 | Current                                                                               | Target layer                   |
 | ------------------------------------------------------------------------------------- | ------------------------------ |
@@ -91,7 +92,7 @@ One convention spans the whole tree. Every artifact kind has a fixed pattern and
 
 The enforceable rule: `.tsx` → PascalCase; `hooks/*.ts` → `useX` camelCase; every other `.ts` → kebab-case; `route`/`store`/`source` suffixes layered on via glob. Role suffixes apply **only** where a folder groups by resource (`routes/`, `store/`, `sources/`) — everywhere else the folder already encodes the layer, so the suffix is dropped (the Angular v20 lesson: no redundant type suffixes). Helpers that live inside a resource folder but are not themselves the resource module (`store/mapping.ts`, `sources/registry.ts`, `sources/linear/filter.ts`, `routes/loopback.ts`) stay plain kebab-case.
 
-The server tree and the web tree both conform fully — the table above states the pattern every new file must follow.
+The server tree and the web tree both conform fully — the table above states the pattern every new file must follow. The naming convention is lint-enforced at error severity by `eslint-plugin-check-file` (`filename-naming-convention` per file class plus `folder-naming-convention` for kebab-case folders) inside `npm run check`, so a wrongly-named file or folder fails the gate rather than landing silently.
 
 ## Build artifacts
 
