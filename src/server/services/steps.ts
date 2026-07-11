@@ -287,7 +287,9 @@ export async function awaitReplReady(session: string): Promise<void> {
  * the three per-session `DISPATCH_*` env vars via tmux `-e`; the token is minted and persisted
  * BEFORE the session exists because the kickoff paste fires the UserPromptSubmit hook (the
  * flip-back it triggers no-ops — the card is never in needs_input during the saga). Below floor
- * the launch is byte-identical to the pre-hooks argv, and the pane watcher carries status alone.
+ * or under `statusChannel: "pane"` the launch is byte-identical to the pre-hooks argv (no
+ * settings, no token, no env), and the pane watcher carries status alone.
+ * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 const startClaude: SagaStep = {
   name: "starting claude",
@@ -298,7 +300,7 @@ const startClaude: SagaStep = {
 
     const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
     const runtime = getHooksRuntime();
-    if (runtime?.capable) {
+    if (runtime?.capable && runtime.statusChannel !== "pane") {
       const previousToken = store.getCard(ctx.card.id)?.hookToken;
       const token = mintHookToken(ctx.card.id, previousToken);
       await store.setHookToken(ctx.card.id, token);

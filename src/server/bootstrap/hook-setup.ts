@@ -35,16 +35,18 @@ exit 0
 `;
 
 /**
- * The `--settings` layer content: exactly Stop + UserPromptSubmit, each with an explicit
- * per-entry timeout (the CLI default is 600s and a timeout-less slow hook blocks the turn for
- * its full runtime). PostToolUse/SessionStart are deliberately absent — no consumer exists and
- * PostToolUse would POST on every tool call.
+ * The `--settings` layer content: exactly Stop + UserPromptSubmit + PostToolUse, each with an
+ * explicit per-entry timeout (the CLI default is 600s and a timeout-less slow hook blocks the
+ * turn for its full runtime). PostToolUse feeds the unseen-activity dot via hook-events' throttled
+ * `outputChangedAt` stamp. SessionStart remains absent — no consumer exists.
  */
 function hookSettingsJson(): string {
   const entry = [
     { hooks: [{ type: "command", command: HOOK_SCRIPT_PATH, timeout: 5 }] },
   ];
-  const settings = { hooks: { Stop: entry, UserPromptSubmit: entry } };
+  const settings = {
+    hooks: { Stop: entry, UserPromptSubmit: entry, PostToolUse: entry },
+  };
   return JSON.stringify(settings, null, 2) + "\n";
 }
 
@@ -67,9 +69,15 @@ export async function installHookArtifacts(): Promise<void> {
  * True when the installed claude CLI is at or above the verified hooks-contract floor. Below
  * floor, unparseable output, or any exec failure degrades to false with one content-free warning
  * — never a startup failure, because an incapable CLI just means sessions launch exactly as
- * before and the untouched watcher carries status.
+ * before and the untouched watcher carries status. Setting `DISPATCH_HOOKS_DISABLED=1` on the
+ * backend process forces false — the deterministic hook-silent simulation for smoke runs and the
+ * standing below-floor-CLI stand-in (env-toggle precedent: `AK_WATCH_DEBUG`).
  */
 export async function checkHooksCapability(): Promise<boolean> {
+  if (process.env.DISPATCH_HOOKS_DISABLED === "1") {
+    console.warn("[hooks] disabled via DISPATCH_HOOKS_DISABLED");
+    return false;
+  }
   try {
     const claudePath = await resolveBinaryPath("claude");
     if (!claudePath) {

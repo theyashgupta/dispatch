@@ -28,7 +28,11 @@ async function main(): Promise<void> {
   const port = config.port ?? DEFAULT_PORT;
   await installHookArtifacts();
   const capable = await checkHooksCapability();
-  setHooksRuntime({ capable, port });
+  setHooksRuntime({
+    capable,
+    port,
+    statusChannel: config.statusChannel ?? "auto",
+  });
   store.setHookTokenReleaser(unregisterHookToken);
 
   await seedPlaybooks();

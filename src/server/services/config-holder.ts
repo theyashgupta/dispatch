@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import writeFileAtomic from "write-file-atomic";
-import type { Config, SourceFilters } from "../../shared/types.js";
+import type {
+  Config,
+  SourceFilters,
+  StatusChannel,
+} from "../../shared/types.js";
 import { CONFIG_PATH } from "./paths.js";
 
 /** The loaded config, pushed in once by index.ts at boot. null until set (route → 400 if unset). */
@@ -18,12 +22,14 @@ export function getOrchestrationConfig(): Config | null {
 
 /**
  * Hook-injection runtime pushed in by bootstrap at boot: whether the installed claude CLI meets
- * the verified hooks-contract floor, plus the RESOLVED listen port (never a hardcoded default)
- * that session env must carry so hook POSTs reach a non-default-port backend.
+ * the verified hooks-contract floor, the RESOLVED listen port (never a hardcoded default) that
+ * session env must carry so hook POSTs reach a non-default-port backend, and the resolved
+ * statusChannel so services can gate injection and hook-event mutations per mode.
  */
 export interface HooksRuntime {
   capable: boolean;
   port: number;
+  statusChannel: StatusChannel;
 }
 
 /** The hooks runtime, pushed in once by bootstrap. null until set (readers treat as not capable). */

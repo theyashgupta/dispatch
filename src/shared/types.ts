@@ -55,6 +55,15 @@ export interface Card {
    * SSE frames and REST reads; only the persisted board.json carries it.
    */
   hookToken?: string;
+  /**
+   * ISO timestamp of the session's first authenticated hook event — the per-session latch that
+   * routes status to the hooks channel under `statusChannel: "auto"`. NON-SECRET by explicit
+   * decision: rides `snapshot()` unredacted (unlike `hookToken`). Cleared with the session fields
+   * via the store's `clearHookToken` chokepoint, so a relaunch/resume starts hook-silent and
+   * re-proves traffic.
+   * @see docs/ARCHITECTURE.md#hooks-status-channel
+   */
+  hookRoutedAt?: string;
   /** Port of the per-session ttyd instance. */
   ttydPort?: number;
   /**
@@ -210,6 +219,13 @@ export interface Playbook {
   body: string;
 }
 
+/**
+ * Which channel drives card status: `hooks` (hook events only), `pane` (today's pane scraping
+ * only), or `auto` (prefer hooks per session, fall back to pane scanning for hook-silent
+ * sessions). Boot-static — changing it requires a backend restart.
+ */
+export type StatusChannel = "hooks" | "pane" | "auto";
+
 /** Contents of ~/.dispatch/config.json. */
 export interface Config {
   linearApiKey: string;
@@ -218,6 +234,8 @@ export interface Config {
   repoPaths?: string[];
   baseBranches?: string[];
   workspaceRoot?: string;
+  /** Status-source selection (`hooks | pane | auto`); absent resolves to `auto` at load. */
+  statusChannel?: StatusChannel;
   /** Writable-config groundwork (Phase 23): nested per-source credentials plus the live filter block. `linearApiKey` stays the resolved read. */
   sources?: { linear?: { apiKey: string; filters?: SourceFilters } };
 }

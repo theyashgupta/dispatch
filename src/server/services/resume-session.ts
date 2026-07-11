@@ -25,7 +25,8 @@ import { ensureTerminal } from "./terminal.js";
  * new token, persisted before the session exists) and carries `--settings` plus the three
  * `DISPATCH_*` env vars; a reattach re-registers the card's persisted token so an in-memory
  * registry lost to a backend restart re-learns the live session's secret; below the capability
- * floor the relaunch argv is byte-identical to the pre-hooks shape. SECURITY: errors
+ * floor or under `statusChannel: "pane"` the relaunch argv is byte-identical to the pre-hooks
+ * shape. SECURITY: errors
  * are logged content-free — no stderr or pane text leaks (the pane payload rides
  * StartStepError.message, so only the step name may be logged).
  * @see docs/ARCHITECTURE.md#in-review-lifecycle
@@ -53,7 +54,7 @@ export async function resumeSession(cardId: string): Promise<void> {
     await preSeedTrust(card.workspacePath);
     const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
     const runtime = getHooksRuntime();
-    if (runtime?.capable) {
+    if (runtime?.capable && runtime.statusChannel !== "pane") {
       const token = mintHookToken(cardId, card.hookToken);
       await store.setHookToken(cardId, token);
       await newSession(

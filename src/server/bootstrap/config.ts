@@ -2,7 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import writeFileAtomic from "write-file-atomic";
-import type { Config, SourceFilters } from "../../shared/types.js";
+import type {
+  Config,
+  SourceFilters,
+  StatusChannel,
+} from "../../shared/types.js";
 import { DEFAULT_FILTERS } from "../../shared/types.js";
 import { StartupError } from "./binary-check.js";
 import { CONFIG_PATH, DISPATCH_DIR } from "../services/paths.js";
@@ -26,7 +30,24 @@ const CONFIG_TEMPLATE = {
   pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
   "// workspaceRoot": "Phase 2+. Root folder for per-ticket workspaces.",
   workspaceRoot: DEFAULT_WORKSPACE_ROOT,
+  "// statusChannel":
+    'Status source: "hooks", "pane", or "auto" (prefer hooks per session, pane fallback). Default "auto".',
+  statusChannel: "auto",
 };
+
+/**
+ * Validate the `statusChannel` key: absent resolves to `"auto"`; a present value that is not
+ * exactly one of the three literals throws StartupError naming the field and the allowed values
+ * (approved validation contract — a hand-edited enum typo must fail loudly, not silently default).
+ */
+function readStatusChannel(parsed: Record<string, unknown>): StatusChannel {
+  const value = parsed.statusChannel;
+  if (value === undefined) return "auto";
+  if (value === "hooks" || value === "pane" || value === "auto") return value;
+  throw new StartupError(
+    `statusChannel in ${CONFIG_PATH} must be one of "hooks", "pane", "auto". Fix it and restart.`,
+  );
+}
 
 /**
  * Read a non-empty `sources.linear.apiKey` from a parsed config object, or "" when the nested shape is
@@ -229,6 +250,7 @@ export function loadConfig(): Config {
         ? parsed.pollIntervalMs
         : DEFAULT_POLL_INTERVAL_MS,
     workspaceRoot,
+    statusChannel: readStatusChannel(parsed),
     sources: { linear: { apiKey: rawKey, filters: readNestedFilters(parsed) } },
   };
 
