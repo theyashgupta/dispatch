@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { Button } from "../../primitives/Button.js";
 import { Modal, type ModalControl } from "../../primitives/Modal.js";
@@ -12,9 +12,20 @@ interface CleanupModalProps {
 export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
   const keepRef = useRef<HTMLButtonElement>(null);
   const modalRef = useRef<ModalControl>(null);
+  const [pending, setPending] = useState(false);
 
   const blocked = card.cleanupBlocked;
   const isBlocked = blocked != null && blocked.length > 0;
+
+  useEffect(() => {
+    setPending(false);
+  }, [isBlocked]);
+
+  const handleConfirm = (force: boolean) => {
+    if (pending) return;
+    setPending(true);
+    onConfirm(force);
+  };
 
   return (
     <Modal
@@ -44,11 +55,19 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
             Keep workspace
           </Button>
           {isBlocked ? (
-            <Button variant="danger" onClick={() => onConfirm(true)}>
+            <Button
+              variant="danger"
+              disabled={pending}
+              onClick={() => handleConfirm(true)}
+            >
               Discard uncommitted changes and clean up
             </Button>
           ) : (
-            <Button variant="primary" onClick={() => onConfirm(false)}>
+            <Button
+              variant="primary"
+              disabled={pending}
+              onClick={() => handleConfirm(false)}
+            >
               Clean up
             </Button>
           )}

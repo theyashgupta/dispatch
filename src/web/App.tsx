@@ -34,11 +34,17 @@ export function App() {
   };
 
   const [cleanupCardId, setCleanupCardId] = useState<string | null>(null);
+  const [cleanupAttempted, setCleanupAttempted] = useState(false);
   const cleanupCard =
     board?.cards.find((card) => card.id === cleanupCardId) ?? null;
 
+  useEffect(() => {
+    setCleanupAttempted(false);
+  }, [cleanupCardId]);
+
   const cleanupBlocked = cleanupCard?.cleanupBlocked;
   const cleanupResolved =
+    cleanupAttempted &&
     cleanupCard != null &&
     (cleanupBlocked == null || cleanupBlocked.length === 0) &&
     ((!cleanupCard.tmuxSession && !cleanupCard.workspacePath) ||
@@ -151,6 +157,7 @@ export function App() {
           key={cleanupCardId}
           card={cleanupCard}
           onConfirm={(force) => {
+            setCleanupAttempted(true);
             void cleanupCardApi(cleanupCardId!, force).catch((err) => {
               console.error("cleanupCard failed", err);
             });
