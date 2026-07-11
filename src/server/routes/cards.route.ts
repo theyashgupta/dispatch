@@ -325,7 +325,8 @@ cardsRouter.post("/cards/:id/cleanup", (req, res) => {
     return;
   }
 
-  void cleanupWorkspace(id).catch((err) => {
+  const force = (req.body as { force?: unknown } | undefined)?.force === true;
+  void cleanupWorkspace(id, { force }).catch((err) => {
     console.error(`[cleanup] failed for card ${id}:`, (err as Error).message);
   });
   res.status(202).json({ cleaning: true });

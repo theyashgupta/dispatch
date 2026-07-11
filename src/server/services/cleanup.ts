@@ -3,7 +3,11 @@ import fsp from "node:fs/promises";
 import { store } from "../store/board.store.js";
 import { killTtyd } from "../adapters/ttyd.js";
 import { killSession } from "../adapters/tmux.js";
-import { worktreeRemove, worktreePrune } from "../adapters/git.js";
+import {
+  worktreeRemove,
+  worktreePrune,
+  worktreeStatus,
+} from "../adapters/git.js";
 import { worktreePath as buildWorktreePath } from "./workspace-paths.js";
 
 /**
@@ -15,9 +19,17 @@ import { worktreePath as buildWorktreePath } from "./workspace-paths.js";
  * the orphan-sweep cannot re-adopt it, then killSession, then per-repo worktreeRemove, then fs.rm the
  * workspace folder, then worktreePrune last (once the directories are gone). Every step is idempotent
  * and no-op tolerant, and branches are ALWAYS kept.
+ * @remarks Preflight (PRE-01/PRE-03/PRE-04): unless `force`, a read-only `git status` probes each
+ * repo's worktree ABOVE any destructive step — a dirty repo refuses with zero teardown (records
+ * cleanupBlocked, keeps the session/ttyd/worktrees alive), a non-orphan git error refuses with a
+ * muted warning, and orphan/clean/missing repos fall through to the unchanged NEW-14 teardown.
+ * `force: true` skips the probe entirely and tears down byte-identically to the pre-preflight path.
  * @see docs/ARCHITECTURE.md#cleanup-lifecycle
  */
-export async function cleanupWorkspace(cardId: string): Promise<void> {
+export async function cleanupWorkspace(
+  cardId: string,
+  opts: { force?: boolean } = {},
+): Promise<void> {
   const card = store.getCard(cardId);
   if (!card) return;
 
@@ -25,6 +37,38 @@ export async function cleanupWorkspace(cardId: string): Promise<void> {
   const workspacePath = card.workspacePath;
   const repoPaths = card.workspace?.repos.map((r) => r.path) ?? [];
   const isLegacyWorkspace = Boolean(workspacePath) && !card.workspace;
+
+  await store.clearCleanupBlocked(cardId);
+
+  if (!opts.force && workspacePath) {
+    const blocked: { repo: string; count: number }[] = [];
+    let nonOrphanError = false;
+    for (const repoPath of repoPaths) {
+      const worktreePath = buildWorktreePath(workspacePath, repoPath);
+      const exists = await fsp.stat(worktreePath).then(
+        () => true,
+        () => false,
+      );
+      if (!exists) continue;
+      const st = await worktreeStatus(worktreePath);
+      if (st.kind === "dirty") {
+        blocked.push({ repo: path.basename(repoPath), count: st.count });
+      } else if (st.kind === "error") {
+        nonOrphanError = true;
+      }
+    }
+    if (blocked.length > 0) {
+      await store.recordCleanupBlocked(cardId, blocked);
+      return;
+    }
+    if (nonOrphanError) {
+      await store.noteCleanupWarning(
+        cardId,
+        "Cleanup preflight failed — a worktree could not be checked.",
+      );
+      return;
+    }
+  }
 
   const failures: string[] = [];
 

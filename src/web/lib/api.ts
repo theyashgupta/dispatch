@@ -269,12 +269,14 @@ export async function resumeCard(id: string): Promise<ResumeResult> {
  * folder, keep branches) and the SSE snapshot carries the outcome (session fields cleared on
  * success, or a muted `cleanupWarning` on partial failure), so there is no response body to parse.
  * Resolves on 2xx (202); throws on any non-2xx so the caller can log (mirrors ensureTerminal).
- * The client sends ONLY the card id — every path/session is server-derived.
+ * The client sends ONLY the card id and a `force` flag — every path/session is server-derived.
+ * `force: true` bypasses the dirty-worktree preflight and discards uncommitted work (PRE-02).
  */
-export async function cleanupCard(id: string): Promise<void> {
+export async function cleanupCard(id: string, force = false): Promise<void> {
   const res = await fetch(`/api/cards/${encodeURIComponent(id)}/cleanup`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ force }),
   });
   if (!res.ok) {
     throw new Error(`cleanupCard failed: ${res.status} ${res.statusText}`);
