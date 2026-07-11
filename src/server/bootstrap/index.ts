@@ -3,7 +3,11 @@ import { checkBinaries, StartupError } from "./binary-check.js";
 import { loadConfig } from "./config.js";
 import { store } from "../store/board.store.js";
 import { apiRouter } from "../routes/index.js";
-import { setOrchestrationConfig } from "../services/config-holder.js";
+import {
+  setHooksRuntime,
+  setOrchestrationConfig,
+} from "../services/config-holder.js";
+import { checkHooksCapability, installHookArtifacts } from "./hook-setup.js";
 import { seedPlaybooks } from "../services/playbooks.js";
 import { startPoller } from "../adapters/poller.js";
 import { buildRegistry, getLinearSource } from "../sources/registry.js";
@@ -20,6 +24,11 @@ async function main(): Promise<void> {
   setOrchestrationConfig(config);
   buildRegistry(config);
 
+  const port = config.port ?? DEFAULT_PORT;
+  await installHookArtifacts();
+  const capable = await checkHooksCapability();
+  setHooksRuntime({ capable, port });
+
   await seedPlaybooks();
 
   await store.load();
@@ -34,7 +43,6 @@ async function main(): Promise<void> {
   app.use(express.json());
   app.use("/api", apiRouter);
 
-  const port = config.port ?? DEFAULT_PORT;
   app.listen(port, "127.0.0.1", () => {
     console.log(
       `[server] Dispatch backend listening on http://127.0.0.1:${port}`,

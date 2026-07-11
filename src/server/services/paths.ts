@@ -15,3 +15,16 @@ export const DISPATCH_DIR = path.join(os.homedir(), ".dispatch");
  * (e.g. first-run mkdir) use `DISPATCH_DIR` itself rather than a duplicate alias export.
  */
 export const CONFIG_PATH = path.join(DISPATCH_DIR, "config.json");
+
+/**
+ * The dispatch-owned hook script claude invokes on Stop/UserPromptSubmit. Absolute (derived from
+ * `os.homedir()` via DISPATCH_DIR) because the generated settings JSON must never rely on shell
+ * expansion of `~` or `$HOME`.
+ */
+export const HOOK_SCRIPT_PATH = path.join(DISPATCH_DIR, "hook.sh");
+
+/**
+ * The static per-session settings layer passed to claude via `--settings`. Lives beside the hook
+ * script so both regenerate together at boot; never merged into `~/.claude/settings.json`.
+ */
+export const HOOK_SETTINGS_PATH = path.join(DISPATCH_DIR, "hook-settings.json");

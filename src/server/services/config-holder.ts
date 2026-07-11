@@ -17,6 +17,29 @@ export function getOrchestrationConfig(): Config | null {
 }
 
 /**
+ * Hook-injection runtime pushed in by bootstrap at boot: whether the installed claude CLI meets
+ * the verified hooks-contract floor, plus the RESOLVED listen port (never a hardcoded default)
+ * that session env must carry so hook POSTs reach a non-default-port backend.
+ */
+export interface HooksRuntime {
+  capable: boolean;
+  port: number;
+}
+
+/** The hooks runtime, pushed in once by bootstrap. null until set (readers treat as not capable). */
+let hooksRuntime: HooksRuntime | null = null;
+
+/** Bootstrap calls this after the capability check, before any session can launch. */
+export function setHooksRuntime(rt: HooksRuntime): void {
+  hooksRuntime = rt;
+}
+
+/** Session-launching services read the capability flag + resolved port through this. */
+export function getHooksRuntime(): HooksRuntime | null {
+  return hooksRuntime;
+}
+
+/**
  * Persist a source's filter selection to `~/.dispatch/config.json` and make it live immediately.
  *
  * @remarks The single writer for the secret-adjacent config file. It re-reads the raw file, mutates
