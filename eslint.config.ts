@@ -152,8 +152,12 @@ const jsdocRules = {
  */
 const externalFactPattern = "(https?:\\/\\/|#\\d+|\\b[A-Z][A-Z0-9]+-\\d+\\b)";
 
-/** Extglob kebab-case segment shared by the check-file role-suffix patterns. */
-const KEBAB = "+([a-z0-9])*(-+([a-z0-9]))";
+/**
+ * Extglob kebab-case segment shared by the check-file role-suffix patterns.
+ * Mirrors the plugin's built-in KEBAB_CASE exactly (leading lowercase letter
+ * required) so the suffix subtrees are precisely as strict as the base block.
+ */
+const KEBAB = "+([a-z])*([a-z0-9])*(-+([a-z0-9]))";
 
 export default tseslint.config(
   {
@@ -239,15 +243,17 @@ export default tseslint.config(
 
   /**
    * File/folder naming enforcement (docs/standards/folder-structure.md):
-   * PascalCase .tsx (main.tsx exempt via the !(main) key), kebab-case .ts,
-   * kebab-case folders. Layered override blocks exist because overlapping glob
-   * keys inside ONE check-file options object require ALL matching patterns to
-   * pass — a hook file would fail the broad kebab key. The hooks/routes/store/
-   * sources/vite-env subtrees therefore each replace the filename rule
-   * wholesale (flat-config last-match-wins); those blocks reuse the check-file
-   * plugin registered once in the general block. Middle extensions are
-   * validated in every block so role suffixes (.route/.store/.source/.d) are
-   * checked too — a stray foo.route.ts outside routes/ fails plain KEBAB_CASE.
+   * PascalCase .tsx everywhere (main.tsx exempt ONLY at src/web root via the
+   * root-scoped !(main) key — a nested main.tsx still fails PascalCase),
+   * kebab-case .ts, kebab-case folders. Layered override blocks exist because
+   * overlapping glob keys inside ONE check-file options object require ALL
+   * matching patterns to pass — a hook file would fail the broad kebab key.
+   * The hooks/routes/store/sources/.d.ts subtrees therefore each replace the
+   * filename rule wholesale (flat-config last-match-wins); those blocks reuse
+   * the check-file plugin registered once in the general block. Middle
+   * extensions are validated in every block so role suffixes
+   * (.route/.store/.source/.d) are checked too — a stray foo.route.ts outside
+   * routes/ fails plain KEBAB_CASE.
    */
   {
     files: ["src/**/*.{ts,tsx}"],
@@ -256,7 +262,9 @@ export default tseslint.config(
       "check-file/filename-naming-convention": [
         "error",
         {
-          "src/web/**/!(main).tsx": "PASCAL_CASE",
+          "src/web/!(main).tsx": "PASCAL_CASE",
+          "src/web/*/**/*.tsx": "PASCAL_CASE",
+          "src/!(web)/**/*.tsx": "PASCAL_CASE",
           "src/**/*.ts": "KEBAB_CASE",
         },
         { ignoreMiddleExtensions: false },
@@ -282,7 +290,7 @@ export default tseslint.config(
     rules: {
       "check-file/filename-naming-convention": [
         "error",
-        { "src/server/routes/**/*.ts": `${KEBAB}*(.route)` },
+        { "src/server/routes/**/*.ts": `${KEBAB}?(.route)` },
         { ignoreMiddleExtensions: false },
       ],
     },
@@ -292,7 +300,7 @@ export default tseslint.config(
     rules: {
       "check-file/filename-naming-convention": [
         "error",
-        { "src/server/store/**/*.ts": `${KEBAB}*(.store)` },
+        { "src/server/store/**/*.ts": `${KEBAB}?(.store)` },
         { ignoreMiddleExtensions: false },
       ],
     },
@@ -302,17 +310,17 @@ export default tseslint.config(
     rules: {
       "check-file/filename-naming-convention": [
         "error",
-        { "src/server/sources/**/*.ts": `${KEBAB}*(.source)` },
+        { "src/server/sources/**/*.ts": `${KEBAB}?(.source)` },
         { ignoreMiddleExtensions: false },
       ],
     },
   },
   {
-    files: ["src/web/vite-env.d.ts"],
+    files: ["src/**/*.d.ts"],
     rules: {
       "check-file/filename-naming-convention": [
         "error",
-        { "src/web/*.ts": `${KEBAB}*(.d)` },
+        { "src/**/*.d.ts": `${KEBAB}.d` },
         { ignoreMiddleExtensions: false },
       ],
     },
