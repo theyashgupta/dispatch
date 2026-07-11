@@ -8,8 +8,8 @@ import {
 import { store } from "../store/board.store.js";
 import { sseHandler } from "./sse.js";
 import { isLocalRequest } from "./loopback.js";
-import { startSession } from "../services/startSession.js";
-import { resumeSession } from "../services/resumeSession.js";
+import { startSession } from "../services/start-session.js";
+import { resumeSession } from "../services/resume-session.js";
 import { cleanupWorkspace } from "../services/cleanup.js";
 import { ensureTerminal } from "../services/terminal.js";
 import { editorPath, launchEditor } from "../adapters/editors.js";

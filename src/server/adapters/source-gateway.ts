@@ -4,7 +4,7 @@ import type {
   FilterDimension,
   FilterOption,
   TicketSource,
-} from "../sources/TicketSource.js";
+} from "../sources/ticket.source.js";
 import type { SourceFilters } from "../../shared/types.js";
 
 /**

@@ -4,7 +4,7 @@ import {
   type FilterCapabilities,
   type FilterOption,
   type TicketSource,
-} from "../TicketSource.js";
+} from "../ticket.source.js";
 import { buildLinearQuery, type LinearIssueFilter } from "./filter.js";
 
 const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";

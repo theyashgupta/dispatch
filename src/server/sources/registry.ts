@@ -1,7 +1,7 @@
 import type { Config } from "../../shared/types.js";
 import { DEFAULT_FILTERS } from "../../shared/types.js";
-import type { TicketSource } from "./TicketSource.js";
-import { LinearSource } from "./linear/LinearSource.js";
+import type { TicketSource } from "./ticket.source.js";
+import { LinearSource } from "./linear/linear.source.js";
 
 /** The boot-built ticket sources, keyed by id. Empty until buildRegistry() runs at boot. */
 const sources = new Map<string, TicketSource>();
