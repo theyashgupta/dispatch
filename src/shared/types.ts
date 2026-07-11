@@ -64,6 +64,17 @@ export interface Card {
    * @see docs/ARCHITECTURE.md#hooks-status-channel
    */
   hookRoutedAt?: string;
+  /**
+   * The Claude CLI session id captured first-event-wins from the v1.8 hook payload (`session_id`).
+   * Drives exact Resume: `claude --resume <id>` reconnects to this exact conversation instead of
+   * `--continue` (which can pick up an unrelated manual claude session started in the same
+   * worktree). NON-SECRET by explicit decision: rides `snapshot()` UNREDACTED (like `hookRoutedAt`,
+   * unlike `hookToken`). Its lifecycle deliberately does NOT follow the `clearHookToken`
+   * chokepoint — markSessionLost KEEPS it (the on-disk transcript outlives a dead tmux session),
+   * completeStart RESETS it (a fresh kickoff is a new conversation), Done cleanup CLEARS it.
+   * @see docs/ARCHITECTURE.md#hooks-status-channel
+   */
+  claudeSessionId?: string;
   /** Port of the per-session ttyd instance. */
   ttydPort?: number;
   /**

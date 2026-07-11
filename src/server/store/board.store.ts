@@ -90,6 +90,10 @@ class BoardStore extends EventEmitter {
    * field before it is wiped), so a dead session's secret can never keep resolving. Also the
    * ONLY clearing site for the markHookRouted channel latch: every session-death path flows
    * through here, so a relaunched/resumed session always starts hook-silent and re-proves traffic.
+   * @remarks Deliberately EXCLUDES `claudeSessionId` — the on-disk Claude transcript outlives a
+   * dead tmux session, so a crashed card (markSessionLost calls this) must KEEP its id to
+   * `--resume` back into the original conversation. The three RESET/CLEAR lifecycle sites
+   * (completeStart, recordCleanupWarning, finishCleanup) handle that field with explicit lines.
    */
   private clearHookToken(card: Card): void {
     if (card.hookToken) this.releaseHookToken(card.hookToken, card.id);
@@ -452,6 +456,22 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Stamp the Claude CLI `session_id` first-event-wins so exact Resume can `--resume <id>` back
+   * into this conversation (SID-01). Single-field enqueue (setHookToken precedent) with an
+   * in-queue `== null` re-check (markHookRouted precedent), so the never-overwrite decision is
+   * authoritative HERE: a racing second hook event finds the id already set and no-ops. The
+   * differing-id case is handled by the caller (a logged mismatch), never a silent overwrite.
+   * No-op if the id is unknown or already stamped.
+   * @see docs/ARCHITECTURE.md#hooks-status-channel
+   */
+  setClaudeSessionId(id: string, sessionId: string): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card && card.claudeSessionId == null) card.claudeSessionId = sessionId;
+    });
+  }
+
+  /**
    * Record the ISO timestamp of the last observed ⏺-view divergence for a live session
    * (ATTN-02 unseen-activity dot). Mirrors setStatusReason exactly: a single-field enqueue.
    * This is a SEPARATE logical event from a column move — it does NOT touch `column`, so it
@@ -785,6 +805,7 @@ class BoardStore extends EventEmitter {
         card.startWarning = null;
         card.sessionLost = false;
         card.resumeError = null;
+        card.claudeSessionId = undefined;
       }
     });
   }
@@ -889,6 +910,7 @@ class BoardStore extends EventEmitter {
         card.ttydPort = undefined;
         card.terminalError = null;
         this.clearHookToken(card);
+        card.claudeSessionId = undefined;
       }
     });
   }
@@ -913,6 +935,7 @@ class BoardStore extends EventEmitter {
         c.terminalError = null;
         c.cleanupWarning = undefined;
         this.clearHookToken(c);
+        c.claudeSessionId = undefined;
       }
     });
   }
