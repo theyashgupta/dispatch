@@ -4,6 +4,7 @@ import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import jsdoc from "eslint-plugin-jsdoc";
 import boundaries from "eslint-plugin-boundaries";
+import checkFile from "eslint-plugin-check-file";
 import prettier from "eslint-config-prettier";
 import commentsJsdocOnly from "./eslint-local/comments-jsdoc-only.js";
 
@@ -151,6 +152,9 @@ const jsdocRules = {
  */
 const externalFactPattern = "(https?:\\/\\/|#\\d+|\\b[A-Z][A-Z0-9]+-\\d+\\b)";
 
+/** Extglob kebab-case segment shared by the check-file role-suffix patterns. */
+const KEBAB = "+([a-z0-9])*(-+([a-z0-9]))";
+
 export default tseslint.config(
   {
     ignores: [
@@ -230,6 +234,87 @@ export default tseslint.config(
       "no-useless-assignment": "warn",
       "@typescript-eslint/no-misused-promises": "warn",
       "@typescript-eslint/no-unsafe-argument": "warn",
+    },
+  },
+
+  /**
+   * File/folder naming enforcement (docs/standards/folder-structure.md):
+   * PascalCase .tsx (main.tsx exempt via the !(main) key), kebab-case .ts,
+   * kebab-case folders. Layered override blocks exist because overlapping glob
+   * keys inside ONE check-file options object require ALL matching patterns to
+   * pass — a hook file would fail the broad kebab key. The hooks/routes/store/
+   * sources/vite-env subtrees therefore each replace the filename rule
+   * wholesale (flat-config last-match-wins); those blocks reuse the check-file
+   * plugin registered once in the general block. Middle extensions are
+   * validated in every block so role suffixes (.route/.store/.source/.d) are
+   * checked too — a stray foo.route.ts outside routes/ fails plain KEBAB_CASE.
+   */
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    plugins: { "check-file": checkFile },
+    rules: {
+      "check-file/filename-naming-convention": [
+        "error",
+        {
+          "src/web/**/!(main).tsx": "PASCAL_CASE",
+          "src/**/*.ts": "KEBAB_CASE",
+        },
+        { ignoreMiddleExtensions: false },
+      ],
+      "check-file/folder-naming-convention": [
+        "error",
+        { "src/**/": "KEBAB_CASE" },
+      ],
+    },
+  },
+  {
+    files: ["src/web/hooks/**/*.ts"],
+    rules: {
+      "check-file/filename-naming-convention": [
+        "error",
+        { "src/web/hooks/**/*.ts": "use[A-Z]*([a-zA-Z0-9])" },
+        { ignoreMiddleExtensions: false },
+      ],
+    },
+  },
+  {
+    files: ["src/server/routes/**/*.ts"],
+    rules: {
+      "check-file/filename-naming-convention": [
+        "error",
+        { "src/server/routes/**/*.ts": `${KEBAB}*(.route)` },
+        { ignoreMiddleExtensions: false },
+      ],
+    },
+  },
+  {
+    files: ["src/server/store/**/*.ts"],
+    rules: {
+      "check-file/filename-naming-convention": [
+        "error",
+        { "src/server/store/**/*.ts": `${KEBAB}*(.store)` },
+        { ignoreMiddleExtensions: false },
+      ],
+    },
+  },
+  {
+    files: ["src/server/sources/**/*.ts"],
+    rules: {
+      "check-file/filename-naming-convention": [
+        "error",
+        { "src/server/sources/**/*.ts": `${KEBAB}*(.source)` },
+        { ignoreMiddleExtensions: false },
+      ],
+    },
+  },
+  {
+    files: ["src/web/vite-env.d.ts"],
+    rules: {
+      "check-file/filename-naming-convention": [
+        "error",
+        { "src/web/*.ts": `${KEBAB}*(.d)` },
+        { ignoreMiddleExtensions: false },
+      ],
     },
   },
 
