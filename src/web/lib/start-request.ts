@@ -1,6 +1,6 @@
 /**
- * Start-flow request shape shared by Board, App, and StartModal; lives in
- * lib so consumers never type-import across feature files.
+ * Start-flow request shape shared by Board and App; lives in lib so
+ * consumers never type-import across feature files.
  */
 export interface StartRequest {
   cardId: string;
