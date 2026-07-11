@@ -5,16 +5,34 @@ import { getHooksRuntime } from "./config-holder.js";
 /**
  * Per-card epoch ms of the last hook-driven activity stamp — the 2s throttle state. Channel
  * policy lives HERE, never in the store (setOutputChanged's JSDoc forbids coalescing there).
- * In-memory only: a backend restart just allows one early stamp, which is harmless.
+ * In-memory only: a backend restart just allows one early stamp, which is harmless. Entries
+ * are reaped by reapActivityThrottle when a card's hook channel dies, matching the reaping
+ * discipline of the watcher's per-session maps.
  */
 const lastActivityStampMs = new Map<string, number>();
 
 /**
- * Minimum ms between hook-driven activity stamps per card. Matches the pane watcher's 2000ms
- * tick, so hook-path dot latency is never worse than the pane path's while a parallel tool-call
- * burst can no longer enqueue several board.json writes + SSE frames per second.
+ * Minimum ms between hook-driven PostToolUse activity stamps per card. Matches the pane
+ * watcher's 2000ms tick, so hook-path dot latency is never worse than the pane path's while a
+ * parallel tool-call burst can no longer enqueue several board.json writes + SSE frames per
+ * second. Stop is EXEMPT: it fires once per turn (inherently rate-limited) and is the turn's
+ * final event, so a throttled Stop would permanently drop the stamp for the turn's actual
+ * final output — no later event exists to self-heal it, unlike the leading-edge drops the
+ * throttle is designed for.
  */
 const ACTIVITY_THROTTLE_MS = 2000;
+
+/**
+ * Drop a card's activity-throttle entry when its hook channel dies. Wired into the store's
+ * token-release chokepoint at boot (composed with the token registry unregister), so every
+ * session-clearing mutation reaps the entry at the moment it clears the hook fields and the
+ * map cannot grow for the process lifetime. A stale entry could never wrongly suppress a
+ * future stamp — this is map-hygiene parity with the watcher's per-session maps, not a
+ * correctness guard.
+ */
+export function reapActivityThrottle(cardId: string): void {
+  lastActivityStampMs.delete(cardId);
+}
 
 /**
  * Map a Stop hook event onto the board: parse the final assistant message for its last
@@ -56,10 +74,11 @@ async function applyPromptSubmit(cardId: string): Promise<void> {
  * the pane-mode no-op guard (a straggler session injected before a config flip to `pane` must
  * mutate NOTHING — no latch, no stamp, no marker/flip; the route still authenticates), the
  * write-once hook-routed latch (any authenticated event proves the session's hook capability;
- * the read-before-enqueue guard prevents per-event write churn and its benign race worst-cases
- * at one duplicate write of the same semantic value), the throttled activity stamp on
- * PostToolUse/Stop only (the user's own typing is not agent output, so UserPromptSubmit never
- * stamps), and the existing Stop/UserPromptSubmit board mapping. PostToolUse binds ONLY to
+ * the read-before-enqueue guard prevents per-event write churn; the store's mutator refuses a
+ * token-less card, so the race with a queued session-clearing mutation can never latch a dead
+ * session), the activity stamp on PostToolUse/Stop only (the user's own typing is not agent
+ * output, so UserPromptSubmit never stamps; PostToolUse is throttled, Stop is exempt — see
+ * ACTIVITY_THROTTLE_MS), and the existing Stop/UserPromptSubmit board mapping. PostToolUse binds ONLY to
  * `hook_event_name` — `tool_*` payload keys are unstable across CLI releases and never read.
  * Unknown events end after the latch/stamp as no-ops.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
@@ -79,7 +98,11 @@ export async function applyHookEvent(
   if (event === "PostToolUse" || event === "Stop") {
     const now = Date.now();
     const last = lastActivityStampMs.get(cardId);
-    if (last === undefined || now - last >= ACTIVITY_THROTTLE_MS) {
+    if (
+      event === "Stop" ||
+      last === undefined ||
+      now - last >= ACTIVITY_THROTTLE_MS
+    ) {
       lastActivityStampMs.set(cardId, now);
       await store.setOutputChanged(cardId, new Date().toISOString());
     }

@@ -72,13 +72,14 @@ class BoardStore extends EventEmitter {
   private readonly inFlightStarts = new Set<string>();
   /**
    * Bootstrap-injected releaser for cleared hook tokens. The boundaries DAG forbids
-   * store → services, so bootstrap wires services/hook-tokens.ts' unregister function in here;
+   * store → services, so bootstrap wires services/hook-tokens.ts' unregister function in here
+   * (composed with hook-events' activity-throttle reaper, which is why the card id rides along);
    * the no-op default keeps the store safe to use before wiring.
    */
-  private releaseHookToken: (token: string) => void = () => {};
+  private releaseHookToken: (token: string, cardId: string) => void = () => {};
 
   /** Wire the hook-token releaser at boot (bootstrap → store is DAG-legal). */
-  setHookTokenReleaser(release: (token: string) => void): void {
+  setHookTokenReleaser(release: (token: string, cardId: string) => void): void {
     this.releaseHookToken = release;
   }
 
@@ -90,7 +91,7 @@ class BoardStore extends EventEmitter {
    * through here, so a relaunched/resumed session always starts hook-silent and re-proves traffic.
    */
   private clearHookToken(card: Card): void {
-    if (card.hookToken) this.releaseHookToken(card.hookToken);
+    if (card.hookToken) this.releaseHookToken(card.hookToken, card.id);
     card.hookToken = undefined;
     card.hookRoutedAt = undefined;
   }
@@ -420,14 +421,34 @@ class BoardStore extends EventEmitter {
    * Latch the session as hook-routed for channel selection: the ISO timestamp of its first
    * authenticated hook event. Write-once per session by service-side guard — the store stays
    * policy-free (no throttling, no read-before-write here). Mirrors setOutputChanged: a
-   * single-field enqueue. Cleared only via the clearHookToken chokepoint. No-op if the id is
-   * unknown.
+   * single-field enqueue. Cleared only via the clearHookToken chokepoint. Refuses to stamp a
+   * card that holds no hookToken, so the latch always implies a live token even when the
+   * service's read-outside-queue guard raced a queued session-clearing mutation — a latch
+   * without a token would demote pane scanning for a session with no hook traffic. No-op if
+   * the id is unknown.
    * @see docs/ARCHITECTURE.md#hooks-status-channel
    */
   markHookRouted(id: string, iso: string): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) card.hookRoutedAt = iso;
+      if (card?.hookToken) card.hookRoutedAt = iso;
+    });
+  }
+
+  /**
+   * Reset a card's hook-channel state (token + hookRoutedAt latch) through the clearHookToken
+   * chokepoint, as one queued mutation. Called by the hook-silent launch branches of
+   * startClaude/resumeSession BEFORE spawning, so a relaunch that skips injection (CLI
+   * downgraded below the hooks floor, hooks disabled) can never inherit a stale persisted
+   * latch — without this, `auto` would demote pane scanning for a session that produces no
+   * hook traffic, and the next boot reconcile would re-register a token no live process
+   * carries. No-op if the id is unknown.
+   * @see docs/ARCHITECTURE.md#hooks-status-channel
+   */
+  clearHookChannel(id: string): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) this.clearHookToken(card);
     });
   }
 

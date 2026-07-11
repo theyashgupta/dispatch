@@ -288,7 +288,9 @@ export async function awaitReplReady(session: string): Promise<void> {
  * BEFORE the session exists because the kickoff paste fires the UserPromptSubmit hook (the
  * flip-back it triggers no-ops — the card is never in needs_input during the saga). Below floor
  * or under `statusChannel: "pane"` the launch is byte-identical to the pre-hooks argv (no
- * settings, no token, no env), and the pane watcher carries status alone.
+ * settings, no token, no env), and the pane watcher carries status alone; that branch first
+ * resets the card's hook-channel state so a stale persisted latch/token from an earlier
+ * hook-capable session can never survive into a hook-silent one.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 const startClaude: SagaStep = {
@@ -320,6 +322,7 @@ const startClaude: SagaStep = {
         },
       );
     } else {
+      await store.clearHookChannel(ctx.card.id);
       await newSession(session, ctx.workspacePath, [
         claudePath,
         "--dangerously-skip-permissions",

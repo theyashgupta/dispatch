@@ -9,6 +9,7 @@ import {
 } from "../services/config-holder.js";
 import { checkHooksCapability, installHookArtifacts } from "./hook-setup.js";
 import { unregisterHookToken } from "../services/hook-tokens.js";
+import { reapActivityThrottle } from "../services/hook-events.js";
 import { seedPlaybooks } from "../services/playbooks.js";
 import { startPoller } from "../adapters/poller.js";
 import { buildRegistry, getLinearSource } from "../sources/registry.js";
@@ -28,9 +29,21 @@ async function main(): Promise<void> {
   const port = config.port ?? DEFAULT_PORT;
   const statusChannel = config.statusChannel ?? "auto";
   await installHookArtifacts();
-  const capable = await checkHooksCapability();
+  const { capable, version } = await checkHooksCapability();
+  if (statusChannel === "hooks" && !capable) {
+    console.warn(
+      `[hooks] statusChannel is "hooks" but ${
+        version ? `claude ${version}` : "the claude CLI"
+      } lacks hook support — status routing is disabled: sessions launch ` +
+        "without hooks and the watcher never scans, so no card will move " +
+        "or flip this run",
+    );
+  }
   setHooksRuntime({ capable, port, statusChannel });
-  store.setHookTokenReleaser(unregisterHookToken);
+  store.setHookTokenReleaser((token, cardId) => {
+    unregisterHookToken(token);
+    reapActivityThrottle(cardId);
+  });
 
   await seedPlaybooks();
 

@@ -26,7 +26,9 @@ import { ensureTerminal } from "./terminal.js";
  * `DISPATCH_*` env vars; a reattach re-registers the card's persisted token so an in-memory
  * registry lost to a backend restart re-learns the live session's secret; below the capability
  * floor or under `statusChannel: "pane"` the relaunch argv is byte-identical to the pre-hooks
- * shape. SECURITY: errors
+ * shape, and that branch first resets the card's hook-channel state so a stale persisted
+ * latch/token from an earlier hook-capable session can never survive into a hook-silent one.
+ * SECURITY: errors
  * are logged content-free — no stderr or pane text leaks (the pane payload rides
  * StartStepError.message, so only the step name may be logged).
  * @see docs/ARCHITECTURE.md#in-review-lifecycle
@@ -74,6 +76,7 @@ export async function resumeSession(cardId: string): Promise<void> {
         },
       );
     } else {
+      await store.clearHookChannel(cardId);
       await newSession(session, card.workspacePath, [
         claudePath,
         "--continue",

@@ -891,10 +891,16 @@ reader is race-free.
 event of ANY type (in practice the kickoff paste's UserPromptSubmit, seconds after launch), one-way
 within a session, and cleared ONLY via the store's `clearHookToken` chokepoint — every
 session-death path (session lost, resume failure, both cleanup outcomes) flows through it, so a
-relaunch/resume starts hook-silent and re-proves traffic. A hook-silent session (below-floor CLI →
-no injection → no token → nothing can authenticate) never latches and keeps full pane routing
-forever. The field is explicitly NON-SECRET: an ISO timestamp that rides `snapshot()` unredacted,
-unlike `hookToken`.
+relaunch/resume starts hook-silent and re-proves traffic. LATCH ⇒ TOKEN: `markHookRouted` refuses
+to stamp a card holding no `hookToken`, so a race with a queued session-clearing mutation can
+never latch a dead session. And because a card killed mid-saga can carry a persisted latch that
+no death path ever clears (it never got a `tmuxSession`, so reconcile cannot see it), BOTH
+hook-silent launch branches (`startClaude`/`resumeSession`) reset the card's hook-channel state
+through `store.clearHookChannel` — the same chokepoint, as one queued mutation — before spawning,
+making "a hook-silent launch starts unlatched" true by construction rather than by path
+enumeration. A hook-silent session (below-floor CLI → no injection → no token → nothing can
+authenticate) never latches and keeps full pane routing forever. The field is explicitly
+NON-SECRET: an ISO timestamp that rides `snapshot()` unredacted, unlike `hookToken`.
 
 **The watcher gate seam.** The demotion is one early return in `scanSession`'s I/O shell —
 `paneRouted` is `pane`-mode always, `hooks`-mode never, `auto` per session on the latch — placed
@@ -916,10 +922,17 @@ status codes are not board behavior.
 
 **The 2s activity throttle.** PostToolUse/Stop events stamp `outputChangedAt` through the
 existing `setOutputChanged` mutator (the dot pipeline is inherited end-to-end; UserPromptSubmit
-never stamps — the user's own typing is not agent output), throttled per card to one stamp per
-2000ms in `hook-events.ts`. The throttle is channel policy and lives in the SERVICE — the store
-stays policy-free (`setOutputChanged`'s JSDoc forbids coalescing there). 2s matches the pane
-watcher's tick, so hook-path dot latency is never worse than the pane path's.
+never stamps — the user's own typing is not agent output). PostToolUse is throttled per card to
+one stamp per 2000ms in `hook-events.ts`; Stop is EXEMPT — it fires once per turn (inherently
+rate-limited) and is the turn's FINAL event, so throttling it would permanently drop the stamp
+for the turn's actual final output with no later event to self-heal it (worst case per turn is
+one PostToolUse stamp + one Stop stamp inside the same 2s — still bounded, still far below a
+per-tool-call burst). The throttle is channel policy and lives in the SERVICE — the store stays
+policy-free (`setOutputChanged`'s JSDoc forbids coalescing there). 2s matches the pane watcher's
+tick, so hook-path dot latency is never worse than the pane path's. The throttle map's entries
+are reaped through the store's token-release chokepoint (the bootstrap-wired releaser composes
+the registry unregister with `reapActivityThrottle`), matching the reaping discipline of the
+watcher's per-session maps.
 
 **Accepted residuals.** Under `auto` the seconds-wide [launch → kickoff] window can double-stamp
 the same activity via both channels (two SSE frames, same semantic — cosmetic, self-heals on
