@@ -467,7 +467,8 @@ class BoardStore extends EventEmitter {
   setClaudeSessionId(id: string, sessionId: string): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card && card.claudeSessionId == null) card.claudeSessionId = sessionId;
+      if (card && card.claudeSessionId == null)
+        card.claudeSessionId = sessionId;
     });
   }
 
