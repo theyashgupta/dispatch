@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { Column, Config, StartError } from "../../shared/types.js";
-import { store } from "../store/boardStore.js";
+import { store } from "../store/board.store.js";
 import { hasSession } from "../adapters/tmux.js";
 import { loadPlaybooks } from "./playbooks.js";
 import {

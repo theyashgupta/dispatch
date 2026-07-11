@@ -5,7 +5,7 @@ import {
   type Column,
   type SourceFilters,
 } from "../../shared/types.js";
-import { store } from "../store/boardStore.js";
+import { store } from "../store/board.store.js";
 import { sseHandler } from "./sse.js";
 import { isLocalRequest } from "./loopback.js";
 import { startSession } from "../services/startSession.js";

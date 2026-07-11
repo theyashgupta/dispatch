@@ -1,7 +1,7 @@
 import express from "express";
 import { checkBinaries, StartupError } from "./binaryCheck.js";
 import { loadConfig } from "./config.js";
-import { store } from "../store/boardStore.js";
+import { store } from "../store/board.store.js";
 import { apiRouter } from "../routes/routes.js";
 import { setOrchestrationConfig } from "../services/config-holder.js";
 import { seedPlaybooks } from "../services/playbooks.js";

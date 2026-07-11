@@ -1,4 +1,4 @@
-import { store } from "../store/boardStore.js";
+import { store } from "../store/board.store.js";
 import { ensureTtyd, killTtyd } from "../adapters/ttyd.js";
 import { hasSession } from "./session-status.js";
 

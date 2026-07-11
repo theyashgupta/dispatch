@@ -1,4 +1,4 @@
-import { store } from "../../store/boardStore.js";
+import { store } from "../../store/board.store.js";
 import { capturePane, paneSize } from "../tmux.js";
 import { killTtyd, trackedTtydSessions } from "../ttyd.js";
 import {

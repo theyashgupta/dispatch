@@ -1,4 +1,4 @@
-import { store } from "../store/boardStore.js";
+import { store } from "../store/board.store.js";
 import { hasSession, killSession, newSession } from "../adapters/tmux.js";
 import { preSeedTrust } from "../adapters/claudeTrust.js";
 import { resolveBinaryPath } from "../adapters/resolveBinary.js";

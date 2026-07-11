@@ -2,7 +2,7 @@ import { spawn, execFile, type ChildProcess } from "node:child_process";
 import net from "node:net";
 import path from "node:path";
 import { promisify } from "node:util";
-import { store } from "../store/boardStore.js";
+import { store } from "../store/board.store.js";
 
 const execFileP = promisify(execFile);
 

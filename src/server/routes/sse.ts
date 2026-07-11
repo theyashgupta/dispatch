@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { store } from "../store/boardStore.js";
+import { store } from "../store/board.store.js";
 import type { BoardSnapshot } from "../../shared/types.js";
 
 /** Active SSE clients; broadcast writes to each and drops them on disconnect. */

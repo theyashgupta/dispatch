@@ -1,5 +1,5 @@
 import type { Config } from "../../shared/types.js";
-import { store } from "../store/boardStore.js";
+import { store } from "../store/board.store.js";
 import { RateLimited, type TicketSource } from "../sources/TicketSource.js";
 
 const DEFAULT_POLL_INTERVAL_MS = 60_000;

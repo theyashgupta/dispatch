@@ -1,4 +1,4 @@
-import { store } from "../store/boardStore.js";
+import { store } from "../store/board.store.js";
 import { listSessions } from "../adapters/tmux.js";
 import { killDspTtydOrphans } from "../adapters/ttyd.js";
 
