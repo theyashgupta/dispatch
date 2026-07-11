@@ -85,11 +85,14 @@ class BoardStore extends EventEmitter {
   /**
    * Clear a card's hookToken AND unregister it from the in-memory token registry in one step —
    * the single chokepoint every session-clearing mutator calls (inside the queue, capturing the
-   * field before it is wiped), so a dead session's secret can never keep resolving.
+   * field before it is wiped), so a dead session's secret can never keep resolving. Also the
+   * ONLY clearing site for the markHookRouted channel latch: every session-death path flows
+   * through here, so a relaunched/resumed session always starts hook-silent and re-proves traffic.
    */
   private clearHookToken(card: Card): void {
     if (card.hookToken) this.releaseHookToken(card.hookToken);
     card.hookToken = undefined;
+    card.hookRoutedAt = undefined;
   }
 
   /**
@@ -209,7 +212,8 @@ class BoardStore extends EventEmitter {
    * (the frontend re-partitions by `column`, so cross-column concat order is irrelevant).
    * SECURITY: this is the single outbound chokepoint — each card is copied and `hookToken`
    * deleted, so the per-session hook-auth secret never rides an SSE frame or a REST response
-   * (only the persisted board.json carries it). Redact future secret-adjacent card fields here.
+   * (only the persisted board.json carries it). Redact future secret-adjacent card fields here
+   * (hookRoutedAt was considered and deliberately rides the wire — a non-secret timestamp).
    */
   snapshot(): BoardSnapshot {
     const snap = this.persistSnapshot();
@@ -409,6 +413,21 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.outputChangedAt = iso;
+    });
+  }
+
+  /**
+   * Latch the session as hook-routed for channel selection: the ISO timestamp of its first
+   * authenticated hook event. Write-once per session by service-side guard — the store stays
+   * policy-free (no throttling, no read-before-write here). Mirrors setOutputChanged: a
+   * single-field enqueue. Cleared only via the clearHookToken chokepoint. No-op if the id is
+   * unknown.
+   * @see docs/ARCHITECTURE.md#hooks-status-channel
+   */
+  markHookRouted(id: string, iso: string): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) card.hookRoutedAt = iso;
     });
   }
 

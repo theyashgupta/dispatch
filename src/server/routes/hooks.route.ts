@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { resolveHookToken } from "../services/hook-tokens.js";
-import { applyPromptSubmit, applyStopEvent } from "../services/hook-events.js";
+import { applyHookEvent } from "../services/hook-events.js";
 
 export const hooksRouter = Router();
 
@@ -34,18 +34,17 @@ async function handleHookEvent(req: Request, res: Response): Promise<void> {
   }
   const body = req.body as
     { hook_event_name?: unknown; last_assistant_message?: unknown } | undefined;
-  if (body?.hook_event_name === "Stop") {
-    if (typeof body.last_assistant_message === "string") {
-      await applyStopEvent(cardId, body.last_assistant_message);
-    } else if (!warnedStopShape) {
-      warnedStopShape = true;
-      console.warn(
-        "[hooks] Stop payload without a string last_assistant_message; degrading to the pane watcher",
-      );
-    }
-  } else if (body?.hook_event_name === "UserPromptSubmit") {
-    await applyPromptSubmit(cardId);
+  if (
+    body?.hook_event_name === "Stop" &&
+    typeof body.last_assistant_message !== "string" &&
+    !warnedStopShape
+  ) {
+    warnedStopShape = true;
+    console.warn(
+      "[hooks] Stop payload without a string last_assistant_message; degrading to the pane watcher",
+    );
   }
+  await applyHookEvent(cardId, body);
   res.status(204).end();
 }
 
