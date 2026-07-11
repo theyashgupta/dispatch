@@ -738,7 +738,9 @@ server→client.
 wholesale. The stream is un-buffered (`X-Accel-Buffering: no`, `Cache-Control: no-cache`, and NO
 compression on this route — compression would buffer and break liveness) and resync-on-connect (the
 full snapshot is written the instant a client connects). The payload is a `BoardSnapshot` only
-(cards + syncedAt) — it NEVER carries the Linear API key or any secret. The `KEEPALIVE_MS` (15s)
+(cards + syncedAt) — it NEVER carries the Linear API key or any secret: `store.snapshot()` is the
+single outbound chokepoint and redacts `card.hookToken` from every wire copy (SSE frames and REST
+reads alike), so the persisted per-session hook secret never leaves the server. The `KEEPALIVE_MS` (15s)
 heartbeat is written as a NAMED `event: ping\ndata: 1\n\n`, NOT a `:comment`: an `EventSource`
 never surfaces comment lines to JS, so a comment heartbeat gives the client no way to tell a healthy
 idle stream from a dead-but-open socket (a backend death behind the Vite proxy leaves the socket
@@ -862,7 +864,12 @@ a 401 with ZERO store calls. Card identity comes EXCLUSIVELY from the token look
 session id claimed in the request body is ignored, so a valid token for one card can never move
 another. The registry is rebuilt at boot from persisted `card.hookToken` for cards whose session
 is still live (`bootstrap/reconcile.ts`), because sessions deliberately outlive backend restarts
-and a memory-only map would silently 401 every live session's POSTs. Tokens are never logged; the
+and a memory-only map would silently 401 every live session's POSTs. Registry entries die with
+their session: every store mutation that clears `card.hookToken` (session lost, resume failure,
+both cleanup outcomes) also unregisters it through a bootstrap-injected releaser (the boundaries
+DAG forbids store → services), and BOTH reattach branches — resume's and the start saga's
+already-running adoption — re-register the persisted token, so a live session reattached after a
+backend restart keeps authenticating. Tokens are never logged; the
 hook path's logging is content-free end to end.
 
 **Manual drag precedence is the SAME mechanism on both channels.** Hook events mutate the board
@@ -879,7 +886,9 @@ is a behavior change, not a refactor.
 
 1. **`shared/types.ts` shape.** `Card`, `BoardSnapshot`, `Config`, `StartError`, `TerminalError`,
    `SessionFields`, `ReconcileResult`, `Column`/`COLUMNS`. Consumed by both halves; **`BoardSnapshot`
-   IS the SSE payload AND the on-disk `board.json`.** Keep the file location and every field name.
+   IS the SSE payload AND the on-disk `board.json`** — same shape both places, but wire copies are
+   redacted at `store.snapshot()` (`card.hookToken` is stripped; only the persisted file carries
+   it). Keep the file location and every field name.
 2. **SSE frame format.** `data: ${JSON.stringify(BoardSnapshot)}\n\n`; named heartbeat
    `event: ping\ndata: 1\n\n`; headers incl. `X-Accel-Buffering: no`; **server `KEEPALIVE_MS` (15s)
    must stay in lockstep with client `HEARTBEAT_MS`** (watchdog trips at 3×). No compression on

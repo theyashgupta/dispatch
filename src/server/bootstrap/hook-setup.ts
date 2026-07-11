@@ -55,7 +55,7 @@ function hookSettingsJson(): string {
  * spawn it.
  */
 export async function installHookArtifacts(): Promise<void> {
-  await fsp.mkdir(DISPATCH_DIR, { recursive: true });
+  await fsp.mkdir(DISPATCH_DIR, { recursive: true, mode: 0o700 });
   await writeFileAtomic(HOOK_SCRIPT_PATH, HOOK_SCRIPT, { mode: 0o755 });
   await fsp.chmod(HOOK_SCRIPT_PATH, 0o755);
   await writeFileAtomic(HOOK_SETTINGS_PATH, hookSettingsJson(), {

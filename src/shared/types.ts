@@ -50,7 +50,9 @@ export interface Card {
    * Per-session hook-auth secret minted at launch/resume. Persisted (not memory-only) because
    * sessions deliberately survive backend restarts — a tsx-watch reload rebuilds the in-memory
    * token registry from this field, so live sessions' hook POSTs keep authenticating. At rest it
-   * is protected by `~/.dispatch` mode 700; cleared whenever the session fields are cleared.
+   * is protected by `~/.dispatch` mode 700; cleared (and unregistered) whenever the session
+   * fields are cleared. NEVER serialized to the wire — the store's snapshot() redacts it from
+   * SSE frames and REST reads; only the persisted board.json carries it.
    */
   hookToken?: string;
   /** Port of the per-session ttyd instance. */
@@ -165,7 +167,9 @@ export interface SessionFields {
 
 /**
  * Full board state. This exact shape is both the SSE payload and the
- * persisted contents of ~/.dispatch/board.json.
+ * persisted contents of ~/.dispatch/board.json — but wire copies (SSE frames
+ * and REST reads) are redacted at the store's snapshot() chokepoint:
+ * `card.hookToken` never leaves the server; only the persisted file carries it.
  */
 export interface BoardSnapshot {
   cards: Card[];

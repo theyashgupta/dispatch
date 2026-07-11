@@ -70,31 +70,56 @@ class BoardStore extends EventEmitter {
    * To Do card whose Linear issue vanished mid-saga (which would orphan a live session).
    */
   private readonly inFlightStarts = new Set<string>();
+  /**
+   * Bootstrap-injected releaser for cleared hook tokens. The boundaries DAG forbids
+   * store → services, so bootstrap wires services/hook-tokens.ts' unregister function in here;
+   * the no-op default keeps the store safe to use before wiring.
+   */
+  private releaseHookToken: (token: string) => void = () => {};
+
+  /** Wire the hook-token releaser at boot (bootstrap → store is DAG-legal). */
+  setHookTokenReleaser(release: (token: string) => void): void {
+    this.releaseHookToken = release;
+  }
+
+  /**
+   * Clear a card's hookToken AND unregister it from the in-memory token registry in one step —
+   * the single chokepoint every session-clearing mutator calls (inside the queue, capturing the
+   * field before it is wiped), so a dead session's secret can never keep resolving.
+   */
+  private clearHookToken(card: Card): void {
+    if (card.hookToken) this.releaseHookToken(card.hookToken);
+    card.hookToken = undefined;
+  }
 
   /**
    * Enqueue a mutation. The chained promise guarantees single-writer ordering.
    * The in-memory Map is the source of truth: the broadcast (step 4) MUST fire even
    * when the persist (step 3) fails, or SSE clients silently diverge from the state
-   * that GET /api/board already reports. A failed persist is logged (the error never
-   * contains the API key — board.json carries no secrets) and simply retried by the
-   * next mutation's write. Errors are caught inside the chain so one failed step can
-   * never break the queue for subsequent mutations.
+   * that GET /api/board already reports. A failed persist is logged (the log prints
+   * only the write error, never snapshot contents — board.json carries per-session
+   * hook tokens) and simply retried by the next mutation's write. The persist writes
+   * the FULL snapshot; the broadcast emits the REDACTED wire snapshot (snapshot()),
+   * so secrets reach disk but never an SSE frame. Errors are caught inside the chain
+   * so one failed step can never break the queue for subsequent mutations.
    * @see docs/ARCHITECTURE.md#single-writer-store
    */
   private enqueue(mutator: () => void): Promise<void> {
     this.queue = this.queue
       .then(async () => {
         mutator();
-        const snap = this.snapshot();
         try {
-          await writeFileAtomic(BOARD_PATH, JSON.stringify(snap, null, 2));
+          await writeFileAtomic(
+            BOARD_PATH,
+            JSON.stringify(this.persistSnapshot(), null, 2),
+          );
         } catch (err) {
           console.error(
             "[store] persist failed (in-memory state still broadcast):",
             err,
           );
         }
-        this.emit("change", snap);
+        this.emit("change", this.snapshot());
       })
       .catch((err: unknown) => {
         console.error("[store] mutation failed:", err);
@@ -159,11 +184,11 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Build the canonical board snapshot. The To Do cards are sorted with compareTodoOrder
-   * on this read path; other columns carry no Phase-1 ordering decision (the frontend
-   * re-partitions by `column`, so cross-column concat order is irrelevant).
+   * Build the FULL persisted snapshot — the exact board.json contents, INCLUDING each card's
+   * `hookToken` (the restart-time registry rebuild reads it back from disk). Persist-only:
+   * every payload that leaves the process goes through snapshot(), which redacts.
    */
-  snapshot(): BoardSnapshot {
+  private persistSnapshot(): BoardSnapshot {
     const all = [...this.cards.values()];
     const todo = all.filter((c) => c.column === "todo").sort(compareTodoOrder);
     const rest = all.filter((c) => c.column !== "todo");
@@ -175,6 +200,26 @@ class BoardStore extends EventEmitter {
       editors: this.editors,
       workspaceFolders: this.workspaceFolders,
       lastUsed: this.lastUsedFolder,
+    };
+  }
+
+  /**
+   * Build the canonical WIRE snapshot (SSE frames + REST reads). The To Do cards are sorted
+   * with compareTodoOrder on this read path; other columns carry no Phase-1 ordering decision
+   * (the frontend re-partitions by `column`, so cross-column concat order is irrelevant).
+   * SECURITY: this is the single outbound chokepoint — each card is copied and `hookToken`
+   * deleted, so the per-session hook-auth secret never rides an SSE frame or a REST response
+   * (only the persisted board.json carries it). Redact future secret-adjacent card fields here.
+   */
+  snapshot(): BoardSnapshot {
+    const snap = this.persistSnapshot();
+    return {
+      ...snap,
+      cards: snap.cards.map((card) => {
+        const wireCard = { ...card };
+        delete wireCard.hookToken;
+        return wireCard;
+      }),
     };
   }
 
@@ -478,8 +523,9 @@ class BoardStore extends EventEmitter {
    * cardsWithSession() (freeing the watcher) and makes the DetailPanel terminal region disappear
    * (Pitfall 5); the session name stays derivable as `dsp-` + identifier for restart. Called at
    * BOTH boot (reconcileSessions) and RUNTIME (Plan 02's watcher dead-session detector, per tick).
-   * `hookToken` is cleared with the session — a card without a live session must not keep a
-   * live secret. No-op if the id is unknown. SECURITY: never logs card contents.
+   * `hookToken` is cleared AND unregistered with the session (clearHookToken) — a card without
+   * a live session must not keep a live, still-resolving secret. No-op if the id is unknown.
+   * SECURITY: never logs card contents.
    */
   markSessionLost(id: string): Promise<void> {
     return this.enqueue(() => {
@@ -489,7 +535,7 @@ class BoardStore extends EventEmitter {
         card.tmuxSession = undefined;
         card.ttydPort = undefined;
         card.terminalError = null;
-        card.hookToken = undefined;
+        this.clearHookToken(card);
       }
     });
   }
@@ -715,8 +761,8 @@ class BoardStore extends EventEmitter {
    * SessionLostSection renders. The SSE frame this broadcasts is the ONLY failure signal the
    * client ever gets — the route's 202 resolved before the saga ran — so without this write the
    * panel's "Resuming…" state would be permanent. The copy is a constant, so no tmux/claude
-   * stderr or pane text can leak (SECURITY, matches setStartError). `hookToken` is cleared with
-   * the session fields. No-op if the id is unknown.
+   * stderr or pane text can leak (SECURITY, matches setStartError). `hookToken` is cleared AND
+   * unregistered with the session fields (clearHookToken). No-op if the id is unknown.
    * @see docs/ARCHITECTURE.md#in-review-lifecycle
    */
   recordResumeFailure(id: string): Promise<void> {
@@ -727,7 +773,7 @@ class BoardStore extends EventEmitter {
         card.tmuxSession = undefined;
         card.ttydPort = undefined;
         card.terminalError = null;
-        card.hookToken = undefined;
+        this.clearHookToken(card);
         card.resumeError =
           "Resume failed — the worktree may be gone. Use Restart to begin a fresh session in the same branch.";
       }
@@ -743,7 +789,8 @@ class BoardStore extends EventEmitter {
    * and make the DetailPanel render the destructive "Terminal disconnected" block on a card whose
    * cleanup should surface only this muted warning. `terminalError` is nulled for the same reason;
    * only the worktree/folder outcome is uncertain on this path, so `workspacePath` is left as-is.
-   * `hookToken` is cleared with the session fields. Column untouched. No-op if the id is unknown.
+   * `hookToken` is cleared AND unregistered with the session fields (clearHookToken). Column
+   * untouched. No-op if the id is unknown.
    */
   recordCleanupWarning(id: string, warning: string): Promise<void> {
     return this.enqueue(() => {
@@ -753,7 +800,7 @@ class BoardStore extends EventEmitter {
         card.tmuxSession = undefined;
         card.ttydPort = undefined;
         card.terminalError = null;
-        card.hookToken = undefined;
+        this.clearHookToken(card);
       }
     });
   }
@@ -763,8 +810,9 @@ class BoardStore extends EventEmitter {
    * completeStart precedent — a split write would broadcast a torn frame). Clears the session
    * fields the teardown removed AND neutralizes any lingering/racing error chrome so the cleaned
    * Done card reads quietly: `tmuxSession`/`ttydPort`/`workspacePath`/`cleanupWarning`/`hookToken`
-   * undefined, `sessionLost` false, `terminalError` null. KEEPS `branch` (branches always survive
-   * per lock), `outputChangedAt`, and `lastMarker`. No-op if the id is unknown.
+   * undefined (the token also unregistered via clearHookToken), `sessionLost` false,
+   * `terminalError` null. KEEPS `branch` (branches always survive per lock), `outputChangedAt`,
+   * and `lastMarker`. No-op if the id is unknown.
    */
   finishCleanup(id: string): Promise<void> {
     return this.enqueue(() => {
@@ -776,7 +824,7 @@ class BoardStore extends EventEmitter {
         c.sessionLost = false;
         c.terminalError = null;
         c.cleanupWarning = undefined;
-        c.hookToken = undefined;
+        this.clearHookToken(c);
       }
     });
   }

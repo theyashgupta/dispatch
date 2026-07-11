@@ -2,6 +2,7 @@ import path from "node:path";
 import type { Column, Config, StartError } from "../../shared/types.js";
 import { store } from "../store/board.store.js";
 import { hasSession } from "../adapters/tmux.js";
+import { registerHookToken } from "./hook-tokens.js";
 import { loadPlaybooks } from "./playbooks.js";
 import {
   steps,
@@ -50,6 +51,10 @@ function toStartError(err: unknown, stepName: string): StartError {
  * request body, so a stored playbook name that no longer resolves (renamed or deleted since the
  * original start) is surfaced as a start warning via the same channel as the fetch-fallback
  * notice — the warning must ride `ctx.warnings` because `completeStart` clears `startWarning`.
+ * The already-running reattach branch re-registers the card's persisted hook token (mirroring
+ * resume's reattach) so a live session adopted after a backend restart — e.g. an interrupted
+ * saga plus Retry, which never reaches boot reconcile because only completeStart sets
+ * `tmuxSession` — keeps its hook POSTs authenticating instead of silently 401ing forever.
  * @see docs/ARCHITECTURE.md#orchestration-saga
  */
 export async function startSession(
@@ -97,6 +102,7 @@ export async function startSession(
     );
 
     if (await hasSession(session)) {
+      if (card.hookToken) registerHookToken(card.hookToken, cardId);
       await store.attachExistingSession(
         cardId,
         {

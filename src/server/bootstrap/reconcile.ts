@@ -8,8 +8,8 @@ import { registerHookToken } from "../services/hook-tokens.js";
  * has vanished as session-lost, re-register the persisted hook token of every still-live session
  * (sessions deliberately outlive backend restarts; a memory-only token registry would silently
  * 401 their hook POSTs), and sweep orphaned ttyd processes. Tolerant of every tmux error.
- * Dead-session cards flow through markSessionLost, which clears hookToken, so no stale
- * registration is possible. Logs a rebuilt-token count only, never token values.
+ * Dead-session cards flow through markSessionLost, which clears AND unregisters hookToken
+ * (the store's clearHookToken chokepoint), so no stale registration is possible. Logs a rebuilt-token count only, never token values.
  * @remarks IN-01 compares the PERSISTED session name (derived `dsp-<identifier>` only as fallback);
  * IN-02 empty-map baseline recovery (a dead server degrades to an empty live Set, never a crash);
  * IN-03 skips To Do and Done so Restart never promotes a parked card; IN-04 orphaned-ttyd

@@ -29,6 +29,16 @@ export function registerHookToken(token: string, cardId: string): void {
 }
 
 /**
+ * Drop a cleared token from the registry so a dead session's secret stops resolving. Wired into
+ * the store at bootstrap as the hook-token releaser (the boundaries DAG forbids store → services),
+ * which makes every session-clearing store mutation unregister at the moment it clears the field
+ * — session lost, resume failure, and both cleanup outcomes included.
+ */
+export function unregisterHookToken(token: string): void {
+  tokensByValue.delete(token);
+}
+
+/**
  * Resolve a presented token to its card id, or undefined for an unknown token. The token IS
  * the hook route's auth: card identity derives exclusively from this lookup, never from ids
  * claimed in a request body. Never logs.

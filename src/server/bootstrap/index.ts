@@ -8,6 +8,7 @@ import {
   setOrchestrationConfig,
 } from "../services/config-holder.js";
 import { checkHooksCapability, installHookArtifacts } from "./hook-setup.js";
+import { unregisterHookToken } from "../services/hook-tokens.js";
 import { seedPlaybooks } from "../services/playbooks.js";
 import { startPoller } from "../adapters/poller.js";
 import { buildRegistry, getLinearSource } from "../sources/registry.js";
@@ -28,6 +29,7 @@ async function main(): Promise<void> {
   await installHookArtifacts();
   const capable = await checkHooksCapability();
   setHooksRuntime({ capable, port });
+  store.setHookTokenReleaser(unregisterHookToken);
 
   await seedPlaybooks();
 
