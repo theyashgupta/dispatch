@@ -26,13 +26,10 @@ async function main(): Promise<void> {
   buildRegistry(config);
 
   const port = config.port ?? DEFAULT_PORT;
+  const statusChannel = config.statusChannel ?? "auto";
   await installHookArtifacts();
   const capable = await checkHooksCapability();
-  setHooksRuntime({
-    capable,
-    port,
-    statusChannel: config.statusChannel ?? "auto",
-  });
+  setHooksRuntime({ capable, port, statusChannel });
   store.setHookTokenReleaser(unregisterHookToken);
 
   await seedPlaybooks();
@@ -56,7 +53,7 @@ async function main(): Promise<void> {
 
     startPoller(config, getLinearSource());
 
-    startMarkerWatcher();
+    startMarkerWatcher(statusChannel);
   });
 }
 

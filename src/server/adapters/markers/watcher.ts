@@ -1,3 +1,4 @@
+import type { StatusChannel } from "../../../shared/types.js";
 import { store } from "../../store/board.store.js";
 import { capturePane, paneSize } from "../tmux.js";
 import { killTtyd, trackedTtydSessions } from "../ttyd.js";
@@ -83,17 +84,26 @@ const captureFailures = new Map<string, number>();
 
 /**
  * Scan one session's visible pane and apply at most ONE decision this tick. This is the I/O SHELL:
- * it owns capture, the lazy `paneSize` fetch, the capture-failure dead-session detector, and the
- * mapping of the pure `decideScan` decision onto `store.*` mutators. All decision logic lives in
- * `scan-decision.ts`; the two per-session baselines (`sessions` flip-back and `agentViews` dot) are
- * threaded through `SessionState` and written back here without ever being merged.
+ * it owns capture, the lazy `paneSize` fetch, the capture-failure dead-session detector, the
+ * per-session channel gate, and the mapping of the pure `decideScan` decision onto `store.*`
+ * mutators. All decision logic lives in `scan-decision.ts`; the two per-session baselines
+ * (`sessions` flip-back and `agentViews` dot) are threaded through `SessionState` and written back
+ * here without ever being merged. The channel gate demotes everything BELOW it — marker scan,
+ * flip-back, and dot pane-diffing — per session, while capture and its 3-strike dead-session
+ * detector above the gate stay unconditional on every channel: capture IS the RESIL-01 probe and
+ * must run for hook-routed sessions too.
+ * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
-async function scanSession(card: {
-  id: string;
-  column: string;
-  tmuxSession?: string;
-  lastMarker?: string;
-}): Promise<void> {
+async function scanSession(
+  card: {
+    id: string;
+    column: string;
+    tmuxSession?: string;
+    lastMarker?: string;
+    hookRoutedAt?: string;
+  },
+  channel: StatusChannel,
+): Promise<void> {
   const session = card.tmuxSession;
   if (!session) return;
 
@@ -121,6 +131,10 @@ async function scanSession(card: {
     }
     return;
   }
+
+  const paneRouted =
+    channel === "pane" || (channel === "auto" && card.hookRoutedAt == null);
+  if (!paneRouted) return;
 
   if (isRecapOverlay(pane)) return;
 
@@ -245,13 +259,16 @@ function reapDeadSessions(): void {
  * live session serially then reaps dead ones, a `scheduleNext` self-rescheduling `setTimeout`
  * (never a fixed-interval timer that could overlap a long tick) with `timer.unref?.()` so it
  * never pins the process, a per-tick try/catch so one failure never kills the loop, and an
- * immediate first run.
+ * immediate first run. `statusChannel` (boot-static, passed as a plain parameter because
+ * adapters must not import services' config-holder) threads to the per-session gate in
+ * scanSession — it demotes marker/flip-back/dot scanning per channel, while capture-failure
+ * dead-session detection and orphaned-ttyd reaping stay unconditional on every channel.
  */
-export function startMarkerWatcher(): void {
+export function startMarkerWatcher(statusChannel: StatusChannel): void {
   async function tick(): Promise<void> {
     try {
       for (const card of store.cardsWithSession()) {
-        await scanSession(card);
+        await scanSession(card, statusChannel);
       }
       reapDeadSessions();
     } catch (err) {

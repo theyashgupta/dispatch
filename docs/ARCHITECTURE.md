@@ -879,6 +879,54 @@ hook-specific exists to make drags win — the precedence the pane channel alrea
 hooks by construction, and any divergence from those shared primitives is where a double-apply
 bug would enter.
 
+**Channel routing — which transport drives status.** The `statusChannel` config key
+(`hooks | pane | auto`, default `auto`) selects the status source. It is BOOT-STATIC: loaded and
+validated once (an invalid value is a StartupError naming the three literals), distributed via
+`HooksRuntime` to services and as a plain `startMarkerWatcher(statusChannel)` parameter to the
+watcher (adapters must not import services), so changing it requires a backend restart and every
+reader is race-free.
+
+**The `hookRoutedAt` latch.** Under `auto`, routing is PER SESSION on the persisted
+`card.hookRoutedAt` latch: stamped by `applyHookEvent` on the session's first authenticated hook
+event of ANY type (in practice the kickoff paste's UserPromptSubmit, seconds after launch), one-way
+within a session, and cleared ONLY via the store's `clearHookToken` chokepoint — every
+session-death path (session lost, resume failure, both cleanup outcomes) flows through it, so a
+relaunch/resume starts hook-silent and re-proves traffic. A hook-silent session (below-floor CLI →
+no injection → no token → nothing can authenticate) never latches and keeps full pane routing
+forever. The field is explicitly NON-SECRET: an ISO timestamp that rides `snapshot()` unredacted,
+unlike `hookToken`.
+
+**The watcher gate seam.** The demotion is one early return in `scanSession`'s I/O shell —
+`paneRouted` is `pane`-mode always, `hooks`-mode never, `auto` per session on the latch — placed
+AFTER the capture try/catch and BEFORE the recap-overlay guard. Everything above the gate is
+unconditional on every channel: capture IS the RESIL-01 dead-session probe (3 failed captures
+~6s → Session lost), and `reapDeadSessions`' orphaned-ttyd teardown runs outside the gate
+entirely. The pure decision core (`scan-decision.ts`, `pane-view.ts`, `parse.ts`) and the replay
+corpus are untouched — the replay harness imports only the pure core, so replay 16/16 is a
+structural property of this seam.
+
+**Two-layer pane suppression.** `statusChannel: "pane"` restores today's scraping exactly through
+two independent guards: (1) the injection gate in `steps.ts`/`resume-session.ts`
+(`runtime?.capable && runtime.statusChannel !== "pane"`) launches sessions byte-identical to the
+pre-hooks argv — no settings, no token, no env — so no hook traffic exists at the source; (2) the
+`applyHookEvent` top guard no-ops straggler sessions injected under `auto`/`hooks` before a config
+flip — zero board mutations, no latch, no stamp. The route still authenticates in pane mode (401
+invalid token, 204 valid): a 401 for a valid token would be a lie and per-turn log noise; HTTP
+status codes are not board behavior.
+
+**The 2s activity throttle.** PostToolUse/Stop events stamp `outputChangedAt` through the
+existing `setOutputChanged` mutator (the dot pipeline is inherited end-to-end; UserPromptSubmit
+never stamps — the user's own typing is not agent output), throttled per card to one stamp per
+2000ms in `hook-events.ts`. The throttle is channel policy and lives in the SERVICE — the store
+stays policy-free (`setOutputChanged`'s JSDoc forbids coalescing there). 2s matches the pane
+watcher's tick, so hook-path dot latency is never worse than the pane path's.
+
+**Accepted residuals.** Under `auto` the seconds-wide [launch → kickoff] window can double-stamp
+the same activity via both channels (two SSE frames, same semantic — cosmetic, self-heals on
+view). Under `hooks`, a hook-silent session gets NO status routing at all — the user's explicit
+mode choice; dead-session detection still covers it. A pathological >1mb PostToolUse payload is
+rejected by the body limit and drops one cosmetic stamp, self-healing on the next event.
+
 ## Do Not Change Contracts
 
 These are seams that refactors must hold **byte/shape-identical**. A change to any of them
