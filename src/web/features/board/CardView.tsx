@@ -373,6 +373,21 @@ export function CardView({
       {card.cleanupWarning != null && card.cleanupWarning.trim() !== "" && (
         <Notice tone="muted">{card.cleanupWarning}</Notice>
       )}
+
+      {card.cleanupBlocked != null && card.cleanupBlocked.length > 0 && (
+        <Notice
+          tone="destructive"
+          icon={
+            <AlertTriangle
+              size={12}
+              strokeWidth={2}
+              aria-hidden="true"
+              style={{ flex: "0 0 auto" }}
+            />
+          }
+          label="Uncommitted work — cleanup blocked"
+        />
+      )}
     </div>
   );
 }

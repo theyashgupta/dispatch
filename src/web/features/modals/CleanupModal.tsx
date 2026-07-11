@@ -5,7 +5,7 @@ import { Modal, type ModalControl } from "../../primitives/Modal.js";
 
 interface CleanupModalProps {
   card: CardModel;
-  onConfirm: () => void;
+  onConfirm: (force: boolean) => void;
   onClose: () => void;
 }
 
@@ -13,10 +13,8 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
   const keepRef = useRef<HTMLButtonElement>(null);
   const modalRef = useRef<ModalControl>(null);
 
-  function handleConfirm() {
-    if (!modalRef.current?.beginImmediateClose()) return;
-    onConfirm();
-  }
+  const blocked = card.cleanupBlocked;
+  const isBlocked = blocked != null && blocked.length > 0;
 
   return (
     <Modal
@@ -45,23 +43,58 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
           >
             Keep workspace
           </Button>
-          <Button variant="primary" onClick={handleConfirm}>
-            Clean up
-          </Button>
+          {isBlocked ? (
+            <Button variant="danger" onClick={() => onConfirm(true)}>
+              Discard uncommitted changes and clean up
+            </Button>
+          ) : (
+            <Button variant="primary" onClick={() => onConfirm(false)}>
+              Clean up
+            </Button>
+          )}
         </div>
       }
     >
-      <div
-        style={{
-          fontFamily: "var(--font-ui)",
-          fontSize: "var(--font-body)",
-          lineHeight: "var(--line-body)",
-          color: "var(--text)",
-        }}
-      >
-        Clean up workspace? Kills the session and removes worktrees; branches
-        are kept.
-      </div>
+      {isBlocked ? (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-xs)",
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-body)",
+            lineHeight: "var(--line-body)",
+          }}
+        >
+          <div
+            style={{
+              color: "var(--destructive)",
+              fontWeight: "var(--weight-semibold)",
+            }}
+          >
+            Uncommitted work would be lost
+          </div>
+          {blocked.map((entry) => (
+            <div key={entry.repo} style={{ color: "var(--text)" }}>
+              {`${entry.repo}: ${entry.count} uncommitted file${
+                entry.count === 1 ? "" : "s"
+              }`}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-body)",
+            lineHeight: "var(--line-body)",
+            color: "var(--text)",
+          }}
+        >
+          Clean up workspace? Kills the session and removes worktrees; branches
+          are kept.
+        </div>
+      )}
     </Modal>
   );
 }

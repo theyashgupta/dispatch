@@ -5,7 +5,7 @@ import {
   type Ref,
 } from "react";
 
-type ButtonVariant = "secondary" | "primary";
+type ButtonVariant = "secondary" | "primary" | "danger";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -44,6 +44,21 @@ const primaryStyle: CSSProperties = {
   outline: "none",
 };
 
+const dangerStyle: CSSProperties = {
+  height: "32px",
+  padding: "0 var(--space-lg)",
+  background: "var(--destructive)",
+  border: "none",
+  borderRadius: "var(--radius)",
+  color: "#ffffff",
+  fontFamily: "var(--font-ui)",
+  fontSize: "var(--font-label)",
+  fontWeight: "var(--weight-semibold)",
+  lineHeight: "var(--line-label)",
+  cursor: "pointer",
+  outline: "none",
+};
+
 export function Button({
   variant = "secondary",
   style,
@@ -61,7 +76,12 @@ export function Button({
     setHovered(false);
     setFocused(false);
   }
-  const base = variant === "primary" ? primaryStyle : secondaryStyle;
+  const base =
+    variant === "primary"
+      ? primaryStyle
+      : variant === "danger"
+        ? dangerStyle
+        : secondaryStyle;
   const composed: CSSProperties = {
     ...base,
     background:

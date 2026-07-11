@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useBoardStream } from "./hooks/useBoardStream.js";
 import { useTransitionNotifications } from "./hooks/useTransitionNotifications.js";
 import { SyncStrip } from "./features/sync/SyncStrip.js";
@@ -36,6 +36,17 @@ export function App() {
   const [cleanupCardId, setCleanupCardId] = useState<string | null>(null);
   const cleanupCard =
     board?.cards.find((card) => card.id === cleanupCardId) ?? null;
+
+  const cleanupBlocked = cleanupCard?.cleanupBlocked;
+  const cleanupResolved =
+    cleanupCard != null &&
+    (cleanupBlocked == null || cleanupBlocked.length === 0) &&
+    ((!cleanupCard.tmuxSession && !cleanupCard.workspacePath) ||
+      (cleanupCard.cleanupWarning != null &&
+        cleanupCard.cleanupWarning.trim() !== ""));
+  useEffect(() => {
+    if (cleanupResolved) setCleanupCardId(null);
+  }, [cleanupResolved]);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -139,11 +150,10 @@ export function App() {
         <CleanupModal
           key={cleanupCardId}
           card={cleanupCard}
-          onConfirm={() => {
-            void cleanupCardApi(cleanupCardId!).catch((err) => {
+          onConfirm={(force) => {
+            void cleanupCardApi(cleanupCardId!, force).catch((err) => {
               console.error("cleanupCard failed", err);
             });
-            setCleanupCardId(null);
           }}
           onClose={() => setCleanupCardId(null)}
         />
