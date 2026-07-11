@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Dispatch is shaped by daily use and stays deliberately small. The most welcome ideas right now
-        are Linux support, other ticket sources, and other agent CLIs — but pitch anything.
+        are Linux support, other ticket sources, and other agent CLIs, but pitch anything.
   - type: textarea
     id: problem
     attributes:
@@ -36,7 +36,7 @@ body:
       options:
         - label: I searched existing issues and the roadmap and this isn't already tracked.
           required: true
-        - label: This fits "one user, one machine, localhost only" — it's not asking Dispatch to become multi-user or hosted.
+        - label: This fits "one user, one machine, localhost only" and isn't asking Dispatch to become multi-user or hosted.
           required: false
   - type: checkboxes
     id: contribute

@@ -7,7 +7,7 @@
 ## How I verified
 
 <!--
-Dispatch doesn't have a test suite yet — for now, behavior is pinned by the check gate and proven
+Dispatch doesn't have a test suite yet. For now, behavior is pinned by the check gate and proven
 against the running app, so tell us how you know this works. Adding tests is welcome; if this PR does,
 say how to run them. Delete lines that don't apply.
 -->
