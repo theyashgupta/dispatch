@@ -3,17 +3,17 @@ import type {
   FilterCapabilities,
   FilterOption,
   SourceFilters,
-} from "../../shared/types.js";
+} from "../../../shared/types.js";
 import {
   getLinearFilters,
   getLinearOptions,
   previewLinearFilters,
   saveLinearFilters,
-} from "../lib/api.js";
-import { Button } from "../primitives/Button.js";
-import { Field } from "../primitives/Field.js";
-import { Modal, type ModalControl } from "../primitives/Modal.js";
-import { Notice } from "../primitives/Notice.js";
+} from "../../lib/api.js";
+import { Button } from "../../primitives/Button.js";
+import { Field } from "../../primitives/Field.js";
+import { Modal, type ModalControl } from "../../primitives/Modal.js";
+import { Notice } from "../../primitives/Notice.js";
 import { MultiSelect } from "./MultiSelect.js";
 
 type MultiDim = "assignees" | "projects" | "teams";

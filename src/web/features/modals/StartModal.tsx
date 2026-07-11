@@ -4,7 +4,7 @@ import type {
   Card as CardModel,
   DiscoveredRepo,
   Playbook,
-} from "../../shared/types.js";
+} from "../../../shared/types.js";
 import {
   addWorkspaceFolder,
   discoverFolder,
@@ -13,12 +13,12 @@ import {
   removeWorkspaceFolder,
   sendKickoff,
   startCard,
-} from "../lib/api.js";
-import { Button } from "../primitives/Button.js";
-import { Field } from "../primitives/Field.js";
-import { IconButton } from "../primitives/IconButton.js";
-import { Modal, type ModalControl } from "../primitives/Modal.js";
-import { Notice } from "../primitives/Notice.js";
+} from "../../lib/api.js";
+import { Button } from "../../primitives/Button.js";
+import { Field } from "../../primitives/Field.js";
+import { IconButton } from "../../primitives/IconButton.js";
+import { Modal, type ModalControl } from "../../primitives/Modal.js";
+import { Notice } from "../../primitives/Notice.js";
 
 interface StartModalProps {
   card: CardModel;

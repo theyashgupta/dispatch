@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Settings } from "lucide-react";
-import type { ConnectionStatus } from "../hooks/useBoardStream.js";
-import { Glyph } from "../primitives/Glyph.js";
-import { IconButton } from "../primitives/IconButton.js";
+import type { ConnectionStatus } from "../../hooks/useBoardStream.js";
+import { Glyph } from "../../primitives/Glyph.js";
+import { IconButton } from "../../primitives/IconButton.js";
 
 interface SyncStripProps {
   syncedAt: string | null;

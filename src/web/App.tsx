@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { useBoardStream } from "./hooks/useBoardStream.js";
 import { useTransitionNotifications } from "./hooks/useTransitionNotifications.js";
-import { SyncStrip } from "./features/SyncStrip.js";
+import { SyncStrip } from "./features/sync/SyncStrip.js";
 import { Glyph } from "./primitives/Glyph.js";
 import { Board } from "./features/board/Board.js";
 import { DetailPanel } from "./features/detail/DetailPanel.js";
-import { StartModal } from "./features/StartModal.js";
-import { CleanupModal } from "./features/CleanupModal.js";
-import { SettingsModal } from "./features/SettingsModal.js";
+import { StartModal } from "./features/modals/StartModal.js";
+import { CleanupModal } from "./features/modals/CleanupModal.js";
+import { SettingsModal } from "./features/modals/SettingsModal.js";
 import { cleanupCard as cleanupCardApi } from "./lib/api.js";
 import type { StartRequest } from "./lib/start-request.js";
 

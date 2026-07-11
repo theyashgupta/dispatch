@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { ChevronDown } from "lucide-react";
-import type { FilterOption } from "../../shared/types.js";
+import type { FilterOption } from "../../../shared/types.js";
 
 const focusRing = (on: boolean): string =>
   on ? "0 0 0 2px var(--accent)" : "none";

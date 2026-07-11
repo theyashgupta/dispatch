@@ -1,7 +1,7 @@
 import { useRef } from "react";
-import type { Card as CardModel } from "../../shared/types.js";
-import { Button } from "../primitives/Button.js";
-import { Modal, type ModalControl } from "../primitives/Modal.js";
+import type { Card as CardModel } from "../../../shared/types.js";
+import { Button } from "../../primitives/Button.js";
+import { Modal, type ModalControl } from "../../primitives/Modal.js";
 
 interface CleanupModalProps {
   card: CardModel;
