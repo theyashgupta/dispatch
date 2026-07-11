@@ -108,8 +108,9 @@ class BoardStore extends EventEmitter {
    * so secrets reach disk but never an SSE frame. Errors are caught inside the chain
    * so one failed step can never break the queue for subsequent mutations. Before the
    * primary write, an hourly best-effort rolling backup of the last-known-good on-disk
-   * board.json is rotated (rotateBackups is itself never-throw, so it can never block or
-   * delay the write or the broadcast).
+   * board.json is rotated (rotateBackups is itself never-throw, so a backup failure can
+   * never fail the write or the broadcast; on the hourly tick it adds a bounded handful of
+   * local fs ops ahead of the write, and is a no-op the rest of the hour).
    * @see docs/ARCHITECTURE.md#single-writer-store
    */
   private enqueue(mutator: () => void): Promise<void> {
