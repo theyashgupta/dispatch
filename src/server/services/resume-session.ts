@@ -41,6 +41,9 @@ export async function resumeSession(cardId: string): Promise<void> {
     if (!card?.workspacePath) return;
     await store.clearResumeError(cardId);
     const session = "dsp-" + card.identifier;
+    const resumeArgs = card.claudeSessionId
+      ? ["--resume", card.claudeSessionId]
+      : ["--continue"];
 
     if (await hasSession(`=${session}`)) {
       if (card.hookToken) registerHookToken(card.hookToken, cardId);
@@ -64,7 +67,7 @@ export async function resumeSession(cardId: string): Promise<void> {
         card.workspacePath,
         [
           claudePath,
-          "--continue",
+          ...resumeArgs,
           "--settings",
           HOOK_SETTINGS_PATH,
           "--dangerously-skip-permissions",
@@ -79,7 +82,7 @@ export async function resumeSession(cardId: string): Promise<void> {
       await store.clearHookChannel(cardId);
       await newSession(session, card.workspacePath, [
         claudePath,
-        "--continue",
+        ...resumeArgs,
         "--dangerously-skip-permissions",
       ]);
     }
