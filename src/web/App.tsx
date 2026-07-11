@@ -5,10 +5,11 @@ import { SyncStrip } from "./features/SyncStrip.js";
 import { Glyph } from "./primitives/Glyph.js";
 import { Board } from "./features/Board.js";
 import { DetailPanel } from "./features/DetailPanel.js";
-import { StartModal, type StartRequest } from "./features/StartModal.js";
+import { StartModal } from "./features/StartModal.js";
 import { CleanupModal } from "./features/CleanupModal.js";
 import { SettingsModal } from "./features/SettingsModal.js";
 import { cleanupCard as cleanupCardApi } from "./lib/api.js";
+import type { StartRequest } from "./lib/start-request.js";
 
 export function App() {
   const { board, connection } = useBoardStream();

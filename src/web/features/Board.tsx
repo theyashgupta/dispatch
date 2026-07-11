@@ -16,7 +16,7 @@ import type {
 } from "../../shared/types.js";
 import { Column } from "./Column.js";
 import { CardView } from "./CardView.js";
-import type { StartRequest } from "./StartModal.js";
+import type { StartRequest } from "../lib/start-request.js";
 import { useLastOpened } from "../hooks/useUnseenActivity.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { moveCard } from "../lib/api.js";

@@ -20,12 +20,6 @@ import { IconButton } from "../primitives/IconButton.js";
 import { Modal, type ModalControl } from "../primitives/Modal.js";
 import { Notice } from "../primitives/Notice.js";
 
-export interface StartRequest {
-  cardId: string;
-  targetColumn: "in_planning" | "in_progress";
-  variant: "full" | "handoff";
-}
-
 interface StartModalProps {
   card: CardModel;
   stage: "planning" | "implementation";
