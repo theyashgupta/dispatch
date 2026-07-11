@@ -67,8 +67,7 @@ async function applyPromptSubmit(cardId: string): Promise<void> {
 export async function applyHookEvent(
   cardId: string,
   body:
-    | { hook_event_name?: unknown; last_assistant_message?: unknown }
-    | undefined,
+    { hook_event_name?: unknown; last_assistant_message?: unknown } | undefined,
 ): Promise<void> {
   if (getHooksRuntime()?.statusChannel === "pane") return;
 
