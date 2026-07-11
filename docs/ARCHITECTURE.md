@@ -33,6 +33,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [SSE Transport](#sse-transport)
   - [Startup Preflight](#startup-preflight)
   - [Cleanup Lifecycle](#cleanup-lifecycle)
+  - [Hooks Status Channel](#hooks-status-channel)
 - [Do Not Change Contracts](#do-not-change-contracts)
 - [Security Threat Model](#security-threat-model)
 - [Known Residuals](#known-residuals)
@@ -825,6 +826,51 @@ and no-op tolerant so a re-run after a partial failure is safe:
 workspace folder are removed, but the underlying git branches ALWAYS survive so the work is never
 lost (`T-08b-05`). Any partial failure across the steps records the muted `cleanupWarning`; a fully
 clean run calls `finishCleanup`.
+
+### Hooks Status Channel
+
+Claude Code hook events are a SECOND transport into the same marker protocol: a per-session hook
+script POSTs `Stop` and `UserPromptSubmit` payloads to the loopback-only `/api/hook/claude` route
+(`routes/hooks.route.ts`), which resolves the per-session token and delegates to
+`services/hook-events.ts`. The channel changes the transport, never the contract — the kickoff
+wording, `MARKER_RE`, and the markers replay corpus stay frozen.
+
+**Edge-triggered vs level-triggered — how the two channels compose.** The hook channel is
+EDGE-triggered: one `Stop` = one event, delivered once, never re-observed. The pane watcher is
+LEVEL-triggered: it re-scans the visible pane every 2s and needs `lastMarker` dedup precisely
+because it re-observes the same text. The two compose safely through `lastMarker`: whichever
+channel applies a marker first writes the dedup key, and the other channel's view of the same
+logical marker resolves to the same or a prefix-related key (the prefix rule in
+[Marker Protocol](#marker-protocol)) and is treated as already consumed. Because the hook path is
+edge-triggered, NO dedup heuristics live on it — the dedup burden stays wholly on the
+level-triggered watcher, which already carries it.
+
+**The markerKey symmetry rule.** The hook path MUST write
+`markerKey(parseLastMarker(last_assistant_message))` — the exact `kind + " " + reason` format from
+`adapters/markers/parse.ts` — as `applyMarker`'s dedup key. Any hooks-specific key format (a
+re-rolled regex, a different separator, a truncated reason) breaks `sameMarkerKey`'s prefix
+comparison and the untouched watcher re-fires every hook-applied marker on its next 2s tick.
+Reusing `parseLastMarker` also inherits the kickoff-placeholder guard and last-match-wins for
+free; the hook payload's message is untruncated, so the hook-side key is always the fullest form
+the prefix rule can meet.
+
+**Token is the auth; identity derives only from the token.** Any local process can reach the
+loopback port, so the route's mandatory `x-dispatch-token` header — resolved against the in-memory
+token→card registry (`services/hook-tokens.ts`) — is the real authentication; the shared loopback
+gate stays in front as free defense-in-depth against DNS rebinding. A missing or unknown token is
+a 401 with ZERO store calls. Card identity comes EXCLUSIVELY from the token lookup: any card or
+session id claimed in the request body is ignored, so a valid token for one card can never move
+another. The registry is rebuilt at boot from persisted `card.hookToken` for cards whose session
+is still live (`bootstrap/reconcile.ts`), because sessions deliberately outlive backend restarts
+and a memory-only map would silently 401 every live session's POSTs. Tokens are never logged; the
+hook path's logging is content-free end to end.
+
+**Manual drag precedence is the SAME mechanism on both channels.** Hook events mutate the board
+ONLY through `applyMarker` and `flipBack`, whose column checks run INSIDE the single-writer queue;
+`moveCardManual` leaves `lastMarker` in place so a drag consumes the current marker. Nothing
+hook-specific exists to make drags win — the precedence the pane channel already had holds for
+hooks by construction, and any divergence from those shared primitives is where a double-apply
+bug would enter.
 
 ## Do Not Change Contracts
 

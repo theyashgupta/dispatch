@@ -27,3 +27,13 @@ export function mintHookToken(cardId: string, previousToken?: string): string {
 export function registerHookToken(token: string, cardId: string): void {
   tokensByValue.set(token, cardId);
 }
+
+/**
+ * Resolve a presented token to its card id, or undefined for an unknown token. The token IS
+ * the hook route's auth: card identity derives exclusively from this lookup, never from ids
+ * claimed in a request body. Never logs.
+ * @see docs/ARCHITECTURE.md#hooks-status-channel
+ */
+export function resolveHookToken(token: string): string | undefined {
+  return tokensByValue.get(token);
+}
