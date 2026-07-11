@@ -46,6 +46,13 @@ export interface Card {
   branch?: string;
   /** tmux session name hosting the claude REPL. */
   tmuxSession?: string;
+  /**
+   * Per-session hook-auth secret minted at launch/resume. Persisted (not memory-only) because
+   * sessions deliberately survive backend restarts — a tsx-watch reload rebuilds the in-memory
+   * token registry from this field, so live sessions' hook POSTs keep authenticating. At rest it
+   * is protected by `~/.dispatch` mode 700; cleared whenever the session fields are cleared.
+   */
+  hookToken?: string;
   /** Port of the per-session ttyd instance. */
   ttydPort?: number;
   /**

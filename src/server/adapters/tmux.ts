@@ -46,10 +46,13 @@ export async function listSessions(): Promise<Set<string>> {
 
 /**
  * Create a detached session running `commandArgv` in `cwd`:
- *   `tmux new-session -d -s <name> -c <cwd> -x 200 -y 50 <...commandArgv>`
+ *   `tmux new-session -d -s <name> -c <cwd> -x 200 -y 50 [-e KEY=VALUE ...] <...commandArgv>`
  * The explicit -x/-y geometry is required for sane capture-pane output BEFORE any client
  * attaches (probe-verified — without it the pane has a tiny default size and readiness
- * detection is unreliable). Trailing args become the window command.
+ * detection is unreliable). Trailing args become the window command. Optional `env` entries
+ * become `-e KEY=VALUE` pairs (tmux ≥3.2, probe-verified on 3.6a) placed after the geometry
+ * and before the command, so per-session values reach the spawned process without ever
+ * appearing in its argv.
  * @remarks NEW-01: the `-x 200 -y 50` geometry is load-bearing for readiness/marker parsing.
  * @see docs/ARCHITECTURE.md#tmux-invocations
  */
@@ -57,7 +60,12 @@ export async function newSession(
   name: string,
   cwd: string,
   commandArgv: string[],
+  env?: Record<string, string>,
 ): Promise<void> {
+  const envArgs = Object.entries(env ?? {}).flatMap(([key, value]) => [
+    "-e",
+    `${key}=${value}`,
+  ]);
   await run("tmux", [
     "new-session",
     "-d",
@@ -69,6 +77,7 @@ export async function newSession(
     "200",
     "-y",
     "50",
+    ...envArgs,
     ...commandArgv,
   ]);
 }

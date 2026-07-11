@@ -341,6 +341,19 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Persist (or clear) the card's per-session hook-auth token (setStatusReason precedent: a
+   * single-field enqueue). Written BEFORE the session spawns so a hook POST arriving as early
+   * as the kickoff paste finds the token already durable; the restart-time registry rebuild
+   * reads it back. SECURITY: the token value is never logged.
+   */
+  setHookToken(id: string, token: string | undefined): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) card.hookToken = token;
+    });
+  }
+
+  /**
    * Record the ISO timestamp of the last observed ⏺-view divergence for a live session
    * (ATTN-02 unseen-activity dot). Mirrors setStatusReason exactly: a single-field enqueue.
    * This is a SEPARATE logical event from a column move — it does NOT touch `column`, so it
@@ -465,7 +478,8 @@ class BoardStore extends EventEmitter {
    * cardsWithSession() (freeing the watcher) and makes the DetailPanel terminal region disappear
    * (Pitfall 5); the session name stays derivable as `dsp-` + identifier for restart. Called at
    * BOTH boot (reconcileSessions) and RUNTIME (Plan 02's watcher dead-session detector, per tick).
-   * No-op if the id is unknown. SECURITY: never logs card contents.
+   * `hookToken` is cleared with the session — a card without a live session must not keep a
+   * live secret. No-op if the id is unknown. SECURITY: never logs card contents.
    */
   markSessionLost(id: string): Promise<void> {
     return this.enqueue(() => {
@@ -475,6 +489,7 @@ class BoardStore extends EventEmitter {
         card.tmuxSession = undefined;
         card.ttydPort = undefined;
         card.terminalError = null;
+        card.hookToken = undefined;
       }
     });
   }
@@ -700,7 +715,8 @@ class BoardStore extends EventEmitter {
    * SessionLostSection renders. The SSE frame this broadcasts is the ONLY failure signal the
    * client ever gets — the route's 202 resolved before the saga ran — so without this write the
    * panel's "Resuming…" state would be permanent. The copy is a constant, so no tmux/claude
-   * stderr or pane text can leak (SECURITY, matches setStartError). No-op if the id is unknown.
+   * stderr or pane text can leak (SECURITY, matches setStartError). `hookToken` is cleared with
+   * the session fields. No-op if the id is unknown.
    * @see docs/ARCHITECTURE.md#in-review-lifecycle
    */
   recordResumeFailure(id: string): Promise<void> {
@@ -711,6 +727,7 @@ class BoardStore extends EventEmitter {
         card.tmuxSession = undefined;
         card.ttydPort = undefined;
         card.terminalError = null;
+        card.hookToken = undefined;
         card.resumeError =
           "Resume failed — the worktree may be gone. Use Restart to begin a fresh session in the same branch.";
       }
@@ -726,7 +743,7 @@ class BoardStore extends EventEmitter {
    * and make the DetailPanel render the destructive "Terminal disconnected" block on a card whose
    * cleanup should surface only this muted warning. `terminalError` is nulled for the same reason;
    * only the worktree/folder outcome is uncertain on this path, so `workspacePath` is left as-is.
-   * Column untouched. No-op if the id is unknown.
+   * `hookToken` is cleared with the session fields. Column untouched. No-op if the id is unknown.
    */
   recordCleanupWarning(id: string, warning: string): Promise<void> {
     return this.enqueue(() => {
@@ -736,6 +753,7 @@ class BoardStore extends EventEmitter {
         card.tmuxSession = undefined;
         card.ttydPort = undefined;
         card.terminalError = null;
+        card.hookToken = undefined;
       }
     });
   }
@@ -744,9 +762,9 @@ class BoardStore extends EventEmitter {
    * Successful Done-cleanup quiet-state clear (LIFE-01) in ONE atomic mutation (markSessionLost /
    * completeStart precedent — a split write would broadcast a torn frame). Clears the session
    * fields the teardown removed AND neutralizes any lingering/racing error chrome so the cleaned
-   * Done card reads quietly: `tmuxSession`/`ttydPort`/`workspacePath`/`cleanupWarning` undefined,
-   * `sessionLost` false, `terminalError` null. KEEPS `branch` (branches always survive per lock),
-   * `outputChangedAt`, and `lastMarker`. No-op if the id is unknown.
+   * Done card reads quietly: `tmuxSession`/`ttydPort`/`workspacePath`/`cleanupWarning`/`hookToken`
+   * undefined, `sessionLost` false, `terminalError` null. KEEPS `branch` (branches always survive
+   * per lock), `outputChangedAt`, and `lastMarker`. No-op if the id is unknown.
    */
   finishCleanup(id: string): Promise<void> {
     return this.enqueue(() => {
@@ -758,6 +776,7 @@ class BoardStore extends EventEmitter {
         c.sessionLost = false;
         c.terminalError = null;
         c.cleanupWarning = undefined;
+        c.hookToken = undefined;
       }
     });
   }
