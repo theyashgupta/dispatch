@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { Card as CardModel } from "../../shared/types.js";
-import { ensureTerminal } from "../lib/api.js";
-import { stampLastOpened } from "../hooks/useUnseenActivity.js";
+import type { Card as CardModel } from "../../../shared/types.js";
+import { ensureTerminal } from "../../lib/api.js";
+import { stampLastOpened } from "../../hooks/useUnseenActivity.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { ReferenceBlocks } from "./ReferenceBlocks.js";
 import { SessionLostSection } from "./SessionLostSection.js";

@@ -1,9 +1,9 @@
 import { AlertTriangle, RotateCw } from "lucide-react";
-import type { Card as CardModel } from "../../shared/types.js";
-import { cleanupCard } from "../lib/api.js";
-import { Button } from "../primitives/Button.js";
-import { Markdown } from "../primitives/Markdown.js";
-import { Notice } from "../primitives/Notice.js";
+import type { Card as CardModel } from "../../../shared/types.js";
+import { cleanupCard } from "../../lib/api.js";
+import { Button } from "../../primitives/Button.js";
+import { Markdown } from "../../primitives/Markdown.js";
+import { Notice } from "../../primitives/Notice.js";
 
 interface ReferenceBlocksProps {
   card: CardModel | null;

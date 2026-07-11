@@ -1,8 +1,8 @@
 import { AlertTriangle, RotateCw } from "lucide-react";
-import type { Card as CardModel } from "../../shared/types.js";
-import { ensureTerminal } from "../lib/api.js";
-import { Button } from "../primitives/Button.js";
-import { Notice } from "../primitives/Notice.js";
+import type { Card as CardModel } from "../../../shared/types.js";
+import { ensureTerminal } from "../../lib/api.js";
+import { Button } from "../../primitives/Button.js";
+import { Notice } from "../../primitives/Notice.js";
 
 interface TerminalRegionProps {
   card: CardModel;

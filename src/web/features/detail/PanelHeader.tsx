@@ -5,11 +5,11 @@ import {
   Minimize2,
   X,
 } from "lucide-react";
-import type { Card as CardModel } from "../../shared/types.js";
-import { openEditor } from "../lib/api.js";
-import { Button } from "../primitives/Button.js";
-import { Field } from "../primitives/Field.js";
-import { IconButton } from "../primitives/IconButton.js";
+import type { Card as CardModel } from "../../../shared/types.js";
+import { openEditor } from "../../lib/api.js";
+import { Button } from "../../primitives/Button.js";
+import { Field } from "../../primitives/Field.js";
+import { IconButton } from "../../primitives/IconButton.js";
 
 interface PanelHeaderProps {
   card: CardModel | null;

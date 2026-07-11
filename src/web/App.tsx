@@ -4,7 +4,7 @@ import { useTransitionNotifications } from "./hooks/useTransitionNotifications.j
 import { SyncStrip } from "./features/SyncStrip.js";
 import { Glyph } from "./primitives/Glyph.js";
 import { Board } from "./features/board/Board.js";
-import { DetailPanel } from "./features/DetailPanel.js";
+import { DetailPanel } from "./features/detail/DetailPanel.js";
 import { StartModal } from "./features/StartModal.js";
 import { CleanupModal } from "./features/CleanupModal.js";
 import { SettingsModal } from "./features/SettingsModal.js";

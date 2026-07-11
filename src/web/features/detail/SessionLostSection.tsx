@@ -1,9 +1,9 @@
 import { AlertTriangle, Play, RotateCw } from "lucide-react";
-import type { Card as CardModel } from "../../shared/types.js";
-import { startCard } from "../lib/api.js";
-import { useResumeFeedback } from "../hooks/useResumeFeedback.js";
-import { Button } from "../primitives/Button.js";
-import { Notice } from "../primitives/Notice.js";
+import type { Card as CardModel } from "../../../shared/types.js";
+import { startCard } from "../../lib/api.js";
+import { useResumeFeedback } from "../../hooks/useResumeFeedback.js";
+import { Button } from "../../primitives/Button.js";
+import { Notice } from "../../primitives/Notice.js";
 
 interface SessionLostSectionProps {
   card: CardModel;
