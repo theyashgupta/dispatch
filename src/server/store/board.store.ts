@@ -12,6 +12,7 @@ import type {
   StartError,
   TerminalError,
 } from "../../shared/types.js";
+import { recoverFromBackups, rotateBackups } from "./board-backups.js";
 import { reconcile } from "./mapping.js";
 
 const BOARD_DIR = path.join(os.homedir(), ".dispatch");
@@ -105,13 +106,17 @@ class BoardStore extends EventEmitter {
    * hook tokens) and simply retried by the next mutation's write. The persist writes
    * the FULL snapshot; the broadcast emits the REDACTED wire snapshot (snapshot()),
    * so secrets reach disk but never an SSE frame. Errors are caught inside the chain
-   * so one failed step can never break the queue for subsequent mutations.
+   * so one failed step can never break the queue for subsequent mutations. Before the
+   * primary write, an hourly best-effort rolling backup of the last-known-good on-disk
+   * board.json is rotated (rotateBackups is itself never-throw, so it can never block or
+   * delay the write or the broadcast).
    * @see docs/ARCHITECTURE.md#single-writer-store
    */
   private enqueue(mutator: () => void): Promise<void> {
     this.queue = this.queue
       .then(async () => {
         mutator();
+        await rotateBackups(BOARD_PATH);
         try {
           await writeFileAtomic(
             BOARD_PATH,
@@ -132,59 +137,101 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Load board.json into the Map if present. Tolerates a missing or corrupt file by
-   * starting empty (and warning) — never throws, so a bad file can't block startup.
+   * Load board.json into the Map. A missing file (ENOENT) starts a fresh empty board — the
+   * backup chain is deliberately NOT walked. Any other read error, or an unparseable primary,
+   * walks the rolling backup chain and recovers the most recent valid snapshot; only when the
+   * primary and every backup fail does the board start empty (always with a warning, never
+   * silently). Never throws, so a bad file can't block startup.
+   * @remarks A corrupt primary is renamed to `board.json.corrupt` before recovery and, per the
+   * locked no-boot-writeback decision, no fresh board.json is written until the next mutation.
+   * A second crash inside that window would see board.json absent (ENOENT) and start fresh; the
+   * ~60s poller closes it by persisting the recovered state, and the `.bak.*` / `.corrupt` files
+   * survive on disk for manual recovery (accepted residual, see RESEARCH.md Pitfall 5).
    */
   async load(): Promise<void> {
     let raw: string;
     try {
       raw = await fs.promises.readFile(BOARD_PATH, "utf8");
-    } catch {
-      console.log(
-        `[store] no board.json at ${BOARD_PATH} — starting with an empty board.`,
-      );
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        console.log(
+          `[store] no board.json at ${BOARD_PATH} — starting with an empty board.`,
+        );
+        return;
+      }
+      await this.recoverOrEmpty();
       return;
     }
     try {
       const parsed = JSON.parse(raw) as Partial<BoardSnapshot>;
-      const loaded = Array.isArray(parsed.cards) ? parsed.cards : [];
-      this.cards.clear();
-      for (const card of loaded) {
-        if (card && typeof card.id === "string") {
-          if (card.provisioningStep != null) {
-            card.startError = {
-              step: "interrupted",
-              stderr:
-                "The server restarted while this start was still provisioning. Any partially-created worktrees or session were left in place — Retry to reconcile and continue.",
-              variant: "generic",
-            };
-            card.provisioningStep = null;
-          }
-          card.ttydPort = undefined;
-          card.terminalError = null;
-          this.cards.set(card.id, card);
-        }
-      }
-      this.syncedAt =
-        typeof parsed.syncedAt === "string" ? parsed.syncedAt : null;
-      this.workspaceFolders = Array.isArray(parsed.workspaceFolders)
-        ? parsed.workspaceFolders
-        : [];
-      this.lastUsedFolder =
-        typeof parsed.lastUsed === "string" ? parsed.lastUsed : null;
+      this.hydrateFromParsed(parsed);
       console.log(
         `[store] loaded ${this.cards.size} card(s) from ${BOARD_PATH}.`,
       );
     } catch (err) {
       console.warn(
-        `[store] board.json at ${BOARD_PATH} is unparseable — starting empty:`,
+        `[store] board.json at ${BOARD_PATH} is unparseable — walking the backup chain:`,
         (err as Error).message,
       );
-      this.cards.clear();
-      this.syncedAt = null;
-      this.workspaceFolders = [];
-      this.lastUsedFolder = null;
+      try {
+        await fs.promises.rename(BOARD_PATH, `${BOARD_PATH}.corrupt`);
+      } catch {}
+      await this.recoverOrEmpty();
     }
+  }
+
+  /**
+   * Walk the rolling backup chain and hydrate from the first valid snapshot, or clear to an empty
+   * board (with a warning — never silent) when the primary and all backups are unparseable.
+   * recoverFromBackups already logged the file-named recovery warning on success.
+   */
+  private async recoverOrEmpty(): Promise<void> {
+    const recovered = await recoverFromBackups(BOARD_PATH);
+    if (recovered) {
+      this.hydrateFromParsed(recovered);
+      return;
+    }
+    console.warn(
+      `[store] board.json at ${BOARD_PATH} and all backups were unreadable/unparseable — starting with an empty board.`,
+    );
+    this.cards.clear();
+    this.syncedAt = null;
+    this.workspaceFolders = [];
+    this.lastUsedFolder = null;
+  }
+
+  /**
+   * Apply a parsed snapshot to the in-memory Map, shared by the healthy-load and backup-recovery
+   * paths so a recovered board hydrates byte-for-byte identically to a healthy one: rebuild the
+   * cards Map, rewrite any interrupted in-flight provisioning into a retryable startError, reset
+   * the transient ttydPort/terminalError, and default syncedAt / workspaceFolders / lastUsed.
+   */
+  private hydrateFromParsed(parsed: Partial<BoardSnapshot>): void {
+    const loaded = Array.isArray(parsed.cards) ? parsed.cards : [];
+    this.cards.clear();
+    for (const card of loaded) {
+      if (card && typeof card.id === "string") {
+        if (card.provisioningStep != null) {
+          card.startError = {
+            step: "interrupted",
+            stderr:
+              "The server restarted while this start was still provisioning. Any partially-created worktrees or session were left in place — Retry to reconcile and continue.",
+            variant: "generic",
+          };
+          card.provisioningStep = null;
+        }
+        card.ttydPort = undefined;
+        card.terminalError = null;
+        this.cards.set(card.id, card);
+      }
+    }
+    this.syncedAt =
+      typeof parsed.syncedAt === "string" ? parsed.syncedAt : null;
+    this.workspaceFolders = Array.isArray(parsed.workspaceFolders)
+      ? parsed.workspaceFolders
+      : [];
+    this.lastUsedFolder =
+      typeof parsed.lastUsed === "string" ? parsed.lastUsed : null;
   }
 
   /**
