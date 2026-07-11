@@ -7,8 +7,9 @@
 ## How I verified
 
 <!--
-Dispatch has no unit tests by design — behavior is pinned by the check gate and proven against the
-running app. Tell us how you know this works. Delete lines that don't apply.
+Dispatch doesn't have a test suite yet — for now, behavior is pinned by the check gate and proven
+against the running app, so tell us how you know this works. Adding tests is welcome; if this PR does,
+say how to run them. Delete lines that don't apply.
 -->
 
 - [ ] `npm run check` passes locally (format, lint, typecheck, deadcode, replay-gate)

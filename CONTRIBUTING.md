@@ -11,6 +11,7 @@ the [MIT License](LICENSE).
 - **File a bug.** Use the bug report form. A reliable repro is worth more than anything else.
 - **Suggest a feature.** Use the feature form, or float it in [Discussions](https://github.com/theyashgupta/dispatch/discussions) first if it's open-ended.
 - **Send a PR.** Small and focused merges fastest. For anything large, open an issue first so we agree on the shape before you build it.
+- **Add tests.** Dispatch has no test suite yet and wants one. Unit and end-to-end tests are wide-open, welcome contributions — pick any module and start.
 
 ## Dev setup
 
@@ -48,10 +49,11 @@ It runs, in order:
 
 CI runs the same command on every PR. A green `npm run check` locally means a green CI run.
 
-## How we verify — there are no unit tests
+## How we verify today
 
-This is deliberate, and it changes what a good PR looks like. Instead of unit test files, behavior is
-pinned by:
+Dispatch doesn't have a test suite yet. The focus so far has been getting the core to production
+quality, so tests haven't been written — but they're wanted, and adding them is one of the most useful
+contributions you can make. Until that suite exists, behavior is held in place by:
 
 - **The replay gate** — 16 recorded watcher fixtures (`scripts/replay-fixtures/`) diffed byte-for-byte
   against their golden decisions. This is what catches a silent watcher regression.
@@ -61,9 +63,13 @@ pinned by:
 - **The running app** — the pieces that matter (tmux, ttyd, real Claude sessions) are exercised by
   actually running Dispatch.
 
-So a PR proves itself two ways: `npm run check` is green, **and** you've run the change against the live
-app and can describe what you saw. The PR template asks for both. Don't add a test framework or unit
-test files — that's not the model here.
+So today a PR proves itself two ways: `npm run check` is green, **and** you've run the change against
+the live app and can describe what you saw. The PR template asks for both.
+
+**Adding tests?** Even better. There's no runner wired up yet, so a test PR can bring its own — pick a
+framework that fits (Vitest pairs naturally with this Vite/TypeScript stack), add the dev dependency and
+an `npm test` script, and note how to run it in the PR. Start with whatever module you know best; small
+focused test PRs are easier to review than a sweeping one.
 
 ### If you change watcher decision logic
 
