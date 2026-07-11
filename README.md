@@ -7,9 +7,11 @@
 A local kanban board that turns your Linear tickets into live Claude Code sessions:
 each in its own git worktree, each with a real terminal in your browser.
 
+[![CI](https://github.com/theyashgupta/dispatch/actions/workflows/ci.yml/badge.svg)](https://github.com/theyashgupta/dispatch/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522.22-brightgreen)](https://nodejs.org)
 [![Made with tmux + ttyd](https://img.shields.io/badge/made%20with-tmux%20%2B%20ttyd-1f2937)](https://github.com/tsl0922/ttyd)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 ![Dispatch demo: drag a ticket, pick its workspace, and a live Claude Code session plans then implements in the same conversation](docs/assets/hero.gif)
 
@@ -111,7 +113,7 @@ Worktrees land in `workspaceRoot/<ticket>/<repo>/` on a branch named after the t
 
 **Why plain `claude` in tmux instead of an SDK?** The session you get is identical to one you'd launch by hand: same tools, same permissions, same TUI. Dispatch never sits between you and the agent; it only watches for the status lines.
 
-**Where are the tests?** There are no unit test files, deliberately. Behavior is pinned by a golden-master replay gate (16 recorded watcher fixtures diffed byte-for-byte), an invariant checker (81 documented cross-module invariants, machine-verified), strict TypeScript, and lint rules that gate `npm run check`. The runtime pieces that matter (tmux, ttyd, real Claude sessions) are exercised against the running app.
+**Where are the tests?** There isn't a test suite yet. The focus so far has been getting the core to production quality. In the meantime, behavior is held in place by a golden-master replay gate (16 recorded watcher fixtures diffed byte-for-byte), an invariant checker (81 documented cross-module invariants, machine-verified), strict TypeScript, and lint rules that gate `npm run check`, and the runtime pieces that matter (tmux, ttyd, real Claude sessions) are exercised against the running app. Proper unit and end-to-end tests are wanted going forward, and contributions that add them are especially welcome.
 
 **Why localhost only?** ttyd hands out a shell attached to a live agent session. Everything binds to `127.0.0.1` and there is no auth layer, on purpose. Don't put this on a network.
 
@@ -126,6 +128,10 @@ Dispatch is young and shaped by one person's daily use. It works well for that p
 ## Roadmap
 
 What's planned and why lives in the issue tracker. See the [`roadmap` label](https://github.com/theyashgupta/dispatch/issues?q=label%3Aroadmap).
+
+## Contributing
+
+New contributors: the [good first issues](https://github.com/theyashgupta/dispatch/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) are the place to start. Bugs and features go through the [issue forms](https://github.com/theyashgupta/dispatch/issues/new/choose); open-ended questions and ideas live in [Discussions](https://github.com/theyashgupta/dispatch/discussions). Before sending a PR, read [CONTRIBUTING.md](CONTRIBUTING.md). It covers dev setup, the `npm run check` gate, and how behavior is verified while a proper test suite is still being built out (test contributions welcome). Security issues go through [private reporting](SECURITY.md), never a public issue. Everyone participating agrees to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

@@ -32,4 +32,4 @@ The app is already hooks-first: `useBoardStream`, `useUnseenActivity`, and `useT
 
 ## Depth
 
-Medium depth. Build the five primitives and the typed style-object module; do **not** build a variant/theme engine, a Storybook, or a component-doc site — all over-engineering for a one-user tool with no test code. Each primitive lands as a pure refactor, smoke-gated on sync → start → terminal → markers → cleanup, with pixel-identical rendering at every adopted call site.
+Medium depth. Build the five primitives and the typed style-object module; do **not** build a variant/theme engine, a Storybook, or a component-doc site — all over-engineering for a young, one-user tool. Each primitive lands as a pure refactor, smoke-gated on sync → start → terminal → markers → cleanup, with pixel-identical rendering at every adopted call site.

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions & ideas
+    url: https://github.com/theyashgupta/dispatch/discussions
+    about: Not sure it's a bug? Ask in Discussions, where setup help, usage questions, and open-ended ideas live.
+  - name: Report a security issue
+    url: https://github.com/theyashgupta/dispatch/security/advisories/new
+    about: Please report vulnerabilities privately, not as a public issue. See SECURITY.md.

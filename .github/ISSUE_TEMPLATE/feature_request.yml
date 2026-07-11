@@ -1,0 +1,47 @@
+name: Feature request
+description: Suggest a capability or change for Dispatch.
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Dispatch is shaped by daily use and stays deliberately small. The most welcome ideas right now
+        are Linux support, other ticket sources, and other agent CLIs, but pitch anything.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem
+      description: What are you trying to do that Dispatch makes hard or impossible today?
+      placeholder: I use GitHub Issues, not Linear, so the poller has nothing to pull.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like
+      description: The change you're imagining. Rough is fine.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Workarounds you're using now, or other designs you weighed.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched existing issues and the roadmap and this isn't already tracked.
+          required: true
+        - label: This fits "one user, one machine, localhost only" and isn't asking Dispatch to become multi-user or hosted.
+          required: false
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributions
+      options:
+        - label: I'm willing to open a PR to build this.
+          required: false
