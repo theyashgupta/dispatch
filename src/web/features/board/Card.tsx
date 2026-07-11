@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
-import type { Card as CardModel } from "../../shared/types.js";
+import type { Card as CardModel } from "../../../shared/types.js";
 import { CardView } from "./CardView.js";
-import { useLastOpened } from "../hooks/useUnseenActivity.js";
-import { deriveShowDot, deriveShowGone } from "../lib/card-badges.js";
+import { useLastOpened } from "../../hooks/useUnseenActivity.js";
+import { deriveShowDot, deriveShowGone } from "../../lib/card-badges.js";
 
 interface CardProps {
   card: CardModel;

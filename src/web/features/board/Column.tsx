@@ -2,7 +2,7 @@ import { useDroppable } from "@dnd-kit/core";
 import type {
   Card as CardModel,
   Column as ColumnId,
-} from "../../shared/types.js";
+} from "../../../shared/types.js";
 import { Card } from "./Card.js";
 import { EmptyState } from "./EmptyState.js";
 

@@ -3,7 +3,7 @@ import { useBoardStream } from "./hooks/useBoardStream.js";
 import { useTransitionNotifications } from "./hooks/useTransitionNotifications.js";
 import { SyncStrip } from "./features/SyncStrip.js";
 import { Glyph } from "./primitives/Glyph.js";
-import { Board } from "./features/Board.js";
+import { Board } from "./features/board/Board.js";
 import { DetailPanel } from "./features/DetailPanel.js";
 import { StartModal } from "./features/StartModal.js";
 import { CleanupModal } from "./features/CleanupModal.js";

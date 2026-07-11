@@ -1,5 +1,5 @@
-import type { Column as ColumnId } from "../../shared/types.js";
-import { Glyph } from "../primitives/Glyph.js";
+import type { Column as ColumnId } from "../../../shared/types.js";
+import { Glyph } from "../../primitives/Glyph.js";
 
 interface EmptyStateProps {
   column: ColumnId;

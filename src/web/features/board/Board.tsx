@@ -8,19 +8,19 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
-import { COLUMNS } from "../../shared/types.js";
+import { COLUMNS } from "../../../shared/types.js";
 import type {
   BoardSnapshot,
   Card as CardModel,
   Column as ColumnId,
-} from "../../shared/types.js";
+} from "../../../shared/types.js";
 import { Column } from "./Column.js";
 import { CardView } from "./CardView.js";
-import type { StartRequest } from "../lib/start-request.js";
-import { useLastOpened } from "../hooks/useUnseenActivity.js";
-import { useMediaQuery } from "../hooks/useMediaQuery.js";
-import { moveCard } from "../lib/api.js";
-import { deriveShowDot, deriveShowGone } from "../lib/card-badges.js";
+import type { StartRequest } from "../../lib/start-request.js";
+import { useLastOpened } from "../../hooks/useUnseenActivity.js";
+import { useMediaQuery } from "../../hooks/useMediaQuery.js";
+import { moveCard } from "../../lib/api.js";
+import { deriveShowDot, deriveShowGone } from "../../lib/card-badges.js";
 
 interface BoardProps {
   board: BoardSnapshot | null;

@@ -1,14 +1,14 @@
 import { Activity, AlertTriangle, Play, RotateCw } from "lucide-react";
-import type { Card as CardModel } from "../../shared/types.js";
-import { startCard } from "../lib/api.js";
-import { formatAge, nowMs } from "../lib/format-age.js";
-import { useResumeFeedback } from "../hooks/useResumeFeedback.js";
-import { GoneBadge } from "./badges/GoneBadge.js";
-import { PlanReadyBadge } from "./badges/PlanReadyBadge.js";
-import { SourceBadge } from "./badges/SourceBadge.js";
-import { Button } from "../primitives/Button.js";
-import { Field } from "../primitives/Field.js";
-import { Notice } from "../primitives/Notice.js";
+import type { Card as CardModel } from "../../../shared/types.js";
+import { startCard } from "../../lib/api.js";
+import { formatAge, nowMs } from "../../lib/format-age.js";
+import { useResumeFeedback } from "../../hooks/useResumeFeedback.js";
+import { GoneBadge } from "../badges/GoneBadge.js";
+import { PlanReadyBadge } from "../badges/PlanReadyBadge.js";
+import { SourceBadge } from "../badges/SourceBadge.js";
+import { Button } from "../../primitives/Button.js";
+import { Field } from "../../primitives/Field.js";
+import { Notice } from "../../primitives/Notice.js";
 
 const PRIORITY_STRIPE: Record<number, string> = {
   1: "var(--prio-urgent)",
