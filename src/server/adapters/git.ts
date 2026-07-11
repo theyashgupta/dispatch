@@ -9,6 +9,45 @@ export async function worktreePrune(repoPath: string): Promise<void> {
   await run("git", ["worktree", "prune"], { cwd: repoPath });
 }
 
+/** Discriminated outcome of the Done-cleanup preflight probe (PRE-01/PRE-04). */
+export type WorktreeStatus =
+  | { kind: "clean" }
+  | { kind: "dirty"; count: number }
+  | { kind: "orphan" }
+  | { kind: "error"; stderr: string };
+
+const ORPHAN_STDERR = ["not a git repository", "must be run in a work tree"];
+
+/**
+ * Read-only Done-cleanup preflight probe (PRE-01): `git status --porcelain --untracked-files=all`
+ * counts every modified, staged, and untracked path; zero lines is `clean`, any lines is `dirty`
+ * with that count, so a dirty worktree can refuse teardown before any destructive step runs. On a
+ * thrown error it classifies strictly on the git stderr (PRE-04): the two verified fragments
+ * `not a git repository` / `must be run in a work tree` mark an `orphan` (a stale registration or a
+ * repo already gone — cleanup proceeds), and any other stderr is a non-orphan `error`. The `run`
+ * chokepoint drops `.code`/`.exitCode`/`.signal`, so `.stderr` is the only classification signal.
+ * The caller stats the worktree dir first, so a missing cwd never reaches this probe.
+ */
+export async function worktreeStatus(
+  worktreePath: string,
+): Promise<WorktreeStatus> {
+  try {
+    const { stdout } = await run(
+      "git",
+      ["status", "--porcelain", "--untracked-files=all"],
+      { cwd: worktreePath },
+    );
+    const count = stdout.split("\n").filter((l) => l.trim() !== "").length;
+    return count === 0 ? { kind: "clean" } : { kind: "dirty", count };
+  } catch (err) {
+    const stderr = ((err as { stderr?: string }).stderr ?? "").toLowerCase();
+    if (ORPHAN_STDERR.some((fragment) => stderr.includes(fragment))) {
+      return { kind: "orphan" };
+    }
+    return { kind: "error", stderr };
+  }
+}
+
 /**
  * `git fetch origin <base>` — refresh the base ref before cutting a worktree.
  * On a missing/unreachable ref git exits non-zero (`fatal: couldn't find remote ref <base>`);

@@ -953,8 +953,53 @@ class BoardStore extends EventEmitter {
         c.sessionLost = false;
         c.terminalError = null;
         c.cleanupWarning = undefined;
+        c.cleanupBlocked = undefined;
         this.clearHookToken(c);
         c.claudeSessionId = undefined;
+      }
+    });
+  }
+
+  /**
+   * Record a non-forced Done-cleanup refusal (PRE-01): a dirty-worktree preflight blocked teardown,
+   * so set the per-repo `cleanupBlocked` list and touch NOTHING else. Unlike recordCleanupWarning
+   * (which runs only AFTER teardown and clears the session fields), this fires BEFORE any
+   * destructive step — the tmux session, ttyd, hookToken, and worktrees all stay alive so the card
+   * remains fully usable while the block is surfaced. No-op if the id is unknown.
+   */
+  recordCleanupBlocked(
+    id: string,
+    blocked: { repo: string; count: number }[],
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) {
+        card.cleanupBlocked = blocked;
+      }
+    });
+  }
+
+  /** Clear a prior cleanup refusal (PRE-01) at the start of a fresh attempt. No-op if id unknown. */
+  clearCleanupBlocked(id: string): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) {
+        card.cleanupBlocked = undefined;
+      }
+    });
+  }
+
+  /**
+   * Zero-teardown cleanup warning (PRE-04): the preflight-refusal-safe sibling of
+   * recordCleanupWarning. Sets ONLY the muted `cleanupWarning` and clears no session fields, because
+   * the non-orphan preflight-error path tore nothing down — the live tmux session, ttyd, and
+   * hookToken MUST survive so the terminal stays usable. No-op if the id is unknown.
+   */
+  noteCleanupWarning(id: string, message: string): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) {
+        card.cleanupWarning = message;
       }
     });
   }

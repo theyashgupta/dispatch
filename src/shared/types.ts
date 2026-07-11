@@ -109,6 +109,15 @@ export interface Card {
   outputChangedAt?: string;
   /** Non-fatal Done-cleanup failure surfaced like startWarning; absent in the quiet/success state (LIFE-01). */
   cleanupWarning?: string;
+  /**
+   * Per-repo uncommitted-work refusal recorded when a non-forced Done cleanup preflight finds a
+   * dirty worktree (PRE-01): each entry is the dirty repo's basename plus its porcelain line count.
+   * Present = cleanup was refused with the tmux session, ttyd, and worktrees ALL still alive
+   * (PRE-02); absent = not blocked. NON-SECRET (repo basenames + integer counts only) and rides
+   * `snapshot()` UNREDACTED (like `hookRoutedAt`/`claudeSessionId`, unlike `hookToken`). Cleared at
+   * the start of every fresh cleanup attempt and by finishCleanup.
+   */
+  cleanupBlocked?: { repo: string; count: number }[];
   /** Optional extra direction text captured at Start; reused by Retry and the Phase-3 detail panel. */
   extraDirection?: string | null;
   /** Structured ttyd (terminal) failure surfaced in the detail panel; null/absent when the terminal is healthy. */
