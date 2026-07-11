@@ -79,6 +79,8 @@ One convention spans the whole tree. Every artifact kind has a fixed pattern and
 
 The enforceable rule: `.tsx` → PascalCase; `hooks/*.ts` → `useX` camelCase; every other `.ts` → kebab-case; `route`/`store`/`source` suffixes layered on via glob. Role suffixes apply **only** where a folder groups by resource (`routes/`, `store/`, `sources/`) — everywhere else the folder already encodes the layer, so the suffix is dropped (the Angular v20 lesson: no redundant type suffixes). Helpers that live inside a resource folder but are not themselves the resource module (`store/mapping.ts`, `sources/registry.ts`, `sources/linear/filter.ts`, `routes/loopback.ts`) stay plain kebab-case.
 
+The server tree conforms fully. The web tree (`src/web/lib` casing, `features/` folder grouping) migrates to this convention in a follow-up restructuring — the table above states the target every new file must already follow.
+
 ## Build artifacts
 
 `src/web/dist/` is a build artifact and must not live in source control — it belongs in `.gitignore`, not tracked in git.
