@@ -23,8 +23,8 @@ import {
   pasteBuffer,
   sendKeys,
 } from "../adapters/tmux.js";
-import { preSeedTrust } from "../adapters/claudeTrust.js";
-import { resolveBinaryPath } from "../adapters/resolveBinary.js";
+import { preSeedTrust } from "../adapters/claude-trust.js";
+import { resolveBinaryPath } from "../adapters/resolve-binary.js";
 import { buildKickoff } from "./kickoff.js";
 import { worktreePath as buildWorktreePath } from "./workspace-paths.js";
 

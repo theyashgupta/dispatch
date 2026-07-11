@@ -1,4 +1,4 @@
-import { resolveBinaryPath } from "./resolveBinary.js";
+import { resolveBinaryPath } from "./resolve-binary.js";
 import { run } from "./exec.js";
 
 /** Absolute editor paths, resolved once at boot. null when the binary is not on PATH. Module-private

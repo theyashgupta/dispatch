@@ -4,7 +4,7 @@ import path from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import type { Config, SourceFilters } from "../../shared/types.js";
 import { DEFAULT_FILTERS } from "../../shared/types.js";
-import { StartupError } from "./binaryCheck.js";
+import { StartupError } from "./binary-check.js";
 import { CONFIG_PATH, DISPATCH_DIR } from "../services/paths.js";
 
 const DEFAULT_PORT = 4700;

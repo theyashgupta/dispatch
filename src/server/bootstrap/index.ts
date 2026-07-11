@@ -1,5 +1,5 @@
 import express from "express";
-import { checkBinaries, StartupError } from "./binaryCheck.js";
+import { checkBinaries, StartupError } from "./binary-check.js";
 import { loadConfig } from "./config.js";
 import { store } from "../store/board.store.js";
 import { apiRouter } from "../routes/routes.js";
