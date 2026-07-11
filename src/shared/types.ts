@@ -70,8 +70,12 @@ export interface Card {
    * `--continue` (which can pick up an unrelated manual claude session started in the same
    * worktree). NON-SECRET by explicit decision: rides `snapshot()` UNREDACTED (like `hookRoutedAt`,
    * unlike `hookToken`). Its lifecycle deliberately does NOT follow the `clearHookToken`
-   * chokepoint — markSessionLost KEEPS it (the on-disk transcript outlives a dead tmux session),
-   * completeStart RESETS it (a fresh kickoff is a new conversation), Done cleanup CLEARS it.
+   * chokepoint — markSessionLost and recordResumeFailure KEEP it (the on-disk transcript outlives a
+   * dead tmux session, and a failed resume must be retryable via `--resume`), the start saga's
+   * launch step RESETS it pre-spawn (a fresh kickoff is a new conversation — reset before the
+   * kickoff's first hook event so a restart never logs a spurious mismatch), Done cleanup CLEARS it.
+   * A genuinely gone conversation therefore wedges Resume on `--resume` until Restart (a new
+   * conversation) — intentional: falling back to `--continue` would resurrect the manual-pickup bug.
    * @see docs/ARCHITECTURE.md#hooks-status-channel
    */
   claudeSessionId?: string;

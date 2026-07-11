@@ -299,6 +299,7 @@ const startClaude: SagaStep = {
   async run(ctx) {
     const session = "dsp-" + ctx.identifier;
     await preSeedTrust(ctx.workspacePath);
+    await store.resetClaudeSessionId(ctx.card.id);
 
     const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
     const runtime = getHooksRuntime();

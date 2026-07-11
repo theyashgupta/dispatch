@@ -100,7 +100,7 @@ export async function applyHookEvent(
   }
 
   const sid = body?.session_id;
-  if (typeof sid === "string" && sid.length > 0) {
+  if (typeof sid === "string" && /^[\w-]{1,256}$/.test(sid)) {
     const recorded = store.getCard(cardId)?.claudeSessionId;
     if (recorded == null) {
       await store.setClaudeSessionId(cardId, sid);

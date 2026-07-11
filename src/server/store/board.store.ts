@@ -91,9 +91,11 @@ class BoardStore extends EventEmitter {
    * ONLY clearing site for the markHookRouted channel latch: every session-death path flows
    * through here, so a relaunched/resumed session always starts hook-silent and re-proves traffic.
    * @remarks Deliberately EXCLUDES `claudeSessionId` — the on-disk Claude transcript outlives a
-   * dead tmux session, so a crashed card (markSessionLost calls this) must KEEP its id to
-   * `--resume` back into the original conversation. The three RESET/CLEAR lifecycle sites
-   * (completeStart, recordCleanupWarning, finishCleanup) handle that field with explicit lines.
+   * dead tmux session, so a crashed card (markSessionLost calls this) and a failed resume
+   * (recordResumeFailure) must KEEP the id to `--resume` back into the original conversation. The
+   * field is RESET pre-spawn by the start saga's launch step (resetClaudeSessionId — a fresh
+   * kickoff is a new conversation) and CLEARED by Done cleanup (recordCleanupWarning, finishCleanup)
+   * with explicit lines; every other session-clearing mutator KEEPS it.
    */
   private clearHookToken(card: Card): void {
     if (card.hookToken) this.releaseHookToken(card.hookToken, card.id);
@@ -473,6 +475,23 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Clear a card's recorded Claude session id BEFORE a fresh session spawns. Called by the start
+   * saga's launch step (a new kickoff is a new conversation) so the reset lands ahead of the
+   * kickoff paste's first hook event — otherwise a restart of a card that still holds its old id
+   * would make the new session's early events log a spurious `session_id mismatch` and drop the
+   * genuine first capture. Symmetric with the pre-spawn hook-token mint. Distinct from the
+   * first-event-wins setter and never called on the resume path, which must KEEP the id.
+   * No-op if the id is unknown.
+   * @see docs/ARCHITECTURE.md#hooks-status-channel
+   */
+  resetClaudeSessionId(id: string): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) card.claudeSessionId = undefined;
+    });
+  }
+
+  /**
    * Record the ISO timestamp of the last observed ⏺-view divergence for a live session
    * (ATTN-02 unseen-activity dot). Mirrors setStatusReason exactly: a single-field enqueue.
    * This is a SEPARATE logical event from a column move — it does NOT touch `column`, so it
@@ -806,7 +825,6 @@ class BoardStore extends EventEmitter {
         card.startWarning = null;
         card.sessionLost = false;
         card.resumeError = null;
-        card.claudeSessionId = undefined;
       }
     });
   }
