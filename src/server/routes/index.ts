@@ -3,6 +3,7 @@ import { isLocalRequest } from "./loopback.js";
 import { boardRouter } from "./board.route.js";
 import { cardsRouter } from "./cards.route.js";
 import { sseRouter } from "./sse.route.js";
+import { hooksRouter } from "./hooks.route.js";
 
 export const apiRouter = Router();
 
@@ -17,3 +18,4 @@ apiRouter.use((req, res, next) => {
 apiRouter.use(boardRouter);
 apiRouter.use(cardsRouter);
 apiRouter.use(sseRouter);
+apiRouter.use(hooksRouter);

@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   store.setEditors(editors);
 
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: "1mb" }));
   app.use("/api", apiRouter);
 
   app.listen(port, "127.0.0.1", () => {
