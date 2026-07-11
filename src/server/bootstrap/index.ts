@@ -2,7 +2,7 @@ import express from "express";
 import { checkBinaries, StartupError } from "./binary-check.js";
 import { loadConfig } from "./config.js";
 import { store } from "../store/board.store.js";
-import { apiRouter } from "../routes/routes.js";
+import { apiRouter } from "../routes/index.js";
 import { setOrchestrationConfig } from "../services/config-holder.js";
 import { seedPlaybooks } from "../services/playbooks.js";
 import { startPoller } from "../adapters/poller.js";
