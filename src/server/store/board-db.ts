@@ -112,12 +112,14 @@ function quarantineAndRecover(cause: unknown): Database.Database {
  * — `new Database` creates it and an empty board follows (STORE-02).
  */
 function connect(): Database.Database {
+  let db: Database.Database | undefined;
   try {
-    const db = new Database(BOARD_DB_PATH);
+    db = new Database(BOARD_DB_PATH);
     if (db.pragma("integrity_check", { simple: true }) === "ok") return db;
     db.close();
     throw new Error("integrity_check reported corruption");
   } catch (err) {
+    if (db?.open) db.close();
     return quarantineAndRecover(err);
   }
 }
