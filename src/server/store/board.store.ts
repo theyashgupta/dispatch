@@ -3,9 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type {
+  ActivityEvent,
   BoardSnapshot,
   Card,
   Column,
+  EventType,
   SessionFields,
   SourceIssue,
   StartError,
@@ -121,15 +123,28 @@ class BoardStore extends EventEmitter {
    * never break the queue for subsequent mutations. Ahead of the write, an hourly best-effort
    * SQLite snapshot is folded into the backup chain (backupTick is itself never-throw, so a
    * backup failure can never fail the write or the broadcast; it is a no-op the rest of the hour).
+   * @remarks The mutator RETURNS the events it wants appended (`[]` for a no-op), which persist
+   * inserts in the SAME transaction as the card write. The two broadcasts are ASYMMETRIC: the
+   * board `change` frame fires unconditionally from the in-memory Map (source of truth), but each
+   * `activity` frame fires ONLY after a durable insert (persist returned matching ids) — a persist
+   * failure must not advertise an event GET /api/events will never return (Pitfall 5).
    * @see docs/ARCHITECTURE.md#single-writer-store
    */
-  private enqueue(mutator: () => void): Promise<void> {
+  private enqueue(mutator: () => Omit<ActivityEvent, "id">[]): Promise<void> {
     this.queue = this.queue
       .then(async () => {
-        mutator();
+        const events = mutator();
         await this.db.backupTick();
+        let broadcast: ActivityEvent[] = [];
         try {
-          this.db.persist([...this.cards.values()], this.buildMeta());
+          const ids = this.db.persist(
+            [...this.cards.values()],
+            this.buildMeta(),
+            events,
+          );
+          if (ids.length === events.length) {
+            broadcast = events.map((e, i) => ({ ...e, id: ids[i] }));
+          }
         } catch (err) {
           console.error(
             "[store] persist failed (in-memory state still broadcast):",
@@ -137,11 +152,31 @@ class BoardStore extends EventEmitter {
           );
         }
         this.emit("change", this.snapshot());
+        for (const ev of broadcast) this.emit("activity", ev);
       })
       .catch((err: unknown) => {
         console.error("[store] mutation failed:", err);
       });
     return this.queue;
+  }
+
+  /**
+   * Stamp the append `ts` and default the nullable event columns so each mutator stays terse and
+   * only spells out the fields its taxonomy row actually carries.
+   */
+  private event(
+    type: EventType,
+    partial: Partial<Omit<ActivityEvent, "id" | "type" | "ts">> = {},
+  ): Omit<ActivityEvent, "id"> {
+    return {
+      type,
+      ts: new Date().toISOString(),
+      cardId: partial.cardId ?? null,
+      fromCol: partial.fromCol ?? null,
+      toCol: partial.toCol ?? null,
+      reason: partial.reason ?? null,
+      source: partial.source ?? null,
+    };
   }
 
   /**
@@ -306,6 +341,15 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Newest-first read of the append-only activity log for the REST route (`null` cardId = whole
+   * board, a string scopes to one card). A pure synchronous read delegated to the BoardDb surface
+   * (hasCard/getCard precedent) so the route never imports better-sqlite3; not enqueued.
+   */
+  listEvents(cardId: string | null, limit: number): ActivityEvent[] {
+    return this.db.listEvents(cardId, limit);
+  }
+
+  /**
    * Is a start saga currently in flight for this card? Synchronous double-start guard for the
    * orchestrator (CR-01). Not queued/persisted — a purely transient in-memory marker.
    */
@@ -339,6 +383,7 @@ class BoardStore extends EventEmitter {
         card.provisioningStep = step;
         card.startError = null;
       }
+      return [];
     });
   }
 
@@ -350,6 +395,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.extraDirection = text;
+      return [];
     });
   }
 
@@ -369,6 +415,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.startIntent = intent;
+      return [];
     });
   }
 
@@ -382,6 +429,7 @@ class BoardStore extends EventEmitter {
       if (!this.workspaceFolders.includes(path)) {
         this.workspaceFolders.push(path);
       }
+      return [];
     });
   }
 
@@ -395,6 +443,7 @@ class BoardStore extends EventEmitter {
       if (this.lastUsedFolder === path) {
         this.lastUsedFolder = this.workspaceFolders[0] ?? null;
       }
+      return [];
     });
   }
 
@@ -405,6 +454,7 @@ class BoardStore extends EventEmitter {
   setLastUsedFolder(path: string): Promise<void> {
     return this.enqueue(() => {
       this.lastUsedFolder = path;
+      return [];
     });
   }
 
@@ -420,6 +470,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.workspace = workspace;
+      return [];
     });
   }
 
@@ -431,6 +482,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.statusReason = reason ?? undefined;
+      return [];
     });
   }
 
@@ -444,6 +496,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.hookToken = token;
+      return [];
     });
   }
 
@@ -461,6 +514,7 @@ class BoardStore extends EventEmitter {
       const card = this.cards.get(id);
       if (card && card.claudeSessionId == null)
         card.claudeSessionId = sessionId;
+      return [];
     });
   }
 
@@ -478,6 +532,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.claudeSessionId = undefined;
+      return [];
     });
   }
 
@@ -492,6 +547,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.outputChangedAt = iso;
+      return [];
     });
   }
 
@@ -510,6 +566,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card?.hookToken) card.hookRoutedAt = iso;
+      return [];
     });
   }
 
@@ -527,6 +584,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) this.clearHookToken(card);
+      return [];
     });
   }
 
@@ -538,6 +596,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.startWarning = warning;
+      return [];
     });
   }
 
@@ -549,10 +608,10 @@ class BoardStore extends EventEmitter {
   setStartError(id: string, e: StartError): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) {
-        card.startError = e;
-        card.provisioningStep = null;
-      }
+      if (!card) return [];
+      card.startError = e;
+      card.provisioningStep = null;
+      return [this.event("session_failed", { cardId: id, reason: e.step })];
     });
   }
 
@@ -574,22 +633,30 @@ class BoardStore extends EventEmitter {
   ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) {
-        card.workspacePath = s.workspacePath;
-        card.branch = s.branch;
-        card.tmuxSession = s.tmuxSession;
-        card.ttydPort = s.ttydPort;
-        card.column = opts?.column ?? "in_progress";
-        if (opts?.mode !== undefined) card.mode = opts.mode;
-        if (card.startIntent?.targetColumn !== undefined) {
-          card.startIntent = { playbook: card.startIntent.playbook };
-        }
-        card.statusReason = "Already running — reattached";
-        card.provisioningStep = null;
-        card.startError = null;
-        card.sessionLost = false;
-        card.resumeError = null;
+      if (!card) return [];
+      const prev = card.column;
+      card.workspacePath = s.workspacePath;
+      card.branch = s.branch;
+      card.tmuxSession = s.tmuxSession;
+      card.ttydPort = s.ttydPort;
+      card.column = opts?.column ?? "in_progress";
+      if (opts?.mode !== undefined) card.mode = opts.mode;
+      if (card.startIntent?.targetColumn !== undefined) {
+        card.startIntent = { playbook: card.startIntent.playbook };
       }
+      card.statusReason = "Already running — reattached";
+      card.provisioningStep = null;
+      card.startError = null;
+      card.sessionLost = false;
+      card.resumeError = null;
+      return [
+        this.event("session_start", {
+          cardId: id,
+          fromCol: prev,
+          toCol: opts?.column ?? "in_progress",
+          reason: "reattached",
+        }),
+      ];
     });
   }
 
@@ -614,6 +681,7 @@ class BoardStore extends EventEmitter {
         card.terminalError = null;
         recorded = true;
       }
+      return [];
     }).then(() => recorded);
   }
 
@@ -630,6 +698,7 @@ class BoardStore extends EventEmitter {
         card.ttydPort = undefined;
         card.terminalError = e;
       }
+      return [];
     });
   }
 
@@ -648,13 +717,23 @@ class BoardStore extends EventEmitter {
   markSessionLost(id: string): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) {
-        card.sessionLost = true;
-        card.tmuxSession = undefined;
-        card.ttydPort = undefined;
-        card.terminalError = null;
-        this.clearHookToken(card);
-      }
+      if (!card) return [];
+      const wasTransition = !(card.sessionLost && card.tmuxSession == null);
+      card.sessionLost = true;
+      card.tmuxSession = undefined;
+      card.ttydPort = undefined;
+      card.terminalError = null;
+      this.clearHookToken(card);
+      return wasTransition
+        ? [
+            this.event("session_lost", {
+              cardId: id,
+              fromCol: card.column,
+              toCol: card.column,
+              source: "watcher",
+            }),
+          ]
+        : [];
     });
   }
 
@@ -666,6 +745,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.terminalError = e;
+      return [];
     });
   }
 
@@ -699,16 +779,36 @@ class BoardStore extends EventEmitter {
   ): Promise<void> {
     return this.enqueue(() => {
       const c = this.cards.get(id);
-      if (!c || c.column === "todo" || c.column === "done") return;
+      if (!c || c.column === "todo" || c.column === "done") return [];
+      if (c.lastMarker === markerKey) return [];
+      const from = c.column;
       if (column === "agent_done" && c.mode === "planning") {
         c.planReady = true;
         c.statusReason = statusReason;
         c.lastMarker = markerKey;
-        return;
+        return [
+          this.event("plan_ready", {
+            cardId: id,
+            fromCol: "in_planning",
+            toCol: "in_planning",
+            reason: statusReason ?? null,
+          }),
+        ];
       }
       c.column = column;
       c.statusReason = statusReason;
       c.lastMarker = markerKey;
+      return [
+        this.event(
+          column === "needs_input" ? "status_needs_input" : "status_agent_done",
+          {
+            cardId: id,
+            fromCol: from,
+            toCol: column,
+            reason: statusReason ?? null,
+          },
+        ),
+      ];
     });
   }
 
@@ -725,6 +825,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const c = this.cards.get(id);
       if (c) c.lastMarker = undefined;
+      return [];
     });
   }
 
@@ -744,10 +845,18 @@ class BoardStore extends EventEmitter {
   flipBack(id: string): Promise<void> {
     return this.enqueue(() => {
       const c = this.cards.get(id);
-      if (c && c.column === "needs_input") {
-        c.column = c.mode === "planning" ? "in_planning" : "in_progress";
-        c.statusReason = undefined;
-      }
+      if (!c || c.column !== "needs_input") return [];
+      const target = c.mode === "planning" ? "in_planning" : "in_progress";
+      c.column = target;
+      c.statusReason = undefined;
+      return [
+        this.event("move_auto", {
+          cardId: id,
+          fromCol: "needs_input",
+          toCol: target,
+          reason: "agent responded",
+        }),
+      ];
     });
   }
 
@@ -770,12 +879,21 @@ class BoardStore extends EventEmitter {
   moveCardManual(id: string, column: Column): Promise<void> {
     return this.enqueue(() => {
       const c = this.cards.get(id);
-      if (c) {
-        c.column = column;
-        if (column !== "needs_input" && column !== "agent_done") {
-          c.statusReason = undefined;
-        }
+      if (!c) return [];
+      const from = c.column;
+      c.column = column;
+      if (column !== "needs_input" && column !== "agent_done") {
+        c.statusReason = undefined;
       }
+      if (from === column) return [];
+      return [
+        this.event(column === "done" ? "status_done" : "move_manual", {
+          cardId: id,
+          fromCol: from,
+          toCol: column,
+          source: "user",
+        }),
+      ];
     });
   }
 
@@ -799,23 +917,30 @@ class BoardStore extends EventEmitter {
   ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) {
-        card.workspacePath = s.workspacePath;
-        card.branch = s.branch;
-        card.tmuxSession = s.tmuxSession;
-        card.ttydPort = s.ttydPort;
-        card.column = opts?.column ?? "in_progress";
-        if (opts?.mode !== undefined) card.mode = opts.mode;
-        if (card.startIntent?.targetColumn !== undefined) {
-          card.startIntent = { playbook: card.startIntent.playbook };
-        }
-        card.planReady = undefined;
-        card.provisioningStep = null;
-        card.startError = null;
-        card.startWarning = null;
-        card.sessionLost = false;
-        card.resumeError = null;
+      if (!card) return [];
+      const prev = card.column;
+      card.workspacePath = s.workspacePath;
+      card.branch = s.branch;
+      card.tmuxSession = s.tmuxSession;
+      card.ttydPort = s.ttydPort;
+      card.column = opts?.column ?? "in_progress";
+      if (opts?.mode !== undefined) card.mode = opts.mode;
+      if (card.startIntent?.targetColumn !== undefined) {
+        card.startIntent = { playbook: card.startIntent.playbook };
       }
+      card.planReady = undefined;
+      card.provisioningStep = null;
+      card.startError = null;
+      card.startWarning = null;
+      card.sessionLost = false;
+      card.resumeError = null;
+      return [
+        this.event("session_start", {
+          cardId: id,
+          fromCol: prev,
+          toCol: opts?.column ?? "in_progress",
+        }),
+      ];
     });
   }
 
@@ -832,14 +957,21 @@ class BoardStore extends EventEmitter {
   resumeSession(id: string, { session }: { session: string }): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) {
-        card.tmuxSession = session;
-        card.sessionLost = false;
-        card.terminalError = null;
-        card.ttydPort = undefined;
-        card.resumeError = null;
-        card.statusReason = "Resumed — reattached";
-      }
+      if (!card) return [];
+      card.tmuxSession = session;
+      card.sessionLost = false;
+      card.terminalError = null;
+      card.ttydPort = undefined;
+      card.resumeError = null;
+      card.statusReason = "Resumed — reattached";
+      return [
+        this.event("session_resume", {
+          cardId: id,
+          fromCol: card.column,
+          toCol: card.column,
+          reason: "resumed",
+        }),
+      ];
     });
   }
 
@@ -852,12 +984,20 @@ class BoardStore extends EventEmitter {
   handoffToImplementation(id: string): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) {
-        card.column = "in_progress";
-        card.mode = "implementation";
-        card.planReady = undefined;
-        card.statusReason = undefined;
-      }
+      if (!card) return [];
+      card.column = "in_progress";
+      card.mode = "implementation";
+      card.planReady = undefined;
+      card.statusReason = undefined;
+      return [
+        this.event("move_auto", {
+          cardId: id,
+          fromCol: "in_planning",
+          toCol: "in_progress",
+          reason: "plan handed off",
+          source: "user",
+        }),
+      ];
     });
   }
 
@@ -870,6 +1010,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.resumeError = null;
+      return [];
     });
   }
 
@@ -886,15 +1027,15 @@ class BoardStore extends EventEmitter {
   recordResumeFailure(id: string): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) {
-        card.sessionLost = true;
-        card.tmuxSession = undefined;
-        card.ttydPort = undefined;
-        card.terminalError = null;
-        this.clearHookToken(card);
-        card.resumeError =
-          "Resume failed — the worktree may be gone. Use Restart to begin a fresh session in the same branch.";
-      }
+      if (!card) return [];
+      card.sessionLost = true;
+      card.tmuxSession = undefined;
+      card.ttydPort = undefined;
+      card.terminalError = null;
+      this.clearHookToken(card);
+      card.resumeError =
+        "Resume failed — the worktree may be gone. Use Restart to begin a fresh session in the same branch.";
+      return [this.event("resume_failed", { cardId: id })];
     });
   }
 
@@ -913,14 +1054,21 @@ class BoardStore extends EventEmitter {
   recordCleanupWarning(id: string, warning: string): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) {
-        card.cleanupWarning = warning;
-        card.tmuxSession = undefined;
-        card.ttydPort = undefined;
-        card.terminalError = null;
-        this.clearHookToken(card);
-        card.claudeSessionId = undefined;
-      }
+      if (!card) return [];
+      card.cleanupWarning = warning;
+      card.tmuxSession = undefined;
+      card.ttydPort = undefined;
+      card.terminalError = null;
+      this.clearHookToken(card);
+      card.claudeSessionId = undefined;
+      return [
+        this.event("cleanup", {
+          cardId: id,
+          fromCol: "done",
+          toCol: "done",
+          reason: warning,
+        }),
+      ];
     });
   }
 
@@ -936,17 +1084,19 @@ class BoardStore extends EventEmitter {
   finishCleanup(id: string): Promise<void> {
     return this.enqueue(() => {
       const c = this.cards.get(id);
-      if (c) {
-        c.tmuxSession = undefined;
-        c.ttydPort = undefined;
-        c.workspacePath = undefined;
-        c.sessionLost = false;
-        c.terminalError = null;
-        c.cleanupWarning = undefined;
-        c.cleanupBlocked = undefined;
-        this.clearHookToken(c);
-        c.claudeSessionId = undefined;
-      }
+      if (!c) return [];
+      c.tmuxSession = undefined;
+      c.ttydPort = undefined;
+      c.workspacePath = undefined;
+      c.sessionLost = false;
+      c.terminalError = null;
+      c.cleanupWarning = undefined;
+      c.cleanupBlocked = undefined;
+      this.clearHookToken(c);
+      c.claudeSessionId = undefined;
+      return [
+        this.event("cleanup", { cardId: id, fromCol: "done", toCol: "done" }),
+      ];
     });
   }
 
@@ -966,6 +1116,7 @@ class BoardStore extends EventEmitter {
       if (card) {
         card.cleanupBlocked = blocked;
       }
+      return [];
     });
   }
 
@@ -976,6 +1127,7 @@ class BoardStore extends EventEmitter {
       if (card) {
         card.cleanupBlocked = undefined;
       }
+      return [];
     });
   }
 
@@ -991,6 +1143,7 @@ class BoardStore extends EventEmitter {
       if (card) {
         card.cleanupWarning = message;
       }
+      return [];
     });
   }
 
@@ -1025,6 +1178,7 @@ class BoardStore extends EventEmitter {
           .map((c) => [c.issueId, c] as const),
       );
       const r = reconcile(issues, current, this.inFlightStarts, src);
+      const applied: string[] = [];
       for (const card of r.upserts) {
         const existing = this.cards.get(card.id);
         if (existing && (existing.source ?? "linear") !== src) {
@@ -1034,6 +1188,7 @@ class BoardStore extends EventEmitter {
           continue;
         }
         this.cards.set(card.id, card);
+        applied.push(card.id);
       }
       for (const id of r.reappearedIds) {
         const card = this.cards.get(id);
@@ -1051,6 +1206,21 @@ class BoardStore extends EventEmitter {
         this.syncWarning = null;
       }
       this.syncedAt = syncedAt;
+      if (
+        r.upserts.length === 0 &&
+        r.removeIds.length === 0 &&
+        r.goneIds.length === 0 &&
+        r.reappearedIds.length === 0
+      ) {
+        return [];
+      }
+      return applied.map((cardId) =>
+        this.event("sync_in", {
+          cardId,
+          source: src,
+          reason: "synced from " + src,
+        }),
+      );
     });
   }
 }
