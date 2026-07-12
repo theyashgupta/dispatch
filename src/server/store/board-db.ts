@@ -2,7 +2,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import type { BoardSnapshot, Card } from "../../shared/types.js";
+import type {
+  ActivityEvent,
+  BoardSnapshot,
+  Card,
+  Column,
+  EventType,
+} from "../../shared/types.js";
 
 const BOARD_DIR = path.join(os.homedir(), ".dispatch");
 export const BOARD_DB_PATH = path.join(BOARD_DIR, "board.db");
@@ -34,9 +40,26 @@ export interface BoardMeta {
 export interface BoardDb {
   cardCount(): number;
   readAll(): { cards: Card[]; meta: Partial<BoardMeta> };
-  persist(cards: Card[], meta: BoardMeta): void;
+  persist(
+    cards: Card[],
+    meta: BoardMeta,
+    events: Omit<ActivityEvent, "id">[],
+  ): number[];
   importParsed(parsed: Partial<BoardSnapshot>): void;
+  listEvents(cardId: string | null, limit: number): ActivityEvent[];
   backupTick(): Promise<void>;
+}
+
+/** Raw `events` row shape (snake_case columns) before the read-path snake→camel map. */
+interface EventRow {
+  id: number;
+  card_id: string | null;
+  type: string;
+  from_col: string | null;
+  to_col: string | null;
+  reason: string | null;
+  source: string | null;
+  ts: string;
 }
 
 /** Slot path for the Nth snapshot backup in the `.bak.N` chain. */
@@ -166,6 +189,17 @@ export function openBoardDb(): BoardDb {
       id   INTEGER PRIMARY KEY CHECK (id = 0),
       data TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS events (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      card_id  TEXT,
+      type     TEXT NOT NULL,
+      from_col TEXT,
+      to_col   TEXT,
+      reason   TEXT,
+      source   TEXT,
+      ts       TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_events_card_id ON events(card_id);
   `);
 
   const upsertCard = db.prepare(
@@ -182,16 +216,48 @@ export function openBoardDb(): BoardDb {
   const selectCards = db.prepare(`SELECT data FROM cards`);
   const selectMeta = db.prepare(`SELECT data FROM meta WHERE id = 0`);
   const countCards = db.prepare(`SELECT COUNT(*) AS n FROM cards`);
+  const insertEvent = db.prepare(
+    `INSERT INTO events (card_id, type, from_col, to_col, reason, source, ts)
+     VALUES (@cardId, @type, @fromCol, @toCol, @reason, @source, @ts)`,
+  );
+  const selectEvents = db.prepare(
+    `SELECT id, card_id, type, from_col, to_col, reason, source, ts
+       FROM events ORDER BY id DESC LIMIT ?`,
+  );
+  const selectEventsByCard = db.prepare(
+    `SELECT id, card_id, type, from_col, to_col, reason, source, ts
+       FROM events WHERE card_id = ? ORDER BY id DESC LIMIT ?`,
+  );
 
-  const persistTxn = db.transaction((cards: Card[], meta: BoardMeta) => {
-    const ids: string[] = [];
-    for (const card of cards) {
-      upsertCard.run({ id: card.id, data: JSON.stringify(card) });
-      ids.push(card.id);
-    }
-    deleteGone.run(JSON.stringify(ids));
-    writeMeta.run({ data: JSON.stringify(meta) });
-  });
+  const persistTxn = db.transaction(
+    (
+      cards: Card[],
+      meta: BoardMeta,
+      events: Omit<ActivityEvent, "id">[],
+    ): number[] => {
+      const ids: string[] = [];
+      for (const card of cards) {
+        upsertCard.run({ id: card.id, data: JSON.stringify(card) });
+        ids.push(card.id);
+      }
+      deleteGone.run(JSON.stringify(ids));
+      writeMeta.run({ data: JSON.stringify(meta) });
+      const eventIds: number[] = [];
+      for (const e of events) {
+        const info = insertEvent.run({
+          cardId: e.cardId ?? null,
+          type: e.type,
+          fromCol: e.fromCol ?? null,
+          toCol: e.toCol ?? null,
+          reason: e.reason ?? null,
+          source: e.source ?? null,
+          ts: e.ts,
+        });
+        eventIds.push(Number(info.lastInsertRowid));
+      }
+      return eventIds;
+    },
+  );
 
   let backupFailureLogged = false;
 
@@ -209,12 +275,29 @@ export function openBoardDb(): BoardDb {
         : {};
       return { cards, meta };
     },
-    persist(cards, meta) {
-      persistTxn(cards, meta);
+    persist(cards, meta, events) {
+      return persistTxn(cards, meta, events);
     },
     importParsed(parsed) {
       const cards = Array.isArray(parsed.cards) ? parsed.cards : [];
-      persistTxn(cards, toMeta(parsed));
+      persistTxn(cards, toMeta(parsed), []);
+    },
+    listEvents(cardId, limit) {
+      const rows = (
+        cardId == null
+          ? selectEvents.all(limit)
+          : selectEventsByCard.all(cardId, limit)
+      ) as EventRow[];
+      return rows.map((r) => ({
+        id: r.id,
+        cardId: r.card_id,
+        type: r.type as EventType,
+        fromCol: r.from_col as Column | null,
+        toCol: r.to_col as Column | null,
+        reason: r.reason,
+        source: r.source,
+        ts: r.ts,
+      }));
     },
     async backupTick() {
       try {

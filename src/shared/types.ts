@@ -19,6 +19,37 @@ export const COLUMNS: readonly Column[] = [
   "done",
 ] as const;
 
+/**
+ * The fixed board-activity taxonomy — one shared source of truth for the server emitter and the
+ * client feed, so a new event kind can only be added by widening this union (never a stray string).
+ */
+export type EventType =
+  | "sync_in"
+  | "move_manual"
+  | "move_auto"
+  | "status_needs_input"
+  | "status_agent_done"
+  | "status_done"
+  | "session_start"
+  | "session_resume"
+  | "session_lost"
+  | "session_failed"
+  | "resume_failed"
+  | "plan_ready"
+  | "cleanup";
+
+/** One immutable board-activity log row; append-only; carries no secrets. */
+export interface ActivityEvent {
+  id: number;
+  cardId: string | null;
+  type: EventType;
+  fromCol: Column | null;
+  toCol: Column | null;
+  reason: string | null;
+  source: string | null;
+  ts: string;
+}
+
 export interface Card {
   /** Internal card id (can equal issueId in Phase 1). */
   id: string;
