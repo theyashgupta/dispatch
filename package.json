@@ -24,6 +24,7 @@
   "dependencies": {
     "@dnd-kit/core": "6.3.1",
     "@dnd-kit/sortable": "10.0.0",
+    "better-sqlite3": "12.11.1",
     "express": "5.2.1",
     "lucide-react": "1.23.0",
     "react": "19.2.7",
@@ -34,6 +35,7 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@types/better-sqlite3": "7.6.13",
     "@types/express": "5.0.6",
     "@types/node": "26.1.0",
     "@types/react": "19.2.17",
