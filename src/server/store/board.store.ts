@@ -33,6 +33,23 @@ export function compareTodoOrder(a: Card, b: Card): number {
   return b.updatedAt.localeCompare(a.updatedAt);
 }
 
+/**
+ * Did a reconcile refresh actually change the card's synced content? reconcile() re-pushes
+ * every existing To Do card into upserts as an in-place refresh on every poll (SYNC-02), so a
+ * `sync_in` event must fire ONLY when one of the poller-owned fields genuinely differs — else the
+ * 60s poll floods the event log with phantom sync-ins for the whole unchanged backlog (CR-01).
+ */
+function syncedFieldsChanged(prev: Card, next: Card): boolean {
+  return (
+    prev.title !== next.title ||
+    prev.url !== next.url ||
+    prev.description !== next.description ||
+    prev.priority !== next.priority ||
+    prev.updatedAt !== next.updatedAt ||
+    prev.goneFromLinear !== next.goneFromLinear
+  );
+}
+
 class BoardStore extends EventEmitter {
   /** The sole mutable truth. */
   private readonly cards = new Map<string, Card>();
@@ -1179,6 +1196,7 @@ class BoardStore extends EventEmitter {
       );
       const r = reconcile(issues, current, this.inFlightStarts, src);
       const applied: string[] = [];
+      const syncedIn: string[] = [];
       for (const card of r.upserts) {
         const existing = this.cards.get(card.id);
         if (existing && (existing.source ?? "linear") !== src) {
@@ -1186,6 +1204,9 @@ class BoardStore extends EventEmitter {
             `[store] skipped upsert of ${card.id} from source ${src} — id already owned by source ${existing.source ?? "linear"}.`,
           );
           continue;
+        }
+        if (!existing || syncedFieldsChanged(existing, card)) {
+          syncedIn.push(card.id);
         }
         this.cards.set(card.id, card);
         applied.push(card.id);
@@ -1206,15 +1227,7 @@ class BoardStore extends EventEmitter {
         this.syncWarning = null;
       }
       this.syncedAt = syncedAt;
-      if (
-        r.upserts.length === 0 &&
-        r.removeIds.length === 0 &&
-        r.goneIds.length === 0 &&
-        r.reappearedIds.length === 0
-      ) {
-        return [];
-      }
-      return applied.map((cardId) =>
+      return syncedIn.map((cardId) =>
         this.event("sync_in", {
           cardId,
           source: src,
