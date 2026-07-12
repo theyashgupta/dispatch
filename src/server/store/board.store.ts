@@ -2,7 +2,6 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import writeFileAtomic from "write-file-atomic";
 import type {
   BoardSnapshot,
   Card,
@@ -12,7 +11,7 @@ import type {
   StartError,
   TerminalError,
 } from "../../shared/types.js";
-import { recoverFromBackups, rotateBackups } from "./board-backups.js";
+import { type BoardDb, type BoardMeta, openBoardDb } from "./board-db.js";
 import { reconcile } from "./mapping.js";
 
 const BOARD_DIR = path.join(os.homedir(), ".dispatch");
@@ -65,6 +64,11 @@ class BoardStore extends EventEmitter {
   /** Serializes every mutation so mutate -> persist -> emit runs to completion before the next. */
   private queue: Promise<void> = Promise.resolve();
   /**
+   * The SQLite persistence handle, opened in load() before any mutation is enqueued. The store
+   * itself stays SQL-free — every DB contact lives behind this typed surface in board-db.ts.
+   */
+  private db!: BoardDb;
+  /**
    * Card ids with a start saga currently in flight (CR-01). Transient, in-memory, NOT persisted:
    * no saga survives a restart, so this set is intentionally empty after load(). It is the
    * double-start guard AND the signal reconcile() uses to refuse removing an actively-provisioning
@@ -104,31 +108,28 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Enqueue a mutation. The chained promise guarantees single-writer ordering.
-   * The in-memory Map is the source of truth: the broadcast (step 4) MUST fire even
-   * when the persist (step 3) fails, or SSE clients silently diverge from the state
-   * that GET /api/board already reports. A failed persist is logged (the log prints
-   * only the write error, never snapshot contents — board.json carries per-session
-   * hook tokens) and simply retried by the next mutation's write. The persist writes
-   * the FULL snapshot; the broadcast emits the REDACTED wire snapshot (snapshot()),
-   * so secrets reach disk but never an SSE frame. Errors are caught inside the chain
-   * so one failed step can never break the queue for subsequent mutations. Before the
-   * primary write, an hourly best-effort rolling backup of the last-known-good on-disk
-   * board.json is rotated (rotateBackups is itself never-throw, so a backup failure can
-   * never fail the write or the broadcast; on the hourly tick it adds a bounded handful of
-   * local fs ops ahead of the write, and is a no-op the rest of the hour).
+   * Enqueue a mutation. The chained promise guarantees single-writer ordering — WAL gives
+   * transaction atomicity, NOT the Map read-modify-write serialization or the SSE broadcast
+   * ordering, so the queue is retained even though each persist is now transactional. The
+   * in-memory Map is the source of truth: the broadcast (step 4) MUST fire even when the
+   * persist (step 3) fails, or SSE clients silently diverge from the state that GET /api/board
+   * already reports. A failed persist is logged (the log prints only the write error, never
+   * snapshot contents — the DB carries per-session hook tokens) and simply retried by the next
+   * mutation's write. The persist consumes the FULL card set (`this.cards.values()`, INCLUDING
+   * hookToken); the broadcast emits the REDACTED wire snapshot (snapshot()), so secrets reach
+   * the DB but never an SSE frame. Errors are caught inside the chain so one failed step can
+   * never break the queue for subsequent mutations. Ahead of the write, an hourly best-effort
+   * SQLite snapshot is folded into the backup chain (backupTick is itself never-throw, so a
+   * backup failure can never fail the write or the broadcast; it is a no-op the rest of the hour).
    * @see docs/ARCHITECTURE.md#single-writer-store
    */
   private enqueue(mutator: () => void): Promise<void> {
     this.queue = this.queue
       .then(async () => {
         mutator();
-        await rotateBackups(BOARD_PATH);
+        await this.db.backupTick();
         try {
-          await writeFileAtomic(
-            BOARD_PATH,
-            JSON.stringify(this.persistSnapshot(), null, 2),
-          );
+          this.db.persist([...this.cards.values()], this.buildMeta());
         } catch (err) {
           console.error(
             "[store] persist failed (in-memory state still broadcast):",
@@ -144,67 +145,56 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Load board.json into the Map. A missing file (ENOENT) starts a fresh empty board — the
-   * backup chain is deliberately NOT walked. Any other read error, or an unparseable primary,
-   * walks the rolling backup chain and recovers the most recent valid snapshot; only when the
-   * primary and every backup fail does the board start empty (always with a warning, never
-   * silently). Never throws, so a bad file can't block startup.
-   * @remarks A corrupt primary is renamed to `board.json.corrupt` before recovery and, per the
-   * locked no-boot-writeback decision, no fresh board.json is written until the next mutation.
-   * A second crash inside that window would see board.json absent (ENOENT) and start fresh; the
-   * ~60s poller closes it by persisting the recovered state, and the `.bak.*` / `.corrupt` files
-   * survive on disk for manual recovery (accepted residual, see RESEARCH.md Pitfall 5).
+   * Assemble the non-card meta row persisted alongside the cards — the same fields
+   * persistSnapshot carried in board.json's envelope (syncWarning/pollIntervalMs/editors
+   * stay in-memory-only, as they were absent from the persisted shape before).
    */
-  async load(): Promise<void> {
-    let raw: string;
-    try {
-      raw = await fs.promises.readFile(BOARD_PATH, "utf8");
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        console.log(
-          `[store] no board.json at ${BOARD_PATH} — starting with an empty board.`,
-        );
-        return;
-      }
-      await this.recoverOrEmpty();
-      return;
-    }
-    try {
-      const parsed = JSON.parse(raw) as Partial<BoardSnapshot>;
-      this.hydrateFromParsed(parsed);
-      console.log(
-        `[store] loaded ${this.cards.size} card(s) from ${BOARD_PATH}.`,
-      );
-    } catch (err) {
-      console.warn(
-        `[store] board.json at ${BOARD_PATH} is unparseable — walking the backup chain:`,
-        (err as Error).message,
-      );
-      try {
-        await fs.promises.rename(BOARD_PATH, `${BOARD_PATH}.corrupt`);
-      } catch {}
-      await this.recoverOrEmpty();
-    }
+  private buildMeta(): BoardMeta {
+    return {
+      syncedAt: this.syncedAt,
+      workspaceFolders: this.workspaceFolders,
+      lastUsed: this.lastUsedFolder,
+    };
   }
 
   /**
-   * Walk the rolling backup chain and hydrate from the first valid snapshot, or clear to an empty
-   * board (with a warning — never silent) when the primary and all backups are unparseable.
-   * recoverFromBackups already logged the file-named recovery warning on success.
+   * Open the board database and hydrate the in-memory Map from it. On first boot with a legacy
+   * board.json and an empty DB, import the file's cards + meta in ONE transaction, then rename it
+   * to board.json.pre-sqlite (never read again — STORE-02); a fresh install with no board.json
+   * and an empty DB hydrates an empty board with no error. A corrupt primary self-heals inside
+   * openBoardDb (renamed to board.db.corrupt, restored from the newest clean snapshot with a loud
+   * named log — STORE-04), so this path never throws on a bad file. The DB rows feed the SAME
+   * hydrateFromParsed used before, so interrupted-provisioning -> retryable startError and the
+   * transient ttydPort/terminalError reset happen identically on the import and DB-row paths.
+   * @see docs/ARCHITECTURE.md#single-writer-store
    */
-  private async recoverOrEmpty(): Promise<void> {
-    const recovered = await recoverFromBackups(BOARD_PATH);
-    if (recovered) {
-      this.hydrateFromParsed(recovered);
-      return;
+  async load(): Promise<void> {
+    this.db = openBoardDb();
+    if (this.db.cardCount() === 0 && fs.existsSync(BOARD_PATH)) {
+      try {
+        const parsed = JSON.parse(
+          await fs.promises.readFile(BOARD_PATH, "utf8"),
+        ) as Partial<BoardSnapshot>;
+        this.db.importParsed(parsed);
+        await fs.promises.rename(BOARD_PATH, `${BOARD_PATH}.pre-sqlite`);
+        console.log(
+          `[store] imported board.json into board.db and renamed it to ${BOARD_PATH}.pre-sqlite.`,
+        );
+      } catch (err) {
+        console.warn(
+          `[store] board.json at ${BOARD_PATH} was unreadable/unparseable — skipping import, starting from the database:`,
+          (err as Error).message,
+        );
+      }
     }
-    console.warn(
-      `[store] board.json at ${BOARD_PATH} and all backups were unreadable/unparseable — starting with an empty board.`,
-    );
-    this.cards.clear();
-    this.syncedAt = null;
-    this.workspaceFolders = [];
-    this.lastUsedFolder = null;
+    const { cards, meta } = this.db.readAll();
+    this.hydrateFromParsed({
+      cards,
+      syncedAt: meta.syncedAt ?? null,
+      workspaceFolders: meta.workspaceFolders,
+      lastUsed: meta.lastUsed,
+    });
+    console.log(`[store] loaded ${this.cards.size} card(s) from board.db.`);
   }
 
   /**
