@@ -7,6 +7,11 @@ import type { BoardSnapshot, Card } from "../../shared/types.js";
 const BOARD_DIR = path.join(os.homedir(), ".dispatch");
 export const BOARD_DB_PATH = path.join(BOARD_DIR, "board.db");
 
+/** Hardcoded snapshot-backup slot count (`.bak.1` .. `.bak.5`); no config surface (BAK-01). */
+export const BACKUP_SLOTS = 5;
+
+const HOUR_MS = 3_600_000;
+
 /**
  * The non-card board fields the store persists alongside the cards — the exact
  * subset `persistSnapshot()` writes today (`syncWarning`/`pollIntervalMs`/`editors`
@@ -31,6 +36,90 @@ export interface BoardDb {
   readAll(): { cards: Card[]; meta: Partial<BoardMeta> };
   persist(cards: Card[], meta: BoardMeta): void;
   importParsed(parsed: Partial<BoardSnapshot>): void;
+  backupTick(): Promise<void>;
+}
+
+/** Slot path for the Nth snapshot backup in the `.bak.N` chain. */
+function bak(n: number): string {
+  return `${BOARD_DB_PATH}.bak.${n}`;
+}
+
+/**
+ * Does a backup candidate open as a structurally-sound SQLite database? Opened read-only
+ * so probing a slot never mutates it, and gated on PRAGMA integrity_check so page-level
+ * damage a bare open would miss is caught before the slot is adopted (STORE-04).
+ */
+function opensClean(candidate: string): boolean {
+  try {
+    const probe = new Database(candidate, {
+      readonly: true,
+      fileMustExist: true,
+    });
+    const ok = probe.pragma("integrity_check", { simple: true }) === "ok";
+    probe.close();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Quarantine an unopenable/corrupt primary and recover from the newest clean snapshot
+ * (STORE-04). Renames the bad primary to `board.db.corrupt` and removes its stale WAL
+ * sidecars (so they cannot poison the restored copy), then walks `.bak.1`..`.bak.5`
+ * newest-first, copying back the first slot that opens clean and logging a LOUD warning
+ * naming the exact file used — a recovery is never silent. When the primary and every
+ * slot fail, a fresh empty database is opened (also with a warning), so a corrupt file
+ * can never crash boot (STORE-04 DoS mitigation).
+ */
+function quarantineAndRecover(cause: unknown): Database.Database {
+  console.warn(
+    `[store] board.db failed to open cleanly (${(cause as Error).message}) — quarantining and walking the backup chain.`,
+  );
+  try {
+    if (fs.existsSync(BOARD_DB_PATH)) {
+      fs.renameSync(BOARD_DB_PATH, `${BOARD_DB_PATH}.corrupt`);
+    }
+  } catch {}
+  for (const ext of ["-wal", "-shm"]) {
+    try {
+      fs.rmSync(`${BOARD_DB_PATH}${ext}`, { force: true });
+    } catch {}
+  }
+  for (let i = 1; i <= BACKUP_SLOTS; i++) {
+    if (opensClean(bak(i))) {
+      try {
+        fs.copyFileSync(bak(i), BOARD_DB_PATH);
+        const restored = new Database(BOARD_DB_PATH);
+        console.warn(
+          `[store] recovered board.db from ${bak(i)} after the primary was corrupt/unopenable.`,
+        );
+        return restored;
+      } catch {}
+    }
+  }
+  console.warn(
+    `[store] board.db and every backup slot were unreadable — starting with an empty database.`,
+  );
+  return new Database(BOARD_DB_PATH);
+}
+
+/**
+ * Open the primary with BOTH a constructor try/catch AND a PRAGMA integrity_check, the two
+ * complementary corruption detectors: the catch handles a file too damaged to open at all,
+ * the pragma handles one that opens but has damaged pages. On either failure the connection
+ * self-heals via quarantineAndRecover. A MISSING primary on a fresh install is not corruption
+ * — `new Database` creates it and an empty board follows (STORE-02).
+ */
+function connect(): Database.Database {
+  try {
+    const db = new Database(BOARD_DB_PATH);
+    if (db.pragma("integrity_check", { simple: true }) === "ok") return db;
+    db.close();
+    throw new Error("integrity_check reported corruption");
+  } catch (err) {
+    return quarantineAndRecover(err);
+  }
 }
 
 /**
@@ -55,12 +144,14 @@ function toMeta(parsed: Partial<BoardSnapshot>): BoardMeta {
  * protection board.json had). Prepared statements are compiled once here and reused for
  * every mutation. Card and meta values cross into SQL ONLY as bound parameters
  * (`@id`/`@data`/`?` + json_each) — never string-concatenated, so card text (incl.
- * Linear-sourced content) cannot inject SQL (STORE tampering mitigation).
+ * Linear-sourced content) cannot inject SQL (STORE tampering mitigation). The open
+ * self-heals a corrupt primary from the newest clean snapshot (connect), and
+ * `backupTick` folds an hourly WAL-consistent snapshot into the `.bak.N` chain.
  * @see docs/ARCHITECTURE.md#single-writer-store
  */
 export function openBoardDb(): BoardDb {
   fs.mkdirSync(BOARD_DIR, { recursive: true, mode: 0o700 });
-  const db = new Database(BOARD_DB_PATH);
+  const db = connect();
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
   db.pragma("foreign_keys = ON");
@@ -100,6 +191,8 @@ export function openBoardDb(): BoardDb {
     writeMeta.run({ data: JSON.stringify(meta) });
   });
 
+  let backupFailureLogged = false;
+
   return {
     cardCount() {
       return (countCards.get() as { n: number }).n;
@@ -120,6 +213,32 @@ export function openBoardDb(): BoardDb {
     importParsed(parsed) {
       const cards = Array.isArray(parsed.cards) ? parsed.cards : [];
       persistTxn(cards, toMeta(parsed));
+    },
+    async backupTick() {
+      try {
+        let elapsed = true;
+        try {
+          const { mtimeMs } = fs.statSync(bak(1));
+          elapsed = Date.now() - mtimeMs >= HOUR_MS;
+        } catch {}
+        if (!elapsed) return;
+        const tmp = `${BOARD_DB_PATH}.bak.tmp`;
+        await db.backup(tmp);
+        for (let i = BACKUP_SLOTS - 1; i >= 1; i--) {
+          try {
+            fs.renameSync(bak(i), bak(i + 1));
+          } catch {}
+        }
+        fs.renameSync(tmp, bak(1));
+      } catch (err) {
+        if (!backupFailureLogged) {
+          backupFailureLogged = true;
+          console.error(
+            "[store] board.db backup failed (primary write unaffected):",
+            (err as Error).message,
+          );
+        }
+      }
     },
   };
 }
