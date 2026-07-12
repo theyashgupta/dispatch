@@ -20,6 +20,28 @@ import { resolveEditors } from "../adapters/editors.js";
 const DEFAULT_PORT = 4700;
 const DEFAULT_POLL_INTERVAL_MS = 60_000;
 
+/**
+ * Turn a body-parser JSON failure into a clean JSON 400 so a malformed request body returns
+ * `{ error }` instead of Express's default HTML error page (which also leaks a SyntaxError, and
+ * fires before a route's own auth check). Registered after the router so it only catches parse
+ * errors that fell through the API.
+ */
+const jsonBodyErrorHandler: express.ErrorRequestHandler = (
+  err,
+  _req,
+  res,
+  next,
+) => {
+  if (
+    err instanceof SyntaxError &&
+    (err as unknown as { type?: unknown }).type === "entity.parse.failed"
+  ) {
+    res.status(400).json({ error: "invalid JSON body" });
+    return;
+  }
+  next(err);
+};
+
 async function main(): Promise<void> {
   await checkBinaries();
   const config = loadConfig();
@@ -58,6 +80,7 @@ async function main(): Promise<void> {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
   app.use("/api", apiRouter);
+  app.use(jsonBodyErrorHandler);
 
   app.listen(port, "127.0.0.1", () => {
     console.log(
