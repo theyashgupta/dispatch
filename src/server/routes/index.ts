@@ -2,6 +2,7 @@ import { Router } from "express";
 import { isLocalRequest } from "./loopback.js";
 import { boardRouter } from "./board.route.js";
 import { cardsRouter } from "./cards.route.js";
+import { eventsRouter } from "./events.route.js";
 import { sseRouter } from "./sse.route.js";
 import { hooksRouter } from "./hooks.route.js";
 
@@ -17,5 +18,6 @@ apiRouter.use((req, res, next) => {
 
 apiRouter.use(boardRouter);
 apiRouter.use(cardsRouter);
+apiRouter.use(eventsRouter);
 apiRouter.use(sseRouter);
 apiRouter.use(hooksRouter);
