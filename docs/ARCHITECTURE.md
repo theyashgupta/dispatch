@@ -732,10 +732,12 @@ The board receives state over a single hand-rolled Server-Sent-Events stream —
 and pushes state back only through fire-and-forget REST, so the SSE channel is strictly
 server→client.
 
-**Hand-rolled SSE endpoint (`BOARD-04`).** `GET /api/events` (`routes/sse.route.ts`) keeps a module-level
+**Hand-rolled SSE endpoint (`BOARD-04`).** `GET /api/stream` (`routes/sse.route.ts`) keeps a module-level
 `Set<Response>` of active clients and, on every store `"change"`, broadcasts the FULL current
 `BoardSnapshot` to each — a single-user board does no event merging, the client replaces its state
-wholesale. The stream is un-buffered (`X-Accel-Buffering: no`, `Cache-Control: no-cache`, and NO
+wholesale. Each durably-inserted event also rides the SAME connection as a distinct NAMED
+`event: activity\ndata: <ActivityEvent JSON>\n\n` frame (on every store `"activity"`), alongside the
+unnamed board `data:` frame and the named `ping` heartbeat. The stream is un-buffered (`X-Accel-Buffering: no`, `Cache-Control: no-cache`, and NO
 compression on this route — compression would buffer and break liveness) and resync-on-connect (the
 full snapshot is written the instant a client connects). The payload is a `BoardSnapshot` only
 (cards + syncedAt) — it NEVER carries the Linear API key or any secret: `store.snapshot()` is the
@@ -953,8 +955,10 @@ is a behavior change, not a refactor.
 2. **SSE frame format.** `data: ${JSON.stringify(BoardSnapshot)}\n\n`; named heartbeat
    `event: ping\ndata: 1\n\n`; headers incl. `X-Accel-Buffering: no`; **server `KEEPALIVE_MS` (15s)
    must stay in lockstep with client `HEARTBEAT_MS`** (watchdog trips at 3×). No compression on
-   `/events`.
-3. **REST route paths + status codes.** `GET /api/board`, `GET /api/events`,
+   `/stream`.
+3. **REST route paths + status codes.** `GET /api/board`, `GET /api/stream` (SSE),
+   `GET /api/events` (REST event log — `{ events: ActivityEvent[] }`, newest-first, default limit 200,
+   `?cardId=` scoped),
    `POST /api/cards/:id/{move,start,resume,terminal,open-editor,cleanup}`; the `202/400/409/204` codes and
    the `{ error, variant? }` 400 body. Vite proxy matches `^/api/` only (regex, deliberately not `/api`).
 4. **Persistence format + location.** `~/.dispatch/{board.json,config.json}`; `board.json` ===

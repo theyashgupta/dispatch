@@ -46,7 +46,7 @@ export function useBoardStream(): BoardStream {
     const connect = () => {
       if (disposed) return;
       lastEventAt = Date.now();
-      const src = new EventSource("/api/events");
+      const src = new EventSource("/api/stream");
       es = src;
 
       src.onopen = () => {
@@ -62,6 +62,9 @@ export function useBoardStream(): BoardStream {
       src.addEventListener("ping", () => {
         lastEventAt = Date.now();
         setConnection("connected");
+      });
+      src.addEventListener("activity", () => {
+        lastEventAt = Date.now();
       });
       src.onerror = () => {
         if (es === src) scheduleReconnect();

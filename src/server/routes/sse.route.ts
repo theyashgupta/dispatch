@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { store } from "../store/board.store.js";
-import type { BoardSnapshot } from "../../shared/types.js";
+import type { ActivityEvent, BoardSnapshot } from "../../shared/types.js";
 
 /** Active SSE clients; broadcast writes to each and drops them on disconnect. */
 const clients = new Set<Response>();
@@ -19,6 +19,11 @@ function frame(snapshot: BoardSnapshot): string {
   return `data: ${JSON.stringify(snapshot)}\n\n`;
 }
 
+/** Serialize one durably-inserted event into a NAMED `activity` SSE frame, distinct from the board `data:` frame. */
+function activityFrame(event: ActivityEvent): string {
+  return `event: activity\ndata: ${JSON.stringify(event)}\n\n`;
+}
+
 /**
  * Write to a client only if its response stream is still alive. The socket can be torn
  * down a tick BEFORE the req "close" handler runs; a write in that window emits a stream
@@ -31,7 +36,7 @@ function safeWrite(res: Response, payload: string): boolean {
   return true;
 }
 
-/** Express handler for GET /api/events. */
+/** Express handler for GET /api/stream. */
 export function sseHandler(req: Request, res: Response): void {
   res.on("error", () => {});
 
@@ -66,6 +71,13 @@ store.on("change", (snapshot: BoardSnapshot) => {
   }
 });
 
+store.on("activity", (event: ActivityEvent) => {
+  const payload = activityFrame(event);
+  for (const client of clients) {
+    if (!safeWrite(client, payload)) clients.delete(client);
+  }
+});
+
 export const sseRouter = Router();
 
-sseRouter.get("/events", sseHandler);
+sseRouter.get("/stream", sseHandler);
