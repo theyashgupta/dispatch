@@ -75,6 +75,7 @@ export function FirstRunSetup({ onConnected }: FirstRunSetupProps) {
         padding: "var(--space-2xl)",
         color: "var(--text)",
         overflowY: "auto",
+        userSelect: "none",
       }}
     >
       <div
@@ -92,7 +93,6 @@ export function FirstRunSetup({ onConnected }: FirstRunSetupProps) {
             flexDirection: "column",
             alignItems: "center",
             gap: "var(--space-sm)",
-            userSelect: "none",
           }}
         >
           <Glyph size={44} />
@@ -168,6 +168,7 @@ export function FirstRunSetup({ onConnected }: FirstRunSetupProps) {
                 lineHeight: "var(--line-body)",
                 outline: "none",
                 boxShadow: inputFocused ? "0 0 0 2px var(--accent)" : "none",
+                userSelect: "text",
               }}
             />
             <span
