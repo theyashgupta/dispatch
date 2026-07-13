@@ -1,11 +1,16 @@
-import { useEffect, useState } from "react";
-import type { BoardSnapshot } from "../../shared/types.js";
+import { useEffect, useRef, useState } from "react";
+import type { ActivityEvent, BoardSnapshot } from "../../shared/types.js";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
 export interface BoardStream {
   board: BoardSnapshot | null;
   connection: ConnectionStatus;
+}
+
+export interface BoardStreamOptions {
+  /** Invoked with each parsed activity event from the single stream's named `activity` frame. */
+  onActivity?: (event: ActivityEvent) => void;
 }
 
 const HEARTBEAT_MS = 15_000;
@@ -15,9 +20,20 @@ const WATCHDOG_TICK_MS = 5_000;
 const BACKOFF_START_MS = 1_000;
 const BACKOFF_MAX_MS = 5_000;
 
-export function useBoardStream(): BoardStream {
+/**
+ * Own the single `/api/stream` EventSource. The optional `onActivity` callback is held in a ref
+ * refreshed every render and read inside the existing `activity` listener, so a changing callback
+ * never re-runs the connect effect (deps stay `[]`) and no second EventSource is ever opened — the
+ * board `data:` snapshot frame and the named `activity` frame stay decoupled.
+ */
+export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
   const [board, setBoard] = useState<BoardSnapshot | null>(null);
   const [connection, setConnection] = useState<ConnectionStatus>("connecting");
+
+  const onActivityRef = useRef(options.onActivity);
+  useEffect(() => {
+    onActivityRef.current = options.onActivity;
+  });
 
   useEffect(() => {
     let es: EventSource | null = null;
@@ -63,8 +79,9 @@ export function useBoardStream(): BoardStream {
         lastEventAt = Date.now();
         setConnection("connected");
       });
-      src.addEventListener("activity", () => {
+      src.addEventListener("activity", (e: MessageEvent) => {
         lastEventAt = Date.now();
+        onActivityRef.current?.(JSON.parse(e.data) as ActivityEvent);
       });
       src.onerror = () => {
         if (es === src) scheduleReconnect();
