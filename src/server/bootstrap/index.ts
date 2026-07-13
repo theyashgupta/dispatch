@@ -40,7 +40,7 @@ const spaFallback: express.RequestHandler = (req, res, next) => {
     next();
     return;
   }
-  if (req.path.startsWith("/api/")) {
+  if (req.path === "/api" || req.path.startsWith("/api/")) {
     next();
     return;
   }
