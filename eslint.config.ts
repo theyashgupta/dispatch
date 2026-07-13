@@ -162,7 +162,7 @@ const KEBAB = "+([a-z])*([a-z0-9])*(-+([a-z0-9]))";
 export default tseslint.config(
   {
     ignores: [
-      "src/web/dist/**",
+      "dist/**",
       "node_modules/**",
       "eslint.config.ts",
       "eslint-local/**",
