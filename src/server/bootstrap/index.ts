@@ -1,5 +1,6 @@
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import type { Server } from "node:http";
 import express from "express";
 import { StartupError } from "./binary-check.js";
 import { loadConfig } from "./config.js";
@@ -71,7 +72,44 @@ const jsonBodyErrorHandler: express.ErrorRequestHandler = (
   next(err);
 };
 
-async function main(): Promise<void> {
+/** Options for {@link main}; `desiredPort` overrides the configured port (the CLI's `--port`). */
+export interface MainOptions {
+  desiredPort?: number;
+}
+
+/**
+ * Listen on `desiredPort`, falling back to an OS-assigned free port on EADDRINUSE, and resolve the
+ * REAL bound port from `server.address()`. Both the primary and fallback bind loopback only so the
+ * port-selection change never widens exposure; using the real socket avoids the TOCTOU race a
+ * separate free-port probe would introduce.
+ */
+function listenWithFallback(
+  app: express.Express,
+  desiredPort: number,
+): Promise<{ server: Server; port: number }> {
+  return new Promise((resolve, reject) => {
+    const attempt = (candidate: number, isRetry: boolean): void => {
+      const server = app.listen(candidate, "127.0.0.1");
+      server.once("listening", () => {
+        const addr = server.address();
+        resolve({
+          server,
+          port: typeof addr === "object" && addr ? addr.port : candidate,
+        });
+      });
+      server.once("error", (err: NodeJS.ErrnoException) => {
+        if (err.code === "EADDRINUSE" && !isRetry && candidate !== 0) {
+          attempt(0, true);
+        } else {
+          reject(err);
+        }
+      });
+    };
+    attempt(desiredPort, false);
+  });
+}
+
+export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   const missing = (await probePrerequisites()).filter((p) => !p.present);
   if (missing.length > 0) {
     console.warn(
@@ -84,7 +122,6 @@ async function main(): Promise<void> {
   setOrchestrationConfig(config);
   buildRegistry(config);
 
-  const port = config.port ?? DEFAULT_PORT;
   const statusChannel = config.statusChannel ?? "auto";
   await installHookArtifacts();
   const { capable, version } = await checkHooksCapability();
@@ -97,7 +134,6 @@ async function main(): Promise<void> {
         "or flip this run",
     );
   }
-  setHooksRuntime({ capable, port, statusChannel });
   store.setHookTokenReleaser((token, cardId) => {
     unregisterHookToken(token);
     reapActivityThrottle(cardId);
@@ -135,24 +171,32 @@ async function main(): Promise<void> {
 
   app.use(jsonBodyErrorHandler);
 
-  app.listen(port, "127.0.0.1", () => {
-    console.log(
-      `[server] Dispatch backend listening on http://127.0.0.1:${port}`,
-    );
+  const desiredPort = opts.desiredPort ?? config.port ?? DEFAULT_PORT;
+  const { port } = await listenWithFallback(app, desiredPort);
+  console.log(
+    `[server] Dispatch backend listening on http://127.0.0.1:${port}`,
+  );
 
+  setHooksRuntime({ capable, port, statusChannel });
+  if (config.linearApiKey) {
     startPoller(config, getLinearSource());
-
-    startMarkerWatcher(statusChannel);
-  });
+  }
+  startMarkerWatcher(statusChannel);
+  return { port };
 }
 
-main().catch((err: unknown) => {
-  if (err instanceof StartupError) {
-    process.stderr.write(`\n${err.message}\n`);
-  } else {
-    process.stderr.write(
-      `\nStartup failed: ${(err as Error).stack ?? String(err)}\n`,
-    );
-  }
-  process.exit(1);
-});
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  main().catch((err: unknown) => {
+    if (err instanceof StartupError) {
+      process.stderr.write(`\n${err.message}\n`);
+    } else {
+      process.stderr.write(
+        `\nStartup failed: ${(err as Error).stack ?? String(err)}\n`,
+      );
+    }
+    process.exit(1);
+  });
+}

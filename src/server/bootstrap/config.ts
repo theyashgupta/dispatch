@@ -20,7 +20,7 @@ const DEFAULT_WORKSPACE_ROOT = path.join(os.homedir(), "dispatch-workspaces");
  * so a user can read the guidance and still have the file parse cleanly after editing.
  */
 const CONFIG_TEMPLATE = {
-  "//": "Dispatch config. Fill in linearApiKey, then restart. This file is kept at mode 0600 (owner read/write only).",
+  "//": "Dispatch config. Add your Linear API key in the browser first-run setup (or here). This file is kept at mode 0600 (owner read/write only).",
   "// linearApiKey":
     "Required. Linear personal API key: Linear -> Settings -> Security & access -> Personal API keys -> New key.",
   linearApiKey: "",
@@ -139,11 +139,12 @@ function buildMigratedConfig(
 }
 
 /**
- * Load and validate the config, or bootstrap it.
- * - Missing file: create the dir (0o700), write the 0o600 template, print guidance, exit(1).
- * - Existing file: parse, REQUIRE linearApiKey (throw StartupError if empty), apply defaults for
- *   port/pollIntervalMs, tighten perms to 0o600. Retired repoPaths/baseBranches keys are ignored
- *   with a one-line notice when still present on disk.
+ * Load and validate the config, or bootstrap it into a needs-setup state.
+ * - Missing file: create the dir (0o700), write the 0o600 template, print guidance, then fall
+ *   through to parse it so an empty key boots into first-run setup rather than exiting.
+ * - Existing file: parse, apply defaults for port/pollIntervalMs, tighten perms to 0o600. An empty
+ *   key is a bootable needs-setup signal (linearApiKey ""), NOT a fatal error; retired
+ *   repoPaths/baseBranches keys are ignored with a one-line notice when still present on disk.
  * The API key value is never logged (presence is logged as a boolean only) — JSON parse failures
  * report the error position but never the parser message, because V8 embeds a snippet of the input
  * around the failure point and a mis-quoted key sits exactly there.
@@ -159,9 +160,8 @@ export function loadConfig(): Config {
     fs.chmodSync(CONFIG_PATH, 0o600);
     process.stderr.write(
       `No config found. Wrote a template to ${CONFIG_PATH}.\n` +
-        `Add your Linear API key (field "linearApiKey") and restart.\n`,
+        `Dispatch will boot into first-run setup — add your Linear API key in the browser.\n`,
     );
-    process.exit(1);
   }
 
   try {
@@ -224,11 +224,6 @@ export function loadConfig(): Config {
   }
 
   const rawKey = nestedKey !== "" ? nestedKey : flatKey;
-  if (rawKey === "") {
-    throw new StartupError(
-      `Linear API key missing in ${CONFIG_PATH}. Set the "linearApiKey" field and restart.`,
-    );
-  }
 
   if (parsed.repoPaths !== undefined || parsed.baseBranches !== undefined) {
     process.stderr.write(
