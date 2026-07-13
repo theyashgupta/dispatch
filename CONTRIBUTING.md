@@ -37,9 +37,9 @@ npm install
 npm run dev
 ```
 
-First run writes a config template to `~/.dispatch/config.json` and exits. Fill it in, then run
-`npm run dev` again. Dispatch is localhost only: everything binds to `127.0.0.1` and there is no auth
-layer. Don't develop against a network-exposed instance.
+The first run lands on an in-browser setup screen: paste your Linear key there and confirm the prereq
+checklist — no config file to hand-edit, no restart. Dispatch is localhost only: everything binds to
+`127.0.0.1` and there is no auth layer. Don't develop against a network-exposed instance.
 
 ## The check gate
 
@@ -100,6 +100,34 @@ surprises you, that's a bug, not a re-record.
 Give it a durable home: a JSDoc block in `src/**` or a line in `docs/ARCHITECTURE.md`. A bare `//` body
 comment doesn't count. Then run `npm run check`. The replay gate step won't complain, but the invariant
 audit will if an ID is homeless.
+
+## Releasing
+
+Maintainer-only. Dispatch ships to npm as the public scoped package `@theyashgupta/dispatch`; a version
+tag triggers the publish.
+
+**One-time setup.** Create an npm **Automation** token (bypasses 2FA for CI, publish-only, revocable) and
+add it as the repo secret `NPM_TOKEN`. The scope publishes public via `publishConfig.access:public` in
+`package.json` plus `--access public` on the command — both are set, so nothing lands as restricted. The
+first publish claims the public scope for the name.
+
+**Per release.**
+
+1. Verify before tagging (local): `npm run check` green, then `npm run build && npm pack --dry-run`. The
+   tarball must be `dist/**` + `README.md` + `LICENSE` + `package.json` and nothing from `src/`,
+   `.planning/`, or `docs/`. Optionally clean-room smoke it: `npm i <tgz> --omit=dev` in a temp dir and run
+   `dispatch --version`.
+2. Bump `version` in `package.json`, commit.
+3. `git tag vX.Y.Z`, then `git push --tags` (maintainer does this — YubiKey).
+4. The [`publish.yml`](.github/workflows/publish.yml) workflow fires on the `v*` tag, runs `npm ci`,
+   `npm run build`, and `npm publish --access public` with `NODE_AUTH_TOKEN` from `NPM_TOKEN`. Pushing to
+   `main` or creating the tag file alone does not publish — only a pushed tag does.
+
+The milestone number equals the public release tag. Release notes and the demo recording happen at
+publish time as part of the maintainer's release-notes ritual — out of scope for a normal PR.
+
+npm provenance (`--provenance` with `id-token: write`) is available as an opt-in for extra supply-chain
+trust; it's kept off by default to stay on the locked publish steps.
 
 ## Commit messages
 
