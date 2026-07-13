@@ -10,6 +10,9 @@
   },
   "private": true,
   "type": "module",
+  "bin": {
+    "dispatch": "dist/server/bootstrap/cli.js"
+  },
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,magenta \"tsx watch src/server/bootstrap/index.ts\" \"vite\"",
     "typecheck": "tsc --noEmit",

@@ -82,6 +82,7 @@ const rule = {
     return {
       "Program:exit"() {
         for (const c of sc.getAllComments()) {
+          if (c.type === "Hashbang" || c.type === "Shebang") continue;
           if (/^\s*eslint\b|^\s*global\b/.test(c.value)) continue;
           if (c.type === "Line" && /^\/\s*<reference\b/.test(c.value)) continue;
           if (c.type === "Line" && EXTERNAL_FACT_TOKEN.test(c.value)) continue;

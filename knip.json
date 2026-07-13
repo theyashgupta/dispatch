@@ -1,6 +1,7 @@
 {
   "entry": [
     "src/server/bootstrap/index.ts",
+    "src/server/bootstrap/cli.ts",
     "src/web/main.tsx",
     "src/web/index.html"
   ],
