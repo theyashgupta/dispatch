@@ -5,6 +5,7 @@ import type {
   FilterCapabilities,
   FilterOption,
   Playbook,
+  PrerequisiteStatus,
   SourceFilters,
 } from "../../shared/types.js";
 
@@ -423,4 +424,48 @@ export async function saveLinearFilters(
     return { ok: false, error: body.error ?? "Couldn't save filters." };
   }
   throw new Error(`saveLinearFilters failed: ${res.status} ${res.statusText}`);
+}
+
+/**
+ * Read first-run status: GET /api/setup. Fired once on app mount to gate the setup screen vs the
+ * board. Returns `needsKey` plus the live prerequisite checklist; the Linear key never crosses this
+ * boundary. Throws on any non-2xx so the caller can fail-open to the board rather than trapping a
+ * fresh install behind a fetch error.
+ */
+export async function getSetup(): Promise<{
+  needsKey: boolean;
+  prerequisites: PrerequisiteStatus[];
+}> {
+  const res = await fetch("/api/setup");
+  if (!res.ok) {
+    throw new Error(`getSetup failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as {
+    needsKey: boolean;
+    prerequisites: PrerequisiteStatus[];
+  };
+}
+
+/**
+ * Submit the Linear key on first run: POST /api/setup. The server tests the key against Linear
+ * before persisting, so the discriminated result maps the two failure modes to the setup screen's
+ * two error strings: 200 → { ok:true } (board hydrates over the live SSE, no reload); 502 →
+ * { ok:false, reason:"unreachable" } (couldn't reach Linear); any other non-2xx (400 rejected, 409
+ * already-configured) → { ok:false, reason:"rejected" }. The key is sent once and never echoed back.
+ */
+export async function saveLinearKey(
+  apiKey: string,
+): Promise<{ ok: true } | { ok: false; reason: "rejected" | "unreachable" }> {
+  const res = await fetch("/api/setup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey }),
+  });
+  if (res.ok) {
+    return { ok: true };
+  }
+  if (res.status === 502) {
+    return { ok: false, reason: "unreachable" };
+  }
+  return { ok: false, reason: "rejected" };
 }

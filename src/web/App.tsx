@@ -15,7 +15,8 @@ import { ActivityDrawer } from "./features/activity/ActivityDrawer.js";
 import { StartModal } from "./features/modals/StartModal.js";
 import { CleanupModal } from "./features/modals/CleanupModal.js";
 import { SettingsModal } from "./features/modals/SettingsModal.js";
-import { cleanupCard as cleanupCardApi } from "./lib/api.js";
+import { FirstRunSetup } from "./features/setup/FirstRunSetup.js";
+import { cleanupCard as cleanupCardApi, getSetup } from "./lib/api.js";
 import type { StartRequest } from "./lib/start-request.js";
 
 export function App() {
@@ -73,6 +74,27 @@ export function App() {
   }, [cleanupResolved]);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const [setupState, setSetupState] = useState<
+    "loading" | "needsKey" | "ready"
+  >("loading");
+  useEffect(() => {
+    let active = true;
+    void getSetup()
+      .then((s) => {
+        if (active) setSetupState(s.needsKey ? "needsKey" : "ready");
+      })
+      .catch(() => {
+        if (active) setSetupState("ready");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (setupState === "needsKey") {
+    return <FirstRunSetup onConnected={() => setSetupState("ready")} />;
+  }
 
   if (board === null) {
     const statusText =
