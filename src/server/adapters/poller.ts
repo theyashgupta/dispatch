@@ -1,5 +1,6 @@
 import type { Config } from "../../shared/types.js";
 import { store } from "../store/board.store.js";
+import { getLinearSource } from "../sources/registry.js";
 import { RateLimited, type TicketSource } from "../sources/ticket.source.js";
 
 const DEFAULT_POLL_INTERVAL_MS = 60_000;
@@ -84,6 +85,16 @@ export function startPoller(config: Config, source: TicketSource): void {
   baseIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   backoffMs = baseIntervalMs;
   void pollOnce();
+}
+
+/**
+ * Start the poll loop against the freshly-built Linear source after a first-run key save.
+ * @remarks Called only from the keyless setup path (the route 409s when a key already exists), so the
+ * `startPoller` re-entry residual — it does not reset `generation` — is never triggered by a second
+ * start.
+ */
+export function startLinearPoller(config: Config): void {
+  startPoller(config, getLinearSource());
 }
 
 /**

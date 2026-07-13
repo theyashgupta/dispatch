@@ -110,3 +110,65 @@ export function updateSourceFilters(
     orchestrationConfig.sources.linear.filters = filters;
   }
 }
+
+/**
+ * Persist the Linear API key to `~/.dispatch/config.json` and make it live immediately, mirroring
+ * `updateSourceFilters` exactly.
+ *
+ * @remarks The first-run setup route calls this only after a live Linear check has passed, so a
+ * rejected key never reaches disk. It re-reads the raw file, mutates ONLY `sources.linear.apiKey`,
+ * and carries every other top-level key plus `sources.linear.filters` forward verbatim. The write is
+ * atomic at mode 0600 because the file holds the key at rest; the key is copied as an opaque value —
+ * never read back, logged, or returned. Both the resolved `linearApiKey` read and the nested
+ * `sources.linear.apiKey` on the held Config are mutated IN PLACE so the registry's key-carrying
+ * source and the keyless-boot signal both flip on the next poll with no restart.
+ */
+export function updateLinearApiKey(apiKey: string): void {
+  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
+  let parsed: Record<string, unknown>;
+  try {
+    const p = JSON.parse(raw) as unknown;
+    if (typeof p !== "object" || p === null || Array.isArray(p)) {
+      throw new Error("not an object");
+    }
+    parsed = p as Record<string, unknown>;
+  } catch (err) {
+    const pos = /position (\d+)/.exec((err as Error).message)?.[1];
+    throw new Error(
+      `config at ${CONFIG_PATH} is not valid JSON${pos ? ` (near position ${pos})` : ""}`,
+    );
+  }
+
+  const priorSources =
+    typeof parsed.sources === "object" &&
+    parsed.sources !== null &&
+    !Array.isArray(parsed.sources)
+      ? (parsed.sources as Record<string, unknown>)
+      : {};
+  const priorLinear =
+    typeof priorSources.linear === "object" &&
+    priorSources.linear !== null &&
+    !Array.isArray(priorSources.linear)
+      ? (priorSources.linear as Record<string, unknown>)
+      : {};
+
+  const next = {
+    ...parsed,
+    sources: {
+      ...priorSources,
+      linear: { ...priorLinear, apiKey },
+    },
+  };
+
+  writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
+    mode: 0o600,
+  });
+  fs.chmodSync(CONFIG_PATH, 0o600);
+
+  if (orchestrationConfig) {
+    orchestrationConfig.linearApiKey = apiKey;
+    if (orchestrationConfig.sources?.linear) {
+      orchestrationConfig.sources.linear.apiKey = apiKey;
+    }
+  }
+}

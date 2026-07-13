@@ -1,4 +1,7 @@
+import type { PrerequisiteStatus } from "../../shared/types.js";
 import { resolveBinaryPath } from "../adapters/resolve-binary.js";
+
+export type { PrerequisiteStatus };
 
 /** The four binaries Dispatch needs at runtime (spec + BOARD-05). */
 export const REQUIRED_BINARIES = ["tmux", "ttyd", "git", "claude"] as const;
@@ -10,13 +13,6 @@ export const INSTALL_HINTS: Record<string, string> = {
   claude: "install Claude Code — https://docs.claude.com/claude-code",
   git: "xcode-select --install  (or: brew install git)",
 };
-
-/** Per-binary presence result: `hint` is populated only when the binary is absent. */
-export interface PrerequisiteStatus {
-  name: string;
-  present: boolean;
-  hint: string | null;
-}
 
 /**
  * Probe every required binary on PATH and return a per-binary status.

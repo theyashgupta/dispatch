@@ -1,11 +1,12 @@
-import { getLinearSource } from "../sources/registry.js";
+import { buildRegistry, getLinearSource } from "../sources/registry.js";
+import { testLinearConnection as testImpl } from "../sources/linear/linear.source.js";
 import type {
   FilterCapabilities,
   FilterDimension,
   FilterOption,
   TicketSource,
 } from "../sources/ticket.source.js";
-import type { SourceFilters } from "../../shared/types.js";
+import type { Config, SourceFilters } from "../../shared/types.js";
 
 /**
  * Thrown when a route asks for a source id the registry does not serve. It lives in the adapters
@@ -49,4 +50,17 @@ export function countSourceMatches(
   filters: SourceFilters,
 ): Promise<{ count: number; more: boolean }> {
   return resolveSource(sourceId).countMatches(filters);
+}
+
+/**
+ * Rebuild the source registry from a (now key-carrying) config — the seam the first-run setup route
+ * uses to swap the keyless registry for one that can poll, without importing `sources` directly.
+ */
+export function rebuildSources(config: Config): void {
+  buildRegistry(config);
+}
+
+/** Live Linear key check for the setup route (viewer query); the only seam routes may reach it through. */
+export function testLinearConnection(apiKey: string): Promise<boolean> {
+  return testImpl(apiKey);
 }

@@ -197,6 +197,28 @@ async function fetchAllIssues(
   return { issues, truncated: lastHasNextPage };
 }
 
+const VIEWER_QUERY = `query Viewer { viewer { id } }`;
+
+/**
+ * Live key check for the first-run setup route: run a minimal viewer query with the entered key.
+ *
+ * @remarks Resolves `true` when Linear returns a viewer and `false` when Linear rejects the key
+ * (an auth/GraphQL error, which `postGraphQL` surfaces as a plain `Error`), so the route can answer
+ * 400 "rejected". It REJECTS only on a genuine network failure — the global `fetch` throws a
+ * `TypeError` that this re-throws so the route can answer 502 "unreachable". This TypeError-vs-Error
+ * split is the cleanest available discriminator and is confirmed at the phase smoke gate with a bad
+ * key plus an offline run. The key is passed straight to `postGraphQL` and is never logged.
+ */
+export async function testLinearConnection(apiKey: string): Promise<boolean> {
+  try {
+    const data = await postGraphQL(apiKey, VIEWER_QUERY, {});
+    return Boolean((data as { viewer?: { id?: string } }).viewer?.id);
+  } catch (err) {
+    if (err instanceof TypeError) throw err;
+    return false;
+  }
+}
+
 const USERS_QUERY = `query Users($onlyActive: UserFilter) { users(filter: $onlyActive, first: ${PAGE_SIZE}) { nodes { id name displayName } pageInfo { hasNextPage } } }`;
 const ACTIVE_USERS: Record<string, unknown> = { active: { eq: true } };
 const TEAMS_QUERY = `query Teams { teams(first: ${PAGE_SIZE}) { nodes { id name } pageInfo { hasNextPage } } }`;

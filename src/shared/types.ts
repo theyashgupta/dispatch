@@ -281,6 +281,17 @@ export interface Playbook {
  */
 export type StatusChannel = "hooks" | "pane" | "auto";
 
+/**
+ * Per-binary presence result surfaced by the boot probe and the first-run setup screen. Shared here
+ * so the `/api/setup` route and the web client agree on the shape without either reaching across the
+ * server boundary; `hint` is populated only when the binary is absent.
+ */
+export interface PrerequisiteStatus {
+  name: string;
+  present: boolean;
+  hint: string | null;
+}
+
 /** Contents of ~/.dispatch/config.json. */
 export interface Config {
   linearApiKey: string;

@@ -5,6 +5,7 @@ import { cardsRouter } from "./cards.route.js";
 import { eventsRouter } from "./events.route.js";
 import { sseRouter } from "./sse.route.js";
 import { hooksRouter } from "./hooks.route.js";
+import { setupRouter } from "./setup.route.js";
 
 export const apiRouter = Router();
 
@@ -21,3 +22,4 @@ apiRouter.use(cardsRouter);
 apiRouter.use(eventsRouter);
 apiRouter.use(sseRouter);
 apiRouter.use(hooksRouter);
+apiRouter.use(setupRouter);
