@@ -1,10 +1,11 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
-import { checkBinaries, StartupError } from "./binary-check.js";
+import { StartupError } from "./binary-check.js";
 import { loadConfig } from "./config.js";
 import { store } from "../store/board.store.js";
 import { apiRouter } from "../routes/index.js";
+import { probePrerequisites } from "../services/prerequisites.js";
 import {
   setHooksRuntime,
   setOrchestrationConfig,
@@ -71,7 +72,14 @@ const jsonBodyErrorHandler: express.ErrorRequestHandler = (
 };
 
 async function main(): Promise<void> {
-  await checkBinaries();
+  const missing = (await probePrerequisites()).filter((p) => !p.present);
+  if (missing.length > 0) {
+    console.warn(
+      `[preflight] missing tools (sessions needing them fail at use-time): ${missing
+        .map((p) => `${p.name} (${p.hint ?? "install and add to PATH"})`)
+        .join(", ")}`,
+    );
+  }
   const config = loadConfig();
   setOrchestrationConfig(config);
   buildRegistry(config);
