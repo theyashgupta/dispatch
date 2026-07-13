@@ -1,4 +1,5 @@
 import type {
+  ActivityEvent,
   Column,
   DiscoveredRepo,
   FilterCapabilities,
@@ -80,6 +81,28 @@ export async function startCard(
     };
   }
   throw new Error(`startCard failed: ${res.status} ${res.statusText}`);
+}
+
+/**
+ * Read the newest-first event log: GET /api/events (+ optional `?cardId=` scope and `?limit=`).
+ * Hydrates the activity buffer once on mount and backfills a card's timeline on open. Resolves the
+ * parsed `events` array on 2xx; throws on any non-2xx so the caller can decide (the feed keeps its
+ * last-known buffer on failure — no spinner). Mirrors getPlaybooks' reject-on-non-2xx.
+ */
+export async function fetchEvents(
+  cardId?: string,
+  limit?: number,
+): Promise<ActivityEvent[]> {
+  const params = new URLSearchParams();
+  if (cardId !== undefined) params.set("cardId", cardId);
+  if (limit !== undefined) params.set("limit", String(limit));
+  const query = params.toString();
+  const res = await fetch(`/api/events${query ? `?${query}` : ""}`);
+  if (!res.ok) {
+    throw new Error(`fetchEvents failed: ${res.status} ${res.statusText}`);
+  }
+  const body = (await res.json()) as { events: ActivityEvent[] };
+  return body.events;
 }
 
 /**

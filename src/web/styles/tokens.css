@@ -71,6 +71,7 @@
   /* Dimensions */
   --stripe-width: 3px;
   --panel-width: 480px; /* desktop default; swapped per breakpoint below */
+  --drawer-width: 360px; /* activity drawer; narrower than the panel — swapped per breakpoint below */
   --board-gutter-lg: 24px; /* wider board gutter at >=1600px (large displays) */
 }
 
@@ -89,6 +90,7 @@
 @media (max-width: 767px) {
   :root {
     --panel-width: 100vw;
+    --drawer-width: 100vw;
   }
 }
 
