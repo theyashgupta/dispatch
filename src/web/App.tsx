@@ -1,10 +1,17 @@
 import { useEffect, useState } from "react";
 import { useBoardStream } from "./hooks/useBoardStream.js";
+import { useActivityFeed } from "./hooks/useActivityFeed.js";
+import {
+  isUnseen,
+  stampLastOpened,
+  useLastOpened,
+} from "./hooks/useUnseenActivity.js";
 import { useTransitionNotifications } from "./hooks/useTransitionNotifications.js";
 import { SyncStrip } from "./features/sync/SyncStrip.js";
 import { Glyph } from "./primitives/Glyph.js";
 import { Board } from "./features/board/Board.js";
 import { DetailPanel } from "./features/detail/DetailPanel.js";
+import { ActivityDrawer } from "./features/activity/ActivityDrawer.js";
 import { StartModal } from "./features/modals/StartModal.js";
 import { CleanupModal } from "./features/modals/CleanupModal.js";
 import { SettingsModal } from "./features/modals/SettingsModal.js";
@@ -12,9 +19,15 @@ import { cleanupCard as cleanupCardApi } from "./lib/api.js";
 import type { StartRequest } from "./lib/start-request.js";
 
 export function App() {
-  const { board, connection } = useBoardStream();
+  const feed = useActivityFeed();
+  const { board, connection } = useBoardStream({ onActivity: feed.append });
 
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [activityOpen, setActivityOpen] = useState(false);
+
+  const lastOpened = useLastOpened();
+  const newestTs = feed.events[0]?.ts;
+  const activityUnseen = isUnseen(newestTs, lastOpened["__feed__"]);
 
   useTransitionNotifications(board, connection, setSelectedCardId);
 
@@ -124,6 +137,12 @@ export function App() {
         pollIntervalMs={board?.pollIntervalMs ?? null}
         syncWarning={board?.syncWarning ?? null}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenActivity={() => {
+          setActivityOpen(true);
+          stampLastOpened("__feed__");
+        }}
+        activityUnseen={activityUnseen}
+        activityOpen={activityOpen}
       />
       <Board
         board={board}
@@ -137,6 +156,18 @@ export function App() {
         editors={board?.editors}
         onClose={() => setSelectedCardId(null)}
         onStartRequest={requestStart}
+      />
+      <ActivityDrawer
+        open={activityOpen}
+        events={feed.events}
+        onClose={() => {
+          setActivityOpen(false);
+          document.getElementById("activity-toggle")?.focus();
+        }}
+        onSelectCard={(id) => {
+          setSelectedCardId(id);
+          setActivityOpen(false);
+        }}
       />
       {startCard && startRequest && (
         <StartModal

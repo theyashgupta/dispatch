@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Settings } from "lucide-react";
+import { Activity, Settings } from "lucide-react";
 import type { ConnectionStatus } from "../../hooks/useBoardStream.js";
 import { Glyph } from "../../primitives/Glyph.js";
 import { IconButton } from "../../primitives/IconButton.js";
@@ -10,6 +10,9 @@ interface SyncStripProps {
   pollIntervalMs: number | null;
   syncWarning: string | null;
   onOpenSettings?: () => void;
+  onOpenActivity?: () => void;
+  activityUnseen?: boolean;
+  activityOpen?: boolean;
 }
 
 function formatSynced(syncedTs: number, now: number): string {
@@ -27,6 +30,9 @@ export function SyncStrip({
   pollIntervalMs,
   syncWarning,
   onOpenSettings,
+  onOpenActivity,
+  activityUnseen,
+  activityOpen,
 }: SyncStripProps) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -140,6 +146,32 @@ export function SyncStrip({
             }}
           />
           {text}
+        </div>
+        <div style={{ position: "relative", display: "flex" }}>
+          <IconButton
+            id="activity-toggle"
+            aria-label="Activity feed"
+            aria-expanded={activityOpen}
+            aria-controls="activity-drawer"
+            onClick={onOpenActivity}
+          >
+            <Activity size={16} />
+          </IconButton>
+          {activityUnseen && (
+            <span
+              aria-hidden="true"
+              style={{
+                position: "absolute",
+                top: "2px",
+                right: "2px",
+                width: "6px",
+                height: "6px",
+                borderRadius: "50%",
+                background: "var(--status-ok)",
+                pointerEvents: "none",
+              }}
+            />
+          )}
         </div>
         <IconButton aria-label="Sync filters" onClick={onOpenSettings}>
           <Settings size={16} />
