@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import type { Card as CardModel } from "../../../shared/types.js";
+import type {
+  ActivityEvent,
+  Card as CardModel,
+} from "../../../shared/types.js";
 import { ensureTerminal } from "../../lib/api.js";
 import { stampLastOpened } from "../../hooks/useUnseenActivity.js";
+import { CardTimeline } from "./CardTimeline.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { ReferenceBlocks } from "./ReferenceBlocks.js";
 import { SessionLostSection } from "./SessionLostSection.js";
@@ -10,6 +14,7 @@ import { TerminalRegion } from "./TerminalRegion.js";
 interface DetailPanelProps {
   card: CardModel | null;
   editors?: { code: boolean; cursor: boolean };
+  activityEvents?: ActivityEvent[];
   onClose: () => void;
   onStartRequest?: (id: string) => void;
 }
@@ -17,6 +22,7 @@ interface DetailPanelProps {
 export function DetailPanel({
   card,
   editors,
+  activityEvents,
   onClose,
   onStartRequest,
 }: DetailPanelProps) {
@@ -162,6 +168,9 @@ export function DetailPanel({
                 }}
               >
                 <ReferenceBlocks card={c} />
+                {c && (
+                  <CardTimeline cardId={c.id} events={activityEvents ?? []} />
+                )}
               </div>
             )
           ) : (
@@ -173,6 +182,9 @@ export function DetailPanel({
               }}
             >
               <ReferenceBlocks card={c} />
+              {c && (
+                <CardTimeline cardId={c.id} events={activityEvents ?? []} />
+              )}
             </div>
           )}
 

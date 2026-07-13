@@ -154,6 +154,7 @@ export function App() {
       <DetailPanel
         card={selectedCard}
         editors={board?.editors}
+        activityEvents={feed.events}
         onClose={() => setSelectedCardId(null)}
         onStartRequest={requestStart}
       />
