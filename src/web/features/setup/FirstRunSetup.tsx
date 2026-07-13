@@ -1,13 +1,14 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Check, X } from "lucide-react";
 import type { PrerequisiteStatus } from "../../../shared/types.js";
-import { getSetup, saveLinearKey } from "../../lib/api.js";
+import { saveLinearKey } from "../../lib/api.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { Glyph } from "../../primitives/Glyph.js";
 import { Notice } from "../../primitives/Notice.js";
 
 interface FirstRunSetupProps {
+  prerequisites: PrerequisiteStatus[];
   onConnected: () => void;
 }
 
@@ -16,30 +17,18 @@ const ERROR_COPY = {
   unreachable: "Couldn't reach Linear. Check your connection and try again.",
 } as const;
 
-export function FirstRunSetup({ onConnected }: FirstRunSetupProps) {
+export function FirstRunSetup({
+  prerequisites,
+  onConnected,
+}: FirstRunSetupProps) {
   const [value, setValue] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<"rejected" | "unreachable" | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
-  const [prerequisites, setPrerequisites] = useState<PrerequisiteStatus[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = useId();
   const hintId = useId();
   const errorId = useId();
-
-  useEffect(() => {
-    let active = true;
-    void getSetup()
-      .then((s) => {
-        if (active) setPrerequisites(s.prerequisites);
-      })
-      .catch((err: unknown) => {
-        console.error("getSetup failed", err);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const trimmed = value.trim();
   const canSubmit = trimmed !== "" && !connecting;

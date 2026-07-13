@@ -21,6 +21,7 @@ import { SettingsModal } from "./features/modals/SettingsModal.js";
 import { FirstRunSetup } from "./features/setup/FirstRunSetup.js";
 import { cleanupCard as cleanupCardApi, getSetup } from "./lib/api.js";
 import type { StartRequest } from "./lib/start-request.js";
+import type { PrerequisiteStatus } from "../shared/types.js";
 
 function BootScreen({ connection }: { connection: ConnectionStatus }) {
   const statusText =
@@ -134,11 +135,14 @@ export function App() {
   const [setupState, setSetupState] = useState<
     "loading" | "needsKey" | "ready"
   >("loading");
+  const [prerequisites, setPrerequisites] = useState<PrerequisiteStatus[]>([]);
   useEffect(() => {
     let active = true;
     void getSetup()
       .then((s) => {
-        if (active) setSetupState(s.needsKey ? "needsKey" : "ready");
+        if (!active) return;
+        setPrerequisites(s.prerequisites);
+        setSetupState(s.needsKey ? "needsKey" : "ready");
       })
       .catch(() => {
         if (active) setSetupState("ready");
@@ -153,7 +157,12 @@ export function App() {
   }
 
   if (setupState === "needsKey") {
-    return <FirstRunSetup onConnected={() => setSetupState("ready")} />;
+    return (
+      <FirstRunSetup
+        prerequisites={prerequisites}
+        onConnected={() => setSetupState("ready")}
+      />
+    );
   }
 
   if (board === null) {
