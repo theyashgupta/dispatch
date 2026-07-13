@@ -5,7 +5,6 @@
     "src/web/index.html"
   ],
   "project": ["src/**/*.{ts,tsx}"],
-  "ignore": ["dist/**"],
   "ignoreExportsUsedInFile": true,
   "ignoreDependencies": ["@dnd-kit/sortable"],
   "ignoreBinaries": ["which", "ttyd"]
