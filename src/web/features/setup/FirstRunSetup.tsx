@@ -50,7 +50,7 @@ export function FirstRunSetup({ onConnected }: FirstRunSetupProps) {
     setError(null);
     try {
       const result = await saveLinearKey(trimmed);
-      if (result.ok) {
+      if (result.ok || result.reason === "already-configured") {
         onConnected();
         return;
       }

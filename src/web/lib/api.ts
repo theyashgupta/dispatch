@@ -448,14 +448,18 @@ export async function getSetup(): Promise<{
 
 /**
  * Submit the Linear key on first run: POST /api/setup. The server tests the key against Linear
- * before persisting, so the discriminated result maps the two failure modes to the setup screen's
- * two error strings: 200 → { ok:true } (board hydrates over the live SSE, no reload); 502 →
- * { ok:false, reason:"unreachable" } (couldn't reach Linear); any other non-2xx (400 rejected, 409
- * already-configured) → { ok:false, reason:"rejected" }. The key is sent once and never echoed back.
+ * before persisting, so the discriminated result maps each failure mode distinctly: 200 → { ok:true }
+ * (board hydrates over the live SSE, no reload); 502 → { ok:false, reason:"unreachable" } (couldn't
+ * reach Linear); 409 → { ok:false, reason:"already-configured" } (a key already exists — a benign
+ * two-tab race, NOT a bad key, so the caller can transition straight to the board); any other non-2xx
+ * (400) → { ok:false, reason:"rejected" }. The key is sent once and never echoed back.
  */
 export async function saveLinearKey(
   apiKey: string,
-): Promise<{ ok: true } | { ok: false; reason: "rejected" | "unreachable" }> {
+): Promise<
+  | { ok: true }
+  | { ok: false; reason: "rejected" | "unreachable" | "already-configured" }
+> {
   const res = await fetch("/api/setup", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -466,6 +470,9 @@ export async function saveLinearKey(
   }
   if (res.status === 502) {
     return { ok: false, reason: "unreachable" };
+  }
+  if (res.status === 409) {
+    return { ok: false, reason: "already-configured" };
   }
   return { ok: false, reason: "rejected" };
 }
