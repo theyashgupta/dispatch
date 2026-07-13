@@ -11,6 +11,35 @@ const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 const MAX_PAGES = 20;
 const PAGE_SIZE = 250;
 
+/**
+ * Thrown by `postGraphQL` only when Linear rejects the credentials themselves — an HTTP 401/403 or a
+ * GraphQL authentication error code — never for a transport, rate-limit, non-JSON, or 5xx failure.
+ * This lets the first-run key check answer 400 "rejected" for a genuinely bad key while every
+ * unreachable failure re-throws for the route to map to 502. The detail carries codes/status only,
+ * never the key.
+ */
+class LinearAuthError extends Error {
+  constructor(detail: string) {
+    super(`Linear rejected the credentials (${detail})`);
+    this.name = "LinearAuthError";
+  }
+}
+
+/**
+ * Whether a GraphQL error `extensions.code` denotes an authentication/authorization rejection (a bad
+ * key) as opposed to a transient or transport failure. Substring-matched so provider code variants
+ * (`AUTHENTICATION_ERROR`, `UNAUTHENTICATED`, `FORBIDDEN`) all classify as a rejection.
+ */
+function isAuthCode(code: string | undefined): boolean {
+  if (!code) return false;
+  const upper = code.toUpperCase();
+  return (
+    upper.includes("AUTHENTICATION") ||
+    upper.includes("UNAUTHENT") ||
+    upper.includes("FORBIDDEN")
+  );
+}
+
 const ISSUE_NODE_FIELDS =
   "id identifier title url description priority updatedAt state { id name type }";
 
@@ -106,10 +135,16 @@ async function postGraphQL(
     const codes = body.errors
       .map((e) => e.extensions?.code ?? "UNKNOWN")
       .join(", ");
+    if (body.errors.some((e) => isAuthCode(e.extensions?.code))) {
+      throw new LinearAuthError(`GraphQL ${codes}, HTTP ${res.status}`);
+    }
     throw new Error(`Linear GraphQL errors (HTTP ${res.status}): ${codes}`);
   }
 
   if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      throw new LinearAuthError(`HTTP ${res.status}`);
+    }
     throw new Error(`Linear HTTP ${res.status}`);
   }
 
@@ -202,20 +237,21 @@ const VIEWER_QUERY = `query Viewer { viewer { id } }`;
 /**
  * Live key check for the first-run setup route: run a minimal viewer query with the entered key.
  *
- * @remarks Resolves `true` when Linear returns a viewer and `false` when Linear rejects the key
- * (an auth/GraphQL error, which `postGraphQL` surfaces as a plain `Error`), so the route can answer
- * 400 "rejected". It REJECTS only on a genuine network failure — the global `fetch` throws a
- * `TypeError` that this re-throws so the route can answer 502 "unreachable". This TypeError-vs-Error
- * split is the cleanest available discriminator and is confirmed at the phase smoke gate with a bad
- * key plus an offline run. The key is passed straight to `postGraphQL` and is never logged.
+ * @remarks Resolves `true` when Linear returns a viewer, and `false` ONLY on a genuine credential
+ * rejection — an HTTP 401/403 or a GraphQL authentication error, which `postGraphQL` surfaces as a
+ * `LinearAuthError` — so the route answers 400 "rejected" only for a truly bad key. Every other
+ * failure re-throws so the route answers 502 "unreachable": a `fetch` `TypeError` (offline), a
+ * `RateLimited` (HTTP 429 on a valid key), a non-JSON body (an outage page), and any 5xx/other
+ * transport error. A valid-but-rate-limited key or a transient outage is therefore reported as
+ * unreachable, not as a rejected key. The key is passed straight to `postGraphQL` and is never logged.
  */
 export async function testLinearConnection(apiKey: string): Promise<boolean> {
   try {
     const data = await postGraphQL(apiKey, VIEWER_QUERY, {});
     return Boolean((data as { viewer?: { id?: string } }).viewer?.id);
   } catch (err) {
-    if (err instanceof TypeError) throw err;
-    return false;
+    if (err instanceof LinearAuthError) return false;
+    throw err;
   }
 }
 
