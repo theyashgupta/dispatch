@@ -102,6 +102,15 @@ async function cli(): Promise<void> {
 
   process.env.NODE_ENV ??= "production";
   const desiredPort = values.port ? Number(values.port) : undefined;
+  if (
+    desiredPort !== undefined &&
+    (!Number.isInteger(desiredPort) || desiredPort < 1 || desiredPort > 65535)
+  ) {
+    process.stderr.write(
+      `Invalid --port value: ${values.port} (expected an integer 1–65535)\n`,
+    );
+    process.exit(2);
+  }
   const { main } = await import("./index.js");
   const { port } = await main({ desiredPort });
   const url = `http://127.0.0.1:${port}`;
