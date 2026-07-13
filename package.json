@@ -18,6 +18,10 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "deadcode": "knip",
+    "build:web": "vite build",
+    "build:server": "tsc -p tsconfig.build.json",
+    "build": "npm run build:web && npm run build:server",
+    "start": "NODE_ENV=production node dist/server/bootstrap/index.js",
     "replay-gate": "tsx scripts/replay-watcher.ts --check",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run deadcode && npm run replay-gate"
   },

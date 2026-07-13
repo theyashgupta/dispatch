@@ -4,6 +4,10 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   root: "src/web",
   plugins: [react()],
+  build: {
+    outDir: "../../dist/web",
+    emptyOutDir: true,
+  },
   server: {
     proxy: {
       // Regex key: a bare "/api" prefix also matches frontend module URLs under
