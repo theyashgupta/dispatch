@@ -84,28 +84,16 @@ You need macOS or Linux with:
 Dispatch checks all four binaries at startup and tells you exactly what's missing.
 
 ```bash
-git clone https://github.com/theyashgupta/dispatch.git
-cd dispatch
-npm install
-npm run dev
+npx @theyashgupta/dispatch      # or: npm i -g @theyashgupta/dispatch && dispatch
 ```
 
-The first run writes a config template to `~/.dispatch/config.json` and exits. Fill it in:
+It picks a free port, prints the URL, and opens your browser. The first run lands on a setup screen: paste your Linear key and confirm the prereq checklist. The board starts syncing — no config file to edit, no restart.
 
-```jsonc
-{
-  "linearApiKey": "lin_api_...",
-  "port": 4700, // backend port (loopback only)
-  "pollIntervalMs": 60000, // Linear poll interval
-  "repoPaths": ["/abs/path/to/repo"], // repos to cut worktrees from
-  "baseBranches": ["main"], // base branch per repo (index-aligned)
-  "workspaceRoot": "~/dispatch-workspaces",
-}
-```
+`dispatch doctor` reports which binaries are present or missing. Use `dispatch --port <n>`, `--no-open`, `--help`, or `--version` as needed.
 
-Run `npm run dev` again and open `http://localhost:5173`. Tickets assigned to you show up within a minute.
+Tickets assigned to you show up within a minute. Worktrees land in `workspaceRoot/<ticket>/<repo>/` on a branch named after the ticket. If a ticket touches more than one of your repos, the agent decides which ones to work in. There's no repo picker.
 
-Worktrees land in `workspaceRoot/<ticket>/<repo>/` on a branch named after the ticket. If a ticket touches more than one of your repos, the agent decides which ones to work in. There's no repo picker.
+Running from source instead? `git clone`, `npm install`, `npm run dev` — see [CONTRIBUTING.md](CONTRIBUTING.md#dev-setup).
 
 ## Design decisions
 
