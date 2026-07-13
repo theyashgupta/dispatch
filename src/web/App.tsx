@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { useBoardStream } from "./hooks/useBoardStream.js";
+import {
+  useBoardStream,
+  type ConnectionStatus,
+} from "./hooks/useBoardStream.js";
 import { useActivityFeed } from "./hooks/useActivityFeed.js";
 import {
   isUnseen,
@@ -18,6 +21,59 @@ import { SettingsModal } from "./features/modals/SettingsModal.js";
 import { FirstRunSetup } from "./features/setup/FirstRunSetup.js";
 import { cleanupCard as cleanupCardApi, getSetup } from "./lib/api.js";
 import type { StartRequest } from "./lib/start-request.js";
+
+function BootScreen({ connection }: { connection: ConnectionStatus }) {
+  const statusText =
+    connection === "disconnected"
+      ? "Disconnected — reconnecting…"
+      : "Connecting…";
+  return (
+    <div
+      style={{
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "var(--space-xl)",
+        color: "var(--text)",
+        userSelect: "none",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "var(--space-sm)",
+        }}
+      >
+        <Glyph size={44} />
+        <span
+          style={{
+            fontWeight: 800,
+            fontSize: "var(--font-display)",
+            letterSpacing: "0.18em",
+          }}
+        >
+          DISPATCH
+        </span>
+      </div>
+      <div
+        style={{
+          fontSize: "var(--font-label)",
+          fontWeight: "var(--weight-semibold)",
+          color:
+            connection === "disconnected"
+              ? "var(--destructive)"
+              : "var(--text-muted)",
+        }}
+      >
+        {statusText}
+      </div>
+    </div>
+  );
+}
 
 export function App() {
   const feed = useActivityFeed();
@@ -92,61 +148,16 @@ export function App() {
     };
   }, []);
 
+  if (setupState === "loading") {
+    return <BootScreen connection={connection} />;
+  }
+
   if (setupState === "needsKey") {
     return <FirstRunSetup onConnected={() => setSetupState("ready")} />;
   }
 
   if (board === null) {
-    const statusText =
-      connection === "disconnected"
-        ? "Disconnected — reconnecting…"
-        : "Connecting…";
-    return (
-      <div
-        style={{
-          height: "100vh",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: "var(--space-xl)",
-          color: "var(--text)",
-          userSelect: "none",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "var(--space-sm)",
-          }}
-        >
-          <Glyph size={44} />
-          <span
-            style={{
-              fontWeight: 800,
-              fontSize: "var(--font-display)",
-              letterSpacing: "0.18em",
-            }}
-          >
-            DISPATCH
-          </span>
-        </div>
-        <div
-          style={{
-            fontSize: "var(--font-label)",
-            fontWeight: "var(--weight-semibold)",
-            color:
-              connection === "disconnected"
-                ? "var(--destructive)"
-                : "var(--text-muted)",
-          }}
-        >
-          {statusText}
-        </div>
-      </div>
-    );
+    return <BootScreen connection={connection} />;
   }
 
   return (
