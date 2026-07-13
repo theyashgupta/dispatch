@@ -15,6 +15,7 @@ interface DetailPanelProps {
   card: CardModel | null;
   editors?: { code: boolean; cursor: boolean };
   activityEvents?: ActivityEvent[];
+  cardIdentifiers?: Record<string, string>;
   onClose: () => void;
   onStartRequest?: (id: string) => void;
 }
@@ -23,6 +24,7 @@ export function DetailPanel({
   card,
   editors,
   activityEvents,
+  cardIdentifiers,
   onClose,
   onStartRequest,
 }: DetailPanelProps) {
@@ -169,7 +171,11 @@ export function DetailPanel({
               >
                 <ReferenceBlocks card={c} />
                 {c && (
-                  <CardTimeline cardId={c.id} events={activityEvents ?? []} />
+                  <CardTimeline
+                    cardId={c.id}
+                    events={activityEvents ?? []}
+                    identifiers={cardIdentifiers}
+                  />
                 )}
               </div>
             )
@@ -183,7 +189,11 @@ export function DetailPanel({
             >
               <ReferenceBlocks card={c} />
               {c && (
-                <CardTimeline cardId={c.id} events={activityEvents ?? []} />
+                <CardTimeline
+                  cardId={c.id}
+                  events={activityEvents ?? []}
+                  identifiers={cardIdentifiers}
+                />
               )}
             </div>
           )}

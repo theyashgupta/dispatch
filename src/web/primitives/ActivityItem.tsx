@@ -53,6 +53,7 @@ const EVENT_TINT: Record<EventType, string> = {
 interface ActivityItemProps {
   event: ActivityEvent;
   now: number;
+  identifiers?: Record<string, string>;
   onSelect?: (cardId: string) => void;
 }
 
@@ -62,10 +63,18 @@ const textBlockStyle: CSSProperties = {
   wordBreak: "break-word",
 };
 
-export function ActivityItem({ event, now, onSelect }: ActivityItemProps) {
+export function ActivityItem({
+  event,
+  now,
+  identifiers,
+  onSelect,
+}: ActivityItemProps) {
   const [hovered, setHovered] = useState(false);
   const Icon = EVENT_GLYPH[event.type];
   const interactive = onSelect != null && event.cardId != null;
+  const label =
+    event.cardId != null ? (identifiers?.[event.cardId] ?? event.cardId) : null;
+  const age = formatAge(event.ts, now);
 
   const rowStyle: CSSProperties = {
     display: "flex",
@@ -96,7 +105,7 @@ export function ActivityItem({ event, now, onSelect }: ActivityItemProps) {
         }}
       />
       <span style={textBlockStyle}>
-        {event.cardId != null && (
+        {label != null && (
           <span
             style={{
               fontFamily: "var(--font-mono)",
@@ -104,7 +113,7 @@ export function ActivityItem({ event, now, onSelect }: ActivityItemProps) {
               color: "var(--text)",
             }}
           >
-            {event.cardId}{" "}
+            {label}{" "}
           </span>
         )}
         <span
@@ -112,9 +121,9 @@ export function ActivityItem({ event, now, onSelect }: ActivityItemProps) {
         >
           {describeEvent(event)}
         </span>
-        <span style={{ color: "var(--text-muted)" }}>
-          {` · ${formatAge(event.ts, now)}`}
-        </span>
+        {age !== "" && (
+          <span style={{ color: "var(--text-muted)" }}>{` · ${age}`}</span>
+        )}
       </span>
     </>
   );

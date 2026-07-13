@@ -7,6 +7,7 @@ import { IconButton } from "../../primitives/IconButton.js";
 interface ActivityDrawerProps {
   open: boolean;
   events: ActivityEvent[];
+  identifiers?: Record<string, string>;
   onClose: () => void;
   onSelectCard: (cardId: string) => void;
 }
@@ -14,6 +15,7 @@ interface ActivityDrawerProps {
 export function ActivityDrawer({
   open,
   events,
+  identifiers,
   onClose,
   onSelectCard,
 }: ActivityDrawerProps) {
@@ -57,6 +59,8 @@ export function ActivityDrawer({
         role="dialog"
         aria-label="Activity feed"
         id="activity-drawer"
+        inert={!open}
+        aria-hidden={!open}
         style={{
           position: "fixed",
           top: 0,
@@ -139,7 +143,12 @@ export function ActivityDrawer({
                       : "none",
                 }}
               >
-                <ActivityItem event={event} now={now} onSelect={onSelectCard} />
+                <ActivityItem
+                  event={event}
+                  now={now}
+                  identifiers={identifiers}
+                  onSelect={onSelectCard}
+                />
               </div>
             ))
           )}

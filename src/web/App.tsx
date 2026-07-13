@@ -34,6 +34,11 @@ export function App() {
   const selectedCard =
     board?.cards.find((card) => card.id === selectedCardId) ?? null;
 
+  const cardIdentifiers: Record<string, string> = {};
+  for (const card of board?.cards ?? []) {
+    cardIdentifiers[card.id] = card.identifier;
+  }
+
   const [startRequest, setStartRequest] = useState<StartRequest | null>(null);
   const startCard =
     board?.cards.find((card) => card.id === startRequest?.cardId) ?? null;
@@ -155,12 +160,14 @@ export function App() {
         card={selectedCard}
         editors={board?.editors}
         activityEvents={feed.events}
+        cardIdentifiers={cardIdentifiers}
         onClose={() => setSelectedCardId(null)}
         onStartRequest={requestStart}
       />
       <ActivityDrawer
         open={activityOpen}
         events={feed.events}
+        identifiers={cardIdentifiers}
         onClose={() => {
           setActivityOpen(false);
           document.getElementById("activity-toggle")?.focus();

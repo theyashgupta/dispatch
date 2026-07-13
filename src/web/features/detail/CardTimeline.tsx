@@ -8,6 +8,7 @@ import { IconButton } from "../../primitives/IconButton.js";
 interface CardTimelineProps {
   cardId: string;
   events: ActivityEvent[];
+  identifiers?: Record<string, string>;
 }
 
 function mergeById(a: ActivityEvent[], b: ActivityEvent[]): ActivityEvent[] {
@@ -17,7 +18,11 @@ function mergeById(a: ActivityEvent[], b: ActivityEvent[]): ActivityEvent[] {
   return [...byId.values()].sort((x, y) => y.id - x.id);
 }
 
-export function CardTimeline({ cardId, events }: CardTimelineProps) {
+export function CardTimeline({
+  cardId,
+  events,
+  identifiers,
+}: CardTimelineProps) {
   const [expanded, setExpanded] = useState(true);
   const [backfill, setBackfill] = useState<ActivityEvent[]>([]);
   const [now, setNow] = useState(() => Date.now());
@@ -77,6 +82,7 @@ export function CardTimeline({ cardId, events }: CardTimelineProps) {
         <IconButton
           aria-label="Toggle activity"
           aria-expanded={expanded}
+          aria-controls="card-timeline-region"
           onClick={() => setExpanded((v) => !v)}
         >
           <ChevronDown
@@ -94,6 +100,7 @@ export function CardTimeline({ cardId, events }: CardTimelineProps) {
       {expanded &&
         (rows.length === 0 ? (
           <div
+            id="card-timeline-region"
             style={{
               fontSize: "var(--font-body)",
               lineHeight: "var(--line-body)",
@@ -104,7 +111,10 @@ export function CardTimeline({ cardId, events }: CardTimelineProps) {
             No activity for this card yet.
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column" }}>
+          <div
+            id="card-timeline-region"
+            style={{ display: "flex", flexDirection: "column" }}
+          >
             {rows.map((event, index) => (
               <div
                 key={event.id}
@@ -116,7 +126,11 @@ export function CardTimeline({ cardId, events }: CardTimelineProps) {
                       : "none",
                 }}
               >
-                <ActivityItem event={event} now={now} />
+                <ActivityItem
+                  event={event}
+                  now={now}
+                  identifiers={identifiers}
+                />
               </div>
             ))}
           </div>
