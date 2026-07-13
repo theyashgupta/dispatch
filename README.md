@@ -61,16 +61,17 @@ DISPATCH_STATUS: DONE — built the board UI, committed on branch YAS-22
 
 The watcher parses those from the visible pane (it survives TUI repaints, recap overlays, and prompt echoes), applies one atomic board mutation per tick, and a manual drag always wins over a marker.
 
-The board itself is six columns:
+The board itself is seven columns:
 
-| Column          | Meaning                                                   |
-| --------------- | --------------------------------------------------------- |
-| **To Do**       | Synced from Linear, ordered by priority                   |
-| **In Progress** | Agent working; card shows provisioning steps and errors   |
-| **Needs Input** | Agent asked something; the reason is on the card          |
-| **Agent Done**  | Agent finished and said so                                |
-| **In Review**   | Holding state: session/terminal/worktree stay fully alive |
-| **Done**        | Deliberate human action: confirm → cleanup, branches kept |
+| Column          | Meaning                                                                    |
+| --------------- | -------------------------------------------------------------------------- |
+| **To Do**       | Synced from Linear, ordered by priority                                    |
+| **In Planning** | Agent drafts a plan first; hands off to In Progress once the plan is ready |
+| **In Progress** | Agent working; card shows provisioning steps and errors                    |
+| **Needs Input** | Agent asked something; the reason is on the card                           |
+| **Agent Done**  | Agent finished and said so                                                 |
+| **In Review**   | Holding state: session/terminal/worktree stay fully alive                  |
+| **Done**        | Deliberate human action: confirm → cleanup, branches kept                  |
 
 ## Getting started
 
@@ -95,19 +96,9 @@ Tickets assigned to you show up within a minute. Worktrees land in `workspaceRoo
 
 Running from source instead? `git clone`, `npm install`, `npm run dev` — see [CONTRIBUTING.md](CONTRIBUTING.md#dev-setup).
 
-## Design decisions
+## Learn more
 
-**Why a JSON file instead of a database?** One user, low write volume, and a single-writer mutation queue with atomic writes. `board.json` is also exactly the SSE payload, which keeps the whole state path inspectable with `cat`.
-
-**Why plain `claude` in tmux instead of an SDK?** The session you get is identical to one you'd launch by hand: same tools, same permissions, same TUI. Dispatch never sits between you and the agent; it only watches for the status lines.
-
-**Where are the tests?** There isn't a test suite yet. The focus so far has been getting the core to production quality. In the meantime, behavior is held in place by a golden-master replay gate (16 recorded watcher fixtures diffed byte-for-byte), an invariant checker (81 documented cross-module invariants, machine-verified), strict TypeScript, and lint rules that gate `npm run check`, and the runtime pieces that matter (tmux, ttyd, real Claude sessions) are exercised against the running app. Proper unit and end-to-end tests are wanted going forward, and contributions that add them are especially welcome.
-
-**Why localhost only?** ttyd hands out a shell attached to a live agent session. Everything binds to `127.0.0.1` and there is no auth layer, on purpose. Don't put this on a network.
-
-**Why one-way Linear sync?** Dispatch never writes to Linear. Your board state is yours; Linear stays authoritative for the ticket lifecycle.
-
-More detail lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), including the invariants that let the pane watcher survive Claude's TUI chrome. The engineering standards are in [docs/standards/](docs/standards/).
+Architecture — including the invariants that let the pane watcher survive Claude's TUI chrome — is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The engineering standards are in [docs/standards/](docs/standards/).
 
 ## Status
 
