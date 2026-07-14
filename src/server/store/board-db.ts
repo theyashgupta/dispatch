@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import type {
   ActivityEvent,
   BoardSnapshot,
@@ -19,6 +19,35 @@ export const BACKUP_SLOTS = 5;
 const HOUR_MS = 3_600_000;
 
 /**
+ * Swallow ONLY node:sqlite's `ExperimentalWarning` — never any other warning — so normal
+ * boot/CLI output stays clean while genuine deprecations still surface.
+ * @remarks node:sqlite emits the warning once, deferred (nextTick), when this module's
+ * `import { DatabaseSync }` first evaluates; installing this filter synchronously in the
+ * module body catches that deferred emission. Never use `--no-warnings` (it hides all
+ * warnings for an interactive tool). The store import is lazy, so DB-free paths
+ * (`dispatch --help`, keyless setup) never load this module and never emit the warning.
+ * @see https://github.com/nodejs/node/issues/58611
+ */
+function installSqliteWarningFilter(): void {
+  const original = process.emit.bind(process);
+  const patched = (name: string, ...args: unknown[]): boolean => {
+    const warning = args[0] as { name?: string; message?: string } | undefined;
+    if (
+      name === "warning" &&
+      warning?.name === "ExperimentalWarning" &&
+      typeof warning.message === "string" &&
+      warning.message.includes("SQLite")
+    ) {
+      return false;
+    }
+    return (original as (...a: unknown[]) => boolean)(name, ...args);
+  };
+  process.emit = patched;
+}
+
+installSqliteWarningFilter();
+
+/**
  * The non-card board fields the store persists alongside the cards — the exact
  * subset `persistSnapshot()` writes today (`syncWarning`/`pollIntervalMs`/`editors`
  * stay in-memory-only, as they did in board.json). Serialized as one JSON blob into
@@ -32,7 +61,7 @@ export interface BoardMeta {
 
 /**
  * The store-facing surface of the SQLite persistence layer — the only place
- * better-sqlite3 is touched. `persist` writes the FULL card set (including each
+ * node:sqlite is touched. `persist` writes the FULL card set (including each
  * `hookToken`) so secrets reach the DB; redaction stays the caller's snapshot()
  * concern (STORE-05). `cardCount` drives the one-time import decision in load().
  * @see docs/ARCHITECTURE.md#single-writer-store
@@ -68,17 +97,55 @@ function bak(n: number): string {
 }
 
 /**
+ * True only for genuine on-disk SQLite corruption — never for an engine/load, permission,
+ * disk-full, or busy failure. node:sqlite puts the numeric SQLite result code on `errcode`;
+ * the string `code` is `"ERR_SQLITE_ERROR"` for ALL sqlite errors, so it cannot discriminate.
+ * @remarks 11 = SQLITE_CORRUPT, 26 = SQLITE_NOTADB; `& 0xff` folds extended codes (e.g.
+ * SQLITE_CORRUPT_VTAB) to their primary. The `constants` export does not expose these.
+ * @see https://sqlite.org/rescode.html
+ */
+function isCorruption(err: unknown): boolean {
+  const code = (err as { errcode?: number } | null)?.errcode;
+  if (typeof code !== "number") return false;
+  const primary = code & 0xff;
+  return primary === 11 || primary === 26;
+}
+
+/**
+ * Run fn in one IMMEDIATE transaction; commit on success, roll back and rethrow on failure —
+ * the automatic-rollback guarantee better-sqlite3's transaction wrapper gave. A re-entrant call
+ * runs inline (a nested `BEGIN` would throw), matching the store's single-writer serialization.
+ * @remarks BEGIN IMMEDIATE takes the write lock up front so a failed lock upgrade can't strand
+ * a half-applied write; the unconditional ROLLBACK on any throw prevents a stranded open txn
+ * from blocking every later write.
+ */
+function withTxn<T>(db: DatabaseSync, fn: () => T): T {
+  if (db.isTransaction) return fn();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const out = fn();
+    db.exec("COMMIT");
+    return out;
+  } catch (err) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {}
+    throw err;
+  }
+}
+
+/**
  * Does a backup candidate open as a structurally-sound SQLite database? Opened read-only
  * so probing a slot never mutates it, and gated on PRAGMA integrity_check so page-level
- * damage a bare open would miss is caught before the slot is adopted (STORE-04).
+ * damage a bare open would miss is caught before the slot is adopted (STORE-04). A missing
+ * slot (errcode 14) or a corrupt slot (integrity_check throws 11/26) is caught → returns false.
  */
 function opensClean(candidate: string): boolean {
   try {
-    const probe = new Database(candidate, {
-      readonly: true,
-      fileMustExist: true,
-    });
-    const ok = probe.pragma("integrity_check", { simple: true }) === "ok";
+    const probe = new DatabaseSync(candidate, { readOnly: true });
+    const row = probe.prepare("PRAGMA integrity_check").get() as
+      { integrity_check?: string } | undefined;
+    const ok = row?.integrity_check === "ok";
     probe.close();
     return ok;
   } catch {
@@ -93,9 +160,10 @@ function opensClean(candidate: string): boolean {
  * newest-first, copying back the first slot that opens clean and logging a LOUD warning
  * naming the exact file used — a recovery is never silent. When the primary and every
  * slot fail, a fresh empty database is opened (also with a warning), so a corrupt file
- * can never crash boot (STORE-04 DoS mitigation).
+ * can never crash boot (STORE-04 DoS mitigation). Reached ONLY on genuine corruption —
+ * `connect()`'s classifier fails loud on every non-corruption open error and never calls this.
  */
-function quarantineAndRecover(cause: unknown): Database.Database {
+function quarantineAndRecover(cause: unknown): DatabaseSync {
   console.warn(
     `[store] board.db failed to open cleanly (${(cause as Error).message}) — quarantining and walking the backup chain.`,
   );
@@ -113,7 +181,7 @@ function quarantineAndRecover(cause: unknown): Database.Database {
     if (opensClean(bak(i))) {
       try {
         fs.copyFileSync(bak(i), BOARD_DB_PATH);
-        const restored = new Database(BOARD_DB_PATH);
+        const restored = new DatabaseSync(BOARD_DB_PATH);
         console.warn(
           `[store] recovered board.db from ${bak(i)} after the primary was corrupt/unopenable.`,
         );
@@ -124,26 +192,49 @@ function quarantineAndRecover(cause: unknown): Database.Database {
   console.warn(
     `[store] board.db and every backup slot were unreadable — starting with an empty database.`,
   );
-  return new Database(BOARD_DB_PATH);
+  return new DatabaseSync(BOARD_DB_PATH);
 }
 
 /**
- * Open the primary with BOTH a constructor try/catch AND a PRAGMA integrity_check, the two
- * complementary corruption detectors: the catch handles a file too damaged to open at all,
- * the pragma handles one that opens but has damaged pages. On either failure the connection
- * self-heals via quarantineAndRecover. A MISSING primary on a fresh install is not corruption
- * — `new Database` creates it and an empty board follows (STORE-02).
+ * Open the primary and classify any open failure: genuine corruption (a thrown errcode 11/26
+ * or a non-`ok` integrity_check row) self-heals via quarantineAndRecover, while EVERY other
+ * failure (engine/load, EACCES, disk full, CANTOPEN, busy, unexpected JS error) throws a loud,
+ * actionable Error and touches NOTHING — no rename, no slot walk, no delete of board.db or any
+ * backup (SAFE-02/SAFE-03, the v1.7 data-loss fix). A MISSING primary on a fresh install is not
+ * corruption — `new DatabaseSync` creates it and the empty db's integrity_check returns "ok".
+ * @remarks `new DatabaseSync` opens lazily (does not throw on garbage), so integrity_check is
+ * the FIRST file-touching op inside the guard — the errcode-throw it raises IS the corruption
+ * signal. A plain Error (not StartupError) is thrown because a store→bootstrap import is
+ * DAG-illegal; the bootstrap `main().catch` already prints thrown errors loud with a stack.
  */
-function connect(): Database.Database {
-  let db: Database.Database | undefined;
+function connect(): DatabaseSync {
+  let db: DatabaseSync | undefined;
   try {
-    db = new Database(BOARD_DB_PATH);
-    if (db.pragma("integrity_check", { simple: true }) === "ok") return db;
-    db.close();
-    throw new Error("integrity_check reported corruption");
+    db = new DatabaseSync(BOARD_DB_PATH);
+    const row = db.prepare("PRAGMA integrity_check").get() as
+      { integrity_check?: string } | undefined;
+    if (row?.integrity_check === "ok") return db;
+    try {
+      db.close();
+    } catch {}
+    return quarantineAndRecover(
+      new Error(
+        `integrity_check reported: ${row?.integrity_check ?? "unknown"}`,
+      ),
+    );
   } catch (err) {
-    if (db?.open) db.close();
-    return quarantineAndRecover(err);
+    try {
+      db?.close();
+    } catch {}
+    if (isCorruption(err)) return quarantineAndRecover(err);
+    throw new Error(
+      `[store] board.db at ${BOARD_DB_PATH} could not be opened and this is NOT corruption ` +
+        `(${(err as Error).message}). board.db and every backup were left untouched. ` +
+        `Fix the underlying problem (file permissions on ~/.dispatch, free disk space, or a ` +
+        `stuck lock) and restart — dispatch will not quarantine or overwrite your data on a ` +
+        `non-corruption error.`,
+      { cause: err },
+    );
   }
 }
 
@@ -172,14 +263,28 @@ function toMeta(parsed: Partial<BoardSnapshot>): BoardMeta {
  * Linear-sourced content) cannot inject SQL (STORE tampering mitigation). The open
  * self-heals a corrupt primary from the newest clean snapshot (connect), and
  * `backupTick` folds an hourly WAL-consistent snapshot into the `.bak.N` chain.
+ * @remarks On first open the old better-sqlite3 WAL is folded in via
+ * `wal_checkpoint(TRUNCATE)` before any rotation, and `busy_timeout` is set explicitly
+ * (node:sqlite defaults to 0) so an hourly snapshot read-lock retries instead of throwing.
  * @see docs/ARCHITECTURE.md#single-writer-store
  */
 export function openBoardDb(): BoardDb {
   fs.mkdirSync(BOARD_DIR, { recursive: true, mode: 0o700 });
   const db = connect();
-  db.pragma("journal_mode = WAL");
-  db.pragma("synchronous = NORMAL");
-  db.pragma("foreign_keys = ON");
+  db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA synchronous = NORMAL");
+  db.exec("PRAGMA foreign_keys = ON");
+  db.exec("PRAGMA busy_timeout = 5000");
+  try {
+    db.prepare("SELECT value FROM json_each('[]')").all();
+  } catch (err) {
+    throw new Error(
+      `[store] this Node build's SQLite lacks the JSON1 json_each() function the board store ` +
+        `requires (${(err as Error).message}). Use a standard Node build with JSON1 enabled.`,
+      { cause: err },
+    );
+  }
   db.exec(`
     CREATE TABLE IF NOT EXISTS cards (
       id   TEXT PRIMARY KEY,
@@ -229,12 +334,12 @@ export function openBoardDb(): BoardDb {
        FROM events WHERE card_id = ? ORDER BY id DESC LIMIT ?`,
   );
 
-  const persistTxn = db.transaction(
-    (
-      cards: Card[],
-      meta: BoardMeta,
-      events: Omit<ActivityEvent, "id">[],
-    ): number[] => {
+  function persistTxn(
+    cards: Card[],
+    meta: BoardMeta,
+    events: Omit<ActivityEvent, "id">[],
+  ): number[] {
+    return withTxn(db, () => {
       const ids: string[] = [];
       for (const card of cards) {
         upsertCard.run({ id: card.id, data: JSON.stringify(card) });
@@ -256,8 +361,8 @@ export function openBoardDb(): BoardDb {
         eventIds.push(Number(info.lastInsertRowid));
       }
       return eventIds;
-    },
-  );
+    });
+  }
 
   let backupFailureLogged = false;
 
@@ -283,11 +388,9 @@ export function openBoardDb(): BoardDb {
       persistTxn(cards, toMeta(parsed), []);
     },
     listEvents(cardId, limit) {
-      const rows = (
-        cardId == null
-          ? selectEvents.all(limit)
-          : selectEventsByCard.all(cardId, limit)
-      ) as EventRow[];
+      const rows = (cardId == null
+        ? selectEvents.all(limit)
+        : selectEventsByCard.all(cardId, limit)) as unknown as EventRow[];
       return rows.map((r) => ({
         id: r.id,
         cardId: r.card_id,
@@ -299,22 +402,24 @@ export function openBoardDb(): BoardDb {
         ts: r.ts,
       }));
     },
-    async backupTick() {
+    backupTick(): Promise<void> {
       try {
         let elapsed = true;
         try {
           const { mtimeMs } = fs.statSync(bak(1));
           elapsed = Date.now() - mtimeMs >= HOUR_MS;
         } catch {}
-        if (!elapsed) return;
-        const tmp = `${BOARD_DB_PATH}.bak.tmp`;
-        await db.backup(tmp);
-        for (let i = BACKUP_SLOTS - 1; i >= 1; i--) {
-          try {
-            fs.renameSync(bak(i), bak(i + 1));
-          } catch {}
+        if (elapsed) {
+          const tmp = `${BOARD_DB_PATH}.bak.tmp`;
+          fs.rmSync(tmp, { force: true });
+          db.prepare("VACUUM INTO ?").run(tmp);
+          for (let i = BACKUP_SLOTS - 1; i >= 1; i--) {
+            try {
+              fs.renameSync(bak(i), bak(i + 1));
+            } catch {}
+          }
+          fs.renameSync(tmp, bak(1));
         }
-        fs.renameSync(tmp, bak(1));
       } catch (err) {
         if (!backupFailureLogged) {
           backupFailureLogged = true;
@@ -324,6 +429,7 @@ export function openBoardDb(): BoardDb {
           );
         }
       }
+      return Promise.resolve();
     },
   };
 }
