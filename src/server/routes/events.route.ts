@@ -10,7 +10,7 @@ const MAX_LIMIT = 1000;
  * REST event log at GET /api/events, newest-first, `?cardId=` scoped, `?limit=` clamped to [1,1000].
  * @remarks A bodyless GET never reaches the shared body-parser JSON-400 middleware, so the query is
  * validated in-route and rejected with a clean JSON 400 BEFORE any store/DB call — a malformed
- * query can never fall through to a raw better-sqlite3 error rendered as an HTML 500.
+ * query can never fall through to a raw node:sqlite error rendered as an HTML 500.
  */
 function listEventsHandler(req: Request, res: Response): void {
   const rawCardId = req.query.cardId;

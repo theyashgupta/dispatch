@@ -113,7 +113,7 @@ function isCorruption(err: unknown): boolean {
 
 /**
  * Run fn in one IMMEDIATE transaction; commit on success, roll back and rethrow on failure —
- * the automatic-rollback guarantee better-sqlite3's transaction wrapper gave. A re-entrant call
+ * the automatic-rollback guarantee the previous native engine's transaction wrapper gave. A re-entrant call
  * runs inline (a nested `BEGIN` would throw), matching the store's single-writer serialization.
  * @remarks BEGIN IMMEDIATE takes the write lock up front so a failed lock upgrade can't strand
  * a half-applied write; the unconditional ROLLBACK on any throw prevents a stranded open txn
@@ -263,7 +263,7 @@ function toMeta(parsed: Partial<BoardSnapshot>): BoardMeta {
  * Linear-sourced content) cannot inject SQL (STORE tampering mitigation). The open
  * self-heals a corrupt primary from the newest clean snapshot (connect), and
  * `backupTick` folds an hourly WAL-consistent snapshot into the `.bak.N` chain.
- * @remarks On first open the old better-sqlite3 WAL is folded in via
+ * @remarks On first open any pre-existing WAL (e.g. from the previous native engine) is folded in via
  * `wal_checkpoint(TRUNCATE)` before any rotation, and `busy_timeout` is set explicitly
  * (node:sqlite defaults to 0) so an hourly snapshot read-lock retries instead of throwing.
  * @see docs/ARCHITECTURE.md#single-writer-store
