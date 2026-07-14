@@ -79,7 +79,12 @@ export interface BoardDb {
   backupTick(): Promise<void>;
 }
 
-/** Raw `events` row shape (snake_case columns) before the read-path snake→camel map. */
+/**
+ * Raw `events` row shape (snake_case columns) before the read-path snake→camel map.
+ * @remarks `listEvents` reads rows via a `... as unknown as EventRow[]` double cast because
+ * node:sqlite's `.all()` returns a structurally-incompatible index-signature type that TypeScript
+ * will not narrow to `EventRow` with a single `as`; the double cast is intentional, not a shortcut.
+ */
 interface EventRow {
   id: number;
   card_id: string | null;
@@ -141,15 +146,18 @@ function withTxn<T>(db: DatabaseSync, fn: () => T): T {
  * slot (errcode 14) or a corrupt slot (integrity_check throws 11/26) is caught → returns false.
  */
 function opensClean(candidate: string): boolean {
+  let probe: DatabaseSync | undefined;
   try {
-    const probe = new DatabaseSync(candidate, { readOnly: true });
+    probe = new DatabaseSync(candidate, { readOnly: true });
     const row = probe.prepare("PRAGMA integrity_check").get() as
       { integrity_check?: string } | undefined;
-    const ok = row?.integrity_check === "ok";
-    probe.close();
-    return ok;
+    return row?.integrity_check === "ok";
   } catch {
     return false;
+  } finally {
+    try {
+      probe?.close();
+    } catch {}
   }
 }
 
@@ -192,6 +200,9 @@ function quarantineAndRecover(cause: unknown): DatabaseSync {
   console.warn(
     `[store] board.db and every backup slot were unreadable — starting with an empty database.`,
   );
+  try {
+    fs.rmSync(BOARD_DB_PATH, { force: true });
+  } catch {}
   return new DatabaseSync(BOARD_DB_PATH);
 }
 
@@ -279,6 +290,9 @@ export function openBoardDb(): BoardDb {
   try {
     db.prepare("SELECT value FROM json_each('[]')").all();
   } catch (err) {
+    try {
+      db.close();
+    } catch {}
     throw new Error(
       `[store] this Node build's SQLite lacks the JSON1 json_each() function the board store ` +
         `requires (${(err as Error).message}). Use a standard Node build with JSON1 enabled.`,
