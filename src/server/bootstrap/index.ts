@@ -6,7 +6,7 @@ import { StartupError } from "./binary-check.js";
 import { loadConfig } from "./config.js";
 import { store } from "../store/board.store.js";
 import { apiRouter } from "../routes/index.js";
-import { probePrerequisites } from "../services/prerequisites.js";
+import { probePreflight } from "../services/preflight.js";
 import {
   setHooksRuntime,
   setOrchestrationConfig,
@@ -110,11 +110,31 @@ function listenWithFallback(
 }
 
 export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
-  const missing = (await probePrerequisites()).filter((p) => !p.present);
+  const preflight = await probePreflight();
+  if (preflight.node.ok) {
+    console.log(
+      `[preflight] Node ${preflight.node.version} (floor ${preflight.node.floor})`,
+    );
+  } else {
+    console.warn(
+      `[preflight] Node ${preflight.node.version} is below the supported floor (${preflight.node.floor}) — continuing; upgrade Node if you hit issues`,
+    );
+  }
+  if (preflight.storage.ok) {
+    console.log(`[preflight] storage OK — ${preflight.storage.path}`);
+  } else {
+    console.warn(
+      `[preflight] storage check FAILED — ${preflight.storage.path} did not open cleanly (continuing; the store recovers on load)`,
+    );
+  }
+  const missing = preflight.binaries.filter((p) => !p.present);
   if (missing.length > 0) {
     console.warn(
       `[preflight] missing tools (sessions needing them fail at use-time): ${missing
-        .map((p) => `${p.name} (${p.hint ?? "install and add to PATH"})`)
+        .map(
+          (p) =>
+            `${p.name} (${p.command ?? p.hint ?? "install and add to PATH"})`,
+        )
         .join(", ")}`,
     );
   }
