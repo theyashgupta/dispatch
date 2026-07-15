@@ -435,6 +435,8 @@ export async function saveLinearFilters(
 export async function getSetup(): Promise<{
   needsKey: boolean;
   prerequisites: PrerequisiteStatus[];
+  node: { version: string; floor: string; ok: boolean };
+  storage: { ok: boolean; path: string };
 }> {
   const res = await fetch("/api/setup");
   if (!res.ok) {
@@ -443,6 +445,38 @@ export async function getSetup(): Promise<{
   return (await res.json()) as {
     needsKey: boolean;
     prerequisites: PrerequisiteStatus[];
+    node: { version: string; floor: string; ok: boolean };
+    storage: { ok: boolean; path: string };
+  };
+}
+
+/**
+ * Run the guided install for one prerequisite on first run: POST /api/setup/install { target }.
+ * Drives the shared preflight `runInstall` over the loopback route (whitelist-validated to
+ * tmux/ttyd/git server-side) and resolves the re-probed status so the setup screen can flip the row.
+ * The Linear key never crosses this boundary and there is no streaming — a single request/response.
+ * Resolves `{ ok, command, status }` on 2xx; throws on any non-2xx so the component renders the
+ * failure state (mirrors moveCard's reject-on-non-2xx).
+ */
+export async function runPrerequisiteInstall(target: string): Promise<{
+  ok: boolean;
+  command: string;
+  status: PrerequisiteStatus;
+}> {
+  const res = await fetch("/api/setup/install", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target }),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `runPrerequisiteInstall failed: ${res.status} ${res.statusText}`,
+    );
+  }
+  return (await res.json()) as {
+    ok: boolean;
+    command: string;
+    status: PrerequisiteStatus;
   };
 }
 
