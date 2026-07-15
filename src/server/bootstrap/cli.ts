@@ -2,9 +2,14 @@
 import { parseArgs } from "node:util";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { probePrerequisites } from "../services/prerequisites.js";
+import {
+  installArgv,
+  probePreflight,
+  runInstall,
+} from "../services/preflight.js";
 
 const HELP = `dispatch — local Kanban that turns Linear tickets into Claude Code sessions
 
@@ -57,6 +62,71 @@ function openBrowser(url: string): void {
   } catch {}
 }
 
+/**
+ * Read a `[Y/n]` confirmation from stdin, defaulting to yes on an empty answer per the prompt copy.
+ * Only called on the interactive branch (a real TTY), so it never blocks a pipe/CI run.
+ */
+function confirm(promptText: string): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  return new Promise((resolve) =>
+    rl.question(promptText, (ans) => {
+      const t = ans.trim();
+      rl.close();
+      resolve(t === "" || /^y(es)?$/i.test(t));
+    }),
+  );
+}
+
+/**
+ * Render the preflight report and, in an interactive terminal, offer to install each missing
+ * installable binary (`[Y/n]`, run on yes). Under a pipe/CI it prints the command and never prompts
+ * or spawns (INST-02/03). ALWAYS resolves without a non-zero exit — `doctor` is a diagnostic, not a
+ * gate (Pitfall 3): a missing binary, below-floor Node, or unhealthy storage renders a line but the
+ * command still succeeds (PRE-03).
+ */
+async function doctor(): Promise<void> {
+  const report = await probePreflight();
+  for (const p of report.binaries) {
+    process.stdout.write(
+      p.present
+        ? `  ✓ ${p.name}\n`
+        : `  ✗ ${p.name} — ${p.command ?? p.hint ?? "not installable"}\n`,
+    );
+  }
+  process.stdout.write(
+    report.node.ok
+      ? `  ✓ Node ${report.node.version}\n`
+      : `  ⚠ Node ${report.node.version} — below supported floor (${report.node.floor})\n`,
+  );
+  process.stdout.write(
+    report.storage.ok
+      ? `  ✓ Storage OK — ${report.storage.path}\n`
+      : `  ✗ Storage check failed — ${report.storage.path}\n`,
+  );
+
+  const interactive =
+    Boolean(process.stdin.isTTY && process.stdout.isTTY) && !process.env.CI;
+  for (const p of report.binaries) {
+    if (p.present || !installArgv(p.name)) continue;
+    if (!interactive) continue;
+    const yes = await confirm(
+      `  Install ${p.name} with "${p.command}"? [Y/n] `,
+    );
+    if (!yes) continue;
+    const { ok, command, status } = await runInstall(p.name, {
+      interactive: true,
+    });
+    process.stdout.write(
+      ok
+        ? `  ✓ ${status.name} installed\n`
+        : `  ✗ ${status.name} still missing — run manually: ${command}\n`,
+    );
+  }
+}
+
 async function cli(): Promise<void> {
   let result;
   try {
@@ -87,13 +157,8 @@ async function cli(): Promise<void> {
   }
 
   if (positionals[0] === "doctor") {
-    const prereqs = await probePrerequisites();
-    for (const p of prereqs) {
-      process.stdout.write(
-        p.present ? `  ✓ ${p.name}\n` : `  ✗ ${p.name} — ${p.hint}\n`,
-      );
-    }
-    process.exit(prereqs.every((p) => p.present) ? 0 : 1);
+    await doctor();
+    process.exit(0);
   }
   if (positionals.length > 0) {
     process.stderr.write(`Unknown command: ${positionals[0]}\n\n${HELP}\n`);
