@@ -136,12 +136,22 @@ export function App() {
     "loading" | "needsKey" | "ready"
   >("loading");
   const [prerequisites, setPrerequisites] = useState<PrerequisiteStatus[]>([]);
+  const [node, setNode] = useState<{
+    version: string;
+    floor: string;
+    ok: boolean;
+  } | null>(null);
+  const [storage, setStorage] = useState<{ ok: boolean; path: string } | null>(
+    null,
+  );
   useEffect(() => {
     let active = true;
     void getSetup()
       .then((s) => {
         if (!active) return;
         setPrerequisites(s.prerequisites);
+        setNode(s.node);
+        setStorage(s.storage);
         setSetupState(s.needsKey ? "needsKey" : "ready");
       })
       .catch(() => {
@@ -156,10 +166,12 @@ export function App() {
     return <BootScreen connection={connection} />;
   }
 
-  if (setupState === "needsKey") {
+  if (setupState === "needsKey" && node && storage) {
     return (
       <FirstRunSetup
         prerequisites={prerequisites}
+        node={node}
+        storage={storage}
         onConnected={() => setSetupState("ready")}
       />
     );
