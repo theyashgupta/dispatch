@@ -285,11 +285,29 @@ export type StatusChannel = "hooks" | "pane" | "auto";
  * Per-binary presence result surfaced by the boot probe and the first-run setup screen. Shared here
  * so the `/api/setup` route and the web client agree on the shape without either reaching across the
  * server boundary; `hint` is populated only when the binary is absent.
+ * @remarks `installable` is true only for the package-manager targets (tmux/ttyd/git) that get the
+ * run-on-confirm flow; `claude` is print-only guidance. `command` is the exact human-readable install
+ * command (e.g. `brew install ttyd`) — null when the binary is not installable or no package manager
+ * was detected, in which case `hint` carries the fallback guidance.
  */
 export interface PrerequisiteStatus {
   name: string;
   present: boolean;
   hint: string | null;
+  installable: boolean;
+  command: string | null;
+}
+
+/**
+ * The single-source-of-truth preflight snapshot shared by `dispatch doctor`, ordinary boot, and the
+ * web first-run setup screen. Every field is INFORMATIVE — a below-floor Node, missing binary, or
+ * unhealthy storage renders a status line but never blocks boot (PRE-01/02/03).
+ */
+export interface PreflightReport {
+  binaries: PrerequisiteStatus[];
+  node: { version: string; floor: string; ok: boolean };
+  storage: { ok: boolean; path: string };
+  platform: { os: "darwin" | "linux" | "other"; packageManager: string | null };
 }
 
 /** Contents of ~/.dispatch/config.json. */

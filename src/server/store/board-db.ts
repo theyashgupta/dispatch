@@ -162,6 +162,19 @@ function opensClean(candidate: string): boolean {
 }
 
 /**
+ * Read-only storage-health probe for the preflight report (PRE-02). A missing `board.db` (fresh
+ * install, before the store is ever loaded) counts as HEALTHY; otherwise the primary is opened
+ * read-only via `opensClean` (DatabaseSync `{ readOnly: true }` + `PRAGMA integrity_check`).
+ * @remarks Deliberately NEVER calls `connect()`, `openBoardDb()`, or `quarantineAndRecover()`: a
+ * health probe must never rename, delete, or otherwise mutate `board.db` (Pitfall 4). `dispatch
+ * doctor` and boot both call this without ever loading the store.
+ */
+export function probeStorageHealth(): { ok: boolean; path: string } {
+  if (!fs.existsSync(BOARD_DB_PATH)) return { ok: true, path: BOARD_DB_PATH };
+  return { ok: opensClean(BOARD_DB_PATH), path: BOARD_DB_PATH };
+}
+
+/**
  * Quarantine an unopenable/corrupt primary and recover from the newest clean snapshot
  * (STORE-04). Renames the bad primary to `board.db.corrupt` and removes its stale WAL
  * sidecars (so they cannot poison the restored copy), then walks `.bak.1`..`.bak.5`

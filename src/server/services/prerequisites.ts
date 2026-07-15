@@ -24,10 +24,14 @@ export async function probePrerequisites(): Promise<PrerequisiteStatus[]> {
   return Promise.all(
     REQUIRED_BINARIES.map(async (name) => {
       const present = (await resolveBinaryPath(name)) != null;
+      const hint = present ? null : (INSTALL_HINTS[name] ?? null);
+      const installable = name !== "claude";
       return {
         name,
         present,
-        hint: present ? null : (INSTALL_HINTS[name] ?? null),
+        hint,
+        installable,
+        command: present ? null : installable ? hint : null,
       };
     }),
   );
