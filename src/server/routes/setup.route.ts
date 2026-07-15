@@ -3,7 +3,11 @@ import {
   getOrchestrationConfig,
   updateLinearApiKey,
 } from "../services/config-holder.js";
-import { installArgv, probePreflight, runInstall } from "../services/preflight.js";
+import {
+  installArgv,
+  probePreflight,
+  runInstall,
+} from "../services/preflight.js";
 import {
   rebuildSources,
   testLinearConnection,
