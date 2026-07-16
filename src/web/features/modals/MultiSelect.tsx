@@ -88,7 +88,10 @@ export function MultiSelect({
 }: MultiSelectProps) {
   const [open, setOpen] = useState(false);
   const [triggerFocus, setTriggerFocus] = useState(false);
+  const [search, setSearch] = useState("");
+  const [searchFocus, setSearchFocus] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -97,6 +100,14 @@ export function MultiSelect({
     };
     window.addEventListener("pointerdown", onPointerDown);
     return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) searchInputRef.current?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) setSearch("");
   }, [open]);
 
   const toggle = (id: string) => {
@@ -109,6 +120,14 @@ export function MultiSelect({
 
   const hasSelection = selected.length > 0;
   const showEmpty = !loading && (options.length === 0 || loadError);
+  const filteredOptions = options.filter((o) =>
+    o.label.toLowerCase().includes(search.toLowerCase()),
+  );
+  const noMatches =
+    !loading &&
+    !loadError &&
+    options.length > 0 &&
+    filteredOptions.length === 0;
 
   return (
     <div
@@ -116,6 +135,10 @@ export function MultiSelect({
       onKeyDown={(e) => {
         if (e.key === "Escape" && open) {
           e.preventDefault();
+          if (search !== "") {
+            setSearch("");
+            return;
+          }
           setOpen(false);
         }
       }}
@@ -185,46 +208,91 @@ export function MultiSelect({
             borderRadius: "var(--radius)",
             display: "flex",
             flexDirection: "column",
-            maxHeight: "240px",
-            overflowY: "auto",
           }}
         >
-          {loading && (
-            <span
+          <div style={{ padding: "var(--space-xs)" }}>
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onFocus={() => setSearchFocus(true)}
+              onBlur={() => setSearchFocus(false)}
+              placeholder="Search…"
               style={{
-                padding: "var(--space-sm)",
+                height: "28px",
+                width: "100%",
+                boxSizing: "border-box",
+                padding: "0 var(--space-sm)",
+                background: "var(--surface-card)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius)",
+                color: "var(--text)",
                 fontFamily: "var(--font-ui)",
                 fontSize: "var(--font-body)",
-                lineHeight: "var(--line-body)",
-                color: "var(--text-muted)",
+                outline: "none",
+                boxShadow: focusRing(searchFocus),
               }}
-            >
-              Loading…
-            </span>
-          )}
-          {showEmpty && (
-            <span
-              style={{
-                padding: "var(--space-sm)",
-                fontFamily: "var(--font-ui)",
-                fontSize: "var(--font-body)",
-                lineHeight: "var(--line-body)",
-                color: "var(--text-muted)",
-              }}
-            >
-              {loadError ? "Couldn't load options" : emptyText}
-            </span>
-          )}
-          {!loading &&
-            !loadError &&
-            options.map((option) => (
-              <OptionRow
-                key={option.id}
-                option={option}
-                checked={selected.includes(option.id)}
-                onToggle={() => toggle(option.id)}
-              />
-            ))}
+            />
+          </div>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "240px",
+              overflowY: "auto",
+            }}
+          >
+            {loading && (
+              <span
+                style={{
+                  padding: "var(--space-sm)",
+                  fontFamily: "var(--font-ui)",
+                  fontSize: "var(--font-body)",
+                  lineHeight: "var(--line-body)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                Loading…
+              </span>
+            )}
+            {showEmpty && (
+              <span
+                style={{
+                  padding: "var(--space-sm)",
+                  fontFamily: "var(--font-ui)",
+                  fontSize: "var(--font-body)",
+                  lineHeight: "var(--line-body)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                {loadError ? "Couldn't load options" : emptyText}
+              </span>
+            )}
+            {noMatches && (
+              <span
+                style={{
+                  padding: "var(--space-sm)",
+                  fontFamily: "var(--font-ui)",
+                  fontSize: "var(--font-body)",
+                  lineHeight: "var(--line-body)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                No matches
+              </span>
+            )}
+            {!loading &&
+              !loadError &&
+              filteredOptions.map((option) => (
+                <OptionRow
+                  key={option.id}
+                  option={option}
+                  checked={selected.includes(option.id)}
+                  onToggle={() => toggle(option.id)}
+                />
+              ))}
+          </div>
         </div>
       )}
     </div>
