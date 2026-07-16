@@ -21,7 +21,7 @@ export interface ExecResult {
 export async function run(
   cmd: string,
   args: string[],
-  opts: { cwd?: string } = {},
+  opts: { cwd?: string; timeout?: number; maxBuffer?: number } = {},
 ): Promise<ExecResult> {
   try {
     const { stdout, stderr } = await execFileP(cmd, args, {

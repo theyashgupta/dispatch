@@ -214,7 +214,10 @@ async function doRunUpdate(opts: {
     ok = (await spawnInherit(cmd, args)) === 0;
   } else {
     try {
-      await run(cmd, args);
+      await run(cmd, args, {
+        timeout: 5 * 60_000,
+        maxBuffer: 32 * 1024 * 1024,
+      });
       ok = true;
     } catch {
       ok = false;
