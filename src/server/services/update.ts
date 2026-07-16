@@ -183,12 +183,28 @@ async function confirmInstalledVersion(): Promise<string | null> {
   }
 }
 
+let inFlight: Promise<UpdateRunResult> | null = null;
+
 /**
  * Run the global-mode update. The argv is a 100% constant literal — never built from any input,
  * never `sudo`, never a shell string. `interactive` callers (a real TTY) stream via `spawn`
  * `stdio:"inherit"`; non-interactive callers (the web route) capture via `adapters/exec.ts` `run()`.
+ * @remarks Serializes on a module-level in-flight promise so two concurrent callers (a second
+ * browser tab, a reload mid-update, a direct loopback `curl`) never launch parallel `npm i -g`
+ * installs of the same package — the second caller just awaits the first's result.
  */
-export async function runUpdate(opts: {
+export function runUpdate(opts: {
+  interactive: boolean;
+}): Promise<UpdateRunResult> {
+  if (inFlight) return inFlight;
+  inFlight = doRunUpdate(opts).finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
+}
+
+/** Perform the actual global-mode update; wrapped by {@link runUpdate}'s in-flight guard. */
+async function doRunUpdate(opts: {
   interactive: boolean;
 }): Promise<UpdateRunResult> {
   const cmd = "npm";
