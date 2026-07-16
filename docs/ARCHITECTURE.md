@@ -70,18 +70,18 @@ research). The backend is layered `bootstrap → routes → services → adapter
 [docs/standards/backend-design.md](standards/backend-design.md) — this table names the layers
 and roles only, it does not restate the layering policy.
 
-| Layer               | Modules                                                                                                                                                        | Role                                                                                                                                                                                          |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bootstrap           | `bootstrap/index.ts`, `bootstrap/binary-check.ts`, `bootstrap/config.ts`, `bootstrap/reconcile.ts`                                                             | Startup binary preflight, config load/bootstrap, boot session reconcile, then wire routes + SSE and start poller/watcher.                                                                     |
-| Routes              | `routes/index.ts`, `routes/cards.route.ts`, `routes/board.route.ts`, `routes/sse.route.ts`, `routes/loopback.ts`                                               | Loopback-gated REST router, the hand-rolled SSE broadcast endpoint, and the loopback request guard.                                                                                           |
-| Linear + mapping    | `adapters/poller.ts`, `store/mapping.ts`                                                                                                                       | GraphQL poll loop and the pure issue-versus-card reconcile mapping.                                                                                                                           |
-| Store               | `store/board.store.ts`                                                                                                                                         | Single-writer card store: serialized mutation queue, atomic persist, snapshot ordering.                                                                                                       |
-| Services (start)    | `services/start-session.ts`, `services/steps.ts`, `services/kickoff.ts`                                                                                        | Start-saga runner, its do/undo steps, and the pure kickoff-prompt builder.                                                                                                                    |
-| Services (sessions) | `services/cleanup.ts`, `services/config-holder.ts`, `services/workspace-paths.ts`, `services/session-status.ts`                                                | Teardown saga, the orchestration-config holder (routes read config through it, value-free 400 when unset), the canonical worktree-path builder, and the tmux-liveness passthrough for routes. |
-| Markers             | `adapters/markers/parse.ts`, `adapters/markers/scan-decision.ts`, `adapters/markers/pane-view.ts`, `adapters/markers/watcher.ts`                               | Pure marker parser, the pure per-tick decision core, the pane-view helpers, and the I/O-shell pane watcher applying one card decision per tick.                                               |
-| Adapters            | `adapters/exec.ts`, `adapters/git.ts`, `adapters/tmux.ts`, `adapters/ttyd.ts`, `adapters/claude-trust.ts`, `adapters/editors.ts`, `adapters/resolve-binary.ts` | The argv-only subprocess chokepoint, the git / tmux / ttyd / claude-trust adapters over it, editor launch, and binary-path resolution.                                                        |
-| Shared              | `shared/types.ts`                                                                                                                                              | Pure cross-half contracts; `BoardSnapshot` is both the SSE payload and the on-disk board file.                                                                                                |
-| Frontend            | `web/App.tsx`, `web/features/board/Board.tsx`, `web/features/board/Card.tsx`, `web/features/detail/DetailPanel.tsx`, plus hooks, dialogs, and sync strip       | React board: optimistic drag-and-drop, the detail slide-over with the terminal iframe, SSE hooks.                                                                                             |
+| Layer               | Modules                                                                                                                                                        | Role                                                                                                                                                                                                                                          |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bootstrap           | `bootstrap/index.ts`, `bootstrap/cli.ts`, `bootstrap/binary-check.ts`, `bootstrap/config.ts`, `bootstrap/reconcile.ts`                                         | CLI entry (`doctor`/`uninstall`/boot), informative startup preflight lines (via `services/preflight.ts`), `StartupError` for config failures, config load/bootstrap, boot session reconcile, then wire routes + SSE and start poller/watcher. |
+| Routes              | `routes/index.ts`, `routes/cards.route.ts`, `routes/board.route.ts`, `routes/sse.route.ts`, `routes/loopback.ts`                                               | Loopback-gated REST router, the hand-rolled SSE broadcast endpoint, and the loopback request guard.                                                                                                                                           |
+| Linear + mapping    | `adapters/poller.ts`, `store/mapping.ts`                                                                                                                       | GraphQL poll loop and the pure issue-versus-card reconcile mapping.                                                                                                                                                                           |
+| Store               | `store/board.store.ts`                                                                                                                                         | Single-writer card store: serialized mutation queue, atomic persist, snapshot ordering.                                                                                                                                                       |
+| Services (start)    | `services/start-session.ts`, `services/steps.ts`, `services/kickoff.ts`                                                                                        | Start-saga runner, its do/undo steps, and the pure kickoff-prompt builder.                                                                                                                                                                    |
+| Services (sessions) | `services/cleanup.ts`, `services/config-holder.ts`, `services/workspace-paths.ts`, `services/session-status.ts`                                                | Teardown saga, the orchestration-config holder (routes read config through it, value-free 400 when unset), the canonical worktree-path builder, and the tmux-liveness passthrough for routes.                                                 |
+| Markers             | `adapters/markers/parse.ts`, `adapters/markers/scan-decision.ts`, `adapters/markers/pane-view.ts`, `adapters/markers/watcher.ts`                               | Pure marker parser, the pure per-tick decision core, the pane-view helpers, and the I/O-shell pane watcher applying one card decision per tick.                                                                                               |
+| Adapters            | `adapters/exec.ts`, `adapters/git.ts`, `adapters/tmux.ts`, `adapters/ttyd.ts`, `adapters/claude-trust.ts`, `adapters/editors.ts`, `adapters/resolve-binary.ts` | The argv-only subprocess chokepoint, the git / tmux / ttyd / claude-trust adapters over it, editor launch, and binary-path resolution.                                                                                                        |
+| Shared              | `shared/types.ts`                                                                                                                                              | Pure cross-half contracts; `BoardSnapshot` is both the SSE payload and the on-disk board file.                                                                                                                                                |
+| Frontend            | `web/App.tsx`, `web/features/board/Board.tsx`, `web/features/board/Card.tsx`, `web/features/detail/DetailPanel.tsx`, plus hooks, dialogs, and sync strip       | React board: optimistic drag-and-drop, the detail slide-over with the terminal iframe, SSE hooks.                                                                                                                                             |
 
 ## Cross-Module Invariants
 
@@ -772,18 +772,37 @@ The board iterates `COLUMNS` in fixed order and MUST NOT re-sort To Do (it arriv
 
 ### Startup Preflight
 
-Before the HTTP server listens, a startup preflight (`bootstrap/binary-check.ts`) verifies the four external
-binaries Dispatch needs at runtime — `tmux`, `ttyd`, `claude`, `git` — are on `PATH`
-(`BOARD-05`). `checkBinaries` probes EVERY binary (no short-circuit on the first miss) and, if any
-are absent, throws a single `StartupError` naming EACH missing binary with per-binary install
-guidance, so the user fixes everything in one pass rather than one restart per missing tool. The
-backend fails fast and EXITS on a missing binary or missing/incomplete config — it never serves a
-degraded state — so a total connection failure surfaces to the user as the SyncStrip
-"Disconnected" state, not a dedicated error screen. `resolveBinaryPath` — extracted to `adapters/resolve-binary.ts` — additionally resolves the
-absolute `claude` path (via `which`) that the orchestrator passes to tmux, immunizing the session
-against tmux-server env/PATH drift; it never rejects. The formerly built-but-unwired
-degraded-serving surface (`StartupErrorScreen`) has since been DELETED; its disposition is
-recorded under [Known Residuals](#known-residuals).
+Preflight is INFORMATIVE, never a gate (`BOARD-05`, `PRE-01`/`PRE-02`/`PRE-03`). `services/preflight.ts` is
+the single source of truth for prerequisite / Node-version / storage-health status and per-platform
+install commands, and it is consumed identically by three surfaces: `dispatch doctor` and ordinary
+boot (`bootstrap/cli.ts`, `bootstrap/index.ts`) and the web first-run setup screen
+(`routes/setup.route.ts` → `web/lib/api.ts` → `features/setup/FirstRunSetup.tsx`). `probePreflight()`
+probes EVERY required binary — `tmux`, `ttyd`, `claude`, `git` — with no short-circuit, and returns
+each one's presence plus its exact platform-appropriate install command, alongside the running Node
+version compared against the `engines.node` floor and a read-only storage-health line.
+
+The backend BOOTS REGARDLESS: a missing binary, a below-floor Node, or unhealthy storage renders a
+line and the server still listens, so the browser always reaches a live setup screen with current
+status. (Sessions that actually need a missing binary still fail at use-time, on the card.) `dispatch
+doctor` is likewise a diagnostic, not a gate — it ALWAYS exits 0. The only fail-fast path left is a
+missing/incomplete config, which throws `StartupError` (the class still homed in
+`bootstrap/binary-check.ts`, now its sole remaining export, raised from `bootstrap/config.ts`).
+
+A missing binary is one guided command away on either surface: in an interactive terminal preflight
+offers `[Y/n]` and runs the install on confirm; under a pipe/CI it prints the command and never
+prompts or spawns (`INST-02`/`INST-03`). `claude` is print-only guidance on both surfaces — it has no
+package-manager install. After an attempt the re-check probes known install prefixes rather than the
+stale process `PATH` (`INST-04`), because `process.env.PATH` is snapshotted at launch and a good
+install would otherwise re-read as "still missing". The storage line reuses the store's read-only
+`probeStorageHealth()` and NEVER `connect()` — a health probe must not quarantine or mutate
+`board.db`.
+
+`resolveBinaryPath` — in `adapters/resolve-binary.ts` — stays PATH-only (via `which`) and resolves the
+absolute `claude` path the orchestrator passes to tmux, immunizing the session against tmux-server
+env/PATH drift; it never rejects. Its sibling `resolveWithPrefixes` unions the known install prefixes
+and is used ONLY by the post-install re-probe. The formerly built-but-unwired degraded-serving surface
+(`StartupErrorScreen`) has since been DELETED; its disposition is recorded under
+[Known Residuals](#known-residuals).
 
 ### Cleanup Lifecycle
 
