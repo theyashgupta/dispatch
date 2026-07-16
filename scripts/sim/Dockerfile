@@ -27,6 +27,12 @@ RUN apt-get update \
 COPY dispatch.tgz /tmp/dispatch.tgz
 RUN npm install -g /tmp/dispatch.tgz && rm /tmp/dispatch.tgz
 
+# Scenario steps live as files in the image and are invoked as a static /opt/sim/<name>.sh argv.
+# That is what keeps every container command free of host interpolation — a `sh -c "<built string>"`
+# row would put host values on a shell command line.
+COPY sim-scripts/ /opt/sim/
+RUN chmod +x /opt/sim/*.sh
+
 # LAST, so the layers above could still use apt-get: moving it off PATH is what makes
 # detectPackageManager find nothing and puts the generic-hint fallback under test.
 RUN if [ "$PKG_MANAGER" = "none" ]; then \

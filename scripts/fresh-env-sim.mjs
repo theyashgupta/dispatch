@@ -21,13 +21,21 @@
  * local Docker state that this harness did not create.
  */
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const DOCKERFILE = join(REPO_ROOT, "scripts", "sim", "Dockerfile");
+const SIM_DIR = join(REPO_ROOT, "scripts", "sim");
+const DOCKERFILE = join(SIM_DIR, "Dockerfile");
 
 /** The tag namespace this harness owns. `--clean` and the scenario table both read it, so the two can never drift apart. */
 const TAG_NAMESPACE = "dispatch-sim";
@@ -78,6 +86,19 @@ const GENERIC_HINTS = {
 
 /** The print-only guidance for `claude`, which is never package-manager-installed. */
 const CLAUDE_HINT = "install Claude Code — https://docs.claude.com/claude-code";
+
+/**
+ * The crash class the node:sqlite swap removed, plus the warning it must keep filtered.
+ * @remarks A boot row that only checked "the server started" would be the false green this milestone
+ * exists to prevent: a native-module mismatch is exactly the failure that reaches a user's fresh box
+ * and never this machine, so the EXCLUSIONS — not the listening line — are the actual SIM-03 claim.
+ */
+const NATIVE_CRASH_MARKERS = [
+  "ExperimentalWarning",
+  "MODULE_NOT_FOUND",
+  "ERR_DLOPEN_FAILED",
+  "was compiled against a different Node.js version",
+];
 
 /**
  * The scenario matrix.
@@ -139,6 +160,22 @@ const SCENARIOS = [
         present: ["✓ tmux", "✓ git", "apt-get install ttyd"],
         absent: ["apt-get install tmux", "apt-get install git"],
       }),
+  },
+  {
+    id: "boot-setup-screen-node22",
+    requirement: "SIM-03",
+    node: "22",
+    image: `${TAG_NAMESPACE}:node22-tmuxgit`,
+    argv: ["/opt/sim/boot-probe.sh"],
+    assert: bootSetupAssert("22"),
+  },
+  {
+    id: "boot-setup-screen-node24",
+    requirement: "SIM-03",
+    node: "24",
+    image: `${TAG_NAMESPACE}:node24-tmuxgit`,
+    argv: ["/opt/sim/boot-probe.sh"],
+    assert: bootSetupAssert("24"),
   },
 ];
 
@@ -255,6 +292,30 @@ function buildAndPack(stageDir) {
 }
 
 /**
+ * Copy the scenario scripts into the build context so the Dockerfile can COPY them to /opt/sim.
+ * @param stageDir The docker build context.
+ * @returns How many scripts were staged.
+ * @remarks Staged as FILES rather than assembled into container command strings: a row's steps then
+ * reach the container as a static `/opt/sim/<name>.sh` argv, and no host value ever lands on a shell
+ * command line (T-41-05). An empty copy is a hard failure — the rows would all fail on a missing
+ * entrypoint, which reads like a product defect but is a harness fault.
+ */
+function stageSimScripts(stageDir) {
+  const dest = join(stageDir, "sim-scripts");
+  mkdirSync(dest, { recursive: true });
+  const scripts = readdirSync(SIM_DIR).filter((f) => f.endsWith(".sh"));
+  if (scripts.length === 0) {
+    fail(
+      `no scenario scripts found in ${SIM_DIR} — every row would fail for the wrong reason`,
+    );
+  }
+  for (const script of scripts) {
+    copyFileSync(join(SIM_DIR, script), join(dest, script));
+  }
+  return scripts.length;
+}
+
+/**
  * Stage a docker build context in a fresh tmpdir and build every image from it.
  * @remarks A tmpdir context (never the repo root) keeps node_modules out of the build context and
  * leaves nothing behind to gitignore. A build failure is a harness fault, not a scenario result, so
@@ -266,6 +327,7 @@ function buildImages() {
     const tarball = buildAndPack(stageDir);
     copyFileSync(join(stageDir, tarball), join(stageDir, "dispatch.tgz"));
     copyFileSync(DOCKERFILE, join(stageDir, "Dockerfile"));
+    console.log(`  staged ${stageSimScripts(stageDir)} scenario script(s)`);
 
     for (const image of IMAGES) {
       console.log(`\n  building ${image.tag}`);
@@ -313,6 +375,114 @@ function check(r, { expectCode, present = [], absent = [] }) {
     }
   }
   return { ok: problems.length === 0, detail: problems.join("; ") };
+}
+
+/**
+ * Parse the `SIM_KEY=value` tokens a scenario script printed.
+ * @param output The container's combined stdout+stderr.
+ * @returns A Map of KEY → value.
+ * @remarks Rows grade tokens rather than scrape prose, so a reworded log line can never silently
+ * flip a verdict. First occurrence wins: every key is emitted once by design, so a later line that
+ * merely LOOKS like a token (a boot log echoing one back) cannot overwrite the real observation.
+ */
+function tokens(output) {
+  const map = new Map();
+  for (const line of output.split("\n")) {
+    const m = /^SIM_([A-Z0-9_]+)=(.*)$/.exec(line.trim());
+    if (m && !map.has(m[1])) map.set(m[1], m[2]);
+  }
+  return map;
+}
+
+/** Turn a problem list into the `{ ok, detail }` verdict shape {@link check} returns. */
+function grade(problems) {
+  return { ok: problems.length === 0, detail: problems.join("; ") };
+}
+
+/** Combine two verdicts, keeping every diagnosis, so a row reports ALL of its failures at once. */
+function both(a, b) {
+  return {
+    ok: a.ok && b.ok,
+    detail: [a.detail, b.detail].filter(Boolean).join("; "),
+  };
+}
+
+/**
+ * Require a token to be present AND exactly equal to `expected`.
+ * @remarks A MISSING token is a failure, never a pass — the scripts emit an explicit `none`/`no` on
+ * their failure paths precisely so a row can never go green by matching absence against absence.
+ */
+function expectToken(t, key, expected, problems) {
+  const actual = t.get(key);
+  if (actual !== expected) {
+    problems.push(
+      `SIM_${key} was ${actual ?? "MISSING"}, expected ${expected}`,
+    );
+  }
+}
+
+/**
+ * Grade the raw `/api/setup` body against what a genuinely fresh box must report.
+ * @param raw The one-line JSON the probe captured.
+ * @param expectedMajor The Node major this row's image is built on.
+ * @remarks `node.version` is the load-bearing field: it is the container's OWN Node, so asserting it
+ * is what proves the 22 and 24 rows ran on different engines rather than re-proving one twice.
+ */
+function setupBodyProblems(raw, expectedMajor) {
+  if (!raw) return ["SIM_SETUP_BODY is MISSING — the probe never read a body"];
+  let body;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return [`SIM_SETUP_BODY is not JSON: ${raw.slice(0, 200)}`];
+  }
+  const problems = [];
+  if (body.needsKey !== true) {
+    problems.push(
+      `needsKey was ${body.needsKey}, expected true on a fresh box`,
+    );
+  }
+  if (!Array.isArray(body.prerequisites) || body.prerequisites.length === 0) {
+    problems.push("prerequisites was not a non-empty array");
+  }
+  if (body.node?.ok !== true) {
+    problems.push(`node.ok was ${body.node?.ok}, expected true`);
+  }
+  const version = body.node?.version;
+  if (typeof version !== "string" || !version.startsWith(`${expectedMajor}.`)) {
+    problems.push(
+      `node.version was ${version} — expected ${expectedMajor}.x; this row ran on the wrong image`,
+    );
+  }
+  return problems;
+}
+
+/**
+ * The SIM-03 row: a fresh install reaches the setup screen on this Node, with no native-module crash.
+ * @param expectedMajor The Node major the image is built on.
+ * @remarks One factory for both rows so the 22 and 24 claims can never drift apart — the ONLY
+ * difference between them is the engine they run on, which is the whole point of running both.
+ */
+function bootSetupAssert(expectedMajor) {
+  return (r) => {
+    const t = tokens(r.output);
+    const problems = setupBodyProblems(t.get("SETUP_BODY"), expectedMajor);
+    expectToken(t, "SETUP_STATUS", "200", problems);
+    expectToken(t, "HTML_STATUS", "200", problems);
+    expectToken(t, "HTML_ROOT", "yes", problems);
+    expectToken(t, "HTML_TITLE", "yes", problems);
+    return both(
+      check(r, {
+        expectCode: 0,
+        present: [
+          "[server] Dispatch backend listening",
+          "[preflight] storage OK",
+        ],
+        absent: NATIVE_CRASH_MARKERS,
+      }),
+      grade(problems),
+    );
+  };
 }
 
 /**
@@ -372,7 +542,7 @@ function report(results) {
   for (const r of results) {
     const verdict = r.ok ? "PASS" : "FAIL";
     console.log(
-      `  ${verdict}  ${r.id.padEnd(30)} node${r.node}  ${r.requirement}`,
+      `  ${verdict}  ${r.id.padEnd(36)} node${r.node}  ${r.requirement}`,
     );
   }
   for (const r of results.filter((x) => !x.ok)) {
