@@ -77,6 +77,15 @@ const RUN_TIMEOUT_MS = 180_000;
 /** Container-name prefix this harness owns; forced removal is scoped to it, never to a bare `docker rm`. */
 const CONTAINER_PREFIX = "dsp-sim-";
 
+/**
+ * The bound on every container-reclaim call.
+ * @remarks Deliberately far shorter than {@link RUN_TIMEOUT_MS}: the condition that fires a row's
+ * timeout is usually a wedged daemon, and a `docker rm -f` issued at that moment can hang just as
+ * easily as the run did. An unbounded cleanup would out-live the very bound it exists to enforce and
+ * stall the whole matrix, so reclaim is bounded too and its own failure is reported, never awaited.
+ */
+const CLEANUP_TIMEOUT_MS = 30_000;
+
 /** The exact guidance strings preflight.ts renders when no package manager is on PATH. */
 const GENERIC_HINTS = {
   tmux: "install tmux via your platform's package manager or build from source",
@@ -258,18 +267,82 @@ function requireDocker() {
 }
 
 /**
- * Remove every image in this harness's tag namespace, and nothing else.
- * @remarks Scoped by construction (T-41-02): the id list comes from a `reference=dispatch-sim:*`
- * filter, so `docker rmi` is only ever handed ids this harness tagged. A prune/dangling sweep would
- * be shorter and is exactly what must never appear here — it would delete unrelated local images.
+ * Force-remove one container by name, bounded and best-effort.
+ * @param name The container name; callers only ever pass a `dsp-sim-` name (T-41-02).
+ * @returns True when the container is gone (removed now, or never existed).
+ * @remarks Bounded by {@link CLEANUP_TIMEOUT_MS} because this is called on the timeout path, where a
+ * wedged daemon is the likeliest cause. A non-zero status is NOT an error to report: `docker rm -f`
+ * on an absent container exits non-zero, which is the ordinary case for the pre-run clear.
+ */
+function removeContainer(name) {
+  const rm = docker(["rm", "-f", name], {
+    timeout: CLEANUP_TIMEOUT_MS,
+    killSignal: "SIGKILL",
+  });
+  return rm.status === 0 || /No such container/i.test(rm.stderr ?? "");
+}
+
+/**
+ * Force-remove every leftover container this harness named, and nothing else.
+ * @returns `{ removed, failed }`, or null when the query itself failed.
+ * @remarks `docker run --rm` only reclaims the container when the docker CLIENT exits normally, so a
+ * Ctrl-C or SIGKILL to `npm run sim` strands one under a name this harness reuses forever — the next
+ * run of that row would then die on a name conflict until a human intervened. The filter is anchored
+ * to `^/dsp-sim-` so the sweep can only ever see containers this harness created (T-41-02); a bare
+ * `docker rm` or a container prune would reach unrelated local state and must never appear here.
+ * `failed` is counted separately because a wedged daemon that swallows every removal would otherwise
+ * report a serene `removed 0` — indistinguishable from the genuinely clean box it is not.
+ */
+function sweepContainers() {
+  const ids = docker(["ps", "-aq", "--filter", `name=^/${CONTAINER_PREFIX}`]);
+  if (ids.status !== 0 || typeof ids.stdout !== "string") {
+    return null;
+  }
+  const unique = [...new Set(ids.stdout.split("\n").filter(Boolean))];
+  let removed = 0;
+  const failed = [];
+  for (const id of unique) {
+    if (removeContainer(id)) removed += 1;
+    else failed.push(id);
+  }
+  return { removed, failed };
+}
+
+/**
+ * Remove every container and image in this harness's own namespace, and nothing else.
+ * @remarks Scoped by construction (T-41-02): the id lists come from a `reference=dispatch-sim:*` and
+ * a `^/dsp-sim-` filter, so `docker rmi`/`docker rm` are only ever handed ids this harness created. A
+ * prune/dangling sweep would be shorter and is exactly what must never appear here — it would delete
+ * unrelated local state. The queries are status-checked before their stdout is consumed: an
+ * unspawnable docker makes spawnSync return `stdout: undefined`, and treating a FAILED query as
+ * "nothing to clean" would report a green that means only that the harness could not look.
  */
 function clean() {
+  const containers = sweepContainers();
+  if (containers === null) {
+    fail(`could not list ${CONTAINER_PREFIX}* containers — is the daemon up?`);
+  }
+  if (containers.failed.length > 0) {
+    fail(
+      `could not remove ${containers.failed.length} ${CONTAINER_PREFIX}* container(s): ` +
+        `${containers.failed.join(" ")} — remove them manually with \`docker rm -f\``,
+    );
+  }
+  console.log(
+    `  removed ${containers.removed} ${CONTAINER_PREFIX}* container(s)`,
+  );
+
   const ids = docker([
     "images",
     "--filter",
     `reference=${TAG_NAMESPACE}:*`,
     "-q",
   ]);
+  if (ids.status !== 0 || typeof ids.stdout !== "string") {
+    fail(
+      `docker images query failed: ${ids.stderr || ids.error?.message || `exit ${ids.status}`}`,
+    );
+  }
   const unique = [...new Set(ids.stdout.split("\n").filter(Boolean))];
   if (unique.length === 0) {
     console.log(`  nothing to clean — no ${TAG_NAMESPACE}:* images`);
@@ -612,11 +685,14 @@ function deniedUntouchedAssert(r) {
 
 /**
  * SIM-05: uninstall removes its own footprint, keeps the user's data, and is idempotent.
- * @remarks The second run is graded on `Removed 0 file(s)` — a line only a genuine no-op can print,
- * since the first run reports 3 — plus the kept-paths no-op text. That text is `Nothing LEFT to stop
- * or remove` rather than `Nothing to stop or remove` precisely BECAUSE the board data survived: the
- * shorter sentence renders only on a box with nothing kept, so asserting it here would demand that
- * uninstall had eaten the data this row exists to prove it keeps.
+ * @remarks Idempotency is graded from PER-RUN tokens the script parsed out of each run's own log
+ * (`SIM_REMOVED_1` / `SIM_REMOVED_2`), not from substrings of the concatenated transcript: the two
+ * runs print into one stream, so `output.includes("Removed 0 file(s)")` is satisfied just as well by
+ * a regression that removed nothing first and 3 files second. The full-phrase checks stay ON TOP of
+ * the tokens, since they also pin the session count the tokens do not carry. That kept-paths text is
+ * `Nothing LEFT to stop or remove` rather than `Nothing to stop or remove` precisely BECAUSE the
+ * board data survived: the shorter sentence renders only on a box with nothing kept, so asserting it
+ * here would demand that uninstall had eaten the data this row exists to prove it keeps.
  */
 function uninstallCleanBoxAssert(r) {
   const t = tokens(r.output);
@@ -630,6 +706,8 @@ function uninstallCleanBoxAssert(r) {
     }
   }
   expectToken(t, "UNINSTALL_EXIT", "0", problems);
+  expectToken(t, "REMOVED_1", "3", problems);
+  expectToken(t, "REMOVED_2", "0", problems);
   expectToken(t, "FOOTPRINT_AFTER", "none", problems);
   expectToken(t, "BOARD_DB_EXISTS", "yes", problems);
   expectToken(t, "BAK1_EXISTS", "yes", problems);
@@ -655,12 +733,14 @@ function uninstallCleanBoxAssert(r) {
  * @param scenario A row from {@link SCENARIOS}.
  * @returns The row plus `{ ok, detail, code, output }`.
  * @remarks Never throws and never exits: an assert that blows up becomes a FAIL row, because one
- * bad row must not rob the operator of the other rows' results. On timeout the container is force
- * removed by its OWN `dsp-sim-` name (T-41-02) — killing the docker CLI does not stop the container
- * it started, so without this a hung row would leak a container past the run.
+ * bad row must not rob the operator of the other rows' results. The container is force removed by its
+ * OWN `dsp-sim-` name (T-41-02) both BEFORE the run — a name is fixed per row, so a leftover from an
+ * interrupted run would otherwise fail this row forever on a name conflict, diagnosing as a product
+ * defect — and after a timeout, since killing the docker CLI does not stop the container it started.
  */
 function runScenario(scenario) {
   const name = `${CONTAINER_PREFIX}${scenario.id}`;
+  removeContainer(name);
   const argv = ["run", "--rm", "--name", name];
   if (scenario.user) {
     argv.push("--user", scenario.user, "-e", `HOME=${scenario.home}`);
@@ -674,7 +754,11 @@ function runScenario(scenario) {
   const output = `${res.stdout ?? ""}${res.stderr ?? ""}`;
 
   if (res.error) {
-    docker(["rm", "-f", name]);
+    if (!removeContainer(name)) {
+      console.error(
+        `  warning: could not remove ${name} — remove it manually with \`docker rm -f ${name}\``,
+      );
+    }
     const timedOut = res.error.code === "ETIMEDOUT" || res.signal === "SIGKILL";
     return {
       ...scenario,
@@ -740,9 +824,27 @@ function selectScenarios(only) {
   return picked;
 }
 
+/**
+ * Read `--only`'s value, refusing a flag that was passed without one.
+ * @returns The id substring, or null when `--only` was not passed at all.
+ * @remarks A bare trailing `--only` used to read as `undefined`, which is falsy, so the harness
+ * silently ran the ENTIRE matrix — a typo would then masquerade as the full green the operator never
+ * asked for. "Flag absent" and "flag passed with no value" must not collapse into one meaning.
+ */
+function readOnlyFlag(argv) {
+  const onlyIndex = argv.indexOf("--only");
+  if (onlyIndex === -1) return null;
+  const value = argv[onlyIndex + 1];
+  if (value === undefined || value.startsWith("--")) {
+    fail(
+      `--only requires a value, e.g. \`npm run sim -- --only classifier-denied\`. Known ids:\n    ${SCENARIOS.map((s) => s.id).join("\n    ")}`,
+    );
+  }
+  return value;
+}
+
 const args = process.argv.slice(2);
-const onlyIndex = args.indexOf("--only");
-const only = onlyIndex === -1 ? null : args[onlyIndex + 1];
+const only = readOnlyFlag(args);
 
 if (args.includes("--clean")) {
   requireDocker();
