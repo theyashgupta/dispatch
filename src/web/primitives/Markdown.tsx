@@ -201,6 +201,7 @@ const components: Components = {
     typeof src === "string" && src !== "" ? (
       isLinearUploadUrl(src) ? (
         <ImageWithFallback
+          key={src}
           src={`/api/images?url=${encodeURIComponent(src)}`}
           alt={alt != null && alt !== "" ? alt : undefined}
         />
