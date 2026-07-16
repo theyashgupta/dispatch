@@ -107,6 +107,13 @@ export function Column({
           Math.max(MIN_COL_WIDTH, startWidth + delta),
         );
         setColumnWidth(column, finalWidth);
+      } else if (persistedWidth != null) {
+        const w = Math.min(
+          MAX_COL_WIDTH,
+          Math.max(MIN_COL_WIDTH, persistedWidth),
+        );
+        node!.style.width = `${w}px`;
+        node!.style.flex = "0 0 auto";
       } else {
         node!.style.width = "";
         node!.style.flex = "";
