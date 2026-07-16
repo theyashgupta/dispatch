@@ -10,9 +10,10 @@ interface OptionRowProps {
   option: FilterOption;
   checked: boolean;
   onToggle: () => void;
+  highlighted?: boolean;
 }
 
-function OptionRow({ option, checked, onToggle }: OptionRowProps) {
+function OptionRow({ option, checked, onToggle, highlighted }: OptionRowProps) {
   const [hover, setHover] = useState(false);
   const [checkFocus, setCheckFocus] = useState(false);
   return (
@@ -25,7 +26,8 @@ function OptionRow({ option, checked, onToggle }: OptionRowProps) {
         gap: "var(--space-sm)",
         padding: "var(--space-sm)",
         borderRadius: "var(--radius)",
-        background: hover ? "var(--surface-card-hover)" : "transparent",
+        background:
+          hover || highlighted ? "var(--surface-card-hover)" : "transparent",
         cursor: "pointer",
       }}
     >
@@ -90,6 +92,7 @@ export function MultiSelect({
   const [triggerFocus, setTriggerFocus] = useState(false);
   const [search, setSearch] = useState("");
   const [searchFocus, setSearchFocus] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const rootRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -109,6 +112,10 @@ export function MultiSelect({
   useEffect(() => {
     if (!open) setSearch("");
   }, [open]);
+
+  useEffect(() => {
+    setHighlightedIndex(-1);
+  }, [open, search]);
 
   const toggle = (id: string) => {
     onChange(
@@ -133,13 +140,30 @@ export function MultiSelect({
     <div
       ref={rootRef}
       onKeyDown={(e) => {
-        if (e.key === "Escape" && open) {
+        if (!open) return;
+        if (e.key === "Escape") {
           e.preventDefault();
           if (search !== "") {
             setSearch("");
             return;
           }
           setOpen(false);
+        } else if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setHighlightedIndex((i) =>
+            Math.min(i + 1, filteredOptions.length - 1),
+          );
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setHighlightedIndex((i) => Math.max(i - 1, 0));
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          if (
+            highlightedIndex >= 0 &&
+            highlightedIndex < filteredOptions.length
+          ) {
+            toggle(filteredOptions[highlightedIndex].id);
+          }
         }
       }}
       style={{ position: "relative" }}
@@ -284,13 +308,22 @@ export function MultiSelect({
             )}
             {!loading &&
               !loadError &&
-              filteredOptions.map((option) => (
-                <OptionRow
+              filteredOptions.map((option, index) => (
+                <div
                   key={option.id}
-                  option={option}
-                  checked={selected.includes(option.id)}
-                  onToggle={() => toggle(option.id)}
-                />
+                  ref={(node) => {
+                    if (node && index === highlightedIndex) {
+                      node.scrollIntoView({ block: "nearest" });
+                    }
+                  }}
+                >
+                  <OptionRow
+                    option={option}
+                    checked={selected.includes(option.id)}
+                    onToggle={() => toggle(option.id)}
+                    highlighted={index === highlightedIndex}
+                  />
+                </div>
               ))}
           </div>
         </div>
