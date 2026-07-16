@@ -190,10 +190,9 @@ export function killTtyd(session: string): void {
 }
 
 /**
- * Boot-time orphan sweep (Phase 5, RESIL-01): kill every untracked `ttyd … tmux attach`
- * process by fingerprint, returning the killed COUNT. After any restart the procs/inFlight
- * maps are empty, so every live dsp-ttyd is untracked; ports were already cleared on load and
- * the panel re-ensures on open, so a fresh spawn beats adopting a possibly-broken ttyd.
+ * The PIDs of every untracked `ttyd … tmux attach` process — the read-only half of the orphan
+ * sweep, split out so a non-destructive caller (`uninstall --dry-run`) can COUNT orphans without
+ * killing them.
  *
  * Fingerprint (RESEARCH Probe 2/3): match iff basename(argv[0]) === "ttyd" AND argv includes
  * "tmux" AND "attach". ttyd rewrites its own proctitle and STRIPS the `=dsp-<session>` target,
@@ -201,21 +200,21 @@ export function killTtyd(session: string): void {
  * single-user host. The basename check excludes the backend's own node/ps/shell commands that
  * merely mention "ttyd" (Pitfall 1); a full-command-line substring match would self-match the
  * backend (Pitfall 2), so we parse `ps` and inspect argv[0] instead. Own pid/ppid are skipped
- * explicitly. Tolerant: `ps` failure returns 0, never crashes
- * boot. SECURITY: logs the count only — never PIDs or argv (T-04-04 precedent).
+ * explicitly. Tolerant: `ps` failure returns an empty list, never crashes boot.
  * @remarks TERM-01 / RESIL-01 orphan sweep: keep the fingerprint EXACT — broadening it
- * over-matches a non-dsp ttyd/user process (denial of service).
+ * over-matches a non-dsp ttyd/user process (denial of service). SECURITY: callers report the
+ * COUNT only — never these PIDs or any argv (T-04-04 precedent).
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
-export async function killDspTtydOrphans(): Promise<number> {
+export async function findDspTtydOrphans(): Promise<number[]> {
   let out: string;
   try {
     ({ stdout: out } = await execFileP("ps", ["-axww", "-o", "pid=,command="]));
   } catch {
-    return 0;
+    return [];
   }
-  let killed = 0;
+  const pids: number[] = [];
   for (const line of out.split("\n")) {
     const m = line.match(/^\s*(\d+)\s+(.*)$/);
     if (!m) continue;
@@ -224,6 +223,25 @@ export async function killDspTtydOrphans(): Promise<number> {
     const argv = m[2].trim().split(/\s+/);
     if (path.basename(argv[0]) !== "ttyd") continue;
     if (!(argv.includes("tmux") && argv.includes("attach"))) continue;
+    pids.push(pid);
+  }
+  return pids;
+}
+
+/**
+ * Boot-time orphan sweep (Phase 5, RESIL-01): kill every untracked `ttyd … tmux attach`
+ * process the fingerprint scan finds, returning the killed COUNT. After any restart the
+ * procs/inFlight maps are empty, so every live dsp-ttyd is untracked; ports were already cleared
+ * on load and the panel re-ensures on open, so a fresh spawn beats adopting a possibly-broken ttyd.
+ * @remarks TERM-01 / RESIL-01: the fingerprint itself lives in `findDspTtydOrphans` — a `ps`
+ * failure surfaces there as an empty list and still returns 0 killed here, so the sweep never
+ * crashes boot. SECURITY: logs the count only — never PIDs or argv (T-04-04 precedent).
+ * @see docs/ARCHITECTURE.md#terminal-ttyd
+ * @see docs/ARCHITECTURE.md#security-threat-model
+ */
+export async function killDspTtydOrphans(): Promise<number> {
+  let killed = 0;
+  for (const pid of await findDspTtydOrphans()) {
     try {
       process.kill(pid, "SIGTERM");
       killed++;

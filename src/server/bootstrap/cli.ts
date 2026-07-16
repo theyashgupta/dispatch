@@ -10,17 +10,22 @@ import {
   probePreflight,
   runInstall,
 } from "../services/preflight.js";
+import { renderPlan, scanFootprint } from "../services/uninstall.js";
 
 const HELP = `dispatch — local Kanban that turns Linear tickets into Claude Code sessions
 
 Usage:
   dispatch [--port <n>] [--no-open]   Boot the app and open the browser
   dispatch doctor                     Check required binaries, then exit
+  dispatch uninstall [--purge] [--dry-run]
+                                      Stop dispatch sessions and remove its config/hooks
   dispatch --help | --version
 
 Options:
   --port <n>   Preferred port (falls back to a free port if taken)
-  --no-open    Do not auto-open the browser`;
+  --no-open    Do not auto-open the browser
+  --purge      uninstall: also delete board data (playbooks are still kept)
+  --dry-run    uninstall: print the plan and change nothing`;
 
 /**
  * Read the package version from the nearest ancestor package.json so `--version` reports the same
@@ -127,6 +132,22 @@ async function doctor(): Promise<void> {
   }
 }
 
+/**
+ * Reverse dispatch's own footprint. This task lands the READ-ONLY half: `--dry-run` prints the
+ * grouped plan, and every other invocation prints the same plan plus the `--dry-run` hint without
+ * touching anything — the confirm/execute path arrives with `runUninstall`.
+ */
+async function uninstall(values: {
+  "dry-run"?: boolean;
+  purge?: boolean;
+}): Promise<void> {
+  const plan = await scanFootprint({ purge: Boolean(values.purge) });
+  process.stdout.write(renderPlan(plan));
+  if (!values["dry-run"]) {
+    process.stdout.write(`\n  Nothing was changed — re-run with --dry-run.\n`);
+  }
+}
+
 async function cli(): Promise<void> {
   let result;
   try {
@@ -137,6 +158,8 @@ async function cli(): Promise<void> {
       options: {
         port: { type: "string" },
         "no-open": { type: "boolean" },
+        purge: { type: "boolean" },
+        "dry-run": { type: "boolean" },
         help: { type: "boolean", short: "h" },
         version: { type: "boolean" },
       },
@@ -158,6 +181,10 @@ async function cli(): Promise<void> {
 
   if (positionals[0] === "doctor") {
     await doctor();
+    process.exit(0);
+  }
+  if (positionals[0] === "uninstall") {
+    await uninstall(values);
     process.exit(0);
   }
   if (positionals.length > 0) {

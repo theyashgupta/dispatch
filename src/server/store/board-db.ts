@@ -175,6 +175,48 @@ export function probeStorageHealth(): { ok: boolean; path: string } {
 }
 
 /**
+ * The per-ticket workspace registry as `uninstall` reads it: every card's workspace folder plus the
+ * source repos its worktrees were cut from. Returned RAW (never joined into worktree paths) because
+ * that join lives in `services/workspace-paths.ts` and store→services is a boundary violation — the
+ * services caller owns the join.
+ * @remarks Read-only by construction and tolerant to `[]` on ANY failure (absent db, missing `cards`
+ * table, unreadable file, malformed JSON): this feeds the idempotent uninstall re-run, where a
+ * half-removed footprint is a normal state, not an error. NEVER calls `openBoardDb()` — that mkdirs
+ * `~/.dispatch` and CREATES board.db, so a `--dry-run` on a clean box would materialize the very
+ * directory it claims not to touch. Mirrors `probeStorageHealth`'s existsSync-guard +
+ * `{ readOnly: true }` discipline (Pitfall 4).
+ */
+export function readWorkspaceRegistry(): {
+  workspacePath: string;
+  repoPaths: string[];
+}[] {
+  if (!fs.existsSync(BOARD_DB_PATH)) return [];
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(BOARD_DB_PATH, { readOnly: true });
+    const rows = db.prepare("SELECT data FROM cards").all() as {
+      data: string;
+    }[];
+    const out: { workspacePath: string; repoPaths: string[] }[] = [];
+    for (const row of rows) {
+      const card = JSON.parse(row.data) as Card;
+      if (!card.workspacePath) continue;
+      out.push({
+        workspacePath: card.workspacePath,
+        repoPaths: (card.workspace?.repos ?? []).map((r) => r.path),
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  } finally {
+    try {
+      db?.close();
+    } catch {}
+  }
+}
+
+/**
  * Quarantine an unopenable/corrupt primary and recover from the newest clean snapshot
  * (STORE-04). Renames the bad primary to `board.db.corrupt` and removes its stale WAL
  * sidecars (so they cannot poison the restored copy), then walks `.bak.1`..`.bak.5`
