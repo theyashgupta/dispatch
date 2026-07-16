@@ -234,7 +234,7 @@ export function MultiSelect({
             flexDirection: "column",
           }}
         >
-          <div style={{ padding: "var(--space-xs)" }}>
+          <div style={{ padding: "var(--space-sm)" }}>
             <input
               ref={searchInputRef}
               type="text"
@@ -243,6 +243,7 @@ export function MultiSelect({
               onFocus={() => setSearchFocus(true)}
               onBlur={() => setSearchFocus(false)}
               placeholder="Search…"
+              aria-label="Search options"
               style={{
                 height: "28px",
                 width: "100%",
@@ -254,6 +255,7 @@ export function MultiSelect({
                 color: "var(--text)",
                 fontFamily: "var(--font-ui)",
                 fontSize: "var(--font-body)",
+                lineHeight: 1.5,
                 outline: "none",
                 boxShadow: focusRing(searchFocus),
               }}
