@@ -1,6 +1,8 @@
 import { type CSSProperties } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { isLinearUploadUrl } from "../../shared/linear-asset-url.js";
+import { ImageWithFallback } from "./ImageWithFallback.js";
 
 interface MarkdownProps {
   source: string;
@@ -197,14 +199,21 @@ const components: Components = {
     ),
   img: ({ src, alt }) =>
     typeof src === "string" && src !== "" ? (
-      <a
-        href={src}
-        target="_blank"
-        rel="noopener noreferrer"
-        style={anchorStyle}
-      >
-        {alt != null && alt !== "" ? alt : src}
-      </a>
+      isLinearUploadUrl(src) ? (
+        <ImageWithFallback
+          src={`/api/images?url=${encodeURIComponent(src)}`}
+          alt={alt != null && alt !== "" ? alt : undefined}
+        />
+      ) : (
+        <a
+          href={src}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={anchorStyle}
+        >
+          {alt != null && alt !== "" ? alt : src}
+        </a>
+      )
     ) : (
       <>{alt}</>
     ),
