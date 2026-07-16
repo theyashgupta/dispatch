@@ -60,7 +60,12 @@ export async function fetchLinearImage(
   }
 
   const contentType = upstream.headers.get("content-type") ?? "";
-  if (!upstream.ok || !contentType.toLowerCase().startsWith("image/")) {
+  const normalizedType = contentType.toLowerCase();
+  if (
+    !upstream.ok ||
+    !normalizedType.startsWith("image/") ||
+    normalizedType.startsWith("image/svg")
+  ) {
     throw new ImageProxyError(
       `upstream rejected (${upstream.status}, ${contentType})`,
     );
@@ -76,6 +81,8 @@ export async function fetchLinearImage(
   res.status(200).set({
     "Content-Type": contentType,
     "Cache-Control": "private, max-age=3600",
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "sandbox",
   });
   await pipeline(
     Readable.fromWeb(upstream.body as ReadableStream<Uint8Array>),
