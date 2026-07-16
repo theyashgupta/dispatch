@@ -7,6 +7,8 @@ import type {
   Playbook,
   PrerequisiteStatus,
   SourceFilters,
+  UpdateRunResult,
+  UpdateStatus,
 } from "../../shared/types.js";
 
 /**
@@ -509,4 +511,31 @@ export async function saveLinearKey(
     return { ok: false, reason: "already-configured" };
   }
   return { ok: false, reason: "rejected" };
+}
+
+/**
+ * Read the cached update status: GET /api/update. Fired once on the update banner's mount; the
+ * server serves the 24h-cached registry check, never a fresh network hit per page load. Throws on
+ * any non-2xx so the banner stays hidden on failure (fail-silent, per the locked design).
+ */
+export async function getUpdateStatus(): Promise<UpdateStatus> {
+  const res = await fetch("/api/update");
+  if (!res.ok) {
+    throw new Error(`getUpdateStatus failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as UpdateStatus;
+}
+
+/**
+ * Run the loopback update: POST /api/update/run. Sends no body — install mode and the target
+ * package are entirely server-resolved. Throws only on a genuine non-2xx (network/500) failure;
+ * the 200 body's `ok:true/false` discriminant is a valid application state the banner renders, not
+ * a thrown error.
+ */
+export async function runUpdate(): Promise<UpdateRunResult> {
+  const res = await fetch("/api/update/run", { method: "POST" });
+  if (!res.ok) {
+    throw new Error(`runUpdate failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as UpdateRunResult;
 }
