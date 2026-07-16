@@ -10,22 +10,29 @@ import {
   probePreflight,
   runInstall,
 } from "../services/preflight.js";
-import { renderPlan, scanFootprint } from "../services/uninstall.js";
+import {
+  renderPlan,
+  runUninstall,
+  scanFootprint,
+} from "../services/uninstall.js";
 
 const HELP = `dispatch — local Kanban that turns Linear tickets into Claude Code sessions
 
 Usage:
   dispatch [--port <n>] [--no-open]   Boot the app and open the browser
   dispatch doctor                     Check required binaries, then exit
-  dispatch uninstall [--purge] [--dry-run]
+  dispatch uninstall [--purge] [--dry-run] [--yes]
                                       Stop dispatch sessions and remove its config/hooks
   dispatch --help | --version
 
 Options:
   --port <n>   Preferred port (falls back to a free port if taken)
   --no-open    Do not auto-open the browser
-  --purge      uninstall: also delete board data (playbooks are still kept)
-  --dry-run    uninstall: print the plan and change nothing`;
+  --purge      uninstall: also delete board data (your playbooks are still kept)
+  --dry-run    uninstall: print the plan and change nothing
+  --yes        uninstall: skip the confirmation prompt
+
+Uninstall never deletes git worktrees — it lists them for you to remove.`;
 
 /**
  * Read the package version from the nearest ancestor package.json so `--version` reports the same
@@ -68,10 +75,17 @@ function openBrowser(url: string): void {
 }
 
 /**
- * Read a `[Y/n]` confirmation from stdin, defaulting to yes on an empty answer per the prompt copy.
- * Only called on the interactive branch (a real TTY), so it never blocks a pipe/CI run.
+ * Read a yes/no confirmation from stdin, resolving a bare Enter to `defaultYes` so the answer always
+ * matches the prompt copy the caller printed. Only called on the interactive branch (a real TTY), so
+ * it never blocks a pipe/CI run.
+ * @remarks `defaultYes` is deliberately explicit at every call site rather than defaulted: an
+ * additive install (`[Y/n]`) and a destructive uninstall (`[y/N]`) must never share a default, and a
+ * silent default is exactly how a bare Enter would come to mean "yes, destroy it".
  */
-function confirm(promptText: string): Promise<boolean> {
+function confirm(
+  promptText: string,
+  opts: { defaultYes: boolean },
+): Promise<boolean> {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -80,7 +94,7 @@ function confirm(promptText: string): Promise<boolean> {
     rl.question(promptText, (ans) => {
       const t = ans.trim();
       rl.close();
-      resolve(t === "" || /^y(es)?$/i.test(t));
+      resolve(t === "" ? opts.defaultYes : /^y(es)?$/i.test(t));
     }),
   );
 }
@@ -119,6 +133,9 @@ async function doctor(): Promise<void> {
     if (!interactive) continue;
     const yes = await confirm(
       `  Install ${p.name} with "${p.command}"? [Y/n] `,
+      {
+        defaultYes: true,
+      },
     );
     if (!yes) continue;
     const { ok, command, status } = await runInstall(p.name, {
@@ -133,19 +150,51 @@ async function doctor(): Promise<void> {
 }
 
 /**
- * Reverse dispatch's own footprint. This task lands the READ-ONLY half: `--dry-run` prints the
- * grouped plan, and every other invocation prints the same plan plus the `--dry-run` hint without
- * touching anything — the confirm/execute path arrives with `runUninstall`.
+ * Reverse dispatch's own footprint, gated behind the layered consent this command's destructiveness
+ * demands: `--dry-run` only ever previews (and WINS over `--yes`, so a scripted dry run can never
+ * execute); a no-TTY run without `--yes` REFUSES and changes nothing rather than destroying data it
+ * could not confirm; and an interactive run must clear a DEFAULT-NO prompt where a bare Enter
+ * cancels. Every branch renders through the one `renderPlan`, so the preview, the confirmation, and
+ * the post-run report can never describe a different set than the one acted on, and every branch
+ * exits 0 — a nothing-to-do uninstall is a success, not an error.
  */
 async function uninstall(values: {
   "dry-run"?: boolean;
   purge?: boolean;
+  yes?: boolean;
 }): Promise<void> {
   const plan = await scanFootprint({ purge: Boolean(values.purge) });
-  process.stdout.write(renderPlan(plan));
-  if (!values["dry-run"]) {
-    process.stdout.write(`\n  Nothing was changed — re-run with --dry-run.\n`);
+
+  if (values["dry-run"]) {
+    process.stdout.write(renderPlan(plan));
+    return;
   }
+
+  const interactive =
+    Boolean(process.stdin.isTTY && process.stdout.isTTY) && !process.env.CI;
+
+  if (!values.yes) {
+    process.stdout.write(renderPlan(plan));
+    if (!interactive) {
+      process.stdout.write(
+        `\n  Not a terminal — nothing was changed. Re-run with --yes to proceed.\n`,
+      );
+      return;
+    }
+    if (!(await confirm(`  Proceed? [y/N] `, { defaultYes: false }))) {
+      process.stdout.write(`  Cancelled — nothing was changed.\n`);
+      return;
+    }
+    process.stdout.write("\n");
+  }
+
+  const removed = plan.remove.length;
+  const stopped = plan.stop.sessions.length;
+  const done = await runUninstall(plan);
+  process.stdout.write(
+    `  Removed ${removed} file(s), stopped ${stopped} session(s).\n\n`,
+  );
+  process.stdout.write(renderPlan(done));
 }
 
 async function cli(): Promise<void> {
@@ -160,6 +209,7 @@ async function cli(): Promise<void> {
         "no-open": { type: "boolean" },
         purge: { type: "boolean" },
         "dry-run": { type: "boolean" },
+        yes: { type: "boolean" },
         help: { type: "boolean", short: "h" },
         version: { type: "boolean" },
       },

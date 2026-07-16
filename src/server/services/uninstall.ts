@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { listSessions } from "../adapters/tmux.js";
-import { findDspTtydOrphans } from "../adapters/ttyd.js";
+import { killSession, listSessions } from "../adapters/tmux.js";
+import { findDspTtydOrphans, killDspTtydOrphans } from "../adapters/ttyd.js";
 import {
   BACKUP_SLOTS,
   BOARD_DB_PATH,
@@ -160,4 +160,34 @@ export function renderPlan(plan: UninstallPlan): string {
 /** Is there any live session or ttyd for `runUninstall` to stop? */
 function hasStopWork(plan: UninstallPlan): boolean {
   return plan.stop.sessions.length > 0 || plan.stop.ttydCount > 0;
+}
+
+/**
+ * Execute an already-scanned plan in the locked order — ttyd, then tmux, then files — and return the
+ * plan as it now stands (nothing left to stop or remove) so the caller can re-render the Keep /
+ * worktree report through the one renderer.
+ * @remarks Three invariants make this command safe to run, and each is load-bearing:
+ * (1) it deletes ONLY the exact, constant paths the scan collected, one `rmSync(p, { force: true })`
+ * per file — never `{ recursive: true }`, never a directory, never a glob, and never `~/.dispatch`
+ * itself, which still holds the user's playbooks;
+ * (2) tmux targets come only from the `dsp-` filter AND are passed as `=<name>`, tmux's EXACT-match
+ * prefix (mirroring cleanup.ts) — without the `=`, tmux prefix-matches and could kill a user session;
+ * (3) git worktrees are listed for the user, NEVER removed, because they may hold uncommitted agent
+ * work.
+ * Every step is best-effort: an absent file, a dead tmux server, and a missing ttyd are all SUCCESS,
+ * which is what makes a second run (or a half-removed footprint) a clean no-op rather than an error.
+ */
+export async function runUninstall(
+  plan: UninstallPlan,
+): Promise<UninstallPlan> {
+  await killDspTtydOrphans();
+  for (const session of plan.stop.sessions) {
+    await killSession(`=${session}`);
+  }
+  for (const target of plan.remove) {
+    try {
+      fs.rmSync(target, { force: true });
+    } catch {}
+  }
+  return { ...plan, remove: [], stop: { sessions: [], ttydCount: 0 } };
 }
