@@ -63,6 +63,85 @@ const IMAGES = [
   },
 ];
 
+/** How long one container gets before it is killed and its row recorded as a timeout. */
+const RUN_TIMEOUT_MS = 180_000;
+
+/** Container-name prefix this harness owns; forced removal is scoped to it, never to a bare `docker rm`. */
+const CONTAINER_PREFIX = "dsp-sim-";
+
+/** The exact guidance strings preflight.ts renders when no package manager is on PATH. */
+const GENERIC_HINTS = {
+  tmux: "install tmux via your platform's package manager or build from source",
+  ttyd: "install ttyd — https://github.com/tsl0922/ttyd/releases",
+  git: "install git — https://git-scm.com/downloads",
+};
+
+/** The print-only guidance for `claude`, which is never package-manager-installed. */
+const CLAUDE_HINT = "install Claude Code — https://docs.claude.com/claude-code";
+
+/**
+ * The scenario matrix.
+ * @remarks Each `argv` is a STATIC constant (T-41-01): no host value, env var, cwd, or CLI argument
+ * is ever interpolated into a container command, and no row is ever a shell string. `-t` is
+ * deliberately never passed — no TTY is exactly what puts `doctor` on its non-interactive
+ * print-only branch (INST-03), which is the branch these rows exist to assert.
+ */
+const SCENARIOS = [
+  {
+    id: "install-only-node",
+    requirement: "SIM-02",
+    node: "22",
+    image: `${TAG_NAMESPACE}:node22-onlynode`,
+    argv: ["dispatch", "doctor"],
+    assert: (r) =>
+      check(r, {
+        expectCode: 0,
+        present: [
+          "✗ tmux",
+          "✗ ttyd",
+          "✗ git",
+          "✗ claude",
+          GENERIC_HINTS.tmux,
+          GENERIC_HINTS.ttyd,
+          GENERIC_HINTS.git,
+          CLAUDE_HINT,
+        ],
+        absent: ["apt-get", "brew"],
+      }),
+  },
+  {
+    id: "install-all-binaries-missing",
+    requirement: "SIM-02",
+    node: "22",
+    image: `${TAG_NAMESPACE}:node22-bare`,
+    argv: ["dispatch", "doctor"],
+    assert: (r) =>
+      check(r, {
+        expectCode: 0,
+        present: [
+          "apt-get install tmux",
+          "apt-get install ttyd",
+          "apt-get install git",
+          CLAUDE_HINT,
+        ],
+        absent: ["apt-get install claude", "brew", "[Y/n]"],
+      }),
+  },
+  {
+    id: "install-ttyd-missing",
+    requirement: "SIM-02",
+    node: "22",
+    image: `${TAG_NAMESPACE}:node22-tmuxgit`,
+    argv: ["dispatch", "doctor"],
+    assert: (r) =>
+      check(r, {
+        expectCode: 0,
+        present: ["✓ tmux", "✓ git", "apt-get install ttyd"],
+        absent: ["apt-get install tmux", "apt-get install git"],
+      }),
+  },
+];
+
 /**
  * Abort the harness with an actionable message.
  * @param message What went wrong and what to do about it.
@@ -213,7 +292,122 @@ function buildImages() {
   }
 }
 
+/**
+ * The one assertion primitive every row is built from: exit code plus required/forbidden substrings.
+ * @param r The captured run: `{ code, output }`.
+ * @param expectations `{ expectCode, present, absent }`.
+ * @returns `{ ok, detail }` where detail NAMES every offending string, so a failure is diagnosable
+ * without re-running or reading this file.
+ */
+function check(r, { expectCode, present = [], absent = [] }) {
+  const problems = [];
+  if (r.code !== expectCode) {
+    problems.push(`exit code was ${r.code}, expected ${expectCode}`);
+  }
+  for (const needle of present) {
+    if (!r.output.includes(needle)) problems.push(`missing: ${needle}`);
+  }
+  for (const needle of absent) {
+    if (r.output.includes(needle)) {
+      problems.push(`unexpectedly present: ${needle}`);
+    }
+  }
+  return { ok: problems.length === 0, detail: problems.join("; ") };
+}
+
+/**
+ * Run one scenario container and grade it.
+ * @param scenario A row from {@link SCENARIOS}.
+ * @returns The row plus `{ ok, detail, code, output }`.
+ * @remarks Never throws and never exits: an assert that blows up becomes a FAIL row, because one
+ * bad row must not rob the operator of the other rows' results. On timeout the container is force
+ * removed by its OWN `dsp-sim-` name (T-41-02) — killing the docker CLI does not stop the container
+ * it started, so without this a hung row would leak a container past the run.
+ */
+function runScenario(scenario) {
+  const name = `${CONTAINER_PREFIX}${scenario.id}`;
+  const argv = ["run", "--rm", "--name", name];
+  if (scenario.user) {
+    argv.push("--user", scenario.user, "-e", `HOME=${scenario.home}`);
+  }
+  argv.push(scenario.image, ...scenario.argv);
+
+  const res = docker(argv, {
+    timeout: RUN_TIMEOUT_MS,
+    killSignal: "SIGKILL",
+  });
+  const output = `${res.stdout ?? ""}${res.stderr ?? ""}`;
+
+  if (res.error) {
+    docker(["rm", "-f", name]);
+    const timedOut = res.error.code === "ETIMEDOUT" || res.signal === "SIGKILL";
+    return {
+      ...scenario,
+      ok: false,
+      code: res.status,
+      output,
+      detail: timedOut
+        ? `timed out after ${RUN_TIMEOUT_MS}ms`
+        : `docker run failed: ${res.error.message}`,
+    };
+  }
+
+  let verdict;
+  try {
+    verdict = scenario.assert({ code: res.status, output });
+  } catch (err) {
+    verdict = { ok: false, detail: `assert threw: ${err.message}` };
+  }
+  return { ...scenario, code: res.status, output, ...verdict };
+}
+
+/**
+ * Print the PASS/FAIL matrix and every failure's diagnosis.
+ * @param results Graded rows.
+ * @remarks Failing rows dump their (bounded) captured output so the operator can diagnose from the
+ * one run rather than re-running with different flags.
+ */
+function report(results) {
+  console.log("\n  SCENARIO MATRIX\n");
+  for (const r of results) {
+    const verdict = r.ok ? "PASS" : "FAIL";
+    console.log(
+      `  ${verdict}  ${r.id.padEnd(30)} node${r.node}  ${r.requirement}`,
+    );
+  }
+  for (const r of results.filter((x) => !x.ok)) {
+    console.log(`\n  ---- ${r.id} FAILED (exit ${r.code}) ----`);
+    console.log(`  ${r.detail}`);
+    const tail = r.output.split("\n").slice(-40).join("\n  ");
+    console.log(`  ---- output (last 40 lines) ----\n  ${tail}`);
+  }
+  const passed = results.filter((r) => r.ok).length;
+  console.log(
+    `\n${passed === results.length ? "PASS" : "FAIL"}: ${passed}/${results.length} scenarios\n`,
+  );
+}
+
+/**
+ * Select the rows to run.
+ * @param only Optional id substring.
+ * @returns The matching rows.
+ * @remarks Filters the MATRIX only — it can never weaken an assertion. Its purpose is that an agent
+ * fixing one row does not pay for the whole matrix.
+ */
+function selectScenarios(only) {
+  if (!only) return SCENARIOS;
+  const picked = SCENARIOS.filter((s) => s.id.includes(only));
+  if (picked.length === 0) {
+    fail(
+      `--only ${only} matched no scenario. Known ids:\n    ${SCENARIOS.map((s) => s.id).join("\n    ")}`,
+    );
+  }
+  return picked;
+}
+
 const args = process.argv.slice(2);
+const onlyIndex = args.indexOf("--only");
+const only = onlyIndex === -1 ? null : args[onlyIndex + 1];
 
 if (args.includes("--clean")) {
   requireDocker();
@@ -227,3 +421,12 @@ buildImages();
 if (args.includes("--build-only")) {
   process.exit(0);
 }
+
+const selected = selectScenarios(only);
+const results = [];
+for (const scenario of selected) {
+  console.log(`\n  running ${scenario.id} (${scenario.image})`);
+  results.push(runScenario(scenario));
+}
+report(results);
+process.exit(results.every((r) => r.ok) ? 0 : 1);
