@@ -33,6 +33,9 @@ const CONFIG_TEMPLATE = {
   "// statusChannel":
     'Status source: "hooks", "pane", or "auto" (prefer hooks per session, pane fallback). Default "auto".',
   statusChannel: "auto",
+  "// updateCheck":
+    "Set to false to disable the on-boot update check. Default true.",
+  updateCheck: true,
 };
 
 /**
@@ -47,6 +50,17 @@ function readStatusChannel(parsed: Record<string, unknown>): StatusChannel {
   throw new StartupError(
     `statusChannel in ${CONFIG_PATH} must be one of "hooks", "pane", "auto". Fix it and restart.`,
   );
+}
+
+/**
+ * Read the `updateCheck` opt-out: absent or any non-`false` value resolves to `true`.
+ * @remarks Deliberately does NOT throw `StartupError` the way {@link readStatusChannel} does for an
+ * invalid enum literal — `updateCheck` is a plain boolean preference, not a closed set of routing
+ * literals, so a malformed/truthy-but-wrong value safely coerces to the default-on behavior rather
+ * than blocking boot; only an explicit `false` disables the check.
+ */
+function readUpdateCheck(parsed: Record<string, unknown>): boolean {
+  return parsed.updateCheck === false ? false : true;
 }
 
 /**
@@ -246,6 +260,7 @@ export function loadConfig(): Config {
         : DEFAULT_POLL_INTERVAL_MS,
     workspaceRoot,
     statusChannel: readStatusChannel(parsed),
+    updateCheck: readUpdateCheck(parsed),
     sources: { linear: { apiKey: rawKey, filters: readNestedFilters(parsed) } },
   };
 
