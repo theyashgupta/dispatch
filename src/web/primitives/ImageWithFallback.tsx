@@ -25,7 +25,7 @@ const imgStyle: CSSProperties = {
 };
 
 const placeholderStyle: CSSProperties = {
-  display: "flex",
+  display: "inline-flex",
   alignItems: "center",
   gap: "var(--space-xs)",
   padding: "var(--space-sm) var(--space-lg)",
@@ -56,7 +56,7 @@ export function ImageWithFallback({ src, alt }: ImageWithFallbackProps) {
 
   if (broken) {
     return (
-      <div style={placeholderStyle}>
+      <span style={placeholderStyle}>
         <ImageOff
           size={14}
           strokeWidth={2}
@@ -66,7 +66,7 @@ export function ImageWithFallback({ src, alt }: ImageWithFallbackProps) {
         <span style={placeholderLabelStyle}>
           {alt ? `Image unavailable — ${alt}` : "Image unavailable"}
         </span>
-      </div>
+      </span>
     );
   }
 
