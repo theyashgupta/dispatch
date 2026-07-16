@@ -13,12 +13,20 @@ export class ImageProxyError extends Error {}
 /**
  * A backstop against a misreported or absent upstream `Content-Length`: counts real streamed
  * bytes and destroys the pipeline the instant the running total exceeds `maxBytes`, regardless
- * of what any header claimed.
+ * of what any header claimed. Also re-arms an inactivity timer on every chunk so a stalled
+ * upstream body (no bytes for `idleMs`) is destroyed instead of pinning the connection
+ * indefinitely — the `AbortController` in `fetchLinearImage` cannot cover this window because
+ * its signal is only awaited up to header arrival.
  */
-function sizeCap(maxBytes: number): Transform {
+function sizeCap(maxBytes: number, idleMs: number): Transform {
   let total = 0;
-  return new Transform({
+  let idleTimer: NodeJS.Timeout;
+  const cap: Transform = new Transform({
     transform(chunk: Buffer, _enc, callback) {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        cap.destroy(new ImageProxyError("upstream stream stalled"));
+      }, idleMs);
       total += chunk.length;
       if (total > maxBytes) {
         callback(new ImageProxyError("upstream exceeds size cap"));
@@ -26,7 +34,16 @@ function sizeCap(maxBytes: number): Transform {
       }
       callback(null, chunk);
     },
+    flush(callback) {
+      clearTimeout(idleTimer);
+      callback();
+    },
   });
+  idleTimer = setTimeout(() => {
+    cap.destroy(new ImageProxyError("upstream stream stalled"));
+  }, idleMs);
+  cap.once("close", () => clearTimeout(idleTimer));
+  return cap;
 }
 
 /**
@@ -35,10 +52,10 @@ function sizeCap(maxBytes: number): Transform {
  *
  * @remarks Auth is the raw-key form used by `postGraphQL` (`Authorization: <key>`, with no scheme
  * prefix) — the key never appears in any thrown message or response byte. The `AbortController`
- * timeout is cleared as soon as the initial `fetch` resolves, so the 10s bound covers
- * header-arrival only; a stalled body is instead bounded by the byte-counting `sizeCap` plus the
- * OS/Node socket's own timeouts, since the same signal can no longer be awaited once streaming
- * (via `pipeline`) has started.
+ * timeout is cleared as soon as the initial `fetch` resolves, so it bounds header-arrival only;
+ * `sizeCap` re-arms its own `idleMs` timer on every chunk and destroys the pipeline on stall, so
+ * the streaming body carries the same 10s inactivity bound even though the fetch signal can no
+ * longer be awaited once `pipeline` has started.
  */
 export async function fetchLinearImage(
   url: string,
@@ -86,7 +103,7 @@ export async function fetchLinearImage(
   });
   await pipeline(
     Readable.fromWeb(upstream.body as ReadableStream<Uint8Array>),
-    sizeCap(MAX_BYTES),
+    sizeCap(MAX_BYTES, TIMEOUT_MS),
     res,
   );
 }
