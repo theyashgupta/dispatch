@@ -177,6 +177,42 @@ const SCENARIOS = [
     argv: ["/opt/sim/boot-probe.sh"],
     assert: bootSetupAssert("24"),
   },
+  {
+    id: "classifier-corrupt-recovers-node22",
+    requirement: "SIM-04",
+    node: "22",
+    image: `${TAG_NAMESPACE}:node22-tmuxgit`,
+    argv: ["/opt/sim/classifier-corrupt.sh"],
+    assert: corruptRecoversAssert,
+  },
+  {
+    id: "classifier-corrupt-recovers-node24",
+    requirement: "SIM-04",
+    node: "24",
+    image: `${TAG_NAMESPACE}:node24-tmuxgit`,
+    argv: ["/opt/sim/classifier-corrupt.sh"],
+    assert: corruptRecoversAssert,
+  },
+  {
+    id: "classifier-denied-untouched-node22",
+    requirement: "SIM-04",
+    node: "22",
+    image: `${TAG_NAMESPACE}:node22-tmuxgit`,
+    user: "node",
+    home: "/home/node",
+    argv: ["/opt/sim/classifier-denied.sh"],
+    assert: deniedUntouchedAssert,
+  },
+  {
+    id: "classifier-denied-untouched-node24",
+    requirement: "SIM-04",
+    node: "24",
+    image: `${TAG_NAMESPACE}:node24-tmuxgit`,
+    user: "node",
+    home: "/home/node",
+    argv: ["/opt/sim/classifier-denied.sh"],
+    assert: deniedUntouchedAssert,
+  },
 ];
 
 /**
@@ -483,6 +519,87 @@ function bootSetupAssert(expectedMajor) {
       grade(problems),
     );
   };
+}
+
+/**
+ * SIM-04 positive: genuine corruption is quarantined and recovered from the newest clean slot.
+ * @remarks Asserts the bad primary was RENAMED (`board.db.corrupt` exists) rather than deleted, that
+ * the slot it recovered FROM survives, and that boot still served the setup screen — a recovery that
+ * crashed the boot would satisfy "did not lose data" while still leaving the user dead in the water.
+ */
+function corruptRecoversAssert(r) {
+  const t = tokens(r.output);
+  const problems = [];
+  expectToken(t, "SETUP_STATUS", "200", problems);
+  expectToken(t, "CORRUPT_MARKER", "yes", problems);
+  expectToken(t, "BAK1_EXISTS", "yes", problems);
+  expectToken(t, "DB_OPENS_CLEAN", "yes", problems);
+  return both(
+    check(r, {
+      expectCode: 0,
+      present: [
+        "recovered board.db from",
+        ".bak.1 after the primary was corrupt/unopenable",
+        "[server] Dispatch backend listening",
+      ],
+      absent: NATIVE_CRASH_MARKERS,
+    }),
+    grade(problems),
+  );
+}
+
+/**
+ * SIM-04 negative: a permission-denied board.db fails loud and NOTHING is touched.
+ * @remarks The digest comparison is the claim stated as arithmetic rather than as a hope — but two
+ * MISSING digests would compare equal, so each is required to be a real sha256 first. `SIM_WHOAMI`
+ * is asserted non-root because as root `chmod 000` is ignored: the row would then open the file
+ * happily and report a green that means nothing at all.
+ */
+function deniedUntouchedAssert(r) {
+  const t = tokens(r.output);
+  const problems = [];
+  const uid = t.get("WHOAMI");
+  if (!uid || uid === "0") {
+    problems.push(
+      `SIM_WHOAMI was ${uid ?? "MISSING"} — this row is only valid as a non-root user, because root ignores chmod 000`,
+    );
+  }
+  const exit = t.get("BOOT_EXIT");
+  if (!/^[1-9][0-9]*$/.test(exit ?? "")) {
+    problems.push(
+      `SIM_BOOT_EXIT was ${exit ?? "MISSING"}, expected a non-zero exit code (boot must fail loud)`,
+    );
+  }
+  expectToken(t, "CORRUPT_MARKER", "no", problems);
+  expectToken(t, "DB_EXISTS", "yes", problems);
+  for (const [before, after, what] of [
+    ["DB_SHA_BEFORE", "DB_SHA_AFTER", "board.db"],
+    ["BAK_SHA_BEFORE", "BAK_SHA_AFTER", "board.db.bak.1"],
+  ]) {
+    const a = t.get(before);
+    const b = t.get(after);
+    if (!/^[0-9a-f]{64}$/.test(a ?? "") || !/^[0-9a-f]{64}$/.test(b ?? "")) {
+      problems.push(
+        `${what} digests are not both real sha256 values (${a ?? "MISSING"} / ${b ?? "MISSING"})`,
+      );
+    } else if (a !== b) {
+      problems.push(`${what} CHANGED across the denied boot: ${a} -> ${b}`);
+    }
+  }
+  return both(
+    check(r, {
+      expectCode: 0,
+      present: [
+        "could not be opened and this is NOT corruption",
+        "[preflight] storage check FAILED",
+      ],
+      absent: [
+        "recovered board.db from",
+        "quarantining and walking the backup",
+      ],
+    }),
+    grade(problems),
+  );
 }
 
 /**
