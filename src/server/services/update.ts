@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import writeFileAtomic from "write-file-atomic";
@@ -9,7 +9,7 @@ import type {
   UpdateStatus,
 } from "../../shared/types.js";
 import { run } from "../adapters/exec.js";
-import { UPDATE_CACHE_PATH } from "./paths.js";
+import { DISPATCH_DIR, UPDATE_CACHE_PATH } from "./paths.js";
 
 const REGISTRY_URL =
   "https://registry.npmjs.org/@theyashgupta%2fdispatch/latest";
@@ -106,6 +106,7 @@ function readCache(): UpdateCache | null {
 /** Write the update-check cache atomically. A failed write is swallowed — caching is best-effort. */
 async function writeCache(cache: UpdateCache): Promise<void> {
   try {
+    mkdirSync(DISPATCH_DIR, { recursive: true });
     await writeFileAtomic(UPDATE_CACHE_PATH, JSON.stringify(cache));
   } catch {}
 }
