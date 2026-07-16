@@ -20,6 +20,7 @@ import { buildRegistry, getLinearSource } from "../sources/registry.js";
 import { startMarkerWatcher } from "../adapters/markers/watcher.js";
 import { reconcileSessions } from "./reconcile.js";
 import { resolveEditors } from "../adapters/editors.js";
+import { startUpdateCheckLoop } from "../services/update.js";
 
 const DEFAULT_PORT = 4700;
 const DEFAULT_POLL_INTERVAL_MS = 60_000;
@@ -202,6 +203,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
     startPoller(config, getLinearSource());
   }
   startMarkerWatcher(statusChannel);
+  if (config.updateCheck !== false) startUpdateCheckLoop(config);
   return { port };
 }
 
