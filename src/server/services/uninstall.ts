@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { killSession, listSessions } from "../adapters/tmux.js";
-import { findDspTtydOrphans, killDspTtydOrphans } from "../adapters/ttyd.js";
+import { findDspTtydOrphans, killTtydPids } from "../adapters/ttyd.js";
 import {
   BACKUP_SLOTS,
   BOARD_DB_PATH,
@@ -19,11 +19,26 @@ import { worktreePath } from "./workspace-paths.js";
  * The three groups `uninstall` reasons about, produced once by `scanFootprint` and consumed by both
  * `renderPlan` and `runUninstall` — so what the user is shown and what is actually touched can never
  * drift apart.
+ * @remarks `stop.ttydPids` holds the pids captured AT SCAN TIME, not a count to re-derive later:
+ * `runUninstall` kills exactly this set, so a ttyd that starts between the scan and the (interactive,
+ * possibly long) confirmation is never killed unseen. Rendered as a count only — the pids never reach
+ * the user's terminal.
  */
 export interface UninstallPlan {
   remove: string[];
-  stop: { sessions: string[]; ttydCount: number };
+  stop: { sessions: string[]; ttydPids: number[] };
   keep: { boardData: string[]; playbooks: string | null; worktrees: string[] };
+}
+
+/**
+ * What `runUninstall` ACTUALLY did, as distinct from what it planned to do — the caller reports these
+ * counts rather than the pre-execution plan's, so a file that survived (EACCES, EPERM, a path turned
+ * directory) can never be reported as removed.
+ */
+export interface UninstallOutcome {
+  plan: UninstallPlan;
+  removed: string[];
+  failed: { path: string; reason: string }[];
 }
 
 const PACKAGE_NOTE =
@@ -97,7 +112,7 @@ export async function scanFootprint(opts: {
     remove: opts.purge
       ? [...footprint, ...boardData, ...boardSidecarPaths()]
       : footprint,
-    stop: { sessions, ttydCount: (await findDspTtydOrphans()).length },
+    stop: { sessions, ttydPids: await findDspTtydOrphans() },
     keep: {
       boardData: opts.purge ? [] : boardData,
       playbooks: fs.existsSync(playbooks) ? playbooks : null,
@@ -111,6 +126,11 @@ export async function scanFootprint(opts: {
  * this, so the user reads one consistent description of the same scan. Empty sections are omitted
  * (a fully-uninstalled box renders a short no-op plan, not three bare headings), and the output
  * always closes with the package note since uninstall can never remove the package itself.
+ * @remarks The ttyd caveat is printed WITH the count, before the `[y/N]` prompt, because the ttyd
+ * match is a process fingerprint that cannot be narrowed to dispatch (ttyd strips the
+ * `=dsp-<session>` target from its own process line), so an unrelated `ttyd … tmux attach` on this
+ * machine would otherwise be stopped without ever appearing in the plan the user approved.
+ * Disclosure is the mitigation the adapter's scoping cannot provide.
  */
 export function renderPlan(plan: UninstallPlan): string {
   const lines: string[] = [];
@@ -121,11 +141,17 @@ export function renderPlan(plan: UninstallPlan): string {
     lines.push("");
   }
 
-  if (plan.stop.sessions.length > 0 || plan.stop.ttydCount > 0) {
+  const ttydCount = plan.stop.ttydPids.length;
+  if (plan.stop.sessions.length > 0 || ttydCount > 0) {
     lines.push("Stop:");
     for (const s of plan.stop.sessions) lines.push(`  tmux session ${s}`);
-    if (plan.stop.ttydCount > 0) {
-      lines.push(`  ${plan.stop.ttydCount} ttyd terminal process(es)`);
+    if (ttydCount > 0) {
+      lines.push(
+        `  ${ttydCount} ttyd terminal process(es)`,
+        `    Matched by process fingerprint, not by dispatch ownership — this`,
+        `    includes ANY "ttyd … tmux attach" process on this machine, even one`,
+        `    dispatch did not start.`,
+      );
     }
     lines.push("");
   }
@@ -150,7 +176,12 @@ export function renderPlan(plan: UninstallPlan): string {
   }
 
   if (plan.remove.length === 0 && !hasStopWork(plan)) {
-    lines.push("Nothing to stop or remove — dispatch's footprint is gone.", "");
+    lines.push(
+      keepLines.length > 0
+        ? "Nothing left to stop or remove — only the kept paths above remain."
+        : "Nothing to stop or remove — dispatch's footprint is gone.",
+      "",
+    );
   }
 
   lines.push(PACKAGE_NOTE);
@@ -159,35 +190,55 @@ export function renderPlan(plan: UninstallPlan): string {
 
 /** Is there any live session or ttyd for `runUninstall` to stop? */
 function hasStopWork(plan: UninstallPlan): boolean {
-  return plan.stop.sessions.length > 0 || plan.stop.ttydCount > 0;
+  return plan.stop.sessions.length > 0 || plan.stop.ttydPids.length > 0;
 }
 
 /**
- * Execute an already-scanned plan in the locked order — ttyd, then tmux, then files — and return the
- * plan as it now stands (nothing left to stop or remove) so the caller can re-render the Keep /
- * worktree report through the one renderer.
+ * Execute an already-scanned plan in the locked order — ttyd, then tmux, then files — reporting what
+ * was ACTUALLY removed alongside the plan as it now stands, so the caller can re-render the Keep /
+ * worktree report through the one renderer without claiming a failed delete succeeded.
  * @remarks Three invariants make this command safe to run, and each is load-bearing:
- * (1) it deletes ONLY the exact, constant paths the scan collected, one `rmSync(p, { force: true })`
- * per file — never `{ recursive: true }`, never a directory, never a glob, and never `~/.dispatch`
- * itself, which still holds the user's playbooks;
+ * (1) it deletes ONLY the exact, constant paths the scan collected, one `rmSync(p)` per file — never
+ * `{ recursive: true }`, never a directory, never a glob, and never `~/.dispatch` itself, which still
+ * holds the user's playbooks;
  * (2) tmux targets come only from the `dsp-` filter AND are passed as `=<name>`, tmux's EXACT-match
  * prefix (mirroring cleanup.ts) — without the `=`, tmux prefix-matches and could kill a user session;
  * (3) git worktrees are listed for the user, NEVER removed, because they may hold uncommitted agent
  * work.
- * Every step is best-effort: an absent file, a dead tmux server, and a missing ttyd are all SUCCESS,
- * which is what makes a second run (or a half-removed footprint) a clean no-op rather than an error.
+ * The ttyd kill has NO equivalent of (2) and must not be read as sharing it: ttyd strips the
+ * `=dsp-<session>` target from its process line, so the fingerprint cannot be dsp-scoped and the
+ * captured pids may include an unrelated `ttyd … tmux attach` process. What bounds that kill is
+ * DISCLOSURE plus the plan snapshot — `renderPlan` states the match's true scope before the prompt,
+ * and only the pids the user was shown a count of are killed here (never a fresh re-scan).
+ * Steps stay best-effort and idempotent: an absent file (ENOENT), a dead tmux server, and an
+ * already-exited ttyd are all SUCCESS, which is what makes a second run (or a half-removed footprint)
+ * a clean no-op. A file that fails for a REAL reason (EACCES, EPERM, EISDIR) is reported, not
+ * counted as removed and not swallowed — but it never aborts the remaining removals.
  */
 export async function runUninstall(
   plan: UninstallPlan,
-): Promise<UninstallPlan> {
-  await killDspTtydOrphans();
+): Promise<UninstallOutcome> {
+  killTtydPids(plan.stop.ttydPids);
   for (const session of plan.stop.sessions) {
     await killSession(`=${session}`);
   }
+
+  const removed: string[] = [];
+  const failed: { path: string; reason: string }[] = [];
   for (const target of plan.remove) {
     try {
-      fs.rmSync(target, { force: true });
-    } catch {}
+      fs.rmSync(target);
+      removed.push(target);
+    } catch (err) {
+      const { code, message } = err as NodeJS.ErrnoException;
+      if (code === "ENOENT") continue;
+      failed.push({ path: target, reason: code ?? message });
+    }
   }
-  return { ...plan, remove: [], stop: { sessions: [], ttydCount: 0 } };
+
+  return {
+    plan: { ...plan, remove: [], stop: { sessions: [], ttydPids: [] } },
+    removed,
+    failed,
+  };
 }

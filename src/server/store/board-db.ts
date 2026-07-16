@@ -179,12 +179,14 @@ export function probeStorageHealth(): { ok: boolean; path: string } {
  * source repos its worktrees were cut from. Returned RAW (never joined into worktree paths) because
  * that join lives in `services/workspace-paths.ts` and store→services is a boundary violation — the
  * services caller owns the join.
- * @remarks Read-only by construction and tolerant to `[]` on ANY failure (absent db, missing `cards`
- * table, unreadable file, malformed JSON): this feeds the idempotent uninstall re-run, where a
- * half-removed footprint is a normal state, not an error. NEVER calls `openBoardDb()` — that mkdirs
- * `~/.dispatch` and CREATES board.db, so a `--dry-run` on a clean box would materialize the very
- * directory it claims not to touch. Mirrors `probeStorageHealth`'s existsSync-guard +
- * `{ readOnly: true }` discipline (Pitfall 4).
+ * @remarks Read-only by construction and tolerant to `[]` on a WHOLE-STORE failure (absent db,
+ * missing `cards` table, unreadable file): this feeds the idempotent uninstall re-run, where a
+ * half-removed footprint is a normal state, not an error. A PER-ROW failure (malformed JSON, a repo
+ * entry with no `path`) skips only that row — discarding the whole list over one bad card would hide
+ * every other card's worktrees from the uninstall report and orphan them exactly as this function
+ * exists to prevent. NEVER calls `openBoardDb()` — that mkdirs `~/.dispatch` and CREATES board.db,
+ * so a `--dry-run` on a clean box would materialize the very directory it claims not to touch.
+ * Mirrors `probeStorageHealth`'s existsSync-guard + `{ readOnly: true }` discipline (Pitfall 4).
  */
 export function readWorkspaceRegistry(): {
   workspacePath: string;
@@ -199,12 +201,20 @@ export function readWorkspaceRegistry(): {
     }[];
     const out: { workspacePath: string; repoPaths: string[] }[] = [];
     for (const row of rows) {
-      const card = JSON.parse(row.data) as Card;
-      if (!card.workspacePath) continue;
-      out.push({
-        workspacePath: card.workspacePath,
-        repoPaths: (card.workspace?.repos ?? []).map((r) => r.path),
-      });
+      try {
+        const card = JSON.parse(row.data) as Card;
+        if (!card.workspacePath) continue;
+        out.push({
+          workspacePath: card.workspacePath,
+          repoPaths: (card.workspace?.repos ?? [])
+            .map((r) => r?.path)
+            .filter((p): p is string => typeof p === "string" && p.length > 0),
+        });
+      } catch {
+        console.warn(
+          "[store] skipping a malformed card row while reading the workspace registry.",
+        );
+      }
     }
     return out;
   } catch {

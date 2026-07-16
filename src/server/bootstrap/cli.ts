@@ -80,7 +80,11 @@ function openBrowser(url: string): void {
  * it never blocks a pipe/CI run.
  * @remarks `defaultYes` is deliberately explicit at every call site rather than defaulted: an
  * additive install (`[Y/n]`) and a destructive uninstall (`[y/N]`) must never share a default, and a
- * silent default is exactly how a bare Enter would come to mean "yes, destroy it".
+ * silent default is exactly how a bare Enter would come to mean "yes, destroy it". Ctrl-D (EOF)
+ * closes the interface without ever firing `line`, so `close` resolves the same default a bare Enter
+ * would — without it the promise never settles and the caller's cancel path never prints. The answer
+ * is settled BEFORE `rl.close()` so the close handler loses the race it would otherwise win and
+ * overwrite a real answer with the default.
  */
 function confirm(
   promptText: string,
@@ -90,13 +94,20 @@ function confirm(
     input: process.stdin,
     output: process.stdout,
   });
-  return new Promise((resolve) =>
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (answer: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(answer);
+    };
+    rl.on("close", () => settle(opts.defaultYes));
     rl.question(promptText, (ans) => {
       const t = ans.trim();
+      settle(t === "" ? opts.defaultYes : /^y(es)?$/i.test(t));
       rl.close();
-      resolve(t === "" ? opts.defaultYes : /^y(es)?$/i.test(t));
-    }),
-  );
+    });
+  });
 }
 
 /**
@@ -188,12 +199,18 @@ async function uninstall(values: {
     process.stdout.write("\n");
   }
 
-  const removed = plan.remove.length;
   const stopped = plan.stop.sessions.length;
-  const done = await runUninstall(plan);
+  const { plan: done, removed, failed } = await runUninstall(plan);
   process.stdout.write(
-    `  Removed ${removed} file(s), stopped ${stopped} session(s).\n\n`,
+    `  Removed ${removed.length} file(s), stopped ${stopped} session(s).\n`,
   );
+  if (failed.length > 0) {
+    process.stdout.write(`  Failed to remove ${failed.length} file(s):\n`);
+    for (const f of failed) {
+      process.stdout.write(`    ${f.path}  (${f.reason})\n`);
+    }
+  }
+  process.stdout.write("\n");
   process.stdout.write(renderPlan(done));
 }
 

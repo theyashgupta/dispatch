@@ -229,23 +229,40 @@ export async function findDspTtydOrphans(): Promise<number[]> {
 }
 
 /**
- * Boot-time orphan sweep (Phase 5, RESIL-01): kill every untracked `ttyd … tmux attach`
- * process the fingerprint scan finds, returning the killed COUNT. After any restart the
- * procs/inFlight maps are empty, so every live dsp-ttyd is untracked; ports were already cleared
- * on load and the panel re-ensures on open, so a fresh spawn beats adopting a possibly-broken ttyd.
- * @remarks TERM-01 / RESIL-01: the fingerprint itself lives in `findDspTtydOrphans` — a `ps`
- * failure surfaces there as an empty list and still returns 0 killed here, so the sweep never
- * crashes boot. SECURITY: logs the count only — never PIDs or argv (T-04-04 precedent).
+ * SIGTERM an ALREADY-SCANNED pid set, returning the killed COUNT — the destructive half of the
+ * orphan sweep, split from the scan so a caller that must kill exactly what it showed the user
+ * (`uninstall`) can pass the pids it captured at scan time instead of re-scanning at execution time
+ * and killing something the user never saw. A pid that has since exited throws and is skipped, so a
+ * stale set degrades to a no-op rather than an error.
+ * @remarks SECURITY: callers report the COUNT only — never these PIDs or any argv (T-04-04
+ * precedent).
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
-export async function killDspTtydOrphans(): Promise<number> {
+export function killTtydPids(pids: number[]): number {
   let killed = 0;
-  for (const pid of await findDspTtydOrphans()) {
+  for (const pid of pids) {
     try {
       process.kill(pid, "SIGTERM");
       killed++;
     } catch {}
   }
   return killed;
+}
+
+/**
+ * Boot-time orphan sweep (Phase 5, RESIL-01): kill every untracked `ttyd … tmux attach`
+ * process the fingerprint scan finds, returning the killed COUNT. After any restart the
+ * procs/inFlight maps are empty, so every live dsp-ttyd is untracked; ports were already cleared
+ * on load and the panel re-ensures on open, so a fresh spawn beats adopting a possibly-broken ttyd.
+ * @remarks TERM-01 / RESIL-01: the fingerprint itself lives in `findDspTtydOrphans` — a `ps`
+ * failure surfaces there as an empty list and still returns 0 killed here, so the sweep never
+ * crashes boot. Scan-then-kill in one call is correct HERE (boot owns no prior plan to honor) but
+ * NOT for `uninstall`, which must kill the set it already showed the user. SECURITY: logs the count
+ * only — never PIDs or argv (T-04-04 precedent).
+ * @see docs/ARCHITECTURE.md#terminal-ttyd
+ * @see docs/ARCHITECTURE.md#security-threat-model
+ */
+export async function killDspTtydOrphans(): Promise<number> {
+  return killTtydPids(await findDspTtydOrphans());
 }
