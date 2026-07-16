@@ -5,6 +5,10 @@ import type {
 } from "../../../shared/types.js";
 import { Card } from "./Card.js";
 import { EmptyState } from "./EmptyState.js";
+import { useColumnWidths } from "../../hooks/useColumnWidths.js";
+
+const MIN_COL_WIDTH = 220;
+const MAX_COL_WIDTH = 480;
 
 const COLUMN_LABELS: Record<ColumnId, string> = {
   todo: "TO DO",
@@ -36,6 +40,7 @@ interface ColumnProps {
   phone?: boolean;
   large?: boolean;
   dropDisabled?: boolean;
+  resizeDisabled?: boolean;
 }
 
 export function Column({
@@ -48,18 +53,27 @@ export function Column({
   phone,
   large,
   dropDisabled,
+  resizeDisabled,
 }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column });
   const highlight = isOver && !dropDisabled;
+  const widths = useColumnWidths();
+  const persistedWidth = widths[column];
 
-  const sizing = isCarousel
-    ? {
-        flex: phone ? "0 0 90vw" : "0 0 80vw",
-        scrollSnapAlign: "start" as const,
-      }
-    : large
-      ? { flex: "1 1 0", minWidth: "240px", maxWidth: "360px" }
-      : { flex: "1 1 0", minWidth: "220px" };
+  const sizing =
+    !isCarousel && persistedWidth != null
+      ? {
+          flex: "0 0 auto",
+          width: `${Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, persistedWidth))}px`,
+        }
+      : isCarousel
+        ? {
+            flex: phone ? "0 0 90vw" : "0 0 80vw",
+            scrollSnapAlign: "start" as const,
+          }
+        : large
+          ? { flex: "1 1 0", minWidth: "240px", maxWidth: "360px" }
+          : { flex: "1 1 0", minWidth: "220px" };
 
   return (
     <div
@@ -68,6 +82,7 @@ export function Column({
         ...sizing,
         display: "flex",
         flexDirection: "column",
+        position: "relative",
         background: highlight
           ? "color-mix(in srgb, var(--accent) 12%, var(--surface-column))"
           : "var(--surface-column)",

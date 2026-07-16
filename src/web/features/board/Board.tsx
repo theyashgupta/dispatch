@@ -195,6 +195,7 @@ export function Board({
               Boolean(activeCard.tmuxSession) &&
               !activeCard.planReady
             }
+            resizeDisabled={activeCardId != null}
           />
         ))}
       </div>
