@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import type {
   Card as CardModel,
@@ -5,7 +6,11 @@ import type {
 } from "../../../shared/types.js";
 import { Card } from "./Card.js";
 import { EmptyState } from "./EmptyState.js";
-import { useColumnWidths } from "../../hooks/useColumnWidths.js";
+import {
+  clearColumnWidth,
+  setColumnWidth,
+  useColumnWidths,
+} from "../../hooks/useColumnWidths.js";
 
 const MIN_COL_WIDTH = 220;
 const MAX_COL_WIDTH = 480;
@@ -59,6 +64,74 @@ export function Column({
   const highlight = isOver && !dropDisabled;
   const widths = useColumnWidths();
   const persistedWidth = widths[column];
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const cleanupDragRef = useRef<(() => void) | null>(null);
+  const [hoveringHandle, setHoveringHandle] = useState(false);
+  const [resizing, setResizing] = useState(false);
+
+  useEffect(() => {
+    return () => cleanupDragRef.current?.();
+  }, []);
+
+  function handleResizePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.stopPropagation();
+    if (resizeDisabled) return;
+    const node = wrapperRef.current;
+    if (node == null) return;
+    const startX = e.clientX;
+    const startWidth = node.getBoundingClientRect().width;
+    setResizing(true);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    function handlePointerMove(ev: PointerEvent) {
+      const next = Math.min(
+        MAX_COL_WIDTH,
+        Math.max(MIN_COL_WIDTH, startWidth + (ev.clientX - startX)),
+      );
+      node!.style.width = `${next}px`;
+      node!.style.flex = "0 0 auto";
+    }
+
+    function handlePointerUp(ev: PointerEvent) {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      cleanupDragRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setResizing(false);
+      const delta = ev.clientX - startX;
+      if (Math.abs(delta) > 3) {
+        const finalWidth = Math.min(
+          MAX_COL_WIDTH,
+          Math.max(MIN_COL_WIDTH, startWidth + delta),
+        );
+        setColumnWidth(column, finalWidth);
+      } else {
+        node!.style.width = "";
+        node!.style.flex = "";
+      }
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    cleanupDragRef.current = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }
+
+  function handleResizeDoubleClick(e: React.MouseEvent<HTMLDivElement>) {
+    e.stopPropagation();
+    const node = wrapperRef.current;
+    if (node != null) {
+      node.style.width = "";
+      node.style.flex = "";
+    }
+    clearColumnWidth(column);
+  }
 
   const sizing =
     !isCarousel && persistedWidth != null
@@ -77,7 +150,10 @@ export function Column({
 
   return (
     <div
-      ref={setNodeRef}
+      ref={(node) => {
+        setNodeRef(node);
+        wrapperRef.current = node;
+      }}
       style={{
         ...sizing,
         display: "flex",
@@ -93,6 +169,29 @@ export function Column({
         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.02)",
       }}
     >
+      {!isCarousel && (
+        <div
+          onPointerDown={handleResizePointerDown}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={handleResizeDoubleClick}
+          onPointerEnter={() => setHoveringHandle(true)}
+          onPointerLeave={() => setHoveringHandle(false)}
+          style={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            width: "6px",
+            height: "100%",
+            cursor: "col-resize",
+            zIndex: 2,
+            background: "transparent",
+            borderRight:
+              hoveringHandle || resizing
+                ? "2px solid var(--accent)"
+                : "2px solid transparent",
+          }}
+        />
+      )}
       <div
         style={{
           position: "sticky",
