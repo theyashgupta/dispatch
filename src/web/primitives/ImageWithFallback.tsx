@@ -18,6 +18,7 @@ const imgStyle: CSSProperties = {
   maxWidth: "100%",
   maxHeight: "360px",
   objectFit: "contain",
+  minHeight: "48px",
   borderRadius: "var(--radius)",
   border: "1px solid var(--border)",
   background: "var(--surface-card)",
@@ -25,7 +26,7 @@ const imgStyle: CSSProperties = {
 };
 
 const placeholderStyle: CSSProperties = {
-  display: "inline-flex",
+  display: "flex",
   alignItems: "center",
   gap: "var(--space-xs)",
   padding: "var(--space-sm) var(--space-lg)",
@@ -71,7 +72,13 @@ export function ImageWithFallback({ src, alt }: ImageWithFallbackProps) {
   }
 
   return (
-    <a href={src} target="_blank" rel="noopener noreferrer" style={anchorStyle}>
+    <a
+      href={src}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={alt != null && alt !== "" ? alt : "Open full image"}
+      style={anchorStyle}
+    >
       <img
         src={src}
         alt={alt ?? ""}
