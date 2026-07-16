@@ -15,12 +15,14 @@ import {
   runUninstall,
   scanFootprint,
 } from "../services/uninstall.js";
+import { checkForUpdate, runUpdate } from "../services/update.js";
 
 const HELP = `dispatch — local Kanban that turns Linear tickets into Claude Code sessions
 
 Usage:
   dispatch [--port <n>] [--no-open]   Boot the app and open the browser
   dispatch doctor                     Check required binaries, then exit
+  dispatch update                     Check for and guide you through an update
   dispatch uninstall [--purge] [--dry-run] [--yes]
                                       Stop dispatch sessions and remove its config/hooks
   dispatch --help | --version
@@ -137,6 +139,25 @@ async function doctor(): Promise<void> {
       : `  ✗ Storage check failed — ${report.storage.path}\n`,
   );
 
+  const u = await checkForUpdate({ liveCheck: true });
+  if (!u.updateAvailable) {
+    process.stdout.write(
+      u.latest == null
+        ? `  ⚠ dispatch ${u.current} — could not reach the registry\n`
+        : `  ✓ dispatch ${u.current} (latest)\n`,
+    );
+  } else {
+    const command =
+      u.installMode === "global"
+        ? "npm i -g @theyashgupta/dispatch@latest"
+        : u.installMode === "npx"
+          ? "npx @theyashgupta/dispatch@latest"
+          : "pull the latest changes (dev checkout)";
+    process.stdout.write(
+      `  ✗ dispatch ${u.current} — ${u.latest} available: ${command}\n`,
+    );
+  }
+
   const interactive =
     Boolean(process.stdin.isTTY && process.stdout.isTTY) && !process.env.CI;
   for (const p of report.binaries) {
@@ -158,6 +179,64 @@ async function doctor(): Promise<void> {
         : `  ✗ ${status.name} still missing — run manually: ${command}\n`,
     );
   }
+}
+
+/**
+ * Check the registry (always live), then guide the user through updating. Install-mode-aware: npx
+ * installs get printed `@latest` guidance (never `npm i -g`, since the npx cache serves stale
+ * versions), a local checkout gets dev-checkout guidance, and a global install offers `[Y/n]`
+ * default-yes then runs it on confirm — under a pipe/CI it prints the command instead of prompting
+ * or spawning. ALWAYS resolves without a non-zero exit, mirroring `doctor`'s diagnostic posture: a
+ * failed update prints the manual fallback command rather than failing the command itself.
+ */
+async function update(): Promise<void> {
+  const status = await checkForUpdate({ liveCheck: true });
+  process.stdout.write(`  dispatch ${status.current}\n`);
+
+  if (!status.updateAvailable) {
+    process.stdout.write(
+      status.latest == null
+        ? `  Couldn't reach the registry — dispatch ${status.current} may not be the latest.\n`
+        : `  dispatch ${status.current} is up to date.\n`,
+    );
+    return;
+  }
+
+  process.stdout.write(`  dispatch ${status.latest} is available.\n`);
+
+  if (status.installMode === "npx") {
+    process.stdout.write(`  Run: npx @theyashgupta/dispatch@latest\n`);
+    return;
+  }
+  if (status.installMode === "local") {
+    process.stdout.write(
+      `  This is a dev checkout — pull the latest changes to update.\n`,
+    );
+    return;
+  }
+
+  const interactive =
+    Boolean(process.stdin.isTTY && process.stdout.isTTY) && !process.env.CI;
+  const command = "npm i -g @theyashgupta/dispatch@latest";
+  if (!interactive) {
+    process.stdout.write(`  Run: ${command}\n`);
+    return;
+  }
+
+  const yes = await confirm(
+    `  Update to v${status.latest} with "${command}"? [Y/n] `,
+    { defaultYes: true },
+  );
+  if (!yes) {
+    process.stdout.write(`  Skipped — nothing was changed.\n`);
+    return;
+  }
+  const result = await runUpdate({ interactive: true });
+  process.stdout.write(
+    result.ok
+      ? `  Updated to v${result.version} — restart dispatch to use it.\n`
+      : `  Update failed — run it yourself: ${result.command}\n`,
+  );
 }
 
 /**
@@ -252,6 +331,10 @@ async function cli(): Promise<void> {
   }
   if (positionals[0] === "uninstall") {
     await uninstall(values);
+    process.exit(0);
+  }
+  if (positionals[0] === "update") {
+    await update();
     process.exit(0);
   }
   if (positionals.length > 0) {
