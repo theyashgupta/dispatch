@@ -10,5 +10,7 @@ export function isLinearUploadUrl(rawUrl: string): boolean {
   } catch {
     return false;
   }
-  return parsed.protocol === "https:" && parsed.hostname === "uploads.linear.app";
+  return (
+    parsed.protocol === "https:" && parsed.hostname === "uploads.linear.app"
+  );
 }

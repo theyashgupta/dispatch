@@ -18,7 +18,7 @@ export class ImageProxyError extends Error {}
 function sizeCap(maxBytes: number): Transform {
   let total = 0;
   return new Transform({
-    transform(chunk, _enc, callback) {
+    transform(chunk: Buffer, _enc, callback) {
       total += chunk.length;
       if (total > maxBytes) {
         callback(new ImageProxyError("upstream exceeds size cap"));
