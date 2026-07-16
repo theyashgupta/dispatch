@@ -213,6 +213,14 @@ const SCENARIOS = [
     argv: ["/opt/sim/classifier-denied.sh"],
     assert: deniedUntouchedAssert,
   },
+  {
+    id: "uninstall-clean-box",
+    requirement: "SIM-05",
+    node: "22",
+    image: `${TAG_NAMESPACE}:node22-tmuxgit`,
+    argv: ["/opt/sim/uninstall-check.sh"],
+    assert: uninstallCleanBoxAssert,
+  },
 ];
 
 /**
@@ -596,6 +604,46 @@ function deniedUntouchedAssert(r) {
       absent: [
         "recovered board.db from",
         "quarantining and walking the backup",
+      ],
+    }),
+    grade(problems),
+  );
+}
+
+/**
+ * SIM-05: uninstall removes its own footprint, keeps the user's data, and is idempotent.
+ * @remarks The second run is graded on `Removed 0 file(s)` — a line only a genuine no-op can print,
+ * since the first run reports 3 — plus the kept-paths no-op text. That text is `Nothing LEFT to stop
+ * or remove` rather than `Nothing to stop or remove` precisely BECAUSE the board data survived: the
+ * shorter sentence renders only on a box with nothing kept, so asserting it here would demand that
+ * uninstall had eaten the data this row exists to prove it keeps.
+ */
+function uninstallCleanBoxAssert(r) {
+  const t = tokens(r.output);
+  const problems = [];
+  const before = t.get("FOOTPRINT_BEFORE") ?? "";
+  for (const artifact of ["config.json", "hook.sh", "hook-settings.json"]) {
+    if (!before.includes(artifact)) {
+      problems.push(
+        `SIM_FOOTPRINT_BEFORE lacks ${artifact} — there was nothing to remove, so a clean "after" would prove nothing`,
+      );
+    }
+  }
+  expectToken(t, "UNINSTALL_EXIT", "0", problems);
+  expectToken(t, "FOOTPRINT_AFTER", "none", problems);
+  expectToken(t, "BOARD_DB_EXISTS", "yes", problems);
+  expectToken(t, "BAK1_EXISTS", "yes", problems);
+  expectToken(t, "DISPATCH_DIR_EXISTS", "yes", problems);
+  expectToken(t, "SECOND_RUN_EXIT", "0", problems);
+  return both(
+    check(r, {
+      expectCode: 0,
+      present: [
+        "Removed 3 file(s), stopped 0 session(s).",
+        "/root/.dispatch/board.db  (board data — pass --purge to delete)",
+        "npm uninstall -g @theyashgupta/dispatch",
+        "Removed 0 file(s), stopped 0 session(s).",
+        "Nothing left to stop or remove",
       ],
     }),
     grade(problems),
