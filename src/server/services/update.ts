@@ -136,10 +136,12 @@ export async function checkForUpdate(opts: {
       latest = cache.latestSeen;
     } else {
       latest = await fetchLatestVersion();
-      await writeCache({
-        lastCheckedAt: new Date().toISOString(),
-        latestSeen: latest,
-      });
+      if (latest != null) {
+        await writeCache({
+          lastCheckedAt: new Date().toISOString(),
+          latestSeen: latest,
+        });
+      }
     }
   } catch {
     latest = null;
