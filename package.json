@@ -49,6 +49,7 @@
     "build": "npm run build:web && npm run build:server",
     "start": "NODE_ENV=production node dist/server/bootstrap/index.js",
     "replay-gate": "tsx scripts/replay-watcher.ts --check",
+    "sim": "node scripts/fresh-env-sim.mjs",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run deadcode && npm run replay-gate",
     "prepack": "npm run build"
   },
