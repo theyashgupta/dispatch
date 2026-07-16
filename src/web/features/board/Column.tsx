@@ -116,7 +116,7 @@ export function Column({
         node!.style.flex = "0 0 auto";
       } else {
         node!.style.width = "";
-        node!.style.flex = "";
+        node!.style.flex = "1 1 0";
       }
     }
 
@@ -135,7 +135,7 @@ export function Column({
     const node = wrapperRef.current;
     if (node != null) {
       node.style.width = "";
-      node.style.flex = "";
+      node.style.flex = "1 1 0";
     }
     clearColumnWidth(column);
   }
