@@ -310,6 +310,22 @@ export interface PreflightReport {
   platform: { os: "darwin" | "linux" | "other"; packageManager: string | null };
 }
 
+/**
+ * The single-source-of-truth update-check snapshot shared by `dispatch update`, `dispatch doctor`,
+ * the boot-time check loop, and the web update banner.
+ */
+export interface UpdateStatus {
+  updateAvailable: boolean;
+  current: string;
+  latest: string | null;
+  installMode: "global" | "npx" | "local";
+}
+
+/** Outcome of a `runUpdate()` attempt: the freshly-confirmed on-disk version, or the manual fallback command. */
+export type UpdateRunResult =
+  | { ok: true; version: string }
+  | { ok: false; command: string };
+
 /** Contents of ~/.dispatch/config.json. */
 export interface Config {
   linearApiKey: string;
@@ -322,6 +338,8 @@ export interface Config {
   statusChannel?: StatusChannel;
   /** Writable-config groundwork (Phase 23): nested per-source credentials plus the live filter block. `linearApiKey` stays the resolved read. */
   sources?: { linear?: { apiKey: string; filters?: SourceFilters } };
+  /** On-boot update check; absent or any non-`false` value resolves to on. */
+  updateCheck?: boolean;
 }
 
 /**

@@ -28,3 +28,9 @@ export const HOOK_SCRIPT_PATH = path.join(DISPATCH_DIR, "hook.sh");
  * script so both regenerate together at boot; never merged into `~/.claude/settings.json`.
  */
 export const HOOK_SETTINGS_PATH = path.join(DISPATCH_DIR, "hook-settings.json");
+
+/**
+ * The update-check cache, holding `{ lastCheckedAt, latestSeen }` so at most one anonymous
+ * registry GET/day is made. A corrupt or missing file is not an error — the service just re-checks.
+ */
+export const UPDATE_CACHE_PATH = path.join(DISPATCH_DIR, "update-check.json");
