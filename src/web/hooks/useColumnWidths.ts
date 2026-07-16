@@ -28,6 +28,13 @@ function loadWidths(): ColumnWidthsMap {
 let widths: ColumnWidthsMap = loadWidths();
 const listeners = new Set<() => void>();
 
+window.addEventListener("storage", (e) => {
+  if (e.key === STORAGE_KEY) {
+    widths = loadWidths();
+    for (const cb of listeners) cb();
+  }
+});
+
 function subscribe(cb: () => void): () => void {
   listeners.add(cb);
   return () => listeners.delete(cb);
