@@ -136,13 +136,17 @@ export async function checkForUpdate(opts: {
       latest = cache.latestSeen;
     } else {
       latest = await fetchLatestVersion();
-      await writeCache({ lastCheckedAt: new Date().toISOString(), latestSeen: latest });
+      await writeCache({
+        lastCheckedAt: new Date().toISOString(),
+        latestSeen: latest,
+      });
     }
   } catch {
     latest = null;
   }
 
-  const updateAvailable = latest != null && compareVersions(current, latest) < 0;
+  const updateAvailable =
+    latest != null && compareVersions(current, latest) < 0;
   return { updateAvailable, current, latest, installMode };
 }
 
@@ -228,6 +232,9 @@ export function startUpdateCheckLoop(config: Config): void {
       );
     }
   });
-  const timer = setTimeout(() => startUpdateCheckLoop(config), CHECK_INTERVAL_MS);
+  const timer = setTimeout(
+    () => startUpdateCheckLoop(config),
+    CHECK_INTERVAL_MS,
+  );
   timer.unref?.();
 }

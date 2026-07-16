@@ -323,8 +323,7 @@ export interface UpdateStatus {
 
 /** Outcome of a `runUpdate()` attempt: the freshly-confirmed on-disk version, or the manual fallback command. */
 export type UpdateRunResult =
-  | { ok: true; version: string }
-  | { ok: false; command: string };
+  { ok: true; version: string } | { ok: false; command: string };
 
 /** Contents of ~/.dispatch/config.json. */
 export interface Config {

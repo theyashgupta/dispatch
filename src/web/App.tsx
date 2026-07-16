@@ -19,6 +19,7 @@ import { StartModal } from "./features/modals/StartModal.js";
 import { CleanupModal } from "./features/modals/CleanupModal.js";
 import { SettingsModal } from "./features/modals/SettingsModal.js";
 import { FirstRunSetup } from "./features/setup/FirstRunSetup.js";
+import { UpdateBanner } from "./features/update/UpdateBanner.js";
 import { cleanupCard as cleanupCardApi, getSetup } from "./lib/api.js";
 import type { StartRequest } from "./lib/start-request.js";
 import type { PrerequisiteStatus } from "../shared/types.js";
@@ -190,6 +191,7 @@ export function App() {
         overflow: "hidden",
       }}
     >
+      <UpdateBanner />
       <SyncStrip
         syncedAt={board?.syncedAt ?? null}
         connection={connection}
