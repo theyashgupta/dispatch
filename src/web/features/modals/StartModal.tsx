@@ -19,6 +19,7 @@ import { Field } from "../../primitives/Field.js";
 import { IconButton } from "../../primitives/IconButton.js";
 import { Modal, type ModalControl } from "../../primitives/Modal.js";
 import { Notice } from "../../primitives/Notice.js";
+import { WorkspaceAdd } from "../workspaces/WorkspaceAdd.js";
 
 interface StartModalProps {
   card: CardModel;
@@ -111,10 +112,7 @@ function FolderPicker({
   const firstRun = folders.length === 0;
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [value, setValue] = useState("");
-  const [validationError, setValidationError] = useState<string | null>(null);
   const [triggerFocus, setTriggerFocus] = useState(false);
-  const [inputFocus, setInputFocus] = useState(false);
   const [addRowHover, setAddRowHover] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -129,25 +127,14 @@ function FolderPicker({
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [open]);
 
-  async function submitAdd() {
-    const path = value.trim();
-    if (path === "") return;
+  async function wrappedAdd(path: string): Promise<string | null> {
     const err = await onAdd(path);
-    if (err === null) {
-      setValue("");
-      setValidationError(null);
-      setAdding(false);
-    } else {
-      setValidationError(err);
-    }
+    if (err === null) setAdding(false);
+    return err;
   }
 
   function cancelAdd() {
-    setValidationError(null);
-    if (!firstRun) {
-      setAdding(false);
-      setValue("");
-    }
+    if (!firstRun) setAdding(false);
   }
 
   return (
@@ -246,8 +233,6 @@ function FolderPicker({
             onClick={() => {
               setAdding(true);
               setOpen(false);
-              setValue("");
-              setValidationError(null);
             }}
             onMouseEnter={() => setAddRowHover(true)}
             onMouseLeave={() => setAddRowHover(false)}
@@ -273,61 +258,15 @@ function FolderPicker({
       )}
 
       {showAdd && (
-        <>
-          <input
-            value={value}
-            placeholder="~/Work/project-folder"
-            aria-label="Workspace folder path"
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void submitAdd();
-              } else if (e.key === "Escape") {
-                e.preventDefault();
-                cancelAdd();
-              }
-            }}
-            onFocus={() => setInputFocus(true)}
-            onBlur={() => setInputFocus(false)}
-            style={{
-              padding: "var(--space-sm)",
-              background: "var(--surface-card)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius)",
-              color: "var(--text)",
-              fontFamily: "var(--font-ui)",
-              fontSize: "var(--font-body)",
-              lineHeight: "var(--line-body)",
-              outline: "none",
-              boxShadow: focusRing(inputFocus),
-            }}
-          />
-          {firstRun && validationError === null && (
-            <div
-              style={{
-                fontSize: "var(--font-body)",
-                lineHeight: "var(--line-body)",
-                color: "var(--text-muted)",
-              }}
-            >
-              Add a folder that contains the git repos for this ticket.
-            </div>
-          )}
-          {validationError !== null && (
-            <div
-              role="alert"
-              style={{
-                fontSize: "var(--font-label)",
-                fontWeight: "var(--weight-semibold)",
-                lineHeight: "var(--line-label)",
-                color: "var(--destructive)",
-              }}
-            >
-              {validationError}
-            </div>
-          )}
-        </>
+        <WorkspaceAdd
+          onAdd={wrappedAdd}
+          onCancel={cancelAdd}
+          hint={
+            firstRun
+              ? "Add a folder that contains the git repos for this ticket."
+              : undefined
+          }
+        />
       )}
     </div>
   );
