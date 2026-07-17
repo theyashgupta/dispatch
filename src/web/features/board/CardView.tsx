@@ -448,22 +448,26 @@ export function CardView({
       ) : null}
 
       {card.cleanupWarning != null && card.cleanupWarning.trim() !== "" && (
-        <Notice tone="muted">{card.cleanupWarning}</Notice>
+        <div style={{ marginTop: "var(--space-xs)" }}>
+          <Notice tone="muted">{card.cleanupWarning}</Notice>
+        </div>
       )}
 
       {card.cleanupBlocked != null && card.cleanupBlocked.length > 0 && (
-        <Notice
-          tone="destructive"
-          icon={
-            <AlertTriangle
-              size={12}
-              strokeWidth={2}
-              aria-hidden="true"
-              style={{ flex: "0 0 auto" }}
-            />
-          }
-          label="Uncommitted work — cleanup blocked"
-        />
+        <div style={{ marginTop: "var(--space-xs)" }}>
+          <Notice
+            tone="destructive"
+            icon={
+              <AlertTriangle
+                size={12}
+                strokeWidth={2}
+                aria-hidden="true"
+                style={{ flex: "0 0 auto" }}
+              />
+            }
+            label="Uncommitted work — cleanup blocked"
+          />
+        </div>
       )}
     </div>
   );
