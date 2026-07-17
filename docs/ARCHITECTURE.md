@@ -955,6 +955,36 @@ are reaped through the store's token-release chokepoint (the bootstrap-wired rel
 the registry unregister with `reapActivityThrottle`), matching the reaping discipline of the
 watcher's per-session maps.
 
+**Tool-mediated pause routing (HOOK-03).** `AskUserQuestion` (and the same class of tool,
+`ExitPlanMode`) pauses the CURRENT turn to wait on the user WITHOUT ending it — no `Stop` event
+fires at the pause, so `applyStopEvent`'s marker-text parsing (the mechanism every other pause
+class relies on) never runs for it, and answering the question delivers the reply as a tool
+result, not a fresh prompt, so `UserPromptSubmit` never fires either. Both gaps were confirmed
+live (not inferred from docs) against the installed CLI before any fix landed. The fix is two
+layers, ordered lowest-risk first:
+
+1. `kickoff.ts`'s `STATUS_PROTOCOL` carries a fourth instruction line asking the agent to print
+   the `NEEDS_INPUT` marker as a standalone reply before calling a pausing tool. Live-measured
+   INSUFFICIENT ALONE, even when followed: the printed text still lands mid-turn, so it is never
+   carried by a `Stop` event and the hook channel never sees it (0/3 flips across live runs with
+   only this layer present).
+2. A permanent `PreToolUse` hook is registered (matcher `"AskUserQuestion"`,
+   `bootstrap/hook-setup.ts`) as the structural safety net: `applyHookEvent` synthesizes a
+   `{ kind: "NEEDS_INPUT", reason: "waiting on " + toolName }` marker and applies it through the
+   SAME `markerKey()`/`applyMarker` path `applyStopEvent` uses (never a hand-rolled key), so this
+   is additive to — not a fork of — the shared marker/dedup core; `parse.ts`/`scan-decision.ts`/
+   the replay corpus are untouched. Flip-back mirrors it: the existing `PostToolUse` branch (today
+   only stamping `outputChangedAt`) additionally calls `store.flipBack(cardId)` when the event's
+   validated `tool_name` is in the same pause-tool set; `flipBack`'s own column guard
+   (`c.column !== "needs_input"` → no-op) makes this safe to call unconditionally on every such
+   event. Both new branches sit AFTER the pane-mode no-op guard described above, so they inherit
+   the "no pane fallback under explicit `hooks` mode" contract automatically and can never fire
+   under `statusChannel: "pane"` — a pane-mode session never even carries `--settings`, so the CLI
+   never emits the `PreToolUse`/`PostToolUse` events in the first place. Live-verified 3/3: the
+   pause flips the card to Needs Input, answering flips it back, a plain `pane`-mode session stays
+   structurally unable to detect the pause (unregressed, pre-existing, out of this fix's scope),
+   and a manual drag still wins over any marker.
+
 **Accepted residuals.** Under `auto` the seconds-wide [launch → kickoff] window can double-stamp
 the same activity via both channels (two SSE frames, same semantic — cosmetic, self-heals on
 view). Under `hooks`, a hook-silent session gets NO status routing at all — the user's explicit
