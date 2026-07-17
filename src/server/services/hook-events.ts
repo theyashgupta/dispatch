@@ -57,8 +57,12 @@ export function reapActivityThrottle(cardId: string): void {
  * pause's still-standing `lastMarker` — `flipBack` deliberately never clears it — and silently
  * never flip the card for a genuinely new, still-blocking pause. Incrementing this per call gives
  * every fallback-path pause a distinct reason/markerKey without touching `board.store.ts`'s
- * dedup guard or `flipBack`'s contract at all. Values carry no meaning beyond distinctness within
- * one live hook channel; reaped alongside `lastActivityStampMs` at the same chokepoint.
+ * dedup guard or `flipBack`'s contract at all. Values carry no meaning beyond distinctness, and
+ * distinctness must hold ACROSS channel lifetimes, not just within one: entries are reaped at the
+ * token-release chokepoint alongside `lastActivityStampMs`, but `lastMarker` survives every
+ * session-clearing mutator, so a counter restarting at a fixed seed would reproduce the dead
+ * channel's key on the new channel's first fallback pause and be dedup-swallowed — hence
+ * {@link resolvePreToolUseDiscriminator} seeds a fresh entry from `Date.now()`, never `0`.
  */
 const preToolUseSeq = new Map<string, number>();
 
@@ -134,10 +138,12 @@ async function applyPreToolUseEvent(
  * Resolve the per-invocation discriminator a synthesized `PreToolUse` marker's `reason` folds in
  * (HOOK-03 follow-up): the payload's own `tool_use_id` when present and well-formed — validated
  * with the same string-plus-bounded-charset shape as `session_id` below, never trusted blindly —
- * else the next value from the per-card {@link preToolUseSeq} fallback. Either path is distinct
- * per call, which is the only property {@link applyPreToolUseEvent} depends on; a retried event
- * carrying the SAME `tool_use_id` deliberately resolves to the SAME discriminator, so the
- * existing `lastMarker` dedup guard still suppresses a true duplicate fire.
+ * else the next value from the per-card {@link preToolUseSeq} fallback, seeded from `Date.now()`
+ * on first miss so a fresh hook channel can never reproduce a dead channel's key (see
+ * {@link preToolUseSeq}). Either path is distinct per call and across channel lifetimes, which is
+ * the only property {@link applyPreToolUseEvent} depends on; a retried event carrying the SAME
+ * `tool_use_id` deliberately resolves to the SAME discriminator, so the existing `lastMarker`
+ * dedup guard still suppresses a true duplicate fire.
  */
 function resolvePreToolUseDiscriminator(
   cardId: string,
@@ -146,7 +152,7 @@ function resolvePreToolUseDiscriminator(
   if (typeof toolUseId === "string" && /^[\w-]{1,256}$/.test(toolUseId)) {
     return toolUseId;
   }
-  const next = (preToolUseSeq.get(cardId) ?? 0) + 1;
+  const next = (preToolUseSeq.get(cardId) ?? Date.now()) + 1;
   preToolUseSeq.set(cardId, next);
   return `#${next}`;
 }
