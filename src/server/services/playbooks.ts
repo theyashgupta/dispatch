@@ -18,20 +18,38 @@ export type PlaybookWriteResult =
   | { ok: true; playbook: Playbook }
   | { ok: false; error: "name-exists" | "footgun" | "not-found" };
 
-const CODE_PLAYBOOK = `---
-name: Code
----
-## Extra direction
-{extra}`;
-
-const PLAN_PLAYBOOK = `---
-name: Plan
+const PRD_RALPH_LOOP_PLAYBOOK = `---
+name: PRD + Ralph Loop
 ---
 ## Extra direction
 {extra}
 
-## Planning task
-Interview me about the scope, constraints, and acceptance criteria for this ticket before writing anything. Once we agree on the approach, write a PLAN.md at the root of this workspace folder capturing the plan, then stop for my approval — do not start implementing until I approve the plan.`;
+## Workflow
+Use the grill-me skill first to stress-test the scope of this ticket until requirements stop changing. Once the scope is settled, use the write-prd skill to produce a phased PRD.md for it. Then use the ralph-loop skill to execute the PRD phase by phase (default --qa-subagent mode unless the PRD is trivial). Hand off between steps by naming the PRD's path when moving from write-prd to ralph-loop.`;
+
+const SUPERPOWERS_PLAYBOOK = `---
+name: Superpowers
+---
+## Extra direction
+{extra}
+
+## Workflow
+Use the Superpowers brainstorming skill to reach an approved design for this ticket before writing any code. Once the design is settled, use the writing-plans and executing-plans skills to turn it into an implementation plan and carry it out, reaching for subagent-driven-development if the work is large enough to parallelize.`;
+
+const GSD_PLAYBOOK = `---
+name: GSD
+---
+## Extra direction
+{extra}
+
+## Workflow
+If this repo already has a GSD project set up for related work, plan and execute this ticket directly with the gsd-plan-phase and gsd-execute-phase skills. Otherwise, start with gsd-new-project (or gsd-new-milestone if a project already exists but needs a new milestone), then plan and execute the resulting phase.`;
+
+const WRITE_CODE_DIRECTLY_PLAYBOOK = `---
+name: Write code directly
+---
+## Extra direction
+{extra}`;
 
 /**
  * Hand-rolled front-matter parser (no YAML dependency): the file must open with a `---\n` fence and
@@ -130,25 +148,31 @@ export async function loadPlaybooks(): Promise<Playbook[]> {
   return playbooks;
 }
 
+const SEED_PLAYBOOKS: { slug: string; content: string }[] = [
+  { slug: "prd-ralph-loop", content: PRD_RALPH_LOOP_PLAYBOOK },
+  { slug: "superpowers", content: SUPERPOWERS_PLAYBOOK },
+  { slug: "gsd", content: GSD_PLAYBOOK },
+  { slug: "write-code-directly", content: WRITE_CODE_DIRECTLY_PLAYBOOK },
+];
+
 /**
- * Seed the two default playbooks (Code, Plan) on first run ONLY — the directory's absence is the
- * first-run signal, mirroring config.ts. An existing directory is never touched so a user's edits and
- * custom playbooks always survive a restart.
+ * Seed the four pipeline playbooks per-file: each of the four fixed slugs is written only if that
+ * exact filename is still missing, never gated on the directory's existence as a whole (a machine
+ * that already ran dispatch before this seeder shipped has a populated directory and would
+ * otherwise never receive the new seeds). A user's own files (including the retired code.md/plan.md)
+ * are never seeded, overwritten, or deleted here.
  */
 export async function seedPlaybooks(): Promise<void> {
-  const exists = await fsp.stat(PLAYBOOKS_DIR).then(
-    () => true,
-    () => false,
-  );
-  if (exists) return;
-
   await fsp.mkdir(PLAYBOOKS_DIR, { recursive: true, mode: 0o700 });
-  await fsp.writeFile(path.join(PLAYBOOKS_DIR, "code.md"), CODE_PLAYBOOK, {
-    mode: 0o600,
-  });
-  await fsp.writeFile(path.join(PLAYBOOKS_DIR, "plan.md"), PLAN_PLAYBOOK, {
-    mode: 0o600,
-  });
+
+  for (const seed of SEED_PLAYBOOKS) {
+    if (await slugExists(seed.slug)) continue;
+    await fsp.writeFile(
+      path.join(PLAYBOOKS_DIR, `${seed.slug}.md`),
+      seed.content,
+      { mode: 0o600 },
+    );
+  }
 }
 
 function assembleContent(input: PlaybookWriteInput): string {
