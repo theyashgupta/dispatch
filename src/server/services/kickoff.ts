@@ -53,13 +53,20 @@ function substitutePlaybookBody(body: string, direction: string): string {
  * an em-dash U+2014 whose paste fidelity is verified — do NOT swap it for a hyphen (NEW-07). Shared
  * by both the saga kickoff and the implementation-handoff follow-up so one definition owns the
  * contract and a playbook body can neither alter nor suppress it.
- * @see docs/ARCHITECTURE.md#marker-protocol
+ *
+ * @remarks The fourth line (HOOK-03) is prompt-engineering only, not a structural guarantee — a
+ * tool call needs no preceding assistant text, so an agent may still invoke a pausing tool directly.
+ * It is deliberately paired with the permanent PreToolUse/AskUserQuestion registration in
+ * `hook-setup.ts` and its `hook-events.ts` marker-synthesis branch, which catch the pause
+ * structurally regardless of whether this line is followed.
+ * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 const STATUS_PROTOCOL = [
   `## Status protocol (required)`,
   `Print these as standalone lines, in the exact format shown, as the LAST line of a reply:`,
   `- When blocked and needing human input: DISPATCH_STATUS: NEEDS_INPUT — <one-line reason>`,
   `- When the task is complete: DISPATCH_STATUS: DONE — <one-line summary>`,
+  `- Before calling a tool that pauses for the user (AskUserQuestion, ExitPlanMode, or any action needing approval), print the NEEDS_INPUT line above as your entire reply first, then call the tool.`,
 ];
 
 /**
