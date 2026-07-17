@@ -8,6 +8,7 @@ import {
   type Ref,
   type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { IconButton } from "./IconButton.js";
 
@@ -142,7 +143,7 @@ export function Modal({
 
   const active = entered && !closing;
 
-  return (
+  return createPortal(
     <>
       <div
         onClick={() => control.current.requestClose()}
@@ -177,6 +178,7 @@ export function Modal({
           {footer}
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

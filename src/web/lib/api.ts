@@ -205,6 +205,33 @@ export async function deletePlaybook(slug: string): Promise<{ ok: boolean }> {
 }
 
 /**
+ * Generate a playbook draft via headless `claude -p`: POST /api/playbooks/generate. The server owns
+ * the ~150s generation bound and always responds within it — no client-side abort timer. The panel
+ * has exactly one failure surface (bad input, source-read failure, or the generation itself
+ * failing/timing out all read the same to the user), so this resolves a plain `{ok, draft?}` rather
+ * than fanning out server error codes.
+ */
+export async function generatePlaybookDraft(input: {
+  direction: string;
+  sourcePaths: string[];
+}): Promise<{ ok: true; draft: string } | { ok: false }> {
+  try {
+    const res = await fetch("/api/playbooks/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      return { ok: false };
+    }
+    const body = (await res.json()) as { draft: string };
+    return { ok: true, draft: body.draft };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
  * Send a follow-up kickoff into a card's live session: POST /api/cards/:id/kickoff.
  * The In Planning → In Progress live hand-off: the server splices the chosen
  * implementation `playbook` (a name, never a path; omitted for the Default option)
