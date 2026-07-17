@@ -135,6 +135,13 @@ async function isWithinHome(absPath: string): Promise<boolean> {
 }
 
 /**
+ * Cap on concurrent `.git` stats per batch in `browseDirectory`. Bounds the fan-out so a directory
+ * with thousands of children can't exhaust file descriptors — under EMFILE, `hasGitEntry` swallows
+ * the error to `false`, which would otherwise silently mislabel real repos as plain folders.
+ */
+const DIR_STAT_BATCH_SIZE = 32;
+
+/**
  * List the immediate child directories of `rawPath` (default `~`) for the folder-browser picker.
  * Rejects any resolved target outside the home subtree (symlinks resolved first, defense-in-depth —
  * the UI never constructs an out-of-bound request) rather than silently clamping to home. The
@@ -177,14 +184,19 @@ export async function browseDirectory(
   }
 
   const dirs = children.filter((d) => d.isDirectory());
-  const entries: DirEntry[] = await Promise.all(
-    dirs.map(async (d) => ({
-      name: d.name,
-      path: path.join(canonicalPath, d.name),
-      hasGit: await hasGitEntry(path.join(canonicalPath, d.name)),
-      hidden: d.name.startsWith("."),
-    })),
-  );
+  const entries: DirEntry[] = [];
+  for (let i = 0; i < dirs.length; i += DIR_STAT_BATCH_SIZE) {
+    const batch = dirs.slice(i, i + DIR_STAT_BATCH_SIZE);
+    const batchEntries = await Promise.all(
+      batch.map(async (d) => ({
+        name: d.name,
+        path: path.join(canonicalPath, d.name),
+        hasGit: await hasGitEntry(path.join(canonicalPath, d.name)),
+        hidden: d.name.startsWith("."),
+      })),
+    );
+    entries.push(...batchEntries);
+  }
   entries.sort((a, b) => a.name.localeCompare(b.name));
 
   return {
