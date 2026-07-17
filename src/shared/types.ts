@@ -291,6 +291,8 @@ export interface Playbook {
   name: string;
   stage: "planning" | "implementation";
   body: string;
+  /** On-disk filename stem (no `.md`), used ONLY for CRUD addressing — kickoff/picker resolution stays name-keyed. */
+  slug?: string;
 }
 
 /**
