@@ -16,6 +16,9 @@ export interface ModalControl {
   beginImmediateClose: () => boolean;
 }
 
+let stackCounter = 0;
+const modalStack: number[] = [];
+
 interface ModalProps {
   ariaLabel: string;
   title: ReactNode;
@@ -90,6 +93,8 @@ export function Modal({
   const [entered, setEntered] = useState(false);
   const [closing, setClosing] = useState(false);
   const closingRef = useRef(false);
+  const idRef = useRef<number | undefined>(undefined);
+  if (idRef.current === undefined) idRef.current = stackCounter++;
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -118,10 +123,18 @@ export function Modal({
   }, [initialFocusRef]);
 
   useEffect(() => {
+    modalStack.push(idRef.current!);
+    return () => {
+      const i = modalStack.indexOf(idRef.current!);
+      if (i !== -1) modalStack.splice(i, 1);
+    };
+  }, []);
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) {
-        control.current.requestClose();
-      }
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (modalStack[modalStack.length - 1] !== idRef.current) return;
+      control.current.requestClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
