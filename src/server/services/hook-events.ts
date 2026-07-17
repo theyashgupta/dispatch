@@ -8,13 +8,17 @@ import { getHooksRuntime } from "./config-holder.js";
 
 /**
  * Tool names whose `PreToolUse` fires the structural Needs-Input safety net (HOOK-03) and whose
- * matching `PostToolUse` fires the symmetric flip-back — the same set both branches read, so the
- * "enters on tool X" and "leaves on tool X" contracts can never drift apart. Live-verified
- * (48-DIAGNOSIS.md) for `AskUserQuestion` only; `ExitPlanMode` is the same class of gap
- * (RESEARCH.md) but was not exercised live in this phase's diagnosis, so it stays out until it is.
+ * matching `PostToolUse` fires the symmetric flip-back — the single source of truth for the pause
+ * class: both event branches here read it AND `bootstrap/hook-setup.ts` derives the registered
+ * `PreToolUse` matcher from it, so the "enters on tool X", "leaves on tool X", and "matcher
+ * delivers tool X" contracts can never drift apart (a set edited without the matcher would
+ * half-wire: catch-all PostToolUse flips back on a tool the enter side never covered).
+ * Live-verified (48-DIAGNOSIS.md) for `AskUserQuestion` only; `ExitPlanMode` is the same class of
+ * gap (RESEARCH.md) but was not exercised live in this phase's diagnosis, so it stays out until
+ * it is.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
-const PAUSE_TOOL_NAMES = new Set(["AskUserQuestion"]);
+export const PAUSE_TOOL_NAMES = new Set(["AskUserQuestion"]);
 
 /**
  * Per-card epoch ms of the last hook-driven activity stamp — the 2s throttle state. Channel

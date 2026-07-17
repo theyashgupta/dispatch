@@ -2,6 +2,7 @@ import fsp from "node:fs/promises";
 import writeFileAtomic from "write-file-atomic";
 import { run } from "../adapters/exec.js";
 import { resolveBinaryPath } from "../adapters/resolve-binary.js";
+import { PAUSE_TOOL_NAMES } from "../services/hook-events.js";
 import {
   DISPATCH_DIR,
   HOOK_SCRIPT_PATH,
@@ -36,14 +37,18 @@ exit 0
 
 /**
  * The `--settings` layer content: Stop + UserPromptSubmit + PostToolUse (unmatched, catch-all)
- * plus a matched `PreToolUse` entry for `AskUserQuestion`, each with an explicit per-entry timeout
- * (the CLI default is 600s and a timeout-less slow hook blocks the turn for its full runtime).
- * PostToolUse feeds the unseen-activity dot via hook-events' throttled `outputChangedAt` stamp,
- * AND (HOOK-03) carries the flip-back signal for a tool-mediated pause. PreToolUse/AskUserQuestion
- * (HOOK-03) is the structural safety net for the same pause class: live-verified (48-DIAGNOSIS.md)
- * to fire reliably on the installed CLI, catching the pause regardless of whether the agent
- * follows the STATUS_PROTOCOL wording (kickoff.ts) that asks it to print a marker line first.
- * SessionStart remains absent — no consumer exists.
+ * plus a matched `PreToolUse` entry whose matcher is derived from {@link PAUSE_TOOL_NAMES} —
+ * the single source of truth shared with hook-events' enter/flip-back branches, so extending the
+ * pause-tool set can never half-wire (a hardcoded matcher edited out of sync would leave the
+ * catch-all PostToolUse flipping back on a tool the matcher never delivers). Claude Code matchers
+ * accept regex alternation, and a single name degenerates to the exact string. Each entry carries
+ * an explicit per-entry timeout (the CLI default is 600s and a timeout-less slow hook blocks the
+ * turn for its full runtime). PostToolUse feeds the unseen-activity dot via hook-events' throttled
+ * `outputChangedAt` stamp, AND (HOOK-03) carries the flip-back signal for a tool-mediated pause.
+ * PreToolUse (HOOK-03) is the structural safety net for the same pause class: live-verified
+ * (48-DIAGNOSIS.md) to fire reliably on the installed CLI, catching the pause regardless of
+ * whether the agent follows the STATUS_PROTOCOL wording (kickoff.ts) that asks it to print a
+ * marker line first. SessionStart remains absent — no consumer exists.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 function hookSettingsJson(): string {
@@ -55,7 +60,9 @@ function hookSettingsJson(): string {
       Stop: entry,
       UserPromptSubmit: entry,
       PostToolUse: entry,
-      PreToolUse: [{ matcher: "AskUserQuestion", hooks: entry[0].hooks }],
+      PreToolUse: [
+        { matcher: [...PAUSE_TOOL_NAMES].join("|"), hooks: entry[0].hooks },
+      ],
     },
   };
   return JSON.stringify(settings, null, 2) + "\n";
