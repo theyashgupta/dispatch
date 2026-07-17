@@ -9,8 +9,6 @@ import { editorPath, launchEditor } from "../adapters/editors.js";
 import { getOrchestrationConfig } from "../services/config-holder.js";
 import { restatRepos } from "../services/workspaces.js";
 import { loadPlaybooks } from "../services/playbooks.js";
-import { buildFollowupKickoff } from "../services/kickoff.js";
-import { sendFollowupKickoff } from "../services/steps.js";
 
 export const cardsRouter = Router();
 
@@ -68,27 +66,15 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
         folder?: unknown;
         repos?: unknown;
         playbook?: unknown;
-        targetColumn?: unknown;
       }
     | undefined;
   const extraDirection =
     typeof body?.extraDirection === "string" ? body.extraDirection : "";
   const playbook =
     typeof body?.playbook === "string" ? body.playbook : undefined;
-  const targetColumn =
-    body?.targetColumn === "in_planning"
-      ? "in_planning"
-      : body?.targetColumn === "in_progress"
-        ? "in_progress"
-        : undefined;
 
   if (playbook !== undefined) {
-    const stage =
-      targetColumn === "in_planning" ||
-      (targetColumn === undefined && card.mode === "planning")
-        ? "planning"
-        : "implementation";
-    const known = (await loadPlaybooks(stage)).some((p) => p.name === playbook);
+    const known = (await loadPlaybooks()).some((p) => p.name === playbook);
     if (!known) {
       res.status(400).json({ error: "unknown playbook", variant: "config" });
       return;
@@ -137,72 +123,8 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
     return;
   }
 
-  void startSession(id, extraDirection, config, { playbook, targetColumn });
+  void startSession(id, extraDirection, config, { playbook });
   res.status(202).json({ started: true });
-});
-
-cardsRouter.post("/cards/:id/kickoff", async (req, res) => {
-  const { id } = req.params;
-
-  const card = store.getCard(id);
-  if (!card) {
-    res.status(400).json({ error: `unknown card id: ${id}` });
-    return;
-  }
-
-  if (!/^[A-Za-z0-9]+-\d+$/.test(card.identifier)) {
-    res
-      .status(400)
-      .json({ error: `invalid ticket identifier: ${card.identifier}` });
-    return;
-  }
-
-  if (store.isStarting(id)) {
-    res.status(409).json({ error: "a start is in flight for this card" });
-    return;
-  }
-
-  if (!card.tmuxSession) {
-    res.status(409).json({ error: "card has no live session to hand off" });
-    return;
-  }
-
-  if (card.column !== "in_planning" || card.planReady !== true) {
-    res.status(409).json({ error: "card is not ready to hand off" });
-    return;
-  }
-
-  const body = req.body as { playbook?: unknown; extra?: unknown } | undefined;
-  if (body?.playbook !== undefined && typeof body.playbook !== "string") {
-    res.status(400).json({ error: "invalid playbook" });
-    return;
-  }
-  const playbook =
-    typeof body?.playbook === "string" ? body.playbook : undefined;
-  const extra = typeof body?.extra === "string" ? body.extra : "";
-
-  const playbookBody = playbook
-    ? (await loadPlaybooks("implementation")).find((p) => p.name === playbook)
-        ?.body
-    : undefined;
-  if (playbook !== undefined && playbookBody === undefined) {
-    res.status(409).json({ error: "unknown playbook" });
-    return;
-  }
-
-  try {
-    await sendFollowupKickoff(
-      card.identifier,
-      buildFollowupKickoff(playbookBody, extra),
-    );
-  } catch {
-    res
-      .status(409)
-      .json({ error: "the live session is gone — resume it and retry" });
-    return;
-  }
-  await store.handoffToImplementation(id);
-  res.status(202).json({ handedOff: true });
 });
 
 cardsRouter.post("/cards/:id/resume", (req, res) => {

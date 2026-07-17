@@ -28,18 +28,8 @@ const MAX_SOURCE_PATHS = 8;
  */
 export const playbooksRouter = Router();
 
-playbooksRouter.get("/playbooks", async (req, res) => {
-  const rawStage = req.query.stage;
-  const stage =
-    rawStage === "planning" || rawStage === "implementation"
-      ? rawStage
-      : undefined;
-  if (rawStage !== undefined && stage === undefined) {
-    res.status(400).json({ error: "Invalid stage" });
-    return;
-  }
-
-  const playbooks = await loadPlaybooks(stage);
+playbooksRouter.get("/playbooks", async (_req, res) => {
+  const playbooks = await loadPlaybooks();
   res.status(200).json({ playbooks });
 });
 
@@ -47,8 +37,7 @@ playbooksRouter.get("/playbooks", async (req, res) => {
 function validateInput(
   body: unknown,
 ): { ok: true; input: PlaybookWriteInput } | { ok: false; error: string } {
-  const b = body as
-    { name?: unknown; stage?: unknown; body?: unknown } | undefined;
+  const b = body as { name?: unknown; body?: unknown } | undefined;
 
   const rawName = b?.name;
   if (typeof rawName !== "string") {
@@ -64,11 +53,6 @@ function validateInput(
     return { ok: false, error: "invalid-name" };
   }
 
-  const stage = b?.stage;
-  if (stage !== "planning" && stage !== "implementation") {
-    return { ok: false, error: "invalid-stage" };
-  }
-
   const rawBody = b?.body;
   if (
     typeof rawBody !== "string" ||
@@ -77,7 +61,7 @@ function validateInput(
     return { ok: false, error: "invalid-body" };
   }
 
-  return { ok: true, input: { name, stage, body: rawBody } };
+  return { ok: true, input: { name, body: rawBody } };
 }
 
 playbooksRouter.post("/playbooks", async (req, res) => {

@@ -5,14 +5,11 @@ import writeFileAtomic from "write-file-atomic";
 import type { Playbook } from "../../shared/types.js";
 import { DISPATCH_DIR } from "./paths.js";
 
-type Stage = "planning" | "implementation";
-
 const PLAYBOOKS_DIR = path.join(DISPATCH_DIR, "playbooks");
 
 /** Input shape for create/update: front-matter fields plus the raw markdown body. */
 export type PlaybookWriteInput = {
   name: string;
-  stage: Stage;
   body: string;
 };
 
@@ -23,14 +20,12 @@ export type PlaybookWriteResult =
 
 const CODE_PLAYBOOK = `---
 name: Code
-stage: implementation
 ---
 ## Extra direction
 {extra}`;
 
 const PLAN_PLAYBOOK = `---
 name: Plan
-stage: planning
 ---
 ## Extra direction
 {extra}
@@ -40,9 +35,10 @@ Interview me about the scope, constraints, and acceptance criteria for this tick
 
 /**
  * Hand-rolled front-matter parser (no YAML dependency): the file must open with a `---\n` fence and
- * close it with a `\n---\n` fence; only `name` and `stage` are read from the fenced region and the
- * remainder is the verbatim body. Returns null (caller SKIPS) when the fences are absent, `name` is
- * empty, or `stage` is not exactly `planning`/`implementation` — a permissive parser would let a
+ * close it with a `\n---\n` fence; only `name` is read from the fenced region and the remainder is
+ * the verbatim body — any other key (including a legacy `stage:` line, still present on files
+ * written before the stage split was retired) is silently ignored, never validated. Returns null
+ * (caller SKIPS) when the fences are absent or `name` is empty — a permissive parser would let a
  * malformed playbook silently join the picker.
  */
 function parseFrontMatter(raw: string): Playbook | null {
@@ -54,19 +50,16 @@ function parseFrontMatter(raw: string): Playbook | null {
   const body = rest.slice(end + 5);
 
   let name = "";
-  let stage = "";
   for (const line of fmRegion.split("\n")) {
     const idx = line.indexOf(":");
     if (idx === -1) continue;
     const key = line.slice(0, idx).trim();
     const value = line.slice(idx + 1).trim();
     if (key === "name") name = value;
-    else if (key === "stage") stage = value;
   }
 
   if (name === "") return null;
-  if (stage !== "planning" && stage !== "implementation") return null;
-  return { name, stage, body };
+  return { name, body };
 }
 
 /**
@@ -94,12 +87,13 @@ function slugify(name: string): string {
 
 /**
  * Read every `*.md` playbook fresh from disk on each call (no cache — a user edit lands immediately),
- * returning them stage-filtered and alphabetically sorted. A missing directory yields `[]`, never a
- * throw, so a first-run/absent state renders an empty picker instead of a 500. Any file that fails to
- * parse OR whose body carries the DISPATCH_STATUS marker (see {@link hasDispatchMarker}) is skipped
- * with a content-free warning: a playbook must never smuggle the status-protocol contract into a kickoff.
+ * returning them alphabetically sorted, flat (no stage scoping). A missing directory yields `[]`,
+ * never a throw, so a first-run/absent state renders an empty picker instead of a 500. Any file that
+ * fails to parse OR whose body carries the DISPATCH_STATUS marker (see {@link hasDispatchMarker}) is
+ * skipped with a content-free warning: a playbook must never smuggle the status-protocol contract
+ * into a kickoff.
  */
-export async function loadPlaybooks(stage?: Stage): Promise<Playbook[]> {
+export async function loadPlaybooks(): Promise<Playbook[]> {
   let entries: Dirent[];
   try {
     entries = await fsp.readdir(PLAYBOOKS_DIR, { withFileTypes: true });
@@ -129,7 +123,6 @@ export async function loadPlaybooks(stage?: Stage): Promise<Playbook[]> {
       );
       continue;
     }
-    if (stage !== undefined && parsed.stage !== stage) continue;
     playbooks.push({ ...parsed, slug: entry.name.slice(0, -3) });
   }
 
@@ -159,7 +152,7 @@ export async function seedPlaybooks(): Promise<void> {
 }
 
 function assembleContent(input: PlaybookWriteInput): string {
-  return `---\nname: ${input.name}\nstage: ${input.stage}\n---\n${input.body}`;
+  return `---\nname: ${input.name}\n---\n${input.body}`;
 }
 
 async function slugExists(slug: string): Promise<boolean> {
@@ -214,7 +207,7 @@ export async function createPlaybook(
   );
   return {
     ok: true,
-    playbook: { name: input.name, stage: input.stage, body: input.body, slug },
+    playbook: { name: input.name, body: input.body, slug },
   };
 }
 
@@ -264,7 +257,6 @@ export async function updatePlaybook(
     ok: true,
     playbook: {
       name: input.name,
-      stage: input.stage,
       body: input.body,
       slug: newSlug,
     },

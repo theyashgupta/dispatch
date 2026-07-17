@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { Column, Config, StartError } from "../../shared/types.js";
+import type { Config, StartError } from "../../shared/types.js";
 import { store } from "../store/board.store.js";
 import { hasSession } from "../adapters/tmux.js";
 import { registerHookToken } from "./hook-tokens.js";
@@ -34,24 +34,15 @@ function toStartError(err: unknown, stepName: string): StartError {
  * reverse over saga bookkeeping on any failure, leaving the card in To Do (ORCH-01/03). The
  * one-saga-per-card in-flight guard is a synchronous check-then-set on the store (not a
  * module-local Set) so the poller's reconcile can see it and refuse to remove a card whose start
- * is in flight (CR-01). Column/mode are derived from whether `targetColumn` was EXPLICITLY present
- * in the request — an explicit target is honored, an absent target preserves an existing card's
- * mode (the bare-Restart signature), and a modeless card falls back to in_progress. The restart
- * column is derived from the preserved mode, not the stale column: a planning card returns to its
- * In Planning home (so a plan completed after the restart is never stranded plan-ready outside the
- * handoff column), an implementation card to In Progress — the attention-column state belonged to
- * the dead session either way. This is
- * deliberately decoupled from the session-lost flag (which drives only the restart wording) because
- * a bare Restart and a deliberate re-provision both arrive session-lost and only presence tells
- * them apart. A request carrying neither `playbook` nor `targetColumn` falls back to the intent
- * persisted at the original start (`card.startIntent`), so Retry after a failed planning start and
- * a bare Restart reproduce the chosen playbook and planning target instead of silently degrading to
- * a playbook-less implementation session; a request carrying either field is a fresh, complete
- * intent and never mixes with the stored one. Route validation only covers names arriving in the
- * request body, so a stored playbook name that no longer resolves (renamed or deleted since the
- * original start) is surfaced as a start warning via the same channel as the fetch-fallback
- * notice — the warning must ride `ctx.warnings` because `completeStart` clears `startWarning`.
- * The already-running reattach branch re-registers the card's persisted hook token (mirroring
+ * is in flight (CR-01). Every start lands the card on In Progress — a request carrying no
+ * `playbook` falls back to the intent persisted at the original start (`card.startIntent`), so
+ * Retry after a failed start and a bare Restart reproduce the chosen playbook instead of silently
+ * degrading to a playbook-less session; a request carrying the field is a fresh, complete intent
+ * and never mixes with the stored one. Route validation only covers names arriving in the request
+ * body, so a stored playbook name that no longer resolves (renamed or deleted since the original
+ * start) is surfaced as a start warning via the same channel as the fetch-fallback notice — the
+ * warning must ride `ctx.warnings` because `completeStart` clears `startWarning`. The
+ * already-running reattach branch re-registers the card's persisted hook token (mirroring
  * resume's reattach) so a live session adopted after a backend restart — e.g. an interrupted
  * saga plus Retry, which never reaches boot reconcile because only completeStart sets
  * `tmuxSession` — keeps its hook POSTs authenticating instead of silently 401ing forever.
@@ -61,7 +52,7 @@ export async function startSession(
   cardId: string,
   extraDirection: string,
   config: Config,
-  opts?: { playbook?: string; targetColumn?: "in_planning" | "in_progress" },
+  opts?: { playbook?: string },
 ): Promise<void> {
   if (store.isStarting(cardId)) return;
   store.beginStart(cardId);
@@ -69,30 +60,11 @@ export async function startSession(
     const card = store.getCard(cardId);
     if (!card) return;
 
-    const stored =
-      opts?.playbook === undefined && opts?.targetColumn === undefined
-        ? card.startIntent
-        : undefined;
+    const stored = opts?.playbook === undefined ? card.startIntent : undefined;
     const playbookName = opts?.playbook ?? stored?.playbook;
-    const targetColumn = opts?.targetColumn ?? stored?.targetColumn;
-    let column: Column;
-    let mode: "planning" | "implementation" | undefined;
-    if (targetColumn !== undefined) {
-      column = targetColumn;
-      mode = targetColumn === "in_planning" ? "planning" : "implementation";
-    } else if (card.mode !== undefined) {
-      column = card.mode === "planning" ? "in_planning" : "in_progress";
-      mode = card.mode;
-    } else {
-      column = "in_progress";
-      mode = undefined;
-    }
 
-    if (opts?.playbook !== undefined || opts?.targetColumn !== undefined) {
-      await store.setStartIntent(cardId, {
-        playbook: opts.playbook,
-        targetColumn: opts.targetColumn,
-      });
+    if (opts?.playbook !== undefined) {
+      await store.setStartIntent(cardId, { playbook: opts.playbook });
     }
 
     const session = "dsp-" + card.identifier;
@@ -103,15 +75,11 @@ export async function startSession(
 
     if (await hasSession(session)) {
       if (card.hookToken) registerHookToken(card.hookToken, cardId);
-      await store.attachExistingSession(
-        cardId,
-        {
-          workspacePath,
-          branch: card.identifier,
-          tmuxSession: session,
-        },
-        { column, mode },
-      );
+      await store.attachExistingSession(cardId, {
+        workspacePath,
+        branch: card.identifier,
+        tmuxSession: session,
+      });
       setTimeout(
         () => void store.setStatusReason(cardId, null),
         REATTACH_STATUS_CLEAR_MS,
@@ -120,11 +88,7 @@ export async function startSession(
     }
 
     const playbookBody = playbookName
-      ? (
-          await loadPlaybooks(
-            mode === "planning" ? "planning" : "implementation",
-          )
-        ).find((p) => p.name === playbookName)?.body
+      ? (await loadPlaybooks()).find((p) => p.name === playbookName)?.body
       : undefined;
     const warnings: string[] = [];
     if (playbookName !== undefined && playbookBody === undefined) {
@@ -158,15 +122,11 @@ export async function startSession(
         done.push(step);
       }
       currentStep = undefined;
-      await store.completeStart(
-        cardId,
-        {
-          workspacePath: ctx.workspacePath,
-          branch: card.identifier,
-          tmuxSession: session,
-        },
-        { column, mode },
-      );
+      await store.completeStart(cardId, {
+        workspacePath: ctx.workspacePath,
+        branch: card.identifier,
+        tmuxSession: session,
+      });
       if (card.workspace?.folder) {
         await store.setLastUsedFolder(card.workspace.folder);
       }

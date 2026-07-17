@@ -369,32 +369,6 @@ const sendKickoff: SagaStep = {
   async undo() {},
 };
 
-/**
- * Paste an already-assembled follow-up prompt into the live `dsp-<identifier>` session using the
- * EXACT bracketed-paste-then-separate-Enter sequence sendKickoff uses (NEW-05/06), so the live
- * implementation handoff lands the same way the saga kickoff does. Owning the tmux paste here keeps
- * it inside services, so the /kickoff route never imports adapters (route→adapters boundary).
- */
-export async function sendFollowupKickoff(
-  identifier: string,
-  body: string,
-): Promise<void> {
-  const session = "dsp-" + identifier;
-  const tmpFile = path.join(
-    os.tmpdir(),
-    `dsp-followup-${identifier}-${Date.now()}.txt`,
-  );
-  await fsp.writeFile(tmpFile, body, "utf8");
-  try {
-    await loadBuffer(session, tmpFile);
-    await pasteBuffer(session, session);
-    await sleep(PASTE_SETTLE_MS);
-    await sendKeys(session, ["Enter"]);
-  } finally {
-    await fsp.unlink(tmpFile).catch(() => {});
-  }
-}
-
 /** The four steps, in forward execution order. */
 export const steps: SagaStep[] = [
   prepareWorkspace,

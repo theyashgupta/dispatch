@@ -1,17 +1,15 @@
 /** Board columns in display order. */
 export type Column =
   | "todo"
-  | "in_planning"
   | "in_progress"
   | "needs_input"
   | "agent_done"
   | "in_review"
   | "done";
 
-/** The seven columns in board order, for the frontend to iterate. */
+/** The six columns in board order, for the frontend to iterate. */
 export const COLUMNS: readonly Column[] = [
   "todo",
-  "in_planning",
   "in_progress",
   "needs_input",
   "agent_done",
@@ -35,7 +33,6 @@ export type EventType =
   | "session_lost"
   | "session_failed"
   | "resume_failed"
-  | "plan_ready"
   | "cleanup";
 
 /** One immutable board-activity log row; append-only; carries no secrets. */
@@ -157,12 +154,6 @@ export interface Card {
   resumeError?: string | null;
 
   /**
-   * Session methodology stage. Absent is treated as `implementation` everywhere in routing (locked
-   * rule) so existing cards need no migration; set at session start and flipped to `implementation`
-   * on the In Planning → In Progress handoff.
-   */
-  mode?: "planning" | "implementation";
-  /**
    * Originating ticket source (a registered TicketSource.id — "linear" is the only value today).
    * Typed as string, not a literal union, because reconcile stamps whatever source id it is handed;
    * narrowing here would just hide that behind a cast. Absent is treated as `"linear"` everywhere
@@ -171,22 +162,12 @@ export interface Card {
    */
   source?: string;
   /**
-   * A planning session emitted DONE and is ready to hand off. Survives Needs Input round-trips (the
-   * flag is not touched by marker routing), and is cleared on the implementation handoff and on any
-   * restart/re-provision so a stale badge never outlives its plan.
-   */
-  planReady?: boolean;
-  /**
-   * The playbook name and target column captured when a start request carries them, persisted
-   * BEFORE the saga runs (the extraDirection precedent) so Retry after a failed start and a bare
-   * Restart reproduce the original start — playbook body and planning target included — instead of
-   * degrading to a playbook-less implementation start. `targetColumn` is consumed once a session
-   * lands (completeStart/attachExistingSession — `mode` becomes authoritative); the playbook name
-   * survives so a later restart re-resolves the body from disk.
+   * The playbook name captured when a start request carries one, persisted BEFORE the saga runs
+   * (the extraDirection precedent) so Retry after a failed start and a bare Restart reproduce the
+   * original start — playbook body included — instead of degrading to a playbook-less start.
    */
   startIntent?: {
     playbook?: string;
-    targetColumn?: "in_planning" | "in_progress";
   };
 }
 
@@ -284,12 +265,11 @@ export interface DirListing {
 }
 
 /**
- * A methodology playbook surfaced by the loader/picker: its display `name`, the `stage` it applies
- * to, and its markdown `body` spliced into the kickoff. Selected by `name`, never a client path.
+ * A methodology playbook surfaced by the loader/picker: its display `name` and markdown `body`
+ * spliced into the kickoff. Selected by `name`, never a client path.
  */
 export interface Playbook {
   name: string;
-  stage: "planning" | "implementation";
   body: string;
   /** On-disk filename stem (no `.md`), used ONLY for CRUD addressing — kickoff/picker resolution stays name-keyed. */
   slug?: string;

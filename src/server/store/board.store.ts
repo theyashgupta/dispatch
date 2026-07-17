@@ -254,12 +254,35 @@ class BoardStore extends EventEmitter {
    * paths so a recovered board hydrates byte-for-byte identically to a healthy one: rebuild the
    * cards Map, rewrite any interrupted in-flight provisioning into a retryable startError, reset
    * the transient ttydPort/terminalError, and default syncedAt / workspaceFolders / lastUsed.
+   *
+   * @remarks Also migrates any card stranded on the retired `in_planning` column (KICK-02): a
+   * card carrying a live `tmuxSession` resolves to `in_progress` (the session keeps running — a
+   * stale name is corrected to sessionLost by the existing boot-time `reconcileSessions()` pass on
+   * the very next line of boot code, same as any other dead-session card), a card with none
+   * resolves to `todo`. The persisted string is read via an untyped cast because `"in_planning"`
+   * is no longer a member of `Column` — no live write path can ever produce it again, so this
+   * check needs no re-migration guard. The legacy `mode`/`planReady` fields and
+   * `startIntent.targetColumn` are stripped from the loaded object in the same pass (one-way, no
+   * back-compat shim) so they never round-trip back into a future persist.
    */
   private hydrateFromParsed(parsed: Partial<BoardSnapshot>): void {
     const loaded = Array.isArray(parsed.cards) ? parsed.cards : [];
     this.cards.clear();
     for (const card of loaded) {
       if (card && typeof card.id === "string") {
+        const legacy = card as unknown as Record<string, unknown>;
+        if (legacy.column === "in_planning") {
+          card.column = card.tmuxSession ? "in_progress" : "todo";
+        }
+        delete legacy.mode;
+        delete legacy.planReady;
+        if (
+          card.startIntent &&
+          typeof card.startIntent === "object" &&
+          "targetColumn" in card.startIntent
+        ) {
+          card.startIntent = { playbook: card.startIntent.playbook };
+        }
         if (card.provisioningStep != null) {
           card.startError = {
             step: "interrupted",
@@ -417,18 +440,12 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Persist the start intent (playbook name + target column) captured at Start, BEFORE the saga
-   * runs (the setExtraDirection precedent), so Retry after a failed start and a bare Restart can
-   * reproduce the original planning start instead of silently degrading to a playbook-less
-   * implementation session. No-op if the id is unknown.
+   * Persist the start intent (playbook name) captured at Start, BEFORE the saga runs (the
+   * setExtraDirection precedent), so Retry after a failed start and a bare Restart can reproduce
+   * the original playbook choice instead of silently degrading to a playbook-less session.
+   * No-op if the id is unknown.
    */
-  setStartIntent(
-    id: string,
-    intent: {
-      playbook?: string;
-      targetColumn?: "in_planning" | "in_progress";
-    },
-  ): Promise<void> {
+  setStartIntent(id: string, intent: { playbook?: string }): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.startIntent = intent;
@@ -634,20 +651,10 @@ class BoardStore extends EventEmitter {
 
   /**
    * Idempotent reattach to a live `dsp-<id>` session ("already running"): copy the session
-   * fields, promote the card to its target column, surface a transient reattach status, and clear
-   * any provisioning step / start error. No-op if the id is unknown.
-   *
-   * `opts` uses the same asymmetric defaulting as completeStart: `column` defaults to "in_progress"
-   * when omitted; `mode` is assigned only when provided so reattaching a live planning session never
-   * yanks it to In Progress nor wipes its mode. `startIntent.targetColumn` is consumed here exactly
-   * as in completeStart — a landed session makes `mode` authoritative, so a stale target can never
-   * drag a later bare Restart back to a column the card has since left.
+   * fields, promote the card to In Progress, surface a transient reattach status, and clear any
+   * provisioning step / start error. No-op if the id is unknown.
    */
-  attachExistingSession(
-    id: string,
-    s: SessionFields,
-    opts?: { column?: Column; mode?: "planning" | "implementation" },
-  ): Promise<void> {
+  attachExistingSession(id: string, s: SessionFields): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card) return [];
@@ -656,11 +663,7 @@ class BoardStore extends EventEmitter {
       card.branch = s.branch;
       card.tmuxSession = s.tmuxSession;
       card.ttydPort = s.ttydPort;
-      card.column = opts?.column ?? "in_progress";
-      if (opts?.mode !== undefined) card.mode = opts.mode;
-      if (card.startIntent?.targetColumn !== undefined) {
-        card.startIntent = { playbook: card.startIntent.playbook };
-      }
+      card.column = "in_progress";
       card.statusReason = "Already running — reattached";
       card.provisioningStep = null;
       card.startError = null;
@@ -670,7 +673,7 @@ class BoardStore extends EventEmitter {
         this.event("session_start", {
           cardId: id,
           fromCol: prev,
-          toCol: opts?.column ?? "in_progress",
+          toCol: "in_progress",
           reason: "reattached",
         }),
       ];
@@ -782,10 +785,6 @@ class BoardStore extends EventEmitter {
    * and a card the user parked in Done stays parked. Cards in in_progress / needs_input /
    * agent_done remain eligible (an Agent Done card CAN move to Needs Input on a new distinct
    * marker — intended). SECURITY: never logs card, reason, or pane contents.
-   *
-   * A DONE marker on a planning-mode card does NOT move it: the plan is complete in place, so the
-   * card keeps its In Planning column and gains `planReady` (the badge + handoff affordance) rather
-   * than sliding into Agent Done. NEEDS_INPUT stays identical for both modes (shared column).
    * @see docs/ARCHITECTURE.md#single-writer-store
    */
   applyMarker(
@@ -799,19 +798,6 @@ class BoardStore extends EventEmitter {
       if (!c || c.column === "todo" || c.column === "done") return [];
       if (c.lastMarker === markerKey) return [];
       const from = c.column;
-      if (column === "agent_done" && c.mode === "planning") {
-        c.planReady = true;
-        c.statusReason = statusReason;
-        c.lastMarker = markerKey;
-        return [
-          this.event("plan_ready", {
-            cardId: id,
-            fromCol: "in_planning",
-            toCol: "in_planning",
-            reason: statusReason ?? null,
-          }),
-        ];
-      }
       c.column = column;
       c.statusReason = statusReason;
       c.lastMarker = markerKey;
@@ -847,12 +833,10 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Flip a Needs-Input card back to its working column once the agent responds (Phase 4, MARK-03):
-   * clear statusReason in ONE atomic mutation. The target is mode-aware — a planning-mode card
-   * returns to In Planning, everything else to In Progress — so the shared Needs Input column routes
-   * each card home. `lastMarker` is left
-   * UNTOUCHED so the still-visible NEEDS_INPUT marker line cannot re-fire on the next tick (the
-   * watcher dedups on `lastMarker`). No-op if the id is unknown.
+   * Flip a Needs-Input card back to In Progress once the agent responds (Phase 4, MARK-03): clear
+   * statusReason in ONE atomic mutation. `lastMarker` is left UNTOUCHED so the still-visible
+   * NEEDS_INPUT marker line cannot re-fire on the next tick (the watcher dedups on `lastMarker`).
+   * No-op if the id is unknown.
    *
    * The column check lives INSIDE the mutator (the applyIssues precedent): the watcher's read of
    * `column === "needs_input"` happens outside the queue, so a manual drag can already be queued
@@ -863,7 +847,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const c = this.cards.get(id);
       if (!c || c.column !== "needs_input") return [];
-      const target = c.mode === "planning" ? "in_planning" : "in_progress";
+      const target = "in_progress";
       c.column = target;
       c.statusReason = undefined;
       return [
@@ -915,23 +899,11 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Successful start: copy the session fields, promote the card to its target column, and clear
-   * the provisioning step, start error, start warning, and the session-lost flag (so a restart
-   * returns the card to its normal running appearance). No-op if the id is unknown.
-   *
-   * The `opts` defaulting is deliberately ASYMMETRIC. `column` defaults to "in_progress" when
-   * omitted, so the existing start caller lands cards exactly as before. `mode` is assigned ONLY
-   * when explicitly provided — an omitted `mode` preserves whatever the card already carries, so a
-   * planning restart keeps its planning identity instead of being silently downgraded. `planReady`
-   * is always cleared: a fresh or re-provisioned session has no stale Plan-ready badge to show.
-   * `startIntent.targetColumn` is consumed here — once the session lands, `mode` is authoritative
-   * and only the playbook name survives for a later restart to re-resolve from disk.
+   * Successful start: copy the session fields, promote the card to In Progress, and clear the
+   * provisioning step, start error, start warning, and the session-lost flag (so a restart returns
+   * the card to its normal running appearance). No-op if the id is unknown.
    */
-  completeStart(
-    id: string,
-    s: SessionFields,
-    opts?: { column?: Column; mode?: "planning" | "implementation" },
-  ): Promise<void> {
+  completeStart(id: string, s: SessionFields): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card) return [];
@@ -940,12 +912,7 @@ class BoardStore extends EventEmitter {
       card.branch = s.branch;
       card.tmuxSession = s.tmuxSession;
       card.ttydPort = s.ttydPort;
-      card.column = opts?.column ?? "in_progress";
-      if (opts?.mode !== undefined) card.mode = opts.mode;
-      if (card.startIntent?.targetColumn !== undefined) {
-        card.startIntent = { playbook: card.startIntent.playbook };
-      }
-      card.planReady = undefined;
+      card.column = "in_progress";
       card.provisioningStep = null;
       card.startError = null;
       card.startWarning = null;
@@ -955,7 +922,7 @@ class BoardStore extends EventEmitter {
         this.event("session_start", {
           cardId: id,
           fromCol: prev,
-          toCol: opts?.column ?? "in_progress",
+          toCol: "in_progress",
         }),
       ];
     });
@@ -987,32 +954,6 @@ class BoardStore extends EventEmitter {
           fromCol: card.column,
           toCol: card.column,
           reason: "resumed",
-        }),
-      ];
-    });
-  }
-
-  /**
-   * Hand a completed plan off to implementation in ONE atomic mutation: move the card to In
-   * Progress, flip `mode` to "implementation", drop the Plan-ready badge, and clear the planning
-   * status reason. Called after the live-session follow-up paste succeeds, so the same conversation
-   * continues building — no re-provisioning. No-op if the id is unknown.
-   */
-  handoffToImplementation(id: string): Promise<void> {
-    return this.enqueue(() => {
-      const card = this.cards.get(id);
-      if (!card) return [];
-      card.column = "in_progress";
-      card.mode = "implementation";
-      card.planReady = undefined;
-      card.statusReason = undefined;
-      return [
-        this.event("move_auto", {
-          cardId: id,
-          fromCol: "in_planning",
-          toCol: "in_progress",
-          reason: "plan handed off",
-          source: "user",
         }),
       ];
     });

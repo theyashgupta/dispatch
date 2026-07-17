@@ -122,27 +122,3 @@ export function buildKickoff(
     ...STATUS_PROTOCOL,
   ].join("\n");
 }
-
-/**
- * Assemble the implementation-handoff follow-up pasted into the SAME live session: the substituted
- * playbook body, the fixed approved-plan line, and the shared status-protocol reminder. Unlike
- * buildKickoff it re-emits no ticket header / description / workspace — the live session already
- * carries that context. An undefined body reduces to just the extra direction (or nothing) ahead of
- * the fixed lines; the shared STATUS_PROTOCOL keeps the marker contract byte-identical either way.
- */
-export function buildFollowupKickoff(
-  playbookBody: string | undefined,
-  extraDirection: string,
-): string {
-  const extra = extraDirection.trim();
-  const lead =
-    playbookBody !== undefined
-      ? substitutePlaybookBody(playbookBody, extra)
-      : extra;
-  return [
-    ...(lead ? [...lead.split("\n"), ``] : []),
-    `The approved plan from the planning phase is in this workspace.`,
-    ``,
-    ...STATUS_PROTOCOL,
-  ].join("\n");
-}

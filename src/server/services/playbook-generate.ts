@@ -82,7 +82,7 @@ function buildPrompt(direction: string, sources: string): string {
   return `You are writing a "playbook" for Dispatch, a local kanban tool that launches Claude Code agent sessions on tickets. A playbook is a reusable markdown instruction block appended to the agent's kickoff prompt for a ticket.
 
 Output rules — follow exactly:
-- Output ONLY the playbook's markdown body. No preamble, no closing remarks, no code fence wrapping the whole output, no YAML front-matter, no "name:" or "stage:" lines.
+- Output ONLY the playbook's markdown body. No preamble, no closing remarks, no code fence wrapping the whole output, no YAML front-matter, no "name:" line.
 - Start the body with this exact section:
 
 ## Extra direction
