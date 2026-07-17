@@ -46,7 +46,21 @@ const ACTIVITY_THROTTLE_MS = 2000;
  */
 export function reapActivityThrottle(cardId: string): void {
   lastActivityStampMs.delete(cardId);
+  preToolUseSeq.delete(cardId);
 }
+
+/**
+ * Per-card monotonic counter used ONLY as the fallback discriminator for a synthesized
+ * `PreToolUse` marker when the payload carries no usable `tool_use_id` (HOOK-03 follow-up):
+ * `markerKey` is entirely derived from `Marker.reason`, so a SECOND same-session pause with the
+ * identical fixed reason text ("waiting on AskUserQuestion") would dedup against the first
+ * pause's still-standing `lastMarker` — `flipBack` deliberately never clears it — and silently
+ * never flip the card for a genuinely new, still-blocking pause. Incrementing this per call gives
+ * every fallback-path pause a distinct reason/markerKey without touching `board.store.ts`'s
+ * dedup guard or `flipBack`'s contract at all. Values carry no meaning beyond distinctness within
+ * one live hook channel; reaped alongside `lastActivityStampMs` at the same chokepoint.
+ */
+const preToolUseSeq = new Map<string, number>();
 
 /**
  * Map a Stop hook event onto the board: parse the final assistant message for its last
@@ -90,15 +104,23 @@ async function applyPromptSubmit(cardId: string): Promise<void> {
  * channel's dedup sees a hook-synthesized marker exactly as it would a parsed one and the two
  * channels' key formats can never drift apart. `applyMarker`'s own guards (no-op on the To Do
  * and Done columns, duplicate-key dedup) are the only column logic needed here.
+ *
+ * @remarks `discriminator` MUST vary per distinct pause (the live `tool_use_id`, or the
+ * {@link preToolUseSeq} fallback) and is folded into `reason` — the ONLY input `markerKey` reads
+ * — so a second, genuinely new pause in the same session never dedups against the first pause's
+ * still-standing `lastMarker` (`flipBack` deliberately never clears it). The SAME pause retried
+ * with the SAME `tool_use_id` still produces the SAME key, so the existing dedup guard continues
+ * to suppress a true duplicate fire.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 async function applyPreToolUseEvent(
   cardId: string,
   toolName: string,
+  discriminator: string,
 ): Promise<void> {
   const marker: Marker = {
     kind: "NEEDS_INPUT",
-    reason: `waiting on ${toolName}`,
+    reason: `waiting on ${toolName} (${discriminator})`,
   };
   await store.applyMarker(
     cardId,
@@ -106,6 +128,27 @@ async function applyPreToolUseEvent(
     marker.reason,
     markerKey(marker),
   );
+}
+
+/**
+ * Resolve the per-invocation discriminator a synthesized `PreToolUse` marker's `reason` folds in
+ * (HOOK-03 follow-up): the payload's own `tool_use_id` when present and well-formed — validated
+ * with the same string-plus-bounded-charset shape as `session_id` below, never trusted blindly —
+ * else the next value from the per-card {@link preToolUseSeq} fallback. Either path is distinct
+ * per call, which is the only property {@link applyPreToolUseEvent} depends on; a retried event
+ * carrying the SAME `tool_use_id` deliberately resolves to the SAME discriminator, so the
+ * existing `lastMarker` dedup guard still suppresses a true duplicate fire.
+ */
+function resolvePreToolUseDiscriminator(
+  cardId: string,
+  toolUseId: unknown,
+): string {
+  if (typeof toolUseId === "string" && /^[\w-]{1,256}$/.test(toolUseId)) {
+    return toolUseId;
+  }
+  const next = (preToolUseSeq.get(cardId) ?? 0) + 1;
+  preToolUseSeq.set(cardId, next);
+  return `#${next}`;
 }
 
 /**
@@ -121,7 +164,9 @@ async function applyPreToolUseEvent(
  * `tool_name` (HOOK-03) is validated (string + exact membership in {@link PAUSE_TOOL_NAMES})
  * before use, unlike the throttle's `hook_event_name`-only binding — an untrusted payload can
  * never synthesize a marker or flip a card for a tool dispatch never registered a matcher for.
- * Unknown events end after the latch/stamp as no-ops.
+ * `tool_use_id` (also validated, see {@link resolvePreToolUseDiscriminator}) makes each PreToolUse
+ * pause's synthesized marker distinct so a second same-session pause is never deduped against the
+ * first's still-standing `lastMarker`. Unknown events end after the latch/stamp as no-ops.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 export async function applyHookEvent(
@@ -132,6 +177,7 @@ export async function applyHookEvent(
         last_assistant_message?: unknown;
         session_id?: unknown;
         tool_name?: unknown;
+        tool_use_id?: unknown;
       }
     | undefined,
 ): Promise<void> {
@@ -177,7 +223,11 @@ export async function applyHookEvent(
   } else if (event === "UserPromptSubmit") {
     await applyPromptSubmit(cardId);
   } else if (event === "PreToolUse" && toolName !== undefined) {
-    await applyPreToolUseEvent(cardId, toolName);
+    const discriminator = resolvePreToolUseDiscriminator(
+      cardId,
+      body?.tool_use_id,
+    );
+    await applyPreToolUseEvent(cardId, toolName, discriminator);
   }
 
   if (event === "PostToolUse" && toolName !== undefined) {
