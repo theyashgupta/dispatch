@@ -968,12 +968,22 @@ layers, ordered lowest-risk first:
    INSUFFICIENT ALONE, even when followed: the printed text still lands mid-turn, so it is never
    carried by a `Stop` event and the hook channel never sees it (0/3 flips across live runs with
    only this layer present).
-2. A permanent `PreToolUse` hook is registered (matcher `"AskUserQuestion"`,
-   `bootstrap/hook-setup.ts`) as the structural safety net: `applyHookEvent` synthesizes a
-   `{ kind: "NEEDS_INPUT", reason: "waiting on " + toolName }` marker and applies it through the
-   SAME `markerKey()`/`applyMarker` path `applyStopEvent` uses (never a hand-rolled key), so this
+2. A permanent `PreToolUse` hook is registered (`bootstrap/hook-setup.ts`, its matcher derived
+   from hook-events' exported `PAUSE_TOOL_NAMES` — the single source of truth for the pause-tool
+   set, so registration, enter, and flip-back can never drift apart) as the structural safety
+   net: `applyHookEvent` synthesizes a marker with `kind: "NEEDS_INPUT"` and
+   `` reason: `waiting on ${toolName} (${discriminator})` `` and applies it through the SAME
+   `markerKey()`/`applyMarker` path `applyStopEvent` uses (never a hand-rolled key), so this
    is additive to — not a fork of — the shared marker/dedup core; `parse.ts`/`scan-decision.ts`/
-   the replay corpus are untouched. Flip-back mirrors it: the existing `PostToolUse` branch (today
+   the replay corpus are untouched. The discriminator is the payload's validated `tool_use_id`
+   when present, else a per-card fallback counter seeded from `Date.now()` on first use and
+   reaped at the token-release chokepoint. Folding it into `reason` — the sole input `markerKey`
+   reads — makes each pause's key distinct BOTH within a session (a second same-session pause
+   never dedups against the first's still-standing `lastMarker`, which `flipBack` deliberately
+   never clears) AND across channel lifetimes (`lastMarker` survives every session-clearing
+   mutator while the counter is reaped, so a fixed-seed counter would reproduce a dead channel's
+   key on the new channel's first fallback pause — the `Date.now()` seed forbids that), while a
+   retried event carrying the SAME `tool_use_id` still yields the SAME key and stays deduped. Flip-back mirrors it: the existing `PostToolUse` branch (today
    only stamping `outputChangedAt`) additionally calls `store.flipBack(cardId)` when the event's
    validated `tool_name` is in the same pause-tool set; `flipBack`'s own column guard
    (`c.column !== "needs_input"` → no-op) makes this safe to call unconditionally on every such
