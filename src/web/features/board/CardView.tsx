@@ -4,7 +4,6 @@ import { startCard } from "../../lib/api.js";
 import { formatAge, nowMs } from "../../lib/format-age.js";
 import { useResumeFeedback } from "../../hooks/useResumeFeedback.js";
 import { GoneBadge } from "../badges/GoneBadge.js";
-import { PlanReadyBadge } from "../badges/PlanReadyBadge.js";
 import { SourceBadge } from "../badges/SourceBadge.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
@@ -213,7 +212,6 @@ export function CardView({
           }}
         >
           <SourceBadge source={card.source ?? "linear"} />
-          {card.planReady && <PlanReadyBadge />}
           {showGone && <GoneBadge />}
         </div>
       </div>
@@ -388,8 +386,7 @@ export function CardView({
             label="Session lost"
           />
 
-          {(card.column === "in_review" || card.column === "in_planning") &&
-          card.workspacePath ? (
+          {card.column === "in_review" && card.workspacePath ? (
             <div
               style={{
                 display: "flex",

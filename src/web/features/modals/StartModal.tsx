@@ -11,7 +11,6 @@ import {
   getPlaybooks,
   getWorkspaceFolders,
   removeWorkspaceFolder,
-  sendKickoff,
   startCard,
 } from "../../lib/api.js";
 import { Button } from "../../primitives/Button.js";
@@ -23,41 +22,11 @@ import { WorkspaceAdd } from "../workspaces/WorkspaceAdd.js";
 
 interface StartModalProps {
   card: CardModel;
-  stage: "planning" | "implementation";
-  variant: "full" | "handoff";
-  targetColumn: "in_planning" | "in_progress";
   onClose: () => void;
 }
 
 const PLAYBOOK_NONE = "None";
-
-const PLAYBOOK_STAGE_DEFAULT: Record<"planning" | "implementation", string> = {
-  planning: "Plan",
-  implementation: "Code",
-};
-
-function playbookLastUsedKey(stage: "planning" | "implementation"): string {
-  return `dispatch:playbook-last-used:${stage}`;
-}
-
-function readLastUsedPlaybook(
-  stage: "planning" | "implementation",
-): string | null {
-  try {
-    return localStorage.getItem(playbookLastUsedKey(stage));
-  } catch {
-    return null;
-  }
-}
-
-function writeLastUsedPlaybook(
-  stage: "planning" | "implementation",
-  name: string,
-): void {
-  try {
-    localStorage.setItem(playbookLastUsedKey(stage), name);
-  } catch {}
-}
+const PLAYBOOK_DEFAULT = "Code";
 
 const focusRing = (on: boolean): string =>
   on ? "0 0 0 2px var(--accent)" : "none";
@@ -620,13 +589,7 @@ function RepoRow({
   );
 }
 
-export function StartModal({
-  card,
-  stage,
-  variant,
-  targetColumn,
-  onClose,
-}: StartModalProps) {
+export function StartModal({ card, onClose }: StartModalProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modalRef = useRef<ModalControl>(null);
   const [extraDirection, setExtraDirection] = useState(
@@ -676,7 +639,6 @@ export function StartModal({
   );
 
   useEffect(() => {
-    if (variant !== "full") return;
     let active = true;
     void (async () => {
       try {
@@ -699,28 +661,19 @@ export function StartModal({
     return () => {
       active = false;
     };
-  }, [applyRepos, variant]);
+  }, [applyRepos]);
 
   useEffect(() => {
     let active = true;
     void (async () => {
       try {
-        const list = await getPlaybooks(stage);
+        const list = await getPlaybooks();
         if (!active) return;
         const sorted = [...list].sort((a, b) => a.name.localeCompare(b.name));
         setPlaybooks(sorted);
         const names = sorted.map((p) => p.name);
-        const stored = readLastUsedPlaybook(stage);
-        if (
-          stored !== null &&
-          (stored === PLAYBOOK_NONE || names.includes(stored))
-        ) {
-          setSelectedPlaybook(stored);
-          return;
-        }
-        const seededDefault = PLAYBOOK_STAGE_DEFAULT[stage];
         setSelectedPlaybook(
-          names.includes(seededDefault) ? seededDefault : PLAYBOOK_NONE,
+          names.includes(PLAYBOOK_DEFAULT) ? PLAYBOOK_DEFAULT : PLAYBOOK_NONE,
         );
       } catch (err) {
         console.error("getPlaybooks failed", err);
@@ -732,7 +685,7 @@ export function StartModal({
     return () => {
       active = false;
     };
-  }, [stage]);
+  }, []);
 
   const addFolder = useCallback(
     async (path: string): Promise<string | null> => {
@@ -782,22 +735,16 @@ export function StartModal({
       ? selectedPlaybook
       : undefined;
 
-  const selectPlaybook = useCallback(
-    (name: string) => {
-      writeLastUsedPlaybook(stage, name);
-      setSelectedPlaybook(name);
-    },
-    [stage],
-  );
+  const selectPlaybook = useCallback((name: string) => {
+    setSelectedPlaybook(name);
+  }, []);
 
   const checkedCount = (repos ?? []).filter((r) => checked[r.path]).length;
   const startDisabled =
-    variant === "handoff"
-      ? submitting
-      : submitting ||
-        (error?.isConfig ?? false) ||
-        selectedFolder === null ||
-        checkedCount === 0;
+    submitting ||
+    (error?.isConfig ?? false) ||
+    selectedFolder === null ||
+    checkedCount === 0;
 
   async function handleStart() {
     if (startDisabled) return;
@@ -807,20 +754,13 @@ export function StartModal({
       const chosen = (repos ?? [])
         .filter((r) => checked[r.path])
         .map((r) => ({ path: r.path, base: baseOverride[r.path] ?? r.base }));
-      const result =
-        variant === "handoff"
-          ? await sendKickoff(card.id, {
-              playbook: playbookArg,
-              extra: extraDirection,
-            })
-          : await startCard(
-              card.id,
-              extraDirection,
-              selectedFolder ?? undefined,
-              chosen,
-              playbookArg,
-              targetColumn,
-            );
+      const result = await startCard(
+        card.id,
+        extraDirection,
+        selectedFolder ?? undefined,
+        chosen,
+        playbookArg,
+      );
       if (result.ok) {
         modalRef.current?.requestClose();
         return;
@@ -866,15 +806,32 @@ export function StartModal({
         </div>
       }
     >
-      {variant === "full" && (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--space-lg)",
+          flex: "0 0 auto",
+        }}
+      >
         <div
           style={{
             display: "flex",
             flexDirection: "column",
-            gap: "var(--space-lg)",
-            flex: "0 0 auto",
+            gap: "var(--space-xs)",
           }}
         >
+          <Field>Workspace</Field>
+          <FolderPicker
+            folders={folders}
+            selected={selectedFolder}
+            onSelect={(p) => void selectFolder(p)}
+            onRemove={removeFolder}
+            onAdd={addFolder}
+          />
+        </div>
+
+        {selectedFolder !== null && repos !== null && (
           <div
             style={{
               display: "flex",
@@ -882,69 +839,50 @@ export function StartModal({
               gap: "var(--space-xs)",
             }}
           >
-            <Field>Workspace</Field>
-            <FolderPicker
-              folders={folders}
-              selected={selectedFolder}
-              onSelect={(p) => void selectFolder(p)}
-              onRemove={removeFolder}
-              onAdd={addFolder}
-            />
+            <Field>Repositories</Field>
+            {repos.length === 0 ? (
+              <div
+                style={{
+                  fontSize: "var(--font-label)",
+                  fontWeight: "var(--weight-semibold)",
+                  lineHeight: "var(--line-label)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                No git repositories found in this folder
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "var(--space-sm)",
+                }}
+              >
+                {repos.map((r) => (
+                  <RepoRow
+                    key={r.path}
+                    repo={r}
+                    checked={checked[r.path] ?? false}
+                    base={baseOverride[r.path] ?? r.base}
+                    onToggle={() => {
+                      setError(null);
+                      setChecked((prev) => ({
+                        ...prev,
+                        [r.path]: !prev[r.path],
+                      }));
+                    }}
+                    onBaseChange={(b) => {
+                      setError(null);
+                      setBaseOverride((prev) => ({ ...prev, [r.path]: b }));
+                    }}
+                  />
+                ))}
+              </div>
+            )}
           </div>
-
-          {selectedFolder !== null && repos !== null && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "var(--space-xs)",
-              }}
-            >
-              <Field>Repositories</Field>
-              {repos.length === 0 ? (
-                <div
-                  style={{
-                    fontSize: "var(--font-label)",
-                    fontWeight: "var(--weight-semibold)",
-                    lineHeight: "var(--line-label)",
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  No git repositories found in this folder
-                </div>
-              ) : (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "var(--space-sm)",
-                  }}
-                >
-                  {repos.map((r) => (
-                    <RepoRow
-                      key={r.path}
-                      repo={r}
-                      checked={checked[r.path] ?? false}
-                      base={baseOverride[r.path] ?? r.base}
-                      onToggle={() => {
-                        setError(null);
-                        setChecked((prev) => ({
-                          ...prev,
-                          [r.path]: !prev[r.path],
-                        }));
-                      }}
-                      onBaseChange={(b) => {
-                        setError(null);
-                        setBaseOverride((prev) => ({ ...prev, [r.path]: b }));
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+        )}
+      </div>
 
       <div
         style={{

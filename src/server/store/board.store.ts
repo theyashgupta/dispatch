@@ -259,9 +259,9 @@ class BoardStore extends EventEmitter {
    * card carrying a live `tmuxSession` resolves to `in_progress` (the session keeps running — a
    * stale name is corrected to sessionLost by the existing boot-time `reconcileSessions()` pass on
    * the very next line of boot code, same as any other dead-session card), a card with none
-   * resolves to `todo`. The persisted string is read via an untyped cast because `"in_planning"`
-   * is no longer a member of `Column` — no live write path can ever produce it again, so this
-   * check needs no re-migration guard. The legacy `mode`/`planReady` fields and
+   * resolves to the "To Do" column. The persisted string is read via an untyped cast because
+   * `"in_planning"` is no longer a member of `Column` — no live write path can ever produce it
+   * again, so this check needs no re-migration guard. The legacy `mode`/`planReady` fields and
    * `startIntent.targetColumn` are stripped from the loaded object in the same pass (one-way, no
    * back-compat shim) so they never round-trip back into a future persist.
    */

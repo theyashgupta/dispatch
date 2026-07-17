@@ -16,8 +16,7 @@ export function SessionLostSection({
 }: SessionLostSectionProps) {
   const { resuming, resumeFailed, watchdogFired, failureCopy, onResume } =
     useResumeFeedback(card);
-  const inResumableColumn =
-    card.column === "in_review" || card.column === "in_planning";
+  const inResumableColumn = card.column === "in_review";
   const canResume = inResumableColumn && Boolean(card.workspacePath);
   const workspaceGone = inResumableColumn && !card.workspacePath;
 

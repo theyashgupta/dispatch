@@ -20,38 +20,6 @@ const FOOTGUN_MESSAGE =
   "Playbook body can't contain the text DISPATCH_STATUS: — remove it and try again.";
 const COLLISION_MESSAGE = "A playbook with that name already exists";
 
-interface StageOptionButtonProps {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}
-
-function StageOptionButton({ label, active, onClick }: StageOptionButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        padding: "0 0 var(--space-xs)",
-        background: "transparent",
-        border: "none",
-        borderBottom: active
-          ? "2px solid var(--accent)"
-          : "2px solid transparent",
-        color: active ? "var(--text)" : "var(--text-muted)",
-        fontFamily: "var(--font-ui)",
-        fontSize: "var(--font-label)",
-        fontWeight: "var(--weight-semibold)",
-        lineHeight: "var(--line-label)",
-        cursor: "pointer",
-        outline: "none",
-      }}
-    >
-      {label}
-    </button>
-  );
-}
-
 interface PlaybookEditorModalProps {
   mode: "create" | "edit";
   playbook?: Playbook;
@@ -70,9 +38,6 @@ export function PlaybookEditorModal({
   const modalRef = useRef<ModalControl>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(playbook?.name ?? "");
-  const [stage, setStage] = useState<"planning" | "implementation">(
-    playbook?.stage ?? "planning",
-  );
   const [body, setBody] = useState(playbook?.body ?? "");
   const [nameFocus, setNameFocus] = useState(false);
   const [bodyFocus, setBodyFocus] = useState(false);
@@ -137,7 +102,7 @@ export function PlaybookEditorModal({
     setSaveError(false);
     setFootgunError(false);
     try {
-      const input = { name: trimmedName, stage, body };
+      const input = { name: trimmedName, body };
       const result =
         mode === "create"
           ? await createPlaybook(input)
@@ -255,28 +220,6 @@ export function PlaybookEditorModal({
               {nameError}
             </div>
           )}
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-xs)",
-          }}
-        >
-          <Field>Stage</Field>
-          <div style={{ display: "flex", gap: "var(--space-lg)" }}>
-            <StageOptionButton
-              label="Planning"
-              active={stage === "planning"}
-              onClick={() => setStage("planning")}
-            />
-            <StageOptionButton
-              label="Implementation"
-              active={stage === "implementation"}
-              onClick={() => setStage("implementation")}
-            />
-          </div>
         </div>
 
         <div

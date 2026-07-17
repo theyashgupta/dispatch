@@ -1,11 +1,6 @@
 /** Board columns in display order. */
 export type Column =
-  | "todo"
-  | "in_progress"
-  | "needs_input"
-  | "agent_done"
-  | "in_review"
-  | "done";
+  "todo" | "in_progress" | "needs_input" | "agent_done" | "in_review" | "done";
 
 /** The six columns in board order, for the frontend to iterate. */
 export const COLUMNS: readonly Column[] = [

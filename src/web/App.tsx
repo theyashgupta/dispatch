@@ -103,11 +103,7 @@ export function App() {
     board?.cards.find((card) => card.id === startRequest?.cardId) ?? null;
 
   const requestStart = (req: string | StartRequest) => {
-    setStartRequest(
-      typeof req === "string"
-        ? { cardId: req, targetColumn: "in_progress", variant: "full" }
-        : req,
-    );
+    setStartRequest(typeof req === "string" ? { cardId: req } : req);
   };
 
   const [cleanupCardId, setCleanupCardId] = useState<string | null>(null);
@@ -237,13 +233,6 @@ export function App() {
         <StartModal
           key={startRequest.cardId}
           card={startCard}
-          stage={
-            startRequest.targetColumn === "in_planning"
-              ? "planning"
-              : "implementation"
-          }
-          variant={startRequest.variant}
-          targetColumn={startRequest.targetColumn}
           onClose={() => setStartRequest(null)}
         />
       )}

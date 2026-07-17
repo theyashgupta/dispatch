@@ -7,7 +7,6 @@ import type { ActivityEvent, Column } from "../../shared/types.js";
  */
 export const COLUMN_LABELS: Record<Column, string> = {
   todo: "To Do",
-  in_planning: "In Planning",
   in_progress: "In Progress",
   needs_input: "Needs Input",
   agent_done: "Agent Done",
@@ -22,6 +21,18 @@ function moveClause(
 ): string {
   if (from == null || to == null) return verb;
   return `${verb} ${COLUMN_LABELS[from]} → ${COLUMN_LABELS[to]}`;
+}
+
+/**
+ * Fallback for an `ActivityEvent.type` string that no longer matches any `EventType` member — e.g.
+ * a historical `plan_ready` row read back from board.db's untyped TEXT column after the plan-stage
+ * machinery was retired. The `never` parameter preserves compile-time exhaustiveness: a genuinely
+ * new, unhandled `EventType` member would fail to assign here, so this can only ever catch stale
+ * on-disk strings, not a forgotten case.
+ */
+function describeUnknownEvent(type: never): string {
+  void type;
+  return "activity";
 }
 
 /**
@@ -54,9 +65,9 @@ export function describeEvent(event: ActivityEvent): string {
       return "session failed to start";
     case "resume_failed":
       return "resume failed";
-    case "plan_ready":
-      return "plan ready";
     case "cleanup":
       return "workspace cleaned up";
+    default:
+      return describeUnknownEvent(event.type);
   }
 }

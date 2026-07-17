@@ -24,16 +24,6 @@ import { PlaybookEditorModal } from "./PlaybookEditorModal.js";
 
 type SettingsTab = "filters" | "playbooks";
 
-const STAGE_LABEL: Record<"planning" | "implementation", string> = {
-  planning: "Planning",
-  implementation: "Implementation",
-};
-
-const STAGE_COLOR_VAR: Record<"planning" | "implementation", string> = {
-  planning: "--col-in-planning",
-  implementation: "--col-in-progress",
-};
-
 interface SettingsTabButtonProps {
   label: string;
   active: boolean;
@@ -74,7 +64,6 @@ interface PlaybookListRowProps {
 
 function PlaybookListRow({ playbook, onEdit, onDelete }: PlaybookListRowProps) {
   const [hover, setHover] = useState(false);
-  const stageVar = STAGE_COLOR_VAR[playbook.stage];
   return (
     <div
       onClick={onEdit}
@@ -105,21 +94,6 @@ function PlaybookListRow({ playbook, onEdit, onDelete }: PlaybookListRowProps) {
         }}
       >
         {playbook.name}
-      </span>
-      <span
-        style={{
-          flex: "0 0 auto",
-          fontSize: "var(--font-label)",
-          fontWeight: "var(--weight-semibold)",
-          lineHeight: "var(--line-label)",
-          color: `var(${stageVar})`,
-          background: `color-mix(in srgb, var(${stageVar}) 16%, var(--surface-card))`,
-          borderRadius: "var(--radius)",
-          padding: "0 var(--space-xs)",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {STAGE_LABEL[playbook.stage]}
       </span>
       <IconButton
         aria-label={`Edit ${playbook.name}`}

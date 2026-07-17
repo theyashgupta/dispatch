@@ -5,7 +5,6 @@ import {
   Check,
   CircleAlert,
   CircleCheck,
-  ClipboardCheck,
   Download,
   Play,
   RotateCw,
@@ -30,7 +29,6 @@ const EVENT_GLYPH: Record<EventType, LucideIcon> = {
   session_lost: Unplug,
   session_failed: TriangleAlert,
   resume_failed: TriangleAlert,
-  plan_ready: ClipboardCheck,
   cleanup: Trash2,
 };
 
@@ -46,7 +44,6 @@ const EVENT_TINT: Record<EventType, string> = {
   session_lost: "var(--destructive)",
   session_failed: "var(--destructive)",
   resume_failed: "var(--destructive)",
-  plan_ready: "var(--text-muted)",
   cleanup: "var(--text-muted)",
 };
 

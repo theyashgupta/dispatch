@@ -108,28 +108,8 @@ export function Board({
     const card = cards.find((c) => c.id === cardId);
     if (!card) return;
 
-    if (
-      card.column === "todo" &&
-      (targetColumn === "in_progress" || targetColumn === "in_planning")
-    ) {
-      onStartRequest?.({ cardId, targetColumn, variant: "full" });
-      return;
-    }
-
-    if (card.column === "in_planning" && targetColumn === "in_progress") {
-      if (card.planReady && card.tmuxSession) {
-        onStartRequest?.({
-          cardId,
-          targetColumn: "in_progress",
-          variant: "handoff",
-        });
-      } else if (!card.tmuxSession) {
-        onStartRequest?.({
-          cardId,
-          targetColumn: "in_progress",
-          variant: "full",
-        });
-      }
+    if (card.column === "todo" && targetColumn === "in_progress") {
+      onStartRequest?.({ cardId });
       return;
     }
 
@@ -189,12 +169,6 @@ export function Board({
             isCarousel={isCarousel}
             phone={isPhone}
             large={isLarge}
-            dropDisabled={
-              column === "in_progress" &&
-              activeCard?.column === "in_planning" &&
-              Boolean(activeCard.tmuxSession) &&
-              !activeCard.planReady
-            }
             resizeDisabled={activeCardId != null}
           />
         ))}

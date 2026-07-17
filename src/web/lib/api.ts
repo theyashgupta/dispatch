@@ -47,11 +47,10 @@ export type StartResult =
  * per-ticket base). Restart/retry callers omit both so the body stays exactly
  * `{ extraDirection }` and the backend reuses the persisted `card.workspace`.
  *
- * `playbook` (a name, never a path) and `targetColumn` are passed through exactly
- * as supplied — this function applies no default. A modal-driven start always
- * supplies an explicit `targetColumn` so the server honors it (Case 1); the bare
- * Restart caller supplies neither, and `JSON.stringify` drops the resulting
- * `undefined` keys so that absence reaches the server as the preserve-column signal.
+ * `playbook` (a name, never a path) is passed through exactly as supplied — this
+ * function applies no default. The bare Restart caller omits it, and
+ * `JSON.stringify` drops the resulting `undefined` key so absence reaches the
+ * server as the reuse-persisted-intent signal.
  */
 export async function startCard(
   id: string,
@@ -59,12 +58,11 @@ export async function startCard(
   folder?: string,
   repos?: { path: string; base: string }[],
   playbook?: string,
-  targetColumn?: "in_planning" | "in_progress",
 ): Promise<StartResult> {
   const body =
     folder !== undefined || repos !== undefined
-      ? { extraDirection, folder, repos, playbook, targetColumn }
-      : { extraDirection, playbook, targetColumn };
+      ? { extraDirection, folder, repos, playbook }
+      : { extraDirection, playbook };
   const res = await fetch(`/api/cards/${encodeURIComponent(id)}/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -110,18 +108,13 @@ export async function fetchEvents(
 }
 
 /**
- * List playbooks: GET /api/playbooks (+ optional `?stage=`). Read fresh on every call so the
- * picker/list reflects the on-disk markdown without a cache. `stage` filters for the kickoff
- * picker; omitted entirely for the Settings list, which manages every stage in one place.
- * Resolves the parsed `playbooks` array on 2xx; throws on any non-2xx so the caller can surface
- * a load failure (mirrors getWorkspaceFolders).
+ * List playbooks: GET /api/playbooks. Read fresh on every call so the picker/list reflects the
+ * on-disk markdown without a cache — a single flat list, no stage scoping. Resolves the parsed
+ * `playbooks` array on 2xx; throws on any non-2xx so the caller can surface a load failure
+ * (mirrors getWorkspaceFolders).
  */
-export async function getPlaybooks(
-  stage?: "planning" | "implementation",
-): Promise<Playbook[]> {
-  const query =
-    stage !== undefined ? `?stage=${encodeURIComponent(stage)}` : "";
-  const res = await fetch(`/api/playbooks${query}`);
+export async function getPlaybooks(): Promise<Playbook[]> {
+  const res = await fetch("/api/playbooks");
   if (!res.ok) {
     throw new Error(`getPlaybooks failed: ${res.status} ${res.statusText}`);
   }
@@ -137,7 +130,6 @@ export type PlaybookWriteResult =
 /** Shared shape submitted by both create and update — the server re-validates every field. */
 export interface PlaybookWriteInput {
   name: string;
-  stage: "planning" | "implementation";
   body: string;
 }
 
@@ -229,41 +221,6 @@ export async function generatePlaybookDraft(input: {
   } catch {
     return { ok: false };
   }
-}
-
-/**
- * Send a follow-up kickoff into a card's live session: POST /api/cards/:id/kickoff.
- * The In Planning → In Progress live hand-off: the server splices the chosen
- * implementation `playbook` (a name, never a path; omitted for the Default option)
- * plus the `extra` direction and sends it into the same tmux session — no
- * re-provisioning. Mirrors startCard's discrimination so a dead-session reject
- * (400/409 with `{ error, variant }`) falls through to session-lost treatment;
- * any other status throws for a network/unexpected failure.
- */
-export async function sendKickoff(
-  id: string,
-  opts: { playbook?: string; extra: string },
-): Promise<StartResult> {
-  const res = await fetch(`/api/cards/${encodeURIComponent(id)}/kickoff`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ playbook: opts.playbook, extra: opts.extra }),
-  });
-  if (res.ok) {
-    return { ok: true };
-  }
-  if (res.status === 400 || res.status === 409) {
-    const body = (await res.json().catch(() => ({}))) as {
-      error?: string;
-      variant?: string;
-    };
-    return {
-      ok: false,
-      error: body.error ?? "Hand-off failed.",
-      variant: body.variant,
-    };
-  }
-  throw new Error(`sendKickoff failed: ${res.status} ${res.statusText}`);
 }
 
 /**

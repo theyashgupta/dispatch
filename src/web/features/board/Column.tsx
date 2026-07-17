@@ -17,7 +17,6 @@ const MAX_COL_WIDTH = 480;
 
 const COLUMN_LABELS: Record<ColumnId, string> = {
   todo: "TO DO",
-  in_planning: "IN PLANNING",
   in_progress: "IN PROGRESS",
   needs_input: "NEEDS INPUT",
   agent_done: "AGENT DONE",
@@ -27,7 +26,6 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
 
 const COLUMN_ACCENT: Record<ColumnId, string> = {
   todo: "var(--col-todo)",
-  in_planning: "var(--col-in-planning)",
   in_progress: "var(--col-in-progress)",
   needs_input: "var(--col-needs-input)",
   agent_done: "var(--col-agent-done)",
