@@ -1,11 +1,16 @@
 import { useId, useRef, useState } from "react";
 import { Check, X } from "lucide-react";
 import type { PrerequisiteStatus } from "../../../shared/types.js";
-import { runPrerequisiteInstall, saveLinearKey } from "../../lib/api.js";
+import {
+  addWorkspaceFolder,
+  runPrerequisiteInstall,
+  saveLinearKey,
+} from "../../lib/api.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { Glyph } from "../../primitives/Glyph.js";
 import { Notice } from "../../primitives/Notice.js";
+import { WorkspaceAdd } from "../workspaces/WorkspaceAdd.js";
 
 interface FirstRunSetupProps {
   prerequisites: PrerequisiteStatus[];
@@ -40,6 +45,8 @@ export function FirstRunSetup({
   storage,
   onConnected,
 }: FirstRunSetupProps) {
+  const [step, setStep] = useState<"connect" | "workspace">("connect");
+  const [addedThisSession, setAddedThisSession] = useState(false);
   const [value, setValue] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<"rejected" | "unreachable" | null>(null);
@@ -93,7 +100,7 @@ export function FirstRunSetup({
     try {
       const result = await saveLinearKey(trimmed);
       if (result.ok || result.reason === "already-configured") {
-        onConnected();
+        setStep("workspace");
         return;
       }
       setError(result.reason);
@@ -103,6 +110,18 @@ export function FirstRunSetup({
     } finally {
       setConnecting(false);
       inputRef.current?.focus();
+    }
+  }
+
+  async function onAddWorkspace(path: string): Promise<string | null> {
+    try {
+      const result = await addWorkspaceFolder(path);
+      if (!result.ok) return result.error;
+      setAddedThisSession(true);
+      return null;
+    } catch (err) {
+      console.error("addWorkspaceFolder failed", err);
+      return "Couldn't reach the server. Try again.";
     }
   }
 
@@ -149,98 +168,155 @@ export function FirstRunSetup({
           </span>
         </div>
 
-        <span
-          style={{
-            textAlign: "center",
-            fontSize: "var(--font-heading)",
-            fontWeight: "var(--weight-semibold)",
-            lineHeight: "var(--line-heading)",
-            color: "var(--text)",
-          }}
-        >
-          Connect your Linear workspace
-        </span>
-
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-lg)",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "var(--space-xs)",
-            }}
-          >
-            <label htmlFor={inputId}>
-              <Field>Linear API key</Field>
-            </label>
-            <input
-              id={inputId}
-              ref={inputRef}
-              type="text"
-              value={value}
-              placeholder="lin_api_..."
-              autoFocus
-              autoComplete="off"
-              spellCheck={false}
-              readOnly={connecting}
-              aria-describedby={error ? `${hintId} ${errorId}` : hintId}
-              aria-invalid={error != null}
-              onChange={(e) => setValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void handleConnect();
-              }}
-              onFocus={(e) =>
-                setInputFocused(e.currentTarget.matches(":focus-visible"))
-              }
-              onBlur={() => setInputFocused(false)}
-              style={{
-                height: "32px",
-                padding: "0 var(--space-lg)",
-                background: "var(--surface-card)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius)",
-                color: "var(--text)",
-                fontFamily: "var(--font-ui)",
-                fontSize: "var(--font-body)",
-                lineHeight: "var(--line-body)",
-                outline: "none",
-                boxShadow: inputFocused ? "0 0 0 2px var(--accent)" : "none",
-                userSelect: "text",
-              }}
-            />
+        {step === "connect" ? (
+          <>
             <span
-              id={hintId}
               style={{
-                fontFamily: "var(--font-ui)",
-                fontSize: "var(--font-body)",
-                lineHeight: "var(--line-body)",
-                color: "var(--text-muted)",
+                textAlign: "center",
+                fontSize: "var(--font-heading)",
+                fontWeight: "var(--weight-semibold)",
+                lineHeight: "var(--line-heading)",
+                color: "var(--text)",
               }}
             >
-              Create a personal key at linear.app/settings/api. It's stored
-              locally at 0600 and only ever sent to Linear.
+              Connect your Linear workspace
             </span>
-            {error && (
-              <div id={errorId} role="alert">
-                <Notice tone="destructive" label={ERROR_COPY[error]} />
+
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "var(--space-lg)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "var(--space-xs)",
+                }}
+              >
+                <label htmlFor={inputId}>
+                  <Field>Linear API key</Field>
+                </label>
+                <input
+                  id={inputId}
+                  ref={inputRef}
+                  type="text"
+                  value={value}
+                  placeholder="lin_api_..."
+                  autoFocus
+                  autoComplete="off"
+                  spellCheck={false}
+                  readOnly={connecting}
+                  aria-describedby={error ? `${hintId} ${errorId}` : hintId}
+                  aria-invalid={error != null}
+                  onChange={(e) => setValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void handleConnect();
+                  }}
+                  onFocus={(e) =>
+                    setInputFocused(e.currentTarget.matches(":focus-visible"))
+                  }
+                  onBlur={() => setInputFocused(false)}
+                  style={{
+                    height: "32px",
+                    padding: "0 var(--space-lg)",
+                    background: "var(--surface-card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius)",
+                    color: "var(--text)",
+                    fontFamily: "var(--font-ui)",
+                    fontSize: "var(--font-body)",
+                    lineHeight: "var(--line-body)",
+                    outline: "none",
+                    boxShadow: inputFocused
+                      ? "0 0 0 2px var(--accent)"
+                      : "none",
+                    userSelect: "text",
+                  }}
+                />
+                <span
+                  id={hintId}
+                  style={{
+                    fontFamily: "var(--font-ui)",
+                    fontSize: "var(--font-body)",
+                    lineHeight: "var(--line-body)",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  Create a personal key at linear.app/settings/api. It's stored
+                  locally at 0600 and only ever sent to Linear.
+                </span>
+                {error && (
+                  <div id={errorId} role="alert">
+                    <Notice tone="destructive" label={ERROR_COPY[error]} />
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <Button
-            variant="primary"
-            style={{ width: "100%" }}
-            disabled={!canSubmit}
-            aria-busy={connecting}
-            onClick={() => void handleConnect()}
-          >
-            {connecting ? "Connecting…" : "Connect"}
-          </Button>
-        </div>
+              <Button
+                variant="primary"
+                style={{ width: "100%" }}
+                disabled={!canSubmit}
+                aria-busy={connecting}
+                onClick={() => void handleConnect()}
+              >
+                {connecting ? "Connecting…" : "Connect"}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <span
+              style={{
+                textAlign: "center",
+                fontSize: "var(--font-heading)",
+                fontWeight: "var(--weight-semibold)",
+                lineHeight: "var(--line-heading)",
+                color: "var(--text)",
+              }}
+            >
+              Add a workspace
+            </span>
+
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "var(--space-lg)",
+              }}
+            >
+              <WorkspaceAdd
+                onAdd={onAddWorkspace}
+                hint="Add a folder that contains the git repos for this ticket."
+                fullWidthSubmit
+              />
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "var(--space-sm)",
+                }}
+              >
+                <Button
+                  variant="secondary"
+                  style={{ width: "100%" }}
+                  onClick={onConnected}
+                >
+                  Skip for now
+                </Button>
+                <Button
+                  variant="primary"
+                  style={{ width: "100%" }}
+                  disabled={!addedThisSession}
+                  onClick={onConnected}
+                >
+                  Continue
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
 
         <div
           style={{ height: "1px", background: "var(--border)", width: "100%" }}
