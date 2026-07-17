@@ -403,6 +403,7 @@ function KickoffPlaybookRow({
 
 interface PickerRow {
   name: string;
+  slug?: string;
   reason?: string;
 }
 
@@ -519,7 +520,7 @@ function KickoffPlaybookPicker({
           }}
         >
           {validRows.map((row, index) => (
-            <div key={row.name}>
+            <div key={row.slug ?? row.name}>
               <KickoffPlaybookRow
                 name={row.name}
                 selected={row.name === selected}
@@ -539,7 +540,7 @@ function KickoffPlaybookPicker({
           ))}
           {invalidRows.map((row) => (
             <KickoffPlaybookRow
-              key={row.name}
+              key={`invalid-${row.name}`}
               name={row.name}
               selected={false}
               isDefault={row.name === lastUsed}
@@ -758,7 +759,7 @@ export function StartModal({
   );
   const [error, setError] = useState<{
     text: string;
-    isConfig: boolean;
+    variant: "config" | "playbook" | null;
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [focused, setFocused] = useState<"textarea" | null>(null);
@@ -826,42 +827,44 @@ export function StartModal({
     };
   }, [applyRepos]);
 
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      try {
-        const { valid, invalid, lastUsed } = await getPickerPlaybooks();
-        if (!active) return;
-        setPickerValid(valid);
-        setPickerInvalid(invalid);
-        setLastUsedPlaybook(lastUsed);
+  const pickerGenRef = useRef(0);
+  const loadPickerPlaybooks = useCallback(async () => {
+    const gen = ++pickerGenRef.current;
+    try {
+      const { valid, invalid, lastUsed } = await getPickerPlaybooks();
+      if (pickerGenRef.current !== gen) return;
+      setPickerValid(valid);
+      setPickerInvalid(invalid);
+      setLastUsedPlaybook(lastUsed);
 
-        const validNames = new Set(valid.map((p) => p.name));
-        const seedRows = orderSeedRows(valid);
-        const orderedNames = [
-          ...seedRows.map((p) => p.name),
-          ...valid.filter((p) => !seedRows.includes(p)).map((p) => p.name),
-        ];
-        if (lastUsed !== null && validNames.has(lastUsed)) {
-          setSelectedPlaybook(lastUsed);
-        } else if (validNames.has(WRITE_CODE_DIRECTLY_NAME)) {
-          setSelectedPlaybook(WRITE_CODE_DIRECTLY_NAME);
-        } else {
-          setSelectedPlaybook(orderedNames[0] ?? null);
-        }
-      } catch (err) {
-        console.error("getPickerPlaybooks failed", err);
-        if (!active) return;
-        setPickerValid([]);
-        setPickerInvalid([]);
-        setLastUsedPlaybook(null);
-        setSelectedPlaybook(null);
+      const validNames = new Set(valid.map((p) => p.name));
+      const seedRows = orderSeedRows(valid);
+      const orderedNames = [
+        ...seedRows.map((p) => p.name),
+        ...valid.filter((p) => !seedRows.includes(p)).map((p) => p.name),
+      ];
+      if (lastUsed !== null && validNames.has(lastUsed)) {
+        setSelectedPlaybook(lastUsed);
+      } else if (validNames.has(WRITE_CODE_DIRECTLY_NAME)) {
+        setSelectedPlaybook(WRITE_CODE_DIRECTLY_NAME);
+      } else {
+        setSelectedPlaybook(orderedNames[0] ?? null);
       }
-    })();
-    return () => {
-      active = false;
-    };
+    } catch (err) {
+      console.error("getPickerPlaybooks failed", err);
+      if (pickerGenRef.current !== gen) return;
+      setPickerValid([]);
+      setPickerInvalid([]);
+      setLastUsedPlaybook(null);
+      setSelectedPlaybook(null);
+    }
   }, []);
+
+  useEffect(() => {
+    void (async () => {
+      await loadPickerPlaybooks();
+    })();
+  }, [loadPickerPlaybooks]);
 
   const addFolder = useCallback(
     async (path: string): Promise<string | null> => {
@@ -911,12 +914,13 @@ export function StartModal({
 
   const selectPlaybook = useCallback((name: string) => {
     setSelectedPlaybook(name);
+    setError(null);
   }, []);
 
   const checkedCount = (repos ?? []).filter((r) => checked[r.path]).length;
   const startDisabled =
     submitting ||
-    (error?.isConfig ?? false) ||
+    error?.variant === "config" ||
     selectedFolder === null ||
     checkedCount === 0;
 
@@ -939,15 +943,23 @@ export function StartModal({
         modalRef.current?.requestClose();
         return;
       }
+      if (result.variant === "playbook") {
+        setError({
+          text: "The selected playbook no longer exists.",
+          variant: "playbook",
+        });
+        void loadPickerPlaybooks();
+        return;
+      }
       setError({
         text: result.error,
-        isConfig: result.variant === "config",
+        variant: result.variant === "config" ? "config" : null,
       });
     } catch (err) {
       console.error("start failed", err);
       setError({
         text: "Couldn't reach the server. Try again.",
-        isConfig: false,
+        variant: null,
       });
     } finally {
       setSubmitting(false);
@@ -1135,7 +1147,7 @@ export function StartModal({
             flex: "0 0 auto",
           }}
         >
-          {error.isConfig ? (
+          {error.variant === "config" ? (
             <>
               <Notice
                 tone="destructive"
@@ -1150,6 +1162,23 @@ export function StartModal({
               >
                 One of the chosen repositories no longer exists on disk. Reopen
                 the workspace and re-pick.
+              </div>
+            </>
+          ) : error.variant === "playbook" ? (
+            <>
+              <Notice
+                tone="destructive"
+                label="Can't start — that playbook is gone"
+              />
+              <div
+                style={{
+                  fontSize: "var(--font-body)",
+                  lineHeight: "var(--line-body)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                The selected playbook was deleted. The list has refreshed — pick
+                another and press Start again.
               </div>
             </>
           ) : (

@@ -76,7 +76,7 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
   if (playbook !== undefined) {
     const known = (await loadPlaybooks()).some((p) => p.name === playbook);
     if (!known) {
-      res.status(400).json({ error: "unknown playbook", variant: "config" });
+      res.status(400).json({ error: "unknown playbook", variant: "playbook" });
       return;
     }
   }
