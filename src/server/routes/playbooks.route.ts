@@ -150,6 +150,16 @@ playbooksRouter.delete("/playbooks/:slug", async (req, res) => {
   }
 });
 
+/**
+ * Module-level single-flight guard for `POST /playbooks/generate` (mirrors {@link runUpdate}'s
+ * in-flight promise): each `claude -p` spawn already runs up to 150s with a 10MB buffer, and the
+ * client-side `generating` flag only bounds one editor panel, not the loopback API itself. Rather
+ * than sharing the in-flight result across callers (wrong here — each request has its own
+ * direction/sourcePaths), a second concurrent call is rejected with 409 so the server never fans
+ * out parallel subprocesses.
+ */
+let generateInFlight = false;
+
 playbooksRouter.post("/playbooks/generate", async (req, res) => {
   const b = req.body as
     { direction?: unknown; sourcePaths?: unknown } | undefined;
@@ -175,6 +185,12 @@ playbooksRouter.post("/playbooks/generate", async (req, res) => {
     sourcePaths = rawSourcePaths;
   }
 
+  if (generateInFlight) {
+    res.status(409).json({ error: "generate-in-progress" });
+    return;
+  }
+
+  generateInFlight = true;
   try {
     const draft = await generatePlaybookDraft({ direction, sourcePaths });
     res.status(200).json({ draft });
@@ -184,5 +200,7 @@ playbooksRouter.post("/playbooks/generate", async (req, res) => {
       return;
     }
     res.status(502).json({ error: "generate-failed" });
+  } finally {
+    generateInFlight = false;
   }
 });
