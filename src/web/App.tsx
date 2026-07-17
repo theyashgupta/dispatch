@@ -17,7 +17,10 @@ import { DetailPanel } from "./features/detail/DetailPanel.js";
 import { ActivityDrawer } from "./features/activity/ActivityDrawer.js";
 import { StartModal } from "./features/modals/StartModal.js";
 import { CleanupModal } from "./features/modals/CleanupModal.js";
-import { SettingsModal } from "./features/modals/SettingsModal.js";
+import {
+  SettingsModal,
+  type SettingsTab,
+} from "./features/modals/SettingsModal.js";
 import { FirstRunSetup } from "./features/setup/FirstRunSetup.js";
 import { UpdateBanner } from "./features/update/UpdateBanner.js";
 import { cleanupCard as cleanupCardApi, getSetup } from "./lib/api.js";
@@ -128,6 +131,8 @@ export function App() {
   }, [cleanupResolved]);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] =
+    useState<SettingsTab>("filters");
 
   const [setupState, setSetupState] = useState<
     "loading" | "needsKey" | "ready"
@@ -234,6 +239,10 @@ export function App() {
           key={startRequest.cardId}
           card={startCard}
           onClose={() => setStartRequest(null)}
+          onEditPlaybooks={() => {
+            setSettingsInitialTab("playbooks");
+            setSettingsOpen(true);
+          }}
         />
       )}
       {cleanupCard && (
@@ -249,7 +258,15 @@ export function App() {
           onClose={() => setCleanupCardId(null)}
         />
       )}
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsModal
+          initialTab={settingsInitialTab}
+          onClose={() => {
+            setSettingsOpen(false);
+            setSettingsInitialTab("filters");
+          }}
+        />
+      )}
     </div>
   );
 }

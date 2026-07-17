@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, X } from "lucide-react";
+import { Check, ChevronDown, TriangleAlert, X } from "lucide-react";
 import type {
   Card as CardModel,
   DiscoveredRepo,
+  InvalidPlaybook,
   Playbook,
 } from "../../../shared/types.js";
 import {
   addWorkspaceFolder,
   discoverFolder,
-  getPlaybooks,
+  getPickerPlaybooks,
   getWorkspaceFolders,
   removeWorkspaceFolder,
   startCard,
@@ -23,13 +24,30 @@ import { WorkspaceAdd } from "../workspaces/WorkspaceAdd.js";
 interface StartModalProps {
   card: CardModel;
   onClose: () => void;
+  onEditPlaybooks: () => void;
 }
 
-const PLAYBOOK_NONE = "None";
-const PLAYBOOK_DEFAULT = "Code";
+const SEED_SLUG_ORDER = [
+  "prd-ralph-loop",
+  "superpowers",
+  "gsd",
+  "write-code-directly",
+];
+
+const WRITE_CODE_DIRECTLY_NAME = "Write code directly";
 
 const focusRing = (on: boolean): string =>
   on ? "0 0 0 2px var(--accent)" : "none";
+
+function orderSeedRows(valid: Playbook[]): Playbook[] {
+  const bySlug = new Map(valid.map((p) => [p.slug, p]));
+  const rows: Playbook[] = [];
+  for (const slug of SEED_SLUG_ORDER) {
+    const p = bySlug.get(slug);
+    if (p) rows.push(p);
+  }
+  return rows;
+}
 
 interface FolderRowProps {
   path: string;
@@ -264,15 +282,61 @@ function FolderPicker({
   );
 }
 
-interface PlaybookRowProps {
+interface KickoffPlaybookRowProps {
   name: string;
-  muted?: boolean;
+  selected: boolean;
+  isDefault: boolean;
+  reason?: string;
   onSelect: () => void;
 }
 
-function PlaybookRow({ name, muted, onSelect }: PlaybookRowProps) {
+function KickoffPlaybookRow({
+  name,
+  selected,
+  isDefault,
+  reason,
+  onSelect,
+}: KickoffPlaybookRowProps) {
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
+
+  if (reason !== undefined) {
+    return (
+      <div
+        tabIndex={-1}
+        aria-disabled="true"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--space-xs)",
+          padding: "var(--space-sm)",
+          opacity: 0.5,
+          cursor: "default",
+        }}
+      >
+        <TriangleAlert
+          size={12}
+          strokeWidth={2}
+          aria-hidden="true"
+          style={{ color: "var(--text-muted)", flex: "0 0 auto" }}
+        />
+        <span
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-body)",
+            lineHeight: "var(--line-body)",
+            color: "var(--text-muted)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {name} ({reason})
+        </span>
+      </div>
+    );
+  }
+
   return (
     <button
       type="button"
@@ -282,35 +346,83 @@ function PlaybookRow({ name, muted, onSelect }: PlaybookRowProps) {
       onFocus={(e) => setFocus(e.currentTarget.matches(":focus-visible"))}
       onBlur={() => setFocus(false)}
       style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--space-xs)",
         textAlign: "left",
         padding: "var(--space-sm)",
         background: hover ? "var(--surface-card-hover)" : "transparent",
         border: "none",
         borderRadius: "var(--radius)",
-        color: muted ? "var(--text-muted)" : "var(--text)",
+        color: "var(--text)",
         fontFamily: "var(--font-ui)",
         fontSize: "var(--font-body)",
+        fontWeight: selected
+          ? "var(--weight-semibold)"
+          : "var(--weight-regular)",
         lineHeight: "var(--line-body)",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
         cursor: "pointer",
         outline: "none",
         boxShadow: focusRing(focus),
       }}
     >
-      {name}
+      <span
+        style={{
+          flex: "1 1 auto",
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {name}
+      </span>
+      {isDefault && (
+        <span
+          style={{
+            flex: "0 0 auto",
+            fontSize: "var(--font-label)",
+            lineHeight: "var(--line-label)",
+            color: "var(--text-muted)",
+          }}
+        >
+          Default
+        </span>
+      )}
+      {selected && (
+        <Check
+          size={12}
+          strokeWidth={2}
+          aria-hidden="true"
+          style={{ color: "var(--accent)", flex: "0 0 auto" }}
+        />
+      )}
     </button>
   );
 }
 
-interface PlaybookPickerProps {
-  names: string[];
+interface PickerRow {
+  name: string;
+  reason?: string;
+}
+
+interface KickoffPlaybookPickerProps {
+  seedRows: PickerRow[];
+  restRows: PickerRow[];
+  invalidRows: InvalidPlaybook[];
   selected: string | null;
+  lastUsed: string | null;
   onSelect: (name: string) => void;
 }
 
-function PlaybookPicker({ names, selected, onSelect }: PlaybookPickerProps) {
+function KickoffPlaybookPicker({
+  seedRows,
+  restRows,
+  invalidRows,
+  selected,
+  lastUsed,
+  onSelect,
+}: KickoffPlaybookPickerProps) {
   const [open, setOpen] = useState(false);
   const [triggerFocus, setTriggerFocus] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -323,6 +435,8 @@ function PlaybookPicker({ names, selected, onSelect }: PlaybookPickerProps) {
     window.addEventListener("pointerdown", onPointerDown);
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [open]);
+
+  const validRows = [...seedRows, ...restRows];
 
   return (
     <div
@@ -369,15 +483,14 @@ function PlaybookPicker({ names, selected, onSelect }: PlaybookPickerProps) {
             fontFamily: "var(--font-ui)",
             fontSize: "var(--font-body)",
             lineHeight: "var(--line-body)",
-            color:
-              selected === PLAYBOOK_NONE ? "var(--text-muted)" : "var(--text)",
+            color: selected === null ? "var(--text-muted)" : "var(--text)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
             minWidth: 0,
           }}
         >
-          {selected}
+          {selected ?? "None selected"}
         </span>
         <ChevronDown
           size={12}
@@ -405,23 +518,34 @@ function PlaybookPicker({ names, selected, onSelect }: PlaybookPickerProps) {
             overflowY: "auto",
           }}
         >
-          {names.map((name, index) => (
-            <div key={name}>
-              <PlaybookRow
-                name={name}
-                muted={name === PLAYBOOK_NONE}
+          {validRows.map((row, index) => (
+            <div key={row.name}>
+              <KickoffPlaybookRow
+                name={row.name}
+                selected={row.name === selected}
+                isDefault={row.name === lastUsed}
                 onSelect={() => {
-                  onSelect(name);
+                  onSelect(row.name);
                   setOpen(false);
                 }}
               />
-              {index === 0 && names.length > 1 && (
+              {index === seedRows.length - 1 && restRows.length > 0 && (
                 <div
                   aria-hidden="true"
                   style={{ borderTop: "1px solid var(--border)" }}
                 />
               )}
             </div>
+          ))}
+          {invalidRows.map((row) => (
+            <KickoffPlaybookRow
+              key={row.name}
+              name={row.name}
+              selected={false}
+              isDefault={row.name === lastUsed}
+              reason={row.reason}
+              onSelect={() => {}}
+            />
           ))}
         </div>
       )}
@@ -589,7 +713,44 @@ function RepoRow({
   );
 }
 
-export function StartModal({ card, onClose }: StartModalProps) {
+interface EditInSettingsLinkProps {
+  onClick: () => void;
+}
+
+function EditInSettingsLink({ onClick }: EditInSettingsLinkProps) {
+  const [hover, setHover] = useState(false);
+  const [focus, setFocus] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onFocus={(e) => setFocus(e.currentTarget.matches(":focus-visible"))}
+      onBlur={() => setFocus(false)}
+      style={{
+        padding: 0,
+        background: "transparent",
+        border: "none",
+        color: hover || focus ? "var(--text)" : "var(--text-muted)",
+        fontFamily: "var(--font-ui)",
+        fontSize: "var(--font-label)",
+        lineHeight: "var(--line-label)",
+        cursor: "pointer",
+        outline: "none",
+        boxShadow: focusRing(focus),
+      }}
+    >
+      Edit in Settings
+    </button>
+  );
+}
+
+export function StartModal({
+  card,
+  onClose,
+  onEditPlaybooks,
+}: StartModalProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modalRef = useRef<ModalControl>(null);
   const [extraDirection, setExtraDirection] = useState(
@@ -602,7 +763,9 @@ export function StartModal({ card, onClose }: StartModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [focused, setFocused] = useState<"textarea" | null>(null);
 
-  const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
+  const [pickerValid, setPickerValid] = useState<Playbook[]>([]);
+  const [pickerInvalid, setPickerInvalid] = useState<InvalidPlaybook[]>([]);
+  const [lastUsedPlaybook, setLastUsedPlaybook] = useState<string | null>(null);
   const [selectedPlaybook, setSelectedPlaybook] = useState<string | null>(null);
 
   const [folders, setFolders] = useState<string[]>([]);
@@ -667,19 +830,32 @@ export function StartModal({ card, onClose }: StartModalProps) {
     let active = true;
     void (async () => {
       try {
-        const list = await getPlaybooks();
+        const { valid, invalid, lastUsed } = await getPickerPlaybooks();
         if (!active) return;
-        const sorted = [...list].sort((a, b) => a.name.localeCompare(b.name));
-        setPlaybooks(sorted);
-        const names = sorted.map((p) => p.name);
-        setSelectedPlaybook(
-          names.includes(PLAYBOOK_DEFAULT) ? PLAYBOOK_DEFAULT : PLAYBOOK_NONE,
-        );
+        setPickerValid(valid);
+        setPickerInvalid(invalid);
+        setLastUsedPlaybook(lastUsed);
+
+        const validNames = new Set(valid.map((p) => p.name));
+        const seedRows = orderSeedRows(valid);
+        const orderedNames = [
+          ...seedRows.map((p) => p.name),
+          ...valid.filter((p) => !seedRows.includes(p)).map((p) => p.name),
+        ];
+        if (lastUsed !== null && validNames.has(lastUsed)) {
+          setSelectedPlaybook(lastUsed);
+        } else if (validNames.has(WRITE_CODE_DIRECTLY_NAME)) {
+          setSelectedPlaybook(WRITE_CODE_DIRECTLY_NAME);
+        } else {
+          setSelectedPlaybook(orderedNames[0] ?? null);
+        }
       } catch (err) {
-        console.error("getPlaybooks failed", err);
+        console.error("getPickerPlaybooks failed", err);
         if (!active) return;
-        setPlaybooks([]);
-        setSelectedPlaybook(PLAYBOOK_NONE);
+        setPickerValid([]);
+        setPickerInvalid([]);
+        setLastUsedPlaybook(null);
+        setSelectedPlaybook(null);
       }
     })();
     return () => {
@@ -729,11 +905,9 @@ export function StartModal({ card, onClose }: StartModalProps) {
     [folders, selectedFolder, lastUsed, selectFolder],
   );
 
-  const playbookNames = [PLAYBOOK_NONE, ...playbooks.map((p) => p.name)];
-  const playbookArg =
-    selectedPlaybook && selectedPlaybook !== PLAYBOOK_NONE
-      ? selectedPlaybook
-      : undefined;
+  const seedRows = orderSeedRows(pickerValid);
+  const restRows = pickerValid.filter((p) => !seedRows.includes(p));
+  const playbookArg = selectedPlaybook ?? undefined;
 
   const selectPlaybook = useCallback((name: string) => {
     setSelectedPlaybook(name);
@@ -892,12 +1066,29 @@ export function StartModal({ card, onClose }: StartModalProps) {
           flex: "0 0 auto",
         }}
       >
-        <Field>Playbook</Field>
-        <PlaybookPicker
-          names={playbookNames}
-          selected={selectedPlaybook ?? PLAYBOOK_NONE}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <Field>Playbook</Field>
+          <EditInSettingsLink onClick={onEditPlaybooks} />
+        </div>
+        <KickoffPlaybookPicker
+          seedRows={seedRows}
+          restRows={restRows}
+          invalidRows={pickerInvalid}
+          selected={selectedPlaybook}
+          lastUsed={lastUsedPlaybook}
           onSelect={selectPlaybook}
         />
+        {seedRows.length === 0 && restRows.length === 0 && (
+          <Notice tone="muted" label="No playbooks available">
+            Starting without one. Manage playbooks in Settings ▸ Playbooks.
+          </Notice>
+        )}
       </div>
 
       <div

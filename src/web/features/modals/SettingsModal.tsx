@@ -22,7 +22,7 @@ import { Notice } from "../../primitives/Notice.js";
 import { MultiSelect } from "./MultiSelect.js";
 import { PlaybookEditorModal } from "./PlaybookEditorModal.js";
 
-type SettingsTab = "filters" | "playbooks";
+export type SettingsTab = "filters" | "playbooks";
 
 interface SettingsTabButtonProps {
   label: string;
@@ -240,9 +240,13 @@ type PreviewState =
 
 interface SettingsModalProps {
   onClose: () => void;
+  initialTab?: SettingsTab;
 }
 
-export function SettingsModal({ onClose }: SettingsModalProps) {
+export function SettingsModal({
+  onClose,
+  initialTab = "filters",
+}: SettingsModalProps) {
   const modalRef = useRef<ModalControl>(null);
   const firstTriggerRef = useRef<HTMLButtonElement>(null);
   const [draft, setDraft] = useState<SourceFilters | null>(null);
@@ -275,7 +279,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [saveError, setSaveError] = useState(false);
   const [loadError, setLoadError] = useState(false);
 
-  const [tab, setTab] = useState<SettingsTab>("filters");
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [playbooks, setPlaybooks] = useState<Playbook[] | null>(null);
   const [playbooksLoading, setPlaybooksLoading] = useState(false);
   const [playbooksLoadError, setPlaybooksLoadError] = useState(false);
