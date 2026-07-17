@@ -1,6 +1,7 @@
 import type {
   ActivityEvent,
   Column,
+  DirListing,
   DiscoveredRepo,
   FilterCapabilities,
   FilterOption,
@@ -223,6 +224,21 @@ export async function discoverFolder(
     throw new Error(`discoverFolder failed: ${res.status} ${res.statusText}`);
   }
   return (await res.json()) as { repos: DiscoveredRepo[] };
+}
+
+/**
+ * List the child directories of a folder for the folder-browser picker:
+ * GET /api/fs/dirs?path=. `path` is OPTIONAL (server defaults to `~`), unlike
+ * `discoverFolder`'s required param, so the query string is built conditionally.
+ * Resolves the parsed `DirListing` on 2xx; throws on non-2xx (mirrors discoverFolder).
+ */
+export async function browseDirectory(path?: string): Promise<DirListing> {
+  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  const res = await fetch(`/api/fs/dirs${query}`);
+  if (!res.ok) {
+    throw new Error(`browseDirectory failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as DirListing;
 }
 
 /**
