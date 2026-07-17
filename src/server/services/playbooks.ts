@@ -214,21 +214,59 @@ const SEED_PLAYBOOKS: { slug: string; content: string }[] = [
   { slug: "write-code-directly", content: WRITE_CODE_DIRECTLY_PLAYBOOK },
 ];
 
+const SEED_STATE_PATH = path.join(PLAYBOOKS_DIR, ".seeded.json");
+
 /**
- * Seed the four pipeline playbooks per-file: each of the four fixed slugs is written only if that
- * exact filename is still missing, never gated on the directory's existence as a whole (a machine
- * that already ran dispatch before this seeder shipped has a populated directory and would
- * otherwise never receive the new seeds). A user's own files (including the retired code.md/plan.md)
- * are never seeded, overwritten, or deleted here.
+ * Read the seeded-once tombstone record (a JSON string array of slugs) written by
+ * {@link seedPlaybooks}. A missing or corrupt file degrades to "nothing seeded yet" — the seeder
+ * then falls back to its per-file existence check, so the worst case is one extra seeding pass,
+ * never a throw at boot.
+ */
+async function readSeededSlugs(): Promise<Set<string>> {
+  try {
+    const parsed: unknown = JSON.parse(
+      await fsp.readFile(SEED_STATE_PATH, "utf8"),
+    );
+    if (Array.isArray(parsed)) {
+      return new Set(parsed.filter((s): s is string => typeof s === "string"));
+    }
+  } catch {
+    return new Set();
+  }
+  return new Set();
+}
+
+/**
+ * Seed the four pipeline playbooks per-slug, at most once per machine: a slug is written only when
+ * it is absent from BOTH the `.seeded.json` tombstone record and the directory itself, then recorded
+ * in `.seeded.json` (atomic write, 0600) so later boots never write it again. The tombstone — not a
+ * dir-level gate — is what lets a user's Settings ▸ Playbooks delete of a seed stay deleted across
+ * restarts while a NEW seed shipped to an old install still lands exactly once. Files already on
+ * disk before the tombstone existed are recorded without being touched; a user's own files
+ * (including the retired code.md/plan.md) are never seeded, overwritten, or deleted here.
  */
 export async function seedPlaybooks(): Promise<void> {
   await fsp.mkdir(PLAYBOOKS_DIR, { recursive: true, mode: 0o700 });
 
+  const seeded = await readSeededSlugs();
+  let changed = false;
   for (const seed of SEED_PLAYBOOKS) {
-    if (await slugExists(seed.slug)) continue;
-    await fsp.writeFile(
-      path.join(PLAYBOOKS_DIR, `${seed.slug}.md`),
-      seed.content,
+    if (seeded.has(seed.slug)) continue;
+    if (!(await slugExists(seed.slug))) {
+      await fsp.writeFile(
+        path.join(PLAYBOOKS_DIR, `${seed.slug}.md`),
+        seed.content,
+        { mode: 0o600 },
+      );
+    }
+    seeded.add(seed.slug);
+    changed = true;
+  }
+
+  if (changed) {
+    await writeFileAtomic(
+      SEED_STATE_PATH,
+      JSON.stringify([...seeded].sort(), null, 2) + "\n",
       { mode: 0o600 },
     );
   }
