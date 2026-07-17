@@ -95,7 +95,8 @@ export function CardView({
       <span
         style={{
           ...chipStyle,
-          background: "color-mix(in srgb, var(--destructive) 16%, var(--surface-card))",
+          background:
+            "color-mix(in srgb, var(--destructive) 16%, var(--surface-card))",
           color: "var(--destructive)",
         }}
       >
@@ -106,7 +107,8 @@ export function CardView({
       <span
         style={{
           ...chipStyle,
-          background: "color-mix(in srgb, var(--status-ok) 16%, var(--surface-card))",
+          background:
+            "color-mix(in srgb, var(--status-ok) 16%, var(--surface-card))",
           color: "var(--status-ok)",
         }}
       >
@@ -118,7 +120,7 @@ export function CardView({
   const hoverOrSelected = hover || selected;
   const border = needsAttention
     ? "1px solid var(--accent)"
-    : hoverOrSelected
+    : !elevated && hoverOrSelected
       ? "1px solid var(--text-muted)"
       : "1px solid var(--border)";
   const background = elevated
@@ -132,7 +134,8 @@ export function CardView({
   if (hover && !elevated && !selected && !needsAttention) {
     boxShadowParts.push("0 2px 8px rgba(0,0,0,0.3)");
   }
-  const boxShadow = boxShadowParts.length > 0 ? boxShadowParts.join(", ") : "none";
+  const boxShadow =
+    boxShadowParts.length > 0 ? boxShadowParts.join(", ") : "none";
 
   return (
     <div
@@ -143,7 +146,9 @@ export function CardView({
         background,
         border,
         borderRadius: "var(--radius)",
-        padding: compact ? "var(--space-xs)" : "var(--space-xs) var(--space-sm)",
+        padding: compact
+          ? "var(--space-xs)"
+          : "var(--space-xs) var(--space-sm)",
         cursor: "pointer",
         display: "flex",
         flexDirection: "column",
