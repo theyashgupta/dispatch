@@ -67,28 +67,52 @@ export function CardView({
     (card.sessionLost === true && card.column !== "done") ||
     (card.cleanupBlocked != null && card.cleanupBlocked.length > 0);
   const priorityDot = PRIORITY_DOT[card.priority];
-  const sessionGlyph =
+  const chipStyle: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "var(--space-xs)",
+    borderRadius: "var(--radius)",
+    padding: "0 var(--space-xs)",
+    fontSize: "var(--font-label)",
+    fontWeight: "var(--weight-semibold)",
+    lineHeight: "var(--line-label)",
+    whiteSpace: "nowrap",
+    flex: "0 0 auto",
+  };
+  const sessionChip =
     card.provisioningStep != null ? (
-      <RotateCw
-        size={12}
-        strokeWidth={2}
-        aria-hidden="true"
-        style={{ color: "var(--text-muted)", flex: "0 0 auto" }}
-      />
+      <span
+        style={{
+          ...chipStyle,
+          border: "1px solid var(--border)",
+          color: "var(--text-muted)",
+        }}
+      >
+        <RotateCw size={12} strokeWidth={2} aria-hidden="true" />
+        Provisioning
+      </span>
     ) : card.sessionLost === true ? (
-      <AlertTriangle
-        size={12}
-        strokeWidth={2}
-        aria-hidden="true"
-        style={{ color: "var(--destructive)", flex: "0 0 auto" }}
-      />
+      <span
+        style={{
+          ...chipStyle,
+          background: "color-mix(in srgb, var(--destructive) 16%, var(--surface-card))",
+          color: "var(--destructive)",
+        }}
+      >
+        <AlertTriangle size={12} strokeWidth={2} aria-hidden="true" />
+        Lost
+      </span>
     ) : card.tmuxSession != null ? (
-      <Activity
-        size={12}
-        strokeWidth={2}
-        aria-hidden="true"
-        style={{ color: "var(--status-ok)", flex: "0 0 auto" }}
-      />
+      <span
+        style={{
+          ...chipStyle,
+          background: "color-mix(in srgb, var(--status-ok) 16%, var(--surface-card))",
+          color: "var(--status-ok)",
+        }}
+      >
+        <Activity size={12} strokeWidth={2} aria-hidden="true" />
+        Live
+      </span>
     ) : null;
 
   const hoverOrSelected = hover || selected;
@@ -173,25 +197,6 @@ export function CardView({
             />
           )}
           <Field mono>{card.identifier}</Field>
-          {sessionGlyph}
-          <span
-            style={{
-              fontSize: "var(--font-label)",
-              lineHeight: "var(--line-label)",
-              color: "var(--text-muted)",
-            }}
-          >
-            ·
-          </span>
-          <span
-            style={{
-              fontSize: "var(--font-label)",
-              lineHeight: "var(--line-label)",
-              color: "var(--text-muted)",
-            }}
-          >
-            {formatAge(card.updatedAt, nowMs())}
-          </span>
         </div>
         <div
           style={{
@@ -221,6 +226,37 @@ export function CardView({
         }}
       >
         {card.title}
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--space-xs)",
+          flexWrap: "nowrap",
+        }}
+      >
+        {sessionChip}
+        {sessionChip != null && (
+          <span
+            style={{
+              fontSize: "var(--font-label)",
+              lineHeight: "var(--line-label)",
+              color: "var(--text-muted)",
+            }}
+          >
+            ·
+          </span>
+        )}
+        <span
+          style={{
+            fontSize: "var(--font-label)",
+            lineHeight: "var(--line-label)",
+            color: "var(--text-muted)",
+          }}
+        >
+          {formatAge(card.updatedAt, nowMs())}
+        </span>
       </div>
 
       {card.startError != null ? (
