@@ -223,7 +223,10 @@ export async function createPlaybook(
  * FIRST (atomically), and only deletes the OLD path once that succeeds — never `fs.rename`. Since
  * front-matter is regenerated from form fields on every save (not preserved raw), a crash between
  * a rename and a content rewrite would otherwise leave a file at the new path with stale content;
- * write-then-delete makes the old file the only thing ever missing, never wrong.
+ * write-then-delete makes the old file the only thing ever missing, never wrong. The old-path
+ * unlink tolerates ENOENT (mirrors {@link deletePlaybook}) since a concurrent delete or a retried
+ * rename can leave the old file already gone — the desired end state (new present, old gone) still
+ * holds, so that case must not surface as a write failure.
  */
 export async function updatePlaybook(
   slug: string,
@@ -253,7 +256,9 @@ export async function updatePlaybook(
   const newPath = path.join(PLAYBOOKS_DIR, `${newSlug}.md`);
   await writeFileAtomic(newPath, assembleContent(input), { mode: 0o600 });
   if (newSlug !== slug) {
-    await fsp.unlink(oldPath);
+    await fsp.unlink(oldPath).catch((err) => {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    });
   }
   return {
     ok: true,
