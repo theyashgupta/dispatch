@@ -1,6 +1,20 @@
-import { markerKey, parseLastMarker } from "../adapters/markers/parse.js";
+import {
+  markerKey,
+  parseLastMarker,
+  type Marker,
+} from "../adapters/markers/parse.js";
 import { store } from "../store/board.store.js";
 import { getHooksRuntime } from "./config-holder.js";
+
+/**
+ * Tool names whose `PreToolUse` fires the structural Needs-Input safety net (HOOK-03) and whose
+ * matching `PostToolUse` fires the symmetric flip-back — the same set both branches read, so the
+ * "enters on tool X" and "leaves on tool X" contracts can never drift apart. Live-verified
+ * (48-DIAGNOSIS.md) for `AskUserQuestion` only; `ExitPlanMode` is the same class of gap
+ * (RESEARCH.md) but was not exercised live in this phase's diagnosis, so it stays out until it is.
+ * @see docs/ARCHITECTURE.md#hooks-status-channel
+ */
+const PAUSE_TOOL_NAMES = new Set(["AskUserQuestion"]);
 
 /**
  * Per-card epoch ms of the last hook-driven activity stamp — the 2s throttle state. Channel
@@ -70,6 +84,31 @@ async function applyPromptSubmit(cardId: string): Promise<void> {
 }
 
 /**
+ * Map a PreToolUse event for a pause-class tool (HOOK-03) directly onto Needs Input: the tool
+ * call itself IS the signal, so no marker text is parsed — a `Marker`-shaped object is synthesized
+ * and routed through the SAME `markerKey()`/`applyMarker` path `applyStopEvent` uses, so the pane
+ * channel's dedup sees a hook-synthesized marker exactly as it would a parsed one and the two
+ * channels' key formats can never drift apart. `applyMarker`'s own guards (no-op on the To Do
+ * and Done columns, duplicate-key dedup) are the only column logic needed here.
+ * @see docs/ARCHITECTURE.md#hooks-status-channel
+ */
+async function applyPreToolUseEvent(
+  cardId: string,
+  toolName: string,
+): Promise<void> {
+  const marker: Marker = {
+    kind: "NEEDS_INPUT",
+    reason: `waiting on ${toolName}`,
+  };
+  await store.applyMarker(
+    cardId,
+    "needs_input",
+    marker.reason,
+    markerKey(marker),
+  );
+}
+
+/**
  * The single channel-policy entry point for every authenticated hook event, owning in order:
  * the pane-mode no-op guard (a straggler session injected before a config flip to `pane` must
  * mutate NOTHING — no latch, no stamp, no marker/flip; the route still authenticates), the
@@ -78,8 +117,10 @@ async function applyPromptSubmit(cardId: string): Promise<void> {
  * token-less card, so the race with a queued session-clearing mutation can never latch a dead
  * session), the activity stamp on PostToolUse/Stop only (the user's own typing is not agent
  * output, so UserPromptSubmit never stamps; PostToolUse is throttled, Stop is exempt — see
- * ACTIVITY_THROTTLE_MS), and the existing Stop/UserPromptSubmit board mapping. PostToolUse binds ONLY to
- * `hook_event_name` — `tool_*` payload keys are unstable across CLI releases and never read.
+ * ACTIVITY_THROTTLE_MS), and the Stop/UserPromptSubmit/PreToolUse/PostToolUse board mapping.
+ * `tool_name` (HOOK-03) is validated (string + exact membership in {@link PAUSE_TOOL_NAMES})
+ * before use, unlike the throttle's `hook_event_name`-only binding — an untrusted payload can
+ * never synthesize a marker or flip a card for a tool dispatch never registered a matcher for.
  * Unknown events end after the latch/stamp as no-ops.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
@@ -90,6 +131,7 @@ export async function applyHookEvent(
         hook_event_name?: unknown;
         last_assistant_message?: unknown;
         session_id?: unknown;
+        tool_name?: unknown;
       }
     | undefined,
 ): Promise<void> {
@@ -112,6 +154,11 @@ export async function applyHookEvent(
   }
 
   const event = body?.hook_event_name;
+  const toolName =
+    typeof body?.tool_name === "string" && PAUSE_TOOL_NAMES.has(body.tool_name)
+      ? body.tool_name
+      : undefined;
+
   if (event === "PostToolUse" || event === "Stop") {
     const now = Date.now();
     const last = lastActivityStampMs.get(cardId);
@@ -129,5 +176,11 @@ export async function applyHookEvent(
     await applyStopEvent(cardId, body.last_assistant_message);
   } else if (event === "UserPromptSubmit") {
     await applyPromptSubmit(cardId);
+  } else if (event === "PreToolUse" && toolName !== undefined) {
+    await applyPreToolUseEvent(cardId, toolName);
+  }
+
+  if (event === "PostToolUse" && toolName !== undefined) {
+    await store.flipBack(cardId);
   }
 }
