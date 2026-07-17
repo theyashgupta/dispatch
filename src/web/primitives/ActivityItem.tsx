@@ -47,6 +47,10 @@ const EVENT_TINT: Record<EventType, string> = {
   cleanup: "var(--text-muted)",
 };
 
+const GLYPH_LOOKUP: Partial<Record<string, LucideIcon>> = EVENT_GLYPH;
+
+const TINT_LOOKUP: Partial<Record<string, string>> = EVENT_TINT;
+
 interface ActivityItemProps {
   event: ActivityEvent;
   now: number;
@@ -67,7 +71,7 @@ export function ActivityItem({
   onSelect,
 }: ActivityItemProps) {
   const [hovered, setHovered] = useState(false);
-  const Icon = EVENT_GLYPH[event.type];
+  const Icon = GLYPH_LOOKUP[event.type] ?? CircleAlert;
   const interactive = onSelect != null && event.cardId != null;
   const label =
     event.cardId != null ? (identifiers?.[event.cardId] ?? event.cardId) : null;
@@ -98,7 +102,7 @@ export function ActivityItem({
         style={{
           flex: "0 0 auto",
           marginTop: "1px",
-          color: EVENT_TINT[event.type],
+          color: TINT_LOOKUP[event.type] ?? "var(--text-muted)",
         }}
       />
       <span style={textBlockStyle}>
