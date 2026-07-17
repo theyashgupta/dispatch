@@ -270,6 +270,23 @@ export interface Playbook {
   slug?: string;
 }
 
+/** A playbook file that failed to load, paired with a fixed-vocabulary reason safe to render client-side. */
+export interface InvalidPlaybook {
+  name: string;
+  reason: string;
+}
+
+/**
+ * Wire shape for `GET /playbooks/picker`: valid playbooks plus malformed ones (with a safe
+ * reason) so the StartModal picker can render both, and the currently remembered default so
+ * the picker can pre-select it without a second round-trip.
+ */
+export interface PlaybookPickerResponse {
+  valid: Playbook[];
+  invalid: InvalidPlaybook[];
+  lastUsed: string | null;
+}
+
 /**
  * Which channel drives card status: `hooks` (hook events only), `pane` (today's pane scraping
  * only), or `auto` (prefer hooks per session, fall back to pane scanning for hook-silent
@@ -335,6 +352,8 @@ export interface Config {
   sources?: { linear?: { apiKey: string; filters?: SourceFilters } };
   /** On-boot update check; absent or any non-`false` value resolves to on. */
   updateCheck?: boolean;
+  /** The playbook name remembered from the last successful kickoff; absent when never set. */
+  lastUsedPlaybook?: string;
 }
 
 /**

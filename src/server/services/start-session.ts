@@ -4,6 +4,7 @@ import { store } from "../store/board.store.js";
 import { hasSession } from "../adapters/tmux.js";
 import { registerHookToken } from "./hook-tokens.js";
 import { loadPlaybooks } from "./playbooks.js";
+import { updateLastUsedPlaybook } from "./config-holder.js";
 import {
   steps,
   StartStepError,
@@ -45,7 +46,10 @@ function toStartError(err: unknown, stepName: string): StartError {
  * already-running reattach branch re-registers the card's persisted hook token (mirroring
  * resume's reattach) so a live session adopted after a backend restart — e.g. an interrupted
  * saga plus Retry, which never reaches boot reconcile because only completeStart sets
- * `tmuxSession` — keeps its hook POSTs authenticating instead of silently 401ing forever.
+ * `tmuxSession` — keeps its hook POSTs authenticating instead of silently 401ing forever. An
+ * explicitly chosen `playbook` (not the intent fallback) is persisted as the picker's remembered
+ * default only after `completeStart` succeeds, matching the "saved on successful kickoff" contract
+ * — a failed start must never overwrite a working remembered default.
  * @see docs/ARCHITECTURE.md#orchestration-saga
  */
 export async function startSession(
@@ -132,6 +136,13 @@ export async function startSession(
       }
       if (ctx.warnings.length > 0) {
         await store.setStartWarning(cardId, ctx.warnings.join("; "));
+      }
+      if (opts?.playbook !== undefined) {
+        try {
+          updateLastUsedPlaybook(opts.playbook);
+        } catch (err) {
+          console.error("[start-session] updateLastUsedPlaybook failed:", err);
+        }
       }
     } catch (err) {
       if (currentStep) {

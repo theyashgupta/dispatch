@@ -6,6 +6,7 @@ import type {
   FilterCapabilities,
   FilterOption,
   Playbook,
+  PlaybookPickerResponse,
   PrerequisiteStatus,
   SourceFilters,
   UpdateRunResult,
@@ -120,6 +121,22 @@ export async function getPlaybooks(): Promise<Playbook[]> {
   }
   const body = (await res.json()) as { playbooks: Playbook[] };
   return body.playbooks;
+}
+
+/**
+ * The StartModal picker's data source: GET /api/playbooks/picker. Read fresh on every modal open
+ * so malformed rows and the remembered default always reflect the current on-disk state.
+ * Resolves the parsed `{valid, invalid, lastUsed}` shape on 2xx; throws on any non-2xx (mirrors
+ * getPlaybooks).
+ */
+export async function getPickerPlaybooks(): Promise<PlaybookPickerResponse> {
+  const res = await fetch("/api/playbooks/picker");
+  if (!res.ok) {
+    throw new Error(
+      `getPickerPlaybooks failed: ${res.status} ${res.statusText}`,
+    );
+  }
+  return (await res.json()) as PlaybookPickerResponse;
 }
 
 /** Discriminated result of a playbook create/update; carries the server's write-time rejection. */

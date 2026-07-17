@@ -64,6 +64,20 @@ function readUpdateCheck(parsed: Record<string, unknown>): boolean {
 }
 
 /**
+ * Read the remembered kickoff-picker default: a plain string preference, absent or any
+ * non-string value resolves to `undefined` (no `StartupError` — mirrors {@link readUpdateCheck},
+ * never a closed enum like `statusChannel`). A name that no longer resolves to a valid playbook
+ * is not caught here — the picker's fallback cascade handles that at read time.
+ */
+function readLastUsedPlaybook(
+  parsed: Record<string, unknown>,
+): string | undefined {
+  return typeof parsed.lastUsedPlaybook === "string"
+    ? parsed.lastUsedPlaybook
+    : undefined;
+}
+
+/**
  * Read a non-empty `sources.linear.apiKey` from a parsed config object, or "" when the nested shape is
  * absent or blank. Checked FIRST during load so an already-migrated file is detected before the flat
  * key, which is what keeps the boot migration idempotent — a second boot never re-wraps an existing
@@ -262,6 +276,7 @@ export function loadConfig(): Config {
     statusChannel: readStatusChannel(parsed),
     updateCheck: readUpdateCheck(parsed),
     sources: { linear: { apiKey: rawKey, filters: readNestedFilters(parsed) } },
+    lastUsedPlaybook: readLastUsedPlaybook(parsed),
   };
 
   const hasKey = config.linearApiKey.length > 0;

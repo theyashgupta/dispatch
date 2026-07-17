@@ -172,3 +172,41 @@ export function updateLinearApiKey(apiKey: string): void {
     }
   }
 }
+
+/**
+ * Persist the remembered kickoff-picker default to `~/.dispatch/config.json` and make it live
+ * immediately.
+ *
+ * @remarks Called only from `start-session.ts` after a start saga succeeds with an explicitly
+ * chosen, already-validated playbook name — never from the route layer, so an unvalidated
+ * client string can never reach disk. Simpler than {@link updateLinearApiKey}: `lastUsedPlaybook`
+ * is a flat top-level key with no nested object to preserve. Same atomic-write-at-0600 + in-memory
+ * mutation discipline as the other writers in this file.
+ */
+export function updateLastUsedPlaybook(name: string): void {
+  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
+  let parsed: Record<string, unknown>;
+  try {
+    const p = JSON.parse(raw) as unknown;
+    if (typeof p !== "object" || p === null || Array.isArray(p)) {
+      throw new Error("not an object");
+    }
+    parsed = p as Record<string, unknown>;
+  } catch (err) {
+    const pos = /position (\d+)/.exec((err as Error).message)?.[1];
+    throw new Error(
+      `config at ${CONFIG_PATH} is not valid JSON${pos ? ` (near position ${pos})` : ""}`,
+    );
+  }
+
+  const next = { ...parsed, lastUsedPlaybook: name };
+
+  writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
+    mode: 0o600,
+  });
+  fs.chmodSync(CONFIG_PATH, 0o600);
+
+  if (orchestrationConfig) {
+    orchestrationConfig.lastUsedPlaybook = name;
+  }
+}

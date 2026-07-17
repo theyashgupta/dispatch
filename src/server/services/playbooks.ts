@@ -2,7 +2,7 @@ import path from "node:path";
 import fsp from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import writeFileAtomic from "write-file-atomic";
-import type { Playbook } from "../../shared/types.js";
+import type { InvalidPlaybook, Playbook } from "../../shared/types.js";
 import { DISPATCH_DIR } from "./paths.js";
 
 const PLAYBOOKS_DIR = path.join(DISPATCH_DIR, "playbooks");
@@ -146,6 +146,65 @@ export async function loadPlaybooks(): Promise<Playbook[]> {
 
   playbooks.sort((a, b) => a.name.localeCompare(b.name));
   return playbooks;
+}
+
+/**
+ * Read every `*.md` playbook fresh from disk, returning valid entries alongside malformed ones
+ * — a sibling of {@link loadPlaybooks} that never silently skips, for the picker's greyed-out-row
+ * contract (KICK-04). `loadPlaybooks` itself is untouched: start-route validation, start-session,
+ * and the Settings list keep its clean `Playbook[]` contract.
+ *
+ * @remarks Reason strings are a fixed four-phrase vocabulary — "unreadable file", "missing
+ * front-matter", "empty body", "contains a reserved marker" — never raw fs/parser text or
+ * absolute paths (mirrors the route layer's generic-500 discipline; an fs error can embed a path,
+ * a parser error can embed file content). The display name falls back to the filename stem when
+ * front-matter didn't parse; once `name` is known, later checks (empty body, reserved marker) use
+ * the parsed name instead of the stem.
+ */
+export async function loadPlaybooksForPicker(): Promise<{
+  valid: Playbook[];
+  invalid: InvalidPlaybook[];
+}> {
+  let entries: Dirent[];
+  try {
+    entries = await fsp.readdir(PLAYBOOKS_DIR, { withFileTypes: true });
+  } catch {
+    return { valid: [], invalid: [] };
+  }
+
+  const valid: Playbook[] = [];
+  const invalid: InvalidPlaybook[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    const slug = entry.name.slice(0, -3);
+
+    let raw: string;
+    try {
+      raw = await fsp.readFile(path.join(PLAYBOOKS_DIR, entry.name), "utf8");
+    } catch {
+      invalid.push({ name: slug, reason: "unreadable file" });
+      continue;
+    }
+
+    const parsed = parseFrontMatter(raw);
+    if (parsed === null) {
+      invalid.push({ name: slug, reason: "missing front-matter" });
+      continue;
+    }
+    if (hasDispatchMarker(parsed.body)) {
+      invalid.push({ name: parsed.name, reason: "contains a reserved marker" });
+      continue;
+    }
+    if (parsed.body.trim() === "") {
+      invalid.push({ name: parsed.name, reason: "empty body" });
+      continue;
+    }
+    valid.push({ ...parsed, slug });
+  }
+
+  valid.sort((a, b) => a.name.localeCompare(b.name));
+  return { valid, invalid };
 }
 
 const SEED_PLAYBOOKS: { slug: string; content: string }[] = [

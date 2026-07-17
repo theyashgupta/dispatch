@@ -4,12 +4,14 @@ import {
   updatePlaybook,
   deletePlaybook,
   loadPlaybooks,
+  loadPlaybooksForPicker,
   type PlaybookWriteInput,
 } from "../services/playbooks.js";
 import {
   generatePlaybookDraft,
   SourceUnreadableError,
 } from "../services/playbook-generate.js";
+import { getOrchestrationConfig } from "../services/config-holder.js";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 const MAX_NAME_LEN = 80;
@@ -24,13 +26,27 @@ const MAX_SOURCE_PATHS = 8;
  * service layer, never accepted raw from a client as a filesystem path. Every mutating handler
  * re-validates its own body independently of any client-side check (the route is loopback-gated,
  * not trust-gated — any local process can POST arbitrary JSON) and maps every unexpected throw to
- * a generic 500 with no stack/path/fs-error text.
+ * a generic 500 with no stack/path/fs-error text. `GET /playbooks/picker` is the one read route
+ * with no client input reaching any path operation, so it maps unexpected throws to the same
+ * generic-500 discipline without needing per-field validation first — it is the StartModal
+ * picker's data source: valid playbooks alongside malformed ones (with a safe reason) plus the
+ * remembered default.
  */
 export const playbooksRouter = Router();
 
 playbooksRouter.get("/playbooks", async (_req, res) => {
   const playbooks = await loadPlaybooks();
   res.status(200).json({ playbooks });
+});
+
+playbooksRouter.get("/playbooks/picker", async (_req, res) => {
+  try {
+    const { valid, invalid } = await loadPlaybooksForPicker();
+    const lastUsed = getOrchestrationConfig()?.lastUsedPlaybook ?? null;
+    res.status(200).json({ valid, invalid, lastUsed });
+  } catch {
+    res.status(500).json({ error: "playbook-picker-failed" });
+  }
 });
 
 /** Shape and length-check a POST/PUT playbook body; returns the validated input or the 400 error key. */
