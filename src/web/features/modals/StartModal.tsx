@@ -653,8 +653,9 @@ export function StartModal({
         const initial = lu && fs.includes(lu) ? lu : (fs[0] ?? null);
         setSelectedFolder(initial);
         if (initial) {
+          const gen = ++selectGenRef.current;
           const { repos: rs } = await discoverFolder(initial);
-          if (!active) return;
+          if (!active || selectGenRef.current !== gen) return;
           applyRepos(rs);
         }
       } catch (err) {
@@ -696,12 +697,15 @@ export function StartModal({
 
   const addFolder = useCallback(
     async (path: string): Promise<string | null> => {
+      const gen = ++selectGenRef.current;
       try {
         const result = await addWorkspaceFolder(path);
         if (!result.ok) return result.error;
         setFolders((prev) => (prev.includes(path) ? prev : [...prev, path]));
-        setSelectedFolder(path);
-        applyRepos(result.repos);
+        if (selectGenRef.current === gen) {
+          setSelectedFolder(path);
+          applyRepos(result.repos);
+        }
         return null;
       } catch (err) {
         console.error("addWorkspaceFolder failed", err);
