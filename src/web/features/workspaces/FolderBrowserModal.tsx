@@ -161,6 +161,7 @@ export function FolderBrowserModal({
   const [highlighted, setHighlighted] = useState(-1);
   const [showHidden, setShowHidden] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [fetchFailed, setFetchFailed] = useState(false);
   const [listFocus, setListFocus] = useState(false);
   const genRef = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -186,6 +187,8 @@ export function FolderBrowserModal({
           } catch {}
         }
         setListing(home);
+      } catch {
+        if (genRef.current === myGen) setFetchFailed(true);
       } finally {
         if (genRef.current === myGen) setLoading(false);
       }
@@ -201,8 +204,10 @@ export function FolderBrowserModal({
         if (genRef.current !== myGen) return;
         setListing(result);
         setHighlighted(-1);
+        setFetchFailed(false);
         writeLastDir(result.path);
       } catch {
+        if (genRef.current === myGen) setFetchFailed(true);
       } finally {
         if (genRef.current === myGen) setLoading(false);
       }
@@ -238,6 +243,7 @@ export function FolderBrowserModal({
     <Modal
       ariaLabel="Browse folders"
       title={listing ? basename(listing.path) : "Browse folders"}
+      initialFocusRef={listRef}
       onClose={onClose}
       dialogStyle={{ width: "560px", maxHeight: "70vh" }}
       footer={
@@ -383,15 +389,23 @@ export function FolderBrowserModal({
           }}
         >
           {loading && <span style={mutedRowStyle}>Loading…</span>}
-          {!loading && listing?.readable === false && (
+          {!loading && fetchFailed && (
+            <Notice
+              tone="destructive"
+              label="Couldn't reach the server. Try again."
+            />
+          )}
+          {!loading && !fetchFailed && listing?.readable === false && (
             <Notice tone="destructive" label="Can't read this folder" />
           )}
           {!loading &&
+            !fetchFailed &&
             listing?.readable !== false &&
             filteredEntries.length === 0 && (
               <span style={mutedRowStyle}>No subfolders here.</span>
             )}
           {!loading &&
+            !fetchFailed &&
             listing?.readable !== false &&
             filteredEntries.map((entry, index) => (
               <div
