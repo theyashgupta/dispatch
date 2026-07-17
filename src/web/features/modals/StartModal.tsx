@@ -622,14 +622,18 @@ export function StartModal({
     setError(null);
   }, []);
 
+  const selectGenRef = useRef(0);
   const selectFolder = useCallback(
     async (path: string) => {
+      const gen = ++selectGenRef.current;
       setSelectedFolder(path);
       setRepos(null);
       try {
         const { repos: rs } = await discoverFolder(path);
+        if (selectGenRef.current !== gen) return;
         applyRepos(rs);
       } catch (err) {
+        if (selectGenRef.current !== gen) return;
         console.error("discoverFolder failed", err);
         applyRepos([]);
       }
