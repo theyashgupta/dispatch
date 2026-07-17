@@ -10,11 +10,11 @@ import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { Notice } from "../../primitives/Notice.js";
 
-const PRIORITY_STRIPE: Record<number, string> = {
-  1: "var(--prio-urgent)",
-  2: "var(--prio-high)",
-  3: "var(--prio-medium)",
-  4: "var(--prio-low)",
+const PRIORITY_DOT: Record<number, { color: string; label: string }> = {
+  1: { color: "var(--prio-urgent)", label: "Urgent priority" },
+  2: { color: "var(--prio-high)", label: "High priority" },
+  3: { color: "var(--prio-medium)", label: "Medium priority" },
+  4: { color: "var(--prio-low)", label: "Low priority" },
 };
 
 interface CardViewProps {
@@ -62,7 +62,11 @@ export function CardView({
   const { resuming, resumeFailed, watchdogFired, failureCopy, onResume } =
     useResumeFeedback(card);
   const compact = card.column === "done";
-  const stripe = PRIORITY_STRIPE[card.priority];
+  const needsAttention =
+    card.startError != null ||
+    (card.sessionLost === true && card.column !== "done") ||
+    (card.cleanupBlocked != null && card.cleanupBlocked.length > 0);
+  const priorityDot = PRIORITY_DOT[card.priority];
   const sessionGlyph =
     card.provisioningStep != null ? (
       <RotateCw
@@ -87,29 +91,41 @@ export function CardView({
       />
     ) : null;
 
+  const hoverOrSelected = hover || selected;
+  const border = needsAttention
+    ? "1px solid var(--accent)"
+    : hoverOrSelected
+      ? "1px solid var(--text-muted)"
+      : "1px solid var(--border)";
+  const background = elevated
+    ? "var(--surface-card)"
+    : hoverOrSelected
+      ? "var(--surface-card-hover)"
+      : "var(--surface-card)";
+  const boxShadowParts: string[] = [];
+  if (needsAttention) boxShadowParts.push("0 0 0 1px var(--accent)");
+  if (elevated) boxShadowParts.push("0 6px 16px rgba(0,0,0,0.45)");
+  if (hover && !elevated && !selected && !needsAttention) {
+    boxShadowParts.push("0 2px 8px rgba(0,0,0,0.3)");
+  }
+  const boxShadow = boxShadowParts.length > 0 ? boxShadowParts.join(", ") : "none";
+
   return (
     <div
       ref={rootRef}
       {...domProps}
       style={{
         position: "relative",
-        background: hover ? "var(--surface-card-hover)" : "var(--surface-card)",
-        border: "1px solid var(--border)",
-        borderLeft: stripe
-          ? `var(--stripe-width) solid ${stripe}`
-          : "1px solid var(--border)",
+        background,
+        border,
         borderRadius: "var(--radius)",
-        padding: compact ? "var(--space-xs)" : "var(--space-sm)",
+        padding: compact ? "var(--space-xs)" : "var(--space-xs) var(--space-sm)",
         cursor: "pointer",
         display: "flex",
         flexDirection: "column",
         gap: "var(--space-xs)",
         opacity: dimmed ? 0.4 : 1,
-        boxShadow: elevated
-          ? "0 0 0 1px var(--accent), 0 6px 16px rgba(0,0,0,0.45)"
-          : selected
-            ? "0 0 0 1px var(--accent)"
-            : "none",
+        boxShadow,
         touchAction: "manipulation",
       }}
     >
@@ -144,6 +160,18 @@ export function CardView({
             minWidth: 0,
           }}
         >
+          {priorityDot && (
+            <span
+              title={priorityDot.label}
+              style={{
+                width: "6px",
+                height: "6px",
+                borderRadius: "50%",
+                background: priorityDot.color,
+                flex: "0 0 auto",
+              }}
+            />
+          )}
           <Field mono>{card.identifier}</Field>
           {sessionGlyph}
           <span
@@ -165,7 +193,15 @@ export function CardView({
             {formatAge(card.updatedAt, nowMs())}
           </span>
         </div>
-        <div style={{ display: "flex", gap: "var(--space-xs)" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--space-xs)",
+            flexWrap: "wrap",
+            justifyContent: "flex-end",
+          }}
+        >
           <SourceBadge source={card.source ?? "linear"} />
           {card.planReady && <PlanReadyBadge />}
           {showGone && <GoneBadge />}
@@ -175,7 +211,7 @@ export function CardView({
       <div
         style={{
           fontSize: "var(--font-body)",
-          fontWeight: "var(--weight-regular)",
+          fontWeight: "var(--weight-semibold)",
           lineHeight: "var(--line-body)",
           color: "var(--text)",
           display: "-webkit-box",
