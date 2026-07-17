@@ -6,10 +6,16 @@ import {
   loadPlaybooks,
   type PlaybookWriteInput,
 } from "../services/playbooks.js";
+import {
+  generatePlaybookDraft,
+  SourceUnreadableError,
+} from "../services/playbook-generate.js";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 const MAX_NAME_LEN = 80;
 const MAX_BODY_BYTES = 262144;
+const MAX_DIRECTION_LEN = 10000;
+const MAX_SOURCE_PATHS = 8;
 
 /**
  * Playbook CRUD + read routes, mounted behind the shared `apiRouter` loopback gate (never a
@@ -141,5 +147,42 @@ playbooksRouter.delete("/playbooks/:slug", async (req, res) => {
     res.status(200).json({ ok: true });
   } catch {
     res.status(500).json({ error: "playbook-write-failed" });
+  }
+});
+
+playbooksRouter.post("/playbooks/generate", async (req, res) => {
+  const b = req.body as
+    { direction?: unknown; sourcePaths?: unknown } | undefined;
+
+  const rawDirection = b?.direction;
+  const direction = typeof rawDirection === "string" ? rawDirection.trim() : "";
+  if (direction === "" || direction.length > MAX_DIRECTION_LEN) {
+    res.status(400).json({ error: "invalid-direction" });
+    return;
+  }
+
+  const rawSourcePaths = b?.sourcePaths;
+  let sourcePaths: string[] = [];
+  if (rawSourcePaths !== undefined) {
+    if (
+      !Array.isArray(rawSourcePaths) ||
+      rawSourcePaths.length > MAX_SOURCE_PATHS ||
+      !rawSourcePaths.every((p) => typeof p === "string")
+    ) {
+      res.status(400).json({ error: "invalid-sources" });
+      return;
+    }
+    sourcePaths = rawSourcePaths;
+  }
+
+  try {
+    const draft = await generatePlaybookDraft({ direction, sourcePaths });
+    res.status(200).json({ draft });
+  } catch (err) {
+    if (err instanceof SourceUnreadableError) {
+      res.status(400).json({ error: "source-unreadable" });
+      return;
+    }
+    res.status(502).json({ error: "generate-failed" });
   }
 });
