@@ -3,6 +3,7 @@ import path from "node:path";
 import { run } from "../adapters/exec.js";
 import { resolveBinaryPath } from "../adapters/resolve-binary.js";
 import { DISPATCH_DIR } from "./paths.js";
+import { isWithinHome } from "./workspaces.js";
 
 const MAX_FILE_BYTES = 100 * 1024;
 const MAX_TOTAL_BYTES = 256 * 1024;
@@ -105,7 +106,10 @@ ${sources}`;
  * entirely (verified live on claude 2.1.212) rather than needing `preSeedTrust` plumbing. `cwd` is
  * `DISPATCH_DIR` (an app-owned 0o700 directory) purely as a conservative default; with zero tools the
  * cwd itself grants the subprocess no filesystem reach. The prompt is the ONLY request-derived argv
- * element — every flag is a fixed literal.
+ * element — every flag is a fixed literal. Every `sourcePath` is confined to the home subtree via
+ * {@link isWithinHome} (same realpath+case-fold recipe as `browseDirectory`) before it is ever
+ * stat'd, so this is the one content-reading route and the one place that boundary must hold even
+ * though every other filesystem reach in the app already goes through the confined folder browser.
  */
 export async function generatePlaybookDraft(input: {
   direction: string;
@@ -114,6 +118,10 @@ export async function generatePlaybookDraft(input: {
   const state: IngestState = { total: 0, blocks: [] };
 
   for (const sourcePath of input.sourcePaths) {
+    const absPath = path.resolve(sourcePath);
+    if (!(await isWithinHome(absPath))) {
+      throw new SourceUnreadableError("source unreadable");
+    }
     let stat;
     try {
       stat = await fsp.stat(sourcePath);

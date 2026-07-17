@@ -123,7 +123,7 @@ export async function restatRepos(
  * default case-insensitive APFS volume, so a bare case-sensitive compare would spuriously reject a
  * legitimate in-home path whose casing drifted from the on-disk original.
  */
-async function isWithinHome(absPath: string): Promise<boolean> {
+export async function isWithinHome(absPath: string): Promise<boolean> {
   const home = os.homedir();
   const [realTarget, realHome] = await Promise.all([
     fsp.realpath(absPath).catch(() => absPath),
