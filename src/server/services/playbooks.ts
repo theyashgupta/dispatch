@@ -199,9 +199,7 @@ export async function createPlaybook(
   await fsp.mkdir(PLAYBOOKS_DIR, { recursive: true, mode: 0o700 });
 
   const existing = await loadPlaybooks();
-  if (
-    existing.some((p) => p.name.toLowerCase() === input.name.toLowerCase())
-  ) {
+  if (existing.some((p) => p.name.toLowerCase() === input.name.toLowerCase())) {
     return { ok: false, error: "name-exists" };
   }
   if (hasDispatchMarker(input.body)) {
@@ -245,8 +243,7 @@ export async function updatePlaybook(
 
   const existing = await loadPlaybooks();
   const collision = existing.some(
-    (p) =>
-      p.slug !== slug && p.name.toLowerCase() === input.name.toLowerCase(),
+    (p) => p.slug !== slug && p.name.toLowerCase() === input.name.toLowerCase(),
   );
   if (collision) {
     return { ok: false, error: "name-exists" };

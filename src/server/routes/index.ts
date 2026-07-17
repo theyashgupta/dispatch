@@ -8,6 +8,7 @@ import { hooksRouter } from "./hooks.route.js";
 import { setupRouter } from "./setup.route.js";
 import { updateRouter } from "./update.route.js";
 import { imagesRouter } from "./images.route.js";
+import { playbooksRouter } from "./playbooks.route.js";
 
 export const apiRouter = Router();
 
@@ -27,3 +28,4 @@ apiRouter.use(hooksRouter);
 apiRouter.use(setupRouter);
 apiRouter.use(updateRouter);
 apiRouter.use(imagesRouter);
+apiRouter.use(playbooksRouter);

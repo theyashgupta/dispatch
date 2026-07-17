@@ -18,7 +18,6 @@ import {
   discoverRepos,
   browseDirectory,
 } from "../services/workspaces.js";
-import { loadPlaybooks } from "../services/playbooks.js";
 
 export const boardRouter = Router();
 
@@ -60,21 +59,6 @@ boardRouter.post("/workspace-folders", async (req, res) => {
 
   await store.addWorkspaceFolder(abs);
   res.status(200).json({ repos });
-});
-
-boardRouter.get("/playbooks", async (req, res) => {
-  const rawStage = req.query.stage;
-  const stage =
-    rawStage === "planning" || rawStage === "implementation"
-      ? rawStage
-      : undefined;
-  if (rawStage !== undefined && stage === undefined) {
-    res.status(400).json({ error: "Invalid stage" });
-    return;
-  }
-
-  const playbooks = await loadPlaybooks(stage);
-  res.status(200).json({ playbooks });
 });
 
 boardRouter.get("/workspace-folders/discover", async (req, res) => {
