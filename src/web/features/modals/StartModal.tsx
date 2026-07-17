@@ -29,12 +29,35 @@ interface StartModalProps {
   onClose: () => void;
 }
 
-const PLAYBOOK_DEFAULT = "Default";
+const PLAYBOOK_NONE = "None";
 
 const PLAYBOOK_STAGE_DEFAULT: Record<"planning" | "implementation", string> = {
   planning: "Plan",
   implementation: "Code",
 };
+
+function playbookLastUsedKey(stage: "planning" | "implementation"): string {
+  return `dispatch:playbook-last-used:${stage}`;
+}
+
+function readLastUsedPlaybook(
+  stage: "planning" | "implementation",
+): string | null {
+  try {
+    return localStorage.getItem(playbookLastUsedKey(stage));
+  } catch {
+    return null;
+  }
+}
+
+function writeLastUsedPlaybook(
+  stage: "planning" | "implementation",
+  name: string,
+): void {
+  try {
+    localStorage.setItem(playbookLastUsedKey(stage), name);
+  } catch {}
+}
 
 const focusRing = (on: boolean): string =>
   on ? "0 0 0 2px var(--accent)" : "none";
@@ -274,10 +297,11 @@ function FolderPicker({
 
 interface PlaybookRowProps {
   name: string;
+  muted?: boolean;
   onSelect: () => void;
 }
 
-function PlaybookRow({ name, onSelect }: PlaybookRowProps) {
+function PlaybookRow({ name, muted, onSelect }: PlaybookRowProps) {
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
   return (
@@ -294,7 +318,7 @@ function PlaybookRow({ name, onSelect }: PlaybookRowProps) {
         background: hover ? "var(--surface-card-hover)" : "transparent",
         border: "none",
         borderRadius: "var(--radius)",
-        color: "var(--text)",
+        color: muted ? "var(--text-muted)" : "var(--text)",
         fontFamily: "var(--font-ui)",
         fontSize: "var(--font-body)",
         lineHeight: "var(--line-body)",
@@ -376,6 +400,7 @@ function PlaybookPicker({ names, selected, onSelect }: PlaybookPickerProps) {
             fontFamily: "var(--font-ui)",
             fontSize: "var(--font-body)",
             lineHeight: "var(--line-body)",
+            color: selected === PLAYBOOK_NONE ? "var(--text-muted)" : "var(--text)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -410,15 +435,23 @@ function PlaybookPicker({ names, selected, onSelect }: PlaybookPickerProps) {
             overflowY: "auto",
           }}
         >
-          {names.map((name) => (
-            <PlaybookRow
-              key={name}
-              name={name}
-              onSelect={() => {
-                onSelect(name);
-                setOpen(false);
-              }}
-            />
+          {names.map((name, index) => (
+            <div key={name}>
+              <PlaybookRow
+                name={name}
+                muted={name === PLAYBOOK_NONE}
+                onSelect={() => {
+                  onSelect(name);
+                  setOpen(false);
+                }}
+              />
+              {index === 0 && names.length > 1 && (
+                <div
+                  aria-hidden="true"
+                  style={{ borderTop: "1px solid var(--border)" }}
+                />
+              )}
+            </div>
           ))}
         </div>
       )}
@@ -675,19 +708,24 @@ export function StartModal({
         if (!active) return;
         const sorted = [...list].sort((a, b) => a.name.localeCompare(b.name));
         setPlaybooks(sorted);
-        if (sorted.length === 0) {
-          setSelectedPlaybook(PLAYBOOK_DEFAULT);
+        const names = sorted.map((p) => p.name);
+        const stored = readLastUsedPlaybook(stage);
+        if (
+          stored !== null &&
+          (stored === PLAYBOOK_NONE || names.includes(stored))
+        ) {
+          setSelectedPlaybook(stored);
           return;
         }
-        const preferred = sorted.find(
-          (p) => p.name === PLAYBOOK_STAGE_DEFAULT[stage],
+        const seededDefault = PLAYBOOK_STAGE_DEFAULT[stage];
+        setSelectedPlaybook(
+          names.includes(seededDefault) ? seededDefault : PLAYBOOK_NONE,
         );
-        setSelectedPlaybook((preferred ?? sorted[0]).name);
       } catch (err) {
         console.error("getPlaybooks failed", err);
         if (!active) return;
         setPlaybooks([]);
-        setSelectedPlaybook(PLAYBOOK_DEFAULT);
+        setSelectedPlaybook(PLAYBOOK_NONE);
       }
     })();
     return () => {
@@ -737,12 +775,19 @@ export function StartModal({
     [folders, selectedFolder, lastUsed, selectFolder],
   );
 
-  const playbookNames =
-    playbooks.length > 0 ? playbooks.map((p) => p.name) : [PLAYBOOK_DEFAULT];
+  const playbookNames = [PLAYBOOK_NONE, ...playbooks.map((p) => p.name)];
   const playbookArg =
-    selectedPlaybook && selectedPlaybook !== PLAYBOOK_DEFAULT
+    selectedPlaybook && selectedPlaybook !== PLAYBOOK_NONE
       ? selectedPlaybook
       : undefined;
+
+  const selectPlaybook = useCallback(
+    (name: string) => {
+      writeLastUsedPlaybook(stage, name);
+      setSelectedPlaybook(name);
+    },
+    [stage],
+  );
 
   const checkedCount = (repos ?? []).filter((r) => checked[r.path]).length;
   const startDisabled =
@@ -911,8 +956,8 @@ export function StartModal({
         <Field>Playbook</Field>
         <PlaybookPicker
           names={playbookNames}
-          selected={selectedPlaybook ?? PLAYBOOK_STAGE_DEFAULT[stage]}
-          onSelect={setSelectedPlaybook}
+          selected={selectedPlaybook ?? PLAYBOOK_NONE}
+          onSelect={selectPlaybook}
         />
       </div>
 
