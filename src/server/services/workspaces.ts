@@ -2,7 +2,11 @@ import os from "node:os";
 import path from "node:path";
 import fsp from "node:fs/promises";
 import type { Dirent } from "node:fs";
-import type { DiscoveredRepo } from "../../shared/types.js";
+import type {
+  DirEntry,
+  DirListing,
+  DiscoveredRepo,
+} from "../../shared/types.js";
 import { originHeadRef, branchExists, currentBranch } from "../adapters/git.js";
 
 /**
@@ -109,4 +113,82 @@ export async function restatRepos(
     if (!(await hasGitEntry(repo.path))) return false;
   }
   return true;
+}
+
+/**
+ * True when `absPath` resolves inside the user's home directory subtree. Resolves symlinks on BOTH
+ * sides (mirrors git.ts's worktreeRegistered realpath-both-sides comparison) before comparing, so a
+ * symlink inside `~` pointing outside it can never pass. Case-folds both sides with `.toLowerCase()`:
+ * empirically verified this session that `fsp.realpath` does NOT normalize casing on this machine's
+ * default case-insensitive APFS volume, so a bare case-sensitive compare would spuriously reject a
+ * legitimate in-home path whose casing drifted from the on-disk original.
+ */
+async function isWithinHome(absPath: string): Promise<boolean> {
+  const home = os.homedir();
+  const [realTarget, realHome] = await Promise.all([
+    fsp.realpath(absPath).catch(() => absPath),
+    fsp.realpath(home).catch(() => home),
+  ]);
+  const targetFold = realTarget.toLowerCase();
+  const homeFold = realHome.toLowerCase();
+  return targetFold === homeFold || targetFold.startsWith(homeFold + path.sep);
+}
+
+/**
+ * List the immediate child directories of `rawPath` (default `~`) for the folder-browser picker.
+ * Rejects any resolved target outside the home subtree (symlinks resolved first, defense-in-depth —
+ * the UI never constructs an out-of-bound request) rather than silently clamping to home. The
+ * returned `path`/`parent`/entry paths are all the CANONICAL (realpath'd) form, so every path the
+ * client echoes back into a later request stays canonical and in-bound. EACCES/ENOENT on the target
+ * itself yields `{ readable: false, entries: [] }` (still `ok: true`) rather than throwing, matching
+ * discoverRepos' registered-but-deleted-folder tolerance. Symlinked directories are deliberately
+ * excluded from `entries` (isDirectory() is false for a symlink Dirent) so every listed entry is
+ * itself a real, already-in-bound path — no separate per-entry bound check is needed.
+ */
+export async function browseDirectory(
+  rawPath: string | undefined,
+): Promise<{ ok: true; listing: DirListing } | { ok: false }> {
+  const target =
+    rawPath !== undefined && rawPath.trim() !== ""
+      ? expandPath(rawPath)
+      : os.homedir();
+
+  const [canonicalPath, canonicalHome] = await Promise.all([
+    fsp.realpath(target).catch(() => target),
+    fsp.realpath(os.homedir()).catch(() => os.homedir()),
+  ]);
+
+  if (!(await isWithinHome(canonicalPath))) {
+    return { ok: false };
+  }
+
+  const foldedPath = canonicalPath.toLowerCase();
+  const foldedHome = canonicalHome.toLowerCase();
+  const parent = foldedPath === foldedHome ? null : path.dirname(canonicalPath);
+
+  let children: Dirent[];
+  try {
+    children = await fsp.readdir(canonicalPath, { withFileTypes: true });
+  } catch {
+    return {
+      ok: true,
+      listing: { path: canonicalPath, parent, entries: [], readable: false },
+    };
+  }
+
+  const dirs = children.filter((d) => d.isDirectory());
+  const entries: DirEntry[] = await Promise.all(
+    dirs.map(async (d) => ({
+      name: d.name,
+      path: path.join(canonicalPath, d.name),
+      hasGit: await hasGitEntry(path.join(canonicalPath, d.name)),
+      hidden: d.name.startsWith("."),
+    })),
+  );
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+
+  return {
+    ok: true,
+    listing: { path: canonicalPath, parent, entries, readable: true },
+  };
 }

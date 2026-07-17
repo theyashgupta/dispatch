@@ -16,6 +16,7 @@ import {
   expandPath,
   validateFolder,
   discoverRepos,
+  browseDirectory,
 } from "../services/workspaces.js";
 import { loadPlaybooks } from "../services/playbooks.js";
 
@@ -85,6 +86,20 @@ boardRouter.get("/workspace-folders/discover", async (req, res) => {
 
   const repos = await discoverRepos(expandPath(rawPath));
   res.status(200).json({ repos });
+});
+
+boardRouter.get("/fs/dirs", async (req, res) => {
+  const rawPath = req.query.path;
+  if (rawPath !== undefined && typeof rawPath !== "string") {
+    res.status(400).json({ error: "invalid path" });
+    return;
+  }
+  const result = await browseDirectory(rawPath);
+  if (!result.ok) {
+    res.status(400).json({ error: "Outside allowed directory" });
+    return;
+  }
+  res.status(200).json(result.listing);
 });
 
 boardRouter.delete("/workspace-folders", async (req, res) => {

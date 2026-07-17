@@ -265,6 +265,25 @@ export interface DiscoveredRepo {
 }
 
 /**
+ * A directory entry surfaced by the folder-browser API: absolute path, display
+ * name, whether it carries a `.git` marker, and whether its name is a dotfolder.
+ */
+export interface DirEntry {
+  name: string;
+  path: string;
+  hasGit: boolean;
+  hidden: boolean;
+}
+
+/** The shape GET /api/fs/dirs returns: the resolved current dir, its parent (null at home), and its child dirs. */
+export interface DirListing {
+  path: string;
+  parent: string | null;
+  entries: DirEntry[];
+  readable: boolean;
+}
+
+/**
  * A methodology playbook surfaced by the loader/picker: its display `name`, the `stage` it applies
  * to, and its markdown `body` spliced into the kickoff. Selected by `name`, never a client path.
  */
