@@ -178,9 +178,11 @@ export function FolderBrowserModal({
           try {
             const atRemembered = await browseDirectory(remembered);
             if (genRef.current !== myGen) return;
-            setListing(atRemembered);
-            writeLastDir(atRemembered.path);
-            return;
+            if (atRemembered.readable) {
+              setListing(atRemembered);
+              writeLastDir(atRemembered.path);
+              return;
+            }
           } catch {}
         }
         setListing(home);
