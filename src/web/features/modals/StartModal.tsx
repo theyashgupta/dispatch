@@ -400,7 +400,8 @@ function PlaybookPicker({ names, selected, onSelect }: PlaybookPickerProps) {
             fontFamily: "var(--font-ui)",
             fontSize: "var(--font-body)",
             lineHeight: "var(--line-body)",
-            color: selected === PLAYBOOK_NONE ? "var(--text-muted)" : "var(--text)",
+            color:
+              selected === PLAYBOOK_NONE ? "var(--text-muted)" : "var(--text)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",

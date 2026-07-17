@@ -1,20 +1,235 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import type {
   FilterCapabilities,
   FilterOption,
+  Playbook,
   SourceFilters,
 } from "../../../shared/types.js";
 import {
+  deletePlaybook,
   getLinearFilters,
   getLinearOptions,
+  getPlaybooks,
   previewLinearFilters,
   saveLinearFilters,
 } from "../../lib/api.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
+import { IconButton } from "../../primitives/IconButton.js";
 import { Modal, type ModalControl } from "../../primitives/Modal.js";
 import { Notice } from "../../primitives/Notice.js";
 import { MultiSelect } from "./MultiSelect.js";
+import { PlaybookEditorModal } from "./PlaybookEditorModal.js";
+
+type SettingsTab = "filters" | "playbooks";
+
+const STAGE_LABEL: Record<"planning" | "implementation", string> = {
+  planning: "Planning",
+  implementation: "Implementation",
+};
+
+const STAGE_COLOR_VAR: Record<"planning" | "implementation", string> = {
+  planning: "--col-in-planning",
+  implementation: "--col-in-progress",
+};
+
+interface SettingsTabButtonProps {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}
+
+function SettingsTabButton({ label, active, onClick }: SettingsTabButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "0 0 var(--space-sm)",
+        background: "transparent",
+        border: "none",
+        borderBottom: active
+          ? "2px solid var(--accent)"
+          : "2px solid transparent",
+        color: active ? "var(--text)" : "var(--text-muted)",
+        fontFamily: "var(--font-ui)",
+        fontSize: "var(--font-label)",
+        fontWeight: "var(--weight-semibold)",
+        lineHeight: "var(--line-label)",
+        cursor: "pointer",
+        outline: "none",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+interface PlaybookListRowProps {
+  playbook: Playbook;
+  onEdit: () => void;
+  onDelete: () => void;
+}
+
+function PlaybookListRow({ playbook, onEdit, onDelete }: PlaybookListRowProps) {
+  const [hover, setHover] = useState(false);
+  const stageVar = STAGE_COLOR_VAR[playbook.stage];
+  return (
+    <div
+      onClick={onEdit}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--space-sm)",
+        padding: "var(--space-sm)",
+        borderRadius: "var(--radius)",
+        background: hover ? "var(--surface-card-hover)" : "transparent",
+        cursor: "pointer",
+      }}
+    >
+      <span
+        style={{
+          flex: "1 1 auto",
+          minWidth: 0,
+          fontFamily: "var(--font-mono)",
+          fontSize: "var(--font-label)",
+          fontWeight: "var(--weight-semibold)",
+          lineHeight: "var(--line-label)",
+          color: "var(--text)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {playbook.name}
+      </span>
+      <span
+        style={{
+          flex: "0 0 auto",
+          fontSize: "var(--font-label)",
+          fontWeight: "var(--weight-semibold)",
+          lineHeight: "var(--line-label)",
+          color: `var(${stageVar})`,
+          background: `color-mix(in srgb, var(${stageVar}) 16%, var(--surface-card))`,
+          borderRadius: "var(--radius)",
+          padding: "0 var(--space-xs)",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {STAGE_LABEL[playbook.stage]}
+      </span>
+      <IconButton
+        aria-label={`Edit ${playbook.name}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onEdit();
+        }}
+      >
+        <Pencil size={14} strokeWidth={2} aria-hidden="true" />
+      </IconButton>
+      <IconButton
+        aria-label={`Delete ${playbook.name}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+      >
+        <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+      </IconButton>
+    </div>
+  );
+}
+
+interface PlaybookDeleteConfirmProps {
+  playbook: Playbook;
+  onClose: () => void;
+  onDeleted: () => void;
+}
+
+function PlaybookDeleteConfirm({
+  playbook,
+  onClose,
+  onDeleted,
+}: PlaybookDeleteConfirmProps) {
+  const modalRef = useRef<ModalControl>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState(false);
+
+  async function handleDelete() {
+    if (pending || playbook.slug === undefined) return;
+    setPending(true);
+    setError(false);
+    try {
+      const result = await deletePlaybook(playbook.slug);
+      if (result.ok) {
+        onDeleted();
+        return;
+      }
+      setError(true);
+    } catch (err) {
+      console.error("deletePlaybook failed", err);
+      setError(true);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Modal
+      ariaLabel={`Delete ${playbook.name}`}
+      title={playbook.name}
+      onClose={onClose}
+      controlRef={modalRef}
+      initialFocusRef={keepRef}
+      footer={
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: "var(--space-sm)",
+            flex: "0 0 auto",
+          }}
+        >
+          <Button
+            ref={keepRef}
+            variant="secondary"
+            onClick={() => modalRef.current?.requestClose()}
+          >
+            Keep playbook
+          </Button>
+          <Button
+            variant="danger"
+            disabled={pending}
+            onClick={() => void handleDelete()}
+          >
+            Delete playbook
+          </Button>
+        </div>
+      }
+    >
+      <div
+        style={{
+          fontFamily: "var(--font-ui)",
+          fontSize: "var(--font-body)",
+          lineHeight: "var(--line-body)",
+          color: "var(--text)",
+        }}
+      >
+        Delete this playbook? This can't be undone.
+      </div>
+      {error && (
+        <Notice
+          tone="destructive"
+          label="Couldn't delete playbook — try again."
+        />
+      )}
+    </Modal>
+  );
+}
 
 type MultiDim = "assignees" | "projects" | "teams";
 
@@ -85,6 +300,37 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [loadError, setLoadError] = useState(false);
+
+  const [tab, setTab] = useState<SettingsTab>("filters");
+  const [playbooks, setPlaybooks] = useState<Playbook[] | null>(null);
+  const [playbooksLoading, setPlaybooksLoading] = useState(false);
+  const [playbooksLoadError, setPlaybooksLoadError] = useState(false);
+  const [playbooksVisited, setPlaybooksVisited] = useState(false);
+  const [editorState, setEditorState] = useState<{
+    mode: "create" | "edit";
+    playbook?: Playbook;
+  } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Playbook | null>(null);
+
+  const loadPlaybooksList = useCallback(async () => {
+    setPlaybooksLoading(true);
+    setPlaybooksLoadError(false);
+    try {
+      const list = await getPlaybooks();
+      setPlaybooks([...list].sort((a, b) => a.name.localeCompare(b.name)));
+    } catch (err) {
+      console.error("getPlaybooks failed", err);
+      setPlaybooksLoadError(true);
+    } finally {
+      setPlaybooksLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab !== "playbooks" || playbooksVisited) return;
+    setPlaybooksVisited(true);
+    void loadPlaybooksList();
+  }, [tab, playbooksVisited, loadPlaybooksList]);
 
   useEffect(() => {
     let active = true;
@@ -174,31 +420,57 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
   return (
     <Modal
-      ariaLabel="Sync filters"
-      title="Sync filters"
+      ariaLabel="Settings"
+      title="Settings"
       onClose={onClose}
       controlRef={modalRef}
       initialFocusRef={firstTriggerRef}
-      dialogStyle={{ maxHeight: "80vh" }}
+      dialogStyle={
+        tab === "playbooks"
+          ? { width: "560px", maxHeight: "80vh" }
+          : { maxHeight: "80vh" }
+      }
       footer={
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            flex: "0 0 auto",
-          }}
-        >
-          <Button
-            variant="primary"
-            onClick={handleSave}
-            disabled={saving || !draft}
+        tab === "filters" ? (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              flex: "0 0 auto",
+            }}
           >
-            Save Filters
-          </Button>
-        </div>
+            <Button
+              variant="primary"
+              onClick={handleSave}
+              disabled={saving || !draft}
+            >
+              Save Filters
+            </Button>
+          </div>
+        ) : null
       }
     >
-      {loadError && (
+      <div
+        style={{
+          display: "flex",
+          gap: "var(--space-lg)",
+          borderBottom: "1px solid var(--border)",
+          flex: "0 0 auto",
+        }}
+      >
+        <SettingsTabButton
+          label="Sync filters"
+          active={tab === "filters"}
+          onClick={() => setTab("filters")}
+        />
+        <SettingsTabButton
+          label="Playbooks"
+          active={tab === "playbooks"}
+          onClick={() => setTab("playbooks")}
+        />
+      </div>
+
+      {tab === "filters" && loadError && (
         <span
           style={{
             fontFamily: "var(--font-ui)",
@@ -210,7 +482,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           Couldn't load filters — reopen settings to retry.
         </span>
       )}
-      {capabilities && draft && (
+      {tab === "filters" && capabilities && draft && (
         <div
           style={{
             display: "flex",
@@ -356,6 +628,101 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             />
           )}
         </div>
+      )}
+
+      {tab === "playbooks" && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-lg)",
+            flex: "1 1 auto",
+            minHeight: 0,
+            overflowY: "auto",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Button
+              variant="primary"
+              onClick={() => setEditorState({ mode: "create" })}
+            >
+              <Plus size={14} strokeWidth={2} aria-hidden="true" />
+              New playbook
+            </Button>
+          </div>
+
+          {playbooksLoading && (
+            <span
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: "var(--font-label)",
+                fontWeight: "var(--weight-semibold)",
+                lineHeight: "var(--line-label)",
+                color: "var(--text-muted)",
+              }}
+            >
+              Loading…
+            </span>
+          )}
+
+          {!playbooksLoading && playbooksLoadError && (
+            <Notice
+              tone="destructive"
+              label="Couldn't load playbooks — reopen settings to retry."
+            />
+          )}
+
+          {!playbooksLoading &&
+            !playbooksLoadError &&
+            playbooks !== null &&
+            playbooks.length === 0 && (
+              <Notice tone="muted" label="No playbooks yet">
+                Create one, or generate a draft with AI.
+              </Notice>
+            )}
+
+          {!playbooksLoading &&
+            !playbooksLoadError &&
+            playbooks !== null &&
+            playbooks.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {playbooks.map((p) => (
+                  <PlaybookListRow
+                    key={p.slug ?? p.name}
+                    playbook={p}
+                    onEdit={() => setEditorState({ mode: "edit", playbook: p })}
+                    onDelete={() => setDeleteTarget(p)}
+                  />
+                ))}
+              </div>
+            )}
+        </div>
+      )}
+
+      {editorState && (
+        <PlaybookEditorModal
+          mode={editorState.mode}
+          playbook={editorState.playbook}
+          existingNames={(playbooks ?? [])
+            .filter((p) => p.slug !== editorState.playbook?.slug)
+            .map((p) => p.name)}
+          onSaved={() => {
+            setEditorState(null);
+            void loadPlaybooksList();
+          }}
+          onClose={() => setEditorState(null)}
+        />
+      )}
+
+      {deleteTarget && (
+        <PlaybookDeleteConfirm
+          playbook={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            setDeleteTarget(null);
+            void loadPlaybooksList();
+          }}
+        />
       )}
     </Modal>
   );

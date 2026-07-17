@@ -110,20 +110,98 @@ export async function fetchEvents(
 }
 
 /**
- * List the playbooks for a methodology stage: GET /api/playbooks?stage=.
- * Read fresh on every start-modal open so the picker reflects the on-disk
- * markdown without a cache. Resolves the parsed `playbooks` array on 2xx; throws
- * on any non-2xx so the modal can surface a load failure (mirrors getWorkspaceFolders).
+ * List playbooks: GET /api/playbooks (+ optional `?stage=`). Read fresh on every call so the
+ * picker/list reflects the on-disk markdown without a cache. `stage` filters for the kickoff
+ * picker; omitted entirely for the Settings list, which manages every stage in one place.
+ * Resolves the parsed `playbooks` array on 2xx; throws on any non-2xx so the caller can surface
+ * a load failure (mirrors getWorkspaceFolders).
  */
 export async function getPlaybooks(
-  stage: "planning" | "implementation",
+  stage?: "planning" | "implementation",
 ): Promise<Playbook[]> {
-  const res = await fetch(`/api/playbooks?stage=${encodeURIComponent(stage)}`);
+  const query =
+    stage !== undefined ? `?stage=${encodeURIComponent(stage)}` : "";
+  const res = await fetch(`/api/playbooks${query}`);
   if (!res.ok) {
     throw new Error(`getPlaybooks failed: ${res.status} ${res.statusText}`);
   }
   const body = (await res.json()) as { playbooks: Playbook[] };
   return body.playbooks;
+}
+
+/** Discriminated result of a playbook create/update; carries the server's write-time rejection. */
+export type PlaybookWriteResult =
+  | { ok: true; playbook: Playbook }
+  | { ok: false; error: "name-exists" | "footgun" | "generic" };
+
+/** Shared shape submitted by both create and update — the server re-validates every field. */
+export interface PlaybookWriteInput {
+  name: string;
+  stage: "planning" | "implementation";
+  body: string;
+}
+
+/**
+ * Create a playbook: POST /api/playbooks. Distinguishes the two write-time rejections the editor
+ * renders inline (`name-exists` from a 409, `footgun` from a 400 `{error:"footgun"}` body) from
+ * every other failure, which collapses to `generic` so the editor shows one honest fallback
+ * Notice. Resolves `{ok:true, playbook}` on 200.
+ */
+export async function createPlaybook(
+  input: PlaybookWriteInput,
+): Promise<PlaybookWriteResult> {
+  const res = await fetch("/api/playbooks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.ok) {
+    const body = (await res.json()) as { playbook: Playbook };
+    return { ok: true, playbook: body.playbook };
+  }
+  if (res.status === 409) {
+    return { ok: false, error: "name-exists" };
+  }
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  return { ok: false, error: body.error === "footgun" ? "footgun" : "generic" };
+}
+
+/**
+ * Rename/edit a playbook: PUT /api/playbooks/:slug. Same discrimination as createPlaybook
+ * (`name-exists`/`footgun`/`generic`); a 404 (playbook deleted out from under the open editor)
+ * also collapses to `generic` since the editor has one shared failure Notice for anything beyond
+ * the two named-rejection cases.
+ */
+export async function updatePlaybook(
+  slug: string,
+  input: PlaybookWriteInput,
+): Promise<PlaybookWriteResult> {
+  const res = await fetch(`/api/playbooks/${encodeURIComponent(slug)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.ok) {
+    const body = (await res.json()) as { playbook: Playbook };
+    return { ok: true, playbook: body.playbook };
+  }
+  if (res.status === 409) {
+    return { ok: false, error: "name-exists" };
+  }
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  return { ok: false, error: body.error === "footgun" ? "footgun" : "generic" };
+}
+
+/**
+ * Delete a playbook: DELETE /api/playbooks/:slug. The confirm modal only needs a bare success/fail
+ * signal (a 404 reads the same as any other failure — "couldn't delete, try again"), so this
+ * resolves a plain `{ok}` rather than a full discriminated union.
+ */
+export async function deletePlaybook(slug: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`/api/playbooks/${encodeURIComponent(slug)}`, {
+    method: "DELETE",
+  });
+  return { ok: res.ok };
 }
 
 /**
