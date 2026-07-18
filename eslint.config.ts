@@ -9,6 +9,39 @@ import prettier from "eslint-config-prettier";
 import commentsJsdocOnly from "./eslint-local/comments-jsdoc-only.js";
 
 /**
+ * Shared element descriptors for both boundary blocks below (backend
+ * element-types + frontend dependencies) so a file classifies identically
+ * under either rule. First-match-wins: the four frontend sub-elements
+ * (primitives/hooks/lib/feature) are listed BEFORE the general `web` catch-all
+ * — same precedent as `adapters-subprocess` before `adapters` — so files under
+ * those subtrees classify as their sub-element instead of falling through to
+ * `web`. `web` remains the catch-all for App.tsx/main.tsx/styles.
+ */
+const boundaryElements = [
+  { type: "bootstrap", pattern: "src/server/bootstrap" },
+  { type: "routes", pattern: "src/server/routes" },
+  { type: "services", pattern: "src/server/services" },
+  {
+    type: "adapters-subprocess",
+    pattern: "src/server/adapters/{exec,git,tmux}.ts",
+    mode: "file",
+  },
+  { type: "adapters", pattern: "src/server/adapters" },
+  { type: "sources", pattern: "src/server/sources" },
+  { type: "store", pattern: "src/server/store" },
+  { type: "shared", pattern: "src/shared" },
+  { type: "primitives", pattern: "src/web/primitives" },
+  { type: "hooks", pattern: "src/web/hooks" },
+  { type: "lib", pattern: "src/web/lib" },
+  {
+    type: "feature",
+    pattern: "src/web/features/*",
+    capture: ["feature"],
+  },
+  { type: "web", pattern: "src/web" },
+];
+
+/**
  * Boundaries mapped to the SETTLED src/ tree (Phase 11 final). The layer graph
  * follows backend-design.md's producer DAG: shared is the sink everyone may
  * import; store depends only on shared; adapters (markers/watcher, poller,
@@ -26,27 +59,19 @@ import commentsJsdocOnly from "./eslint-local/comments-jsdoc-only.js";
  * import is a lint error. The one former consumer (the /terminal pre-spawn
  * `hasSession` liveness probe) now goes through the byte-equivalent
  * services/session-status.ts passthrough.
+ *
+ * The `from`/`allow`/`disallow` lists below name the four new frontend
+ * sub-elements alongside `web` so this error-level rule stays green now that
+ * those sub-elements exist (AUDIT-02) — the fine-grained frontend import
+ * direction is enforced separately, at warn, by `feWebBoundariesConfig` below;
+ * Phase 56 owns flipping that block to error.
  */
 const boundariesConfig = {
   files: ["src/**/*.{ts,tsx}"],
   plugins: { boundaries },
   settings: {
     "import/resolver": { typescript: {} },
-    "boundaries/elements": [
-      { type: "bootstrap", pattern: "src/server/bootstrap" },
-      { type: "routes", pattern: "src/server/routes" },
-      { type: "services", pattern: "src/server/services" },
-      {
-        type: "adapters-subprocess",
-        pattern: "src/server/adapters/{exec,git,tmux}.ts",
-        mode: "file",
-      },
-      { type: "adapters", pattern: "src/server/adapters" },
-      { type: "sources", pattern: "src/server/sources" },
-      { type: "store", pattern: "src/server/store" },
-      { type: "shared", pattern: "src/shared" },
-      { type: "web", pattern: "src/web" },
-    ],
+    "boundaries/elements": boundaryElements,
   },
   rules: {
     "boundaries/element-types": [
@@ -65,7 +90,7 @@ const boundariesConfig = {
               "store",
               "shared",
             ],
-            disallow: ["web"],
+            disallow: ["web", "primitives", "hooks", "lib", "feature"],
             message: "Backend must not import frontend code.",
           },
           {
@@ -113,7 +138,99 @@ const boundariesConfig = {
           { from: "sources", allow: ["sources", "shared"] },
           { from: "store", allow: ["store", "shared"] },
           { from: "shared", allow: ["shared"] },
-          { from: "web", allow: ["web", "shared"] },
+          {
+            from: ["web", "primitives", "hooks", "lib", "feature"],
+            allow: ["web", "primitives", "hooks", "lib", "feature", "shared"],
+          },
+        ],
+      },
+    ],
+  },
+};
+
+/**
+ * AUDIT-02 report-only baseline: frontend import-direction + feature
+ * entry-point rules at warn severity, mirroring folder-structure.md's
+ * `primitives -> hooks/lib -> features -> App` direction and the
+ * single-feature-barrel discipline. `default: "allow"` is deliberate — the
+ * frontend's edges were never enumerated before this phase, so only the
+ * explicit `disallow` policies below produce warnings (an unenumerated
+ * `disallow`-by-default would flag the entire tree). Stays warn until Phase
+ * 56 flips it to error once the Phase 55 restructure gives every feature an
+ * index.ts barrel to import through. Uses `policies` (not the deprecated
+ * `rules` alias) and `{{ }}` Handlebars capture templates — the plugin's
+ * current, non-deprecated syntax.
+ */
+const feWebBoundariesConfig = {
+  files: ["src/web/**/*.{ts,tsx}"],
+  plugins: { boundaries },
+  settings: {
+    "import/resolver": { typescript: {} },
+    "boundaries/elements": boundaryElements,
+  },
+  rules: {
+    "boundaries/dependencies": [
+      "warn",
+      {
+        default: "allow",
+        policies: [
+          {
+            from: { element: { type: "feature" } },
+            disallow: {
+              element: {
+                type: "feature",
+                captured: { feature: "!{{from.captured.feature}}" },
+                fileInternalPath: "!index.ts",
+              },
+            },
+            message:
+              "Cross-feature import must go through the feature's index.ts barrel (docs/standards/folder-structure.md).",
+          },
+          {
+            from: { element: { type: "web" } },
+            disallow: {
+              element: { type: "feature", fileInternalPath: "!index.ts" },
+            },
+            message:
+              "App composes features through their index.ts barrel (docs/standards/folder-structure.md).",
+          },
+          {
+            from: { element: { type: "primitives" } },
+            disallow: {
+              element: { type: ["hooks", "lib", "feature", "web"] },
+            },
+            message:
+              "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
+          },
+          {
+            from: { element: { type: "hooks" } },
+            disallow: { element: { type: ["feature", "web"] } },
+            message:
+              "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
+          },
+          {
+            from: { element: { type: "lib" } },
+            disallow: {
+              element: { type: ["primitives", "hooks", "feature", "web"] },
+            },
+            message:
+              "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
+          },
+          {
+            from: { element: { type: "feature" } },
+            allow: {
+              element: {
+                type: "feature",
+                captured: { feature: "{{from.captured.feature}}" },
+              },
+            },
+          },
+          {
+            from: { element: { type: "feature" } },
+            allow: {
+              element: { type: "feature", captured: { feature: "badges" } },
+            },
+          },
         ],
       },
     ],
@@ -224,6 +341,7 @@ export default tseslint.config(
   },
 
   boundariesConfig,
+  feWebBoundariesConfig,
 
   {
     files: ["src/**/*.{ts,tsx}"],
