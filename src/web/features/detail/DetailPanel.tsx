@@ -5,6 +5,11 @@ import type {
 } from "../../../shared/types.js";
 import { ensureTerminal } from "../../lib/api.js";
 import { stampLastOpened } from "../../hooks/useUnseenActivity.js";
+import {
+  clearPanelWidth,
+  setPanelWidth,
+  usePanelWidth,
+} from "../../hooks/usePanelWidth.js";
 import { CardTimeline } from "./CardTimeline.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { ReferenceBlocks } from "./ReferenceBlocks.js";
@@ -34,6 +39,70 @@ export function DetailPanel({
 
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+
+  const persistedWidth = usePanelWidth();
+  const asideRef = useRef<HTMLElement | null>(null);
+  const cleanupDragRef = useRef<(() => void) | null>(null);
+  const [hoveringHandle, setHoveringHandle] = useState(false);
+  const [resizing, setResizing] = useState(false);
+
+  useEffect(() => {
+    return () => cleanupDragRef.current?.();
+  }, []);
+
+  function handleResizePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const node = asideRef.current;
+    if (node == null) return;
+    const startX = e.clientX;
+    const startWidth = node.getBoundingClientRect().width;
+    const maxPx = window.innerWidth * 0.9;
+    setResizing(true);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    function handlePointerMove(ev: PointerEvent) {
+      const next = Math.min(
+        maxPx,
+        Math.max(360, startWidth + (startX - ev.clientX)),
+      );
+      node!.style.width = `${next}px`;
+    }
+
+    function handlePointerUp(ev: PointerEvent) {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      cleanupDragRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setResizing(false);
+      const finalWidth = Math.min(
+        maxPx,
+        Math.max(360, startWidth + (startX - ev.clientX)),
+      );
+      node!.style.width = "";
+      setPanelWidth(finalWidth);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    cleanupDragRef.current = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }
+
+  function handleResizeDoubleClick(e: React.MouseEvent<HTMLDivElement>) {
+    e.stopPropagation();
+    const node = asideRef.current;
+    if (node != null) {
+      node.style.width = "";
+    }
+    clearPanelWidth();
+  }
 
   const [prevCardId, setPrevCardId] = useState<string | null>(card?.id ?? null);
   if ((card?.id ?? null) !== prevCardId) {
@@ -132,6 +201,7 @@ export function DetailPanel({
 
       <aside
         aria-label="Ticket detail"
+        ref={asideRef}
         style={{
           position: "fixed",
           top: docked ? "var(--chrome-top, var(--strip-height))" : 0,
@@ -144,7 +214,9 @@ export function DetailPanel({
             ? "calc(100% - var(--orca-nav-width))"
             : fullscreen
               ? "100vw"
-              : "var(--panel-width)",
+              : persistedWidth != null
+                ? `clamp(360px, ${persistedWidth}px, 90vw)`
+                : "var(--panel-width)",
           maxWidth: "100vw",
           background: "var(--surface-column)",
           borderLeft: docked || fullscreen ? "none" : "1px solid var(--border)",
@@ -159,6 +231,30 @@ export function DetailPanel({
           zIndex: 11,
         }}
       >
+        {!docked && (
+          <div
+            onPointerDown={handleResizePointerDown}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={handleResizeDoubleClick}
+            onPointerEnter={() => setHoveringHandle(true)}
+            onPointerLeave={() => setHoveringHandle(false)}
+            aria-label="Resize panel"
+            style={{
+              position: "absolute",
+              left: 0,
+              top: 0,
+              width: "8px",
+              height: "100%",
+              cursor: "col-resize",
+              zIndex: 3,
+              background: "transparent",
+              borderLeft:
+                hoveringHandle || resizing
+                  ? "2px solid var(--accent)"
+                  : "2px solid transparent",
+            }}
+          />
+        )}
         {docked && c == null ? (
           <div
             style={{
