@@ -92,10 +92,12 @@ export function DetailPanel({
     function handlePointerUp(ev: PointerEvent) {
       teardown();
       setResizing(false);
-      const finalWidth = Math.min(
-        maxPx,
-        Math.max(360, startWidth + (startX - ev.clientX)),
-      );
+      const delta = startX - ev.clientX;
+      if (Math.abs(delta) <= 3) {
+        node!.style.width = preDragStyleWidth;
+        return;
+      }
+      const finalWidth = Math.min(maxPx, Math.max(360, startWidth + delta));
       node!.style.width = fullscreen
         ? "100vw"
         : `clamp(360px, ${finalWidth}px, 90vw)`;
