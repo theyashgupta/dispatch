@@ -108,6 +108,10 @@ export function DetailPanel({
     setDetailsExpanded(false);
   }
 
+  if (docked && fullscreen) {
+    setFullscreen(false);
+  }
+
   return (
     <>
       {!docked && (
