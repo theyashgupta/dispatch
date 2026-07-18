@@ -170,7 +170,7 @@ export function SyncStrip({
           </IconButton>
           {inboxCount != null && inboxCount > 0 && (
             <span
-              aria-label={`${inboxCount} tickets in inbox`}
+              aria-label={`${inboxCount} ticket${inboxCount === 1 ? "" : "s"} in inbox`}
               style={{
                 position: "absolute",
                 top: "2px",
