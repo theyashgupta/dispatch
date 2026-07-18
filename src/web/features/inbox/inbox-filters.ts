@@ -23,10 +23,14 @@ export function matchesSearch(card: Card, query: string): boolean {
 /**
  * A To Do card is demote-eligible only when it has never carried a live session — checked via
  * existing fields so no new field is needed, and a card that was ever started (even later dragged
- * back to To Do) never re-offers Move to Inbox.
+ * back to To Do) never re-offers Move to Inbox. `branch` is the check that makes that claim hold
+ * through Done-cleanup: finishCleanup clears the three session fields but deliberately KEEPS
+ * `branch` (assigned only when a session attaches, never cleared anywhere in the store), so a
+ * cleaned-up card dragged back to To Do stays ineligible.
  */
 export function isDemoteEligible(card: Card): boolean {
   return (
+    card.branch == null &&
     card.tmuxSession == null &&
     card.claudeSessionId == null &&
     card.workspacePath == null
