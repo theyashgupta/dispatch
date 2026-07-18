@@ -38,6 +38,8 @@ export function OrcaSection({
           justifyContent: "space-between",
           padding: "0 var(--space-lg)",
           border: "none",
+          color: "var(--text-muted)",
+          font: "inherit",
           cursor: "pointer",
         }}
       >
