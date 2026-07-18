@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { Card as CardModel, Column } from "../../../shared/types.js";
-import { COLUMN_ACCENT, COLUMN_LABELS } from "../board/Column.js";
+import { COLUMN_ACCENT, COLUMN_LABELS } from "../board/index.js";
 import { OrcaNavRow } from "./OrcaNavRow.js";
 
 interface OrcaSectionProps {

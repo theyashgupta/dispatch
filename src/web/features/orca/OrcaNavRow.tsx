@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { isUnseen, useLastOpened } from "../../hooks/useUnseenActivity.js";
 import { Field } from "../../primitives/Field.js";
-import { COLUMN_ACCENT } from "../board/Column.js";
+import { COLUMN_ACCENT } from "../board/index.js";
 
 interface OrcaNavRowProps {
   card: CardModel;

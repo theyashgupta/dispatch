@@ -5,7 +5,7 @@ import { formatAge, nowMs } from "../../lib/format-age.js";
 import { useMediaQuery } from "../../hooks/useMediaQuery.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
-import { PRIORITY_DOT } from "../board/CardView.js";
+import { PRIORITY_DOT } from "../board/index.js";
 
 interface InboxRowProps {
   card: CardModel;
