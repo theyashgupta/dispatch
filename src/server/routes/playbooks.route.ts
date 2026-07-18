@@ -6,7 +6,7 @@ import {
   loadPlaybooks,
   loadPlaybooksForPicker,
   type PlaybookWriteInput,
-} from "../services/playbooks.js";
+} from "../services/domain/playbooks.js";
 import {
   generatePlaybookDraft,
   SourceUnreadableError,

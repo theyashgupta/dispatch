@@ -1,7 +1,7 @@
 import { store } from "../store/board.store.js";
 import { listSessions } from "../adapters/tmux.js";
 import { killDspTtydOrphans } from "../adapters/ttyd.js";
-import { registerHookToken } from "../services/hook-tokens.js";
+import { registerHookToken } from "../services/domain/hook-tokens.js";
 
 /**
  * Reconcile persisted card state against live tmux reality once at boot: mark cards whose session

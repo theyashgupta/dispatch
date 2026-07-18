@@ -8,7 +8,7 @@ import {
   worktreePrune,
   worktreeStatus,
 } from "../adapters/git.js";
-import { worktreePath as buildWorktreePath } from "./workspace-paths.js";
+import { worktreePath as buildWorktreePath } from "./domain/workspace-paths.js";
 
 /**
  * Tear down a Done card's workspace: kill ttyd + the tmux session, remove each repo's worktree, and

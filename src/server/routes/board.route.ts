@@ -17,7 +17,7 @@ import {
   validateFolder,
   discoverRepos,
   browseDirectory,
-} from "../services/workspaces.js";
+} from "../services/domain/workspaces.js";
 
 export const boardRouter = Router();
 

@@ -26,11 +26,11 @@ import {
 import { preSeedTrust } from "../adapters/claude-trust.js";
 import { resolveBinaryPath } from "../adapters/resolve-binary.js";
 import { store } from "../store/board.store.js";
-import { buildKickoff } from "./kickoff.js";
+import { buildKickoff } from "./domain/kickoff.js";
 import { getHooksRuntime } from "./infra/config-holder.js";
-import { mintHookToken } from "./hook-tokens.js";
+import { mintHookToken } from "./domain/hook-tokens.js";
 import { HOOK_SETTINGS_PATH } from "./infra/paths.js";
-import { worktreePath as buildWorktreePath } from "./workspace-paths.js";
+import { worktreePath as buildWorktreePath } from "./domain/workspace-paths.js";
 
 /** Linear identifier shape (defense-in-depth; the route also validates before we reach here). */
 const IDENTIFIER_RE = /^[A-Za-z0-9]+-\d+$/;

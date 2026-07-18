@@ -1,4 +1,4 @@
-import type { Card } from "../../shared/types.js";
+import type { Card } from "../../../shared/types.js";
 
 /**
  * Describe the workspace layout for any repo count (N ≥ 1): a comma-joined list of `<name>/`

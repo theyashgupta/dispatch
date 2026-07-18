@@ -2,8 +2,8 @@ import path from "node:path";
 import fsp from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import writeFileAtomic from "write-file-atomic";
-import type { InvalidPlaybook, Playbook } from "../../shared/types.js";
-import { DISPATCH_DIR } from "./infra/paths.js";
+import type { InvalidPlaybook, Playbook } from "../../../shared/types.js";
+import { DISPATCH_DIR } from "../infra/paths.js";
 
 const PLAYBOOKS_DIR = path.join(DISPATCH_DIR, "playbooks");
 

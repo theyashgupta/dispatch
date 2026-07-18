@@ -76,8 +76,8 @@ and roles only, it does not restate the layering policy.
 | Routes              | `routes/index.ts`, `routes/cards.route.ts`, `routes/board.route.ts`, `routes/sse.route.ts`, `routes/loopback.ts`                                               | Loopback-gated REST router, the hand-rolled SSE broadcast endpoint, and the loopback request guard.                                                                                                                                                 |
 | Linear + mapping    | `adapters/poller.ts`, `store/mapping.ts`                                                                                                                       | GraphQL poll loop and the pure issue-versus-card reconcile mapping.                                                                                                                                                                                 |
 | Store               | `store/board.store.ts`                                                                                                                                         | Single-writer card store: serialized mutation queue, atomic persist, snapshot ordering.                                                                                                                                                             |
-| Services (start)    | `services/start-session.ts`, `services/steps.ts`, `services/kickoff.ts`                                                                                        | Start-saga runner, its do/undo steps, and the pure kickoff-prompt builder.                                                                                                                                                                          |
-| Services (sessions) | `services/cleanup.ts`, `services/infra/config-holder.ts`, `services/workspace-paths.ts`, `services/session-status.ts`                                          | Teardown saga, the orchestration-config holder (routes read config through it, value-free 400 when unset), the canonical worktree-path builder, and the tmux-liveness passthrough for routes.                                                       |
+| Services (start)    | `services/start-session.ts`, `services/steps.ts`, `services/domain/kickoff.ts`                                                                                 | Start-saga runner, its do/undo steps, and the pure kickoff-prompt builder.                                                                                                                                                                          |
+| Services (sessions) | `services/cleanup.ts`, `services/infra/config-holder.ts`, `services/domain/workspace-paths.ts`                                                                 | Teardown saga, the orchestration-config holder (routes read config through it, value-free 400 when unset), and the canonical worktree-path builder.                                                                                                  |
 | Markers             | `adapters/markers/parse.ts`, `adapters/markers/scan-decision.ts`, `adapters/markers/pane-view.ts`, `adapters/markers/watcher.ts`                               | Pure marker parser, the pure per-tick decision core, the pane-view helpers, and the I/O-shell pane watcher applying one card decision per tick.                                                                                                     |
 | Adapters            | `adapters/exec.ts`, `adapters/git.ts`, `adapters/tmux.ts`, `adapters/ttyd.ts`, `adapters/claude-trust.ts`, `adapters/editors.ts`, `adapters/resolve-binary.ts` | The argv-only subprocess chokepoint, the git / tmux / ttyd / claude-trust adapters over it, editor launch, and binary-path resolution.                                                                                                              |
 | Shared              | `shared/types.ts`                                                                                                                                              | Pure cross-half contracts; `BoardSnapshot` is both the SSE payload and the on-disk board file.                                                                                                                                                      |
@@ -191,7 +191,7 @@ produces new output after the human replied — the concrete divergence test liv
 [Watcher Discriminator](#watcher-discriminator).
 
 **Byte-identical two-file contract (`NEW-07`, `NEW-08`).** The two status-marker lines emitted by
-`services/kickoff.ts` are byte-identical to what `parse.ts` `MARKER_RE` matches — the wording is
+`services/domain/kickoff.ts` are byte-identical to what `parse.ts` `MARKER_RE` matches — the wording is
 a CONTRACT BETWEEN THE TWO FILES (do-not-change contract 7). Their separator is an em-dash
 (**U+2014**, `—`); paste fidelity for it was EXPLICITLY VERIFIED (02-RESEARCH § "Pattern 4" / Probe
 1: the em-dash survives tmux capture byte-for-byte) and it must NOT be replaced with a plain hyphen —
@@ -907,7 +907,7 @@ clean run calls `finishCleanup`.
 Claude Code hook events are a SECOND transport into the same marker protocol: a per-session hook
 script POSTs `Stop` and `UserPromptSubmit` payloads to the loopback-only `/api/hook/claude` route
 (`routes/hooks.route.ts`), which resolves the per-session token and delegates to
-`services/hook-events.ts`. The channel changes the transport, never the contract — the kickoff
+`services/domain/hook-events.ts`. The channel changes the transport, never the contract — the kickoff
 wording, `MARKER_RE`, and the markers replay corpus stay frozen.
 
 **Edge-triggered vs level-triggered — how the two channels compose.** The hook channel is
@@ -931,7 +931,7 @@ the prefix rule can meet.
 
 **Token is the auth; identity derives only from the token.** Any local process can reach the
 loopback port, so the route's mandatory `x-dispatch-token` header — resolved against the in-memory
-token→card registry (`services/hook-tokens.ts`) — is the real authentication; the shared loopback
+token→card registry (`services/domain/hook-tokens.ts`) — is the real authentication; the shared loopback
 gate stays in front as free defense-in-depth against DNS rebinding. A missing or unknown token is
 a 401 with ZERO store calls. Card identity comes EXCLUSIVELY from the token lookup: any card or
 session id claimed in the request body is ignored, so a valid token for one card can never move
@@ -1089,7 +1089,7 @@ is a behavior change, not a refactor.
    `sameMarkerKey` prefix rule) unchanged.
 8. **Worktree path construction (`NEW-12`).** `path.join(workspacePath, path.basename(repoPath))`
    was once duplicated **byte-identically** in `steps.ts` and `cleanup.ts`; it is now the single
-   canonical builder `worktreePath()` in `services/workspace-paths.ts` (inventory ID `NEW-12`, see
+   canonical builder `worktreePath()` in `services/domain/workspace-paths.ts` (inventory ID `NEW-12`, see
    [Worktree Path](#worktree-path)) — both former sites call it, and the produced string must
    remain identical.
 9. **Single-writer store discipline.** All card mutations flow through the board store's enqueue (`store` in `store/board.store.ts`); `snapshot()`
@@ -1148,7 +1148,7 @@ The worktree path builder `path.join(workspacePath, path.basename(repoPath))` wa
 **byte-identically** across `services/steps.ts` and `services/cleanup.ts` (inventory ID `NEW-12`,
 do-not-change contract #8). A wrong path removes the wrong worktree, so the two sites had to agree
 exactly — the restructure resolved that hazard by extracting the single canonical builder
-`worktreePath()` to `services/workspace-paths.ts`, which both former sites now call. The CONTRACT
+`worktreePath()` to `services/domain/workspace-paths.ts`, which both former sites now call. The CONTRACT
 is unchanged and this section is its do-not-change home (cited by the `workspace-paths.ts`
 header): the worktree for a repo lives under the ticket workspace, named by the repo's final path
 segment, and the produced string must remain identical to the construction above.

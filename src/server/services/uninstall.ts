@@ -13,7 +13,7 @@ import {
   HOOK_SCRIPT_PATH,
   HOOK_SETTINGS_PATH,
 } from "./infra/paths.js";
-import { worktreePath } from "./workspace-paths.js";
+import { worktreePath } from "./domain/workspace-paths.js";
 
 /**
  * The three groups `uninstall` reasons about, produced once by `scanFootprint` and consumed by both

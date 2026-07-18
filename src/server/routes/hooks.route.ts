@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
-import { resolveHookToken } from "../services/hook-tokens.js";
-import { applyHookEvent } from "../services/hook-events.js";
+import { resolveHookToken } from "../services/domain/hook-tokens.js";
+import { applyHookEvent } from "../services/domain/hook-events.js";
 
 export const hooksRouter = Router();
 

@@ -13,9 +13,9 @@ import {
 } from "../services/infra/config-holder.js";
 import { checkHooksCapability, installHookArtifacts } from "./hook-setup.js";
 import { provisionTtydIndex } from "./ttyd-index-setup.js";
-import { unregisterHookToken } from "../services/hook-tokens.js";
-import { reapActivityThrottle } from "../services/hook-events.js";
-import { seedPlaybooks } from "../services/playbooks.js";
+import { unregisterHookToken } from "../services/domain/hook-tokens.js";
+import { reapActivityThrottle } from "../services/domain/hook-events.js";
+import { seedPlaybooks } from "../services/domain/playbooks.js";
 import { startPoller } from "../adapters/poller.js";
 import { buildRegistry, getLinearSource } from "../sources/registry.js";
 import { startMarkerWatcher } from "../adapters/markers/watcher.js";
