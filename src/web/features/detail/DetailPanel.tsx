@@ -98,9 +98,7 @@ export function DetailPanel({
         return;
       }
       const finalWidth = Math.min(maxPx, Math.max(360, startWidth + delta));
-      node!.style.width = fullscreen
-        ? "100vw"
-        : `clamp(360px, ${finalWidth}px, 90vw)`;
+      node!.style.width = `clamp(360px, ${finalWidth}px, 90vw)`;
       setPanelWidth(finalWidth);
     }
 
@@ -113,14 +111,14 @@ export function DetailPanel({
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerCancel);
-    cleanupDragRef.current = teardown;
+    cleanupDragRef.current = handlePointerCancel;
   }
 
   function handleResizeDoubleClick(e: React.MouseEvent<HTMLDivElement>) {
     e.stopPropagation();
     const node = asideRef.current;
     if (node != null) {
-      node.style.width = fullscreen ? "100vw" : "var(--panel-width)";
+      node.style.width = "var(--panel-width)";
     }
     clearPanelWidth();
   }
@@ -158,6 +156,10 @@ export function DetailPanel({
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (cleanupDragRef.current != null) {
+        cleanupDragRef.current();
+        return;
+      }
       if (fullscreen) setFullscreen(false);
       else if (!docked) onClose();
     };
@@ -252,7 +254,7 @@ export function DetailPanel({
           zIndex: 11,
         }}
       >
-        {!docked && (
+        {!docked && !fullscreen && (
           <div
             onPointerDown={handleResizePointerDown}
             onClick={(e) => e.stopPropagation()}
