@@ -133,12 +133,300 @@ export function PlaybookEditorModal({
       ariaLabel={
         mode === "edit" ? `Edit ${playbook?.name ?? ""}` : "New playbook"
       }
-      title={mode === "edit" ? (playbook?.name ?? "") : "New playbook"}
       onClose={onClose}
       controlRef={modalRef}
       initialFocusRef={nameInputRef}
       dialogStyle={{ maxHeight: "80vh" }}
-      footer={
+    >
+      <Modal.Header>
+        {mode === "edit" ? (playbook?.name ?? "") : "New playbook"}
+      </Modal.Header>
+      <Modal.Body>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-lg)",
+            flex: "1 1 auto",
+            minHeight: 0,
+            overflowY: "auto",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-xs)",
+            }}
+          >
+            <Field>Name</Field>
+            <input
+              ref={nameInputRef}
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+                setNameError(null);
+              }}
+              onFocus={() => setNameFocus(true)}
+              onBlur={() => {
+                setNameFocus(false);
+                checkNameCollision();
+              }}
+              aria-label="Playbook name"
+              placeholder="Playbook name"
+              style={{
+                height: "32px",
+                padding: "0 var(--space-sm)",
+                background: "var(--surface-card)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius)",
+                color: "var(--text)",
+                fontFamily: "var(--font-ui)",
+                fontSize: "var(--font-body)",
+                lineHeight: "var(--line-body)",
+                outline: "none",
+                boxShadow: focusRing(nameFocus),
+              }}
+            />
+            {nameError !== null && (
+              <div
+                role="alert"
+                style={{
+                  fontSize: "var(--font-label)",
+                  fontWeight: "var(--weight-semibold)",
+                  lineHeight: "var(--line-label)",
+                  color: "var(--destructive)",
+                }}
+              >
+                {nameError}
+              </div>
+            )}
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-sm)",
+            }}
+          >
+            <Button
+              variant="secondary"
+              onClick={() => setGenerateOpen((o) => !o)}
+              style={{ alignSelf: "flex-start" }}
+            >
+              <Sparkles size={14} strokeWidth={2} aria-hidden="true" />
+              Generate with AI
+            </Button>
+
+            {generateOpen && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "var(--space-sm)",
+                  padding: "var(--space-sm)",
+                  background: "var(--surface-card)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius)",
+                  transition:
+                    "opacity 150ms ease-out, transform 150ms ease-out",
+                }}
+              >
+                <textarea
+                  value={direction}
+                  disabled={generating}
+                  onChange={(e) => setDirection(e.target.value)}
+                  aria-label="Playbook generation direction"
+                  placeholder="Describe what this playbook should do"
+                  style={{
+                    minHeight: "72px",
+                    resize: "vertical",
+                    padding: "var(--space-sm)",
+                    background: "var(--surface-column)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius)",
+                    color: "var(--text)",
+                    fontFamily: "var(--font-ui)",
+                    fontSize: "var(--font-body)",
+                    lineHeight: "var(--line-body)",
+                    outline: "none",
+                  }}
+                />
+
+                {sourcePaths.length > 0 && (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "var(--space-xs)",
+                    }}
+                  >
+                    {sourcePaths.map((p) => (
+                      <div
+                        key={p}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "var(--space-xs)",
+                          padding: "var(--space-sm)",
+                          background: "var(--surface-column)",
+                          borderRadius: "var(--radius)",
+                        }}
+                      >
+                        <span
+                          style={{
+                            flex: "1 1 auto",
+                            minWidth: 0,
+                            fontFamily: "var(--font-mono)",
+                            fontSize: "var(--font-label)",
+                            lineHeight: "var(--line-label)",
+                            color: "var(--text)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {p}
+                        </span>
+                        <IconButton
+                          aria-label={`Remove ${p}`}
+                          disabled={generating}
+                          onClick={() => removeSourcePath(p)}
+                        >
+                          <X size={12} strokeWidth={2} aria-hidden="true" />
+                        </IconButton>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div>
+                  <Button
+                    variant="secondary"
+                    disabled={generating}
+                    onClick={() => setBrowsingSource(true)}
+                  >
+                    Add source folder
+                  </Button>
+                </div>
+
+                {body.trim() !== "" && (
+                  <span
+                    style={{
+                      fontSize: "var(--font-body)",
+                      lineHeight: "var(--line-body)",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    This replaces the current body text.
+                  </span>
+                )}
+
+                <div>
+                  <Button
+                    variant="primary"
+                    disabled={generating || direction.trim() === ""}
+                    aria-busy={generating}
+                    onClick={() => void handleGenerate()}
+                  >
+                    {generating ? "Generating…" : "Generate draft"}
+                  </Button>
+                </div>
+
+                {generating && (
+                  <span
+                    style={{
+                      fontSize: "var(--font-body)",
+                      lineHeight: "var(--line-body)",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    This can take a couple of minutes.
+                  </span>
+                )}
+
+                {generateFailed && (
+                  <Notice
+                    tone="destructive"
+                    label="Couldn't generate a draft — try again."
+                  />
+                )}
+              </div>
+            )}
+
+            {browsingSource && (
+              <FolderBrowserModal
+                onClose={() => setBrowsingSource(false)}
+                onSelect={addSourcePath}
+              />
+            )}
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-xs)",
+              flex: "1 1 auto",
+              minHeight: 0,
+            }}
+          >
+            <Field>Body</Field>
+            {draftNotice && (
+              <Notice tone="muted">
+                Draft generated — review and edit before saving.
+              </Notice>
+            )}
+            <textarea
+              value={body}
+              onChange={(e) => {
+                setBody(e.target.value);
+                setFootgunError(false);
+                setDraftNotice(false);
+              }}
+              onFocus={() => setBodyFocus(true)}
+              onBlur={() => setBodyFocus(false)}
+              aria-label="Playbook body"
+              style={{
+                minHeight: "240px",
+                resize: "vertical",
+                padding: "var(--space-sm)",
+                background: "var(--surface-card)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius)",
+                color: "var(--text)",
+                fontFamily: "var(--font-mono)",
+                fontSize: "var(--font-body)",
+                lineHeight: "var(--line-body)",
+                outline: "none",
+                boxShadow: focusRing(bodyFocus),
+              }}
+            />
+            {footgunError && (
+              <div
+                role="alert"
+                style={{
+                  fontSize: "var(--font-label)",
+                  fontWeight: "var(--weight-semibold)",
+                  lineHeight: "var(--line-label)",
+                  color: "var(--destructive)",
+                }}
+              >
+                {FOOTGUN_MESSAGE}
+              </div>
+            )}
+          </div>
+
+          {saveError && (
+            <Notice
+              tone="destructive"
+              label="Couldn't save playbook — try again."
+            />
+          )}
+        </div>
+      </Modal.Body>
+      <Modal.Actions>
         <div
           style={{
             display: "flex",
@@ -159,290 +447,7 @@ export function PlaybookEditorModal({
             Save playbook
           </Button>
         </div>
-      }
-    >
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-lg)",
-          flex: "1 1 auto",
-          minHeight: 0,
-          overflowY: "auto",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-xs)",
-          }}
-        >
-          <Field>Name</Field>
-          <input
-            ref={nameInputRef}
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              setNameError(null);
-            }}
-            onFocus={() => setNameFocus(true)}
-            onBlur={() => {
-              setNameFocus(false);
-              checkNameCollision();
-            }}
-            aria-label="Playbook name"
-            placeholder="Playbook name"
-            style={{
-              height: "32px",
-              padding: "0 var(--space-sm)",
-              background: "var(--surface-card)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius)",
-              color: "var(--text)",
-              fontFamily: "var(--font-ui)",
-              fontSize: "var(--font-body)",
-              lineHeight: "var(--line-body)",
-              outline: "none",
-              boxShadow: focusRing(nameFocus),
-            }}
-          />
-          {nameError !== null && (
-            <div
-              role="alert"
-              style={{
-                fontSize: "var(--font-label)",
-                fontWeight: "var(--weight-semibold)",
-                lineHeight: "var(--line-label)",
-                color: "var(--destructive)",
-              }}
-            >
-              {nameError}
-            </div>
-          )}
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-sm)",
-          }}
-        >
-          <Button
-            variant="secondary"
-            onClick={() => setGenerateOpen((o) => !o)}
-            style={{ alignSelf: "flex-start" }}
-          >
-            <Sparkles size={14} strokeWidth={2} aria-hidden="true" />
-            Generate with AI
-          </Button>
-
-          {generateOpen && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "var(--space-sm)",
-                padding: "var(--space-sm)",
-                background: "var(--surface-card)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius)",
-                transition: "opacity 150ms ease-out, transform 150ms ease-out",
-              }}
-            >
-              <textarea
-                value={direction}
-                disabled={generating}
-                onChange={(e) => setDirection(e.target.value)}
-                aria-label="Playbook generation direction"
-                placeholder="Describe what this playbook should do"
-                style={{
-                  minHeight: "72px",
-                  resize: "vertical",
-                  padding: "var(--space-sm)",
-                  background: "var(--surface-column)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius)",
-                  color: "var(--text)",
-                  fontFamily: "var(--font-ui)",
-                  fontSize: "var(--font-body)",
-                  lineHeight: "var(--line-body)",
-                  outline: "none",
-                }}
-              />
-
-              {sourcePaths.length > 0 && (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "var(--space-xs)",
-                  }}
-                >
-                  {sourcePaths.map((p) => (
-                    <div
-                      key={p}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "var(--space-xs)",
-                        padding: "var(--space-sm)",
-                        background: "var(--surface-column)",
-                        borderRadius: "var(--radius)",
-                      }}
-                    >
-                      <span
-                        style={{
-                          flex: "1 1 auto",
-                          minWidth: 0,
-                          fontFamily: "var(--font-mono)",
-                          fontSize: "var(--font-label)",
-                          lineHeight: "var(--line-label)",
-                          color: "var(--text)",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {p}
-                      </span>
-                      <IconButton
-                        aria-label={`Remove ${p}`}
-                        disabled={generating}
-                        onClick={() => removeSourcePath(p)}
-                      >
-                        <X size={12} strokeWidth={2} aria-hidden="true" />
-                      </IconButton>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div>
-                <Button
-                  variant="secondary"
-                  disabled={generating}
-                  onClick={() => setBrowsingSource(true)}
-                >
-                  Add source folder
-                </Button>
-              </div>
-
-              {body.trim() !== "" && (
-                <span
-                  style={{
-                    fontSize: "var(--font-body)",
-                    lineHeight: "var(--line-body)",
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  This replaces the current body text.
-                </span>
-              )}
-
-              <div>
-                <Button
-                  variant="primary"
-                  disabled={generating || direction.trim() === ""}
-                  aria-busy={generating}
-                  onClick={() => void handleGenerate()}
-                >
-                  {generating ? "Generating…" : "Generate draft"}
-                </Button>
-              </div>
-
-              {generating && (
-                <span
-                  style={{
-                    fontSize: "var(--font-body)",
-                    lineHeight: "var(--line-body)",
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  This can take a couple of minutes.
-                </span>
-              )}
-
-              {generateFailed && (
-                <Notice
-                  tone="destructive"
-                  label="Couldn't generate a draft — try again."
-                />
-              )}
-            </div>
-          )}
-
-          {browsingSource && (
-            <FolderBrowserModal
-              onClose={() => setBrowsingSource(false)}
-              onSelect={addSourcePath}
-            />
-          )}
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-xs)",
-            flex: "1 1 auto",
-            minHeight: 0,
-          }}
-        >
-          <Field>Body</Field>
-          {draftNotice && (
-            <Notice tone="muted">
-              Draft generated — review and edit before saving.
-            </Notice>
-          )}
-          <textarea
-            value={body}
-            onChange={(e) => {
-              setBody(e.target.value);
-              setFootgunError(false);
-              setDraftNotice(false);
-            }}
-            onFocus={() => setBodyFocus(true)}
-            onBlur={() => setBodyFocus(false)}
-            aria-label="Playbook body"
-            style={{
-              minHeight: "240px",
-              resize: "vertical",
-              padding: "var(--space-sm)",
-              background: "var(--surface-card)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius)",
-              color: "var(--text)",
-              fontFamily: "var(--font-mono)",
-              fontSize: "var(--font-body)",
-              lineHeight: "var(--line-body)",
-              outline: "none",
-              boxShadow: focusRing(bodyFocus),
-            }}
-          />
-          {footgunError && (
-            <div
-              role="alert"
-              style={{
-                fontSize: "var(--font-label)",
-                fontWeight: "var(--weight-semibold)",
-                lineHeight: "var(--line-label)",
-                color: "var(--destructive)",
-              }}
-            >
-              {FOOTGUN_MESSAGE}
-            </div>
-          )}
-        </div>
-
-        {saveError && (
-          <Notice
-            tone="destructive"
-            label="Couldn't save playbook — try again."
-          />
-        )}
-      </div>
+      </Modal.Actions>
     </Modal>
   );
 }

@@ -969,12 +969,217 @@ export function StartModal({
   return (
     <Modal
       ariaLabel="Start session"
-      title={card.identifier}
       onClose={onClose}
       controlRef={modalRef}
       initialFocusRef={textareaRef}
       dialogStyle={{ maxHeight: "80vh" }}
-      footer={
+    >
+      <Modal.Header>{card.identifier}</Modal.Header>
+      <Modal.Body>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-lg)",
+            flex: "0 0 auto",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-xs)",
+            }}
+          >
+            <Field>Workspace</Field>
+            <FolderPicker
+              folders={folders}
+              selected={selectedFolder}
+              onSelect={(p) => void selectFolder(p)}
+              onRemove={removeFolder}
+              onAdd={addFolder}
+            />
+          </div>
+
+          {selectedFolder !== null && repos !== null && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "var(--space-xs)",
+              }}
+            >
+              <Field>Repositories</Field>
+              {repos.length === 0 ? (
+                <div
+                  style={{
+                    fontSize: "var(--font-label)",
+                    fontWeight: "var(--weight-semibold)",
+                    lineHeight: "var(--line-label)",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  No git repositories found in this folder
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "var(--space-sm)",
+                  }}
+                >
+                  {repos.map((r) => (
+                    <RepoRow
+                      key={r.path}
+                      repo={r}
+                      checked={checked[r.path] ?? false}
+                      base={baseOverride[r.path] ?? r.base}
+                      onToggle={() => {
+                        setError(null);
+                        setChecked((prev) => ({
+                          ...prev,
+                          [r.path]: !prev[r.path],
+                        }));
+                      }}
+                      onBaseChange={(b) => {
+                        setError(null);
+                        setBaseOverride((prev) => ({ ...prev, [r.path]: b }));
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-xs)",
+            flex: "0 0 auto",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <Field>Playbook</Field>
+            <EditInSettingsLink onClick={onEditPlaybooks} />
+          </div>
+          <KickoffPlaybookPicker
+            seedRows={seedRows}
+            restRows={restRows}
+            invalidRows={pickerInvalid}
+            selected={selectedPlaybook}
+            lastUsed={lastUsedPlaybook}
+            onSelect={selectPlaybook}
+          />
+          {seedRows.length === 0 && restRows.length === 0 && (
+            <Notice tone="muted" label="No playbooks available">
+              Starting without one. Manage playbooks in Settings ▸ Playbooks.
+            </Notice>
+          )}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-sm)",
+            flex: "0 0 auto",
+          }}
+        >
+          <textarea
+            ref={textareaRef}
+            value={extraDirection}
+            onChange={(e) => setExtraDirection(e.target.value)}
+            onFocus={() => setFocused("textarea")}
+            onBlur={() => setFocused(null)}
+            aria-label="Prompt for Claude"
+            placeholder="Optional direction for Claude — press Start to launch"
+            style={{
+              minHeight: "96px",
+              resize: "vertical",
+              padding: "var(--space-sm)",
+              background: "var(--surface-card)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              color: "var(--text)",
+              fontFamily: "var(--font-ui)",
+              fontSize: "var(--font-body)",
+              lineHeight: "var(--line-body)",
+              outline: "none",
+              boxShadow:
+                focused === "textarea" ? "0 0 0 2px var(--accent)" : "none",
+            }}
+          />
+        </div>
+
+        {error && (
+          <div
+            role="alert"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-xs)",
+              flex: "0 0 auto",
+            }}
+          >
+            {error.variant === "config" ? (
+              <>
+                <Notice
+                  tone="destructive"
+                  label="Can't start — a selected repo is missing"
+                />
+                <div
+                  style={{
+                    fontSize: "var(--font-body)",
+                    lineHeight: "var(--line-body)",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  One of the chosen repositories no longer exists on disk.
+                  Reopen the workspace and re-pick.
+                </div>
+              </>
+            ) : error.variant === "playbook" ? (
+              <>
+                <Notice
+                  tone="destructive"
+                  label="Can't start — that playbook is gone"
+                />
+                <div
+                  style={{
+                    fontSize: "var(--font-body)",
+                    lineHeight: "var(--line-body)",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  The selected playbook was deleted. The list has refreshed —
+                  pick another and press Start again.
+                </div>
+              </>
+            ) : (
+              <div
+                style={{
+                  fontSize: "var(--font-body)",
+                  lineHeight: "var(--line-body)",
+                  color: "var(--destructive)",
+                }}
+              >
+                {error.text}
+              </div>
+            )}
+          </div>
+        )}
+      </Modal.Body>
+      <Modal.Actions>
         <div
           style={{
             display: "flex",
@@ -990,210 +1195,7 @@ export function StartModal({
             Start
           </Button>
         </div>
-      }
-    >
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-lg)",
-          flex: "0 0 auto",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-xs)",
-          }}
-        >
-          <Field>Workspace</Field>
-          <FolderPicker
-            folders={folders}
-            selected={selectedFolder}
-            onSelect={(p) => void selectFolder(p)}
-            onRemove={removeFolder}
-            onAdd={addFolder}
-          />
-        </div>
-
-        {selectedFolder !== null && repos !== null && (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "var(--space-xs)",
-            }}
-          >
-            <Field>Repositories</Field>
-            {repos.length === 0 ? (
-              <div
-                style={{
-                  fontSize: "var(--font-label)",
-                  fontWeight: "var(--weight-semibold)",
-                  lineHeight: "var(--line-label)",
-                  color: "var(--text-muted)",
-                }}
-              >
-                No git repositories found in this folder
-              </div>
-            ) : (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "var(--space-sm)",
-                }}
-              >
-                {repos.map((r) => (
-                  <RepoRow
-                    key={r.path}
-                    repo={r}
-                    checked={checked[r.path] ?? false}
-                    base={baseOverride[r.path] ?? r.base}
-                    onToggle={() => {
-                      setError(null);
-                      setChecked((prev) => ({
-                        ...prev,
-                        [r.path]: !prev[r.path],
-                      }));
-                    }}
-                    onBaseChange={(b) => {
-                      setError(null);
-                      setBaseOverride((prev) => ({ ...prev, [r.path]: b }));
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-xs)",
-          flex: "0 0 auto",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <Field>Playbook</Field>
-          <EditInSettingsLink onClick={onEditPlaybooks} />
-        </div>
-        <KickoffPlaybookPicker
-          seedRows={seedRows}
-          restRows={restRows}
-          invalidRows={pickerInvalid}
-          selected={selectedPlaybook}
-          lastUsed={lastUsedPlaybook}
-          onSelect={selectPlaybook}
-        />
-        {seedRows.length === 0 && restRows.length === 0 && (
-          <Notice tone="muted" label="No playbooks available">
-            Starting without one. Manage playbooks in Settings ▸ Playbooks.
-          </Notice>
-        )}
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-sm)",
-          flex: "0 0 auto",
-        }}
-      >
-        <textarea
-          ref={textareaRef}
-          value={extraDirection}
-          onChange={(e) => setExtraDirection(e.target.value)}
-          onFocus={() => setFocused("textarea")}
-          onBlur={() => setFocused(null)}
-          aria-label="Prompt for Claude"
-          placeholder="Optional direction for Claude — press Start to launch"
-          style={{
-            minHeight: "96px",
-            resize: "vertical",
-            padding: "var(--space-sm)",
-            background: "var(--surface-card)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius)",
-            color: "var(--text)",
-            fontFamily: "var(--font-ui)",
-            fontSize: "var(--font-body)",
-            lineHeight: "var(--line-body)",
-            outline: "none",
-            boxShadow:
-              focused === "textarea" ? "0 0 0 2px var(--accent)" : "none",
-          }}
-        />
-      </div>
-
-      {error && (
-        <div
-          role="alert"
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-xs)",
-            flex: "0 0 auto",
-          }}
-        >
-          {error.variant === "config" ? (
-            <>
-              <Notice
-                tone="destructive"
-                label="Can't start — a selected repo is missing"
-              />
-              <div
-                style={{
-                  fontSize: "var(--font-body)",
-                  lineHeight: "var(--line-body)",
-                  color: "var(--text-muted)",
-                }}
-              >
-                One of the chosen repositories no longer exists on disk. Reopen
-                the workspace and re-pick.
-              </div>
-            </>
-          ) : error.variant === "playbook" ? (
-            <>
-              <Notice
-                tone="destructive"
-                label="Can't start — that playbook is gone"
-              />
-              <div
-                style={{
-                  fontSize: "var(--font-body)",
-                  lineHeight: "var(--line-body)",
-                  color: "var(--text-muted)",
-                }}
-              >
-                The selected playbook was deleted. The list has refreshed — pick
-                another and press Start again.
-              </div>
-            </>
-          ) : (
-            <div
-              style={{
-                fontSize: "var(--font-body)",
-                lineHeight: "var(--line-body)",
-                color: "var(--destructive)",
-              }}
-            >
-              {error.text}
-            </div>
-          )}
-        </div>
-      )}
+      </Modal.Actions>
     </Modal>
   );
 }

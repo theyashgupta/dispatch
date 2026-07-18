@@ -155,11 +155,30 @@ function PlaybookDeleteConfirm({
   return (
     <Modal
       ariaLabel={`Delete ${playbook.name}`}
-      title={playbook.name}
       onClose={onClose}
       controlRef={modalRef}
       initialFocusRef={keepRef}
-      footer={
+    >
+      <Modal.Header>{playbook.name}</Modal.Header>
+      <Modal.Body>
+        <div
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-body)",
+            lineHeight: "var(--line-body)",
+            color: "var(--text)",
+          }}
+        >
+          Delete this playbook? This can't be undone.
+        </div>
+        {error && (
+          <Notice
+            tone="destructive"
+            label="Couldn't delete playbook — try again."
+          />
+        )}
+      </Modal.Body>
+      <Modal.Actions>
         <div
           style={{
             display: "flex",
@@ -183,24 +202,7 @@ function PlaybookDeleteConfirm({
             Delete playbook
           </Button>
         </div>
-      }
-    >
-      <div
-        style={{
-          fontFamily: "var(--font-ui)",
-          fontSize: "var(--font-body)",
-          lineHeight: "var(--line-body)",
-          color: "var(--text)",
-        }}
-      >
-        Delete this playbook? This can't be undone.
-      </div>
-      {error && (
-        <Notice
-          tone="destructive"
-          label="Couldn't delete playbook — try again."
-        />
-      )}
+      </Modal.Actions>
     </Modal>
   );
 }
@@ -399,7 +401,6 @@ export function SettingsModal({
   return (
     <Modal
       ariaLabel="Settings"
-      title="Settings"
       onClose={onClose}
       controlRef={modalRef}
       initialFocusRef={firstTriggerRef}
@@ -408,8 +409,290 @@ export function SettingsModal({
           ? { width: "560px", maxHeight: "80vh" }
           : { maxHeight: "80vh" }
       }
-      footer={
-        tab === "filters" ? (
+    >
+      <Modal.Header>Settings</Modal.Header>
+      <Modal.Body>
+        <div
+          style={{
+            display: "flex",
+            gap: "var(--space-lg)",
+            borderBottom: "1px solid var(--border)",
+            flex: "0 0 auto",
+          }}
+        >
+          <SettingsTabButton
+            label="Sync filters"
+            active={tab === "filters"}
+            onClick={() => setTab("filters")}
+          />
+          <SettingsTabButton
+            label="Playbooks"
+            active={tab === "playbooks"}
+            onClick={() => setTab("playbooks")}
+          />
+        </div>
+
+        {tab === "filters" && loadError && (
+          <span
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: "var(--font-body)",
+              lineHeight: "var(--line-body)",
+              color: "var(--text-muted)",
+            }}
+          >
+            Couldn't load filters — reopen settings to retry.
+          </span>
+        )}
+        {tab === "filters" && capabilities && draft && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-lg)",
+              flex: "0 1 auto",
+              minHeight: 0,
+              overflowY: "auto",
+            }}
+          >
+            {capabilities.dimensions.map((dim) =>
+              dim === "cycle" ? (
+                <div
+                  key="cycle"
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "var(--space-xs)",
+                  }}
+                >
+                  <Field>Current cycle</Field>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "var(--space-sm)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={draft.currentCycle}
+                      onChange={() =>
+                        setDraft((prev) =>
+                          prev
+                            ? { ...prev, currentCycle: !prev.currentCycle }
+                            : prev,
+                        )
+                      }
+                      onFocus={(e) =>
+                        setCycleFocus(e.currentTarget.matches(":focus-visible"))
+                      }
+                      onBlur={() => setCycleFocus(false)}
+                      style={{
+                        accentColor: "var(--accent)",
+                        borderRadius: "var(--radius)",
+                        outline: "none",
+                        boxShadow: focusRing(cycleFocus),
+                        flex: "0 0 auto",
+                      }}
+                    />
+                    <span
+                      style={{
+                        fontFamily: "var(--font-ui)",
+                        fontSize: "var(--font-body)",
+                        lineHeight: "var(--line-body)",
+                        color: "var(--text)",
+                      }}
+                    >
+                      Current cycle only
+                    </span>
+                  </label>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-ui)",
+                      fontSize: "var(--font-body)",
+                      lineHeight: "var(--line-body)",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    Backlog tickets often have no cycle, so this can drop
+                    matches to near zero.
+                  </span>
+                </div>
+              ) : (
+                <div
+                  key={dim}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "var(--space-xs)",
+                  }}
+                >
+                  <Field>{MULTI_COPY[dim].label}</Field>
+                  <MultiSelect
+                    label={MULTI_COPY[dim].label}
+                    placeholder={MULTI_COPY[dim].placeholder}
+                    options={options[dim]}
+                    selected={draft[dim]}
+                    loading={optLoading[dim]}
+                    loadError={optError[dim]}
+                    emptyText={MULTI_COPY[dim].emptyText}
+                    triggerRef={
+                      dim === firstMultiDim ? firstTriggerRef : undefined
+                    }
+                    onChange={(next) =>
+                      setDraft((prev) =>
+                        prev ? { ...prev, [dim]: next } : prev,
+                      )
+                    }
+                  />
+                  {optError[dim] && (
+                    <span
+                      style={{
+                        fontFamily: "var(--font-ui)",
+                        fontSize: "var(--font-body)",
+                        lineHeight: "var(--line-body)",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      Couldn't load options — reopen settings to retry.
+                    </span>
+                  )}
+                  {optTruncated[dim] && (
+                    <span
+                      style={{
+                        fontFamily: "var(--font-ui)",
+                        fontSize: "var(--font-body)",
+                        lineHeight: "var(--line-body)",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      Showing first 250 options.
+                    </span>
+                  )}
+                </div>
+              ),
+            )}
+
+            <span
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: "var(--font-body)",
+                lineHeight: "var(--line-body)",
+                color: "var(--text-muted)",
+              }}
+            >
+              {previewText}
+            </span>
+
+            {saveError && (
+              <Notice
+                tone="destructive"
+                label="Couldn't save filters — try again."
+              />
+            )}
+          </div>
+        )}
+
+        {tab === "playbooks" && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-lg)",
+              flex: "1 1 auto",
+              minHeight: 0,
+              overflowY: "auto",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <Button
+                variant="primary"
+                onClick={() => setEditorState({ mode: "create" })}
+              >
+                <Plus size={14} strokeWidth={2} aria-hidden="true" />
+                New playbook
+              </Button>
+            </div>
+
+            {playbooksLoading && (
+              <span
+                style={{
+                  fontFamily: "var(--font-ui)",
+                  fontSize: "var(--font-label)",
+                  fontWeight: "var(--weight-semibold)",
+                  lineHeight: "var(--line-label)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                Loading…
+              </span>
+            )}
+
+            {!playbooksLoading && playbooksLoadError && (
+              <Notice
+                tone="destructive"
+                label="Couldn't load playbooks — reopen settings to retry."
+              />
+            )}
+
+            {!playbooksLoading &&
+              !playbooksLoadError &&
+              playbooks !== null &&
+              playbooks.length === 0 && (
+                <Notice tone="muted" label="No playbooks yet">
+                  Create one, or generate a draft with AI.
+                </Notice>
+              )}
+
+            {!playbooksLoading &&
+              !playbooksLoadError &&
+              playbooks !== null &&
+              playbooks.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  {playbooks.map((p) => (
+                    <PlaybookListRow
+                      key={p.slug ?? p.name}
+                      playbook={p}
+                      onEdit={() =>
+                        setEditorState({ mode: "edit", playbook: p })
+                      }
+                      onDelete={() => setDeleteTarget(p)}
+                    />
+                  ))}
+                </div>
+              )}
+          </div>
+        )}
+
+        {editorState && (
+          <PlaybookEditorModal
+            mode={editorState.mode}
+            playbook={editorState.playbook}
+            existingNames={(playbooks ?? [])
+              .filter((p) => p.slug !== editorState.playbook?.slug)
+              .map((p) => p.name)}
+            onSaved={() => {
+              setEditorState(null);
+              void loadPlaybooksList();
+            }}
+            onClose={() => setEditorState(null)}
+          />
+        )}
+
+        {deleteTarget && (
+          <PlaybookDeleteConfirm
+            playbook={deleteTarget}
+            onClose={() => setDeleteTarget(null)}
+            onDeleted={() => {
+              setDeleteTarget(null);
+              void loadPlaybooksList();
+            }}
+          />
+        )}
+      </Modal.Body>
+      <Modal.Actions>
+        {tab === "filters" ? (
           <div
             style={{
               display: "flex",
@@ -425,283 +708,8 @@ export function SettingsModal({
               Save Filters
             </Button>
           </div>
-        ) : null
-      }
-    >
-      <div
-        style={{
-          display: "flex",
-          gap: "var(--space-lg)",
-          borderBottom: "1px solid var(--border)",
-          flex: "0 0 auto",
-        }}
-      >
-        <SettingsTabButton
-          label="Sync filters"
-          active={tab === "filters"}
-          onClick={() => setTab("filters")}
-        />
-        <SettingsTabButton
-          label="Playbooks"
-          active={tab === "playbooks"}
-          onClick={() => setTab("playbooks")}
-        />
-      </div>
-
-      {tab === "filters" && loadError && (
-        <span
-          style={{
-            fontFamily: "var(--font-ui)",
-            fontSize: "var(--font-body)",
-            lineHeight: "var(--line-body)",
-            color: "var(--text-muted)",
-          }}
-        >
-          Couldn't load filters — reopen settings to retry.
-        </span>
-      )}
-      {tab === "filters" && capabilities && draft && (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-lg)",
-            flex: "0 1 auto",
-            minHeight: 0,
-            overflowY: "auto",
-          }}
-        >
-          {capabilities.dimensions.map((dim) =>
-            dim === "cycle" ? (
-              <div
-                key="cycle"
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "var(--space-xs)",
-                }}
-              >
-                <Field>Current cycle</Field>
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "var(--space-sm)",
-                    cursor: "pointer",
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={draft.currentCycle}
-                    onChange={() =>
-                      setDraft((prev) =>
-                        prev
-                          ? { ...prev, currentCycle: !prev.currentCycle }
-                          : prev,
-                      )
-                    }
-                    onFocus={(e) =>
-                      setCycleFocus(e.currentTarget.matches(":focus-visible"))
-                    }
-                    onBlur={() => setCycleFocus(false)}
-                    style={{
-                      accentColor: "var(--accent)",
-                      borderRadius: "var(--radius)",
-                      outline: "none",
-                      boxShadow: focusRing(cycleFocus),
-                      flex: "0 0 auto",
-                    }}
-                  />
-                  <span
-                    style={{
-                      fontFamily: "var(--font-ui)",
-                      fontSize: "var(--font-body)",
-                      lineHeight: "var(--line-body)",
-                      color: "var(--text)",
-                    }}
-                  >
-                    Current cycle only
-                  </span>
-                </label>
-                <span
-                  style={{
-                    fontFamily: "var(--font-ui)",
-                    fontSize: "var(--font-body)",
-                    lineHeight: "var(--line-body)",
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  Backlog tickets often have no cycle, so this can drop matches
-                  to near zero.
-                </span>
-              </div>
-            ) : (
-              <div
-                key={dim}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "var(--space-xs)",
-                }}
-              >
-                <Field>{MULTI_COPY[dim].label}</Field>
-                <MultiSelect
-                  label={MULTI_COPY[dim].label}
-                  placeholder={MULTI_COPY[dim].placeholder}
-                  options={options[dim]}
-                  selected={draft[dim]}
-                  loading={optLoading[dim]}
-                  loadError={optError[dim]}
-                  emptyText={MULTI_COPY[dim].emptyText}
-                  triggerRef={
-                    dim === firstMultiDim ? firstTriggerRef : undefined
-                  }
-                  onChange={(next) =>
-                    setDraft((prev) => (prev ? { ...prev, [dim]: next } : prev))
-                  }
-                />
-                {optError[dim] && (
-                  <span
-                    style={{
-                      fontFamily: "var(--font-ui)",
-                      fontSize: "var(--font-body)",
-                      lineHeight: "var(--line-body)",
-                      color: "var(--text-muted)",
-                    }}
-                  >
-                    Couldn't load options — reopen settings to retry.
-                  </span>
-                )}
-                {optTruncated[dim] && (
-                  <span
-                    style={{
-                      fontFamily: "var(--font-ui)",
-                      fontSize: "var(--font-body)",
-                      lineHeight: "var(--line-body)",
-                      color: "var(--text-muted)",
-                    }}
-                  >
-                    Showing first 250 options.
-                  </span>
-                )}
-              </div>
-            ),
-          )}
-
-          <span
-            style={{
-              fontFamily: "var(--font-ui)",
-              fontSize: "var(--font-body)",
-              lineHeight: "var(--line-body)",
-              color: "var(--text-muted)",
-            }}
-          >
-            {previewText}
-          </span>
-
-          {saveError && (
-            <Notice
-              tone="destructive"
-              label="Couldn't save filters — try again."
-            />
-          )}
-        </div>
-      )}
-
-      {tab === "playbooks" && (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-lg)",
-            flex: "1 1 auto",
-            minHeight: 0,
-            overflowY: "auto",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <Button
-              variant="primary"
-              onClick={() => setEditorState({ mode: "create" })}
-            >
-              <Plus size={14} strokeWidth={2} aria-hidden="true" />
-              New playbook
-            </Button>
-          </div>
-
-          {playbooksLoading && (
-            <span
-              style={{
-                fontFamily: "var(--font-ui)",
-                fontSize: "var(--font-label)",
-                fontWeight: "var(--weight-semibold)",
-                lineHeight: "var(--line-label)",
-                color: "var(--text-muted)",
-              }}
-            >
-              Loading…
-            </span>
-          )}
-
-          {!playbooksLoading && playbooksLoadError && (
-            <Notice
-              tone="destructive"
-              label="Couldn't load playbooks — reopen settings to retry."
-            />
-          )}
-
-          {!playbooksLoading &&
-            !playbooksLoadError &&
-            playbooks !== null &&
-            playbooks.length === 0 && (
-              <Notice tone="muted" label="No playbooks yet">
-                Create one, or generate a draft with AI.
-              </Notice>
-            )}
-
-          {!playbooksLoading &&
-            !playbooksLoadError &&
-            playbooks !== null &&
-            playbooks.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                {playbooks.map((p) => (
-                  <PlaybookListRow
-                    key={p.slug ?? p.name}
-                    playbook={p}
-                    onEdit={() => setEditorState({ mode: "edit", playbook: p })}
-                    onDelete={() => setDeleteTarget(p)}
-                  />
-                ))}
-              </div>
-            )}
-        </div>
-      )}
-
-      {editorState && (
-        <PlaybookEditorModal
-          mode={editorState.mode}
-          playbook={editorState.playbook}
-          existingNames={(playbooks ?? [])
-            .filter((p) => p.slug !== editorState.playbook?.slug)
-            .map((p) => p.name)}
-          onSaved={() => {
-            setEditorState(null);
-            void loadPlaybooksList();
-          }}
-          onClose={() => setEditorState(null)}
-        />
-      )}
-
-      {deleteTarget && (
-        <PlaybookDeleteConfirm
-          playbook={deleteTarget}
-          onClose={() => setDeleteTarget(null)}
-          onDeleted={() => {
-            setDeleteTarget(null);
-            void loadPlaybooksList();
-          }}
-        />
-      )}
+        ) : null}
+      </Modal.Actions>
     </Modal>
   );
 }

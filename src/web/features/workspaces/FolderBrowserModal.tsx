@@ -242,11 +242,178 @@ export function FolderBrowserModal({
   return (
     <Modal
       ariaLabel="Browse folders"
-      title={listing ? basename(listing.path) : "Browse folders"}
       initialFocusRef={listRef}
       onClose={onClose}
       dialogStyle={{ width: "560px", maxHeight: "70vh" }}
-      footer={
+    >
+      <Modal.Header>
+        {listing ? basename(listing.path) : "Browse folders"}
+      </Modal.Header>
+      <Modal.Body>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-lg)",
+            flex: "1 1 auto",
+            minHeight: 0,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "var(--space-lg)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "var(--space-xs)",
+                overflowX: "auto",
+                whiteSpace: "nowrap",
+                flex: "1 1 auto",
+                minWidth: 0,
+              }}
+            >
+              {breadcrumbItems.map((item, idx) => (
+                <div
+                  key={item.path}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "var(--space-xs)",
+                    flex: "0 0 auto",
+                  }}
+                >
+                  {idx > 0 && (
+                    <ChevronRight
+                      size={12}
+                      strokeWidth={2}
+                      aria-hidden="true"
+                      style={{ color: "var(--text-muted)" }}
+                    />
+                  )}
+                  <BreadcrumbSegment
+                    label={item.label}
+                    isLast={idx === breadcrumbItems.length - 1}
+                    onClick={() => navigate(item.path)}
+                  />
+                </div>
+              ))}
+            </div>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "var(--space-xs)",
+                flex: "0 0 auto",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={showHidden}
+                onChange={(e) => {
+                  setShowHidden(e.target.checked);
+                  setHighlighted(-1);
+                }}
+                style={{ accentColor: "var(--accent)" }}
+              />
+              <span
+                style={{
+                  fontFamily: "var(--font-label)",
+                  fontSize: "var(--font-label)",
+                  fontWeight: "var(--weight-semibold)",
+                  lineHeight: "var(--line-label)",
+                  color: "var(--text-muted)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Show hidden folders
+              </span>
+            </label>
+          </div>
+
+          <div
+            ref={listRef}
+            tabIndex={0}
+            onFocus={(e) =>
+              setListFocus(e.currentTarget.matches(":focus-visible"))
+            }
+            onBlur={() => setListFocus(false)}
+            onKeyDown={(e) => {
+              if (!listing) return;
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setHighlighted((i) =>
+                  Math.min(i + 1, filteredEntries.length - 1),
+                );
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setHighlighted((i) => Math.max(i - 1, 0));
+              } else if (e.key === "Enter") {
+                if (highlighted >= 0 && highlighted < filteredEntries.length) {
+                  e.preventDefault();
+                  navigate(filteredEntries[highlighted].path);
+                }
+              } else if (e.key === "Backspace") {
+                e.preventDefault();
+                if (listing.parent !== null) navigate(listing.parent);
+              }
+            }}
+            style={{
+              height: "360px",
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              outline: "none",
+              boxShadow: focusRing(listFocus),
+              borderRadius: "var(--radius)",
+            }}
+          >
+            {loading && <span style={mutedRowStyle}>Loading…</span>}
+            {!loading && fetchFailed && (
+              <Notice
+                tone="destructive"
+                label="Couldn't reach the server. Try again."
+              />
+            )}
+            {!loading && !fetchFailed && listing?.readable === false && (
+              <Notice tone="destructive" label="Can't read this folder" />
+            )}
+            {!loading &&
+              !fetchFailed &&
+              listing?.readable !== false &&
+              filteredEntries.length === 0 && (
+                <span style={mutedRowStyle}>No subfolders here.</span>
+              )}
+            {!loading &&
+              !fetchFailed &&
+              listing?.readable !== false &&
+              filteredEntries.map((entry, index) => (
+                <div
+                  key={entry.path}
+                  ref={(node) => {
+                    if (node && index === highlighted) {
+                      node.scrollIntoView({ block: "nearest" });
+                    }
+                  }}
+                >
+                  <DirRow
+                    entry={entry}
+                    highlighted={index === highlighted}
+                    onClick={() => setHighlighted(index)}
+                    onDoubleClick={() => navigate(entry.path)}
+                  />
+                </div>
+              ))}
+          </div>
+        </div>
+      </Modal.Body>
+      <Modal.Actions>
         <div
           style={{
             display: "flex",
@@ -262,170 +429,7 @@ export function FolderBrowserModal({
             Select this folder
           </Button>
         </div>
-      }
-    >
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-lg)",
-          flex: "1 1 auto",
-          minHeight: 0,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "var(--space-lg)",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "var(--space-xs)",
-              overflowX: "auto",
-              whiteSpace: "nowrap",
-              flex: "1 1 auto",
-              minWidth: 0,
-            }}
-          >
-            {breadcrumbItems.map((item, idx) => (
-              <div
-                key={item.path}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "var(--space-xs)",
-                  flex: "0 0 auto",
-                }}
-              >
-                {idx > 0 && (
-                  <ChevronRight
-                    size={12}
-                    strokeWidth={2}
-                    aria-hidden="true"
-                    style={{ color: "var(--text-muted)" }}
-                  />
-                )}
-                <BreadcrumbSegment
-                  label={item.label}
-                  isLast={idx === breadcrumbItems.length - 1}
-                  onClick={() => navigate(item.path)}
-                />
-              </div>
-            ))}
-          </div>
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "var(--space-xs)",
-              flex: "0 0 auto",
-              cursor: "pointer",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={showHidden}
-              onChange={(e) => {
-                setShowHidden(e.target.checked);
-                setHighlighted(-1);
-              }}
-              style={{ accentColor: "var(--accent)" }}
-            />
-            <span
-              style={{
-                fontFamily: "var(--font-label)",
-                fontSize: "var(--font-label)",
-                fontWeight: "var(--weight-semibold)",
-                lineHeight: "var(--line-label)",
-                color: "var(--text-muted)",
-                whiteSpace: "nowrap",
-              }}
-            >
-              Show hidden folders
-            </span>
-          </label>
-        </div>
-
-        <div
-          ref={listRef}
-          tabIndex={0}
-          onFocus={(e) =>
-            setListFocus(e.currentTarget.matches(":focus-visible"))
-          }
-          onBlur={() => setListFocus(false)}
-          onKeyDown={(e) => {
-            if (!listing) return;
-            if (e.key === "ArrowDown") {
-              e.preventDefault();
-              setHighlighted((i) =>
-                Math.min(i + 1, filteredEntries.length - 1),
-              );
-            } else if (e.key === "ArrowUp") {
-              e.preventDefault();
-              setHighlighted((i) => Math.max(i - 1, 0));
-            } else if (e.key === "Enter") {
-              if (highlighted >= 0 && highlighted < filteredEntries.length) {
-                e.preventDefault();
-                navigate(filteredEntries[highlighted].path);
-              }
-            } else if (e.key === "Backspace") {
-              e.preventDefault();
-              if (listing.parent !== null) navigate(listing.parent);
-            }
-          }}
-          style={{
-            height: "360px",
-            overflowY: "auto",
-            display: "flex",
-            flexDirection: "column",
-            outline: "none",
-            boxShadow: focusRing(listFocus),
-            borderRadius: "var(--radius)",
-          }}
-        >
-          {loading && <span style={mutedRowStyle}>Loading…</span>}
-          {!loading && fetchFailed && (
-            <Notice
-              tone="destructive"
-              label="Couldn't reach the server. Try again."
-            />
-          )}
-          {!loading && !fetchFailed && listing?.readable === false && (
-            <Notice tone="destructive" label="Can't read this folder" />
-          )}
-          {!loading &&
-            !fetchFailed &&
-            listing?.readable !== false &&
-            filteredEntries.length === 0 && (
-              <span style={mutedRowStyle}>No subfolders here.</span>
-            )}
-          {!loading &&
-            !fetchFailed &&
-            listing?.readable !== false &&
-            filteredEntries.map((entry, index) => (
-              <div
-                key={entry.path}
-                ref={(node) => {
-                  if (node && index === highlighted) {
-                    node.scrollIntoView({ block: "nearest" });
-                  }
-                }}
-              >
-                <DirRow
-                  entry={entry}
-                  highlighted={index === highlighted}
-                  onClick={() => setHighlighted(index)}
-                  onDoubleClick={() => navigate(entry.path)}
-                />
-              </div>
-            ))}
-        </div>
-      </div>
+      </Modal.Actions>
     </Modal>
   );
 }

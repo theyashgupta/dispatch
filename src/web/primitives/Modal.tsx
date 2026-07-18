@@ -1,4 +1,5 @@
 import {
+  Children,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -22,13 +23,44 @@ const modalStack: number[] = [];
 
 interface ModalProps {
   ariaLabel: string;
-  title: ReactNode;
   onClose: () => void;
-  footer: ReactNode;
   children: ReactNode;
   controlRef?: Ref<ModalControl>;
   initialFocusRef?: RefObject<HTMLElement | null>;
   dialogStyle?: CSSProperties;
+}
+
+interface ModalSlotProps {
+  children: ReactNode;
+}
+
+function ModalHeader({ children }: ModalSlotProps): null {
+  void children;
+  return null;
+}
+
+function ModalBody({ children }: ModalSlotProps): null {
+  void children;
+  return null;
+}
+
+function ModalActions({ children }: ModalSlotProps): null {
+  void children;
+  return null;
+}
+
+function extractSlot(children: ReactNode, slot: typeof ModalHeader): ReactNode {
+  for (const child of Children.toArray(children)) {
+    if (
+      typeof child === "object" &&
+      child !== null &&
+      "type" in child &&
+      child.type === slot
+    ) {
+      return (child.props as ModalSlotProps).children;
+    }
+  }
+  return null;
 }
 
 const scrimStyle: CSSProperties = {
@@ -83,9 +115,7 @@ const headingStyle: CSSProperties = {
 
 export function Modal({
   ariaLabel,
-  title,
   onClose,
-  footer,
   children,
   controlRef,
   initialFocusRef,
@@ -142,6 +172,9 @@ export function Modal({
   }, []);
 
   const active = entered && !closing;
+  const headerContent = extractSlot(children, ModalHeader);
+  const bodyContent = extractSlot(children, ModalBody);
+  const actionsContent = extractSlot(children, ModalActions);
 
   return createPortal(
     <>
@@ -164,7 +197,7 @@ export function Modal({
           }}
         >
           <div style={headerStyle}>
-            <h2 style={headingStyle}>{title}</h2>
+            <h2 style={headingStyle}>{headerContent}</h2>
             <IconButton
               onClick={() => control.current.requestClose()}
               aria-label="Close"
@@ -173,12 +206,16 @@ export function Modal({
             </IconButton>
           </div>
 
-          {children}
+          {bodyContent}
 
-          {footer}
+          {actionsContent}
         </div>
       </div>
     </>,
     document.body,
   );
 }
+
+Modal.Header = ModalHeader;
+Modal.Body = ModalBody;
+Modal.Actions = ModalActions;
