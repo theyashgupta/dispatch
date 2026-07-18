@@ -110,18 +110,18 @@ export function App() {
   const newestTs = feed.events[0]?.ts;
   const activityUnseen = isUnseen(newestTs, lastOpened["__feed__"]);
 
+  const selectedCard =
+    board?.cards.find((card) => card.id === selectedCardId) ?? null;
+
   useEffect(() => {
-    if (viewMode !== "orca" || selectedCardId != null || board == null) {
+    if (viewMode !== "orca" || selectedCard != null || board == null) {
       return;
     }
     const id = mostRecentCardId(lastOpened, board.cards);
     if (id != null) setSelectedCardId(id);
-  }, [viewMode, selectedCardId, board, lastOpened]);
+  }, [viewMode, selectedCard, board, lastOpened]);
 
   useTransitionNotifications(board, connection, setSelectedCardId);
-
-  const selectedCard =
-    board?.cards.find((card) => card.id === selectedCardId) ?? null;
 
   const cardIdentifiers: Record<string, string> = {};
   for (const card of board?.cards ?? []) {
