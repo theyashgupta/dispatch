@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import {
   useBoardStream,
   type ConnectionStatus,
@@ -10,7 +10,7 @@ import {
   useLastOpened,
 } from "./hooks/useUnseenActivity.js";
 import { useTransitionNotifications } from "./hooks/useTransitionNotifications.js";
-import { useChromeHeight } from "./hooks/useChromeHeight.js";
+import { AppShell } from "./AppShell.js";
 import { SyncStrip } from "./features/sync/index.js";
 import { Glyph } from "./primitives/Glyph.js";
 import { Board } from "./features/board/index.js";
@@ -97,7 +97,6 @@ export function App() {
     }
   });
   const [inboxOpen, setInboxOpen] = useState(false);
-  const { chromeRef, chromeHeight } = useChromeHeight();
 
   useEffect(() => {
     try {
@@ -210,69 +209,65 @@ export function App() {
   }
 
   return (
-    <div
-      style={
-        {
-          height: "100vh",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          "--chrome-top":
-            chromeHeight != null ? `${chromeHeight}px` : "var(--strip-height)",
-        } as CSSProperties
+    <AppShell
+      header={
+        <>
+          <UpdateBanner />
+          <SyncStrip
+            syncedAt={board?.syncedAt ?? null}
+            connection={connection}
+            pollIntervalMs={board?.pollIntervalMs ?? null}
+            syncWarning={board?.syncWarning ?? null}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenActivity={() => {
+              setActivityOpen(true);
+              stampLastOpened("__feed__");
+            }}
+            activityUnseen={activityUnseen}
+            activityOpen={activityOpen}
+            onOpenInbox={() => setInboxOpen((v) => !v)}
+            inboxCount={board.cards.filter((c) => c.column === "inbox").length}
+            inboxOpen={inboxOpen}
+            viewMode={viewMode}
+            onSelectViewMode={setViewMode}
+          />
+        </>
+      }
+      content={
+        viewMode === "orca" ? (
+          <OrcaView
+            board={board}
+            selectedCardId={selectedCard ? selectedCardId : null}
+            onSelectCard={setSelectedCardId}
+          />
+        ) : inboxOpen ? (
+          <InboxView
+            board={board}
+            selectedCardId={selectedCard ? selectedCardId : null}
+            onSelectCard={setSelectedCardId}
+          />
+        ) : (
+          <Board
+            board={board}
+            selectedCardId={selectedCard ? selectedCardId : null}
+            onSelectCard={setSelectedCardId}
+            onStartRequest={requestStart}
+            onCleanupRequest={setCleanupCardId}
+          />
+        )
+      }
+      detail={
+        <DetailPanel
+          card={selectedCard}
+          editors={board?.editors}
+          activityEvents={feed.events}
+          cardIdentifiers={cardIdentifiers}
+          onClose={() => setSelectedCardId(null)}
+          onStartRequest={requestStart}
+          docked={viewMode === "orca"}
+        />
       }
     >
-      <div ref={chromeRef} style={{ flex: "0 0 auto" }}>
-        <UpdateBanner />
-        <SyncStrip
-          syncedAt={board?.syncedAt ?? null}
-          connection={connection}
-          pollIntervalMs={board?.pollIntervalMs ?? null}
-          syncWarning={board?.syncWarning ?? null}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onOpenActivity={() => {
-            setActivityOpen(true);
-            stampLastOpened("__feed__");
-          }}
-          activityUnseen={activityUnseen}
-          activityOpen={activityOpen}
-          onOpenInbox={() => setInboxOpen((v) => !v)}
-          inboxCount={board.cards.filter((c) => c.column === "inbox").length}
-          inboxOpen={inboxOpen}
-          viewMode={viewMode}
-          onSelectViewMode={setViewMode}
-        />
-      </div>
-      {viewMode === "orca" ? (
-        <OrcaView
-          board={board}
-          selectedCardId={selectedCard ? selectedCardId : null}
-          onSelectCard={setSelectedCardId}
-        />
-      ) : inboxOpen ? (
-        <InboxView
-          board={board}
-          selectedCardId={selectedCard ? selectedCardId : null}
-          onSelectCard={setSelectedCardId}
-        />
-      ) : (
-        <Board
-          board={board}
-          selectedCardId={selectedCard ? selectedCardId : null}
-          onSelectCard={setSelectedCardId}
-          onStartRequest={requestStart}
-          onCleanupRequest={setCleanupCardId}
-        />
-      )}
-      <DetailPanel
-        card={selectedCard}
-        editors={board?.editors}
-        activityEvents={feed.events}
-        cardIdentifiers={cardIdentifiers}
-        onClose={() => setSelectedCardId(null)}
-        onStartRequest={requestStart}
-        docked={viewMode === "orca"}
-      />
       <ActivityDrawer
         open={activityOpen}
         events={feed.events}
@@ -319,6 +314,6 @@ export function App() {
           }}
         />
       )}
-    </div>
+    </AppShell>
   );
 }
