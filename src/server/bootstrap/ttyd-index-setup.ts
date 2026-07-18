@@ -87,6 +87,14 @@ async function removeStaleArtifact(): Promise<void> {
  * failed WRITE also unlinks the prior boot's artifact, preserving the invariant that an existing
  * artifact always matches the ttyd binary this boot captured; the outer catch is the contract's
  * final safety net (mkdir failure, or anything unexpected).
+ * @remarks Started fire-and-forget in bootstrap and deliberately NOT awaited: the cold
+ * first-ttyd-spawn-per-boot measured ~5s (Pitfall 5), and awaiting it would put that spawn on the
+ * serial boot path ahead of listen — the instant-startup constraint forbids that. It must be
+ * kicked off strictly AFTER reconcileSessions: the boot orphan sweep's fingerprint
+ * (`ttyd … tmux attach`) matches the throwaway capture child, so an overlapping sweep would
+ * SIGTERM the capture mid-flight and silently disable cmd+click for the whole boot. Safe to
+ * overlap listen because spawnTtyd re-checks artifact existence per spawn — a terminal opened
+ * inside the capture window gets the prior boot's artifact or stock behavior for that one spawn.
  */
 export async function provisionTtydIndex(): Promise<void> {
   try {

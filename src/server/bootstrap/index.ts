@@ -146,7 +146,6 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
 
   const statusChannel = config.statusChannel ?? "auto";
   await installHookArtifacts();
-  await provisionTtydIndex();
   const { capable, version } = await checkHooksCapability();
   if (statusChannel === "hooks" && !capable) {
     console.warn(
@@ -168,6 +167,11 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
 
   store.setPollInterval(config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
   await reconcileSessions();
+  void provisionTtydIndex().catch((err: unknown) => {
+    console.warn(
+      `[ttyd-index] provisioning rejected unexpectedly: ${(err as Error).message}`,
+    );
+  });
 
   const editors = await resolveEditors();
   store.setEditors(editors);
