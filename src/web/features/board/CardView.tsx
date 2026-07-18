@@ -9,7 +9,7 @@ import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { Notice } from "../../primitives/Notice.js";
 
-const PRIORITY_DOT: Record<number, { color: string; label: string }> = {
+export const PRIORITY_DOT: Record<number, { color: string; label: string }> = {
   1: { color: "var(--prio-urgent)", label: "Urgent priority" },
   2: { color: "var(--prio-high)", label: "High priority" },
   3: { color: "var(--prio-medium)", label: "Medium priority" },
