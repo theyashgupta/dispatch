@@ -81,7 +81,9 @@ export function DetailPanel({
         maxPx,
         Math.max(360, startWidth + (startX - ev.clientX)),
       );
-      node!.style.width = "";
+      node!.style.width = fullscreen
+        ? "100vw"
+        : `clamp(360px, ${finalWidth}px, 90vw)`;
       setPanelWidth(finalWidth);
     }
 
@@ -99,7 +101,7 @@ export function DetailPanel({
     e.stopPropagation();
     const node = asideRef.current;
     if (node != null) {
-      node.style.width = "";
+      node.style.width = fullscreen ? "100vw" : "var(--panel-width)";
     }
     clearPanelWidth();
   }
