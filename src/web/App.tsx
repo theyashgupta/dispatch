@@ -11,22 +11,21 @@ import {
 } from "./hooks/useUnseenActivity.js";
 import { useTransitionNotifications } from "./hooks/useTransitionNotifications.js";
 import { useChromeHeight } from "./hooks/useChromeHeight.js";
-import { SyncStrip } from "./features/sync/SyncStrip.js";
+import { SyncStrip } from "./features/sync/index.js";
 import { Glyph } from "./primitives/Glyph.js";
-import { Board } from "./features/board/Board.js";
-import { InboxView } from "./features/inbox/InboxView.js";
-import { OrcaView } from "./features/orca/OrcaView.js";
-import { mostRecentCardId } from "./features/orca/orca-selectors.js";
-import { DetailPanel } from "./features/detail/DetailPanel.js";
-import { ActivityDrawer } from "./features/activity/ActivityDrawer.js";
-import { StartModal } from "./features/modals/StartModal.js";
-import { CleanupModal } from "./features/modals/CleanupModal.js";
+import { Board } from "./features/board/index.js";
+import { InboxView } from "./features/inbox/index.js";
+import { OrcaView, mostRecentCardId } from "./features/orca/index.js";
+import { DetailPanel } from "./features/detail/index.js";
+import { ActivityDrawer } from "./features/activity/index.js";
 import {
+  StartModal,
+  CleanupModal,
   SettingsModal,
   type SettingsTab,
-} from "./features/modals/SettingsModal.js";
-import { FirstRunSetup } from "./features/setup/FirstRunSetup.js";
-import { UpdateBanner } from "./features/update/UpdateBanner.js";
+} from "./features/modals/index.js";
+import { FirstRunSetup } from "./features/setup/index.js";
+import { UpdateBanner } from "./features/update/index.js";
 import { cleanupCard as cleanupCardApi, getSetup } from "./lib/api.js";
 import type { StartRequest } from "./lib/start-request.js";
 import type { PrerequisiteStatus } from "../shared/types.js";
