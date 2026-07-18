@@ -7,7 +7,11 @@ import type {
   DirListing,
   DiscoveredRepo,
 } from "../../../shared/types.js";
-import { originHeadRef, branchExists, currentBranch } from "../../adapters/git.js";
+import {
+  originHeadRef,
+  branchExists,
+  currentBranch,
+} from "../../adapters/git.js";
 
 /**
  * Normalize a user-supplied folder path to a canonical absolute form BEFORE any validate/persist/
