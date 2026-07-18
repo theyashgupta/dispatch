@@ -11,6 +11,7 @@ const SINGLE_LINE_COPY: Record<Exclude<ColumnId, "todo">, string> = {
   agent_done: "No finished agents yet.",
   in_review: "Nothing waiting on you.",
   done: "Finished tickets land here.",
+  inbox: "Nothing in the inbox.",
 };
 
 export function EmptyState({ column }: EmptyStateProps) {

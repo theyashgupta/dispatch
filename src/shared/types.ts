@@ -1,6 +1,16 @@
-/** Board columns in display order. */
+/**
+ * Board columns in display order, plus the inbox landing zone for newly synced Linear tickets.
+ * Inbox is deliberately excluded from `COLUMNS` (the board render list) so widening this union
+ * alone can never make Inbox a board column or a drag-drop target.
+ */
 export type Column =
-  "todo" | "in_progress" | "needs_input" | "agent_done" | "in_review" | "done";
+  | "todo"
+  | "in_progress"
+  | "needs_input"
+  | "agent_done"
+  | "in_review"
+  | "done"
+  | "inbox";
 
 /** The six columns in board order, for the frontend to iterate. */
 export const COLUMNS: readonly Column[] = [
@@ -53,6 +63,11 @@ export interface Card {
   description: string | null;
   /** Linear issue permalink; optional so pre-Phase-7 cards backfill on the next poll. */
   url?: string;
+  /**
+   * Linear project { id, name }; optional/nullable so pre-Phase-50 cards backfill on the next
+   * poll and a Linear issue with no project renders cleanly.
+   */
+  project?: { id: string; name: string } | null;
   /** Linear priority integer: 0 none, 1 urgent, 2 high, 3 normal, 4 low. */
   priority: number;
   column: Column;
@@ -60,6 +75,14 @@ export interface Card {
   updatedAt: string;
   /** Set when the issue disappeared from Linear while the card was past To Do. */
   goneFromLinear?: boolean;
+  /**
+   * ISO timestamp stamped by moveCardManual when a card is promoted (inbox -> todo). Drives
+   * compareTodoOrder's top-of-To-Do tier; absent for cards never promoted. Never cleared on
+   * demote (inert while the card sits back in inbox — compareTodoOrder only reads it over the
+   * todo partition) and never cleared on a later session start; simply overwritten with a fresh
+   * timestamp on re-promotion.
+   */
+  promotedAt?: string;
 
   /** Per-ticket workspace folder containing the git worktrees. */
   workspacePath?: string;
@@ -415,6 +438,8 @@ export interface SourceIssue {
   description: string | null;
   priority: number;
   updatedAt: string;
+  /** Linear project { id, name }; null when the issue has no project. */
+  project: { id: string; name: string } | null;
 }
 
 /** Result of reconciling a Linear poll against the current board. */

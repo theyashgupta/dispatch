@@ -22,6 +22,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   agent_done: "AGENT DONE",
   in_review: "IN REVIEW",
   done: "DONE",
+  inbox: "INBOX",
 };
 
 const COLUMN_ACCENT: Record<ColumnId, string> = {
@@ -31,6 +32,7 @@ const COLUMN_ACCENT: Record<ColumnId, string> = {
   agent_done: "var(--col-agent-done)",
   in_review: "var(--col-in-review)",
   done: "var(--col-done)",
+  inbox: "var(--accent)",
 };
 
 interface ColumnProps {

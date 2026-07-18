@@ -12,6 +12,7 @@ export const COLUMN_LABELS: Record<Column, string> = {
   agent_done: "Agent Done",
   in_review: "In Review",
   done: "Done",
+  inbox: "Inbox",
 };
 
 function moveClause(
