@@ -374,6 +374,16 @@ export default tseslint.config(
     },
   },
 
+  {
+    files: ["src/web/lib/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { paths: ["react", "react-dom"], patterns: ["react/*", "react-dom/*"] },
+      ],
+    },
+  },
+
   boundariesConfig,
   feWebBoundariesConfig,
 
