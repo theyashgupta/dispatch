@@ -110,7 +110,7 @@ class BoardStore extends EventEmitter {
   private readonly inFlightStarts = new Set<string>();
   /**
    * Bootstrap-injected releaser for cleared hook tokens. The boundaries DAG forbids
-   * store → services, so bootstrap wires services/hook-tokens.ts' unregister function in here
+   * store → services, so bootstrap wires services/domain/hook-tokens.ts' unregister function in here
    * (composed with hook-events' activity-throttle reaper, which is why the card id rides along);
    * the no-op default keeps the store safe to use before wiring.
    */

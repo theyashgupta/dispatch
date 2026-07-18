@@ -177,7 +177,7 @@ export function probeStorageHealth(): { ok: boolean; path: string } {
 /**
  * The per-ticket workspace registry as `uninstall` reads it: every card's workspace folder plus the
  * source repos its worktrees were cut from. Returned RAW (never joined into worktree paths) because
- * that join lives in `services/workspace-paths.ts` and store→services is a boundary violation — the
+ * that join lives in `services/domain/workspace-paths.ts` and store→services is a boundary violation — the
  * services caller owns the join.
  * @remarks Read-only by construction and tolerant to `[]` on a WHOLE-STORE failure (absent db,
  * missing `cards` table, unreadable file): this feeds the idempotent uninstall re-run, where a

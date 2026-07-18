@@ -38,9 +38,9 @@ const READY_POLL_CADENCE_MS = 100;
  * Steps 1-3 run with NO await between the check and the in-flight `set`, so a second concurrent
  * call always sees the entry — the whole point of the single-flight guard.
  * `indexPath` (TTYD_INDEX_PATH when the boot-provisioned artifact exists, else null) is resolved
- * by the caller rather than imported here: `services/paths.js` lives one layer above `adapters` in
+ * by the caller rather than imported here: `services/infra/paths.js` lives one layer above `adapters` in
  * the backend DAG (boundaries/element-types), so the existence check happens in
- * `services/terminal.ts` and the result is threaded through as plain data.
+ * `services/orchestration/terminal.ts` and the result is threaded through as plain data.
  * @remarks TERM-01: writable + loopback-only ttyd, single-flight spawn (T-03-07), port parsed
  * from stderr `Listening on port: N`.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
