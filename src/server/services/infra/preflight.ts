@@ -5,13 +5,13 @@ import { fileURLToPath } from "node:url";
 import type {
   PreflightReport,
   PrerequisiteStatus,
-} from "../../shared/types.js";
-import { run } from "../adapters/exec.js";
+} from "../../../shared/types.js";
+import { run } from "../../adapters/exec.js";
 import {
   resolveBinaryPath,
   resolveWithPrefixes,
-} from "../adapters/resolve-binary.js";
-import { probeStorageHealth } from "../store/board-db.js";
+} from "../../adapters/resolve-binary.js";
+import { probeStorageHealth } from "../../store/board-db.js";
 
 /** The four binaries Dispatch needs at runtime (spec + BOARD-05). */
 export const REQUIRED_BINARIES = ["tmux", "ttyd", "git", "claude"] as const;

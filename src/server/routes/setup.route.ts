@@ -2,12 +2,12 @@ import { Router } from "express";
 import {
   getOrchestrationConfig,
   updateLinearApiKey,
-} from "../services/config-holder.js";
+} from "../services/infra/config-holder.js";
 import {
   installArgv,
   probePreflight,
   runInstall,
-} from "../services/preflight.js";
+} from "../services/infra/preflight.js";
 import {
   rebuildSources,
   testLinearConnection,

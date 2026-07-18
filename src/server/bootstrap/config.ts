@@ -9,7 +9,7 @@ import type {
 } from "../../shared/types.js";
 import { DEFAULT_FILTERS } from "../../shared/types.js";
 import { StartupError } from "./binary-check.js";
-import { CONFIG_PATH, DISPATCH_DIR } from "../services/paths.js";
+import { CONFIG_PATH, DISPATCH_DIR } from "../services/infra/paths.js";
 
 const DEFAULT_PORT = 4700;
 const DEFAULT_POLL_INTERVAL_MS = 60_000;

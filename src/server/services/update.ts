@@ -9,7 +9,7 @@ import type {
   UpdateStatus,
 } from "../../shared/types.js";
 import { run } from "../adapters/exec.js";
-import { DISPATCH_DIR, UPDATE_CACHE_PATH } from "./paths.js";
+import { DISPATCH_DIR, UPDATE_CACHE_PATH } from "./infra/paths.js";
 
 const REGISTRY_URL =
   "https://registry.npmjs.org/@theyashgupta%2fdispatch/latest";

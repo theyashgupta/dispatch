@@ -9,7 +9,7 @@ import {
   installArgv,
   probePreflight,
   runInstall,
-} from "../services/preflight.js";
+} from "../services/infra/preflight.js";
 import {
   renderPlan,
   runUninstall,

@@ -27,9 +27,9 @@ import { preSeedTrust } from "../adapters/claude-trust.js";
 import { resolveBinaryPath } from "../adapters/resolve-binary.js";
 import { store } from "../store/board.store.js";
 import { buildKickoff } from "./kickoff.js";
-import { getHooksRuntime } from "./config-holder.js";
+import { getHooksRuntime } from "./infra/config-holder.js";
 import { mintHookToken } from "./hook-tokens.js";
-import { HOOK_SETTINGS_PATH } from "./paths.js";
+import { HOOK_SETTINGS_PATH } from "./infra/paths.js";
 import { worktreePath as buildWorktreePath } from "./workspace-paths.js";
 
 /** Linear identifier shape (defense-in-depth; the route also validates before we reach here). */

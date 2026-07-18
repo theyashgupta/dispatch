@@ -12,7 +12,7 @@ import {
   DISPATCH_DIR,
   HOOK_SCRIPT_PATH,
   HOOK_SETTINGS_PATH,
-} from "./paths.js";
+} from "./infra/paths.js";
 import { worktreePath } from "./workspace-paths.js";
 
 /**

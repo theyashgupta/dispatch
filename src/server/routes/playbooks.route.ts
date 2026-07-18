@@ -11,7 +11,7 @@ import {
   generatePlaybookDraft,
   SourceUnreadableError,
 } from "../services/playbook-generate.js";
-import { getOrchestrationConfig } from "../services/config-holder.js";
+import { getOrchestrationConfig } from "../services/infra/config-holder.js";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 const MAX_NAME_LEN = 80;

@@ -4,7 +4,7 @@ import {
   type Marker,
 } from "../adapters/markers/parse.js";
 import { store } from "../store/board.store.js";
-import { getHooksRuntime } from "./config-holder.js";
+import { getHooksRuntime } from "./infra/config-holder.js";
 
 /**
  * Tool names whose `PreToolUse` fires the structural Needs-Input safety net (HOOK-03) and whose

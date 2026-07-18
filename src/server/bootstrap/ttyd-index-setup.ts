@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import fsp from "node:fs/promises";
 import writeFileAtomic from "write-file-atomic";
 import { parsePort } from "../adapters/ttyd.js";
-import { DISPATCH_DIR, TTYD_INDEX_PATH } from "../services/paths.js";
+import { DISPATCH_DIR, TTYD_INDEX_PATH } from "../services/infra/paths.js";
 
 const PATCH_TARGET = "new l.WebLinksAddon";
 const PATCH_HANDLER =

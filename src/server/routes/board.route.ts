@@ -4,7 +4,7 @@ import { store } from "../store/board.store.js";
 import {
   getOrchestrationConfig,
   updateSourceFilters,
-} from "../services/config-holder.js";
+} from "../services/infra/config-holder.js";
 import {
   getSourceCapabilities,
   listSourceOptions,

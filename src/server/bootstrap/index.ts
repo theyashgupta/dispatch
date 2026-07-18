@@ -6,11 +6,11 @@ import { StartupError } from "./binary-check.js";
 import { loadConfig } from "./config.js";
 import { store } from "../store/board.store.js";
 import { apiRouter } from "../routes/index.js";
-import { probePreflight } from "../services/preflight.js";
+import { probePreflight } from "../services/infra/preflight.js";
 import {
   setHooksRuntime,
   setOrchestrationConfig,
-} from "../services/config-holder.js";
+} from "../services/infra/config-holder.js";
 import { checkHooksCapability, installHookArtifacts } from "./hook-setup.js";
 import { provisionTtydIndex } from "./ttyd-index-setup.js";
 import { unregisterHookToken } from "../services/hook-tokens.js";

@@ -7,7 +7,7 @@ import { resumeSession } from "../services/resume-session.js";
 import { cleanupWorkspace } from "../services/cleanup.js";
 import { ensureTerminal } from "../services/terminal.js";
 import { editorPath, launchEditor } from "../adapters/editors.js";
-import { getOrchestrationConfig } from "../services/config-holder.js";
+import { getOrchestrationConfig } from "../services/infra/config-holder.js";
 import { restatRepos } from "../services/workspaces.js";
 import { loadPlaybooks } from "../services/playbooks.js";
 

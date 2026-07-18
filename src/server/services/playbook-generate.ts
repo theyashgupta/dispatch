@@ -2,7 +2,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { run } from "../adapters/exec.js";
 import { resolveBinaryPath } from "../adapters/resolve-binary.js";
-import { DISPATCH_DIR } from "./paths.js";
+import { DISPATCH_DIR } from "./infra/paths.js";
 import { isWithinHome } from "./workspaces.js";
 
 const MAX_FILE_BYTES = 100 * 1024;

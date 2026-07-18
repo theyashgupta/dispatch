@@ -7,7 +7,7 @@ import {
   DISPATCH_DIR,
   HOOK_SCRIPT_PATH,
   HOOK_SETTINGS_PATH,
-} from "../services/paths.js";
+} from "../services/infra/paths.js";
 
 /**
  * Lowest claude CLI version whose hook payload contract was live-verified (Stop carries

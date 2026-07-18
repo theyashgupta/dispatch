@@ -4,7 +4,7 @@ import type {
   Config,
   SourceFilters,
   StatusChannel,
-} from "../../shared/types.js";
+} from "../../../shared/types.js";
 import { CONFIG_PATH } from "./paths.js";
 
 /** The loaded config, pushed in once by index.ts at boot. null until set (route → 400 if unset). */

@@ -2,7 +2,7 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { Response as ExpressResponse } from "express";
 import type { ReadableStream } from "node:stream/web";
-import { getOrchestrationConfig } from "../services/config-holder.js";
+import { getOrchestrationConfig } from "../services/infra/config-holder.js";
 
 const TIMEOUT_MS = 10_000;
 const MAX_BYTES = 20 * 1024 * 1024;

@@ -4,7 +4,7 @@ import { store } from "../store/board.store.js";
 import { hasSession } from "../adapters/tmux.js";
 import { registerHookToken } from "./hook-tokens.js";
 import { loadPlaybooks } from "./playbooks.js";
-import { updateLastUsedPlaybook } from "./config-holder.js";
+import { updateLastUsedPlaybook } from "./infra/config-holder.js";
 import {
   steps,
   StartStepError,
