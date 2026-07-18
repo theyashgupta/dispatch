@@ -15,6 +15,7 @@ import { Glyph } from "./primitives/Glyph.js";
 import { Board } from "./features/board/Board.js";
 import { InboxView } from "./features/inbox/InboxView.js";
 import { OrcaView } from "./features/orca/OrcaView.js";
+import { mostRecentCardId } from "./features/orca/orca-selectors.js";
 import { DetailPanel } from "./features/detail/DetailPanel.js";
 import { ActivityDrawer } from "./features/activity/ActivityDrawer.js";
 import { StartModal } from "./features/modals/StartModal.js";
@@ -106,6 +107,14 @@ export function App() {
   const lastOpened = useLastOpened();
   const newestTs = feed.events[0]?.ts;
   const activityUnseen = isUnseen(newestTs, lastOpened["__feed__"]);
+
+  useEffect(() => {
+    if (viewMode !== "orca" || selectedCardId != null || board == null) {
+      return;
+    }
+    const id = mostRecentCardId(lastOpened, board.cards);
+    if (id != null) setSelectedCardId(id);
+  }, [viewMode, selectedCardId, board, lastOpened]);
 
   useTransitionNotifications(board, connection, setSelectedCardId);
 

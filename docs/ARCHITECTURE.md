@@ -476,8 +476,8 @@ The `DetailPanel` (`web/features/detail/DetailPanel.tsx`) embeds the live termin
 identity across every panel interaction is load-bearing: any remount of that iframe drops its ttyd
 WebSocket and detaches the tmux client, killing the visible terminal mid-session. The whole panel is
 engineered around never remounting that one element. `DetailPanel.tsx` is one of the four
-invariant-dense files and stays untouched this phase; its rules live here so a Phase 12/13
-restructure can preserve them without reading the original body comments.
+invariant-dense files; its rules live here so a Phase 12/13 restructure — and the docked-mode
+re-derivation below — can preserve them without reading the original body comments.
 
 **The ttyd iframe is a single, always-rendered, never-keyed element (`PANEL-03`).** For a live
 session the terminal region is exactly one `<iframe src="http://127.0.0.1:${ttydPort}">` rendered at
@@ -507,6 +507,22 @@ a FIXED position in the JSX tree, and it must stay identity-stable across four s
   CLEARS it at 200ms (200 > 150). Without that clear a closed session card's ttyd iframe would stay
   mounted off-screen forever with its WebSocket open and a tmux client attached. This is the one
   place the iframe is intentionally unmounted — and only after it has left the viewport.
+
+**Docked (Orca) mode is a SECOND style-only derivation of the same `<aside>`, re-deriving `PANEL-03`
+for a second surface.** `position` stays `fixed` in BOTH modes — only `top`/`left`/`width`/`height`/
+`borderLeft`/`transform`/`transition` branch on the `docked` prop, the exact same category of change
+the fullscreen precedent above already proved remount-free; a `position` mode switch was deliberately
+rejected as a larger reflow than adjusting `top`/`left`/`width` in place. The backdrop `<div>`, the
+close `X`, and the fullscreen toggle are conditionally UNMOUNTED when docked — safe because all three
+are stateless, decorative siblings outside the iframe subtree, never the terminal itself; the
+docked-and-empty-selection state (centered "Select a ticket" copy) renders only when
+`docked && card == null`, so the card-present subtree — and the terminal's position in it — is
+identical in both modes. The Orca side nav (`web/features/orca/`) never renders a terminal: it holds
+zero imports of `TerminalRegion` or `<iframe>` (grep-enforced), is pure navigation chrome, and drives
+the SAME `selectedCardId` the board/inbox views already write to. The ensure-terminal spawn guard
+below stays a single ref BY CONSTRUCTION: one `selectedCardId`, one hoisted panel, means "the same
+card open in both views at once" is structurally impossible, so no per-card guard `Map` is needed — a
+future genuinely-second terminal-rendering surface (not this phase) would be the trigger to revisit.
 
 **ATTN-02 `lastOpened` stamping — open, close, and ONE deferred re-stamp.** The panel stamps
 `lastOpened` for a live-session card when its panel OPENS and again when it CLOSES (the effect
