@@ -106,7 +106,7 @@ async function spawnTtyd(session: string): Promise<number> {
 }
 
 /** Resolve with the port ttyd reports on stderr (see PORT_RE), or reject on timeout/early exit. */
-function parsePort(child: ChildProcess): Promise<number> {
+export function parsePort(child: ChildProcess): Promise<number> {
   return new Promise((resolve, reject) => {
     let buf = "";
     const timer = setTimeout(

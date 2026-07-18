@@ -12,6 +12,7 @@ import {
   setOrchestrationConfig,
 } from "../services/config-holder.js";
 import { checkHooksCapability, installHookArtifacts } from "./hook-setup.js";
+import { provisionTtydIndex } from "./ttyd-index-setup.js";
 import { unregisterHookToken } from "../services/hook-tokens.js";
 import { reapActivityThrottle } from "../services/hook-events.js";
 import { seedPlaybooks } from "../services/playbooks.js";
@@ -145,6 +146,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
 
   const statusChannel = config.statusChannel ?? "auto";
   await installHookArtifacts();
+  await provisionTtydIndex();
   const { capable, version } = await checkHooksCapability();
   if (statusChannel === "hooks" && !capable) {
     console.warn(
