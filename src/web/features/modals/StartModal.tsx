@@ -747,28 +747,25 @@ function EditInSettingsLink({ onClick }: EditInSettingsLinkProps) {
   );
 }
 
-export function StartModal({
-  card,
-  onClose,
-  onEditPlaybooks,
-}: StartModalProps) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const modalRef = useRef<ModalControl>(null);
-  const [extraDirection, setExtraDirection] = useState(
-    card.extraDirection ?? "",
-  );
-  const [error, setError] = useState<{
-    text: string;
-    variant: "config" | "playbook" | null;
-  } | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [focused, setFocused] = useState<"textarea" | null>(null);
+interface WorkspacePicker {
+  folders: string[];
+  selectedFolder: string | null;
+  lastUsed: string | null;
+  repos: DiscoveredRepo[] | null;
+  checked: Record<string, boolean>;
+  baseOverride: Record<string, string>;
+  setChecked: (
+    updater: (prev: Record<string, boolean>) => Record<string, boolean>,
+  ) => void;
+  setBaseOverride: (
+    updater: (prev: Record<string, string>) => Record<string, string>,
+  ) => void;
+  selectFolder: (path: string) => Promise<void>;
+  addFolder: (path: string) => Promise<string | null>;
+  removeFolder: (path: string) => void;
+}
 
-  const [pickerValid, setPickerValid] = useState<Playbook[]>([]);
-  const [pickerInvalid, setPickerInvalid] = useState<InvalidPlaybook[]>([]);
-  const [lastUsedPlaybook, setLastUsedPlaybook] = useState<string | null>(null);
-  const [selectedPlaybook, setSelectedPlaybook] = useState<string | null>(null);
-
+function useWorkspacePicker(onInteraction: () => void): WorkspacePicker {
   const [folders, setFolders] = useState<string[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [lastUsed, setLastUsed] = useState<string | null>(null);
@@ -776,12 +773,15 @@ export function StartModal({
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [baseOverride, setBaseOverride] = useState<Record<string, string>>({});
 
-  const applyRepos = useCallback((list: DiscoveredRepo[]) => {
-    setRepos(list);
-    setChecked(Object.fromEntries(list.map((r) => [r.path, true])));
-    setBaseOverride({});
-    setError(null);
-  }, []);
+  const applyRepos = useCallback(
+    (list: DiscoveredRepo[]) => {
+      setRepos(list);
+      setChecked(Object.fromEntries(list.map((r) => [r.path, true])));
+      setBaseOverride({});
+      onInteraction();
+    },
+    [onInteraction],
+  );
 
   const selectGenRef = useRef(0);
   const selectFolder = useCallback(
@@ -827,45 +827,6 @@ export function StartModal({
     };
   }, [applyRepos]);
 
-  const pickerGenRef = useRef(0);
-  const loadPickerPlaybooks = useCallback(async () => {
-    const gen = ++pickerGenRef.current;
-    try {
-      const { valid, invalid, lastUsed } = await getPickerPlaybooks();
-      if (pickerGenRef.current !== gen) return;
-      setPickerValid(valid);
-      setPickerInvalid(invalid);
-      setLastUsedPlaybook(lastUsed);
-
-      const validNames = new Set(valid.map((p) => p.name));
-      const seedRows = orderSeedRows(valid);
-      const orderedNames = [
-        ...seedRows.map((p) => p.name),
-        ...valid.filter((p) => !seedRows.includes(p)).map((p) => p.name),
-      ];
-      if (lastUsed !== null && validNames.has(lastUsed)) {
-        setSelectedPlaybook(lastUsed);
-      } else if (validNames.has(WRITE_CODE_DIRECTLY_NAME)) {
-        setSelectedPlaybook(WRITE_CODE_DIRECTLY_NAME);
-      } else {
-        setSelectedPlaybook(orderedNames[0] ?? null);
-      }
-    } catch (err) {
-      console.error("getPickerPlaybooks failed", err);
-      if (pickerGenRef.current !== gen) return;
-      setPickerValid([]);
-      setPickerInvalid([]);
-      setLastUsedPlaybook(null);
-      setSelectedPlaybook(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    void (async () => {
-      await loadPickerPlaybooks();
-    })();
-  }, [loadPickerPlaybooks]);
-
   const addFolder = useCallback(
     async (path: string): Promise<string | null> => {
       const gen = ++selectGenRef.current;
@@ -908,14 +869,283 @@ export function StartModal({
     [folders, selectedFolder, lastUsed, selectFolder],
   );
 
+  return {
+    folders,
+    selectedFolder,
+    lastUsed,
+    repos,
+    checked,
+    baseOverride,
+    setChecked,
+    setBaseOverride,
+    selectFolder,
+    addFolder,
+    removeFolder,
+  };
+}
+
+interface WorkspacePickerSectionProps {
+  workspace: WorkspacePicker;
+  onInteraction: () => void;
+}
+
+function WorkspacePickerSection({
+  workspace,
+  onInteraction,
+}: WorkspacePickerSectionProps) {
+  const {
+    folders,
+    selectedFolder,
+    repos,
+    checked,
+    baseOverride,
+    selectFolder,
+    addFolder,
+    removeFolder,
+    setChecked,
+    setBaseOverride,
+  } = workspace;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-lg)",
+        flex: "0 0 auto",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--space-xs)",
+        }}
+      >
+        <Field>Workspace</Field>
+        <FolderPicker
+          folders={folders}
+          selected={selectedFolder}
+          onSelect={(p) => void selectFolder(p)}
+          onRemove={removeFolder}
+          onAdd={addFolder}
+        />
+      </div>
+
+      {selectedFolder !== null && repos !== null && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-xs)",
+          }}
+        >
+          <Field>Repositories</Field>
+          {repos.length === 0 ? (
+            <div
+              style={{
+                fontSize: "var(--font-label)",
+                fontWeight: "var(--weight-semibold)",
+                lineHeight: "var(--line-label)",
+                color: "var(--text-muted)",
+              }}
+            >
+              No git repositories found in this folder
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "var(--space-sm)",
+              }}
+            >
+              {repos.map((r) => (
+                <RepoRow
+                  key={r.path}
+                  repo={r}
+                  checked={checked[r.path] ?? false}
+                  base={baseOverride[r.path] ?? r.base}
+                  onToggle={() => {
+                    onInteraction();
+                    setChecked((prev) => ({
+                      ...prev,
+                      [r.path]: !prev[r.path],
+                    }));
+                  }}
+                  onBaseChange={(b) => {
+                    onInteraction();
+                    setBaseOverride((prev) => ({ ...prev, [r.path]: b }));
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface PlaybookPicker {
+  pickerValid: Playbook[];
+  pickerInvalid: InvalidPlaybook[];
+  lastUsedPlaybook: string | null;
+  selectedPlaybook: string | null;
+  seedRows: PickerRow[];
+  restRows: PickerRow[];
+  playbookArg: string | undefined;
+  selectPlaybook: (name: string) => void;
+  reload: () => Promise<void>;
+}
+
+function usePlaybookPicker(onInteraction: () => void): PlaybookPicker {
+  const [pickerValid, setPickerValid] = useState<Playbook[]>([]);
+  const [pickerInvalid, setPickerInvalid] = useState<InvalidPlaybook[]>([]);
+  const [lastUsedPlaybook, setLastUsedPlaybook] = useState<string | null>(null);
+  const [selectedPlaybook, setSelectedPlaybook] = useState<string | null>(null);
+
+  const pickerGenRef = useRef(0);
+  const loadPickerPlaybooks = useCallback(async () => {
+    const gen = ++pickerGenRef.current;
+    try {
+      const { valid, invalid, lastUsed } = await getPickerPlaybooks();
+      if (pickerGenRef.current !== gen) return;
+      setPickerValid(valid);
+      setPickerInvalid(invalid);
+      setLastUsedPlaybook(lastUsed);
+
+      const validNames = new Set(valid.map((p) => p.name));
+      const seedRows = orderSeedRows(valid);
+      const orderedNames = [
+        ...seedRows.map((p) => p.name),
+        ...valid.filter((p) => !seedRows.includes(p)).map((p) => p.name),
+      ];
+      if (lastUsed !== null && validNames.has(lastUsed)) {
+        setSelectedPlaybook(lastUsed);
+      } else if (validNames.has(WRITE_CODE_DIRECTLY_NAME)) {
+        setSelectedPlaybook(WRITE_CODE_DIRECTLY_NAME);
+      } else {
+        setSelectedPlaybook(orderedNames[0] ?? null);
+      }
+    } catch (err) {
+      console.error("getPickerPlaybooks failed", err);
+      if (pickerGenRef.current !== gen) return;
+      setPickerValid([]);
+      setPickerInvalid([]);
+      setLastUsedPlaybook(null);
+      setSelectedPlaybook(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      await loadPickerPlaybooks();
+    })();
+  }, [loadPickerPlaybooks]);
+
+  const selectPlaybook = useCallback(
+    (name: string) => {
+      setSelectedPlaybook(name);
+      onInteraction();
+    },
+    [onInteraction],
+  );
+
   const seedRows = orderSeedRows(pickerValid);
   const restRows = pickerValid.filter((p) => !seedRows.includes(p));
   const playbookArg = selectedPlaybook ?? undefined;
 
-  const selectPlaybook = useCallback((name: string) => {
-    setSelectedPlaybook(name);
-    setError(null);
-  }, []);
+  return {
+    pickerValid,
+    pickerInvalid,
+    lastUsedPlaybook,
+    selectedPlaybook,
+    seedRows,
+    restRows,
+    playbookArg,
+    selectPlaybook,
+    reload: loadPickerPlaybooks,
+  };
+}
+
+interface PlaybookPickerSectionProps {
+  playbook: PlaybookPicker;
+  onEditPlaybooks: () => void;
+}
+
+function PlaybookPickerSection({
+  playbook,
+  onEditPlaybooks,
+}: PlaybookPickerSectionProps) {
+  const {
+    pickerInvalid,
+    lastUsedPlaybook,
+    selectedPlaybook,
+    seedRows,
+    restRows,
+    selectPlaybook,
+  } = playbook;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-xs)",
+        flex: "0 0 auto",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <Field>Playbook</Field>
+        <EditInSettingsLink onClick={onEditPlaybooks} />
+      </div>
+      <KickoffPlaybookPicker
+        seedRows={seedRows}
+        restRows={restRows}
+        invalidRows={pickerInvalid}
+        selected={selectedPlaybook}
+        lastUsed={lastUsedPlaybook}
+        onSelect={selectPlaybook}
+      />
+      {seedRows.length === 0 && restRows.length === 0 && (
+        <Notice tone="muted" label="No playbooks available">
+          Starting without one. Manage playbooks in Settings ▸ Playbooks.
+        </Notice>
+      )}
+    </div>
+  );
+}
+
+export function StartModal({
+  card,
+  onClose,
+  onEditPlaybooks,
+}: StartModalProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const modalRef = useRef<ModalControl>(null);
+  const [extraDirection, setExtraDirection] = useState(
+    card.extraDirection ?? "",
+  );
+  const [error, setError] = useState<{
+    text: string;
+    variant: "config" | "playbook" | null;
+  } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [focused, setFocused] = useState<"textarea" | null>(null);
+
+  const clearError = useCallback(() => setError(null), []);
+  const workspace = useWorkspacePicker(clearError);
+  const playbook = usePlaybookPicker(clearError);
+
+  const { repos, checked, baseOverride, selectedFolder } = workspace;
+  const { playbookArg, reload: reloadPlaybooks } = playbook;
 
   const checkedCount = (repos ?? []).filter((r) => checked[r.path]).length;
   const startDisabled =
@@ -948,7 +1178,7 @@ export function StartModal({
           text: "The selected playbook no longer exists.",
           variant: "playbook",
         });
-        void loadPickerPlaybooks();
+        void reloadPlaybooks();
         return;
       }
       setError({
@@ -976,116 +1206,15 @@ export function StartModal({
     >
       <Modal.Header>{card.identifier}</Modal.Header>
       <Modal.Body>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-lg)",
-            flex: "0 0 auto",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "var(--space-xs)",
-            }}
-          >
-            <Field>Workspace</Field>
-            <FolderPicker
-              folders={folders}
-              selected={selectedFolder}
-              onSelect={(p) => void selectFolder(p)}
-              onRemove={removeFolder}
-              onAdd={addFolder}
-            />
-          </div>
+        <WorkspacePickerSection
+          workspace={workspace}
+          onInteraction={clearError}
+        />
 
-          {selectedFolder !== null && repos !== null && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "var(--space-xs)",
-              }}
-            >
-              <Field>Repositories</Field>
-              {repos.length === 0 ? (
-                <div
-                  style={{
-                    fontSize: "var(--font-label)",
-                    fontWeight: "var(--weight-semibold)",
-                    lineHeight: "var(--line-label)",
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  No git repositories found in this folder
-                </div>
-              ) : (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "var(--space-sm)",
-                  }}
-                >
-                  {repos.map((r) => (
-                    <RepoRow
-                      key={r.path}
-                      repo={r}
-                      checked={checked[r.path] ?? false}
-                      base={baseOverride[r.path] ?? r.base}
-                      onToggle={() => {
-                        setError(null);
-                        setChecked((prev) => ({
-                          ...prev,
-                          [r.path]: !prev[r.path],
-                        }));
-                      }}
-                      onBaseChange={(b) => {
-                        setError(null);
-                        setBaseOverride((prev) => ({ ...prev, [r.path]: b }));
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-xs)",
-            flex: "0 0 auto",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <Field>Playbook</Field>
-            <EditInSettingsLink onClick={onEditPlaybooks} />
-          </div>
-          <KickoffPlaybookPicker
-            seedRows={seedRows}
-            restRows={restRows}
-            invalidRows={pickerInvalid}
-            selected={selectedPlaybook}
-            lastUsed={lastUsedPlaybook}
-            onSelect={selectPlaybook}
-          />
-          {seedRows.length === 0 && restRows.length === 0 && (
-            <Notice tone="muted" label="No playbooks available">
-              Starting without one. Manage playbooks in Settings ▸ Playbooks.
-            </Notice>
-          )}
-        </div>
+        <PlaybookPickerSection
+          playbook={playbook}
+          onEditPlaybooks={onEditPlaybooks}
+        />
 
         <div
           style={{
@@ -1199,3 +1328,6 @@ export function StartModal({
     </Modal>
   );
 }
+
+StartModal.WorkspacePicker = WorkspacePickerSection;
+StartModal.PlaybookPicker = PlaybookPickerSection;
