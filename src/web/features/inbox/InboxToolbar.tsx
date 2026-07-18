@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FilterOption } from "../../../shared/types.js";
-import { MultiSelect } from "../modals/MultiSelect.js";
+import { MultiSelect } from "../modals/index.js";
 
 interface InboxToolbarProps {
   search: string;
