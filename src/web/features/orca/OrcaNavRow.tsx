@@ -23,6 +23,7 @@ export function OrcaNavRow({ card, selected, onSelect }: OrcaNavRowProps) {
     <div
       role="button"
       tabIndex={0}
+      aria-current={selected ? "true" : undefined}
       onClick={select}
       onKeyDown={(event) => {
         if (event.key === "Enter") {
