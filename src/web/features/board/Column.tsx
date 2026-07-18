@@ -15,7 +15,7 @@ import {
 const MIN_COL_WIDTH = 220;
 const MAX_COL_WIDTH = 480;
 
-const COLUMN_LABELS: Record<ColumnId, string> = {
+export const COLUMN_LABELS: Record<ColumnId, string> = {
   todo: "TO DO",
   in_progress: "IN PROGRESS",
   needs_input: "NEEDS INPUT",
@@ -25,7 +25,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   inbox: "INBOX",
 };
 
-const COLUMN_ACCENT: Record<ColumnId, string> = {
+export const COLUMN_ACCENT: Record<ColumnId, string> = {
   todo: "var(--col-todo)",
   in_progress: "var(--col-in-progress)",
   needs_input: "var(--col-needs-input)",

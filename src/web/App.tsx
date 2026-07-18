@@ -228,7 +228,11 @@ export function App() {
         onSelectViewMode={setViewMode}
       />
       {viewMode === "orca" ? (
-        <OrcaView />
+        <OrcaView
+          board={board}
+          selectedCardId={selectedCard ? selectedCardId : null}
+          onSelectCard={setSelectedCardId}
+        />
       ) : inboxOpen ? (
         <InboxView
           board={board}
