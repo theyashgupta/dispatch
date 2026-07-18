@@ -202,7 +202,7 @@ Tier definition (verbatim, applies to every item below): **byte-identical** = th
 | `lib/card-badges.ts` → `hooks/useUnseenActivity.js` cross-tier import                    | byte-identical | The fix is relocating the shared `isUnseen` helper so `lib` stops depending on `hooks` — a pure move-and-relink with no change to `isUnseen`'s behavior or callers' observed output.     |
 | `primitives/ActivityItem.tsx` → `lib/event-copy.js` / `lib/format-age.js` upward imports | byte-identical | The fix is hoisting the formatting calls to the caller (passing pre-formatted strings as props) — same rendered output, no prop-contract change for `ActivityItem`'s existing consumers. |
 
-### Behavior-change allow-list (PENDING USER APPROVAL)
+### Behavior-change allow-list (APPROVED)
 
 Every behavior-change-tier item above, named once, with a one-line description of the observable change:
 
@@ -220,4 +220,4 @@ Every behavior-change-tier item above, named once, with a one-line description o
 12. **50-IN-04: refresh upsert identifier fix** — the displayed identifier after a Linear team move changes.
 13. **51-IN-03: docked Start-button race closed** — button availability/behavior changes under the previously-racing condition.
 
-Status: PENDING USER APPROVAL
+Status: APPROVED by user on 2026-07-19 (all 13 items, no exclusions)
