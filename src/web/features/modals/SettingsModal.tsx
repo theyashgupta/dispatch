@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+} from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import type {
   FilterCapabilities,
@@ -240,17 +248,22 @@ type PreviewState =
   | { status: "ready"; count: number; more: boolean }
   | { status: "unavailable" };
 
-interface SettingsModalProps {
-  onClose: () => void;
-  initialTab?: SettingsTab;
+interface FiltersTab {
+  draft: SourceFilters | null;
+  setDraft: Dispatch<SetStateAction<SourceFilters | null>>;
+  capabilities: FilterCapabilities | null;
+  options: Record<MultiDim, FilterOption[]>;
+  optLoading: Record<MultiDim, boolean>;
+  optError: Record<MultiDim, boolean>;
+  optTruncated: Record<MultiDim, boolean>;
+  preview: PreviewState;
+  saving: boolean;
+  saveError: boolean;
+  loadError: boolean;
+  handleSave: () => Promise<void>;
 }
 
-export function SettingsModal({
-  onClose,
-  initialTab = "filters",
-}: SettingsModalProps) {
-  const modalRef = useRef<ModalControl>(null);
-  const firstTriggerRef = useRef<HTMLButtonElement>(null);
+function useFiltersTab(modalRef: RefObject<ModalControl | null>): FiltersTab {
   const [draft, setDraft] = useState<SourceFilters | null>(null);
   const [capabilities, setCapabilities] = useState<FilterCapabilities | null>(
     null,
@@ -276,41 +289,9 @@ export function SettingsModal({
     teams: false,
   });
   const [preview, setPreview] = useState<PreviewState>({ status: "counting" });
-  const [cycleFocus, setCycleFocus] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [loadError, setLoadError] = useState(false);
-
-  const [tab, setTab] = useState<SettingsTab>(initialTab);
-  const [playbooks, setPlaybooks] = useState<Playbook[] | null>(null);
-  const [playbooksLoading, setPlaybooksLoading] = useState(false);
-  const [playbooksLoadError, setPlaybooksLoadError] = useState(false);
-  const [playbooksVisited, setPlaybooksVisited] = useState(false);
-  const [editorState, setEditorState] = useState<{
-    mode: "create" | "edit";
-    playbook?: Playbook;
-  } | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Playbook | null>(null);
-
-  const loadPlaybooksList = useCallback(async () => {
-    setPlaybooksLoading(true);
-    setPlaybooksLoadError(false);
-    try {
-      const list = await getPlaybooks();
-      setPlaybooks([...list].sort((a, b) => a.name.localeCompare(b.name)));
-    } catch (err) {
-      console.error("getPlaybooks failed", err);
-      setPlaybooksLoadError(true);
-    } finally {
-      setPlaybooksLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (tab !== "playbooks" || playbooksVisited) return;
-    setPlaybooksVisited(true);
-    void loadPlaybooksList();
-  }, [tab, playbooksVisited, loadPlaybooksList]);
 
   useEffect(() => {
     let active = true;
@@ -387,6 +368,45 @@ export function SettingsModal({
     }
   }
 
+  return {
+    draft,
+    setDraft,
+    capabilities,
+    options,
+    optLoading,
+    optError,
+    optTruncated,
+    preview,
+    saving,
+    saveError,
+    loadError,
+    handleSave,
+  };
+}
+
+interface FiltersTabSectionProps {
+  filters: FiltersTab;
+  firstTriggerRef: RefObject<HTMLButtonElement | null>;
+}
+
+function FiltersTabSection({
+  filters,
+  firstTriggerRef,
+}: FiltersTabSectionProps) {
+  const {
+    draft,
+    setDraft,
+    capabilities,
+    options,
+    optLoading,
+    optError,
+    optTruncated,
+    preview,
+    saveError,
+    loadError,
+  } = filters;
+  const [cycleFocus, setCycleFocus] = useState(false);
+
   const previewText =
     preview.status === "counting"
       ? "counting…"
@@ -397,6 +417,344 @@ export function SettingsModal({
           : `Matches ${preview.count} ${preview.count === 1 ? "ticket" : "tickets"}`;
 
   const firstMultiDim = capabilities?.dimensions.find((d) => d !== "cycle");
+
+  return (
+    <>
+      {loadError && (
+        <span
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-body)",
+            lineHeight: "var(--line-body)",
+            color: "var(--text-muted)",
+          }}
+        >
+          Couldn't load filters — reopen settings to retry.
+        </span>
+      )}
+      {capabilities && draft && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-lg)",
+            flex: "0 1 auto",
+            minHeight: 0,
+            overflowY: "auto",
+          }}
+        >
+          {capabilities.dimensions.map((dim) =>
+            dim === "cycle" ? (
+              <div
+                key="cycle"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "var(--space-xs)",
+                }}
+              >
+                <Field>Current cycle</Field>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "var(--space-sm)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={draft.currentCycle}
+                    onChange={() =>
+                      setDraft((prev) =>
+                        prev
+                          ? { ...prev, currentCycle: !prev.currentCycle }
+                          : prev,
+                      )
+                    }
+                    onFocus={(e) =>
+                      setCycleFocus(e.currentTarget.matches(":focus-visible"))
+                    }
+                    onBlur={() => setCycleFocus(false)}
+                    style={{
+                      accentColor: "var(--accent)",
+                      borderRadius: "var(--radius)",
+                      outline: "none",
+                      boxShadow: focusRing(cycleFocus),
+                      flex: "0 0 auto",
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontFamily: "var(--font-ui)",
+                      fontSize: "var(--font-body)",
+                      lineHeight: "var(--line-body)",
+                      color: "var(--text)",
+                    }}
+                  >
+                    Current cycle only
+                  </span>
+                </label>
+                <span
+                  style={{
+                    fontFamily: "var(--font-ui)",
+                    fontSize: "var(--font-body)",
+                    lineHeight: "var(--line-body)",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  Backlog tickets often have no cycle, so this can drop matches
+                  to near zero.
+                </span>
+              </div>
+            ) : (
+              <div
+                key={dim}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "var(--space-xs)",
+                }}
+              >
+                <Field>{MULTI_COPY[dim].label}</Field>
+                <MultiSelect
+                  label={MULTI_COPY[dim].label}
+                  placeholder={MULTI_COPY[dim].placeholder}
+                  options={options[dim]}
+                  selected={draft[dim]}
+                  loading={optLoading[dim]}
+                  loadError={optError[dim]}
+                  emptyText={MULTI_COPY[dim].emptyText}
+                  triggerRef={
+                    dim === firstMultiDim ? firstTriggerRef : undefined
+                  }
+                  onChange={(next) =>
+                    setDraft((prev) => (prev ? { ...prev, [dim]: next } : prev))
+                  }
+                />
+                {optError[dim] && (
+                  <span
+                    style={{
+                      fontFamily: "var(--font-ui)",
+                      fontSize: "var(--font-body)",
+                      lineHeight: "var(--line-body)",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    Couldn't load options — reopen settings to retry.
+                  </span>
+                )}
+                {optTruncated[dim] && (
+                  <span
+                    style={{
+                      fontFamily: "var(--font-ui)",
+                      fontSize: "var(--font-body)",
+                      lineHeight: "var(--line-body)",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    Showing first 250 options.
+                  </span>
+                )}
+              </div>
+            ),
+          )}
+
+          <span
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: "var(--font-body)",
+              lineHeight: "var(--line-body)",
+              color: "var(--text-muted)",
+            }}
+          >
+            {previewText}
+          </span>
+
+          {saveError && (
+            <Notice
+              tone="destructive"
+              label="Couldn't save filters — try again."
+            />
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+interface PlaybooksEditorState {
+  mode: "create" | "edit";
+  playbook?: Playbook;
+}
+
+interface PlaybooksTab {
+  playbooks: Playbook[] | null;
+  playbooksLoading: boolean;
+  playbooksLoadError: boolean;
+  editorState: PlaybooksEditorState | null;
+  deleteTarget: Playbook | null;
+  openCreate: () => void;
+  openEdit: (playbook: Playbook) => void;
+  closeEditor: () => void;
+  openDelete: (playbook: Playbook) => void;
+  closeDelete: () => void;
+  reload: () => Promise<void>;
+}
+
+function usePlaybooksTab(active: boolean): PlaybooksTab {
+  const [playbooks, setPlaybooks] = useState<Playbook[] | null>(null);
+  const [playbooksLoading, setPlaybooksLoading] = useState(false);
+  const [playbooksLoadError, setPlaybooksLoadError] = useState(false);
+  const [visited, setVisited] = useState(false);
+  const [editorState, setEditorState] = useState<PlaybooksEditorState | null>(
+    null,
+  );
+  const [deleteTarget, setDeleteTarget] = useState<Playbook | null>(null);
+
+  const reload = useCallback(async () => {
+    setPlaybooksLoading(true);
+    setPlaybooksLoadError(false);
+    try {
+      const list = await getPlaybooks();
+      setPlaybooks([...list].sort((a, b) => a.name.localeCompare(b.name)));
+    } catch (err) {
+      console.error("getPlaybooks failed", err);
+      setPlaybooksLoadError(true);
+    } finally {
+      setPlaybooksLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!active || visited) return;
+    setVisited(true);
+    void reload();
+  }, [active, visited, reload]);
+
+  const openCreate = useCallback(() => setEditorState({ mode: "create" }), []);
+  const openEdit = useCallback(
+    (playbook: Playbook) => setEditorState({ mode: "edit", playbook }),
+    [],
+  );
+  const closeEditor = useCallback(() => setEditorState(null), []);
+  const openDelete = useCallback(
+    (playbook: Playbook) => setDeleteTarget(playbook),
+    [],
+  );
+  const closeDelete = useCallback(() => setDeleteTarget(null), []);
+
+  return {
+    playbooks,
+    playbooksLoading,
+    playbooksLoadError,
+    editorState,
+    deleteTarget,
+    openCreate,
+    openEdit,
+    closeEditor,
+    openDelete,
+    closeDelete,
+    reload,
+  };
+}
+
+interface PlaybooksTabSectionProps {
+  playbooksTab: PlaybooksTab;
+}
+
+function PlaybooksTabSection({ playbooksTab }: PlaybooksTabSectionProps) {
+  const {
+    playbooks,
+    playbooksLoading,
+    playbooksLoadError,
+    openCreate,
+    openEdit,
+    openDelete,
+  } = playbooksTab;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-lg)",
+        flex: "1 1 auto",
+        minHeight: 0,
+        overflowY: "auto",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <Button variant="primary" onClick={openCreate}>
+          <Plus size={14} strokeWidth={2} aria-hidden="true" />
+          New playbook
+        </Button>
+      </div>
+
+      {playbooksLoading && (
+        <span
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            lineHeight: "var(--line-label)",
+            color: "var(--text-muted)",
+          }}
+        >
+          Loading…
+        </span>
+      )}
+
+      {!playbooksLoading && playbooksLoadError && (
+        <Notice
+          tone="destructive"
+          label="Couldn't load playbooks — reopen settings to retry."
+        />
+      )}
+
+      {!playbooksLoading &&
+        !playbooksLoadError &&
+        playbooks !== null &&
+        playbooks.length === 0 && (
+          <Notice tone="muted" label="No playbooks yet">
+            Create one, or generate a draft with AI.
+          </Notice>
+        )}
+
+      {!playbooksLoading &&
+        !playbooksLoadError &&
+        playbooks !== null &&
+        playbooks.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {playbooks.map((p) => (
+              <PlaybookListRow
+                key={p.slug ?? p.name}
+                playbook={p}
+                onEdit={() => openEdit(p)}
+                onDelete={() => openDelete(p)}
+              />
+            ))}
+          </div>
+        )}
+    </div>
+  );
+}
+
+interface SettingsModalProps {
+  onClose: () => void;
+  initialTab?: SettingsTab;
+}
+
+export function SettingsModal({
+  onClose,
+  initialTab = "filters",
+}: SettingsModalProps) {
+  const modalRef = useRef<ModalControl>(null);
+  const firstTriggerRef = useRef<HTMLButtonElement>(null);
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
+
+  const filters = useFiltersTab(modalRef);
+  const playbooksTab = usePlaybooksTab(tab === "playbooks");
 
   return (
     <Modal
@@ -432,261 +790,41 @@ export function SettingsModal({
           />
         </div>
 
-        {tab === "filters" && loadError && (
-          <span
-            style={{
-              fontFamily: "var(--font-ui)",
-              fontSize: "var(--font-body)",
-              lineHeight: "var(--line-body)",
-              color: "var(--text-muted)",
-            }}
-          >
-            Couldn't load filters — reopen settings to retry.
-          </span>
-        )}
-        {tab === "filters" && capabilities && draft && (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "var(--space-lg)",
-              flex: "0 1 auto",
-              minHeight: 0,
-              overflowY: "auto",
-            }}
-          >
-            {capabilities.dimensions.map((dim) =>
-              dim === "cycle" ? (
-                <div
-                  key="cycle"
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "var(--space-xs)",
-                  }}
-                >
-                  <Field>Current cycle</Field>
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "var(--space-sm)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={draft.currentCycle}
-                      onChange={() =>
-                        setDraft((prev) =>
-                          prev
-                            ? { ...prev, currentCycle: !prev.currentCycle }
-                            : prev,
-                        )
-                      }
-                      onFocus={(e) =>
-                        setCycleFocus(e.currentTarget.matches(":focus-visible"))
-                      }
-                      onBlur={() => setCycleFocus(false)}
-                      style={{
-                        accentColor: "var(--accent)",
-                        borderRadius: "var(--radius)",
-                        outline: "none",
-                        boxShadow: focusRing(cycleFocus),
-                        flex: "0 0 auto",
-                      }}
-                    />
-                    <span
-                      style={{
-                        fontFamily: "var(--font-ui)",
-                        fontSize: "var(--font-body)",
-                        lineHeight: "var(--line-body)",
-                        color: "var(--text)",
-                      }}
-                    >
-                      Current cycle only
-                    </span>
-                  </label>
-                  <span
-                    style={{
-                      fontFamily: "var(--font-ui)",
-                      fontSize: "var(--font-body)",
-                      lineHeight: "var(--line-body)",
-                      color: "var(--text-muted)",
-                    }}
-                  >
-                    Backlog tickets often have no cycle, so this can drop
-                    matches to near zero.
-                  </span>
-                </div>
-              ) : (
-                <div
-                  key={dim}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "var(--space-xs)",
-                  }}
-                >
-                  <Field>{MULTI_COPY[dim].label}</Field>
-                  <MultiSelect
-                    label={MULTI_COPY[dim].label}
-                    placeholder={MULTI_COPY[dim].placeholder}
-                    options={options[dim]}
-                    selected={draft[dim]}
-                    loading={optLoading[dim]}
-                    loadError={optError[dim]}
-                    emptyText={MULTI_COPY[dim].emptyText}
-                    triggerRef={
-                      dim === firstMultiDim ? firstTriggerRef : undefined
-                    }
-                    onChange={(next) =>
-                      setDraft((prev) =>
-                        prev ? { ...prev, [dim]: next } : prev,
-                      )
-                    }
-                  />
-                  {optError[dim] && (
-                    <span
-                      style={{
-                        fontFamily: "var(--font-ui)",
-                        fontSize: "var(--font-body)",
-                        lineHeight: "var(--line-body)",
-                        color: "var(--text-muted)",
-                      }}
-                    >
-                      Couldn't load options — reopen settings to retry.
-                    </span>
-                  )}
-                  {optTruncated[dim] && (
-                    <span
-                      style={{
-                        fontFamily: "var(--font-ui)",
-                        fontSize: "var(--font-body)",
-                        lineHeight: "var(--line-body)",
-                        color: "var(--text-muted)",
-                      }}
-                    >
-                      Showing first 250 options.
-                    </span>
-                  )}
-                </div>
-              ),
-            )}
-
-            <span
-              style={{
-                fontFamily: "var(--font-ui)",
-                fontSize: "var(--font-body)",
-                lineHeight: "var(--line-body)",
-                color: "var(--text-muted)",
-              }}
-            >
-              {previewText}
-            </span>
-
-            {saveError && (
-              <Notice
-                tone="destructive"
-                label="Couldn't save filters — try again."
-              />
-            )}
-          </div>
-        )}
-
-        {tab === "playbooks" && (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "var(--space-lg)",
-              flex: "1 1 auto",
-              minHeight: 0,
-              overflowY: "auto",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <Button
-                variant="primary"
-                onClick={() => setEditorState({ mode: "create" })}
-              >
-                <Plus size={14} strokeWidth={2} aria-hidden="true" />
-                New playbook
-              </Button>
-            </div>
-
-            {playbooksLoading && (
-              <span
-                style={{
-                  fontFamily: "var(--font-ui)",
-                  fontSize: "var(--font-label)",
-                  fontWeight: "var(--weight-semibold)",
-                  lineHeight: "var(--line-label)",
-                  color: "var(--text-muted)",
-                }}
-              >
-                Loading…
-              </span>
-            )}
-
-            {!playbooksLoading && playbooksLoadError && (
-              <Notice
-                tone="destructive"
-                label="Couldn't load playbooks — reopen settings to retry."
-              />
-            )}
-
-            {!playbooksLoading &&
-              !playbooksLoadError &&
-              playbooks !== null &&
-              playbooks.length === 0 && (
-                <Notice tone="muted" label="No playbooks yet">
-                  Create one, or generate a draft with AI.
-                </Notice>
-              )}
-
-            {!playbooksLoading &&
-              !playbooksLoadError &&
-              playbooks !== null &&
-              playbooks.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column" }}>
-                  {playbooks.map((p) => (
-                    <PlaybookListRow
-                      key={p.slug ?? p.name}
-                      playbook={p}
-                      onEdit={() =>
-                        setEditorState({ mode: "edit", playbook: p })
-                      }
-                      onDelete={() => setDeleteTarget(p)}
-                    />
-                  ))}
-                </div>
-              )}
-          </div>
-        )}
-
-        {editorState && (
-          <PlaybookEditorModal
-            mode={editorState.mode}
-            playbook={editorState.playbook}
-            existingNames={(playbooks ?? [])
-              .filter((p) => p.slug !== editorState.playbook?.slug)
-              .map((p) => p.name)}
-            onSaved={() => {
-              setEditorState(null);
-              void loadPlaybooksList();
-            }}
-            onClose={() => setEditorState(null)}
+        {tab === "filters" && (
+          <SettingsModal.FiltersTab
+            filters={filters}
+            firstTriggerRef={firstTriggerRef}
           />
         )}
 
-        {deleteTarget && (
+        {tab === "playbooks" && (
+          <SettingsModal.PlaybooksTab playbooksTab={playbooksTab} />
+        )}
+
+        {playbooksTab.editorState && (
+          <PlaybookEditorModal
+            mode={playbooksTab.editorState.mode}
+            playbook={playbooksTab.editorState.playbook}
+            existingNames={(playbooksTab.playbooks ?? [])
+              .filter(
+                (p) => p.slug !== playbooksTab.editorState?.playbook?.slug,
+              )
+              .map((p) => p.name)}
+            onSaved={() => {
+              playbooksTab.closeEditor();
+              void playbooksTab.reload();
+            }}
+            onClose={playbooksTab.closeEditor}
+          />
+        )}
+
+        {playbooksTab.deleteTarget && (
           <PlaybookDeleteConfirm
-            playbook={deleteTarget}
-            onClose={() => setDeleteTarget(null)}
+            playbook={playbooksTab.deleteTarget}
+            onClose={playbooksTab.closeDelete}
             onDeleted={() => {
-              setDeleteTarget(null);
-              void loadPlaybooksList();
+              playbooksTab.closeDelete();
+              void playbooksTab.reload();
             }}
           />
         )}
@@ -702,8 +840,8 @@ export function SettingsModal({
           >
             <Button
               variant="primary"
-              onClick={handleSave}
-              disabled={saving || !draft}
+              onClick={filters.handleSave}
+              disabled={filters.saving || !filters.draft}
             >
               Save Filters
             </Button>
@@ -713,3 +851,6 @@ export function SettingsModal({
     </Modal>
   );
 }
+
+SettingsModal.FiltersTab = FiltersTabSection;
+SettingsModal.PlaybooksTab = PlaybooksTabSection;
