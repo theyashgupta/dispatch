@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { moveCard, openEditor } from "../../lib/api.js";
-import { isDemoteEligible } from "../inbox/inbox-filters.js";
+import { isDemoteEligible } from "../../../shared/demote-eligibility.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { IconButton } from "../../primitives/IconButton.js";

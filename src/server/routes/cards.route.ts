@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { COLUMNS, type Column } from "../../shared/types.js";
+import { COLUMNS, type Card, type Column } from "../../shared/types.js";
+import { isDemoteEligible } from "../../shared/demote-eligibility.js";
 import { store } from "../store/board.store.js";
 import { startSession } from "../services/start-session.js";
 import { resumeSession } from "../services/resume-session.js";
@@ -19,6 +20,27 @@ export const cardsRouter = Router();
  */
 const MOVABLE_COLUMNS: readonly Column[] = [...COLUMNS, "inbox"];
 
+/**
+ * Server-side enforcement of the sanctioned inbox transitions, mirroring the client gates so one
+ * curl can't bypass what the UI enforces (the same posture `/start` takes with its promote-first
+ * 409): from the Inbox the ONLY legal move is promotion to To Do — anything else would skip the
+ * promote-first rule and the `promotedAt` stamp, and could park a marker-reachable card in a view
+ * with zero session affordances; INTO the Inbox only a To Do card that passes the shared
+ * `isDemoteEligible` predicate (no session history, no start saga) may travel, and an in-flight
+ * start additionally 409s via `store.isStarting` — the same guard `/resume` and `/cleanup` apply.
+ * Board-to-board moves are deliberately untouched. Returns the 409 copy, or null when legal.
+ */
+function inboxTransitionError(card: Card, column: Column): string | null {
+  if (card.column === "inbox" && column !== "todo")
+    return "inbox cards can only be promoted to To Do";
+  if (column !== "inbox") return null;
+  if (card.column !== "todo") return "only To Do cards can be moved to Inbox";
+  if (store.isStarting(card.id)) return "a start is in flight for this card";
+  if (!isDemoteEligible(card))
+    return "cards with session history cannot be moved to Inbox";
+  return null;
+}
+
 cardsRouter.post("/cards/:id/move", async (req, res) => {
   const { id } = req.params;
   const column = (req.body as { column?: unknown } | undefined)?.column;
@@ -32,8 +54,15 @@ cardsRouter.post("/cards/:id/move", async (req, res) => {
     });
     return;
   }
-  if (!store.hasCard(id)) {
+  const card = store.getCard(id);
+  if (!card) {
     res.status(400).json({ error: `unknown card id: ${id}` });
+    return;
+  }
+
+  const transitionError = inboxTransitionError(card, column as Column);
+  if (transitionError != null) {
+    res.status(409).json({ error: transitionError });
     return;
   }
 
