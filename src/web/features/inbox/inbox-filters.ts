@@ -3,7 +3,8 @@ import type { Card, FilterOption } from "../../../shared/types.js";
 export function inboxProjectOptions(cards: Card[]): FilterOption[] {
   const byId = new Map<string, string>();
   for (const c of cards) {
-    if (c.column === "inbox" && c.project) byId.set(c.project.id, c.project.name);
+    if (c.column === "inbox" && c.project)
+      byId.set(c.project.id, c.project.name);
   }
   return [...byId]
     .map(([id, label]) => ({ id, label }))

@@ -13,6 +13,7 @@ import { useTransitionNotifications } from "./hooks/useTransitionNotifications.j
 import { SyncStrip } from "./features/sync/SyncStrip.js";
 import { Glyph } from "./primitives/Glyph.js";
 import { Board } from "./features/board/Board.js";
+import { InboxView } from "./features/inbox/InboxView.js";
 import { DetailPanel } from "./features/detail/DetailPanel.js";
 import { ActivityDrawer } from "./features/activity/ActivityDrawer.js";
 import { StartModal } from "./features/modals/StartModal.js";
@@ -86,6 +87,7 @@ export function App() {
 
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
+  const [view, setView] = useState<"board" | "inbox">("board");
 
   const lastOpened = useLastOpened();
   const newestTs = feed.events[0]?.ts;
@@ -205,14 +207,25 @@ export function App() {
         }}
         activityUnseen={activityUnseen}
         activityOpen={activityOpen}
+        onOpenInbox={() => setView((v) => (v === "inbox" ? "board" : "inbox"))}
+        inboxCount={board.cards.filter((c) => c.column === "inbox").length}
+        inboxOpen={view === "inbox"}
       />
-      <Board
-        board={board}
-        selectedCardId={selectedCard ? selectedCardId : null}
-        onSelectCard={setSelectedCardId}
-        onStartRequest={requestStart}
-        onCleanupRequest={setCleanupCardId}
-      />
+      {view === "board" ? (
+        <Board
+          board={board}
+          selectedCardId={selectedCard ? selectedCardId : null}
+          onSelectCard={setSelectedCardId}
+          onStartRequest={requestStart}
+          onCleanupRequest={setCleanupCardId}
+        />
+      ) : (
+        <InboxView
+          board={board}
+          selectedCardId={selectedCard ? selectedCardId : null}
+          onSelectCard={setSelectedCardId}
+        />
+      )}
       <DetailPanel
         card={selectedCard}
         editors={board?.editors}

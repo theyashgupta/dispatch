@@ -11,7 +11,7 @@
   --surface-card: #1a1b1f; /* Secondary (30%): elevated card surface */
   --surface-card-hover: #202126; /* Card hover lift (no accent) */
   --border: #26272b; /* Borders / dividers */
-  --accent: #5e6ad2; /* Accent (10%): drag/selection/focus ONLY */
+  --accent: #5e6ad2; /* Accent (10%): drag/selection/focus, active/current-view indicator */
   --destructive: #e5484d; /* Sync-failure / disconnected / config error */
   --text: #e8e9ea; /* Primary text: titles, headings, description body */
   --text-muted: #8a8f98; /* Muted: identifiers, headers, counts, timestamps */

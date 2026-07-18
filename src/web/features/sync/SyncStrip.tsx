@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Activity, Settings } from "lucide-react";
+import { Activity, Inbox, Settings } from "lucide-react";
 import type { ConnectionStatus } from "../../hooks/useBoardStream.js";
 import { Glyph } from "../../primitives/Glyph.js";
 import { IconButton } from "../../primitives/IconButton.js";
@@ -13,6 +13,9 @@ interface SyncStripProps {
   onOpenActivity?: () => void;
   activityUnseen?: boolean;
   activityOpen?: boolean;
+  onOpenInbox?: () => void;
+  inboxCount?: number;
+  inboxOpen?: boolean;
 }
 
 function formatSynced(syncedTs: number, now: number): string {
@@ -33,6 +36,9 @@ export function SyncStrip({
   onOpenActivity,
   activityUnseen,
   activityOpen,
+  onOpenInbox,
+  inboxCount,
+  inboxOpen,
 }: SyncStripProps) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -146,6 +152,43 @@ export function SyncStrip({
             }}
           />
           {text}
+        </div>
+        <div style={{ position: "relative", display: "flex" }}>
+          <IconButton
+            id="inbox-toggle"
+            aria-label={
+              inboxOpen ? "Close inbox, return to board" : "Open inbox"
+            }
+            aria-expanded={inboxOpen}
+            onClick={onOpenInbox}
+            style={{
+              color: inboxOpen ? "var(--accent)" : "var(--text-muted)",
+              ...(inboxOpen ? { background: "var(--surface-card-hover)" } : {}),
+            }}
+          >
+            <Inbox size={16} />
+          </IconButton>
+          {inboxCount != null && inboxCount > 0 && (
+            <span
+              aria-label={`${inboxCount} tickets in inbox`}
+              style={{
+                position: "absolute",
+                top: "2px",
+                right: "2px",
+                background:
+                  "color-mix(in srgb, var(--accent) 16%, var(--surface-column))",
+                color: "var(--accent)",
+                borderRadius: "var(--radius)",
+                padding: "0 var(--space-xs)",
+                fontSize: "var(--font-label)",
+                fontWeight: "var(--weight-semibold)",
+                lineHeight: "var(--line-label)",
+                pointerEvents: "none",
+              }}
+            >
+              {inboxCount}
+            </span>
+          )}
         </div>
         <div style={{ position: "relative", display: "flex" }}>
           <IconButton
