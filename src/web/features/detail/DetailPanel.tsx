@@ -57,10 +57,28 @@ export function DetailPanel({
     if (node == null) return;
     const startX = e.clientX;
     const startWidth = node.getBoundingClientRect().width;
+    const preDragStyleWidth = node.style.width;
     const maxPx = window.innerWidth * 0.9;
     setResizing(true);
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
+
+    const overlay = document.createElement("div");
+    overlay.style.position = "fixed";
+    overlay.style.inset = "0";
+    overlay.style.cursor = "col-resize";
+    overlay.style.zIndex = "2147483647";
+    document.body.appendChild(overlay);
+
+    function teardown() {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+      overlay.remove();
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      cleanupDragRef.current = null;
+    }
 
     function handlePointerMove(ev: PointerEvent) {
       const next = Math.min(
@@ -71,11 +89,7 @@ export function DetailPanel({
     }
 
     function handlePointerUp(ev: PointerEvent) {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      cleanupDragRef.current = null;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      teardown();
       setResizing(false);
       const finalWidth = Math.min(
         maxPx,
@@ -87,14 +101,16 @@ export function DetailPanel({
       setPanelWidth(finalWidth);
     }
 
+    function handlePointerCancel() {
+      teardown();
+      setResizing(false);
+      node!.style.width = preDragStyleWidth;
+    }
+
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
-    cleanupDragRef.current = () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
+    window.addEventListener("pointercancel", handlePointerCancel);
+    cleanupDragRef.current = teardown;
   }
 
   function handleResizeDoubleClick(e: React.MouseEvent<HTMLDivElement>) {

@@ -513,6 +513,20 @@ a FIXED position in the JSX tree, and it must stay identity-stable across four s
   flags for the rest of its lifetime — no reload logic exists or is needed, because `src` never
   changes for a live session either (the same PANEL-03 no-remount guarantee). Any NEW session opened
   after the code ships gets the current value at first mount, identically to any other prop.
+- **The left-edge resize handle's drag shields the iframe with a drag-duration overlay, not
+  `setPointerCapture` alone.** `setPointerCapture` only overrides hit-testing within the SAME
+  top-level browsing context; a cross-origin `<iframe>` is a separate browsing context, and a
+  live, 5/5-reproduced defect (headless and headed Chrome) showed `pointerup` never reaching
+  `window` at all when the release happened to land over the iframe's rendered area — the drag
+  would silently abandon mid-resize, leaving `document.body.style.cursor` stuck and the orphaned
+  listeners hijacking the next unrelated click with stale coordinates. `handleResizePointerDown`
+  now appends a transparent, full-viewport `position: fixed` div at `document.body` (max `zIndex`,
+  `cursor: col-resize`) for the drag's duration only — mounted imperatively on `pointerdown`,
+  always removed by a single idempotent `teardown()` shared across `pointerup`, `pointercancel`,
+  and unmount — so the pointer's hit-test target never leaves the top document, regardless of
+  where over the panel the release occurs. The overlay is a `document.body` sibling, never nested
+  inside the `<aside>` or the iframe subtree, and never persists once the drag ends (PANEL-03
+  untouched: no key/re-parent/position change on the panel itself).
 
 **Docked (Orca) mode is a SECOND style-only derivation of the same `<aside>`, re-deriving `PANEL-03`
 for a second surface.** `position` stays `fixed` in BOTH modes — only `top`/`left`/`width`/`height`/
