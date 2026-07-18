@@ -11,7 +11,7 @@ import { Field } from "../../primitives/Field.js";
 import { IconButton } from "../../primitives/IconButton.js";
 import { Modal, type ModalControl } from "../../primitives/Modal.js";
 import { Notice } from "../../primitives/Notice.js";
-import { FolderBrowserModal } from "../workspaces/FolderBrowserModal.js";
+import { FolderBrowserModal } from "../workspaces/index.js";
 
 const focusRing = (on: boolean): string =>
   on ? "0 0 0 2px var(--accent)" : "none";

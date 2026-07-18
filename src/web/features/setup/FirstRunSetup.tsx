@@ -10,7 +10,7 @@ import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { Glyph } from "../../primitives/Glyph.js";
 import { Notice } from "../../primitives/Notice.js";
-import { WorkspaceAdd } from "../workspaces/WorkspaceAdd.js";
+import { WorkspaceAdd } from "../workspaces/index.js";
 
 interface FirstRunSetupProps {
   prerequisites: PrerequisiteStatus[];

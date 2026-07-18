@@ -19,7 +19,7 @@ import { Field } from "../../primitives/Field.js";
 import { IconButton } from "../../primitives/IconButton.js";
 import { Modal, type ModalControl } from "../../primitives/Modal.js";
 import { Notice } from "../../primitives/Notice.js";
-import { WorkspaceAdd } from "../workspaces/WorkspaceAdd.js";
+import { WorkspaceAdd } from "../workspaces/index.js";
 
 interface StartModalProps {
   card: CardModel;
