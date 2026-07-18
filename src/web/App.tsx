@@ -251,6 +251,7 @@ export function App() {
         cardIdentifiers={cardIdentifiers}
         onClose={() => setSelectedCardId(null)}
         onStartRequest={requestStart}
+        docked={viewMode === "orca"}
       />
       <ActivityDrawer
         open={activityOpen}

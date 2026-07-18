@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Maximize2,
   Minimize2,
+  Play,
   X,
 } from "lucide-react";
 import type { Card as CardModel } from "../../../shared/types.js";
@@ -23,6 +24,8 @@ interface PanelHeaderProps {
   fullscreen: boolean;
   onToggleFullscreen: () => void;
   onClose: () => void;
+  docked?: boolean;
+  onStartRequest?: (id: string) => void;
 }
 
 export function PanelHeader({
@@ -34,6 +37,8 @@ export function PanelHeader({
   fullscreen,
   onToggleFullscreen,
   onClose,
+  docked = false,
+  onStartRequest,
 }: PanelHeaderProps) {
   const c = card;
   return (
@@ -116,7 +121,7 @@ export function PanelHeader({
           </Button>
         )}
 
-        {hasLiveSession && (
+        {hasLiveSession && !docked && (
           <IconButton
             onClick={onToggleFullscreen}
             aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
@@ -147,10 +152,18 @@ export function PanelHeader({
             Move to Inbox
           </Button>
         )}
+        {docked && c?.column === "todo" && onStartRequest && (
+          <Button variant="primary" onClick={() => onStartRequest(c.id)}>
+            <Play size={12} strokeWidth={2} aria-hidden="true" />
+            Start
+          </Button>
+        )}
 
-        <IconButton onClick={onClose} aria-label="Close panel">
-          <X size={16} strokeWidth={2} aria-hidden="true" />
-        </IconButton>
+        {!docked && (
+          <IconButton onClick={onClose} aria-label="Close panel">
+            <X size={16} strokeWidth={2} aria-hidden="true" />
+          </IconButton>
+        )}
       </div>
     </div>
   );

@@ -18,6 +18,7 @@ interface DetailPanelProps {
   cardIdentifiers?: Record<string, string>;
   onClose: () => void;
   onStartRequest?: (id: string) => void;
+  docked?: boolean;
 }
 
 export function DetailPanel({
@@ -27,6 +28,7 @@ export function DetailPanel({
   cardIdentifiers,
   onClose,
   onStartRequest,
+  docked = false,
 }: DetailPanelProps) {
   const open = card != null;
 
@@ -67,11 +69,11 @@ export function DetailPanel({
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (fullscreen) setFullscreen(false);
-      else onClose();
+      else if (!docked) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, fullscreen, onClose]);
+  }, [open, fullscreen, docked, onClose]);
 
   const spawnedForRef = useRef<string | null>(null);
   useEffect(() => {
@@ -108,102 +110,153 @@ export function DetailPanel({
 
   return (
     <>
-      <div
-        onClick={onClose}
-        aria-hidden="true"
-        style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(0,0,0,0.4)",
-          opacity: open ? 1 : 0,
-          pointerEvents: open ? "auto" : "none",
-          transition: "opacity 150ms ease-out",
-          zIndex: 10,
-        }}
-      />
+      {!docked && (
+        <div
+          onClick={onClose}
+          aria-hidden="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            opacity: open ? 1 : 0,
+            pointerEvents: open ? "auto" : "none",
+            transition: "opacity 150ms ease-out",
+            zIndex: 10,
+          }}
+        />
+      )}
 
       <aside
         aria-label="Ticket detail"
         style={{
           position: "fixed",
-          top: 0,
+          top: docked ? "var(--strip-height)" : 0,
+          left: docked ? "var(--orca-nav-width)" : "auto",
           right: 0,
-          height: "100dvh",
-          width: fullscreen ? "100vw" : "var(--panel-width)",
+          height: docked ? "calc(100dvh - var(--strip-height))" : "100dvh",
+          width: docked
+            ? "calc(100% - var(--orca-nav-width))"
+            : fullscreen
+              ? "100vw"
+              : "var(--panel-width)",
           maxWidth: "100vw",
           background: "var(--surface-column)",
-          borderLeft: fullscreen ? "none" : "1px solid var(--border)",
+          borderLeft: docked || fullscreen ? "none" : "1px solid var(--border)",
           display: "flex",
           flexDirection: "column",
-          transform: open ? "translateX(0)" : "translateX(100%)",
-          transition: "transform 150ms ease-out",
+          transform: docked
+            ? "none"
+            : open
+              ? "translateX(0)"
+              : "translateX(100%)",
+          transition: docked ? "none" : "transform 150ms ease-out",
           zIndex: 11,
         }}
       >
-        <PanelHeader
-          card={c}
-          editors={editors}
-          hasLiveSession={hasLiveSession}
-          detailsExpanded={detailsExpanded}
-          onToggleDetails={() => setDetailsExpanded((v) => !v)}
-          fullscreen={fullscreen}
-          onToggleFullscreen={() => setFullscreen((v) => !v)}
-          onClose={onClose}
-        />
-
-        <div
-          style={{
-            flex: "1 1 auto",
-            minHeight: 0,
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
-          {hasLiveSession ? (
-            detailsExpanded && (
-              <div
-                style={{
-                  flex: "0 1 auto",
-                  maxHeight: "40%",
-                  overflowY: "auto",
-                  padding: "var(--space-lg)",
-                }}
-              >
-                <ReferenceBlocks card={c} />
-                {c && (
-                  <CardTimeline
-                    cardId={c.id}
-                    events={activityEvents ?? []}
-                    identifiers={cardIdentifiers}
-                  />
-                )}
-              </div>
-            )
-          ) : (
-            <div
+        {docked && c == null ? (
+          <div
+            style={{
+              flex: "1 1 auto",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "var(--space-3xl)",
+            }}
+          >
+            <h2
               style={{
-                flex: c?.tmuxSession ? "0 1 auto" : "1 1 auto",
-                overflowY: "auto",
-                padding: "var(--space-xl)",
+                margin: 0,
+                fontSize: "var(--font-heading)",
+                fontWeight: "var(--weight-semibold)",
+                color: "var(--text)",
               }}
             >
-              <ReferenceBlocks card={c} />
-              {c && (
-                <CardTimeline
-                  cardId={c.id}
-                  events={activityEvents ?? []}
-                  identifiers={cardIdentifiers}
-                />
+              Select a ticket
+            </h2>
+            <p
+              style={{
+                margin: "var(--space-sm) 0 0",
+                fontSize: "var(--font-body)",
+                lineHeight: "var(--line-body)",
+                color: "var(--text-muted)",
+                textAlign: "center",
+              }}
+            >
+              Choose a ticket from the side nav to see its details and live
+              terminal.
+            </p>
+          </div>
+        ) : (
+          <>
+            <PanelHeader
+              card={c}
+              editors={editors}
+              hasLiveSession={hasLiveSession}
+              detailsExpanded={detailsExpanded}
+              onToggleDetails={() => setDetailsExpanded((v) => !v)}
+              fullscreen={fullscreen}
+              onToggleFullscreen={() => setFullscreen((v) => !v)}
+              onClose={onClose}
+              docked={docked}
+              onStartRequest={onStartRequest}
+            />
+
+            <div
+              style={{
+                flex: "1 1 auto",
+                minHeight: 0,
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {hasLiveSession ? (
+                detailsExpanded && (
+                  <div
+                    style={{
+                      flex: "0 1 auto",
+                      maxHeight: "40%",
+                      overflowY: "auto",
+                      padding: "var(--space-lg)",
+                    }}
+                  >
+                    <ReferenceBlocks card={c} />
+                    {c && (
+                      <CardTimeline
+                        cardId={c.id}
+                        events={activityEvents ?? []}
+                        identifiers={cardIdentifiers}
+                      />
+                    )}
+                  </div>
+                )
+              ) : (
+                <div
+                  style={{
+                    flex: c?.tmuxSession ? "0 1 auto" : "1 1 auto",
+                    overflowY: "auto",
+                    padding: "var(--space-xl)",
+                  }}
+                >
+                  <ReferenceBlocks card={c} />
+                  {c && (
+                    <CardTimeline
+                      cardId={c.id}
+                      events={activityEvents ?? []}
+                      identifiers={cardIdentifiers}
+                    />
+                  )}
+                </div>
+              )}
+
+              {c?.tmuxSession && !c.sessionLost && <TerminalRegion card={c} />}
+
+              {c?.sessionLost === true && c.column !== "done" && (
+                <SessionLostSection card={c} onStartRequest={onStartRequest} />
               )}
             </div>
-          )}
-
-          {c?.tmuxSession && !c.sessionLost && <TerminalRegion card={c} />}
-
-          {c?.sessionLost === true && c.column !== "done" && (
-            <SessionLostSection card={c} onStartRequest={onStartRequest} />
-          )}
-        </div>
+          </>
+        )}
       </aside>
     </>
   );
