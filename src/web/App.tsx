@@ -14,6 +14,7 @@ import { SyncStrip } from "./features/sync/SyncStrip.js";
 import { Glyph } from "./primitives/Glyph.js";
 import { Board } from "./features/board/Board.js";
 import { InboxView } from "./features/inbox/InboxView.js";
+import { OrcaView } from "./features/orca/OrcaView.js";
 import { DetailPanel } from "./features/detail/DetailPanel.js";
 import { ActivityDrawer } from "./features/activity/ActivityDrawer.js";
 import { StartModal } from "./features/modals/StartModal.js";
@@ -87,7 +88,20 @@ export function App() {
 
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
-  const [view, setView] = useState<"board" | "inbox">("board");
+  const [viewMode, setViewMode] = useState<"board" | "orca">(() => {
+    try {
+      return localStorage.getItem("dsp.view") === "orca" ? "orca" : "board";
+    } catch {
+      return "board";
+    }
+  });
+  const [inboxOpen, setInboxOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("dsp.view", viewMode);
+    } catch {}
+  }, [viewMode]);
 
   const lastOpened = useLastOpened();
   const newestTs = feed.events[0]?.ts;
@@ -207,23 +221,27 @@ export function App() {
         }}
         activityUnseen={activityUnseen}
         activityOpen={activityOpen}
-        onOpenInbox={() => setView((v) => (v === "inbox" ? "board" : "inbox"))}
+        onOpenInbox={() => setInboxOpen((v) => !v)}
         inboxCount={board.cards.filter((c) => c.column === "inbox").length}
-        inboxOpen={view === "inbox"}
+        inboxOpen={inboxOpen}
+        viewMode={viewMode}
+        onSelectViewMode={setViewMode}
       />
-      {view === "board" ? (
+      {viewMode === "orca" ? (
+        <OrcaView />
+      ) : inboxOpen ? (
+        <InboxView
+          board={board}
+          selectedCardId={selectedCard ? selectedCardId : null}
+          onSelectCard={setSelectedCardId}
+        />
+      ) : (
         <Board
           board={board}
           selectedCardId={selectedCard ? selectedCardId : null}
           onSelectCard={setSelectedCardId}
           onStartRequest={requestStart}
           onCleanupRequest={setCleanupCardId}
-        />
-      ) : (
-        <InboxView
-          board={board}
-          selectedCardId={selectedCard ? selectedCardId : null}
-          onSelectCard={setSelectedCardId}
         />
       )}
       <DetailPanel

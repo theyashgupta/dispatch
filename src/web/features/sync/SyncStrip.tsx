@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Activity, Inbox, Settings } from "lucide-react";
+import { Activity, Inbox, Kanban, PanelLeft, Settings } from "lucide-react";
 import type { ConnectionStatus } from "../../hooks/useBoardStream.js";
 import { Glyph } from "../../primitives/Glyph.js";
 import { IconButton } from "../../primitives/IconButton.js";
@@ -16,6 +16,8 @@ interface SyncStripProps {
   onOpenInbox?: () => void;
   inboxCount?: number;
   inboxOpen?: boolean;
+  viewMode?: "board" | "orca";
+  onSelectViewMode?: (mode: "board" | "orca") => void;
 }
 
 function formatSynced(syncedTs: number, now: number): string {
@@ -39,6 +41,8 @@ export function SyncStrip({
   onOpenInbox,
   inboxCount,
   inboxOpen,
+  viewMode,
+  onSelectViewMode,
 }: SyncStripProps) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -153,43 +157,77 @@ export function SyncStrip({
           />
           {text}
         </div>
-        <div style={{ position: "relative", display: "flex" }}>
+        <div style={{ display: "flex", gap: "var(--space-xs)" }}>
           <IconButton
-            id="inbox-toggle"
-            aria-label={
-              inboxOpen ? "Close inbox, return to board" : "Open inbox"
-            }
-            aria-expanded={inboxOpen}
-            onClick={onOpenInbox}
+            aria-label="Board view"
+            aria-pressed={viewMode === "board"}
+            onClick={() => onSelectViewMode?.("board")}
             style={{
-              color: inboxOpen ? "var(--accent)" : "var(--text-muted)",
-              ...(inboxOpen ? { background: "var(--surface-card-hover)" } : {}),
+              color:
+                viewMode === "board" ? "var(--accent)" : "var(--text-muted)",
+              ...(viewMode === "board"
+                ? { background: "var(--surface-card-hover)" }
+                : {}),
             }}
           >
-            <Inbox size={16} />
+            <Kanban size={16} />
           </IconButton>
-          {inboxCount != null && inboxCount > 0 && (
-            <span
-              aria-label={`${inboxCount} ticket${inboxCount === 1 ? "" : "s"} in inbox`}
+          <IconButton
+            aria-label="Orca view"
+            aria-pressed={viewMode === "orca"}
+            onClick={() => onSelectViewMode?.("orca")}
+            style={{
+              color:
+                viewMode === "orca" ? "var(--accent)" : "var(--text-muted)",
+              ...(viewMode === "orca"
+                ? { background: "var(--surface-card-hover)" }
+                : {}),
+            }}
+          >
+            <PanelLeft size={16} />
+          </IconButton>
+        </div>
+        {viewMode === "board" && (
+          <div style={{ position: "relative", display: "flex" }}>
+            <IconButton
+              id="inbox-toggle"
+              aria-label={
+                inboxOpen ? "Close inbox, return to board" : "Open inbox"
+              }
+              aria-expanded={inboxOpen}
+              onClick={onOpenInbox}
               style={{
-                position: "absolute",
-                top: "2px",
-                right: "2px",
-                background:
-                  "color-mix(in srgb, var(--accent) 16%, var(--surface-column))",
-                color: "var(--accent)",
-                borderRadius: "var(--radius)",
-                padding: "0 var(--space-xs)",
-                fontSize: "var(--font-label)",
-                fontWeight: "var(--weight-semibold)",
-                lineHeight: "var(--line-label)",
-                pointerEvents: "none",
+                color: inboxOpen ? "var(--accent)" : "var(--text-muted)",
+                ...(inboxOpen
+                  ? { background: "var(--surface-card-hover)" }
+                  : {}),
               }}
             >
-              {inboxCount}
-            </span>
-          )}
-        </div>
+              <Inbox size={16} />
+            </IconButton>
+            {inboxCount != null && inboxCount > 0 && (
+              <span
+                aria-label={`${inboxCount} ticket${inboxCount === 1 ? "" : "s"} in inbox`}
+                style={{
+                  position: "absolute",
+                  top: "2px",
+                  right: "2px",
+                  background:
+                    "color-mix(in srgb, var(--accent) 16%, var(--surface-column))",
+                  color: "var(--accent)",
+                  borderRadius: "var(--radius)",
+                  padding: "0 var(--space-xs)",
+                  fontSize: "var(--font-label)",
+                  fontWeight: "var(--weight-semibold)",
+                  lineHeight: "var(--line-label)",
+                  pointerEvents: "none",
+                }}
+              >
+                {inboxCount}
+              </span>
+            )}
+          </div>
+        )}
         <div style={{ position: "relative", display: "flex" }}>
           <IconButton
             id="activity-toggle"
