@@ -507,6 +507,12 @@ a FIXED position in the JSX tree, and it must stay identity-stable across four s
   CLEARS it at 200ms (200 > 150). Without that clear a closed session card's ttyd iframe would stay
   mounted off-screen forever with its WebSocket open and a tmux client attached. This is the one
   place the iframe is intentionally unmounted — and only after it has left the viewport.
+- **The `sandbox` attribute is fixed at the iframe's last navigation (WHATWG spec), so changing its
+  value in code is forward-only.** A session already open when the sandbox value changes (e.g. the
+  `52-01` cmd+click patch adding `allow-popups allow-popups-to-escape-sandbox`) keeps its OLD sandbox
+  flags for the rest of its lifetime — no reload logic exists or is needed, because `src` never
+  changes for a live session either (the same PANEL-03 no-remount guarantee). Any NEW session opened
+  after the code ships gets the current value at first mount, identically to any other prop.
 
 **Docked (Orca) mode is a SECOND style-only derivation of the same `<aside>`, re-deriving `PANEL-03`
 for a second surface.** `position` stays `fixed` in BOTH modes — only `top`/`left`/`width`/`height`/

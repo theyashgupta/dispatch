@@ -37,12 +37,19 @@ const READY_POLL_CADENCE_MS = 100;
  *      in-flight entry on settle (success or failure).
  * Steps 1-3 run with NO await between the check and the in-flight `set`, so a second concurrent
  * call always sees the entry — the whole point of the single-flight guard.
+ * `indexPath` (TTYD_INDEX_PATH when the boot-provisioned artifact exists, else null) is resolved
+ * by the caller rather than imported here: `services/paths.js` lives one layer above `adapters` in
+ * the backend DAG (boundaries/element-types), so the existence check happens in
+ * `services/terminal.ts` and the result is threaded through as plain data.
  * @remarks TERM-01: writable + loopback-only ttyd, single-flight spawn (T-03-07), port parsed
  * from stderr `Listening on port: N`.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
-export function ensureTtyd(session: string): Promise<number> {
+export function ensureTtyd(
+  session: string,
+  indexPath: string | null,
+): Promise<number> {
   const existing = procs.get(session);
   if (existing && existing.child.exitCode === null)
     return Promise.resolve(existing.port);
@@ -50,7 +57,9 @@ export function ensureTtyd(session: string): Promise<number> {
   const pending = inFlight.get(session);
   if (pending) return pending;
 
-  const promise = spawnTtyd(session).finally(() => inFlight.delete(session));
+  const promise = spawnTtyd(session, indexPath).finally(() =>
+    inFlight.delete(session),
+  );
   inFlight.set(session, promise);
   return promise;
 }
@@ -67,8 +76,17 @@ export function trackedTtydSessions(): string[] {
   return [...procs.keys(), ...inFlight.keys()];
 }
 
-/** Spawn a fresh ttyd, parse its port, confirm readiness, and track it. Rejects on failure. */
-async function spawnTtyd(session: string): Promise<number> {
+/**
+ * Spawn a fresh ttyd, parse its port, confirm readiness, and track it. Rejects on failure. The
+ * `-I` flag is added only when the caller resolved a non-null `indexPath` (TTYD_INDEX_PATH exists
+ * at spawn time) — provisionTtydIndex deletes that file on any failed boot-time patch, so its
+ * existence is a trustworthy, per-spawn signal for the cmd+click-gated index versus stock ttyd
+ * behavior.
+ */
+async function spawnTtyd(
+  session: string,
+  indexPath: string | null,
+): Promise<number> {
   const child = spawn(
     "ttyd",
     [
@@ -77,6 +95,7 @@ async function spawnTtyd(session: string): Promise<number> {
       "127.0.0.1",
       "-p",
       "0",
+      ...(indexPath != null ? ["-I", indexPath] : []),
       "-t",
       "disableLeaveAlert=true",
       "tmux",

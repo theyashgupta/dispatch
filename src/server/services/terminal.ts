@@ -1,6 +1,8 @@
+import { existsSync } from "node:fs";
 import { store } from "../store/board.store.js";
 import { ensureTtyd, killTtyd } from "../adapters/ttyd.js";
 import { hasSession } from "./session-status.js";
+import { TTYD_INDEX_PATH } from "./paths.js";
 
 /**
  * Ensure a ttyd terminal for a card's `session` and record its port — the SINGLE TERM-01
@@ -24,7 +26,8 @@ export async function ensureTerminal(
       });
       return;
     }
-    const port = await ensureTtyd(session);
+    const indexPath = existsSync(TTYD_INDEX_PATH) ? TTYD_INDEX_PATH : null;
+    const port = await ensureTtyd(session, indexPath);
     const recorded = await store.setTtydPortIfSession(cardId, session, port);
     if (!recorded) killTtyd(session);
   } catch (err) {
