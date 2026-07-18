@@ -25,8 +25,17 @@ export const BOARD_PATH = path.join(BOARD_DIR, "board.json");
  * (priority 0 is treated as +Infinity per RESEARCH assumption A2), tie-broken by
  * updatedAt DESCENDING (most-recently-updated first). Pure — the single authoritative
  * place the To Do order is expressed. Invoked by snapshot() on the read path.
+ * A promoted-first tier sits ABOVE the priority comparison: any card carrying
+ * `promotedAt` sorts before every non-promoted card, newest-promoted first. A plain
+ * `updatedAt` bump was rejected for this — it only wins ties within the SAME priority
+ * bucket, so a promoted low-priority card would still sort below an unpromoted
+ * high-priority card, contradicting "lands at the TOP of To Do".
  */
 export function compareTodoOrder(a: Card, b: Card): number {
+  const ap = a.promotedAt != null;
+  const bp = b.promotedAt != null;
+  if (ap !== bp) return ap ? -1 : 1;
+  if (ap && bp) return b.promotedAt!.localeCompare(a.promotedAt!);
   const pa = a.priority === 0 ? Number.POSITIVE_INFINITY : a.priority;
   const pb = b.priority === 0 ? Number.POSITIVE_INFINITY : b.priority;
   if (pa !== pb) return pa - pb;
@@ -46,7 +55,8 @@ function syncedFieldsChanged(prev: Card, next: Card): boolean {
     prev.description !== next.description ||
     prev.priority !== next.priority ||
     prev.updatedAt !== next.updatedAt ||
-    prev.goneFromLinear !== next.goneFromLinear
+    prev.goneFromLinear !== next.goneFromLinear ||
+    prev.project?.id !== next.project?.id
   );
 }
 
@@ -875,7 +885,10 @@ class BoardStore extends EventEmitter {
    * attention column (needs_input / agent_done), clear statusReason — as ONE atomic mutation.
    * `lastMarker` is left UNTOUCHED so a drag CONSUMES the current marker: the watcher still sees
    * "already seen" (markerKey === lastMarker) and never re-applies the marker the user just
-   * overrode. Replaces the plain moveCard on the drag route. No-op if the id is unknown.
+   * overrode. Replaces the plain moveCard on the drag route. Also the sole promote/demote mutator
+   * (Inbox and To Do share this same move rather than a new endpoint): an Inbox-to-To-Do
+   * transition stamps `promotedAt`, the single-writer store being the ONLY place that field is
+   * ever assigned. No-op if the id is unknown.
    */
   moveCardManual(id: string, column: Column): Promise<void> {
     return this.enqueue(() => {
@@ -883,6 +896,9 @@ class BoardStore extends EventEmitter {
       if (!c) return [];
       const from = c.column;
       c.column = column;
+      if (from === "inbox" && column === "todo") {
+        c.promotedAt = new Date().toISOString();
+      }
       if (column !== "needs_input" && column !== "agent_done") {
         c.statusReason = undefined;
       }

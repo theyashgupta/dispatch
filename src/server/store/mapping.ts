@@ -1,7 +1,7 @@
 import type { Card, ReconcileResult, SourceIssue } from "../../shared/types.js";
 
-/** Build a fresh To Do card for a newly-seen source issue, stamped with its origin source. */
-function newTodoCard(issue: SourceIssue, sourceId: string): Card {
+/** Build a fresh Inbox card for a newly-seen source issue, stamped with its origin source. */
+function newInboxCard(issue: SourceIssue, sourceId: string): Card {
   return {
     id: issue.id,
     issueId: issue.id,
@@ -10,8 +10,9 @@ function newTodoCard(issue: SourceIssue, sourceId: string): Card {
     url: issue.url,
     description: issue.description,
     priority: issue.priority,
-    column: "todo",
+    column: "inbox",
     updatedAt: issue.updatedAt,
+    project: issue.project ?? undefined,
     goneFromLinear: false,
     source: sourceId,
   };
@@ -36,19 +37,23 @@ function isStartingCard(
  * store orders To Do on read. `current` is keyed by upstream issue id (Card.issueId), which today
  * equals card.id.
  * @remarks Rules, all keyed by upstream issue id:
- *  - Returned issue with no existing card -> upsert a NEW To Do card stamped with `sourceId`
- *    (SYNC-01).
- *  - Returned issue whose card is in To Do -> upsert an in-place refresh of title/url/description/
- *    priority/updatedAt, clearing goneFromLinear (SYNC-02).
- *  - Returned issue whose card is PAST To Do -> NOT included in upserts; the poller never touches
- *    cards past To Do (SYNC-02). Exception: a card currently flagged goneFromLinear emits a
- *    flag-only correction via `reappearedIds` — goneFromLinear is poller-owned derived state, not
- *    user board state, so clearing it does not violate the rule.
- *  - Current card whose issue is absent from the result: in To Do -> removeIds (SYNC-03: removed
- *    only in To Do); past To Do -> goneIds (kept, flagged goneFromLinear). CR-01 carve-out: a To Do
- *    card with a start saga in flight (or already carrying provisioning/session state from one) is
- *    NEVER removed, only flagged — removing it mid-saga would orphan a live session and its
- *    worktrees with no card to reach them.
+ *  - Returned issue with no existing card -> upsert a NEW Inbox card stamped with `sourceId`
+ *    (SYNC-01) — new tickets land in Inbox, never directly in To Do.
+ *  - Returned issue whose card is in To Do OR Inbox -> upsert an in-place refresh of
+ *    title/url/description/priority/updatedAt/project, clearing goneFromLinear (SYNC-02) — ONE
+ *    widened rule, not a separate branch, so promoting a card to To Do simply changes which of the
+ *    two columns keeps receiving refreshes.
+ *  - Returned issue whose card is PAST To Do/Inbox -> NOT included in upserts; the poller never
+ *    touches cards past that point (SYNC-02). Exception: a card currently flagged goneFromLinear
+ *    emits a flag-only correction via `reappearedIds` — goneFromLinear is poller-owned derived
+ *    state, not user board state, so clearing it does not violate the rule.
+ *  - Current card whose issue is absent from the result: in To Do OR Inbox -> removeIds (SYNC-03:
+ *    removed immediately, same as a vanished To Do ticket — Inbox does NOT inherit gone-flagging);
+ *    past that point -> goneIds (kept, flagged goneFromLinear). CR-01 carve-out: a To Do card with
+ *    a start saga in flight (or already carrying provisioning/session state from one) is NEVER
+ *    removed, only flagged — removing it mid-saga would orphan a live session and its worktrees
+ *    with no card to reach them. An Inbox card is structurally never mid-saga (no session start is
+ *    reachable from Inbox), so the carve-out is a harmless no-op for it, not a special case.
  * Removal/gone decisions are scoped to the syncing source: the caller passes a `current`
  * pre-filtered to `sourceId`'s cards, so SYNC-03 removals can never touch another source's card.
  * `inFlightStartIds` is the store's transient set of card ids with a running start saga, threaded
@@ -68,10 +73,10 @@ export function reconcile(
   for (const issue of issues) {
     const existing = current.get(issue.id);
     if (!existing) {
-      upserts.push(newTodoCard(issue, sourceId));
+      upserts.push(newInboxCard(issue, sourceId));
       continue;
     }
-    if (existing.column === "todo") {
+    if (existing.column === "todo" || existing.column === "inbox") {
       upserts.push({
         ...existing,
         title: issue.title,
@@ -79,6 +84,7 @@ export function reconcile(
         description: issue.description,
         priority: issue.priority,
         updatedAt: issue.updatedAt,
+        project: issue.project ?? undefined,
         goneFromLinear: false,
       });
     } else if (existing.goneFromLinear) {
@@ -90,7 +96,10 @@ export function reconcile(
   const goneIds: string[] = [];
   for (const card of current.values()) {
     if (seen.has(card.issueId)) continue;
-    if (card.column === "todo" && !isStartingCard(card, inFlightStartIds)) {
+    if (
+      (card.column === "todo" || card.column === "inbox") &&
+      !isStartingCard(card, inFlightStartIds)
+    ) {
       removeIds.push(card.id);
     } else {
       goneIds.push(card.id);

@@ -76,10 +76,10 @@ export interface Card {
   /** Set when the issue disappeared from Linear while the card was past To Do. */
   goneFromLinear?: boolean;
   /**
-   * ISO timestamp stamped by moveCardManual when a card is promoted (inbox -> todo). Drives
-   * compareTodoOrder's top-of-To-Do tier; absent for cards never promoted. Never cleared on
-   * demote (inert while the card sits back in inbox — compareTodoOrder only reads it over the
-   * todo partition) and never cleared on a later session start; simply overwritten with a fresh
+   * ISO timestamp stamped by moveCardManual when a card is promoted from Inbox into To Do.
+   * Drives compareTodoOrder's top-of-To-Do tier; absent for cards never promoted. Never cleared
+   * on demote (inert while the card sits back in Inbox — compareTodoOrder only reads it over the
+   * To Do partition) and never cleared on a later session start; simply overwritten with a fresh
    * timestamp on re-promotion.
    */
   promotedAt?: string;

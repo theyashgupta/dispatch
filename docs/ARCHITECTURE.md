@@ -695,23 +695,29 @@ missing/malformed FAILS CLOSED (throws, keeping last-known-good) rather than coa
 
 **Upsert rules — pure, column-scoped (`SYNC-02`).** `reconcile(issues, current, inFlightStartIds)`
 is deterministic: no network, no wall-clock, no filesystem. Keyed by Linear issue id: a returned
-issue with NO existing card upserts a fresh To Do card; a returned issue whose card is in `todo`
-upserts an in-place refresh of title/url/description/priority/updatedAt and CLEARS `goneFromLinear`;
-a returned issue whose card is PAST To Do is NOT upserted — the poller never touches cards past To
-Do. Exception: a card past To Do currently flagged `goneFromLinear` whose issue REAPPEARS emits a
-flag-only correction via `reappearedIds` (nothing else on the card is touched), because
-`goneFromLinear` is poller-owned derived state, not user board state. `reconcile` does NOT sort; it
-carries `priority`/`updatedAt` faithfully so the store orders the To Do column on read.
+issue with NO existing card upserts a fresh Inbox card — new tickets land in Inbox, never directly
+in To Do, so To Do stays 100% user-curated; a returned issue whose card is in `todo` OR `inbox`
+upserts an in-place refresh of title/url/description/priority/updatedAt/project and CLEARS
+`goneFromLinear` (ONE widened rule, not a separate branch — promoting a card to To Do simply moves
+it into the other half of the same refresh scope); a returned issue whose card is PAST that point is
+NOT upserted — the poller never touches cards past To Do/Inbox. Exception: a card past that point
+currently flagged `goneFromLinear` whose issue REAPPEARS emits a flag-only correction via
+`reappearedIds` (nothing else on the card is touched), because `goneFromLinear` is poller-owned
+derived state, not user board state. `reconcile` does NOT sort; it carries
+`priority`/`updatedAt`/`project` faithfully so the store orders the To Do column on read.
 
 **Removal / gone rules (`SYNC-03`).** A current card whose issue is ABSENT from the result is
-handled by column: in `todo` → `removeIds` (an issue that vanished is removed ONLY while in To Do);
-past To Do → `goneIds` (the card is KEPT and flagged `goneFromLinear`). CR-01 carve-out: a To Do
-card with a start saga IN FLIGHT (or already carrying provisioning/session state from one) is
-treated like a card past To Do — never removed, only flagged — because removing it mid-saga would
-orphan a live `claude` session and its worktrees with no card to reach them. The muted "Gone from
-Linear" badge (`web/features/badges/GoneBadge.tsx`, shown only on cards past To Do) is INFORMATIONAL, not
-destructive: the issue disappearing from Linear on a card past To Do is EXPECTED, so it uses muted
-text/border, never red.
+handled by column: in `todo` OR `inbox` → `removeIds` (an issue that vanished is removed
+IMMEDIATELY while in To Do or Inbox — Inbox does NOT inherit vanish-handling the way cards past To
+Do do; it is treated exactly like a vanished To Do ticket, never `goneFromLinear`-flagged and kept
+forever); past that point → `goneIds` (the card is KEPT and flagged `goneFromLinear`). CR-01
+carve-out: a To Do card with a start saga IN FLIGHT (or already carrying provisioning/session state
+from one) is treated like a card past To Do — never removed, only flagged — because removing it
+mid-saga would orphan a live `claude` session and its worktrees with no card to reach them; an
+Inbox card is structurally never mid-saga (no session can start from Inbox), so the carve-out is a
+harmless no-op there. The muted "Gone from Linear" badge (`web/features/badges/GoneBadge.tsx`, shown
+only on cards past To Do/Inbox) is INFORMATIONAL, not destructive: the issue disappearing from
+Linear on a card past that point is EXPECTED, so it uses muted text/border, never red.
 
 **Sync-strip precedence (`SYNC-04`).** The slim top strip (`web/features/sync/SyncStrip.tsx`) reports sync
 freshness + connection health as TEXT only (no spinner — the board must feel instant), and its

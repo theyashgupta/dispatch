@@ -41,7 +41,7 @@ function isAuthCode(code: string | undefined): boolean {
 }
 
 const ISSUE_NODE_FIELDS =
-  "id identifier title url description priority updatedAt state { id name type }";
+  "id identifier title url description priority updatedAt state { id name type } project { id name }";
 
 /**
  * Build the paged board query for the active shape. `viewer.assignedIssues` keeps the implicit
@@ -76,6 +76,7 @@ interface IssueNode {
   description: string | null;
   priority: number;
   updatedAt: string;
+  project: { id: string; name: string } | null;
 }
 
 interface Connection<N> {
@@ -228,6 +229,7 @@ async function fetchAllIssues(
     description: n.description ?? null,
     priority: n.priority,
     updatedAt: n.updatedAt,
+    project: n.project ?? null,
   }));
   return { issues, truncated: lastHasNextPage };
 }
