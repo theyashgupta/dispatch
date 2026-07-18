@@ -526,7 +526,11 @@ a FIXED position in the JSX tree, and it must stay identity-stable across four s
   and unmount — so the pointer's hit-test target never leaves the top document, regardless of
   where over the panel the release occurs. The overlay is a `document.body` sibling, never nested
   inside the `<aside>` or the iframe subtree, and never persists once the drag ends (PANEL-03
-  untouched: no key/re-parent/position change on the panel itself).
+  untouched: no key/re-parent/position change on the panel itself). Because the overlay is only
+  ever removed by a delivered end event, the drag must NEVER start for a non-primary button
+  (`e.button !== 0` guard, first statement): a secondary click opens the native context menu,
+  Chrome then delivers neither `pointerup` nor `pointercancel` for that pointer, and the max-z
+  overlay would strand permanently — shielding every element in the app until a full reload.
 
 **Docked (Orca) mode is a SECOND style-only derivation of the same `<aside>`, re-deriving `PANEL-03`
 for a second surface.** `position` stays `fixed` in BOTH modes — only `top`/`left`/`width`/`height`/

@@ -51,10 +51,11 @@ export function DetailPanel({
   }, []);
 
   function handleResizePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.button !== 0) return;
     e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
     const node = asideRef.current;
     if (node == null) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
     const startX = e.clientX;
     const startWidth = node.getBoundingClientRect().width;
     const preDragStyleWidth = node.style.width;
