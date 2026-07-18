@@ -75,7 +75,7 @@ const boundaryElements = [
  * (`adapters-config-consumer`, listed BEFORE the general `adapters` element):
  * it is an adapter-tier file (external Linear-CDN I/O per
  * docs/standards/architecture.md's correction row) that reads orchestration
- * config directly from `services/config-holder.ts`, unlike every other
+ * config directly from `services/infra/config-holder.ts`, unlike every other
  * adapter which receives config as an injected parameter. Phase 56's ENF-01
  * error-flip must carry this as a named allow-rule, never widen
  * `adapters -> services` generally.
