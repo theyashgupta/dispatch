@@ -1,11 +1,11 @@
-import { store } from "../store/board.store.js";
-import { hasSession, killSession, newSession } from "../adapters/tmux.js";
-import { preSeedTrust } from "../adapters/claude-trust.js";
-import { resolveBinaryPath } from "../adapters/resolve-binary.js";
+import { store } from "../../store/board.store.js";
+import { hasSession, killSession, newSession } from "../../adapters/tmux.js";
+import { preSeedTrust } from "../../adapters/claude-trust.js";
+import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { awaitReplReady, StartStepError } from "./steps.js";
-import { getHooksRuntime } from "./infra/config-holder.js";
-import { mintHookToken, registerHookToken } from "./domain/hook-tokens.js";
-import { HOOK_SETTINGS_PATH } from "./infra/paths.js";
+import { getHooksRuntime } from "../infra/config-holder.js";
+import { mintHookToken, registerHookToken } from "../domain/hook-tokens.js";
+import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
 import { REATTACH_STATUS_CLEAR_MS } from "./start-session.js";
 import { ensureTerminal } from "./terminal.js";
 

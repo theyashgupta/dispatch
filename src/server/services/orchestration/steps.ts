@@ -2,8 +2,8 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { Card, Config, StartError } from "../../shared/types.js";
-import { sleep } from "../adapters/exec.js";
+import type { Card, Config, StartError } from "../../../shared/types.js";
+import { sleep } from "../../adapters/exec.js";
 import {
   branchExists,
   fetchBase,
@@ -14,7 +14,7 @@ import {
   worktreeRemove,
   worktreePrune,
   branchDelete,
-} from "../adapters/git.js";
+} from "../../adapters/git.js";
 import {
   capturePane,
   killSession,
@@ -22,15 +22,15 @@ import {
   newSession,
   pasteBuffer,
   sendKeys,
-} from "../adapters/tmux.js";
-import { preSeedTrust } from "../adapters/claude-trust.js";
-import { resolveBinaryPath } from "../adapters/resolve-binary.js";
-import { store } from "../store/board.store.js";
-import { buildKickoff } from "./domain/kickoff.js";
-import { getHooksRuntime } from "./infra/config-holder.js";
-import { mintHookToken } from "./domain/hook-tokens.js";
-import { HOOK_SETTINGS_PATH } from "./infra/paths.js";
-import { worktreePath as buildWorktreePath } from "./domain/workspace-paths.js";
+} from "../../adapters/tmux.js";
+import { preSeedTrust } from "../../adapters/claude-trust.js";
+import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
+import { store } from "../../store/board.store.js";
+import { buildKickoff } from "../domain/kickoff.js";
+import { getHooksRuntime } from "../infra/config-holder.js";
+import { mintHookToken } from "../domain/hook-tokens.js";
+import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
+import { worktreePath as buildWorktreePath } from "../domain/workspace-paths.js";
 
 /** Linear identifier shape (defense-in-depth; the route also validates before we reach here). */
 const IDENTIFIER_RE = /^[A-Za-z0-9]+-\d+$/;

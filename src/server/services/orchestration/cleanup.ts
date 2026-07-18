@@ -1,14 +1,14 @@
 import path from "node:path";
 import fsp from "node:fs/promises";
-import { store } from "../store/board.store.js";
-import { killTtyd } from "../adapters/ttyd.js";
-import { killSession } from "../adapters/tmux.js";
+import { store } from "../../store/board.store.js";
+import { killTtyd } from "../../adapters/ttyd.js";
+import { killSession } from "../../adapters/tmux.js";
 import {
   worktreeRemove,
   worktreePrune,
   worktreeStatus,
-} from "../adapters/git.js";
-import { worktreePath as buildWorktreePath } from "./domain/workspace-paths.js";
+} from "../../adapters/git.js";
+import { worktreePath as buildWorktreePath } from "../domain/workspace-paths.js";
 
 /**
  * Tear down a Done card's workspace: kill ttyd + the tmux session, remove each repo's worktree, and

@@ -14,8 +14,8 @@ import {
   renderPlan,
   runUninstall,
   scanFootprint,
-} from "../services/uninstall.js";
-import { checkForUpdate, runUpdate } from "../services/update.js";
+} from "../services/orchestration/uninstall.js";
+import { checkForUpdate, runUpdate } from "../services/orchestration/update.js";
 
 const HELP = `dispatch — local Kanban that turns Linear tickets into Claude Code sessions
 

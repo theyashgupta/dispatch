@@ -3,7 +3,7 @@ import {
   checkForUpdate,
   detectInstallMode,
   runUpdate,
-} from "../services/update.js";
+} from "../services/orchestration/update.js";
 
 /**
  * Update-flow surface behind the shared `/api` loopback guard.

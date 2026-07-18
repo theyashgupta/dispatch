@@ -10,7 +10,7 @@ import {
 import {
   generatePlaybookDraft,
   SourceUnreadableError,
-} from "../services/playbook-generate.js";
+} from "../services/orchestration/playbook-generate.js";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;

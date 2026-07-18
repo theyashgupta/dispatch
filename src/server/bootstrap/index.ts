@@ -21,7 +21,7 @@ import { buildRegistry, getLinearSource } from "../sources/registry.js";
 import { startMarkerWatcher } from "../adapters/markers/watcher.js";
 import { reconcileSessions } from "./reconcile.js";
 import { resolveEditors } from "../adapters/editors.js";
-import { startUpdateCheckLoop } from "../services/update.js";
+import { startUpdateCheckLoop } from "../services/orchestration/update.js";
 
 const DEFAULT_PORT = 4700;
 const DEFAULT_POLL_INTERVAL_MS = 60_000;

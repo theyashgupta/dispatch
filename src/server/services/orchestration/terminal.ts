@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
-import { store } from "../store/board.store.js";
-import { ensureTtyd, killTtyd } from "../adapters/ttyd.js";
-import { hasSession } from "../adapters/tmux.js";
-import { TTYD_INDEX_PATH } from "./infra/paths.js";
+import { store } from "../../store/board.store.js";
+import { ensureTtyd, killTtyd } from "../../adapters/ttyd.js";
+import { hasSession } from "../../adapters/tmux.js";
+import { TTYD_INDEX_PATH } from "../infra/paths.js";
 
 /**
  * Ensure a ttyd terminal for a card's `session` and record its port — the SINGLE TERM-01

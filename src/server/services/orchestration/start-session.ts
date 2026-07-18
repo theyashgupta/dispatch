@@ -1,10 +1,10 @@
 import path from "node:path";
-import type { Config, StartError } from "../../shared/types.js";
-import { store } from "../store/board.store.js";
-import { hasSession } from "../adapters/tmux.js";
-import { registerHookToken } from "./domain/hook-tokens.js";
-import { loadPlaybooks } from "./domain/playbooks.js";
-import { updateLastUsedPlaybook } from "./infra/config-holder.js";
+import type { Config, StartError } from "../../../shared/types.js";
+import { store } from "../../store/board.store.js";
+import { hasSession } from "../../adapters/tmux.js";
+import { registerHookToken } from "../domain/hook-tokens.js";
+import { loadPlaybooks } from "../domain/playbooks.js";
+import { updateLastUsedPlaybook } from "../infra/config-holder.js";
 import {
   steps,
   StartStepError,

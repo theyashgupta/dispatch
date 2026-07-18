@@ -1,19 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
-import { killSession, listSessions } from "../adapters/tmux.js";
-import { findDspTtydOrphans, killTtydPids } from "../adapters/ttyd.js";
+import { killSession, listSessions } from "../../adapters/tmux.js";
+import { findDspTtydOrphans, killTtydPids } from "../../adapters/ttyd.js";
 import {
   BACKUP_SLOTS,
   BOARD_DB_PATH,
   readWorkspaceRegistry,
-} from "../store/board-db.js";
+} from "../../store/board-db.js";
 import {
   CONFIG_PATH,
   DISPATCH_DIR,
   HOOK_SCRIPT_PATH,
   HOOK_SETTINGS_PATH,
-} from "./infra/paths.js";
-import { worktreePath } from "./domain/workspace-paths.js";
+} from "../infra/paths.js";
+import { worktreePath } from "../domain/workspace-paths.js";
 
 /**
  * The three groups `uninstall` reasons about, produced once by `scanFootprint` and consumed by both
