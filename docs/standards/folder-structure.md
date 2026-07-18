@@ -72,7 +72,7 @@ Imports flow one way; the lower a layer sits, the fewer things it may import. Th
 
 **Backend:** `shared` → (`store`, `adapters`) → `services` → `routes`, with `bootstrap` as the composition root that wires them at startup. Routes never call `exec`/`tmux`/`git` directly — only through `services`/`adapters`. `shared` is a sink (imported by everyone, imports nothing app-specific). `store` is a single-writer island: nothing outside `store/` mutates board state.
 
-**Frontend:** `primitives` → `hooks`/`lib` → `features` → `App`. Primitives are purely presentational (props in, no data fetching); hooks own data and effects; features compose them.
+**Frontend:** `primitives` → `hooks`/`lib` → `features` → `App`. Primitives are purely presentational (props in, no data fetching); hooks own data and effects; features compose them. Within the `hooks`/`lib` tier the rule is asymmetric: `hooks` may import `lib` (data hooks legitimately sit on `lib/api`), but `lib` never imports `hooks` — `lib` is the pure-helper floor of the tier.
 
 Feature folders never import from sibling feature folders — cross-feature sharing goes through `primitives/`, `hooks/`, `lib/`, or `shared/`. The single sanctioned exception is `features/* → badges`: `badges/` is a shared LEAF feature — its components import nothing of their own and may be imported by any feature. The edge is declared here so the boundaries DAG encodes it as an explicit allow when per-feature lint enforcement lands; the graph stays acyclic.
 

@@ -160,6 +160,14 @@ const boundariesConfig = {
  * index.ts barrel to import through. Uses `policies` (not the deprecated
  * `rules` alias) and `{{ }}` Handlebars capture templates — the plugin's
  * current, non-deprecated syntax.
+ *
+ * Policy evaluation is last-write-wins: the trailing allow policies MUST stay
+ * after the disallow policies or they stop overriding them. The final allow
+ * encodes folder-structure.md's sanctioned `features/* -> badges` shared-leaf
+ * edge (CardView.tsx's two badge deep imports produce no warnings by design,
+ * and stay exempt when Phase 56 flips this block to error); the same-feature
+ * allow before it is a deliberate belt-and-braces guard should policy 1's
+ * negated-capture template (`!{{from.captured.feature}}`) ever regress.
  */
 const feWebBoundariesConfig = {
   files: ["src/web/**/*.{ts,tsx}"],
