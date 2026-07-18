@@ -13,11 +13,16 @@ const PATCH_HANDLER =
  * Pure patch step: gate ttyd's bundled web-links click handler on cmd/ctrl. Returns null when the
  * patch target's occurrence count isn't exactly 1 (ttyd version drift — Pitfall 2 in
  * 52-RESEARCH.md) so the caller degrades to stock behavior instead of writing a broken artifact.
+ * The replacement is a function so `$`-patterns (`$&`, `` $` ``, `$'`, `$$`) in a future
+ * PATCH_HANDLER edit are never string-interpolated into the artifact.
  */
 export function patchIndexHtml(html: string): string | null {
   const count = html.split(PATCH_TARGET).length - 1;
   if (count !== 1) return null;
-  return html.replace(PATCH_TARGET, `new l.WebLinksAddon(${PATCH_HANDLER})`);
+  return html.replace(
+    PATCH_TARGET,
+    () => `new l.WebLinksAddon(${PATCH_HANDLER})`,
+  );
 }
 
 /**
@@ -45,6 +50,7 @@ async function captureStockIndex(): Promise<string> {
     const res = await fetch(`http://127.0.0.1:${port}/`, {
       signal: AbortSignal.timeout(5000),
     });
+    if (!res.ok) throw new Error(`index fetch returned ${res.status}`);
     return await res.text();
   } finally {
     try {
