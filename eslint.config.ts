@@ -26,6 +26,11 @@ const boundaryElements = [
     pattern: "src/server/adapters/{exec,git,tmux}.ts",
     mode: "file",
   },
+  {
+    type: "adapters-config-consumer",
+    pattern: "src/server/adapters/image-proxy.ts",
+    mode: "file",
+  },
   { type: "adapters", pattern: "src/server/adapters" },
   { type: "sources", pattern: "src/server/sources" },
   { type: "store", pattern: "src/server/store" },
@@ -65,6 +70,15 @@ const boundaryElements = [
  * those sub-elements exist (AUDIT-02) — the fine-grained frontend import
  * direction is enforced separately, at warn, by `feWebBoundariesConfig` below;
  * Phase 56 owns flipping that block to error.
+ *
+ * `adapters/image-proxy.ts` is a named file-mode carve-out
+ * (`adapters-config-consumer`, listed BEFORE the general `adapters` element):
+ * it is an adapter-tier file (external Linear-CDN I/O per
+ * docs/standards/architecture.md's correction row) that reads orchestration
+ * config directly from `services/config-holder.ts`, unlike every other
+ * adapter which receives config as an injected parameter. Phase 56's ENF-01
+ * error-flip must carry this as a named allow-rule, never widen
+ * `adapters -> services` generally.
  */
 const boundariesConfig = {
   files: ["src/**/*.{ts,tsx}"],
@@ -86,6 +100,7 @@ const boundariesConfig = {
               "services",
               "adapters",
               "adapters-subprocess",
+              "adapters-config-consumer",
               "sources",
               "store",
               "shared",
@@ -109,7 +124,14 @@ const boundariesConfig = {
             // Deliberately NO adapters-subprocess: transport never touches
             // exec/tmux/git directly (backend-design.md rule 4 / transport row).
             from: "routes",
-            allow: ["routes", "services", "adapters", "store", "shared"],
+            allow: [
+              "routes",
+              "services",
+              "adapters",
+              "adapters-config-consumer",
+              "store",
+              "shared",
+            ],
           },
           {
             from: "services",
@@ -134,6 +156,10 @@ const boundariesConfig = {
           {
             from: "adapters-subprocess",
             allow: ["adapters-subprocess", "shared"],
+          },
+          {
+            from: "adapters-config-consumer",
+            allow: ["services", "shared"],
           },
           { from: "sources", allow: ["sources", "shared"] },
           { from: "store", allow: ["store", "shared"] },

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { fetchLinearImage, ImageProxyError } from "../services/image-proxy.js";
+import { fetchLinearImage, ImageProxyError } from "../adapters/image-proxy.js";
 import { isLinearUploadUrl } from "../../shared/linear-asset-url.js";
 
 /**
