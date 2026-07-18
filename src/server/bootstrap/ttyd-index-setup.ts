@@ -56,13 +56,19 @@ async function captureStockIndex(): Promise<string> {
 /**
  * Unlink a stale prior-boot artifact, tolerating ENOENT. A failed provisioning must never leave a
  * previous boot's patched index sitting around to be served against a drifted ttyd binary, so
- * file-existence at spawn time stays a trustworthy signal for spawnTtyd's conditional `-I`.
+ * file-existence at spawn time stays a trustworthy signal for spawnTtyd's conditional `-I`. Any
+ * other unlink error (EACCES/EPERM on ~/.dispatch) warns instead of throwing: the module's
+ * never-throws contract wins, and a loud warning is the only remedy left when the
+ * artifact-matches-this-boot invariant cannot be enforced.
  */
 async function removeStaleArtifact(): Promise<void> {
   try {
     await fsp.unlink(TTYD_INDEX_PATH);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    console.warn(
+      `[ttyd-index] stale artifact removal failed — a prior boot's patched index may still be served: ${(err as Error).message}`,
+    );
   }
 }
 
@@ -70,28 +76,44 @@ async function removeStaleArtifact(): Promise<void> {
  * Capture ttyd's stock served index, patch the web-links click handler to be modifier-gated, and
  * write it atomically to TTYD_INDEX_PATH. Never throws — mirrors installHookArtifacts's
  * self-healing-every-boot shape: a future `brew upgrade ttyd` re-captures automatically, and any
- * failure (capture error or patch-target drift) degrades to stock ttyd behavior (spawnTtyd omits
- * `-I` when the file is absent) with exactly one boot warning, never a startup crash.
+ * failure (capture error, patch-target drift, or artifact write) degrades to stock ttyd behavior
+ * (spawnTtyd omits `-I` when the file is absent) with a boot warning, never a startup crash. A
+ * failed WRITE also unlinks the prior boot's artifact, preserving the invariant that an existing
+ * artifact always matches the ttyd binary this boot captured; the outer catch is the contract's
+ * final safety net (mkdir failure, or anything unexpected).
  */
 export async function provisionTtydIndex(): Promise<void> {
-  await fsp.mkdir(DISPATCH_DIR, { recursive: true, mode: 0o700 });
-  let html: string;
   try {
-    html = await captureStockIndex();
+    await fsp.mkdir(DISPATCH_DIR, { recursive: true, mode: 0o700 });
+    let html: string;
+    try {
+      html = await captureStockIndex();
+    } catch (err) {
+      console.warn(
+        `[ttyd-index] capture failed — cmd+click links disabled: ${(err as Error).message}`,
+      );
+      await removeStaleArtifact();
+      return;
+    }
+    const patched = patchIndexHtml(html);
+    if (patched == null) {
+      console.warn(
+        "[ttyd-index] patch target not found exactly once — ttyd version drift suspected, cmd+click links disabled",
+      );
+      await removeStaleArtifact();
+      return;
+    }
+    try {
+      await writeFileAtomic(TTYD_INDEX_PATH, patched, { mode: 0o644 });
+    } catch (err) {
+      console.warn(
+        `[ttyd-index] artifact write failed — cmd+click links disabled: ${(err as Error).message}`,
+      );
+      await removeStaleArtifact();
+    }
   } catch (err) {
     console.warn(
-      `[ttyd-index] capture failed — cmd+click links disabled: ${(err as Error).message}`,
+      `[ttyd-index] provisioning failed — cmd+click links disabled: ${(err as Error).message}`,
     );
-    await removeStaleArtifact();
-    return;
   }
-  const patched = patchIndexHtml(html);
-  if (patched == null) {
-    console.warn(
-      "[ttyd-index] patch target not found exactly once — ttyd version drift suspected, cmd+click links disabled",
-    );
-    await removeStaleArtifact();
-    return;
-  }
-  await writeFileAtomic(TTYD_INDEX_PATH, patched, { mode: 0o644 });
 }
