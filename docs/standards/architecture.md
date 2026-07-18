@@ -1,0 +1,223 @@
+# Architecture Decisions — v2.1 Restructure
+
+This document ratifies the target shape for the v2.1 "Code Health & Scalable Architecture" milestone before any file moves happen. It records four user-approved decisions (2026-07-19) — the backend target shape, the rejection of a generic Repository pattern, per-file rulings for every `node:child_process` importer, and the bundle-budget policy — plus the Phase 53 audit's violation triage and tier-labeled gap list. Phases 54-57 execute against the rulings recorded here; nothing in this doc changes runtime behavior.
+
+## Backend target shape — Option A
+
+**Ratified: `services/{orchestration,domain,infra}/`.** `src/server/services/` is a 19-file, 3,122-LOC grab-bag mixing three responsibilities in one flat folder. Option A subfolders the existing files by role — no new abstraction, no new layer, no boundaries-lint reconfiguration (the `services` element is already a directory-prefix pattern that matches any subfolder beneath it). This is the classification `.planning/research/ARCHITECTURE.md` already derived file-by-file (read, not inferred from names); it is reused verbatim below, not re-derived.
+
+```
+src/server/services/
+├── orchestration/   start-session.ts, steps.ts, resume-session.ts, cleanup.ts,
+│                    terminal.ts, uninstall.ts, update.ts, playbook-generate.ts
+├── domain/          kickoff.ts, workspace-paths.ts, workspaces.ts, playbooks.ts,
+│                    hook-events.ts, hook-tokens.ts
+└── infra/           config-holder.ts, paths.ts, preflight.ts
+```
+
+### Current → target mapping (all 19 `services/` files)
+
+| Current file | Target subfolder | Why |
+| --- | --- | --- |
+| `start-session.ts` | `orchestration/` | Runs the start saga (store, hook-tokens, playbooks, config-holder, steps). |
+| `steps.ts` | `orchestration/` | The saga's 4 do/undo steps — composes adapters + store with rollback. |
+| `resume-session.ts` | `orchestration/` | A second, smaller saga (resume path). |
+| `cleanup.ts` | `orchestration/` | The Done-column teardown saga. |
+| `terminal.ts` | `orchestration/` | One-function saga (`ensureTerminal`) — same shape as the bigger sagas, just smaller. |
+| `uninstall.ts` | `orchestration/` | Scan-plan-execute saga (`scanFootprint` → `renderPlan`/`runUninstall`). |
+| `update.ts` | `orchestration/` | Self-update saga: registry check, install-mode detection, `npm i -g` spawn. |
+| `playbook-generate.ts` | `orchestration/` | Spawns `claude` to author a playbook from source ingestion. |
+| `kickoff.ts` | `domain/` | Pure string builder (kickoff prompt assembly) — zero imports besides the `Card` type. |
+| `workspace-paths.ts` | `domain/` | One pure function (`worktreePath`) — do-not-change contract #8 (`NEW-12`). |
+| `workspaces.ts` | `domain/` | Folder/workspace domain rules: path normalization, validation, repo discovery. |
+| `playbooks.ts` | `domain/` | CRUD + front-matter parsing over the `Playbook` entity. |
+| `hook-events.ts` | `domain/` | Channel-policy business rules; structurally a producer (only calls store mutations), not a saga. |
+| `hook-tokens.ts` | `domain/` | Small in-memory identity registry (token→cardId) — pure state + lookup. |
+| `config-holder.ts` | `infra/` | Config file read-merge-write plumbing + in-memory holders, consumed across every capability. |
+| `paths.ts` | `infra/` | Pure path constants — a shared sink, imported by nearly every other `services/*` file. |
+| `preflight.ts` | `infra/` | Binary/Node/storage health probing + per-platform install commands — diagnostic plumbing. |
+| `image-proxy.ts` | **`adapters/`** (correction, not a `services/` subfolder) | External I/O against a third-party (Linear-hosted image), same shape as `adapters/poller.ts` — a misplaced file, not a `services/` role. |
+| `session-status.ts` | **deleted** (correction) | One-line dead re-export shim (`export { hasSession } from "../adapters/tmux.js"`). Its one caller (`terminal.ts`) can import `hasSession` from `adapters/tmux.ts` directly — already legal under the current boundaries config. No seam is lost. |
+
+**Split: 8 orchestration + 6 domain + 3 infra + 2 corrections (image-proxy re-homed, session-status deleted) = 19 files, exactly matching the current `services/` inventory.** Cross-checked against `.planning/research/ARCHITECTURE.md`'s own file-by-file table (which additionally labels `image-proxy.ts` "Infra, misplaced" and `session-status.ts` "Dead indirection" as two extra rows beyond its "8:6:4:1" summary) — **no discrepancy found**: the research table's `4` ("infra") count included `image-proxy.ts` as a fourth infra-shaped row before flagging it as misplaced, and its `1` ("misplaced") is that same file counted twice for emphasis; once `image-proxy.ts` is pulled out to its correction row and `session-status.ts` is pulled out to its deletion row, both this document's 8/6/3+2 split and the research table's classification agree on every one of the 19 files' target destination.
+
+**No file moves happen in Phase 53.** This mapping is the input to Phase 54, which executes the moves as `git mv` commits separate from any content edits, gated by `npm run check` + replay 16/16 + invariants 81/81 + `phase-smoke-tester` PASS.
+
+## Repository pattern — rejected
+
+**The generic Repository pattern is rejected.** `src/server/store/board.store.ts` (single-writer class, 1203 LOC) plus `src/server/store/board-db.ts` (the SQLite engine seam, 514 LOC) are **already** the repository: they hide the on-disk `board.json`/`board.db` shape behind method calls (`applyMarker`, `flipBack`, `setTtydPortIfSession`, `snapshot()`, …), and `board.store.ts` is the sole writer of board state — that is the Repository pattern's job description under a domain-specific name, not a generic `save()/find()` interface. `docs/standards/backend-design.md` rule 1 ("Store is the sole writer of board state") already locks this invariant; this document does not restate it, only names the two files so the term "Repository" is never reinvented as a new class wrapping `board.store.ts`. A generic `Repository<T>` wrapper adds an indirection layer with no behavioral value and a real risk: any wrapper that fails to preserve "column-sensitive checks happen INSIDE the mutator, against live state" (`WR-04`) silently reintroduces the exact race the single-writer queue exists to prevent. `board.store.ts` stays one cohesive class — it is never split (`docs/standards/folder-structure.md`).
+
+## Exec-chokepoint rulings
+
+The roadmap's "three importers" count (`exec.ts`, `ttyd.ts`, `resolve-binary.ts`) is **stale**. A live `grep -rn "node:child_process" src --include="*.ts" -l` on 2026-07-19 confirms **seven** current importers, no more, no fewer. Every one is ruled on individually below, applying the locked criterion: carve-out ONLY where spawn semantics genuinely differ from `exec.ts`'s await-and-capture shape; trivial uses get refactored through `exec.ts`.
+
+| File | Import | Call shape | Semantics | Ruling |
+| --- | --- | --- | --- | --- |
+| `adapters/exec.ts` | `execFile` | `promisify(execFile)`, awaited, returns `{stdout, stderr}`, throws with `.stderr`/`.stdout` on failure | One-shot, output-captured, silent | **CHOKEPOINT** — this is the file itself. Already documented at `docs/ARCHITECTURE.md#exec-chokepoint`. |
+| `adapters/ttyd.ts` | `spawn`, `execFile`, `ChildProcess` type | `spawn(...)` returns a live handle tracked for the session's lifetime (port parsing via stdout, an `onExit` listener, kept alive until the session ends) | Long-lived, held handle | **CARVE-OUT** — fundamentally incompatible with `exec.ts`'s await-and-discard shape; the handle must outlive the call that created it. |
+| `bootstrap/ttyd-index-setup.ts` | `spawn` | Spawns a throwaway ttyd at boot, holds the child handle to `parsePort()` it (the shared helper from `adapters/ttyd.ts`), then kills it in a `finally` | Short-lived but needs a live handle mid-flight | **CARVE-OUT** — same "needs the handle, not just the result" shape as `ttyd.ts`, not just an await-to-completion call. |
+| `bootstrap/cli.ts` | `spawn` | `spawn(cmd, args, { stdio: "ignore", detached: true })`, `child.unref()`, all errors swallowed | Detached, fire-and-forget OS browser opener, never awaited | **CARVE-OUT** — `exec.ts`'s `run()` cannot express "don't wait, don't capture, detach" without changing its own signature. |
+| `adapters/resolve-binary.ts` | `execFile` | One-shot, resolves a binary's path/version | Same shape as `exec.ts`'s `run()` | **REFACTOR-THROUGH-exec.ts** — trivial one-shot capture, route through the chokepoint as-is. |
+| `services/preflight.ts` | `spawn` | `spawnInherit()` helper: `spawn(cmd, args, { stdio: "inherit" })`, resolves the exit code via `child.on("error"/"exit")` | Interactive/foreground, zero output capture, package-manager install streamed live to the user's terminal | **REFACTOR** via a new second export on `exec.ts` (a `runInherit()`-style helper for stdio-inherit foreground streaming) — never forced through the capture-only `run()`. |
+| `services/update.ts` | `spawn` | Same `spawnInherit()` helper body as `preflight.ts` | Interactive/foreground, zero output capture, `npm i -g` streamed live | **REFACTOR** — same `runInherit()` target as `preflight.ts`. |
+
+**Duplication check (RESEARCH.md assumption A2), verified by an actual diff, not a re-read of excerpts:**
+
+```
+$ diff <(sed -n '/^function spawnInherit/,/^}/p' src/server/services/preflight.ts) \
+       <(sed -n '/^function spawnInherit/,/^}/p' src/server/services/update.ts)
+(no output — exit 0)
+```
+
+The two `spawnInherit()` helper function bodies are **byte-identical**: same signature (`(cmd: string, args: string[]): Promise<number>`), same `spawn(cmd, args, { stdio: "inherit" })` call, same `child.on("error", () => resolve(-1))` / `child.on("exit", (code) => resolve(code ?? -1))` resolution. This confirms A2's claim exactly — it is not a Low-Medium-risk assumption anymore, it is a verified fact — and grounds the "extract to a shared `runInherit()` export on `exec.ts`" ruling for both files.
+
+**Three additional recorded facts:**
+
+1. **The exec-chokepoint import ban does not exist today.** `grep -n "no-restricted-imports" eslint.config.ts` finds nothing — there is no `no-restricted-imports` rule banning `node:child_process` anywhere in the current config. The error-level ban is Phase 56's `ENF-02`.
+2. **The Phase 56 allow-list must exactly match these rulings.** Only the three CARVE-OUT files may keep a direct `node:child_process` import once `ENF-02` lands: `{ adapters/ttyd.ts, bootstrap/ttyd-index-setup.ts, bootstrap/cli.ts }` (plus `adapters/exec.ts` itself, which is the chokepoint the ban protects, not an exception to it). Author narrow, widen later — never the reverse.
+3. **The three REFACTOR-THROUGH rulings are not implemented in Phase 53.** `resolve-binary.ts`'s and `preflight.ts`'/`update.ts`'s routing through `exec.ts` (and `exec.ts`'s new `runInherit()` export) are Phase 56/57 work. This phase only rules — it does not touch `adapters/exec.ts`, `adapters/resolve-binary.ts`, `services/preflight.ts`, or `services/update.ts`'s code.
+
+## Bundle-budget ruling
+
+`scripts/bundle-budget.mjs` is a **non-blocking audit artifact only**, deferred to Phase 58. It never joins the `npm run check` gate — a gate would add a full Vite production build to every check run, which conflicts with this repo's "instant" verification-loop requirement. Phase 58 measures bundle weight (via `ANALYZE=1` + `rollup-plugin-visualizer`) and records before/after numbers as part of its measurement-first optimization work; `bundle-budget.mjs` stays a standalone script invoked on demand, not wired into `npm run check`'s `format:check && lint && typecheck && deadcode && replay-gate` chain.
+
+## Violation triage
+
+Phase 53 Plan 01 extended `eslint.config.ts` with a `warn`-severity `boundaries/dependencies` rule covering `src/web/**` and captured every resulting warning to `.planning/phases/53-architecture-audit-baseline-enforcement/53-LINT-BASELINE.txt` (22 warnings, 0 errors added). Two buckets only, per the user-approved decision: **"restructure will fix"** (the Phase 54/55 moves/barrels eliminate it mechanically) vs **"genuine violation"** (needs a code change no restructure performs). A third "accepted permanent" bucket is explicitly **deferred to Phase 56** — it is not used here.
+
+### Boundaries warnings (22 of 22 — matches the baseline file's TOTAL count line exactly)
+
+| File:line | Rule / message | Bucket | Reason |
+| --- | --- | --- | --- |
+| `App.tsx:14:27` | App-shell reach-in (SyncStrip barrel) | restructure will fix | Phase 55's per-feature `index.ts` barrels give `App.tsx` a public entry point to import through. |
+| `App.tsx:16:23` | App-shell reach-in (Board barrel) | restructure will fix | Same — barrel resolves it. |
+| `App.tsx:17:27` | App-shell reach-in (InboxView barrel) | restructure will fix | Same — barrel resolves it. |
+| `App.tsx:18:26` | App-shell reach-in (OrcaView barrel) | restructure will fix | Same — barrel resolves it. |
+| `App.tsx:19:34` | App-shell reach-in (`orca-selectors.mostRecentCardId` deep import) | restructure will fix | The concrete reach-in named in `.planning/research/ARCHITECTURE.md` — Phase 55's `features/orca/index.ts` barrel re-exports `{ OrcaView, mostRecentCardId }`, killing this exact import. |
+| `App.tsx:20:29` | App-shell reach-in (DetailPanel barrel) | restructure will fix | Same — barrel resolves it. |
+| `App.tsx:21:32` | App-shell reach-in (ActivityDrawer barrel) | restructure will fix | Same — barrel resolves it. |
+| `App.tsx:22:28` | App-shell reach-in (StartModal barrel) | restructure will fix | Same — barrel resolves it. |
+| `App.tsx:23:30` | App-shell reach-in (CleanupModal barrel) | restructure will fix | Same — barrel resolves it. |
+| `App.tsx:27:8` | App-shell reach-in (SettingsModal + SettingsTab barrel) | restructure will fix | Same — barrel resolves it. |
+| `App.tsx:28:31` | App-shell reach-in (FirstRunSetup barrel) | restructure will fix | Same — barrel resolves it. |
+| `App.tsx:29:30` | App-shell reach-in (UpdateBanner barrel) | restructure will fix | Same — barrel resolves it. |
+| `features/inbox/InboxRow.tsx:8:30` | Cross-feature deep import | restructure will fix | Phase 55 barrel on the imported feature gives this a public entry point. |
+| `features/inbox/InboxToolbar.tsx:3:29` | Cross-feature deep import | restructure will fix | Same — barrel resolves it. |
+| `features/modals/PlaybookEditorModal.tsx:14:36` | Cross-feature deep import | restructure will fix | Same — barrel resolves it. |
+| `features/modals/StartModal.tsx:22:30` | Cross-feature deep import | restructure will fix | Same — barrel resolves it. |
+| `features/orca/OrcaNavRow.tsx:5:31` | Cross-feature deep import | restructure will fix | Same — barrel resolves it. |
+| `features/orca/OrcaSection.tsx:3:46` | Cross-feature deep import | restructure will fix | Same — barrel resolves it. |
+| `features/setup/FirstRunSetup.tsx:13:30` | Cross-feature deep import | restructure will fix | Same — barrel resolves it. |
+| `lib/card-badges.ts:2:46` | Layering violation (`lib` importing `hooks/useUnseenActivity.js`) | **genuine violation** | `lib`/`hooks` are peer tiers in `primitives → hooks/lib → features → App`; `card-badges.ts` reaching into `hooks/` is a real cross-tier import a barrel cannot fix — the shared `isUnseen` logic needs relocating (e.g. into `lib/` itself) so `lib` stops depending on `hooks`. |
+| `primitives/ActivityItem.tsx:17:31` | Layering violation (`primitives` importing `lib/event-copy.js`) | **genuine violation** | Primitives must be purely presentational (props in, no data fetching) per `docs/standards/folder-structure.md`; importing from `lib/` is backwards against the direction. Needs the event-copy formatting hoisted to the caller or the prop reshaped — not resolvable by moving files. |
+| `primitives/ActivityItem.tsx:18:27` | Layering violation (`primitives` importing `lib/format-age.js`) | **genuine violation** | Same direction violation as the row above, same fix class (hoist formatting to the caller). |
+
+**Total: 22 boundaries rows = 53-LINT-BASELINE.txt's `TOTAL boundaries/dependencies warnings: 22` line exactly.** (19 "restructure will fix": 12 App-shell reach-ins + 7 cross-feature deep imports; 3 "genuine violation": the `primitives`/`lib` layering violations.)
+
+### Exec-import triage (required by the two-bucket decision, not itself a boundaries-rule warning)
+
+| File | Bucket | Reason |
+| --- | --- | --- |
+| `adapters/resolve-binary.ts` | **genuine violation** | Fixed by routing through `exec.ts`'s existing `run()` in Phase 56/57 per the Exec-chokepoint rulings above — not a restructure/move, an actual routing change. |
+| `services/preflight.ts` | **genuine violation** | Fixed by routing through a new `exec.ts` `runInherit()` export in Phase 56/57 — same class of fix, not restructure-eliminable. |
+| `services/update.ts` | **genuine violation** | Same fix as `preflight.ts` — shared `runInherit()` target. |
+| `adapters/ttyd.ts` | sanctioned exception (not a violation) | CARVE-OUT per the rulings above — belongs on the Phase 56 `no-restricted-imports` allow-list, never treated as debt to clear. |
+| `bootstrap/ttyd-index-setup.ts` | sanctioned exception (not a violation) | CARVE-OUT — same allow-list entry. |
+| `bootstrap/cli.ts` | sanctioned exception (not a violation) | CARVE-OUT — same allow-list entry. |
+
+## Gap list
+
+Tier definition (verbatim, applies to every item below): **byte-identical** = the fix alters no observable runtime behavior, prop contract, HTTP response, or replay fixture output. **Behavior change** = anything else. Every item below carries exactly one tier label; every behavior-change item is also named on the allow-list at the end of this section; no byte-identical item appears on the allow-list.
+
+**Exclusion note:** three residuals named in `docs/ARCHITECTURE.md`'s "Known Residuals" section are already resolved or accepted, not open gaps, and are deliberately excluded here so Phase 57 does not rediscover them: `NEW-12` (worktree path — resolved by extraction to `services/workspace-paths.ts`), `BOARD-05` (`StartupErrorScreen` — resolved by deletion), `FE-02` (primitive interaction-state normalization — accepted design decision, not a bug).
+
+### statusReason first-line truncation
+
+**Source:** `.planning/PROJECT.md` line 210 (v1.0 audit note) — "Pre-existing debt noted in the v1.0 audit: statusReason truncates to the first wrapped pane line."
+**Tier: BEHAVIOR CHANGE** — the status text a user sees on a card visibly changes once the truncation is fixed.
+
+### /resume server-side column check
+
+**Source:** `.planning/PROJECT.md` line 212 (v0.4 audit note) — "`/resume` route lacks a server-side `in_review` column check (client-gated only)."
+**Tier: BEHAVIOR CHANGE** — adding the server-side check introduces a new 4xx response path that does not exist today.
+
+### recap-overlay watcher no-op
+
+**Source:** `.planning/PROJECT.md` line 212 (v0.4 audit note) — "pre-existing recap-overlay marker-scan edge case."
+**Tier: BEHAVIOR CHANGE** — fixing the edge case changes marker-scan behavior for the affected case.
+
+### Dead @dnd-kit/sortable dependency
+
+**Source:** `.planning/PROJECT.md` line 214 (v0.3 audit note) — "dead @dnd-kit/sortable dep."
+**Tier: byte-identical** — removing an unused dependency changes no runtime code path.
+
+### Unborn-HEAD discoverRepos 500
+
+**Source:** `.planning/milestones/v1.9-MILESTONE-AUDIT.md` line 27 (phase 45 tech_debt) — "PRE-EXISTING BUG (smoke-found, out of scope): discoverRepos throws unhandled 500 on a repo with unborn HEAD (zero commits) — file follow-up issue."
+**Tier: BEHAVIOR CHANGE** — the unhandled 500 becomes a handled response.
+
+### steps.ts trust-dialog regex
+
+**Source:** `.planning/milestones/v1.9-MILESTONE-AUDIT.md` line 35 (phase 47 tech_debt) — "PRE-EXISTING BUG (smoke-found, out of scope): steps.ts TRUST_DIALOG/READY regexes miss Claude CLI's newer 'Bypass Permissions mode' dialog → first-ever launch repl-timeout — file follow-up issue."
+**Tier: BEHAVIOR CHANGE** — the first-launch flow currently timing out gets fixed to proceed correctly.
+
+### A11y residuals (pointer-only column resize)
+
+**Source:** `.planning/milestones/v1.9-MILESTONE-AUDIT.md` line 21 (phase 43 tech_debt) — "A11y scope cut (documented): column resize handle is pointer-only (no role/keyboard alternative); combobox ARIA minimal."
+**Tier: BEHAVIOR CHANGE** — adding keyboard support and combobox ARIA introduces new interaction paths and changes the accessibility tree.
+
+### Modal.tsx dead export removal
+
+**Source:** `.planning/milestones/v1.9-MILESTONE-AUDIT.md` line 39 (cross-phase tech_debt) — "Dead export: Modal.tsx ModalControl.beginImmediateClose has zero call sites — wire or remove in a cleanup pass."
+**Tier: byte-identical** — removing a zero-call-site export changes no runtime behavior; wiring it (the alternative resolution) would be the behavior-change branch, but removal is the default under the byte-identical policy.
+
+### v2.0 Info findings (9 total, individually tiered)
+
+**Source:** `.planning/milestones/v2.0-MILESTONE-AUDIT.md` frontmatter `tech_debt` block, lines 15-29 — phase 48 (3 items), phase 50 (4 items), phase 51 (2 items) = 9, confirming the count named in CONTEXT.md.
+
+| ID | Text | Tier | Reason |
+| --- | --- | --- | --- |
+| 48-IN-01 | HOOKS_FLOOR JSDoc "live-verified" claim doesn't cover the PreToolUse-matcher/tool_use_id surface beyond the installed CLI (2.1.212) | byte-identical | Correcting a JSDoc accuracy claim changes documentation, not runtime behavior. |
+| 48-IN-02 | Raw `toolu_…` ids (up to ~290 chars) render in user-facing statusReason | BEHAVIOR CHANGE | Fixing this changes the displayed statusReason text. |
+| 48-IN-03 | ExitPlanMode named in kickoff instruction but has no PreToolUse detection path (matcher covers AskUserQuestion only) | BEHAVIOR CHANGE | Adding the detection path introduces a new marker/routing behavior that doesn't fire today. |
+| 50-IN-01 remainder | Search input aria-label/aria-controls gaps | BEHAVIOR CHANGE | Adding ARIA attributes changes the accessibility tree observable to assistive tech, consistent with the a11y-residual tier above. |
+| 50-IN-02 | Promote is response-driven rather than locally-optimistic (no visible lag observed) | BEHAVIOR CHANGE | Making promote locally-optimistic changes the UI update's timing/ordering relative to the server response. |
+| 50-IN-03 | deriveShowGone not widened for inbox | BEHAVIOR CHANGE | Widening the predicate changes which gone-from-Linear cards are shown/hidden in the inbox view. |
+| 50-IN-04 | Refresh upsert omits identifier (stale identifier in inbox search after a Linear team move) | BEHAVIOR CHANGE | Fixing the upsert changes the displayed identifier after a team move. |
+| 51-IN-03 | Docked Start button races card leaving To Do (backend is final arbiter — same class as board) | BEHAVIOR CHANGE | Closing the race changes button availability/behavior under the racing condition. |
+| 51-IN-04 | Section collapse state resets on every view switch (session-only by locked decision) | byte-identical | This is an already-accepted design decision ("locked decision" in the source text), not an open behavior gap — Phase 57 needs no fix; there is no pending change that would alter observable behavior. |
+
+### Exec refactor-through items (from the Exec-chokepoint rulings above)
+
+| Item | Tier | Reason |
+| --- | --- | --- |
+| `adapters/resolve-binary.ts` routed through `exec.ts` `run()` | byte-identical | Same argv, same one-shot capture shape — only the call site changes, not the observable output. |
+| `services/preflight.ts` routed through a new `exec.ts` `runInherit()` export | byte-identical | Same argv, same stdio-inherit streaming shape, only the import path changes. |
+| `services/update.ts` routed through the same `exec.ts` `runInherit()` export | byte-identical | Same as `preflight.ts` — argv and streaming output unchanged by routing through `exec.ts`. |
+
+### Triage-derived layering-violation fixes (genuine violations from the boundaries table above)
+
+| Item | Tier | Reason |
+| --- | --- | --- |
+| `lib/card-badges.ts` → `hooks/useUnseenActivity.js` cross-tier import | byte-identical | The fix is relocating the shared `isUnseen` helper so `lib` stops depending on `hooks` — a pure move-and-relink with no change to `isUnseen`'s behavior or callers' observed output. |
+| `primitives/ActivityItem.tsx` → `lib/event-copy.js` / `lib/format-age.js` upward imports | byte-identical | The fix is hoisting the formatting calls to the caller (passing pre-formatted strings as props) — same rendered output, no prop-contract change for `ActivityItem`'s existing consumers. |
+
+### Behavior-change allow-list (PENDING USER APPROVAL)
+
+Every behavior-change-tier item above, named once, with a one-line description of the observable change:
+
+1. **statusReason first-line truncation fix** — the status text shown on a card changes (no longer cut to the first wrapped pane line).
+2. **`/resume` server-side `in_review` column check** — a new 4xx response path exists where none did before (server now rejects resume attempts on a non-`in_review` card, not just the client).
+3. **recap-overlay watcher no-op fix** — marker-scan behavior changes for the previously-no-op edge case.
+4. **Unborn-HEAD `discoverRepos` 500 fix** — the route returns a handled response instead of an unhandled 500 for a repo with zero commits.
+5. **steps.ts trust-dialog regex fix** — first-ever launch no longer times out; the newer "Bypass Permissions mode" dialog is now detected.
+6. **A11y: keyboard support for column resize + combobox ARIA** — new keyboard interaction paths and ARIA attributes are added, changing the accessibility tree.
+7. **48-IN-02: raw tool-use id truncation/removal from statusReason** — the displayed statusReason text changes.
+8. **48-IN-03: ExitPlanMode PreToolUse detection path added** — a new detection/routing behavior fires that does not fire today.
+9. **50-IN-01 remainder: inbox search aria-label/aria-controls added** — the accessibility tree for inbox search changes.
+10. **50-IN-02: promote made locally-optimistic** — the UI update's timing changes relative to the server response.
+11. **50-IN-03: deriveShowGone widened for inbox** — which gone-from-Linear cards show/hide in the inbox view changes.
+12. **50-IN-04: refresh upsert identifier fix** — the displayed identifier after a Linear team move changes.
+13. **51-IN-03: docked Start-button race closed** — button availability/behavior changes under the previously-racing condition.
+
+Status: PENDING USER APPROVAL
