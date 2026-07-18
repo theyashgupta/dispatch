@@ -1047,7 +1047,9 @@ is a behavior change, not a refactor.
    [Worktree Path](#worktree-path)) — both former sites call it, and the produced string must
    remain identical.
 9. **Single-writer store discipline.** All card mutations flow through the board store's enqueue (`store` in `store/board.store.ts`); `snapshot()`
-   is the sole ordering point (`compareTodoOrder`, priority `0`→+∞, `updatedAt` desc tiebreak). Do not
+   is the sole ordering point (`compareTodoOrder`: promotion recency first — the by-design primary
+   tier now that Inbox is the sole entry path and `promotedAt` is never cleared — then priority
+   `0`→+∞ with `updatedAt` desc tiebreak for never-promoted cards only). Do not
    split the queue, do not add a second writer, do not pre-sort upstream.
 10. **Linear GraphQL contract.** Query shape (unstarted `state.type`, `first:100`, cursor pagination),
     `RATELIMITED`-in-400-body detection, raw `Authorization` key (never logged), fail-closed on missing

@@ -20,16 +20,20 @@ const BOARD_DIR = path.join(os.homedir(), ".dispatch");
 export const BOARD_PATH = path.join(BOARD_DIR, "board.json");
 
 /**
- * Locked To Do ordering (CONTEXT.md -> Data & Sync Semantics):
- * Linear priority urgent->low, with 1 urgent .. 4 low ascending and 0 (none) LAST
- * (priority 0 is treated as +Infinity per RESEARCH assumption A2), tie-broken by
- * updatedAt DESCENDING (most-recently-updated first). Pure — the single authoritative
- * place the To Do order is expressed. Invoked by snapshot() on the read path.
- * A promoted-first tier sits ABOVE the priority comparison: any card carrying
- * `promotedAt` sorts before every non-promoted card, newest-promoted first. A plain
- * `updatedAt` bump was rejected for this — it only wins ties within the SAME priority
- * bucket, so a promoted low-priority card would still sort below an unpromoted
- * high-priority card, contradicting "lands at the TOP of To Do".
+ * To Do ordering. Promotion recency is the PRIMARY tier BY DESIGN: any card carrying
+ * `promotedAt` sorts before every non-promoted card, newest-promoted first — the locked
+ * user decision is "promoted lands at the TOP of To Do", and with Inbox as the sole
+ * entry path onto the board every To Do card eventually carries `promotedAt` (the field
+ * is deliberately never cleared), so the column converges to pure promotion-recency
+ * order in the steady state. The original locked priority ordering (CONTEXT.md -> Data
+ * & Sync Semantics: Linear priority urgent->low, with 1 urgent .. 4 low ascending and
+ * 0 (none) LAST — treated as +Infinity per RESEARCH assumption A2 — tie-broken by
+ * updatedAt DESCENDING) governs ONLY never-promoted legacy cards, below the promoted
+ * tier. Pure — the single authoritative place the To Do order is expressed. Invoked by
+ * snapshot() on the read path. A plain `updatedAt` bump was rejected for the promoted
+ * tier — it only wins ties within the SAME priority bucket, so a promoted low-priority
+ * card would still sort below an unpromoted high-priority card, contradicting "lands
+ * at the TOP of To Do".
  */
 export function compareTodoOrder(a: Card, b: Card): number {
   const ap = a.promotedAt != null;
