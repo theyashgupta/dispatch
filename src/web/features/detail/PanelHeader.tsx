@@ -1,4 +1,6 @@
 import {
+  ArrowDown,
+  ArrowUp,
   ChevronDown,
   ChevronRight,
   Maximize2,
@@ -6,7 +8,8 @@ import {
   X,
 } from "lucide-react";
 import type { Card as CardModel } from "../../../shared/types.js";
-import { openEditor } from "../../lib/api.js";
+import { moveCard, openEditor } from "../../lib/api.js";
+import { isDemoteEligible } from "../inbox/inbox-filters.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { IconButton } from "../../primitives/IconButton.js";
@@ -124,6 +127,25 @@ export function PanelHeader({
               <Maximize2 size={16} strokeWidth={2} aria-hidden="true" />
             )}
           </IconButton>
+        )}
+
+        {c?.column === "inbox" && (
+          <Button
+            variant="primary"
+            onClick={() => moveCard(c.id, "todo").catch(console.error)}
+          >
+            <ArrowUp size={12} strokeWidth={2} aria-hidden="true" />
+            Promote to To Do
+          </Button>
+        )}
+        {c?.column === "todo" && isDemoteEligible(c) && (
+          <Button
+            variant="secondary"
+            onClick={() => moveCard(c.id, "inbox").catch(console.error)}
+          >
+            <ArrowDown size={12} strokeWidth={2} aria-hidden="true" />
+            Move to Inbox
+          </Button>
         )}
 
         <IconButton onClick={onClose} aria-label="Close panel">

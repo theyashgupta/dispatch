@@ -19,3 +19,16 @@ export function matchesSearch(card: Card, query: string): boolean {
     card.identifier.toLowerCase().includes(q)
   );
 }
+
+/**
+ * A To Do card is demote-eligible only when it has never carried a live session — checked via
+ * existing fields so no new field is needed, and a card that was ever started (even later dragged
+ * back to To Do) never re-offers Move to Inbox.
+ */
+export function isDemoteEligible(card: Card): boolean {
+  return (
+    card.tmuxSession == null &&
+    card.claudeSessionId == null &&
+    card.workspacePath == null
+  );
+}
