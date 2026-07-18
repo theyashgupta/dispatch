@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { store } from "../store/board.store.js";
 import { ensureTtyd, killTtyd } from "../adapters/ttyd.js";
-import { hasSession } from "./session-status.js";
+import { hasSession } from "../adapters/tmux.js";
 import { TTYD_INDEX_PATH } from "./paths.js";
 
 /**

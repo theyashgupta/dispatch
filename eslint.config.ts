@@ -62,8 +62,8 @@ const boundaryElements = [
  * import the non-subprocess adapters the design ratifies (ttyd for the
  * terminal spawn, editors for open-editor), but any routes → exec/git/tmux
  * import is a lint error. The one former consumer (the /terminal pre-spawn
- * `hasSession` liveness probe) now goes through the byte-equivalent
- * services/session-status.ts passthrough.
+ * `hasSession` liveness probe) imports directly from the tmux adapter,
+ * which is legal because services may import adapters-subprocess.
  *
  * The `from`/`allow`/`disallow` lists below name the four new frontend
  * sub-elements alongside `web` so this error-level rule stays green now that
