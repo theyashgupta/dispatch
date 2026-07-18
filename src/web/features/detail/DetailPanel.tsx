@@ -130,10 +130,12 @@ export function DetailPanel({
         aria-label="Ticket detail"
         style={{
           position: "fixed",
-          top: docked ? "var(--strip-height)" : 0,
+          top: docked ? "var(--chrome-top, var(--strip-height))" : 0,
           left: docked ? "var(--orca-nav-width)" : "auto",
           right: 0,
-          height: docked ? "calc(100dvh - var(--strip-height))" : "100dvh",
+          height: docked
+            ? "calc(100dvh - var(--chrome-top, var(--strip-height)))"
+            : "100dvh",
           width: docked
             ? "calc(100% - var(--orca-nav-width))"
             : fullscreen
