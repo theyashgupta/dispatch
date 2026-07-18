@@ -12,14 +12,24 @@ import { loadPlaybooks } from "../services/playbooks.js";
 
 export const cardsRouter = Router();
 
+/**
+ * `/move`'s own whitelist, distinct from `COLUMNS` (the board's render list). Inbox is a valid
+ * move target (promote/demote) but must stay OUT of `COLUMNS` so it can never become a board
+ * column or a drag-drop target — this is the first feature to split those two concerns.
+ */
+const MOVABLE_COLUMNS: readonly Column[] = [...COLUMNS, "inbox"];
+
 cardsRouter.post("/cards/:id/move", async (req, res) => {
   const { id } = req.params;
   const column = (req.body as { column?: unknown } | undefined)?.column;
 
-  if (typeof column !== "string" || !COLUMNS.includes(column as Column)) {
-    res
-      .status(400)
-      .json({ error: `invalid column; must be one of: ${COLUMNS.join(", ")}` });
+  if (
+    typeof column !== "string" ||
+    !MOVABLE_COLUMNS.includes(column as Column)
+  ) {
+    res.status(400).json({
+      error: `invalid column; must be one of: ${MOVABLE_COLUMNS.join(", ")}`,
+    });
     return;
   }
   if (!store.hasCard(id)) {
@@ -42,6 +52,13 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
 
   if (card.column === "done") {
     res.status(409).json({ error: "cannot start a session for a Done card" });
+    return;
+  }
+
+  if (card.column === "inbox") {
+    res.status(409).json({
+      error: "cannot start a session from the Inbox — promote to To Do first",
+    });
     return;
   }
 
