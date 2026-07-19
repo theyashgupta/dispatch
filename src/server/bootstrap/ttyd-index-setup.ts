@@ -10,11 +10,15 @@ import { DISPATCH_DIR, TTYD_INDEX_PATH } from "../services/infra/paths.js";
  * navigate — never `window.open(url,"_blank")`, which does not reliably null the opener across
  * browsers. Its `(e,t)` signature matches both WebLinksAddon's click handler shape and xterm's
  * `linkHandler.activate(event, uri)` shape, which is why both patches can reuse it unmodified.
+ * The else-branch warn preserves the popup-blocked diagnostic both stock xterm code paths emit
+ * when `window.open()` returns null — without it a blocked cmd+click does nothing silently,
+ * indistinguishable from an unapplied patch when debugging.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 const PATCH_HANDLER =
   "(e,t)=>{if(e.metaKey||e.ctrlKey){const w=window.open();" +
-  "if(w){try{w.opener=null}catch(_){}w.location.href=t}}}";
+  "if(w){try{w.opener=null}catch(_){}w.location.href=t}" +
+  'else console.warn("dispatch: cmd+click open blocked")}}';
 
 /** Existing WebLinksAddon plain-text-link patch anchor (52-RESEARCH.md). */
 const PATCH_TARGET = "new l.WebLinksAddon";
