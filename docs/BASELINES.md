@@ -43,7 +43,8 @@ run 10  220.0ms
 PERF-BOOT n=10 mean=220.9 p50=221.3 p95=223.1
 ```
 
-**After:** _(pending — no boot optimization shipped yet)_
+**After:** N/A — ship-zero verdict recorded below; no boot optimization was needed, so there is
+no before/after pair to record for this path.
 
 **Verdict:** ship-zero — p50=221.3ms/p95=223.1ms at baseline is already fine because it is
 well under the ~1s threshold at which a serial-await boot chain would need parallelizing for a
@@ -97,7 +98,8 @@ subprocess-load hot path is a legitimate ship-zero-optimizations candidate under
 zero-session-load profile. A future re-measurement with live sessions attached (session-load
 `capture-pane` cost) is a separate, not-yet-run scenario.
 
-**After:** _(pending — no subprocess-load optimization shipped yet)_
+**After:** N/A — ship-zero verdict recorded below; no subprocess-load optimization was needed, so
+there is no before/after pair to record for this path.
 
 **Verdict:** ship-zero — `calls_per_min=18.0` at 30s steady-state is identical to the boot-only
 `calls_per_min=0.0` window's call COUNT (9 calls both windows; the `calls_per_min` field is a
@@ -139,7 +141,8 @@ the `Set<Response>`, so N-client fan-out is not the bottleneck the naive per-cli
 mistake would have created. This hot path is a legitimate ship-zero-optimizations candidate at
 this client count.
 
-**After:** _(pending — no SSE optimization shipped yet)_
+**After:** N/A — ship-zero verdict recorded below; no SSE fan-out optimization was needed, so
+there is no before/after pair to record for this path.
 
 **Verdict:** ship-zero — `n=16 max_ms=3.0` (flat against `n=1 max_ms=3.3`) is sub-perceptible
 fan-out latency that does not scale with client count in this range, confirming
@@ -196,7 +199,8 @@ clock-tick noise.
 so no "this number is bad" claim is made here. This is the number any later frontend
 optimization task (58-05) and the PERF-04 Compiler spike must cite.
 
-**After:** _(pending — no board re-render optimization shipped yet)_
+**After:** N/A — ship-zero verdict recorded below; no board re-render optimization was needed, so
+there is no before/after pair to record for this path.
 
 **Verdict:** ship-zero — the React Compiler decision above is REJECT (zero measured commit
 reduction on this exact fixed interaction script, at a real build-time and bundle-weight cost),
@@ -242,7 +246,10 @@ PERF-BUNDLE files=4 total_raw_kb=532.9 total_gzip_kb=153.3 over_budget=0
 by exact filename, so this table's filenames are illustrative of the SHA above, not a literal
 match requirement for future runs.
 
-**After:** _(pending — no bundle-weight optimization shipped yet)_
+**After:** N/A — bundle weight is an on-demand audit artifact, not a ship/ship-zero blocking gate
+(ROADMAP.md Phase 56 risk note: `scripts/bundle-budget.mjs` deferred to Phase 58 as audit-only,
+never a blocking gate), and `over_budget=0` above shows no budget breach requiring action; no
+optimization commit was needed against this measured build.
 
 ## React Compiler decision
 
@@ -356,7 +363,8 @@ sign-off needed since no build-dep change lands on main.
 **Standing concern discharged:** PERF-04 is settled. 58-05 may proceed with targeted manual
 memoization where a harness number justifies it — hand-tuned memoization and the compiler are
 non-additive strategies (58-RESEARCH.md Pitfall 10), and this REJECT means manual memoization
-remains the only lever, not a stopgap pending compiler adoption.
+remains the only lever now that the compiler question is settled, not a stopgap awaiting future
+compiler adoption.
 
 **After (main):** N/A — REJECT path, main's `package.json`/`package-lock.json`/`vite.config.ts`
 are unchanged from before this plan; no adoption, no post-adoption numbers to record.
