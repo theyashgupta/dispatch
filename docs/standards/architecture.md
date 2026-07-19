@@ -73,7 +73,7 @@ The two `spawnInherit()` helper function bodies are **byte-identical**: same sig
 
 **Three additional recorded facts:**
 
-1. **The exec-chokepoint import ban does not exist today.** `grep -n "no-restricted-imports" eslint.config.ts` finds nothing — there is no `no-restricted-imports` rule banning `node:child_process` anywhere in the current config. The error-level ban is Phase 56's `ENF-02`.
+1. **The exec-chokepoint import ban did not exist before Phase 56.** At ruling time, `grep -n "no-restricted-imports" eslint.config.ts` found nothing — no rule banned `node:child_process` anywhere in the then-current config. Phase 56's `ENF-02` landed the error-level ban, covering both the `node:child_process` and bare `child_process` specifiers — see fact 2 for the allow-list.
 2. **The Phase 56 allow-list exactly matches these rulings.** `ENF-02` has landed: only the three CARVE-OUT files keep a direct `node:child_process` import: `{ adapters/ttyd.ts, bootstrap/ttyd-index-setup.ts, bootstrap/cli.ts }` (plus `adapters/exec.ts` itself, which is the chokepoint the ban protects, not an exception to it). Author narrow, widen later — never the reverse.
 3. **The three REFACTOR-THROUGH rulings are not implemented in Phase 53.** `resolve-binary.ts`'s and `preflight.ts`'/`update.ts`'s routing through `exec.ts` (and `exec.ts`'s new `runInherit()` export) are Phase 56/57 work. This phase only rules — it does not touch `adapters/exec.ts`, `adapters/resolve-binary.ts`, `services/preflight.ts`, or `services/update.ts`'s code.
 
