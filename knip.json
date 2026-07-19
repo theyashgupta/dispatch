@@ -7,6 +7,5 @@
   ],
   "project": ["src/**/*.{ts,tsx}"],
   "ignoreExportsUsedInFile": true,
-  "ignoreDependencies": ["@dnd-kit/sortable"],
   "ignoreBinaries": ["which", "ttyd"]
 }
