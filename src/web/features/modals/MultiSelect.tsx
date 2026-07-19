@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { ChevronDown } from "lucide-react";
 import type { FilterOption } from "../../../shared/types.js";
@@ -7,17 +7,27 @@ const focusRing = (on: boolean): string =>
   on ? "0 0 0 2px var(--accent)" : "none";
 
 interface OptionRowProps {
+  id: string;
   option: FilterOption;
   checked: boolean;
   onToggle: () => void;
   highlighted?: boolean;
 }
 
-function OptionRow({ option, checked, onToggle, highlighted }: OptionRowProps) {
+function OptionRow({
+  id,
+  option,
+  checked,
+  onToggle,
+  highlighted,
+}: OptionRowProps) {
   const [hover, setHover] = useState(false);
   const [checkFocus, setCheckFocus] = useState(false);
   return (
     <label
+      id={id}
+      role="option"
+      aria-selected={checked}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
@@ -95,6 +105,8 @@ export function MultiSelect({
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const rootRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const listboxId = useId();
+  const optionId = (id: string): string => `${listboxId}-opt-${id}`;
 
   useEffect(() => {
     if (!open) return;
@@ -135,6 +147,10 @@ export function MultiSelect({
     !loadError &&
     options.length > 0 &&
     filteredOptions.length === 0;
+  const activeOptionId =
+    highlightedIndex >= 0 && highlightedIndex < filteredOptions.length
+      ? optionId(filteredOptions[highlightedIndex].id)
+      : undefined;
 
   return (
     <div
@@ -172,6 +188,7 @@ export function MultiSelect({
         ref={triggerRef}
         type="button"
         aria-label={label}
+        aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         onFocus={(e) =>
@@ -244,6 +261,11 @@ export function MultiSelect({
               onBlur={() => setSearchFocus(false)}
               placeholder="Search…"
               aria-label="Search options"
+              role="combobox"
+              aria-expanded={open}
+              aria-controls={listboxId}
+              aria-autocomplete="list"
+              aria-activedescendant={activeOptionId}
               style={{
                 height: "28px",
                 width: "100%",
@@ -262,6 +284,8 @@ export function MultiSelect({
             />
           </div>
           <div
+            role="listbox"
+            id={listboxId}
             style={{
               display: "flex",
               flexDirection: "column",
@@ -320,6 +344,7 @@ export function MultiSelect({
                   }}
                 >
                   <OptionRow
+                    id={optionId(option.id)}
                     option={option}
                     checked={selected.includes(option.id)}
                     onToggle={() => toggle(option.id)}
