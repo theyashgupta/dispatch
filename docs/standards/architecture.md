@@ -74,7 +74,7 @@ The two `spawnInherit()` helper function bodies are **byte-identical**: same sig
 **Three additional recorded facts:**
 
 1. **The exec-chokepoint import ban does not exist today.** `grep -n "no-restricted-imports" eslint.config.ts` finds nothing — there is no `no-restricted-imports` rule banning `node:child_process` anywhere in the current config. The error-level ban is Phase 56's `ENF-02`.
-2. **The Phase 56 allow-list must exactly match these rulings.** Only the three CARVE-OUT files may keep a direct `node:child_process` import once `ENF-02` lands: `{ adapters/ttyd.ts, bootstrap/ttyd-index-setup.ts, bootstrap/cli.ts }` (plus `adapters/exec.ts` itself, which is the chokepoint the ban protects, not an exception to it). Author narrow, widen later — never the reverse.
+2. **The Phase 56 allow-list exactly matches these rulings.** `ENF-02` has landed: only the three CARVE-OUT files keep a direct `node:child_process` import: `{ adapters/ttyd.ts, bootstrap/ttyd-index-setup.ts, bootstrap/cli.ts }` (plus `adapters/exec.ts` itself, which is the chokepoint the ban protects, not an exception to it). Author narrow, widen later — never the reverse.
 3. **The three REFACTOR-THROUGH rulings are not implemented in Phase 53.** `resolve-binary.ts`'s and `preflight.ts`'/`update.ts`'s routing through `exec.ts` (and `exec.ts`'s new `runInherit()` export) are Phase 56/57 work. This phase only rules — it does not touch `adapters/exec.ts`, `adapters/resolve-binary.ts`, `services/preflight.ts`, or `services/update.ts`'s code.
 
 ## Bundle-budget ruling
@@ -114,7 +114,7 @@ Phase 53 Plan 01 extended `eslint.config.ts` with a `warn`-severity `boundaries/
 
 **Total: 22 boundaries rows = 53-LINT-BASELINE.txt's `TOTAL boundaries/dependencies warnings: 22` line exactly.** (19 "restructure will fix": 12 App-shell reach-ins + 7 cross-feature deep imports; 3 "genuine violation": the `primitives`/`lib` layering violations.)
 
-Two additional feature→badges deep imports (`features/board/CardView.tsx:6-7`, importing `GoneBadge`/`SourceBadge`) produce no warnings **by design**, not by omission: the `features/* → badges` shared-leaf edge is sanctioned in `docs/standards/folder-structure.md` and encoded as the config's final allow policy (policy evaluation is last-write-wins, so that allow must stay after the disallow policies to override them). The exemption persists when Phase 56 flips the block to error — the Phase 56 allow-list must carry this edge.
+Two additional feature→badges deep imports (`features/board/CardView.tsx:6-7`, importing `GoneBadge`/`SourceBadge`) produce no warnings **by design**, not by omission: the `features/* → badges` shared-leaf edge is sanctioned in `docs/standards/folder-structure.md` and encoded as the config's final allow policy (policy evaluation is last-write-wins, so that allow must stay after the disallow policies to override them). The exemption persists now that Phase 56 has flipped the block to error — the Phase 56 allow-list carries this edge (verified: the `npx eslint src` before/after diff across the flip is byte-identical, 0 errors/46 warnings both sides).
 
 ### Exec-import triage (required by the two-bucket decision, not itself a boundaries-rule warning)
 

@@ -374,6 +374,7 @@ export default tseslint.config(
       "eslint.config.ts",
       "eslint-local/**",
       "scripts/**",
+      ".claude/**",
     ],
   },
 
