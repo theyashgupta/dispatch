@@ -198,6 +198,19 @@ optimization task (58-05) and the PERF-04 Compiler spike must cite.
 
 **After:** _(pending — no board re-render optimization shipped yet)_
 
+**Verdict:** ship-zero — the React Compiler decision above is REJECT (zero measured commit
+reduction on this exact fixed interaction script, at a real build-time and bundle-weight cost),
+so the compiler is not this path's optimization; per the REJECT branch, manual memoization is
+the only remaining lever, gated on a specific interaction showing excessive commits. None does:
+`toggle=6` (2 full view-mode swaps), `inbox=4` (2 open/close cycles), `select=4` (select +
+re-select in Orca), and `sse=6` (2 card moves, each requiring a `Board`-column re-render by
+design) are each proportionate to the distinct state transitions they exercise — no single
+interaction stands out as disproportionate against the others, and the baseline's own finding
+already noted no "this number is bad" claim could be made without a comparison point. Baseline
+counts are already proportionate; no targeted memoization is applied. No files touched, so no
+DetailPanel-tree change occurred and the PANEL-03 lsof re-proof is not required for this plan
+(compiler was not adopted).
+
 ## Bundle weight
 
 - **Date:** 2026-07-19
