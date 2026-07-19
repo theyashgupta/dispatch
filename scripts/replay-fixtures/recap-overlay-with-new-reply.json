@@ -1,0 +1,43 @@
+{
+  "class": "recap-overlay-with-new-reply",
+  "session": "dsp-fixture",
+  "covers": [
+    "recap-with-new-reply — a lingering ※ recap header near the top of the pane no longer no-ops the tick once a FRESH ⏺ block prints below it; the scan proceeds and the new DONE marker applies (allow-list #3)"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ Understood — I'll wait for your decision.",
+        "  DISPATCH_STATUS: NEEDS_INPUT — which db to use",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT which db to use"
+    },
+    {
+      "pane": [
+        "※ recap: dispatch · replay-gate corpus (disable recaps in /config)",
+        "",
+        "  A summary of the last hour of work on the watcher restructure …",
+        "",
+        "⏺ Actually, let's go with Postgres — proceeding now.",
+        "  DISPATCH_STATUS: DONE — configured Postgres and migrated the schema",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT which db to use"
+    }
+  ]
+}

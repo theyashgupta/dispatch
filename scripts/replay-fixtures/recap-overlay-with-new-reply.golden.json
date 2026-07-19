@@ -1,0 +1,29 @@
+[
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Understood — I'll wait for your decision.",
+        "width": 200,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Understood — I'll wait for your decision.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "applyMarker",
+      "column": "agent_done",
+      "reason": "configured Postgres and migrated the schema",
+      "key": "DONE configured Postgres and migrated the schema"
+    },
+    "next": {
+      "agentView": "⏺ Actually, let's go with Postgres — proceeding now.",
+      "markerFreeStreak": 0
+    }
+  }
+]

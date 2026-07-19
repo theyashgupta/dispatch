@@ -7,12 +7,28 @@
  * recap header, not in normal transcript body or the footer/spinner set (`✻✽✶·`), so this never
  * matches a live working pane.
  *
+ * Structural, not any-line: a recap header that lingers near the top of a full-screen repaint after
+ * the agent has printed a FRESH `⏺` block below it must no longer make the tick a no-op — otherwise
+ * the guard keeps suppressing marker scans until the stale `※` line scrolls out of the (unscrolled)
+ * capture window. Mirrors this module's own `agentOutputView` `⏺`-anchoring rationale: only the LAST
+ * `※` line and the LAST `⏺` line matter, and the overlay is "current" only when the last `※` is
+ * BELOW the last `⏺` (nothing newer has printed since the recap). A pane with no `⏺` line at all
+ * (lastBullet === -1) still treats any `※` line as current — the genuinely-idle recap case.
+ *
  * @remarks The recap overlay both false-flips and (next tick) wipes the dedup key if untreated —
- * the guard makes the whole tick a no-op. Stays in this module this phase (no extraction).
+ * the guard makes the whole tick a no-op, but only while the recap is still the newest content.
+ * Stays in this module this phase (no extraction).
  * @see docs/ARCHITECTURE.md#watcher-discriminator
  */
 export function isRecapOverlay(pane: string): boolean {
-  return pane.split("\n").some((line) => /^\s*※/.test(line));
+  const lines = pane.split("\n");
+  let lastRecap = -1;
+  let lastBullet = -1;
+  lines.forEach((line, i) => {
+    if (/^\s*※/.test(line)) lastRecap = i;
+    if (/^\s*⏺/.test(line)) lastBullet = i;
+  });
+  return lastRecap !== -1 && lastRecap > lastBullet;
 }
 
 /**
