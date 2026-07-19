@@ -202,6 +202,117 @@ match requirement for future runs.
 
 ## React Compiler decision
 
-_Pending — PERF-04 spike (measured build-time dep cost + board re-render before/after with
-`babel-plugin-react-compiler`) not yet run. Adopt/reject decision will be recorded here as a Key
-Decision either way._
+- **Date:** 2026-07-19
+- **Git SHA measured:** `ff0664f` (main, unchanged before/after — spike isolated on a throwaway
+  `spike/react-compiler` branch, deleted after this decision was recorded)
+- **Verdict: REJECT**
+
+### Spike method
+
+Throwaway branch `spike/react-compiler` installed `babel-plugin-react-compiler@1.0.0` (GA,
+registry-verified, slopcheck-clean per 58-RESEARCH.md) and wired it into `vite.config.ts`.
+
+**Wiring-shape correction (worth recording):** the plan's assumed wiring —
+`react({ babel: { plugins: [["babel-plugin-react-compiler", {}]] } })` — does not exist on
+`@vitejs/plugin-react@6.0.3`. That version dropped Babel-by-default in favor of Rolldown's native
+Oxc transformer and has no `babel` option in its `Options` type at all. The correct current wiring
+(confirmed against the plugin's live npm-registry README) is the plugin's own exported
+`reactCompilerPreset()` helper, applied through the separate `@rolldown/plugin-babel` package:
+
+```ts
+import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import babel from "@rolldown/plugin-babel";
+
+export default defineConfig({
+  plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
+});
+```
+
+This required two additional devDeps on the spike branch beyond the plan's anticipated single
+package: `@rolldown/plugin-babel@0.2.3` (rolldown org, maintained by the Rolldown/Vite team) and
+`@babel/core@8.0.1` (peer dep required by the babel bridge), plus `@types/babel__core` for TS.
+Both were registry-verified (rolldown/plugins GitHub org; maintainer includes Evan You) before
+installing — not slopsquat risk, but a stale-wiring-assumption pitfall for any future spike against
+a Rolldown-era `@vitejs/plugin-react`.
+
+**Transform verified applied:** an unminified build (`npx vite build --minify false`, throwaway,
+not part of the measured numbers below) shows 1896 occurrences of the compiler's `$[N]` memoization
+cache-array pattern across the bundle, plus the `react-compiler-runtime.production.js` module
+bundled in — e.g. `StartModal`'s compiled output opens with `$[17] = t6; $[18] = t7;`-shaped cache
+writes. The minified production build (used for all measurements below) does not preserve these
+literal strings, which is expected of single-chunk ESM minification — the unminified check exists
+solely to prove the transform ran, not to be reused as a measurement build.
+
+### Three measured deltas (main SHA `ff0664f`, compiler off vs. spike branch, compiler on)
+
+**Build-time** — median of 3 `npm run build:web` runs (`Date.now()` wrapper), same machine:
+
+| | Without | With | Delta |
+|---|---:|---:|---:|
+| run 1 | 372ms | 1710ms | |
+| run 2 | 366ms | 1684ms | |
+| run 3 | 368ms | 1683ms | |
+| **median** | **368ms** | **1684ms** | **+1316ms (+358%)** |
+
+**Bundle** — `node scripts/bundle-budget.mjs` totals, fresh build each side:
+
+| | Without | With | Delta |
+|---|---:|---:|---:|
+| raw kB | 532.9 | 563.5 | +30.6 kB (+5.7%) |
+| gzip kB | 153.3 | 165.9 | +12.6 kB (+8.2%) |
+
+**Board re-renders** — `node scripts/perf-rerender.mjs`, `mode=prod` (same pinned serve mode as
+the Board re-renders baseline above), same fixed interaction script, 3 runs each side:
+
+| | Without | With |
+|---|---:|---:|
+| run 1 | total=20 (toggle=6 inbox=4 select=4 sse=6) | total=20 (toggle=6 inbox=4 select=4 sse=6) |
+| run 2 | total=20 | total=20 |
+| run 3 | total=20 | total=20 |
+
+**Delta: 0 commits (0%).** The compiler produced zero measurable re-render reduction on this
+fixed interaction script, stable across 3 runs on both sides.
+
+### Compiler-rules audit (`eslint-plugin-react-hooks@7.1.1`)
+
+Open Q1 from 58-RESEARCH.md resolved: `eslint-plugin-react-hooks@7.1.1` (already installed)
+covers React-Compiler-derived linting via its `flat.recommended` config, already wired into this
+repo's `eslint.config.ts` (`reactHooks.configs.flat.recommended`, line ~441) — no
+`eslint-plugin-react-compiler` install was needed.
+
+Ran `npx eslint src/web` against the real tree (no config changes required, on both main and the
+spike branch — identical result on both since the rules were already active):
+
+| Rule | Violations |
+|---|---:|
+| `react-hooks/refs` | 0 |
+| `react-hooks/purity` | 0 |
+| `react-hooks/set-state-in-render` | 0 |
+| `react-hooks/immutability` | 0 |
+| `react-hooks/preserve-manual-memoization` | 0 |
+
+`onInteractionRef` (`StartModal.tsx`) and all 10 `.current`-using files (`UpdateBanner`, `Board`,
+`Column`, `CleanupModal`, `FirstRunSetup`, `FolderBrowserModal`, `StartModal`, `MultiSelect`,
+`SettingsModal`, `DetailPanel`) were inspected directly: every `.current` read/write happens inside
+an event handler, effect, or effect-scheduled callback — none read a ref during render. All 10
+classify as **(b) event-handler/effect usage (fine)**; the compiler's `refs` rule (0 violations,
+confirmed by the lint run) agrees. No bail-out risk found.
+
+### Rationale
+
+Two of the three deltas are net-negative (build-time +358%, bundle gzip +8.2%) and the third —
+the entire reason to adopt — is exactly zero (0 of 20 commits eliminated across a fixed,
+representative interaction script covering view-toggle, inbox open/close, card select, and an
+SSE-driven mutation). The rules audit found zero bail-out risk, so a REJECT here is not "the
+compiler can't run on this tree" — it demonstrably can (1896 memoization sites injected) — but
+running it buys nothing measurable while costing real build-time and bundle weight. Per
+CONTEXT.md's ORCHESTRATOR ROUTING, evidence favoring REJECT records without a pause: no user
+sign-off needed since no build-dep change lands on main.
+
+**Standing concern discharged:** PERF-04 is settled. 58-05 may proceed with targeted manual
+memoization where a harness number justifies it — hand-tuned memoization and the compiler are
+non-additive strategies (58-RESEARCH.md Pitfall 10), and this REJECT means manual memoization
+remains the only lever, not a stopgap pending compiler adoption.
+
+**After (main):** N/A — REJECT path, main's `package.json`/`package-lock.json`/`vite.config.ts`
+are unchanged from before this plan; no adoption, no post-adoption numbers to record.
