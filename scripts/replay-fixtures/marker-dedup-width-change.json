@@ -1,0 +1,57 @@
+{
+  "class": "marker-dedup-width-change",
+  "session": "dsp-fixture",
+  "covers": [
+    "width-invariant-dedup — the SAME logical marker captured at two pane widths, where the narrow capture's continuation join inserted a space inside a wrapped word (`configure d`), must dedup in BOTH directions: the comparison runs on whitespace-stripped keys, so an attach/detach resize can never re-fire an already-consumed wrapped marker (allow-list #1, BUG-1 class)"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ Understood — let me check with you before proceeding.",
+        "  DISPATCH_STATUS: NEEDS_INPUT — I found three possible auth providers configure",
+        "d in this repo (Okta, Auth0, and a custom OIDC issuer) and need you to pick one",
+        "before I wire the login flow, since the callback URL differs per provider.",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 80,
+      "height": 24,
+      "column": "in_progress"
+    },
+    {
+      "pane": [
+        "⏺ Understood — let me check with you before proceeding.",
+        "  DISPATCH_STATUS: NEEDS_INPUT — I found three possible auth providers configured in this repo (Okta, Auth0, and a custom OIDC issuer) and need you to pick one before I wire the login flow, since the callback URL differs per provider.",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 200,
+      "height": 50,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT I found three possible auth providers configure d in this repo (Okta, Auth0, and a custom OIDC issuer) and need you to pick one before I wire the login flow, since the callback URL differs per provider."
+    },
+    {
+      "pane": [
+        "⏺ Understood — let me check with you before proceeding.",
+        "  DISPATCH_STATUS: NEEDS_INPUT — I found three possible auth providers configure",
+        "d in this repo (Okta, Auth0, and a custom OIDC issuer) and need you to pick one",
+        "before I wire the login flow, since the callback URL differs per provider.",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 80,
+      "height": 24,
+      "column": "needs_input",
+      "lastMarker": "NEEDS_INPUT I found three possible auth providers configured in this repo (Okta, Auth0, and a custom OIDC issuer) and need you to pick one before I wire the login flow, since the callback URL differs per provider."
+    }
+  ]
+}

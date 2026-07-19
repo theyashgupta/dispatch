@@ -1,0 +1,50 @@
+[
+  {
+    "decision": {
+      "kind": "applyMarker",
+      "column": "needs_input",
+      "reason": "I found three possible auth providers configure d in this repo (Okta, Auth0, and a custom OIDC issuer) and need you to pick one before I wire the login flow, since the callback URL differs per provider.",
+      "key": "NEEDS_INPUT I found three possible auth providers configure d in this repo (Okta, Auth0, and a custom OIDC issuer) and need you to pick one before I wire the login flow, since the callback URL differs per provider."
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Understood — let me check with you before proceeding.",
+        "width": 80,
+        "height": 24,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Understood — let me check with you before proceeding.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Understood — let me check with you before proceeding.",
+        "width": 200,
+        "height": 50,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Understood — let me check with you before proceeding.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "flip": {
+        "baseline": "⏺ Understood — let me check with you before proceeding.",
+        "width": 80,
+        "height": 24,
+        "divergentTicks": 0
+      },
+      "agentView": "⏺ Understood — let me check with you before proceeding.",
+      "markerFreeStreak": 0
+    }
+  }
+]

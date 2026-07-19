@@ -49,6 +49,18 @@ export function normalizeMarkerKey(key: string): string {
 }
 
 /**
+ * Fully whitespace-STRIPPED form of a dedup key, for the `sameMarkerKey` comparison only. The TUI
+ * hard-wraps at column boundaries and may split a WORD across physical lines; the continuation
+ * join then inserts a space INSIDE that word (e.g. `configure d`), which whitespace-collapsing
+ * cannot undo — two captures of the SAME logical marker at different pane widths would produce
+ * keys that are not prefix-related. Removing ALL whitespace makes the comparison immune to where
+ * the wrap landed. The spaced form stays the stored/display key; only the comparison strips.
+ */
+function stripMarkerKey(key: string): string {
+  return key.replace(/\s+/g, "");
+}
+
+/**
  * Width-invariant "is marker B the same already-consumed marker as key K?" test (BUG-1).
  *
  * `capture-pane -J` rejoins only tmux SOFT-wraps; the claude TUI HARD-wraps its own long marker
@@ -60,8 +72,11 @@ export function normalizeMarkerKey(key: string): string {
  *
  * Any two wrap-widths of one logical marker produce PREFIX-related keys (the kind is always fully
  * present at line start; only the reason's tail is cut), so we treat B and K as the same marker
- * when either normalized key is a prefix of the other. Cross-kind keys never collide (`NEEDS_INPUT`
- * is never a prefix of `DONE` or vice versa).
+ * when either key is a prefix of the other. The comparison runs on fully whitespace-STRIPPED
+ * forms (`stripMarkerKey`): the continuation join can insert a space INSIDE a word the TUI
+ * wrapped mid-word (`configure` + `d`), and collapse-only normalization left such captures
+ * non-prefix-related across widths — re-firing the marker on resize. Cross-kind keys never
+ * collide (`NEEDS_INPUT` is never a prefix of `DONE` or vice versa).
  *
  * Accepted rare tradeoff: a genuinely NEW reason that happens to EXTEND the suppressed one (e.g.
  * `need the key` then `need the key from vault`) is treated as already-seen and won't re-fire.
@@ -75,8 +90,8 @@ export function sameMarkerKey(
   consumed: string | undefined,
 ): boolean {
   if (consumed == null) return false;
-  const nb = normalizeMarkerKey(b);
-  const nk = normalizeMarkerKey(consumed);
+  const nb = stripMarkerKey(b);
+  const nk = stripMarkerKey(consumed);
   return nb === nk || nb.startsWith(nk) || nk.startsWith(nb);
 }
 
