@@ -175,25 +175,105 @@ const boundariesConfig = {
 };
 
 /**
- * AUDIT-02 report-only baseline: frontend import-direction + feature
- * entry-point rules at warn severity, mirroring folder-structure.md's
- * `primitives -> hooks/lib -> features -> App` direction and the
- * single-feature-barrel discipline. `default: "allow"` is deliberate — the
- * frontend's edges were never enumerated before this phase, so only the
- * explicit `disallow` policies below produce warnings (an unenumerated
- * `disallow`-by-default would flag the entire tree). Stays warn until Phase
- * 56 flips it to error once the Phase 55 restructure gives every feature an
- * index.ts barrel to import through. Uses `policies` (not the deprecated
- * `rules` alias) and `{{ }}` Handlebars capture templates — the plugin's
- * current, non-deprecated syntax.
+ * Frontend import-direction + feature entry-point policies, shared by
+ * `feWebBoundariesConfig` (error) and `feWebBoundariesWarnCarveout` (warn) so
+ * the two severity-split blocks can never drift apart — extracted per ENF-01
+ * to keep the 7-policy options object defined exactly once.
+ * `default: "allow"` is deliberate — the frontend's edges were enumerated as
+ * of Phase 56's restructure, so only the explicit `disallow` policies below
+ * produce findings (an unenumerated `disallow`-by-default would flag the
+ * entire tree). Uses `policies` (not the deprecated `rules` alias) and
+ * `{{ }}` Handlebars capture templates — the plugin's current, non-deprecated
+ * syntax.
  *
  * Policy evaluation is last-write-wins: the trailing allow policies MUST stay
  * after the disallow policies or they stop overriding them. The final allow
  * encodes folder-structure.md's sanctioned `features/* -> badges` shared-leaf
- * edge (CardView.tsx's two badge deep imports produce no warnings by design,
- * and stay exempt when Phase 56 flips this block to error); the same-feature
- * allow before it is a deliberate belt-and-braces guard should policy 1's
- * negated-capture template (`!{{from.captured.feature}}`) ever regress.
+ * edge (CardView.tsx's two badge deep imports produce no findings by design);
+ * the same-feature allow before it is a deliberate belt-and-braces guard
+ * should policy 1's negated-capture template
+ * (`!{{from.captured.feature}}`) ever regress.
+ */
+const feWebBoundaryPolicies = {
+  default: "allow",
+  policies: [
+    {
+      from: { element: { type: "feature" } },
+      disallow: {
+        element: {
+          type: "feature",
+          captured: { feature: "!{{from.captured.feature}}" },
+          fileInternalPath: "!index.ts",
+        },
+      },
+      message:
+        "Cross-feature import must go through the feature's index.ts barrel (docs/standards/folder-structure.md).",
+    },
+    {
+      from: { element: { type: "web" } },
+      disallow: {
+        element: { type: "feature", fileInternalPath: "!index.ts" },
+      },
+      message:
+        "App composes features through their index.ts barrel (docs/standards/folder-structure.md).",
+    },
+    {
+      from: { element: { type: "primitives" } },
+      disallow: {
+        element: { type: ["hooks", "lib", "feature", "web"] },
+      },
+      message:
+        "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
+    },
+    {
+      from: { element: { type: "hooks" } },
+      disallow: { element: { type: ["feature", "web"] } },
+      message:
+        "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
+    },
+    {
+      from: { element: { type: "lib" } },
+      disallow: {
+        element: { type: ["primitives", "hooks", "feature", "web"] },
+      },
+      message:
+        "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
+    },
+    {
+      from: { element: { type: "feature" } },
+      allow: {
+        element: {
+          type: "feature",
+          captured: { feature: "{{from.captured.feature}}" },
+        },
+      },
+    },
+    {
+      from: { element: { type: "feature" } },
+      allow: {
+        element: { type: "feature", captured: { feature: "badges" } },
+      },
+    },
+  ],
+};
+
+/**
+ * ENF-01 error-flip: frontend import-direction + feature entry-point rules
+ * now enforced at error for every `src/web/**` file. Only the 3 named
+ * Phase-57 gap edges (`lib/card-badges.ts` -> `hooks/useUnseenActivity`;
+ * `primitives/ActivityItem.tsx` -> `lib/event-copy`, `lib/format-age`) stay
+ * at warn, via the trailing `feWebBoundariesWarnCarveout` block registered
+ * immediately after this one (flat-config last-write-wins — the carve-out's
+ * position in the exported array is load-bearing, not incidental).
+ *
+ * The `watcher -> ttyd -> store` edge produces no boundaries violation and
+ * needs no allow-rule: `watcher` and `ttyd` both classify as the general
+ * `adapters` element, `adapters -> store` is already allowed, and `store` has
+ * no reverse edge back to `adapters` — this is a documented invariant, not an
+ * unenforced gap (@see docs/ARCHITECTURE.md#preserved-import-edges). The
+ * `adapters-config-consumer` (image-proxy) carve-out and the
+ * `features/* -> badges` shared-leaf allow-rule above are pre-existing and
+ * survive the flip unchanged.
  */
 const feWebBoundariesConfig = {
   files: ["src/web/**/*.{ts,tsx}"],
@@ -203,71 +283,33 @@ const feWebBoundariesConfig = {
     "boundaries/elements": boundaryElements,
   },
   rules: {
-    "boundaries/dependencies": [
-      "warn",
-      {
-        default: "allow",
-        policies: [
-          {
-            from: { element: { type: "feature" } },
-            disallow: {
-              element: {
-                type: "feature",
-                captured: { feature: "!{{from.captured.feature}}" },
-                fileInternalPath: "!index.ts",
-              },
-            },
-            message:
-              "Cross-feature import must go through the feature's index.ts barrel (docs/standards/folder-structure.md).",
-          },
-          {
-            from: { element: { type: "web" } },
-            disallow: {
-              element: { type: "feature", fileInternalPath: "!index.ts" },
-            },
-            message:
-              "App composes features through their index.ts barrel (docs/standards/folder-structure.md).",
-          },
-          {
-            from: { element: { type: "primitives" } },
-            disallow: {
-              element: { type: ["hooks", "lib", "feature", "web"] },
-            },
-            message:
-              "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
-          },
-          {
-            from: { element: { type: "hooks" } },
-            disallow: { element: { type: ["feature", "web"] } },
-            message:
-              "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
-          },
-          {
-            from: { element: { type: "lib" } },
-            disallow: {
-              element: { type: ["primitives", "hooks", "feature", "web"] },
-            },
-            message:
-              "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
-          },
-          {
-            from: { element: { type: "feature" } },
-            allow: {
-              element: {
-                type: "feature",
-                captured: { feature: "{{from.captured.feature}}" },
-              },
-            },
-          },
-          {
-            from: { element: { type: "feature" } },
-            allow: {
-              element: { type: "feature", captured: { feature: "badges" } },
-            },
-          },
-        ],
-      },
-    ],
+    "boundaries/dependencies": ["error", feWebBoundaryPolicies],
+  },
+};
+
+/**
+ * ENF-01 named warn carve-out for the 3 genuine Phase-57 gap edges
+ * (`docs/standards/architecture.md`'s "Triage-derived layering-violation
+ * fixes" gap-list entry): `lib/card-badges.ts` -> `hooks/useUnseenActivity`,
+ * and `primitives/ActivityItem.tsx` -> `lib/event-copy` / `lib/format-age`.
+ * TODO-57 fixes these by relocating/hoisting per that gap-list entry's tier
+ * label; until then this block keeps them at warn instead of error. MUST be
+ * registered AFTER `feWebBoundariesConfig` in the exported array —
+ * flat-config resolves the winning rule severity per file from the LAST
+ * matching block, so ordering is what makes the carve-out take effect. This
+ * carve-out shrinks to zero in Phase 57 and is never resolved via a rule
+ * suppression directive (docs/standards/comments.md rule 9 reserves that
+ * escape hatch for external, code-irreducible facts, not layering debt).
+ */
+const feWebBoundariesWarnCarveout = {
+  files: ["src/web/lib/card-badges.ts", "src/web/primitives/ActivityItem.tsx"],
+  plugins: { boundaries },
+  settings: {
+    "import/resolver": { typescript: {} },
+    "boundaries/elements": boundaryElements,
+  },
+  rules: {
+    "boundaries/dependencies": ["warn", feWebBoundaryPolicies],
   },
 };
 
@@ -386,6 +428,7 @@ export default tseslint.config(
 
   boundariesConfig,
   feWebBoundariesConfig,
+  feWebBoundariesWarnCarveout,
 
   /**
    * The exec chokepoint (argv-array, no-shell) is the app's shell-injection guard; this ban
