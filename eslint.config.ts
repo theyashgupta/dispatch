@@ -387,6 +387,39 @@ export default tseslint.config(
   boundariesConfig,
   feWebBoundariesConfig,
 
+  /**
+   * The exec chokepoint (argv-array, no-shell) is the app's shell-injection guard; this ban
+   * closes the bypass surface at build time. The allow-list is the AUDIT-01 ruling verbatim —
+   * the three CARVE-OUT files plus the chokepoint itself — author narrow, never widen.
+   * @see docs/standards/architecture.md#exec-chokepoint-rulings
+   */
+  {
+    files: ["src/server/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "node:child_process",
+              message:
+                "Route subprocess calls through adapters/exec.ts (the chokepoint) — docs/standards/architecture.md exec-chokepoint rulings.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: [
+      "src/server/adapters/exec.ts",
+      "src/server/adapters/ttyd.ts",
+      "src/server/bootstrap/ttyd-index-setup.ts",
+      "src/server/bootstrap/cli.ts",
+    ],
+    rules: { "no-restricted-imports": "off" },
+  },
+
   {
     files: ["src/**/*.{ts,tsx}"],
     rules: {
