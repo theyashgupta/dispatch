@@ -247,28 +247,28 @@ solely to prove the transform ran, not to be reused as a measurement build.
 
 **Build-time** — median of 3 `npm run build:web` runs (`Date.now()` wrapper), same machine:
 
-| | Without | With | Delta |
-|---|---:|---:|---:|
-| run 1 | 372ms | 1710ms | |
-| run 2 | 366ms | 1684ms | |
-| run 3 | 368ms | 1683ms | |
+|            |   Without |       With |               Delta |
+| ---------- | --------: | ---------: | ------------------: |
+| run 1      |     372ms |     1710ms |                     |
+| run 2      |     366ms |     1684ms |                     |
+| run 3      |     368ms |     1683ms |                     |
 | **median** | **368ms** | **1684ms** | **+1316ms (+358%)** |
 
 **Bundle** — `node scripts/bundle-budget.mjs` totals, fresh build each side:
 
-| | Without | With | Delta |
-|---|---:|---:|---:|
-| raw kB | 532.9 | 563.5 | +30.6 kB (+5.7%) |
-| gzip kB | 153.3 | 165.9 | +12.6 kB (+8.2%) |
+|         | Without |  With |            Delta |
+| ------- | ------: | ----: | ---------------: |
+| raw kB  |   532.9 | 563.5 | +30.6 kB (+5.7%) |
+| gzip kB |   153.3 | 165.9 | +12.6 kB (+8.2%) |
 
 **Board re-renders** — `node scripts/perf-rerender.mjs`, `mode=prod` (same pinned serve mode as
 the Board re-renders baseline above), same fixed interaction script, 3 runs each side:
 
-| | Without | With |
-|---|---:|---:|
+|       |                                    Without |                                       With |
+| ----- | -----------------------------------------: | -----------------------------------------: |
 | run 1 | total=20 (toggle=6 inbox=4 select=4 sse=6) | total=20 (toggle=6 inbox=4 select=4 sse=6) |
-| run 2 | total=20 | total=20 |
-| run 3 | total=20 | total=20 |
+| run 2 |                                   total=20 |                                   total=20 |
+| run 3 |                                   total=20 |                                   total=20 |
 
 **Delta: 0 commits (0%).** The compiler produced zero measurable re-render reduction on this
 fixed interaction script, stable across 3 runs on both sides.
@@ -283,13 +283,13 @@ repo's `eslint.config.ts` (`reactHooks.configs.flat.recommended`, line ~441) —
 Ran `npx eslint src/web` against the real tree (no config changes required, on both main and the
 spike branch — identical result on both since the rules were already active):
 
-| Rule | Violations |
-|---|---:|
-| `react-hooks/refs` | 0 |
-| `react-hooks/purity` | 0 |
-| `react-hooks/set-state-in-render` | 0 |
-| `react-hooks/immutability` | 0 |
-| `react-hooks/preserve-manual-memoization` | 0 |
+| Rule                                      | Violations |
+| ----------------------------------------- | ---------: |
+| `react-hooks/refs`                        |          0 |
+| `react-hooks/purity`                      |          0 |
+| `react-hooks/set-state-in-render`         |          0 |
+| `react-hooks/immutability`                |          0 |
+| `react-hooks/preserve-manual-memoization` |          0 |
 
 `onInteractionRef` (`StartModal.tsx`) and all 10 `.current`-using files (`UpdateBanner`, `Board`,
 `Column`, `CleanupModal`, `FirstRunSetup`, `FolderBrowserModal`, `StartModal`, `MultiSelect`,
