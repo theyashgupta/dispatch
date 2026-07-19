@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import type { ActivityEvent } from "../../../shared/types.js";
+import { describeEvent } from "../../lib/event-copy.js";
+import { formatAge } from "../../lib/format-age.js";
 import { ActivityItem } from "../../primitives/ActivityItem.js";
 import { IconButton } from "../../primitives/IconButton.js";
 
@@ -144,8 +146,10 @@ export function ActivityDrawer({
                 }}
               >
                 <ActivityItem
-                  event={event}
-                  now={now}
+                  type={event.type}
+                  cardId={event.cardId ?? undefined}
+                  description={describeEvent(event)}
+                  age={formatAge(event.ts, now)}
                   identifiers={identifiers}
                   onSelect={onSelectCard}
                 />

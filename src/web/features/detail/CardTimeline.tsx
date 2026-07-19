@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import type { ActivityEvent } from "../../../shared/types.js";
 import { fetchEvents } from "../../lib/api.js";
+import { describeEvent } from "../../lib/event-copy.js";
+import { formatAge } from "../../lib/format-age.js";
 import { ActivityItem } from "../../primitives/ActivityItem.js";
 import { IconButton } from "../../primitives/IconButton.js";
 
@@ -127,8 +129,10 @@ export function CardTimeline({
                 }}
               >
                 <ActivityItem
-                  event={event}
-                  now={now}
+                  type={event.type}
+                  cardId={event.cardId ?? undefined}
+                  description={describeEvent(event)}
+                  age={formatAge(event.ts, now)}
                   identifiers={identifiers}
                 />
               </div>

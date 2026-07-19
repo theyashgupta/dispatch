@@ -1,8 +1,9 @@
 import { useSyncExternalStore } from "react";
+import type { LastOpenedMap } from "../lib/unseen-activity.js";
+
+export { isUnseen, type LastOpenedMap } from "../lib/unseen-activity.js";
 
 const STORAGE_KEY = "dsp.unseen.lastOpened";
-
-export type LastOpenedMap = Record<string, string>;
 
 function loadMap(): LastOpenedMap {
   try {
@@ -41,21 +42,6 @@ export function stampLastOpened(id: string): void {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(lastOpened));
   } catch {}
   for (const cb of listeners) cb();
-}
-
-/**
- * Is this card's agent output unseen? True when the backend stamped `outputChangedAt` more recently
- * than the viewer last opened the card's panel. A missing `lastOpenedIso` (never opened) → unseen
- * as soon as `outputChangedAt` is set; a missing `outputChangedAt` (no divergence yet) → never
- * unseen. ISO-8601 timestamps compare correctly as strings.
- */
-export function isUnseen(
-  outputChangedAt: string | undefined,
-  lastOpenedIso: string | undefined,
-): boolean {
-  if (outputChangedAt == null) return false;
-  if (lastOpenedIso == null) return true;
-  return outputChangedAt > lastOpenedIso;
 }
 
 /** Subscribe to the lastOpened map; re-renders the caller whenever any card is stamped. */

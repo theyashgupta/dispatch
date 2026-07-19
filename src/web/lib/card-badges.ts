@@ -1,5 +1,5 @@
 import type { Card } from "../../shared/types.js";
-import { isUnseen, type LastOpenedMap } from "../hooks/useUnseenActivity.js";
+import { isUnseen, type LastOpenedMap } from "./unseen-activity.js";
 
 /**
  * Single source of truth for the "gone from Linear" badge, shared by the board

@@ -13,9 +13,7 @@ import {
   Unplug,
   type LucideIcon,
 } from "lucide-react";
-import type { ActivityEvent, EventType } from "../../shared/types.js";
-import { describeEvent } from "../lib/event-copy.js";
-import { formatAge } from "../lib/format-age.js";
+import type { EventType } from "../../shared/types.js";
 
 const EVENT_GLYPH: Record<EventType, LucideIcon> = {
   sync_in: Download,
@@ -52,8 +50,10 @@ const GLYPH_LOOKUP: Partial<Record<string, LucideIcon>> = EVENT_GLYPH;
 const TINT_LOOKUP: Partial<Record<string, string>> = EVENT_TINT;
 
 interface ActivityItemProps {
-  event: ActivityEvent;
-  now: number;
+  type: EventType;
+  cardId?: string;
+  description: string;
+  age: string;
   identifiers?: Record<string, string>;
   onSelect?: (cardId: string) => void;
 }
@@ -65,17 +65,17 @@ const textBlockStyle: CSSProperties = {
 };
 
 export function ActivityItem({
-  event,
-  now,
+  type,
+  cardId,
+  description,
+  age,
   identifiers,
   onSelect,
 }: ActivityItemProps) {
   const [hovered, setHovered] = useState(false);
-  const Icon = GLYPH_LOOKUP[event.type] ?? CircleAlert;
-  const interactive = onSelect != null && event.cardId != null;
-  const label =
-    event.cardId != null ? (identifiers?.[event.cardId] ?? event.cardId) : null;
-  const age = formatAge(event.ts, now);
+  const Icon = GLYPH_LOOKUP[type] ?? CircleAlert;
+  const interactive = onSelect != null && cardId != null;
+  const label = cardId != null ? (identifiers?.[cardId] ?? cardId) : null;
 
   const rowStyle: CSSProperties = {
     display: "flex",
@@ -102,7 +102,7 @@ export function ActivityItem({
         style={{
           flex: "0 0 auto",
           marginTop: "1px",
-          color: TINT_LOOKUP[event.type] ?? "var(--text-muted)",
+          color: TINT_LOOKUP[type] ?? "var(--text-muted)",
         }}
       />
       <span style={textBlockStyle}>
@@ -120,7 +120,7 @@ export function ActivityItem({
         <span
           style={{ fontWeight: "var(--weight-regular)", color: "var(--text)" }}
         >
-          {describeEvent(event)}
+          {description}
         </span>
         {age !== "" && (
           <span style={{ color: "var(--text-muted)" }}>{` · ${age}`}</span>
@@ -135,7 +135,7 @@ export function ActivityItem({
         type="button"
         style={rowStyle}
         onClick={() => {
-          if (event.cardId != null) onSelect?.(event.cardId);
+          if (cardId != null) onSelect?.(cardId);
         }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
