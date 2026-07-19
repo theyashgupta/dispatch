@@ -192,13 +192,20 @@ const boundariesConfig = {
  * Frontend import-direction + feature entry-point policies, shared by
  * `feWebBoundariesConfig` (error) and `feWebBoundariesWarnCarveout` (warn) so
  * the two severity-split blocks can never drift apart — extracted per ENF-01
- * to keep the 7-policy options object defined exactly once.
+ * to keep the options object defined exactly once.
  * `default: "allow"` is deliberate — the frontend's edges were enumerated as
  * of Phase 56's restructure, so only the explicit `disallow` policies below
  * produce findings (an unenumerated `disallow`-by-default would flag the
  * entire tree). Uses `policies` (not the deprecated `rules` alias) and
  * `{{ }}` Handlebars capture templates — the plugin's current, non-deprecated
  * syntax.
+ *
+ * The frontend->backend disallow policy MUST be restated here even though the
+ * backend block (`boundariesConfig`) also encodes it: both blocks configure
+ * the same rule ID (`boundaries/dependencies`), and flat-config last-match-wins
+ * replaces earlier rule entries wholesale (severity AND options) — so for
+ * every `src/web/**` file this options object is the only one in effect, and
+ * omitting the policy here silently disables the frontend->backend import ban.
  *
  * Policy evaluation is last-write-wins: the trailing allow policies MUST stay
  * after the disallow policies or they stop overriding them. The final allow
@@ -252,6 +259,26 @@ const feWebBoundaryPolicies = {
       },
       message:
         "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
+    },
+    {
+      from: {
+        element: { type: ["web", "primitives", "hooks", "lib", "feature"] },
+      },
+      disallow: {
+        element: {
+          type: [
+            "bootstrap",
+            "routes",
+            "services",
+            "adapters",
+            "adapters-subprocess",
+            "adapters-config-consumer",
+            "sources",
+            "store",
+          ],
+        },
+      },
+      message: "Frontend must not import backend code.",
     },
     {
       from: { element: { type: "feature" } },
