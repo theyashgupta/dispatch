@@ -68,10 +68,28 @@ export function Column({
   const cleanupDragRef = useRef<(() => void) | null>(null);
   const [hoveringHandle, setHoveringHandle] = useState(false);
   const [resizing, setResizing] = useState(false);
+  const [handleFocused, setHandleFocused] = useState(false);
+  const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
 
   useEffect(() => {
     return () => cleanupDragRef.current?.();
   }, []);
+
+  useEffect(() => {
+    const node = wrapperRef.current;
+    if (node == null) return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width != null) setMeasuredWidth(width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  const effectiveWidth = Math.min(
+    MAX_COL_WIDTH,
+    Math.max(MIN_COL_WIDTH, persistedWidth ?? measuredWidth ?? MIN_COL_WIDTH),
+  );
 
   function handleResizePointerDown(e: React.PointerEvent<HTMLDivElement>) {
     e.stopPropagation();
@@ -140,6 +158,35 @@ export function Column({
     clearColumnWidth(column);
   }
 
+  function handleResizeKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (resizeDisabled) return;
+    const step = 20;
+    let next: number | null = null;
+    if (e.key === "ArrowLeft") {
+      next = Math.min(
+        MAX_COL_WIDTH,
+        Math.max(MIN_COL_WIDTH, effectiveWidth - step),
+      );
+    } else if (e.key === "ArrowRight") {
+      next = Math.min(
+        MAX_COL_WIDTH,
+        Math.max(MIN_COL_WIDTH, effectiveWidth + step),
+      );
+    } else if (e.key === "Home") {
+      next = MIN_COL_WIDTH;
+    } else if (e.key === "End") {
+      next = MAX_COL_WIDTH;
+    }
+    if (next == null) return;
+    e.preventDefault();
+    const node = wrapperRef.current;
+    if (node != null) {
+      node.style.width = `${next}px`;
+      node.style.flex = "0 0 auto";
+    }
+    setColumnWidth(column, next);
+  }
+
   const sizing =
     !isCarousel && persistedWidth != null
       ? {
@@ -178,11 +225,21 @@ export function Column({
     >
       {!isCarousel && (
         <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={`Resize ${COLUMN_LABELS[column]} column`}
+          aria-valuenow={effectiveWidth}
+          aria-valuemin={MIN_COL_WIDTH}
+          aria-valuemax={MAX_COL_WIDTH}
+          tabIndex={resizeDisabled ? -1 : 0}
           onPointerDown={handleResizePointerDown}
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={handleResizeDoubleClick}
           onPointerEnter={() => setHoveringHandle(true)}
           onPointerLeave={() => setHoveringHandle(false)}
+          onKeyDown={handleResizeKeyDown}
+          onFocus={() => setHandleFocused(true)}
+          onBlur={() => setHandleFocused(false)}
           style={{
             position: "absolute",
             top: 0,
@@ -192,8 +249,9 @@ export function Column({
             cursor: "col-resize",
             zIndex: 2,
             background: "transparent",
+            outline: "none",
             borderRight:
-              hoveringHandle || resizing
+              hoveringHandle || resizing || handleFocused
                 ? "2px solid var(--accent)"
                 : "2px solid transparent",
           }}
