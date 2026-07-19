@@ -4,25 +4,101 @@ import writeFileAtomic from "write-file-atomic";
 import { parsePort } from "../adapters/ttyd.js";
 import { DISPATCH_DIR, TTYD_INDEX_PATH } from "../services/infra/paths.js";
 
-const PATCH_TARGET = "new l.WebLinksAddon";
+/**
+ * Reverse-tabnabbing-safe modifier-gated link activator, shared verbatim by both cmd-click
+ * patches (`cmd-click-weblinks` and `cmd-click-osc8`): open a blank tab, null its opener, THEN
+ * navigate — never `window.open(url,"_blank")`, which does not reliably null the opener across
+ * browsers. Its `(e,t)` signature matches both WebLinksAddon's click handler shape and xterm's
+ * `linkHandler.activate(event, uri)` shape, which is why both patches can reuse it unmodified.
+ * @see docs/ARCHITECTURE.md#terminal-ttyd
+ */
 const PATCH_HANDLER =
   "(e,t)=>{if(e.metaKey||e.ctrlKey){const w=window.open();" +
   "if(w){try{w.opener=null}catch(_){}w.location.href=t}}}";
 
+/** Existing WebLinksAddon plain-text-link patch anchor (52-RESEARCH.md). */
+const PATCH_TARGET = "new l.WebLinksAddon";
+
 /**
- * Pure patch step: gate ttyd's bundled web-links click handler on cmd/ctrl. Returns null when the
- * patch target's occurrence count isn't exactly 1 (ttyd version drift — Pitfall 2 in
- * 52-RESEARCH.md) so the caller degrades to stock behavior instead of writing a broken artifact.
- * The replacement is a function so `$`-patterns (`$&`, `` $` ``, `$'`, `$$`) in a future
- * PATCH_HANDLER edit are never string-interpolated into the artifact.
+ * One named, independently-degrading patch to ttyd's served index: `target` is an exact-count-1
+ * literal anchor in the captured stock bundle, `build` returns the full replacement string, and
+ * `disabledWarning` names the feature lost when the anchor drifts.
  */
-export function patchIndexHtml(html: string): string | null {
-  const count = html.split(PATCH_TARGET).length - 1;
-  if (count !== 1) return null;
-  return html.replace(
-    PATCH_TARGET,
-    () => `new l.WebLinksAddon(${PATCH_HANDLER})`,
-  );
+interface NamedPatch {
+  name: string;
+  target: string;
+  build: () => string;
+  disabledWarning: string;
+}
+
+/**
+ * Three independent patches applied to ttyd's served index, in order. Each anchor is checked for
+ * an exact-count-1 occurrence before being applied; a drifted anchor skips ONLY that patch, never
+ * the others, and is never force-applied via regex or fuzzy matching (59-RESEARCH.md Anchors 1-3).
+ * @remarks `cmd-click-osc8` sets `terminal.options.linkHandler` because real Claude Code `⏺`
+ * output uses OSC-8 hyperlinks — a different, earlier-registered xterm.js code path than
+ * `WebLinksAddon`, which never fires for that output (59-RESEARCH.md Pitfall 1). `shift-enter`
+ * sends raw LF via the Dispatcher's own bound `sendData`, never `term.paste` (which silently
+ * converts `\n` back into `\r` via xterm's `prepareTextForTerminal` — 59-RESEARCH.md Pitfall 2).
+ * Its three guards are load-bearing: `e.type!=="keydown"` (this handler fires from
+ * keydown/keyup/keypress alike), `e.isComposing` (runs BEFORE xterm's own composition check — IME
+ * safety, Pitfall 4), and the exact Shift+Enter match with no Ctrl/Alt/Meta.
+ * @see docs/ARCHITECTURE.md#terminal-ttyd
+ */
+const PATCHES: NamedPatch[] = [
+  {
+    name: "cmd-click-weblinks",
+    target: PATCH_TARGET,
+    build: () => `new l.WebLinksAddon(${PATCH_HANDLER})`,
+    disabledWarning: "cmd+click links (plain-text fallback) disabled",
+  },
+  {
+    name: "cmd-click-osc8",
+    target: "this.terminal=new n.Terminal(this.options.termOptions);",
+    build: () =>
+      "this.terminal=new n.Terminal(this.options.termOptions);" +
+      `this.terminal.options.linkHandler={activate:${PATCH_HANDLER}};`,
+    disabledWarning: "cmd+click links (real Claude Code OSC-8 output) disabled",
+  },
+  {
+    name: "shift-enter",
+    target: "t.open(e),i.fit()}",
+    build: () =>
+      "t.open(e),t.attachCustomKeyEventHandler((e=>{" +
+      'if(e.type!=="keydown"||e.isComposing)return!0;' +
+      'if(e.key==="Enter"&&e.shiftKey&&!e.ctrlKey&&!e.altKey&&!e.metaKey){' +
+      'this.sendData("\\n");return!1}return!0})),i.fit()}',
+    disabledWarning: "shift+enter newline disabled",
+  },
+];
+
+/**
+ * Apply every patch in PATCHES independently against `html`. A target whose occurrence count
+ * isn't exactly 1 (ttyd version drift) skips ONLY that patch and the loop continues — the same
+ * "named independent checks, never short-circuit" contract `preflight.ts`'s
+ * `REQUIRED_BINARIES`/`probePreflight` already follows for prerequisite checks. Every replacement
+ * is a function callback so `$`-patterns in a future patch string are never string-interpolated
+ * into the artifact.
+ * @see docs/ARCHITECTURE.md#terminal-ttyd
+ */
+export function patchIndexHtml(html: string): {
+  html: string;
+  applied: string[];
+  skipped: string[];
+} {
+  let out = html;
+  const applied: string[] = [];
+  const skipped: string[] = [];
+  for (const patch of PATCHES) {
+    const count = out.split(patch.target).length - 1;
+    if (count !== 1) {
+      skipped.push(patch.name);
+      continue;
+    }
+    out = out.replace(patch.target, () => patch.build());
+    applied.push(patch.name);
+  }
+  return { html: out, applied, skipped };
 }
 
 /**
@@ -79,22 +155,25 @@ async function removeStaleArtifact(): Promise<void> {
 }
 
 /**
- * Capture ttyd's stock served index, patch the web-links click handler to be modifier-gated, and
- * write it atomically to TTYD_INDEX_PATH. Never throws — mirrors installHookArtifacts's
+ * Capture ttyd's stock served index, apply every patch in PATCHES independently, and write the
+ * (possibly partial) result atomically to TTYD_INDEX_PATH whenever at least one patch applied —
+ * partial capability beats none (CONTEXT.md). Never throws — mirrors installHookArtifacts's
  * self-healing-every-boot shape: a future `brew upgrade ttyd` re-captures automatically, and any
- * failure (capture error, patch-target drift, or artifact write) degrades to stock ttyd behavior
- * (spawnTtyd omits `-I` when the file is absent) with a boot warning, never a startup crash. A
- * failed WRITE also unlinks the prior boot's artifact, preserving the invariant that an existing
- * artifact always matches the ttyd binary this boot captured; the outer catch is the contract's
- * final safety net (mkdir failure, or anything unexpected).
+ * failure (capture error, every patch drifted, or artifact write) degrades to stock ttyd behavior
+ * (spawnTtyd omits `-I` when the file is absent) with a boot warning naming each disabled feature,
+ * never a startup crash. A failed WRITE also unlinks the prior boot's artifact, preserving the
+ * invariant that an existing artifact always matches the ttyd binary this boot captured; the outer
+ * catch is the contract's final safety net (mkdir failure, or anything unexpected disabling every
+ * patch).
  * @remarks Started fire-and-forget in bootstrap and deliberately NOT awaited: the cold
  * first-ttyd-spawn-per-boot measured ~5s (Pitfall 5), and awaiting it would put that spawn on the
  * serial boot path ahead of listen — the instant-startup constraint forbids that. It must be
  * kicked off strictly AFTER reconcileSessions: the boot orphan sweep's fingerprint
  * (`ttyd … tmux attach`) matches the throwaway capture child, so an overlapping sweep would
- * SIGTERM the capture mid-flight and silently disable cmd+click for the whole boot. Safe to
+ * SIGTERM the capture mid-flight and silently disable every patch for the whole boot. Safe to
  * overlap listen because spawnTtyd re-checks artifact existence per spawn — a terminal opened
  * inside the capture window gets the prior boot's artifact or stock behavior for that one spawn.
+ * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 export async function provisionTtydIndex(): Promise<void> {
   try {
@@ -104,16 +183,21 @@ export async function provisionTtydIndex(): Promise<void> {
       html = await captureStockIndex();
     } catch (err) {
       console.warn(
-        `[ttyd-index] capture failed — cmd+click links disabled: ${(err as Error).message}`,
+        `[ttyd-index] capture failed — cmd+click links and shift+enter newline disabled: ${(err as Error).message}`,
       );
       await removeStaleArtifact();
       return;
     }
-    const patched = patchIndexHtml(html);
-    if (patched == null) {
-      console.warn(
-        "[ttyd-index] patch target not found exactly once — ttyd version drift suspected, cmd+click links disabled",
-      );
+    const { html: patched, applied, skipped } = patchIndexHtml(html);
+    for (const name of skipped) {
+      const patch = PATCHES.find((p) => p.name === name);
+      if (patch) {
+        console.warn(
+          `[ttyd-index] ${patch.disabledWarning} — anchor not found exactly once (ttyd version drift suspected)`,
+        );
+      }
+    }
+    if (applied.length === 0) {
       await removeStaleArtifact();
       return;
     }
@@ -121,13 +205,13 @@ export async function provisionTtydIndex(): Promise<void> {
       await writeFileAtomic(TTYD_INDEX_PATH, patched, { mode: 0o644 });
     } catch (err) {
       console.warn(
-        `[ttyd-index] artifact write failed — cmd+click links disabled: ${(err as Error).message}`,
+        `[ttyd-index] artifact write failed — cmd+click links and shift+enter newline disabled: ${(err as Error).message}`,
       );
       await removeStaleArtifact();
     }
   } catch (err) {
     console.warn(
-      `[ttyd-index] provisioning failed — cmd+click links disabled: ${(err as Error).message}`,
+      `[ttyd-index] provisioning failed — cmd+click links and shift+enter newline disabled: ${(err as Error).message}`,
     );
   }
 }
