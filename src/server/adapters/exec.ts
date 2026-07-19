@@ -57,6 +57,9 @@ export async function run(
  * Dump every {@link run} call recorded since boot to stderr as one `DISPATCH_PERF_EXEC_DUMP` JSON
  * line, then exit. Invoked only when `DISPATCH_PERF_EXEC=1` — the perf-subproc harness SIGTERMs the
  * sandboxed server it drove and reads this line back to build the per-cmd breakdown table.
+ * @remarks Exits inside the write callback, not synchronously after it: the harness pipes stderr,
+ * pipe writes are asynchronous on macOS/Linux, and a synchronous `process.exit(0)` can discard the
+ * pending dump line — the harness would then misread a delivery race as dead instrumentation.
  */
 function registerPerfExecDump(): void {
   process.on("SIGTERM", () => {
@@ -70,8 +73,8 @@ function registerPerfExecDump(): void {
     const total = perfCalls.reduce((sum, c) => sum + c.ms, 0);
     process.stderr.write(
       `DISPATCH_PERF_EXEC_DUMP ${JSON.stringify({ calls: perfCalls.length, total, byCmd })}\n`,
+      () => process.exit(0),
     );
-    process.exit(0);
   });
 }
 
