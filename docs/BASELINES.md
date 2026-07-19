@@ -169,8 +169,36 @@ optimization task (58-05) and the PERF-04 Compiler spike must cite.
 
 ## Bundle weight
 
-_Pending — PERF-03 (`ANALYZE=1` `rollup-plugin-visualizer` + `scripts/bundle-budget.mjs`) not yet
-built._
+- **Date:** 2026-07-19
+- **Git SHA measured:** `b4a6423`
+- **Command:** `npm run build:web && node scripts/bundle-budget.mjs`
+- **Method:** production `vite build` output under `dist/web`, every file's raw byte count and
+  gzip byte count (`node:zlib` `gzipSync`, default level) measured directly by
+  `scripts/bundle-budget.mjs`. This is the first measured build for the phase — the script's
+  `budgetGzipBytes` thresholds are each this build's measured gzip size **+10% headroom**,
+  hardcoded as literals with the measured seed value recorded in a trailing comment beside each
+  one (`scripts/bundle-budget.mjs`, `BUDGETS` table). `npm run analyze` (`ANALYZE=1 vite build`)
+  produces the visual treemap at `dist/bundle-stats.html` for interactive drill-down; this table
+  is the numeric record.
+
+| File                          |  Raw (kB) | Gzip (kB) | Budget gzip (kB, +10%) |
+| ----------------------------- | --------: | --------: | ---------------------: |
+| `assets/favicon-CVKTVxiB.svg` |       0.5 |       0.3 |                    0.3 |
+| `assets/index-DJLXrqcp.js`    |     530.1 |     151.8 |                  167.0 |
+| `assets/index-DJYO3imh.css`   |       1.7 |       0.8 |                    0.9 |
+| `index.html`                  |       0.6 |       0.4 |                    0.4 |
+| **Total**                     | **532.9** | **153.3** |                      — |
+
+```
+PERF-BUNDLE files=4 total_raw_kb=532.9 total_gzip_kb=153.3 over_budget=0
+```
+
+**Note:** hashed chunk filenames (`index-DJLXrqcp.js`, etc.) change on every rebuild;
+`scripts/bundle-budget.mjs` matches by stable prefix+extension pattern (`assets/index-*.js`), not
+by exact filename, so this table's filenames are illustrative of the SHA above, not a literal
+match requirement for future runs.
+
+**After:** _(pending — no bundle-weight optimization shipped yet)_
 
 ## React Compiler decision
 
