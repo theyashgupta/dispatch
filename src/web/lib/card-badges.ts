@@ -7,7 +7,11 @@ import { isUnseen, type LastOpenedMap } from "./unseen-activity.js";
  * the first column are exempt: they are removed outright instead of badged.
  */
 export function deriveShowGone(card: Card): boolean {
-  return card.goneFromLinear === true && card.column !== "todo";
+  return (
+    card.goneFromLinear === true &&
+    card.column !== "todo" &&
+    card.column !== "inbox"
+  );
 }
 
 /**
