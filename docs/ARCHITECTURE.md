@@ -441,6 +441,23 @@ reporting readiness (the port line appears slightly before the socket accepts, a
 cannot probe the cross-origin ttyd port itself). Both waits carry a tolerant 10s cap (cold
 first-spawn-per-boot measured ~5s).
 
+**Patched served index — named independent patches.** Boot provisioning (`provisionTtydIndex`,
+`bootstrap/ttyd-index-setup.ts`, fire-and-forget after reconcileSessions) captures ttyd's stock
+served index and applies a list of named independent patches: `cmd-click-weblinks` (modifier-gates
+`WebLinksAddon`'s plain-text URL click handler), `cmd-click-osc8` (sets
+`terminal.options.linkHandler` so OSC-8 hyperlinks from real Claude Code `⏺` output are Cmd/Ctrl-gated
+instead of xterm's stock ungated confirm-and-open), and `shift-enter` (`attachCustomKeyEventHandler`
+sends raw LF via the Dispatcher's own `sendData` so Claude Code inserts a newline instead of
+submitting; keydown-only, IME-composition-safe, exact Shift+Enter with no Ctrl/Alt/Meta). Each patch
+is anchored to an exact-count-1 literal in the captured bundle; a drifted anchor skips ONLY that
+patch with a boot warning naming the disabled feature — the other patches still apply. The artifact
+is written whenever at least one patch applied, so "artifact exists" (spawnTtyd's conditional `-I`
+below) now means "at least one patch applied this boot", and artifact-absent means every patch
+failed and the terminal serves fully stock ttyd/xterm.js behavior. Both link patches keep the
+reverse-tabnabbing guard (`window.open()` then `opener=null` before navigating) from the
+[Security Threat Model](#security-threat-model) — `@see` that table for the STRIDE home — and
+nothing about this patch pipeline changes the loopback-only bind above.
+
 **Not through the exec chokepoint — ttyd is a long-lived daemon.** Unlike every git/tmux call, ttyd
 does NOT route through `adapters/exec.ts` `run()`: `run()` (promisified `execFile`) resolves only on
 process exit, so awaiting a daemon would hang forever. ttyd is spawned directly with piped stderr
