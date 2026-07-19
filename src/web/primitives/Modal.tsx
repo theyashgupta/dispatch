@@ -15,7 +15,6 @@ import { IconButton } from "./IconButton.js";
 
 export interface ModalControl {
   requestClose: () => void;
-  beginImmediateClose: () => boolean;
 }
 
 let stackCounter = 0;
@@ -152,11 +151,6 @@ export function Modal({
       closingRef.current = true;
       setClosing(true);
       setTimeout(() => onCloseRef.current(), 150);
-    },
-    beginImmediateClose: () => {
-      if (closingRef.current) return false;
-      closingRef.current = true;
-      return true;
     },
   });
 
