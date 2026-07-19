@@ -39,6 +39,13 @@ const IDENTIFIER_RE = /^[A-Za-z0-9]+-\d+$/;
 const TRUST_DIALOG =
   /Yes, I trust this folder|Do you trust the files in this folder/;
 /**
+ * Bypass Permissions mode dialog (57-RESEARCH item 5, live-probed on Claude Code v2.1.214):
+ * its default-focused option is "1. No, exit", not an accept — a blind Enter here would exit
+ * the CLI outright, which is the actual mechanism behind the pre-fix first-ever-launch
+ * repl-timeout. Requires its own detection and its own probe-verified accept sequence.
+ */
+const BYPASS_DIALOG = /Bypass Permissions mode/;
+/**
  * REPL-ready footer — present only once the input box is live; absent in the trust dialog.
  * Claude Code changes this hint text between releases (v2.1.200 showed "? for shortcuts";
  * v2.1.201 shows "bypass permissions on (shift+tab to cycle)"), so match ANY known
@@ -268,6 +275,7 @@ const createWorktrees: SagaStep = {
 export async function awaitReplReady(session: string): Promise<void> {
   const deadline = Date.now() + READINESS_TIMEOUT_MS;
   let trustAccepted = false;
+  let bypassAccepted = false;
   let lastPane = "";
   while (Date.now() < deadline) {
     lastPane = await capturePane(session);
@@ -275,6 +283,11 @@ export async function awaitReplReady(session: string): Promise<void> {
     if (!trustAccepted && TRUST_DIALOG.test(lastPane)) {
       await sendKeys(session, ["Enter"]);
       trustAccepted = true;
+    }
+    if (!bypassAccepted && BYPASS_DIALOG.test(lastPane)) {
+      await sendKeys(session, ["Down"]);
+      await sendKeys(session, ["Enter"]);
+      bypassAccepted = true;
     }
     await sleep(POLL_INTERVAL_MS);
   }
