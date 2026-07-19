@@ -70,15 +70,20 @@ const STATUS_PROTOCOL = [
 ];
 
 /**
- * Build the multi-line kickoff prompt: ticket line, description, optional extra direction,
- * workspace orientation, and the required Phase-4 status protocol. Pure — joined with "\n".
+ * Build the multi-line kickoff prompt: ticket line, a slim MCP-read ticket slot for
+ * Linear-sourced cards (or an inline description block for any other source), optional
+ * extra direction, workspace orientation, and the required Phase-4 status protocol. Pure —
+ * joined with "\n".
  *
  * @remarks The two status-protocol lines are byte-identical to `parse.ts` MARKER_RE (NEW-08) and
  * their separator is an em-dash U+2014 whose paste fidelity is verified — do NOT swap it for a
  * hyphen (NEW-07). The wording is a contract between this file and the marker parser. The extra-
  * direction slot is now the ONLY playbook-sourced region; when `opts.playbookBody` is absent the
  * assembler falls back to today's exact `## Extra direction` block so a playbook-less kickoff is
- * unchanged.
+ * unchanged. The slim-vs-description branch keys off `card.source ?? "linear"` (the absent-is-
+ * linear convention documented on `Card.source`): Linear-sourced cards get the MCP-read ticket
+ * slot, every other source keeps the inline description path byte-identical to before, so
+ * Phase 61 local cards and Phase 63 group-member inlining fall to it unchanged.
  * @see docs/ARCHITECTURE.md#marker-protocol
  */
 export function buildKickoff(
@@ -87,6 +92,7 @@ export function buildKickoff(
   repoNames: string[],
   opts: { restarted?: boolean; playbookBody?: string } = {},
 ): string {
+  const slim = (card.source ?? "linear") === "linear";
   const description = card.description?.trim() || "(no description provided)";
   const extra = extraDirection.trim();
   const url = card.url?.trim();
@@ -99,8 +105,12 @@ export function buildKickoff(
     ...(url ? [`Linear ticket: ${url}`, ``] : []),
     `You are working on Linear ticket ${card.identifier}: ${card.title}`,
     ``,
-    `## Description`,
-    description,
+    ...(slim
+      ? [
+          `## Ticket`,
+          `Read the full ticket — description and comments — via the Linear MCP. If the MCP is unavailable, fall back to the ticket URL above or ask the user.`,
+        ]
+      : [`## Description`, description]),
     ...(substituted !== null
       ? substituted
         ? [``, ...substituted.split("\n")]
