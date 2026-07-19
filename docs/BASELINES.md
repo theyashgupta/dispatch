@@ -1,11 +1,15 @@
 # Performance baselines
 
 Measurement-first discipline for Phase 58 (PERF-01..04): no optimization ships without a
-before/after number recorded here. The three harnesses below (`scripts/perf-boot.mjs`,
-`scripts/perf-subproc.mjs`, `scripts/perf-sse.mjs`) each print a machine-parsable
-`PERF-<NAME> ...` summary line; every entry in this file quotes that exact line. If a hot path's
-numbers show it is already fine, shipping ZERO optimizations for it is a sanctioned outcome — the
-harness + numbers are the deliverable either way.
+before/after number recorded here. The four harnesses below (`scripts/perf-boot.mjs`,
+`scripts/perf-subproc.mjs`, `scripts/perf-sse.mjs`, `scripts/perf-rerender.mjs`) each print a
+machine-parsable `PERF-<NAME> ...` summary line; every entry in this file quotes that exact line.
+If a hot path's numbers show it is already fine, shipping ZERO optimizations for it is a
+sanctioned outcome — the harness + numbers are the deliverable either way.
+
+`scripts/perf-rerender.mjs` is reused UNMODIFIED for the PERF-04 React Compiler spike; the spike
+MUST run it in the same serve mode recorded below (`prod`) so the with/without comparison is
+like-for-like.
 
 Every optimization commit that touches a measured hot path must add an `**After:**` line under
 the relevant section, citing the harness command and its output, so a reviewer can diff the
@@ -114,8 +118,54 @@ this client count.
 
 ## Board re-renders
 
-_Pending — PERF-01d harness (`scripts/perf-rerender.mjs`, headless-Chrome CDP DevTools-hook
-injection) not yet built. Reused unmodified for the PERF-04 React Compiler spike._
+- **Date:** 2026-07-19
+- **Git SHA measured:** `e6adc16`
+- **Machine:** Apple Silicon, local (Chrome headless via `--headless=new`)
+- **Serve mode:** `prod` — the production build (`NODE_ENV=production node dist/server/
+bootstrap/index.js`) registered with the DevTools-hook shim on the FIRST attempt (commits > 0
+  after the first interaction), so no `--dev` fallback was needed. **PERF-04's spike must reuse
+  this exact `prod` mode** for its with/without comparison to stay like-for-like.
+- **Command:** `npm run build && node scripts/perf-rerender.mjs` (run 3 times)
+- **Method:** headless Chrome (`--headless=new --remote-debugging-port=9358`, isolated
+  `--user-data-dir`) driven via raw CDP over Node's built-in global `WebSocket`/`fetch` (zero new
+  npm dependency — the technique proven in 55-02/57-04). A `window.__REACT_DEVTOOLS_GLOBAL_HOOK__`
+  shim is injected via `Page.addScriptToEvaluateOnNewDocument` BEFORE `Page.navigate`, so it is in
+  place before react-dom's module-load-time hook registration; every commit anywhere in the tree
+  increments a page-global counter via `onCommitFiberRoot`. A fixed interaction script runs
+  against one real (read-only) Linear-synced card in an isolated-HOME sandbox (`apiKey`/`filters`
+  lifted from `~/.dispatch/config.json`; `board.db` never copied): (a) view toggle
+  Board→Orca→Board, (b) inbox open/close, (c) card select + re-select in Orca/docked mode
+  (avoiding the DetailPanel overlay-backdrop trap — 55-02 lesson), (d) one SSE-driven board
+  mutation via REST (`todo`→`done`→`todo`) while idle on the board. Interactions are dispatched via
+  a real DOM `.click()` (React treats a native `click` Event identically regardless of dispatch
+  origin), not synthesized CDP pointer events — sufficient for triggering state transitions/commits,
+  unlike 57-04's a11y proof which specifically needed real keyboard events to prove input fidelity.
+
+```
+run 1   PERF-RERENDER mode=prod total=20 toggle=6 inbox=4 select=4 sse=6
+run 2   PERF-RERENDER mode=prod total=20 toggle=6 inbox=4 select=4 sse=6
+run 3   PERF-RERENDER mode=prod total=20 toggle=6 inbox=4 select=4 sse=6
+
+median: PERF-RERENDER mode=prod total=20 toggle=6 inbox=4 select=4 sse=6
+```
+
+**Spread note:** three pre-commit dry runs (same harness, uncommitted) showed occasional
+`toggle=7`/`total=21` instead of `toggle=6`/`total=20` — traced to `SyncStrip`'s own 1s
+`setInterval` tick (unrelated to the interaction script) occasionally landing inside the
+350ms toggle settle-window and contributing one extra whole-tree commit, since
+`onCommitFiberRoot` fires once per commit for the single React root regardless of which
+component scheduled it. The 3 official runs above (recorded at the committed SHA) were
+click-for-click identical; this variance is expected and orthogonal to any future
+optimization's before/after delta, since both sides of a comparison are subject to the same
+clock-tick noise.
+
+**Finding:** 20 commits across the whole fixed interaction script is not obviously excessive for
+4 distinct interaction categories touching view-mode swaps, a full-panel mount, and a
+`Board`-column re-render on every card move — but there is no prior baseline to compare against,
+so no "this number is bad" claim is made here. This is the number any later frontend
+optimization task (58-05) and the PERF-04 Compiler spike must cite.
+
+**After:** _(pending — no board re-render optimization shipped yet)_
 
 ## Bundle weight
 
