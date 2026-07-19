@@ -45,6 +45,19 @@ PERF-BOOT n=10 mean=220.9 p50=221.3 p95=223.1
 
 **After:** _(pending — no boot optimization shipped yet)_
 
+**Verdict:** ship-zero — p50=221.3ms/p95=223.1ms at baseline is already fine because it is
+well under the ~1s threshold at which a serial-await boot chain would need parallelizing for a
+local single-user tool; the interfaces guardrail's own criterion ("if p50 boot is already well
+under ~1s, ship zero") is met with room to spare. The candidate `Promise.all` regroupings named
+in this plan's interfaces block (`installHookArtifacts`/`checkHooksCapability` alongside
+`seedPlaybooks`/`store.load`; `reconcileSessions` alongside `resolveEditors`) were read against
+`src/server/bootstrap/index.ts`'s actual callees and are real, data-independent candidates — but
+shaving a few tens of ms off a 221ms local boot buys no perceptible benefit for a tool whose
+"instant startup" bar is already cleared, and the ordering constraints (setHookTokenReleaser
+before store.load; capable+port both needed for setHooksRuntime; startPoller/startMarkerWatcher/
+startUpdateCheckLoop after listen) narrow any regrouping to a marginal, high-review-cost change
+for an unmeasurable win. `src/server/bootstrap/index.ts` is left untouched.
+
 ## Subprocess load
 
 - **Date:** 2026-07-19
@@ -86,6 +99,18 @@ zero-session-load profile. A future re-measurement with live sessions attached (
 
 **After:** _(pending — no subprocess-load optimization shipped yet)_
 
+**Verdict:** ship-zero — `calls_per_min=18.0` at 30s steady-state is identical to the boot-only
+`calls_per_min=0.0` window's call COUNT (9 calls both windows; the `calls_per_min` field is a
+rate artifact of the shorter 0s window, not a real steady-state load), confirming the watcher's
+per-session scan loop makes ZERO additional `run()` calls beyond boot when there are no live
+sessions, exactly as the research's near-zero-steady-state prediction (statusChannel driving
+`cardsWithSession()` empty) anticipated. There is no per-session scan-loop cost to parallelize at
+this profile — parallelizing an empty loop optimizes nothing. `src/server/adapters/markers/
+watcher.ts` is left untouched; the 2s tick constant (`setTimeout(() => void tick(), 2000)`,
+watcher.ts:284) is confirmed unchanged. The live-session variant flagged in 58-01 as a distinct
+not-yet-run scenario remains future work, not in scope for this ship/no-ship decision against the
+recorded baseline.
+
 ## SSE fan-out
 
 - **Date:** 2026-07-19
@@ -115,6 +140,12 @@ mistake would have created. This hot path is a legitimate ship-zero-optimization
 this client count.
 
 **After:** _(pending — no SSE optimization shipped yet)_
+
+**Verdict:** ship-zero — `n=16 max_ms=3.0` (flat against `n=1 max_ms=3.3`) is sub-perceptible
+fan-out latency that does not scale with client count in this range, confirming
+`sse.route.ts` already serializes the broadcast payload once per snapshot outside the client
+loop rather than per-client — the exact naive mistake this path would need fixing if present.
+There is no bottleneck here to optimize.
 
 ## Board re-renders
 
