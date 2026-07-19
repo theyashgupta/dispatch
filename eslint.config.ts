@@ -13,37 +13,23 @@ import commentsJsdocOnly from "./eslint-local/comments-jsdoc-only.js";
  * frontend `boundaries/dependencies` rule instances) so a file classifies
  * identically under either rule. First-match-wins: the four frontend
  * sub-elements (primitives/hooks/lib/feature) are listed BEFORE the general
- * `web` catch-all — same precedent as `adapters-subprocess` before `adapters`
- * — so files under those subtrees classify as their sub-element instead of
- * falling through to `web`. `web` remains the catch-all for
+ * `web` catch-all so files under those subtrees classify as their sub-element
+ * instead of falling through to `web`. `web` remains the catch-all for
  * App.tsx/main.tsx/styles.
  *
- * The two `mode: "file"` descriptors below (`adapters-subprocess`,
- * `adapters-config-consumer`) are on a deprecated syntax path
- * (eslint-plugin-boundaries 7.x). Migrating them is deliberately deferred to
- * Phase 57, not silently dropped — a naive `partialMatch: false` swap was
- * empirically verified-broken (it stops both descriptors from matching their
- * target files, silently reclassifying exec/git/tmux/image-proxy as plain
- * `adapters` and losing the transport-narrowing these carve-outs exist to
- * enforce). The correct migration is `settings["boundaries/files"]` file
- * descriptors plus a policy rewrite; `mode: "file"` continues to function
- * correctly today (deprecation-warning-only, never blocks `npm run check`).
+ * `exec.ts`/`git.ts`/`tmux.ts`/`image-proxy.ts` classify as plain `adapters`
+ * here — their transport-narrowing and config-consumer carve-out are enforced
+ * via `boundaryFiles`' file-category descriptors below (`settings["boundaries/files"]`),
+ * not via a separate element type. This replaces the two `mode: "file"`
+ * element descriptors that lived here through Phase 56 (deprecated syntax in
+ * eslint-plugin-boundaries 7.x); see `boundaryFiles`'s JSDoc for why the
+ * migration could not be a naive syntax swap.
  * @see docs/standards/architecture.md#gap-list — `mode:"file"` element-descriptor migration
  */
 const boundaryElements = [
   { type: "bootstrap", pattern: "src/server/bootstrap" },
   { type: "routes", pattern: "src/server/routes" },
   { type: "services", pattern: "src/server/services" },
-  {
-    type: "adapters-subprocess",
-    pattern: "src/server/adapters/{exec,git,tmux}.ts",
-    mode: "file",
-  },
-  {
-    type: "adapters-config-consumer",
-    pattern: "src/server/adapters/image-proxy.ts",
-    mode: "file",
-  },
   { type: "adapters", pattern: "src/server/adapters" },
   { type: "sources", pattern: "src/server/sources" },
   { type: "store", pattern: "src/server/store" },
@@ -60,6 +46,37 @@ const boundaryElements = [
 ];
 
 /**
+ * File-category descriptors (`settings["boundaries/files"]`, the
+ * non-deprecated replacement for the `mode: "file"` element descriptors this
+ * config used through Phase 56). A file's category is independent of its
+ * element type — `exec.ts`/`git.ts`/`tmux.ts`/`image-proxy.ts` classify as
+ * plain `adapters` (see `boundaryElements`) AND carry one of these
+ * categories, so policies below select on `file: { categories: ... }`
+ * instead of a dedicated element `type`.
+ *
+ * A naive `mode: "file"` -> `partialMatch: false` element-descriptor swap was
+ * empirically verified-broken (56-RESEARCH.md, live-tested): it stopped both
+ * descriptors from matching their target files, silently reclassifying these
+ * four files as plain `adapters` with NO narrowing policy left to catch
+ * them. This file-category migration is the correct replacement; the
+ * narrowing/carve-out policies that key off these categories live in
+ * `boundariesConfig` below (routes' subprocess disallow, adapters'
+ * subprocess-vs-sources/store disallow, the config-consumer -> services
+ * allow).
+ * @see docs/standards/architecture.md#gap-list — `mode:"file"` element-descriptor migration
+ */
+const boundaryFiles = [
+  {
+    category: "adapters-subprocess",
+    pattern: "src/server/adapters/{exec,git,tmux}.ts",
+  },
+  {
+    category: "adapters-config-consumer",
+    pattern: "src/server/adapters/image-proxy.ts",
+  },
+];
+
+/**
  * Boundaries mapped to the SETTLED src/ tree (Phase 11 final). The layer graph
  * follows backend-design.md's producer DAG: shared is the sink everyone may
  * import; store depends only on shared; adapters (markers/watcher, poller,
@@ -68,15 +85,16 @@ const boundaryElements = [
  * transport above services; bootstrap is the composition root wiring all layers.
  * No backend layer may import web. Enforced as error this phase.
  *
- * The subprocess adapters (exec/git/tmux) are carved out as their own
- * `adapters-subprocess` element (listed BEFORE `adapters` — first match wins)
- * so backend-design.md's transport rule — routes NEVER touch exec/tmux/git
- * directly — is ENFORCED rather than merely documented: routes may still
- * import the non-subprocess adapters the design ratifies (ttyd for the
- * terminal spawn, editors for open-editor), but any routes → exec/git/tmux
- * import is a lint error. The one former consumer (the /terminal pre-spawn
- * `hasSession` liveness probe) imports directly from the tmux adapter,
- * which is legal because services may import adapters-subprocess.
+ * The subprocess adapters (exec/git/tmux) carry the `adapters-subprocess`
+ * file category (see `boundaryFiles`) so backend-design.md's transport rule —
+ * routes NEVER touch exec/tmux/git directly — is ENFORCED rather than merely
+ * documented: routes may still import the non-subprocess adapters the design
+ * ratifies (ttyd for the terminal spawn, editors for open-editor), but any
+ * routes → exec/git/tmux import is a lint error via the trailing
+ * file-category disallow policy below. The one former consumer (the
+ * /terminal pre-spawn `hasSession` liveness probe) imports directly from the
+ * tmux adapter, which is legal because services may import any adapter
+ * (including the subprocess ones).
  *
  * The `from`/`allow`/`disallow` lists below name the four new frontend
  * sub-elements alongside `web` so this error-level rule stays green now that
@@ -85,14 +103,14 @@ const boundaryElements = [
  * as of Phase 56's ENF-01 flip (with a named warn carve-out for the 3
  * Phase-57 gap edges).
  *
- * `adapters/image-proxy.ts` is a named file-mode carve-out
- * (`adapters-config-consumer`, listed BEFORE the general `adapters` element):
- * it is an adapter-tier file (external Linear-CDN I/O per
+ * `adapters/image-proxy.ts` carries the `adapters-config-consumer` file
+ * category (see `boundaryFiles`) and gets a trailing allow policy below to
+ * import `services`: it is an adapter-tier file (external Linear-CDN I/O per
  * docs/standards/architecture.md's correction row) that reads orchestration
  * config directly from `services/infra/config-holder.ts`, unlike every other
- * adapter which receives config as an injected parameter. Phase 56's ENF-01
- * error-flip must carry this as a named allow-rule, never widen
- * `adapters -> services` generally.
+ * adapter which receives config as an injected parameter. Never widen the
+ * general `adapters -> services` allow from this precedent — the carve-out
+ * stays scoped to the file category.
  */
 const boundariesConfig = {
   files: ["src/**/*.{ts,tsx}"],
@@ -100,6 +118,7 @@ const boundariesConfig = {
   settings: {
     "import/resolver": { typescript: {} },
     "boundaries/elements": boundaryElements,
+    "boundaries/files": boundaryFiles,
   },
   rules: {
     "boundaries/dependencies": [
@@ -113,8 +132,6 @@ const boundariesConfig = {
               "routes",
               "services",
               "adapters",
-              "adapters-subprocess",
-              "adapters-config-consumer",
               "sources",
               "store",
               "shared",
@@ -128,52 +145,48 @@ const boundariesConfig = {
               "routes",
               "services",
               "adapters",
-              "adapters-subprocess",
               "sources",
               "store",
               "shared",
             ],
           },
           {
-            // Deliberately NO adapters-subprocess: transport never touches
-            // exec/tmux/git directly (backend-design.md rule 4 / transport row).
             from: "routes",
-            allow: [
-              "routes",
-              "services",
-              "adapters",
-              "adapters-config-consumer",
-              "store",
-              "shared",
-            ],
+            allow: ["routes", "services", "adapters", "store", "shared"],
+          },
+          {
+            // Deliberately disallow: transport never touches exec/tmux/git
+            // directly (backend-design.md rule 4 / transport row). Trailing
+            // so it overrides the general `adapters` allow above for exactly
+            // the subprocess file category.
+            from: "routes",
+            disallow: { file: { categories: "adapters-subprocess" } },
+            message:
+              "Routes must not import the subprocess adapters (exec/git/tmux) directly — backend-design.md transport rule.",
           },
           {
             from: "services",
-            allow: [
-              "services",
-              "adapters",
-              "adapters-subprocess",
-              "store",
-              "shared",
-            ],
+            allow: ["services", "adapters", "store", "shared"],
           },
           {
             from: "adapters",
-            allow: [
-              "adapters",
-              "adapters-subprocess",
-              "sources",
-              "store",
-              "shared",
-            ],
+            allow: ["adapters", "sources", "store", "shared"],
           },
           {
-            from: "adapters-subprocess",
-            allow: ["adapters-subprocess", "shared"],
+            // Preserves exec/git/tmux's narrower rights (self + shared only,
+            // never sources/store) now that they classify as plain `adapters`
+            // instead of a dedicated element type. Trailing so it overrides
+            // the general `adapters` allow above for exactly this file category.
+            from: { file: { categories: "adapters-subprocess" } },
+            disallow: { element: { type: ["sources", "store"] } },
+            message:
+              "The subprocess adapters (exec/git/tmux) may only import themselves and shared — backend-design.md transport rule.",
           },
           {
-            from: "adapters-config-consumer",
-            allow: ["services", "shared"],
+            // The image-proxy carve-out: the one adapter allowed to read
+            // orchestration config directly from services/infra/config-holder.ts.
+            from: { file: { categories: "adapters-config-consumer" } },
+            allow: { element: { type: "services" } },
           },
           { from: "sources", allow: ["sources", "shared"] },
           { from: "store", allow: ["store", "shared"] },
@@ -271,8 +284,6 @@ const feWebBoundaryPolicies = {
             "routes",
             "services",
             "adapters",
-            "adapters-subprocess",
-            "adapters-config-consumer",
             "sources",
             "store",
           ],
