@@ -773,15 +773,17 @@ function useWorkspacePicker(onInteraction: () => void): WorkspacePicker {
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [baseOverride, setBaseOverride] = useState<Record<string, string>>({});
 
-  const applyRepos = useCallback(
-    (list: DiscoveredRepo[]) => {
-      setRepos(list);
-      setChecked(Object.fromEntries(list.map((r) => [r.path, true])));
-      setBaseOverride({});
-      onInteraction();
-    },
-    [onInteraction],
-  );
+  const onInteractionRef = useRef(onInteraction);
+  useEffect(() => {
+    onInteractionRef.current = onInteraction;
+  });
+
+  const applyRepos = useCallback((list: DiscoveredRepo[]) => {
+    setRepos(list);
+    setChecked(Object.fromEntries(list.map((r) => [r.path, true])));
+    setBaseOverride({});
+    onInteractionRef.current();
+  }, []);
 
   const selectGenRef = useRef(0);
   const selectFolder = useCallback(

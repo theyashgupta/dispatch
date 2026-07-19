@@ -49,6 +49,21 @@ function ModalActions({ children }: ModalSlotProps): null {
   return null;
 }
 
+function warnUnrecognizedChildren(children: ReactNode): void {
+  for (const child of Children.toArray(children)) {
+    const type =
+      typeof child === "object" && child !== null && "type" in child
+        ? child.type
+        : null;
+    if (type !== ModalHeader && type !== ModalBody && type !== ModalActions) {
+      console.warn(
+        "Modal: unrecognized child ignored — wrap content in Modal.Header, Modal.Body, or Modal.Actions (fragments are not traversed)",
+        child,
+      );
+    }
+  }
+}
+
 function extractSlot(children: ReactNode, slot: typeof ModalHeader): ReactNode {
   for (const child of Children.toArray(children)) {
     if (
@@ -172,6 +187,7 @@ export function Modal({
   }, []);
 
   const active = entered && !closing;
+  if (import.meta.env.DEV) warnUnrecognizedChildren(children);
   const headerContent = extractSlot(children, ModalHeader);
   const bodyContent = extractSlot(children, ModalBody);
   const actionsContent = extractSlot(children, ModalActions);
