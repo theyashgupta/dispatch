@@ -40,9 +40,10 @@ function isStartingCard(
  *  - Returned issue with no existing card -> upsert a NEW Inbox card stamped with `sourceId`
  *    (SYNC-01) — new tickets land in Inbox, never directly in To Do.
  *  - Returned issue whose card is in To Do OR Inbox -> upsert an in-place refresh of
- *    title/url/description/priority/updatedAt/project, clearing goneFromLinear (SYNC-02) — ONE
- *    widened rule, not a separate branch, so promoting a card to To Do simply changes which of the
- *    two columns keeps receiving refreshes.
+ *    identifier/title/url/description/priority/updatedAt/project, clearing goneFromLinear
+ *    (SYNC-02, 50-IN-04) — ONE widened rule, not a separate branch, so promoting a card to To Do
+ *    simply changes which of the two columns keeps receiving refreshes. Identifier is included so
+ *    a Linear team move (which changes the ticket's identifier prefix) is reflected on refresh.
  *  - Returned issue whose card is PAST To Do/Inbox -> NOT included in upserts; the poller never
  *    touches cards past that point (SYNC-02). Exception: a card currently flagged goneFromLinear
  *    emits a flag-only correction via `reappearedIds` — goneFromLinear is poller-owned derived
@@ -79,6 +80,7 @@ export function reconcile(
     if (existing.column === "todo" || existing.column === "inbox") {
       upserts.push({
         ...existing,
+        identifier: issue.identifier,
         title: issue.title,
         url: issue.url,
         description: issue.description,

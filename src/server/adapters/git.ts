@@ -112,14 +112,26 @@ export async function originHeadRef(repoPath: string): Promise<string | null> {
 }
 
 /**
- * The currently checked-out branch name via `rev-parse --abbrev-ref HEAD` — the reliable final
- * fallback when no default branch can be detected from the remote or the conventional names.
+ * The currently checked-out branch name — the reliable final fallback when no default branch can
+ * be detected from the remote or the conventional names.
+ * @remarks Tries `symbolic-ref` first: it reads `.git/HEAD`'s symbolic target without resolving to
+ * a commit, so it works on an unborn HEAD (a freshly-`git init`'d repo with zero commits), where
+ * `rev-parse --abbrev-ref HEAD` fatals with "ambiguous argument 'HEAD'". Falls back to
+ * `rev-parse --abbrev-ref HEAD` on failure, preserving the existing detached-HEAD behavior
+ * (`symbolic-ref` fails there too, and the fallback returns the literal string `"HEAD"`).
  */
 export async function currentBranch(repoPath: string): Promise<string> {
-  const { stdout } = await run("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-    cwd: repoPath,
-  });
-  return stdout.trim();
+  try {
+    const { stdout } = await run("git", ["symbolic-ref", "--short", "HEAD"], {
+      cwd: repoPath,
+    });
+    return stdout.trim();
+  } catch {
+    const { stdout } = await run("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: repoPath,
+    });
+    return stdout.trim();
+  }
 }
 
 /**
