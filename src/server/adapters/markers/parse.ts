@@ -1,6 +1,15 @@
 const MARKER_RE =
   /^\s*(?:⏺\s*)?DISPATCH_STATUS:\s*(NEEDS_INPUT|DONE)\b(?:\s*[—–-]\s*(.*))?\s*$/;
 
+/**
+ * Wrapped-reason continuation boundary: a fresh `⏺` block, or the footer/input-box border
+ * (mirrors pane-view.ts's own `[╭┌]?─{3,}` chrome anchor — kept as a local literal rather than an
+ * import to avoid coupling parse.ts to pane-view.ts for one shared shape). A blank line also
+ * terminates the scan (checked by direct equality below, no regex needed).
+ */
+const BULLET_LINE_RE = /^\s*⏺/;
+const CHROME_BORDER_RE = /^\s*[╭┌]?─{3,}/;
+
 export interface Marker {
   kind: "NEEDS_INPUT" | "DONE";
   reason: string;
@@ -69,6 +78,17 @@ export function sameMarkerKey(
  * the one at the bottom. Dedup happens in the watcher via markerKey() equality against
  * `card.lastMarker` across TUI repaints (MARK-04).
  *
+ * Wrapped-reason capture: the claude TUI hard-wraps a long reason onto further real newlines at
+ * the current pane width, and MARKER_RE is line-anchored (`$`), so once a marker line matches,
+ * subsequent physical lines are greedily consumed as continuation of the SAME reason until a
+ * boundary — a blank line, a fresh `⏺` block, or the footer/input-box border — and joined with a
+ * single space (statusReason renders inline in ReferenceBlocks.tsx/CardView.tsx, never as
+ * preformatted text, so the hard-wrap newline is collapsed, not preserved). Continuation only
+ * runs when the marker line itself carried a reason separator (`m[2] !== undefined`) — a
+ * separator-less marker line has no reason to continue. Capturing the FULL reason (rather than
+ * only the first physical line) makes `sameMarkerKey`'s prefix-tolerance dedup less load-bearing
+ * for THIS case, but it still protects other reflow scenarios and is unchanged here.
+ *
  * Defense-in-depth against the kickoff template echo: a reason that IS the kickoff template's
  * unfilled placeholder (`<one-line reason>` / `<one-line summary>`, exactly) is skipped IN the
  * loop — an earlier real marker still wins, and a legitimate reason that merely CONTAINS angle
@@ -79,13 +99,31 @@ export function sameMarkerKey(
  * @see docs/ARCHITECTURE.md#marker-protocol
  */
 export function parseLastMarker(pane: string): Marker | null {
+  const lines = pane.split("\n");
   let found: Marker | null = null;
-  for (const line of pane.split("\n")) {
-    const m = MARKER_RE.exec(line);
+  for (let i = 0; i < lines.length; i++) {
+    const m = MARKER_RE.exec(lines[i]);
     if (!m) continue;
-    const reason = (m[2] ?? "").trim();
-    if (/^<one-line (reason|summary)>$/.test(reason)) continue;
-    found = { kind: m[1] as Marker["kind"], reason };
+    const parts: string[] = [];
+    const first = (m[2] ?? "").trim();
+    if (first !== "") parts.push(first);
+    let j = i + 1;
+    if (m[2] !== undefined) {
+      while (
+        j < lines.length &&
+        lines[j].trim() !== "" &&
+        !BULLET_LINE_RE.test(lines[j]) &&
+        !CHROME_BORDER_RE.test(lines[j])
+      ) {
+        parts.push(lines[j].trim());
+        j++;
+      }
+    }
+    const reason = parts.join(" ");
+    if (!/^<one-line (reason|summary)>$/.test(reason)) {
+      found = { kind: m[1] as Marker["kind"], reason };
+    }
+    i = j - 1;
   }
   return found;
 }

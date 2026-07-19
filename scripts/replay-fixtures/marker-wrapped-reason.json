@@ -1,0 +1,25 @@
+{
+  "class": "marker-wrapped-reason",
+  "session": "dsp-fixture",
+  "covers": [
+    "wrapped-reason — a hard-wrapped 3-physical-line NEEDS_INPUT reason is captured in full via parseLastMarker's continuation scan, joined to one line, stopping at the blank-line boundary (allow-list #1)"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ Understood — let me check with you before proceeding.",
+        "  DISPATCH_STATUS: NEEDS_INPUT — I found three possible auth providers configure",
+        "d in this repo (Okta, Auth0, and a custom OIDC issuer) and need you to pick one",
+        "before I wire the login flow, since the callback URL differs per provider.",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 80,
+      "height": 24,
+      "column": "in_progress"
+    }
+  ]
+}
