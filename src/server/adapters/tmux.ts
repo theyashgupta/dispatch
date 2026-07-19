@@ -1,6 +1,56 @@
 import { run } from "./exec.js";
 
 /**
+ * The tmux terminal-features entry that grants the `xterm-256color` terminal type (ttyd's
+ * declared TERM, RESEARCH-confirmed) the `hyperlinks` capability. tmux's own default
+ * `terminal-features[0]` entry for `xterm*` (`clipboard:ccolour:cstyle:focus:title`) omits
+ * `hyperlinks`, so without this grant tmux's client-facing byte stream never carries a real
+ * Claude Code `⏺` OSC 8 hyperlink escape at all — proven live (59-02-SUMMARY.md): `capture-pane
+ * -e` shows tmux's own grid DOES track the hyperlink server-side, but an attached ttyd client
+ * never receives the OSC 8 bytes without this terminal-feature, so xterm.js's `OscLinkProvider`
+ * has nothing to resolve regardless of any browser-side patch.
+ */
+const HYPERLINKS_FEATURE_ENTRY = "xterm-256color:hyperlinks";
+
+/**
+ * Idempotently grant the tmux SERVER (a global, not per-session, option) the
+ * {@link HYPERLINKS_FEATURE_ENTRY} terminal-feature. Checked-then-appended rather than
+ * unconditionally appended, because `set -ag` on an array option duplicates the entry on every
+ * call and the tmux server outlives many backend boots (tmux is the app's own source of truth
+ * for session survival across restarts) — an unconditional per-boot append would grow the option
+ * unboundedly over the server's lifetime. Never throws: a missing tmux server makes the read
+ * fail, which is treated as "not yet configured," and any append failure only warns — this is a
+ * best-effort capability grant, not a boot-blocking requirement (mirrors ttyd-index-setup.ts's
+ * degrade-never-crash contract for its own optional Cmd+Click feature).
+ * @remarks Called once at boot (`bootstrap/index.ts`), never per-`newSession` call, because
+ * `terminal-features` is server-global, not session-scoped — RESEARCH's live OSC-8 probe found
+ * the escape sequences server-side (via a direct `capture-pane -e`) but a live-streamed
+ * fresh-attach client received ZERO of them until this feature was granted (Task 1 sandboxed
+ * boot cannot exercise this — it never spawns a real client tmux session — so this fix has no
+ * static boot-log signal to assert on; it is smoke-verified only, per 59-02-SUMMARY.md).
+ * @see docs/ARCHITECTURE.md#terminal-ttyd
+ */
+export async function ensureHyperlinksTerminalFeature(): Promise<void> {
+  let current = "";
+  try {
+    current = (await run("tmux", ["show", "-g", "terminal-features"])).stdout;
+  } catch {}
+  if (current.includes(HYPERLINKS_FEATURE_ENTRY)) return;
+  try {
+    await run("tmux", [
+      "set",
+      "-ag",
+      "terminal-features",
+      HYPERLINKS_FEATURE_ENTRY,
+    ]);
+  } catch (err) {
+    console.warn(
+      `[tmux] could not grant xterm-256color the hyperlinks terminal-feature — Cmd+Click on real Claude Code OSC-8 links may not work: ${(err as Error).message}`,
+    );
+  }
+}
+
+/**
  * True if tmux session `name` exists (`has-session -t <name>` exits 0).
  * Swallows failure into `false` (never rethrows) — a dead tmux server means "no session",
  * and this is the idempotency probe (an existing `dsp-<id>` session → reattach, never recreate).

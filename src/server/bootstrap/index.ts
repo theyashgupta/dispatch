@@ -13,6 +13,7 @@ import {
 } from "../services/infra/config-holder.js";
 import { checkHooksCapability, installHookArtifacts } from "./hook-setup.js";
 import { provisionTtydIndex } from "./ttyd-index-setup.js";
+import { ensureHyperlinksTerminalFeature } from "../adapters/tmux.js";
 import { unregisterHookToken } from "../services/domain/hook-tokens.js";
 import { reapActivityThrottle } from "../services/domain/hook-events.js";
 import { seedPlaybooks } from "../services/domain/playbooks.js";
@@ -166,6 +167,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   await store.load();
 
   store.setPollInterval(config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+  await ensureHyperlinksTerminalFeature();
   await reconcileSessions();
   void provisionTtydIndex().catch((err: unknown) => {
     console.warn(

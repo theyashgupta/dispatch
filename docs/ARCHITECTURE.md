@@ -458,6 +458,20 @@ reverse-tabnabbing guard (`window.open()` then `opener=null` before navigating) 
 [Security Threat Model](#security-threat-model) — `@see` that table for the STRIDE home — and
 nothing about this patch pipeline changes the loopback-only bind above.
 
+**tmux must be granted the `hyperlinks` terminal-feature, or `cmd-click-osc8` has nothing to
+resolve.** `cmd-click-osc8` patches the BROWSER side of link activation, but the OSC 8 bytes
+themselves have to reach the browser first — and tmux's own default `terminal-features[0]` entry
+for `xterm*` (`clipboard:ccolour:cstyle:focus:title`) omits `hyperlinks`. Without it, tmux's grid
+tracks a real Claude Code `⏺` output's OSC 8 hyperlink internally (`capture-pane -e` proves the
+escape exists server-side) but never forwards it to an attached client's byte stream — xterm.js's
+`OscLinkProvider` then has zero cells with the extended `urlId` attribute to resolve, no matter how
+correct the browser-side patch is (live-discovered defect, 59-02-SUMMARY.md). `ensureHyperlinksTerminalFeature`
+(`adapters/tmux.ts`, called once at boot) grants `xterm-256color:hyperlinks` — the exact TERM string
+ttyd's spawn argv above declares — idempotently (`tmux show -g terminal-features` checked before
+`set -ag`, since it is a tmux SERVER-global option that would otherwise duplicate on every backend
+restart across the tmux server's much longer lifetime) and never throws (a missing tmux server
+degrades to "not yet configured, try again next boot" rather than blocking startup).
+
 **Not through the exec chokepoint — ttyd is a long-lived daemon.** Unlike every git/tmux call, ttyd
 does NOT route through `adapters/exec.ts` `run()`: `run()` (promisified `execFile`) resolves only on
 process exit, so awaiting a daemon would hang forever. ttyd is spawned directly with piped stderr
