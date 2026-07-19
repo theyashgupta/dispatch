@@ -9,13 +9,26 @@ import prettier from "eslint-config-prettier";
 import commentsJsdocOnly from "./eslint-local/comments-jsdoc-only.js";
 
 /**
- * Shared element descriptors for both boundary blocks below (backend
- * element-types + frontend dependencies) so a file classifies identically
- * under either rule. First-match-wins: the four frontend sub-elements
- * (primitives/hooks/lib/feature) are listed BEFORE the general `web` catch-all
- * — same precedent as `adapters-subprocess` before `adapters` — so files under
- * those subtrees classify as their sub-element instead of falling through to
- * `web`. `web` remains the catch-all for App.tsx/main.tsx/styles.
+ * Shared element descriptors for both boundary blocks below (backend +
+ * frontend `boundaries/dependencies` rule instances) so a file classifies
+ * identically under either rule. First-match-wins: the four frontend
+ * sub-elements (primitives/hooks/lib/feature) are listed BEFORE the general
+ * `web` catch-all — same precedent as `adapters-subprocess` before `adapters`
+ * — so files under those subtrees classify as their sub-element instead of
+ * falling through to `web`. `web` remains the catch-all for
+ * App.tsx/main.tsx/styles.
+ *
+ * The two `mode: "file"` descriptors below (`adapters-subprocess`,
+ * `adapters-config-consumer`) are on a deprecated syntax path
+ * (eslint-plugin-boundaries 7.x). Migrating them is deliberately deferred to
+ * Phase 57, not silently dropped — a naive `partialMatch: false` swap was
+ * empirically verified-broken (it stops both descriptors from matching their
+ * target files, silently reclassifying exec/git/tmux/image-proxy as plain
+ * `adapters` and losing the transport-narrowing these carve-outs exist to
+ * enforce). The correct migration is `settings["boundaries/files"]` file
+ * descriptors plus a policy rewrite; `mode: "file"` continues to function
+ * correctly today (deprecation-warning-only, never blocks `npm run check`).
+ * @see docs/standards/architecture.md#gap-list — `mode:"file"` element-descriptor migration
  */
 const boundaryElements = [
   { type: "bootstrap", pattern: "src/server/bootstrap" },
@@ -68,8 +81,9 @@ const boundaryElements = [
  * The `from`/`allow`/`disallow` lists below name the four new frontend
  * sub-elements alongside `web` so this error-level rule stays green now that
  * those sub-elements exist (AUDIT-02) — the fine-grained frontend import
- * direction is enforced separately, at warn, by `feWebBoundariesConfig` below;
- * Phase 56 owns flipping that block to error.
+ * direction is enforced separately by `feWebBoundariesConfig` below, at error
+ * as of Phase 56's ENF-01 flip (with a named warn carve-out for the 3
+ * Phase-57 gap edges).
  *
  * `adapters/image-proxy.ts` is a named file-mode carve-out
  * (`adapters-config-consumer`, listed BEFORE the general `adapters` element):
@@ -88,11 +102,11 @@ const boundariesConfig = {
     "boundaries/elements": boundaryElements,
   },
   rules: {
-    "boundaries/element-types": [
+    "boundaries/dependencies": [
       "error",
       {
         default: "disallow",
-        rules: [
+        policies: [
           {
             from: [
               "bootstrap",
