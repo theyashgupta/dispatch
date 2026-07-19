@@ -60,9 +60,10 @@ const boundaryElements = [
  * four files as plain `adapters` with NO narrowing policy left to catch
  * them. This file-category migration is the correct replacement; the
  * narrowing/carve-out policies that key off these categories live in
- * `boundariesConfig` below (routes' subprocess disallow, adapters'
- * subprocess-vs-sources/store disallow, the config-consumer -> services
- * allow).
+ * `boundariesConfig` below (routes' subprocess disallow, the subprocess
+ * self-plus-shared-only narrowing, and the config-consumer
+ * services-plus-shared-only carve-out), with `checkInternals` enabled so
+ * intra-`adapters` imports are actually evaluated against them.
  * @see docs/standards/architecture.md#gap-list — `mode:"file"` element-descriptor migration
  */
 const boundaryFiles = [
@@ -124,6 +125,14 @@ const boundariesConfig = {
       "error",
       {
         default: "disallow",
+        // checkInternals makes the plugin evaluate imports BETWEEN files of
+        // the same element (default: ignored). Without it the subprocess
+        // narrowing below is unenforceable — exec/git/tmux and every other
+        // adapter share the single `adapters` element, so an
+        // exec.ts -> ttyd.ts import is an "internal" dependency the rule
+        // would silently skip. Every element carries a self-allow policy, so
+        // enabling this changes no other outcome (probe-verified).
+        checkInternals: true,
         policies: [
           {
             from: [
@@ -141,6 +150,7 @@ const boundariesConfig = {
           {
             from: "bootstrap",
             allow: [
+              "bootstrap",
               "routes",
               "services",
               "adapters",
@@ -173,17 +183,32 @@ const boundariesConfig = {
           },
           {
             // Preserves exec/git/tmux's narrower rights (self + shared only,
-            // never sources/store) now that they classify as plain `adapters`
-            // instead of a dedicated element type. Trailing so it overrides
-            // the general `adapters` allow above for exactly this file category.
+            // never any other adapter, sources, or store) now that they
+            // classify as plain `adapters` instead of a dedicated element
+            // type. Trailing so it overrides the general `adapters` allow
+            // above for exactly this file category; the next policy re-allows
+            // the subprocess set to import itself (last-match-wins).
             from: { file: { categories: "adapters-subprocess" } },
-            disallow: { element: { type: ["sources", "store"] } },
+            disallow: { element: { type: ["adapters", "sources", "store"] } },
             message:
               "The subprocess adapters (exec/git/tmux) may only import themselves and shared — backend-design.md transport rule.",
           },
           {
+            from: { file: { categories: "adapters-subprocess" } },
+            allow: { file: { categories: "adapters-subprocess" } },
+          },
+          {
             // The image-proxy carve-out: the one adapter allowed to read
             // orchestration config directly from services/infra/config-holder.ts.
+            // Its rights are exactly services + shared — the disallow strips
+            // the general `adapters` allow (adapters/sources/store) it would
+            // otherwise inherit, and the trailing allow restores services.
+            from: { file: { categories: "adapters-config-consumer" } },
+            disallow: { element: { type: ["adapters", "sources", "store"] } },
+            message:
+              "image-proxy may only import services (config-holder) and shared — the config-consumer carve-out stays narrow.",
+          },
+          {
             from: { file: { categories: "adapters-config-consumer" } },
             allow: { element: { type: "services" } },
           },
