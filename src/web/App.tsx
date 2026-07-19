@@ -131,6 +131,9 @@ export function App() {
     board?.cards.find((card) => card.id === startRequest?.cardId) ?? null;
 
   const requestStart = (req: string | StartRequest) => {
+    const id = typeof req === "string" ? req : req.cardId;
+    const card = board?.cards.find((c) => c.id === id);
+    if (card?.column !== "todo") return;
     setStartRequest(typeof req === "string" ? { cardId: req } : req);
   };
 
