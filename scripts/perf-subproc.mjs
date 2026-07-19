@@ -108,16 +108,23 @@ async function driveOnce(home, windowSeconds) {
     stderrBuf += chunk.toString("utf8");
   });
 
-  await waitForReady();
-  if (windowSeconds > 0) {
-    await new Promise((r) => setTimeout(r, windowSeconds * 1000));
+  try {
+    await waitForReady();
+    if (windowSeconds > 0) {
+      await new Promise((r) => setTimeout(r, windowSeconds * 1000));
+    }
+  } finally {
+    // the kill sequence must run on the readiness-timeout path too, or the orphaned
+    // instrumented server poisons every later harness run on the fixed port; skip it
+    // when the child already exited on its own (exit has fired, once() would hang)
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise((resolve) => child.once("exit", resolve));
+      const escalate = setTimeout(() => child.kill("SIGKILL"), KILL_TIMEOUT_MS);
+      child.kill("SIGTERM");
+      await exited;
+      clearTimeout(escalate);
+    }
   }
-
-  const exited = new Promise((resolve) => child.once("exit", resolve));
-  const escalate = setTimeout(() => child.kill("SIGKILL"), KILL_TIMEOUT_MS);
-  child.kill("SIGTERM");
-  await exited;
-  clearTimeout(escalate);
 
   const line = stderrBuf.split("\n").find((l) => l.startsWith(DUMP_PREFIX));
   if (!line) {
