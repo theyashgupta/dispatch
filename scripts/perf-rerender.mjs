@@ -475,7 +475,11 @@ async function main() {
             ? "the dev-serve fallback's react-dom build never registered with the DevTools hook shim; investigate the shim wiring."
             : "production react-dom did not register with the DevTools hook shim. Rerun with `node scripts/perf-rerender.mjs --dev`."),
       );
-      process.exit(2);
+      // process.exit() here would skip the finally teardown, orphaning Chrome + the
+      // server and leaving the API-key-bearing sandbox in tmpdir; set the exit code
+      // and return so teardown runs, then the process exits 2 naturally
+      process.exitCode = 2;
+      return;
     }
 
     await clickSelector(cdp, sessionId, '[aria-label="Board view"]');
