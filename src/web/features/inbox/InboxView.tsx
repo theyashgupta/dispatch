@@ -62,7 +62,12 @@ export function InboxView({
   function handlePromote(id: string) {
     setPromotedIds((s) => new Set(s).add(id));
     moveCard(id, "todo").catch((err) => {
-      console.error("moveCard failed; SSE snapshot will reconcile", err);
+      setPromotedIds((s) => {
+        const next = new Set(s);
+        next.delete(id);
+        return next;
+      });
+      console.error("moveCard failed; card restored to inbox", err);
     });
   }
 
