@@ -13,21 +13,36 @@ import { run } from "./exec.js";
 const HYPERLINKS_FEATURE_ENTRY = "xterm-256color:hyperlinks";
 
 /**
+ * tmux stderr signatures for "no server to talk to": `no server running on <sock>` and
+ * `error connecting to <sock> (No such file or directory)`. tmux never auto-starts a server for
+ * `show`/`set`, so a grant failing this way is the normal no-server-yet state (cold boot after a
+ * machine restart) and self-heals on the next `newSession` — not worth a warning.
+ */
+const NO_SERVER_STDERR = /no server running|error connecting/;
+
+/**
  * Idempotently grant the tmux SERVER (a global, not per-session, option) the
  * {@link HYPERLINKS_FEATURE_ENTRY} terminal-feature. Checked-then-appended rather than
  * unconditionally appended, because `set -ag` on an array option duplicates the entry on every
  * call and the tmux server outlives many backend boots (tmux is the app's own source of truth
  * for session survival across restarts) — an unconditional per-boot append would grow the option
  * unboundedly over the server's lifetime. Never throws: a missing tmux server makes the read
- * fail, which is treated as "not yet configured," and any append failure only warns — this is a
- * best-effort capability grant, not a boot-blocking requirement (mirrors ttyd-index-setup.ts's
- * degrade-never-crash contract for its own optional Cmd+Click feature).
- * @remarks Called once at boot (`bootstrap/index.ts`), never per-`newSession` call, because
- * `terminal-features` is server-global, not session-scoped — RESEARCH's live OSC-8 probe found
- * the escape sequences server-side (via a direct `capture-pane -e`) but a live-streamed
- * fresh-attach client received ZERO of them until this feature was granted (Task 1 sandboxed
- * boot cannot exercise this — it never spawns a real client tmux session — so this fix has no
- * static boot-log signal to assert on; it is smoke-verified only, per 59-02-SUMMARY.md).
+ * fail, which is treated as "not yet configured"; an append failure carrying a
+ * {@link NO_SERVER_STDERR} signature is silently skipped (expected, self-healing state); and any
+ * other append failure only warns — this is a best-effort capability grant, not a boot-blocking
+ * requirement (mirrors ttyd-index-setup.ts's degrade-never-crash contract for its own optional
+ * Cmd+Click feature).
+ * @remarks Called at boot (`bootstrap/index.ts`) AND after every successful `newSession`.
+ * `terminal-features` is server-global, not session-scoped, but scope does not decide the call
+ * site: tmux never auto-starts a server for `show`/`set`, so the boot-time call fails whenever
+ * no server exists yet (the normal post-reboot state), and tmux's default `exit-empty on` kills
+ * a sessionless server — server options do not persist — so a mid-run server restart loses the
+ * grant too. Immediately after `new-session` succeeds is the only moment a live server is
+ * guaranteed, and the idempotency check keeps the repeated calls duplicate-free (a
+ * parallel-kickoff race can at worst append one benign duplicate entry). RESEARCH's live OSC-8
+ * probe found the escape sequences server-side (via a direct `capture-pane -e`) but a
+ * live-streamed fresh-attach client received ZERO of them until this feature was granted;
+ * smoke-verified only, per 59-02-SUMMARY.md.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 export async function ensureHyperlinksTerminalFeature(): Promise<void> {
@@ -44,8 +59,10 @@ export async function ensureHyperlinksTerminalFeature(): Promise<void> {
       HYPERLINKS_FEATURE_ENTRY,
     ]);
   } catch (err) {
+    const failure = err as Error & { stderr?: string };
+    if (NO_SERVER_STDERR.test(failure.stderr ?? "")) return;
     console.warn(
-      `[tmux] could not grant xterm-256color the hyperlinks terminal-feature — Cmd+Click on real Claude Code OSC-8 links may not work: ${(err as Error).message}`,
+      `[tmux] could not grant xterm-256color the hyperlinks terminal-feature — Cmd+Click on real Claude Code OSC-8 links may not work: ${failure.message}`,
     );
   }
 }
@@ -102,7 +119,10 @@ export async function listSessions(): Promise<Set<string>> {
  * detection is unreliable). Trailing args become the window command. Optional `env` entries
  * become `-e KEY=VALUE` pairs (tmux ≥3.2, probe-verified on 3.6a) placed after the geometry
  * and before the command, so per-session values reach the spawned process without ever
- * appearing in its argv.
+ * appearing in its argv. Ends by re-running the idempotent hyperlinks grant: session creation is
+ * the one moment a live tmux server is guaranteed, which closes the cold-boot and
+ * server-restart gaps the boot-time call alone cannot cover (see
+ * {@link ensureHyperlinksTerminalFeature}).
  * @remarks NEW-01: the `-x 200 -y 50` geometry is load-bearing for readiness/marker parsing.
  * @see docs/ARCHITECTURE.md#tmux-invocations
  */
@@ -130,6 +150,7 @@ export async function newSession(
     ...envArgs,
     ...commandArgv,
   ]);
+  await ensureHyperlinksTerminalFeature();
 }
 
 /**

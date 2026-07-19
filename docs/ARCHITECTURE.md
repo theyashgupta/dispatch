@@ -466,11 +466,15 @@ tracks a real Claude Code `⏺` output's OSC 8 hyperlink internally (`capture-pa
 escape exists server-side) but never forwards it to an attached client's byte stream — xterm.js's
 `OscLinkProvider` then has zero cells with the extended `urlId` attribute to resolve, no matter how
 correct the browser-side patch is (live-discovered defect, 59-02-SUMMARY.md). `ensureHyperlinksTerminalFeature`
-(`adapters/tmux.ts`, called once at boot) grants `xterm-256color:hyperlinks` — the exact TERM string
-ttyd's spawn argv above declares — idempotently (`tmux show -g terminal-features` checked before
-`set -ag`, since it is a tmux SERVER-global option that would otherwise duplicate on every backend
-restart across the tmux server's much longer lifetime) and never throws (a missing tmux server
-degrades to "not yet configured, try again next boot" rather than blocking startup).
+(`adapters/tmux.ts`) grants `xterm-256color:hyperlinks` — the exact TERM string ttyd's spawn argv
+above declares — idempotently (`tmux show -g terminal-features` checked before `set -ag`, since it
+is a tmux SERVER-global option that would otherwise duplicate on every backend restart across the
+tmux server's much longer lifetime) and never throws. It runs at boot AND after every successful
+`newSession`: tmux does not auto-start a server for `show`/`set`, so with no server alive (the
+normal post-reboot state) the boot-time call fails outright, and tmux's default `exit-empty on`
+kills a sessionless server — server options do not persist — so a mid-run server restart loses
+the grant too. Session creation is the one moment a live server is guaranteed, which is where the
+grant self-heals; the no-server failure at boot is expected and silently skipped.
 
 **Not through the exec chokepoint — ttyd is a long-lived daemon.** Unlike every git/tmux call, ttyd
 does NOT route through `adapters/exec.ts` `run()`: `run()` (promisified `execFile`) resolves only on
