@@ -124,13 +124,14 @@ async function oneBoot(home) {
   });
   try {
     await Promise.race([waitForReady(), crashed]);
+    return performance.now() - t0;
   } finally {
     // keep racing crashed() alive without an unhandled rejection once waitForReady() wins
     crashed.catch(() => {});
+    // teardown must run on the readiness-timeout path too, or the orphaned server
+    // poisons every later harness run with instant 200s on the fixed port
+    await killAndWait(child);
   }
-  const ms = performance.now() - t0;
-  await killAndWait(child);
-  return ms;
 }
 
 function percentile(sorted, p) {
