@@ -1,10 +1,7 @@
-import { execFile } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
-
-const execFileP = promisify(execFile);
+import { run } from "./exec.js";
 
 /**
  * Resolve the absolute path of `bin` on PATH (via `which`), or null if not found.
@@ -13,7 +10,7 @@ const execFileP = promisify(execFile);
  */
 export async function resolveBinaryPath(bin: string): Promise<string | null> {
   try {
-    const { stdout } = await execFileP("which", [bin], { encoding: "utf8" });
+    const { stdout } = await run("which", [bin]);
     const resolved = stdout.trim();
     return resolved.length > 0 ? resolved : null;
   } catch {
