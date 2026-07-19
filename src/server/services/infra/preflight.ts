@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { accessSync, constants, readFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,7 +5,7 @@ import type {
   PreflightReport,
   PrerequisiteStatus,
 } from "../../../shared/types.js";
-import { run } from "../../adapters/exec.js";
+import { run, runInherit } from "../../adapters/exec.js";
 import {
   resolveBinaryPath,
   resolveWithPrefixes,
@@ -201,15 +200,6 @@ export async function probePreflight(): Promise<PreflightReport> {
   };
 }
 
-/** Spawn an argv command inheriting the terminal so package-manager output streams live; resolve its exit code. */
-function spawnInherit(cmd: string, args: string[]): Promise<number> {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, { stdio: "inherit" });
-    child.on("error", () => resolve(-1));
-    child.on("exit", (code) => resolve(code ?? -1));
-  });
-}
-
 /** Re-probe a binary's status after an install attempt, unioning known install prefixes (INST-04). */
 async function reprobeStatus(target: string): Promise<PrerequisiteStatus> {
   return statusFor(target, (await resolveWithPrefixes(target)) != null);
@@ -235,7 +225,7 @@ export async function runInstall(
   }
   let ok: boolean;
   if (opts.interactive) {
-    ok = (await spawnInherit(argv.cmd, argv.args)) === 0;
+    ok = (await runInherit(argv.cmd, argv.args)) === 0;
   } else {
     try {
       await run(argv.cmd, argv.args);

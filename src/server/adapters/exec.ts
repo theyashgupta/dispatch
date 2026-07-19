@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
@@ -41,4 +41,20 @@ export async function run(
 /** Resolve after `ms` milliseconds. Used by Plan 03's readiness poll and paste settle. */
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Run an argv command with the terminal inherited so interactive package-manager/npm output
+ * streams live to the user, resolving the exit code instead of capturing stdout/stderr.
+ * @remarks The stdio-inherit foreground-streaming counterpart to {@link run}'s capture-and-await
+ * shape — used by `dispatch doctor` installs and interactive self-update, where the user needs to
+ * see live output. Never rejects: resolves `-1` on spawn error, `code ?? -1` on exit.
+ * @see docs/ARCHITECTURE.md#exec-chokepoint
+ */
+export function runInherit(cmd: string, args: string[]): Promise<number> {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, { stdio: "inherit" });
+    child.on("error", () => resolve(-1));
+    child.on("exit", (code) => resolve(code ?? -1));
+  });
 }

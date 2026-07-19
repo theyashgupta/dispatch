@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +7,7 @@ import type {
   UpdateRunResult,
   UpdateStatus,
 } from "../../../shared/types.js";
-import { run } from "../../adapters/exec.js";
+import { run, runInherit } from "../../adapters/exec.js";
 import { DISPATCH_DIR, UPDATE_CACHE_PATH } from "../infra/paths.js";
 
 const REGISTRY_URL =
@@ -153,15 +152,6 @@ export async function checkForUpdate(opts: {
   return { updateAvailable, current, latest, installMode };
 }
 
-/** Spawn an argv command inheriting the terminal so npm output streams live; resolve its exit code. */
-function spawnInherit(cmd: string, args: string[]): Promise<number> {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, { stdio: "inherit" });
-    child.on("error", () => resolve(-1));
-    child.on("exit", (code) => resolve(code ?? -1));
-  });
-}
-
 /**
  * Confirm the post-update version by asking npm directly (`npm root -g`), never by re-reading the
  * running process's own resolved path.
@@ -212,7 +202,7 @@ async function doRunUpdate(opts: {
   const args = ["i", "-g", "@theyashgupta/dispatch@latest"];
   let ok: boolean;
   if (opts.interactive) {
-    ok = (await spawnInherit(cmd, args)) === 0;
+    ok = (await runInherit(cmd, args)) === 0;
   } else {
     try {
       await run(cmd, args, {
