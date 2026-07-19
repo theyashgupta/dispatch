@@ -40,9 +40,15 @@ interface NamedPatch {
  * `WebLinksAddon`, which never fires for that output (59-RESEARCH.md Pitfall 1). `shift-enter`
  * sends raw LF via the Dispatcher's own bound `sendData`, never `term.paste` (which silently
  * converts `\n` back into `\r` via xterm's `prepareTextForTerminal` — 59-RESEARCH.md Pitfall 2).
- * Its three guards are load-bearing: `e.type!=="keydown"` (this handler fires from
- * keydown/keyup/keypress alike), `e.isComposing` (runs BEFORE xterm's own composition check — IME
- * safety, Pitfall 4), and the exact Shift+Enter match with no Ctrl/Alt/Meta.
+ * Its guards are load-bearing: `e.isComposing` (runs BEFORE xterm's own composition check — IME
+ * safety, Pitfall 4) and `e.type==="keyup"` always pass through untouched. On a matching
+ * Shift+Enter the handler swallows BOTH the `keydown` AND the following `keypress` for the SAME
+ * keystroke (calling `sendData` only once, on `keydown`) — `_keyPress` only short-circuits on
+ * `_keyDownHandled`, which xterm sets internally ONLY when its own (not our) keydown handling ran
+ * to completion, so an early customKeyEventHandler-return during keydown never sets it; without
+ * also swallowing keypress, xterm's stock keypress path independently `triggerDataEvent`s the
+ * Enter key's own CR right after our injected LF, submitting the message instead of inserting a
+ * newline (live-discovered defect, fixed same-plan, 59-02-SUMMARY.md).
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 const PATCHES: NamedPatch[] = [
@@ -65,9 +71,9 @@ const PATCHES: NamedPatch[] = [
     target: "t.open(e),i.fit()}",
     build: () =>
       "t.open(e),t.attachCustomKeyEventHandler((e=>{" +
-      'if(e.type!=="keydown"||e.isComposing)return!0;' +
+      'if(e.isComposing||e.type==="keyup")return!0;' +
       'if(e.key==="Enter"&&e.shiftKey&&!e.ctrlKey&&!e.altKey&&!e.metaKey){' +
-      'this.sendData("\\n");return!1}return!0})),i.fit()}',
+      'if(e.type==="keydown")this.sendData("\\n");return!1}return!0})),i.fit()}',
     disabledWarning: "shift+enter newline disabled",
   },
 ];
