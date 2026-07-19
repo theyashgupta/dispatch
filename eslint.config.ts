@@ -490,6 +490,11 @@ export default tseslint.config(
               message:
                 "Route subprocess calls through adapters/exec.ts (the chokepoint) — docs/standards/architecture.md exec-chokepoint rulings.",
             },
+            {
+              name: "child_process",
+              message:
+                "Route subprocess calls through adapters/exec.ts (the chokepoint) — docs/standards/architecture.md exec-chokepoint rulings.",
+            },
           ],
         },
       ],
