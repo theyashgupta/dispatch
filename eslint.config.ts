@@ -100,8 +100,7 @@ const boundaryFiles = [
  * sub-elements alongside `web` so this error-level rule stays green now that
  * those sub-elements exist (AUDIT-02) — the fine-grained frontend import
  * direction is enforced separately by `feWebBoundariesConfig` below, at error
- * as of Phase 56's ENF-01 flip (with a named warn carve-out for the 3
- * Phase-57 gap edges).
+ * as of Phase 56's ENF-01 flip.
  *
  * `adapters/image-proxy.ts` carries the `adapters-config-consumer` file
  * category (see `boundaryFiles`) and gets a trailing allow policy below to
@@ -202,10 +201,8 @@ const boundariesConfig = {
 };
 
 /**
- * Frontend import-direction + feature entry-point policies, shared by
- * `feWebBoundariesConfig` (error) and `feWebBoundariesWarnCarveout` (warn) so
- * the two severity-split blocks can never drift apart — extracted per ENF-01
- * to keep the options object defined exactly once.
+ * Frontend import-direction + feature entry-point policies, used by
+ * `feWebBoundariesConfig` below.
  * `default: "allow"` is deliberate — the frontend's edges were enumerated as
  * of Phase 56's restructure, so only the explicit `disallow` policies below
  * produce findings (an unenumerated `disallow`-by-default would flag the
@@ -311,12 +308,13 @@ const feWebBoundaryPolicies = {
 
 /**
  * ENF-01 error-flip: frontend import-direction + feature entry-point rules
- * now enforced at error for every `src/web/**` file. Only the 3 named
- * Phase-57 gap edges (`lib/card-badges.ts` -> `hooks/useUnseenActivity`;
- * `primitives/ActivityItem.tsx` -> `lib/event-copy`, `lib/format-age`) stay
- * at warn, via the trailing `feWebBoundariesWarnCarveout` block registered
- * immediately after this one (flat-config last-write-wins — the carve-out's
- * position in the exported array is load-bearing, not incidental).
+ * enforced at error for every `src/web/**` file. The 3 Phase-57 gap edges
+ * (`lib/card-badges.ts` -> `hooks/useUnseenActivity`; `primitives/ActivityItem.tsx`
+ * -> `lib/event-copy`, `lib/format-age`) that used to warrant a warn-severity
+ * carve-out are gone — those files were relocated/hoisted per
+ * docs/standards/architecture.md's "Triage-derived layering-violation fixes"
+ * gap-list entry, so this is the only frontend `boundaries/dependencies`
+ * block; there is no trailing carve-out to keep in sync.
  *
  * The `watcher -> ttyd -> store` edge produces no boundaries violation and
  * needs no allow-rule: `watcher` and `ttyd` both classify as the general
@@ -336,39 +334,6 @@ const feWebBoundariesConfig = {
   },
   rules: {
     "boundaries/dependencies": ["error", feWebBoundaryPolicies],
-  },
-};
-
-/**
- * ENF-01 named warn carve-out for the 3 genuine Phase-57 gap edges
- * (`docs/standards/architecture.md`'s "Triage-derived layering-violation
- * fixes" gap-list entry): `lib/card-badges.ts` -> `hooks/useUnseenActivity`,
- * and `primitives/ActivityItem.tsx` -> `lib/event-copy` / `lib/format-age`.
- * TODO-57 fixes these by relocating/hoisting per that gap-list entry's tier
- * label; until then this block keeps them at warn instead of error. MUST be
- * registered AFTER `feWebBoundariesConfig` in the exported array —
- * flat-config resolves the winning rule severity per file from the LAST
- * matching block, so ordering is what makes the carve-out take effect.
- *
- * The demotion is FILE-scoped, not edge-scoped: flat config replaces the
- * whole rule entry, so every policy in `feWebBoundaryPolicies` (including the
- * frontend->backend disallow) reports at warn for these two files — any new,
- * unrelated violation introduced here must be held to the error bar in review
- * (docs/standards/code-review-rules.md, Named exceptions) until Phase 57
- * removes this block. This carve-out shrinks to zero in Phase 57 and is never
- * resolved via a rule suppression directive (docs/standards/comments.md rule 9
- * reserves that escape hatch for external, code-irreducible facts, not
- * layering debt).
- */
-const feWebBoundariesWarnCarveout = {
-  files: ["src/web/lib/card-badges.ts", "src/web/primitives/ActivityItem.tsx"],
-  plugins: { boundaries },
-  settings: {
-    "import/resolver": { typescript: {} },
-    "boundaries/elements": boundaryElements,
-  },
-  rules: {
-    "boundaries/dependencies": ["warn", feWebBoundaryPolicies],
   },
 };
 
@@ -488,7 +453,6 @@ export default tseslint.config(
 
   boundariesConfig,
   feWebBoundariesConfig,
-  feWebBoundariesWarnCarveout,
 
   /**
    * The exec chokepoint (argv-array, no-shell) is the app's shell-injection guard; this ban

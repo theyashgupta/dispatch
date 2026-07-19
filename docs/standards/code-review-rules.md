@@ -55,7 +55,7 @@ Scope: this doc exists for what layer 1 cannot express — a route file with zer
 
 ## Frontend: `primitives/`
 
-- [ ] Props in, no data fetching: zero imports from `hooks/`, `lib/`, `feature`, or `web` (lint-enforced at error; this is the intent check — a primitive that reaches into `lib/` for formatting is the exact violation class the two named Phase-57 warn carve-outs track, see below).
+- [ ] Props in, no data fetching: zero imports from `hooks/`, `lib/`, `feature`, or `web` (lint-enforced at error; this is the intent check — a primitive that reaches into `lib/` for formatting is a layering violation, e.g. the one Phase 57 fixed in `ActivityItem.tsx` by hoisting the formatting calls to its callers).
 - [ ] Purely presentational; a props type is declared immediately above the component (`docs/standards/frontend-design-system.md` anatomy checklist).
 
 ## Frontend: `hooks/`
@@ -86,7 +86,6 @@ Every exception below is a named, narrow allow-rule that survives the error-leve
 - **The image-proxy `adapters-config-consumer` carve-out.** `adapters/image-proxy.ts` is a named file-mode element (`adapters-config-consumer`) allowed to import `services` — the one adapter that reads orchestration config directly from `services/infra/config-holder.ts` instead of receiving it as an injected parameter. Never widen `adapters -> services` generally from this precedent.
 - **The `features/* -> badges` shared-leaf edge.** `CardView.tsx`'s badge deep imports (`GoneBadge`, `SourceBadge`) are sanctioned by design, encoded as the boundaries config's final allow policy — not a violation to flag.
 - **The `watcher -> ttyd -> store` edge.** Both `watcher` and `ttyd` classify as the general `adapters` element; `adapters -> store` is an already-allowed edge. This is a documented architecture invariant (`docs/ARCHITECTURE.md#preserved-import-edges`), not an unenforced gap — no allow-rule was needed to encode it, and none should be added.
-- **The file-scoped warn carve-out (2 files).** `lib/card-badges.ts` and `primitives/ActivityItem.tsx` have their entire `boundaries/dependencies` rule demoted to `warn` via a named trailing carve-out block in `eslint.config.ts` — flat config cannot express per-edge severity, so the carve-out is file-scoped, not edge-scoped: it demotes every boundaries policy in those two files, not just the debt edges. The intended debt is the 3 TODO-57 edges (`lib/card-badges.ts -> hooks/useUnseenActivity`; `primitives/ActivityItem.tsx -> lib/event-copy` / `lib/format-age`) — genuine layering violations kept at `warn` (not `error`, not silenced), pointing at `docs/standards/architecture.md`'s "Triage-derived layering-violation fixes" gap-list entry, temporary until Phase 57 relocates/hoists the offending calls. Flag those 3 in review as known, tracked debt, not as new findings — but any NEW, unrelated boundaries violation in these two files also reports only at `warn`, so reviewers must manually hold new edges there to the error bar until Phase 57 removes the carve-out block entirely.
 
 ## Comments (all layers)
 
