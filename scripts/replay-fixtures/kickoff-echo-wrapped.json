@@ -1,0 +1,67 @@
+{
+  "class": "kickoff-echo-wrapped",
+  "session": "dsp-fixture",
+  "covers": [
+    "kickoff-echo-wrapped — the pasted kickoff's status-protocol block hard-wrapped so a DISPATCH_STATUS placeholder line starts a physical line must never fire: the first-segment placeholder guard skips it BEFORE the continuation scan can swallow adjacent template lines (allow-list #1)",
+    "placeholder-mid-wrap — a wrap splitting the placeholder itself (`<one-line` / `reason>`) is caught by the prefix guard on the JOINED reason",
+    "adjacent-marker-boundary — a continuation scan stops at a line matching MARKER_RE, preserving last-marker-wins for adjacent markers"
+  ],
+  "ticks": [
+    {
+      "pane": [
+        "⏺ Starting on the ticket now.",
+        "## Status protocol (required)",
+        "Print these as standalone lines, in the exact format shown, as the LAST line of a reply:",
+        "- When blocked and needing human input:",
+        "DISPATCH_STATUS: NEEDS_INPUT — <one-line reason>",
+        "- When the task is complete: DISPATCH_STATUS: DONE — <one-line summary>",
+        "- Before calling a tool that pauses for the user (AskUserQuestion, ExitPlanMode,",
+        "or any action needing approval), print the NEEDS_INPUT line above as your entire",
+        "reply first, then call the tool.",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 80,
+      "height": 24,
+      "column": "in_progress"
+    },
+    {
+      "pane": [
+        "⏺ Starting on the ticket now.",
+        "- When blocked and needing human input: DISPATCH_STATUS: NEEDS_INPUT — <one-line reason>",
+        "- When the task is complete:",
+        "DISPATCH_STATUS: DONE — <one-line summary>",
+        "- Before calling a tool that pauses for the user (AskUserQuestion, ExitPlanMode,",
+        "or any action needing approval), print the NEEDS_INPUT line above as your entire",
+        "reply first, then call the tool.",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 90,
+      "height": 24,
+      "column": "in_progress"
+    },
+    {
+      "pane": [
+        "⏺ Starting on the ticket now.",
+        "DISPATCH_STATUS: NEEDS_INPUT — <one-line",
+        "reason>",
+        "- When the task is complete: DISPATCH_STATUS: DONE — <one-line summary>",
+        "",
+        "──────────────────────────────────────────────────────────────────────",
+        " ❯ ",
+        "──────────────────────────────────────────────────────────────────────",
+        " ⏵⏵ accept edits on"
+      ],
+      "width": 40,
+      "height": 24,
+      "column": "in_progress"
+    }
+  ]
+}

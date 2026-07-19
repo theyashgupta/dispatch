@@ -10,6 +10,15 @@ const MARKER_RE =
 const BULLET_LINE_RE = /^\s*⏺/;
 const CHROME_BORDER_RE = /^\s*[╭┌]?─{3,}/;
 
+/**
+ * Kickoff-template placeholder guard, applied as a PREFIX test (not exact equality): the wrapped
+ * kickoff echo can pull further template lines into the joined reason (they are neither blank,
+ * `⏺`, nor border), so a reason that merely STARTS with the unfilled placeholder is template echo,
+ * never agent output. A legitimate reason that contains angle brackets elsewhere (e.g. "need the
+ * <API_KEY> value") still fires normally.
+ */
+const PLACEHOLDER_PREFIX_RE = /^<one-line (reason|summary)>/;
+
 export interface Marker {
   kind: "NEEDS_INPUT" | "DONE";
   reason: string;
@@ -81,7 +90,9 @@ export function sameMarkerKey(
  * Wrapped-reason capture: the claude TUI hard-wraps a long reason onto further real newlines at
  * the current pane width, and MARKER_RE is line-anchored (`$`), so once a marker line matches,
  * subsequent physical lines are greedily consumed as continuation of the SAME reason until a
- * boundary — a blank line, a fresh `⏺` block, or the footer/input-box border — and joined with a
+ * boundary — a blank line, a fresh `⏺` block, the footer/input-box border, or ANOTHER marker
+ * line (a line matching MARKER_RE is a NEW marker, never continuation — consuming it would
+ * violate last-marker-wins for adjacent markers) — and joined with a
  * single space (statusReason renders inline in ReferenceBlocks.tsx/CardView.tsx, never as
  * preformatted text, so the hard-wrap newline is collapsed, not preserved). Continuation only
  * runs when the marker line itself carried a reason separator (`m[2] !== undefined`) — a
@@ -89,10 +100,13 @@ export function sameMarkerKey(
  * only the first physical line) makes `sameMarkerKey`'s prefix-tolerance dedup less load-bearing
  * for THIS case, but it still protects other reflow scenarios and is unchanged here.
  *
- * Defense-in-depth against the kickoff template echo: a reason that IS the kickoff template's
- * unfilled placeholder (`<one-line reason>` / `<one-line summary>`, exactly) is skipped IN the
- * loop — an earlier real marker still wins, and a legitimate reason that merely CONTAINS angle
- * brackets (e.g. "need the <API_KEY> value") fires normally.
+ * Defense-in-depth against the kickoff template echo: a reason whose FIRST captured segment
+ * starts with the kickoff template's unfilled placeholder (`<one-line reason>` /
+ * `<one-line summary>`) is skipped BEFORE continuation runs — otherwise the wrapped echo's
+ * adjacent template lines (neither blank, `⏺`, nor border) would be joined in and defeat an
+ * exact-equality guard. The same prefix guard re-runs on the JOINED reason to catch a wrap that
+ * splits the placeholder itself mid-word. An earlier real marker still wins, and a legitimate
+ * reason that merely CONTAINS angle brackets (e.g. "need the <API_KEY> value") fires normally.
  *
  * @remarks MARKER_RE tolerance envelope (line-start anchor, optional `⏺`, em-dash U+2014
  * separator) is the parse contract; the dedup and byte-identical kickoff contract are homed centrally.
@@ -104,8 +118,9 @@ export function parseLastMarker(pane: string): Marker | null {
   for (let i = 0; i < lines.length; i++) {
     const m = MARKER_RE.exec(lines[i]);
     if (!m) continue;
-    const parts: string[] = [];
     const first = (m[2] ?? "").trim();
+    if (PLACEHOLDER_PREFIX_RE.test(first)) continue;
+    const parts: string[] = [];
     if (first !== "") parts.push(first);
     let j = i + 1;
     if (m[2] !== undefined) {
@@ -113,14 +128,15 @@ export function parseLastMarker(pane: string): Marker | null {
         j < lines.length &&
         lines[j].trim() !== "" &&
         !BULLET_LINE_RE.test(lines[j]) &&
-        !CHROME_BORDER_RE.test(lines[j])
+        !CHROME_BORDER_RE.test(lines[j]) &&
+        !MARKER_RE.test(lines[j])
       ) {
         parts.push(lines[j].trim());
         j++;
       }
     }
     const reason = parts.join(" ");
-    if (!/^<one-line (reason|summary)>$/.test(reason)) {
+    if (!PLACEHOLDER_PREFIX_RE.test(reason)) {
       found = { kind: m[1] as Marker["kind"], reason };
     }
     i = j - 1;

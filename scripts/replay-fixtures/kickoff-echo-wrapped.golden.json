@@ -1,0 +1,29 @@
+[
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "agentView": "⏺ Starting on the ticket now.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "agentView": "⏺ Starting on the ticket now.",
+      "markerFreeStreak": 0
+    }
+  },
+  {
+    "decision": {
+      "kind": "nothing"
+    },
+    "next": {
+      "agentView": "⏺ Starting on the ticket now.",
+      "markerFreeStreak": 0
+    }
+  }
+]
