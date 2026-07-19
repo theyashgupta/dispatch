@@ -89,6 +89,10 @@ const PATCHES: NamedPatch[] = [
  * `REQUIRED_BINARIES`/`probePreflight` already follows for prerequisite checks. Every replacement
  * is a function callback so `$`-patterns in a future patch string are never string-interpolated
  * into the artifact.
+ * @remarks Anchor counts run against the ALREADY-MUTATED string in PATCHES order, not the
+ * pristine capture — so no patch's `build()` output may contain another patch's anchor substring
+ * (holds for the current three, verified against the live bundle), or the later patch's count
+ * silently drifts to 0/2 and the boot log misreports it as ttyd version drift.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 export function patchIndexHtml(html: string): {
