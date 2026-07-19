@@ -71,6 +71,7 @@ export function InboxView({
 
   return (
     <div
+      id="inbox-view"
       style={{
         flex: "1 1 auto",
         minHeight: 0,

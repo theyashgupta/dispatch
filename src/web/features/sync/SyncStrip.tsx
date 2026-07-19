@@ -192,9 +192,14 @@ export function SyncStrip({
             <IconButton
               id="inbox-toggle"
               aria-label={
-                inboxOpen ? "Close inbox, return to board" : "Open inbox"
+                inboxOpen
+                  ? "Close inbox, return to board"
+                  : inboxCount != null && inboxCount > 0
+                    ? `Open inbox, ${inboxCount} ticket${inboxCount === 1 ? "" : "s"}`
+                    : "Open inbox"
               }
               aria-expanded={inboxOpen}
+              aria-controls="inbox-view"
               onClick={onOpenInbox}
               style={{
                 color: inboxOpen ? "var(--accent)" : "var(--text-muted)",
@@ -207,7 +212,7 @@ export function SyncStrip({
             </IconButton>
             {inboxCount != null && inboxCount > 0 && (
               <span
-                aria-label={`${inboxCount} ticket${inboxCount === 1 ? "" : "s"} in inbox`}
+                aria-hidden="true"
                 style={{
                   position: "absolute",
                   top: "2px",

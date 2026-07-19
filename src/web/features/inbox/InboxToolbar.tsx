@@ -43,6 +43,7 @@ export function InboxToolbar({
         onFocus={() => setSearchFocus(true)}
         onBlur={() => setSearchFocus(false)}
         placeholder="Search inbox…"
+        aria-label="Search inbox"
         style={{
           width: "240px",
           height: "32px",
