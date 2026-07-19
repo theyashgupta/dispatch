@@ -197,6 +197,22 @@ Tier definition (verbatim, applies to every item below): **byte-identical** = th
 | `services/preflight.ts` routed through a new `exec.ts` `runInherit()` export | byte-identical | Same argv, same stdio-inherit streaming shape, only the import path changes.                    |
 | `services/update.ts` routed through the same `exec.ts` `runInherit()` export | byte-identical | Same as `preflight.ts` — argv and streaming output unchanged by routing through `exec.ts`.      |
 
+### mode:"file" element-descriptor migration
+
+**Source:** `.planning/phases/56-three-layer-enforcement-completion/56-RESEARCH.md` "Deprecated-Syntax Migration" (Item B) — the two `mode: "file"` element descriptors in `eslint.config.ts`'s `boundaryElements` (`adapters-subprocess`, `adapters-config-consumer`) are on a deprecated syntax path in `eslint-plugin-boundaries` 7.x.
+
+**What:** migrate the two `mode: "file"` descriptors to `settings["boundaries/files"]` file descriptors (`{ category: "...", pattern: "..." }`), with element type staying plain `adapters` and a separate `file.category` selector distinguishing exec/git/tmux/image-proxy, plus rewrite every policy that currently keys off `"adapters-subprocess"`/`"adapters-config-consumer"` as an element `type` to instead select on `file: { category: ... }`.
+
+**Tier: byte-identical** — acceptance is an identical before/after `npx eslint src` violation set (0 errors added, same 3-warning boundaries set, same 0 backend errors); this is a config-shape migration with no intended change to which imports are allowed or disallowed.
+
+**Why deferred:** the naive `mode: "file"` → `partialMatch: false` swap is empirically verified-broken (56-RESEARCH.md, live-tested and reverted) — it stops both file descriptors from matching their target files, silently reclassifying `exec.ts`/`git.ts`/`tmux.ts`/`image-proxy.ts` as the general `adapters` element and losing the transport-narrowing (`routes` never touching `exec`/`tmux`/`git`) and the `adapters-config-consumer -> services` carve-out these descriptors exist to enforce. `mode: "file"` continues to function correctly today — deprecation-warning-only, never blocks `npm run check` — so deferring carries no correctness cost.
+
+**The three concrete policy rewrites required** (per 56-RESEARCH.md's enumeration):
+
+1. `routes`'s allow-list needs a trailing `disallow: { file: { category: "adapters-subprocess" } } }` policy (since plain `routes -> adapters` would otherwise silently include exec/git/tmux once the element-type carve-out is gone).
+2. The general `adapters` allow-list needs a trailing `disallow: { file: { category: "adapters-subprocess" }, to: { element: { type: ["sources", "store"] } } } }`-shaped policy, preserving exec/git/tmux's narrower rights (today `adapters-subprocess` may only import itself + `shared`, not `sources`/`store` like plain `adapters` may).
+3. `adapters-config-consumer`'s `services` carve-out needs a trailing `allow: { file: { category: "adapters-config-consumer" }, to: { element: { type: "services" } } } }` policy.
+
 ### Triage-derived layering-violation fixes (genuine violations from the boundaries table above)
 
 | Item                                                                                     | Tier           | Reason                                                                                                                                                                                   |
