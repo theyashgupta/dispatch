@@ -13,12 +13,12 @@ import { getHooksRuntime } from "../infra/config-holder.js";
  * `PreToolUse` matcher from it, so the "enters on tool X", "leaves on tool X", and "matcher
  * delivers tool X" contracts can never drift apart (a set edited without the matcher would
  * half-wire: catch-all PostToolUse flips back on a tool the enter side never covered).
- * Live-verified (48-DIAGNOSIS.md) for `AskUserQuestion` only; `ExitPlanMode` is the same class of
- * gap (RESEARCH.md) but was not exercised live in this phase's diagnosis, so it stays out until
- * it is.
+ * Live-verified (48-DIAGNOSIS.md) for `AskUserQuestion`; `ExitPlanMode` (48-IN-03, allow-list #8)
+ * is live-verified in Phase 57 — see 57-01-SUMMARY.md for the sandbox probe evidence (PreToolUse
+ * synthesizes the needs_input marker with a clean display reason, PostToolUse flips it back).
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
-export const PAUSE_TOOL_NAMES = new Set(["AskUserQuestion"]);
+export const PAUSE_TOOL_NAMES = new Set(["AskUserQuestion", "ExitPlanMode"]);
 
 /**
  * Per-card epoch ms of the last hook-driven activity stamp — the 2s throttle state. Channel
@@ -114,11 +114,16 @@ async function applyPromptSubmit(cardId: string): Promise<void> {
  * and Done columns, duplicate-key dedup) are the only column logic needed here.
  *
  * @remarks `discriminator` MUST vary per distinct pause (the live `tool_use_id`, or the
- * {@link preToolUseSeq} fallback) and is folded into `reason` — the ONLY input `markerKey` reads
- * — so a second, genuinely new pause in the same session never dedups against the first pause's
- * still-standing `lastMarker` (`flipBack` deliberately never clears it). The SAME pause retried
- * with the SAME `tool_use_id` still produces the SAME key, so the existing dedup guard continues
- * to suppress a true duplicate fire.
+ * {@link preToolUseSeq} fallback) and is folded into the KEY-source `marker.reason` — the ONLY
+ * input `markerKey` reads — so a second, genuinely new pause in the same session never dedups
+ * against the first pause's still-standing `lastMarker` (`flipBack` deliberately never clears
+ * it). The SAME pause retried with the SAME `tool_use_id` still produces the SAME key, so the
+ * existing dedup guard continues to suppress a true duplicate fire. 48-IN-02 (allow-list #7):
+ * the DISPLAYED reason passed to `store.applyMarker` is deliberately a SEPARATE, clean string
+ * (`waiting on <toolName>`, no discriminator) — the raw `tool_use_id`/fallback counter is
+ * internal dedup plumbing, not something the user should see on the card. The key-source and
+ * the display string are allowed to diverge because `markerKey()` is called on `marker` (the
+ * discriminated one), never on the clean display string.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 async function applyPreToolUseEvent(
@@ -130,10 +135,11 @@ async function applyPreToolUseEvent(
     kind: "NEEDS_INPUT",
     reason: `waiting on ${toolName} (${discriminator})`,
   };
+  const displayReason = `waiting on ${toolName}`;
   await store.applyMarker(
     cardId,
     "needs_input",
-    marker.reason,
+    displayReason,
     markerKey(marker),
   );
 }

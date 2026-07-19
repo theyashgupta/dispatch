@@ -11,8 +11,11 @@ import {
 
 /**
  * Lowest claude CLI version whose hook payload contract was live-verified (Stop carries
- * `last_assistant_message`, per-entry timeouts enforced). Below this floor injection is skipped
- * entirely and the pane watcher carries status alone.
+ * `last_assistant_message`, per-entry timeouts enforced, a matched `PreToolUse` entry reliably
+ * delivers `tool_name`/`tool_use_id`). Below this floor injection is skipped entirely and the
+ * pane watcher carries status alone. 48-IN-01: the PreToolUse-matcher/`tool_use_id` surface was
+ * live-verified on CLI 2.1.212 (48-DIAGNOSIS.md); re-verified against 2.1.214 in Phase 57
+ * (57-01-SUMMARY.md) with no contract drift observed.
  */
 const HOOKS_FLOOR: [number, number, number] = [2, 1, 207];
 
