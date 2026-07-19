@@ -41,9 +41,10 @@ export function InboxView({
 }: InboxViewProps) {
   const [search, setSearch] = useState("");
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  const [promotedIds, setPromotedIds] = useState<Set<string>>(new Set());
 
   const inboxCards = board.cards
-    .filter((c) => c.column === "inbox")
+    .filter((c) => c.column === "inbox" && !promotedIds.has(c.id))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
   const projectOptions = inboxProjectOptions(board.cards);
@@ -59,6 +60,7 @@ export function InboxView({
   });
 
   function handlePromote(id: string) {
+    setPromotedIds((s) => new Set(s).add(id));
     moveCard(id, "todo").catch((err) => {
       console.error("moveCard failed; SSE snapshot will reconcile", err);
     });
