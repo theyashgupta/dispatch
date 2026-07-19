@@ -337,10 +337,17 @@ const feWebBoundariesConfig = {
  * label; until then this block keeps them at warn instead of error. MUST be
  * registered AFTER `feWebBoundariesConfig` in the exported array —
  * flat-config resolves the winning rule severity per file from the LAST
- * matching block, so ordering is what makes the carve-out take effect. This
- * carve-out shrinks to zero in Phase 57 and is never resolved via a rule
- * suppression directive (docs/standards/comments.md rule 9 reserves that
- * escape hatch for external, code-irreducible facts, not layering debt).
+ * matching block, so ordering is what makes the carve-out take effect.
+ *
+ * The demotion is FILE-scoped, not edge-scoped: flat config replaces the
+ * whole rule entry, so every policy in `feWebBoundaryPolicies` (including the
+ * frontend->backend disallow) reports at warn for these two files — any new,
+ * unrelated violation introduced here must be held to the error bar in review
+ * (docs/standards/code-review-rules.md, Named exceptions) until Phase 57
+ * removes this block. This carve-out shrinks to zero in Phase 57 and is never
+ * resolved via a rule suppression directive (docs/standards/comments.md rule 9
+ * reserves that escape hatch for external, code-irreducible facts, not
+ * layering debt).
  */
 const feWebBoundariesWarnCarveout = {
   files: ["src/web/lib/card-badges.ts", "src/web/primitives/ActivityItem.tsx"],
