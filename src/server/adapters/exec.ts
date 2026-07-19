@@ -9,6 +9,18 @@ export interface ExecResult {
 }
 
 /**
+ * Env-gated measurement instrumentation for the perf-subproc harness (PERF-01b), dead on every
+ * normal path: `perfExec` and `perfCalls` are the only two allocations that exist when
+ * `DISPATCH_PERF_EXEC` is unset, and neither is read nor written anywhere else in {@link run}.
+ * @remarks This is the sole subprocess chokepoint (NEW-11: execa was never installed), so wrapping
+ * `run()` alone captures effectively all `git`/`tmux`/`ttyd` load system-wide without touching those
+ * adapters individually.
+ * @see docs/ARCHITECTURE.md#exec-chokepoint
+ */
+const perfExec = process.env.DISPATCH_PERF_EXEC === "1";
+const perfCalls: { cmd: string; ms: number }[] = [];
+
+/**
  * Run an argv command and capture stdout/stderr.
  * On non-zero exit / spawn failure, throws an Error carrying `.stderr` and `.stdout`
  * (both always strings) so callers can surface the underlying git/tmux stderr on the card.
@@ -23,13 +35,16 @@ export async function run(
   args: string[],
   opts: { cwd?: string; timeout?: number; maxBuffer?: number } = {},
 ): Promise<ExecResult> {
+  const t0 = perfExec ? performance.now() : 0;
   try {
     const { stdout, stderr } = await execFileP(cmd, args, {
       ...opts,
       encoding: "utf8",
     });
+    if (perfExec) perfCalls.push({ cmd, ms: performance.now() - t0 });
     return { stdout, stderr };
   } catch (err) {
+    if (perfExec) perfCalls.push({ cmd, ms: performance.now() - t0 });
     const e = err as Error & { stderr?: string; stdout?: string };
     throw Object.assign(new Error(e.message), {
       stderr: e.stderr ?? "",
@@ -37,6 +52,30 @@ export async function run(
     });
   }
 }
+
+/**
+ * Dump every {@link run} call recorded since boot to stderr as one `DISPATCH_PERF_EXEC_DUMP` JSON
+ * line, then exit. Invoked only when `DISPATCH_PERF_EXEC=1` — the perf-subproc harness SIGTERMs the
+ * sandboxed server it drove and reads this line back to build the per-cmd breakdown table.
+ */
+function registerPerfExecDump(): void {
+  process.on("SIGTERM", () => {
+    const byCmd: Record<string, { count: number; ms: number }> = {};
+    for (const c of perfCalls) {
+      const entry = byCmd[c.cmd] ?? { count: 0, ms: 0 };
+      entry.count += 1;
+      entry.ms += c.ms;
+      byCmd[c.cmd] = entry;
+    }
+    const total = perfCalls.reduce((sum, c) => sum + c.ms, 0);
+    process.stderr.write(
+      `DISPATCH_PERF_EXEC_DUMP ${JSON.stringify({ calls: perfCalls.length, total, byCmd })}\n`,
+    );
+    process.exit(0);
+  });
+}
+
+if (perfExec) registerPerfExecDump();
 
 /** Resolve after `ms` milliseconds. Used by Plan 03's readiness poll and paste settle. */
 export function sleep(ms: number): Promise<void> {
