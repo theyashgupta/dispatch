@@ -108,7 +108,7 @@ export function buildKickoff(
     ...(slim
       ? [
           `## Ticket`,
-          `Read the full ticket — description and comments — via the Linear MCP. If the MCP is unavailable, fall back to the ticket URL above or ask the user.`,
+          `Read the full ticket — description and comments — via the Linear MCP. If the MCP is unavailable, ${url ? "fall back to the ticket URL above or " : ""}ask the user.`,
         ]
       : [`## Description`, description]),
     ...(substituted !== null
