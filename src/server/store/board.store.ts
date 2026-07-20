@@ -116,6 +116,13 @@ class BoardStore extends EventEmitter {
    */
   private readonly inFlightStarts = new Set<string>();
   /**
+   * Card ids with a Sync-to-Linear request currently in flight (PUSH-01/03). Mirrors
+   * `inFlightStarts` EXACTLY: transient, in-memory, NOT persisted — no sync survives a restart, so
+   * this set is intentionally empty after load(). Keyed by `card.id`, never a single global flag, so
+   * two DIFFERENT local cards may sync concurrently while the SAME card is single-flighted.
+   */
+  private readonly inFlightSyncs = new Set<string>();
+  /**
    * Bootstrap-injected releaser for cleared hook tokens. The boundaries DAG forbids
    * store → services, so bootstrap wires services/domain/hook-tokens.ts' unregister function in here
    * (composed with hook-events' activity-throttle reaper, which is why the card id rides along);
@@ -318,6 +325,7 @@ class BoardStore extends EventEmitter {
         }
         card.ttydPort = undefined;
         card.terminalError = null;
+        card.syncing = undefined;
         this.cards.set(card.id, card);
       }
     }
@@ -436,6 +444,28 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Is a Sync-to-Linear request currently in flight for this card? Synchronous per-card guard for
+   * the sync route (mirrors `isStarting` exactly). Not queued/persisted.
+   */
+  isSyncing(id: string): boolean {
+    return this.inFlightSyncs.has(id);
+  }
+
+  /**
+   * Mark a sync as in flight. MUST be called synchronously (no await between the isSyncing check
+   * and this) so a concurrent request for the SAME card can never race past the guard. Not
+   * queued/persisted.
+   */
+  beginSync(id: string): void {
+    this.inFlightSyncs.add(id);
+  }
+
+  /** Clear the in-flight marker when a sync attempt settles (success or failure). */
+  endSync(id: string): void {
+    this.inFlightSyncs.delete(id);
+  }
+
+  /**
    * Record the current provisioning step (card line 3). The card stays in "To Do" while
    * provisioning — column is untouched — and any prior startError is cleared so a retry's
    * progress replaces the stale error. No-op if the id is unknown.
@@ -540,6 +570,18 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.statusReason = reason ?? undefined;
+      return [];
+    });
+  }
+
+  /**
+   * Set or clear the wire-visible in-flight Sync-to-Linear flag (single-field enqueue, the
+   * `setStatusReason` precedent) so the UI sees the flag flip over SSE. No-op if the id is unknown.
+   */
+  setSyncing(id: string, syncing: boolean): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) card.syncing = syncing;
       return [];
     });
   }
@@ -1180,6 +1222,68 @@ class BoardStore extends EventEmitter {
         }),
       ];
     }).then(() => created);
+  }
+
+  /**
+   * Atomically adopt a real Linear identity onto a `source:"local"` card (PUSH-01/02): ONE enqueue
+   * that flips `source: "linear"`, swaps identifier/url/issueId/title/description to the created
+   * (or found) issue's canonical values, clears `syncError`/`syncing`, and emits `sync_out` in the
+   * SAME transaction. `Card.id` NEVER changes here — only the poller-relevant identity fields move —
+   * which is exactly what lets the next Linear poll refresh the card in place via the issueId-keyed
+   * reconcile map instead of creating a duplicate. Marker screening of the adopted title/description
+   * happens at the ROUTE layer, not here — the boundaries DAG forbids store -> services, so the
+   * store cannot import `hasDispatchMarker`.
+   * @remarks In-queue re-check (the `applyMarker` precedent): re-reads the live Map and no-ops
+   * (returns `[]`, no event) unless the card exists AND is still `source: "local"` — a raced/repeated
+   * call after adoption already landed is therefore idempotent, the retry-safety belt for PUSH-03.
+   */
+  adoptLinearIdentity(
+    id: string,
+    adopted: {
+      identifier: string;
+      url: string;
+      issueId: string;
+      title: string;
+      description: string;
+    },
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card || (card.source ?? "linear") !== "local") return [];
+      card.source = "linear";
+      card.identifier = adopted.identifier;
+      card.url = adopted.url;
+      card.issueId = adopted.issueId;
+      card.title = adopted.title;
+      card.description = adopted.description;
+      card.syncError = null;
+      card.syncing = undefined;
+      return [
+        this.event("sync_out", {
+          cardId: id,
+          source: "linear",
+          reason: `synced to Linear as ${adopted.identifier}`,
+        }),
+      ];
+    });
+  }
+
+  /**
+   * Record a retry-safe Sync-to-Linear failure (PUSH-03) in ONE atomic mutation (`setStartError`
+   * precedent): set the fixed/service-derived `syncError` copy AND clear the in-flight `syncing`
+   * flag together, so the SSE broadcast never carries a torn frame with the error set but the button
+   * still showing "syncing…". `message` must never be raw stdout (SECURITY, mirrors `startError`).
+   * No-op if the id is unknown.
+   */
+  recordSyncError(id: string, message: string): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) {
+        card.syncError = message;
+        card.syncing = undefined;
+      }
+      return [];
+    });
   }
 
   /**

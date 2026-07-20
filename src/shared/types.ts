@@ -39,7 +39,8 @@ export type EventType =
   | "session_failed"
   | "resume_failed"
   | "cleanup"
-  | "local_created";
+  | "local_created"
+  | "sync_out";
 
 /** One immutable board-activity log row; append-only; carries no secrets. */
 export interface ActivityEvent {
@@ -171,6 +172,20 @@ export interface Card {
   terminalError?: TerminalError | null;
   /** Fixed resume-failure copy rendered by the session-lost UI; null/absent when no resume has failed. */
   resumeError?: string | null;
+
+  /**
+   * Transient wire-visible in-flight flag for a running Sync-to-Linear attempt. Follows the
+   * `isStarting` posture: never persisted as meaningful state across a restart — `hydrateFromParsed`
+   * resets it alongside `ttydPort`/`terminalError`, since a sync cannot survive a backend restart and
+   * a stale `true` would permanently disable the Sync Linear button.
+   */
+  syncing?: boolean;
+  /**
+   * Card-level Sync-to-Linear failure copy, persisted like `resumeError` so the error survives a
+   * reload until cleared by a successful retry. A fixed/service-derived string, NEVER raw claude
+   * stdout (SECURITY — mirrors `startError.stderr`'s no-pane-dump discipline).
+   */
+  syncError?: string | null;
 
   /**
    * Originating ticket source (a registered TicketSource.id — "linear" is the only value today).

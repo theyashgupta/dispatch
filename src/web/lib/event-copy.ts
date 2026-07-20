@@ -70,6 +70,8 @@ export function describeEvent(event: ActivityEvent): string {
       return "workspace cleaned up";
     case "local_created":
       return "created locally";
+    case "sync_out":
+      return "synced to Linear";
     default:
       return describeUnknownEvent(event.type);
   }

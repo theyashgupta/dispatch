@@ -12,6 +12,7 @@ import {
   TriangleAlert,
   Trash2,
   Unplug,
+  Upload,
   type LucideIcon,
 } from "lucide-react";
 import type { EventType } from "../../shared/types.js";
@@ -30,6 +31,7 @@ const EVENT_GLYPH: Record<EventType, LucideIcon> = {
   resume_failed: TriangleAlert,
   cleanup: Trash2,
   local_created: FilePlus,
+  sync_out: Upload,
 };
 
 const EVENT_TINT: Record<EventType, string> = {
@@ -46,6 +48,7 @@ const EVENT_TINT: Record<EventType, string> = {
   resume_failed: "var(--destructive)",
   cleanup: "var(--text-muted)",
   local_created: "var(--text-muted)",
+  sync_out: "var(--text-muted)",
 };
 
 const GLYPH_LOOKUP: Partial<Record<string, LucideIcon>> = EVENT_GLYPH;
