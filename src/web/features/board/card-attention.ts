@@ -1,4 +1,4 @@
-import type { Card as CardModel } from "../../../shared/types.js";
+import type { Card as CardModel, StartError } from "../../../shared/types.js";
 
 /**
  * Returns true when a card needs human attention: a start failure, a lost session outside the
@@ -15,19 +15,23 @@ export function needsAttention(card: CardModel): boolean {
 }
 
 /**
- * Maps a card's `startError` variant to the exact heading/detail copy shown in the board's
- * destructive Notice and reused verbatim as the Orca attention-badge tooltip.
+ * Maps a `startError` variant to the exact heading/detail copy shown in the board's destructive
+ * Notice and reused verbatim as the Orca attention-badge tooltip.
+ * @remarks Takes the `StartError` itself (not the card) so the "error exists" precondition lives
+ * in the signature — callers narrow `card.startError` first, and no non-null assertion is needed.
  */
-export function errorCopy(card: CardModel): {
+export function errorCopy(
+  err: StartError,
+  identifier: string,
+): {
   heading: string;
   detail?: string;
 } {
-  const err = card.startError!;
   switch (err.variant) {
     case "branch-conflict":
       return {
         heading: "Start failed — branch checked out elsewhere",
-        detail: `Branch ${card.identifier} is attached to another worktree.`,
+        detail: `Branch ${identifier} is attached to another worktree.`,
       };
     case "repl-timeout":
       return { heading: "Start failed — Claude didn't start" };
@@ -44,7 +48,8 @@ export function errorCopy(card: CardModel): {
  * is true at once.
  */
 export function attentionTitle(card: CardModel): string | null {
-  if (card.startError != null) return errorCopy(card).heading;
+  if (card.startError != null)
+    return errorCopy(card.startError, card.identifier).heading;
   if (card.sessionLost === true && card.column !== "done")
     return "Session lost";
   if (card.cleanupBlocked != null && card.cleanupBlocked.length > 0)

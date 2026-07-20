@@ -353,7 +353,10 @@ export function CardView({
           }}
         >
           {(() => {
-            const { heading, detail } = errorCopy(card);
+            const { heading, detail } = errorCopy(
+              card.startError,
+              card.identifier,
+            );
             return (
               <>
                 <Notice
