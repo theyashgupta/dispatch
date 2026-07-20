@@ -38,7 +38,11 @@ const webRoot = fileURLToPath(new URL("../../web", import.meta.url));
  * Serve the built SPA's index.html for client-routed deep links in production. Registered after
  * the API router and guarded on GET + non-`/api/` paths so it never shadows `/api/*` or the SSE
  * stream: an unknown `/api/*` still gets Express's default 404 rather than HTML. Sent no-cache so
- * a rebuilt asset graph is always re-fetched (hashed assets under assets/ stay immutable).
+ * a rebuilt asset graph is always re-fetched (hashed assets under assets/ stay immutable). Served
+ * via the `root` option (never a joined absolute path): send's dotfile policy inspects every
+ * segment of a bare absolute path, so an npx install under `~/.npm/_npx/...` (or nvm's
+ * `~/.nvm/...`) 404s on the `.npm` segment; with `root` set, only the relative `index.html` is
+ * inspected.
  */
 const spaFallback: express.RequestHandler = (req, res, next) => {
   if (req.method !== "GET") {
@@ -50,7 +54,7 @@ const spaFallback: express.RequestHandler = (req, res, next) => {
     return;
   }
   res.set("Cache-Control", "no-cache");
-  res.sendFile(path.join(webRoot, "index.html"));
+  res.sendFile("index.html", { root: webRoot });
 };
 
 /**
