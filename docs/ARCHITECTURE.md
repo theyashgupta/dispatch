@@ -813,6 +813,37 @@ degrades to the plain `Synced` label rather than computing a relative age or a s
 JSDoc (the comment standard's tsx carve-out — [comments.md](standards/comments.md) rule 2 — forbids
 JSDoc in `src/web/**/*.tsx`, enforced by the `allowJsdoc: false` lint scoping in `eslint.config.ts`).
 
+**Sync out — promoting a local card to Linear (`PUSH-01/02/03`).** The inbound half above mirrors
+Linear INTO the board; this half pushes a `source:"local"` card OUT to a real Linear issue on
+explicit user action (`POST /cards/:id/sync-linear`, `services/orchestration/linear-sync.ts`).
+MCP-only writes: the stored Linear API key is READ-ONLY toward Linear everywhere in this app — the
+sync path never touches it, instead spawning a headless `claude -p` that reuses the CLI's own
+user-scope Linear MCP OAuth session, restricted via `--allowedTools` to five read/write tools
+(`list_issues`, `save_issue`, `list_teams`, `list_users`, `list_issue_statuses`). The sole sanctioned
+exception to "API key never writes" is GraphQL `issueDelete` for TEST-cleanup only (user decision
+2026-07-20) — never issue creation or update. Idempotency: the sync prompt embeds
+`dispatch-sync:<card.id>` as the final line of the created issue's description and searches for that
+exact token via `list_issues` BEFORE ever calling `save_issue` to create — `save_issue` is
+upsert-shaped (an `id` field means UPDATE), so the create branch is instructed to omit `id` entirely.
+A retry after an ambiguous prior attempt (created-but-unparsed) therefore always finds the token and
+reuses the existing issue instead of duplicating it. Atomic adoption: on success, `store.adoptLinearIdentity`
+performs ONE fused mutation — `source: "linear"`, identifier/url/issueId/title/description swapped to
+the canonical Linear values, `syncError`/`syncing` cleared — with a `sync_out` activity event inserted
+in the SAME transaction (the standard `enqueue` persist+broadcast chokepoint, `SINGLE-WRITER` above).
+`Card.id` NEVER changes, which is exactly what lets the NEXT Linear poll refresh the card in place: the
+card now carries `source: "linear"` and the real `issueId`, so `applyIssues`'s per-source `current` map
+(keyed by `issueId`) picks it up and `reconcile()`'s existing in-place-refresh branch (`SYNC-02` above)
+applies — no separate poller code path exists for a freshly-synced card. Per-card single-flight:
+`store.isSyncing`/`beginSync`/`endSync` mirror the start saga's `isStarting` guard exactly (a
+synchronous `Set<string>` keyed by card id, checked and set with no `await` between), so two DIFFERENT
+local cards may sync concurrently while the SAME card is single-flighted; failure records a fixed,
+non-stdout `card.syncError` string (never raw claude output — mirrors `startError`'s discipline) and
+the card stays fully local, retryable via the same idempotency token. **Operator prerequisite:**
+Sync-to-Linear requires a one-time interactive Linear MCP OAuth authorization on the machine running
+`claude` — `claude mcp add --transport http linear -s user https://mcp.linear.app/mcp`, then run
+`claude`, type `/mcp`, choose `linear`, and authenticate in the browser. The workspace selected during
+that OAuth flow is the write target for every subsequent headless sync (done for Yash-Test 2026-07-20).
+
 ### SSE Transport
 
 The board receives state over a single hand-rolled Server-Sent-Events stream — no SSE library —
@@ -1105,8 +1136,10 @@ is a behavior change, not a refactor.
 3. **REST route paths + status codes.** `GET /api/board`, `GET /api/stream` (SSE),
    `GET /api/events` (REST event log — `{ events: ActivityEvent[] }`, newest-first, default limit 200,
    `?cardId=` scoped),
-   `POST /api/cards/:id/{move,start,resume,terminal,open-editor,cleanup}`; the `202/400/409/204` codes and
-   the `{ error, variant? }` 400 body. Vite proxy matches `^/api/` only (regex, deliberately not `/api`).
+   `POST /api/cards/:id/{move,start,resume,terminal,open-editor,cleanup,sync-linear}`; the
+   `202/400/409/204` codes and the `{ error, variant? }` 400 body. `sync-linear` deliberately deviates
+   with a `404` (not `400`) for an unknown card id — see the Sync-out contract above. Vite proxy
+   matches `^/api/` only (regex, deliberately not `/api`).
 4. **Persistence format + location.** `~/.dispatch/{board.json,config.json}`; `board.json` ===
    `BoardSnapshot` JSON; atomic writes via `write-file-atomic`; config at mode `0600`; the `"//"`-keyed
    config template.
