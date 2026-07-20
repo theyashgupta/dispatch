@@ -50,6 +50,19 @@ function inboxTransitionError(card: Card, column: Column): string | null {
   return null;
 }
 
+/**
+ * GROUP-03 as a SERVER invariant, not a UI convention: a grouped member is never independently
+ * progressable, including during the pre-start/failed-start window where it still sits in To Do
+ * (session/workspace fields live only on the group card). Called at the top of every single-card
+ * action handler, right after the card-exists lookup and before any other validation — the same
+ * `isStarting`/inbox-guard 409 posture this file already uses. Returns `null` for an ungrouped card
+ * (including the group card itself, which never carries `groupId`).
+ */
+function groupedMemberError(card: Card): string | null {
+  if (card.groupId == null) return null;
+  return `card is grouped under ${card.groupId} — act on the group card`;
+}
+
 cardsRouter.post("/cards/:id/move", async (req, res) => {
   const { id } = req.params;
   const column = (req.body as { column?: unknown } | undefined)?.column;
@@ -66,6 +79,11 @@ cardsRouter.post("/cards/:id/move", async (req, res) => {
   const card = store.getCard(id);
   if (!card) {
     res.status(400).json({ error: `unknown card id: ${id}` });
+    return;
+  }
+  const groupError = groupedMemberError(card);
+  if (groupError != null) {
+    res.status(409).json({ error: groupError });
     return;
   }
 
@@ -85,6 +103,11 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
   const card = store.getCard(id);
   if (!card) {
     res.status(400).json({ error: `unknown card id: ${id}` });
+    return;
+  }
+  const groupError = groupedMemberError(card);
+  if (groupError != null) {
+    res.status(409).json({ error: groupError });
     return;
   }
 
@@ -190,6 +213,11 @@ cardsRouter.post("/cards/:id/resume", (req, res) => {
     res.status(400).json({ error: `unknown card id: ${id}` });
     return;
   }
+  const groupError = groupedMemberError(card);
+  if (groupError != null) {
+    res.status(409).json({ error: groupError });
+    return;
+  }
 
   if (card.column !== "in_review") {
     res.status(409).json({
@@ -237,6 +265,11 @@ cardsRouter.post("/cards/:id/terminal", (req, res) => {
     res.status(400).json({ error: `unknown card id: ${id}` });
     return;
   }
+  const groupError = groupedMemberError(card);
+  if (groupError != null) {
+    res.status(409).json({ error: groupError });
+    return;
+  }
 
   if (!card.tmuxSession) {
     res.status(400).json({ error: "card has no live session" });
@@ -275,6 +308,11 @@ cardsRouter.post("/cards/:id/open-editor", (req, res) => {
     res.status(400).json({ error: `unknown card id: ${id}` });
     return;
   }
+  const groupError = groupedMemberError(card);
+  if (groupError != null) {
+    res.status(409).json({ error: groupError });
+    return;
+  }
 
   if (!card.workspacePath) {
     res.status(400).json({ error: "card has no workspace" });
@@ -293,6 +331,11 @@ cardsRouter.post("/cards/:id/cleanup", (req, res) => {
   const card = store.getCard(id);
   if (!card) {
     res.status(400).json({ error: `unknown card id: ${id}` });
+    return;
+  }
+  const groupError = groupedMemberError(card);
+  if (groupError != null) {
+    res.status(409).json({ error: groupError });
     return;
   }
   if (card.column !== "done") {
@@ -592,6 +635,11 @@ async function syncLinearHandler(
   const card = store.getCard(id);
   if (!card) {
     res.status(404).json({ error: `unknown card id: ${id}` });
+    return;
+  }
+  const groupError = groupedMemberError(card);
+  if (groupError != null) {
+    res.status(409).json({ error: groupError });
     return;
   }
 
