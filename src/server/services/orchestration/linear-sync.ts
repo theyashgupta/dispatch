@@ -53,40 +53,65 @@ Never emit the literal text "DISPATCH_STATUS:" anywhere in your output.`;
 }
 
 /**
- * Scan `stdout` for the LAST complete top-level JSON object (bracket-matched from the rightmost
- * `}` backward), so trailing prose after the strict-JSON contract line still resolves correctly —
- * mirrors `parseTicketDraft`'s "undecorated, scratchpad-verifiable" precedent, generalized from a
- * delimited-header scan to a brace-matched one since this contract's payload is JSON, not markdown
- * sections. Returns null when no balanced `{...}` substring parses as a JSON object.
+ * Find the index of the `}` closing the top-level object that opens at `start`, tracking JSON
+ * in-string/escape state so braces INSIDE string values never miscount — a description quoting an
+ * unbalanced `}` (code snippet, template syntax) must not mis-pair the match. Returns -1 when the
+ * object never closes.
  */
-function findLastJsonObject(stdout: string): Record<string, unknown> | null {
-  for (let end = stdout.length - 1; end >= 0; end--) {
-    if (stdout[end] !== "}") continue;
-    let depth = 0;
-    for (let start = end; start >= 0; start--) {
-      const ch = stdout[start];
-      if (ch === "}") {
-        depth++;
-      } else if (ch === "{") {
-        depth--;
-        if (depth === 0) {
-          const candidate = stdout.slice(start, end + 1);
-          try {
-            const parsed: unknown = JSON.parse(candidate);
-            if (
-              parsed !== null &&
-              typeof parsed === "object" &&
-              !Array.isArray(parsed)
-            ) {
-              return parsed as Record<string, unknown>;
-            }
-          } catch {}
-          break;
-        }
+function scanObjectEnd(stdout: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < stdout.length; i++) {
+    const ch = stdout[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
       }
+    } else if (ch === '"') {
+      inString = true;
+    } else if (ch === "{") {
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) return i;
     }
   }
-  return null;
+  return -1;
+}
+
+/**
+ * Scan `stdout` forward for the LAST complete top-level JSON object, so trailing prose after the
+ * strict-JSON contract line still resolves correctly — mirrors `parseTicketDraft`'s "undecorated,
+ * scratchpad-verifiable" precedent, generalized from a delimited-header scan to a brace-matched one
+ * since this contract's payload is JSON, not markdown sections. Candidates are matched string-aware
+ * (via {@link scanObjectEnd}); a successful parse jumps the cursor past the object so a nested
+ * `{...}` inside it can never shadow its parent as the "last" object, while a failed candidate
+ * advances one `{` at a time so prose braces before the real payload cannot mask it. Returns null
+ * when no balanced `{...}` substring parses as a JSON object.
+ */
+function findLastJsonObject(stdout: string): Record<string, unknown> | null {
+  let last: Record<string, unknown> | null = null;
+  for (let i = stdout.indexOf("{"); i !== -1; i = stdout.indexOf("{", i + 1)) {
+    const end = scanObjectEnd(stdout, i);
+    if (end === -1) continue;
+    try {
+      const parsed: unknown = JSON.parse(stdout.slice(i, end + 1));
+      if (
+        parsed !== null &&
+        typeof parsed === "object" &&
+        !Array.isArray(parsed)
+      ) {
+        last = parsed as Record<string, unknown>;
+        i = end;
+      }
+    } catch {}
+  }
+  return last;
 }
 
 /**
