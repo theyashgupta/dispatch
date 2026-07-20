@@ -16,6 +16,7 @@ import type {
 } from "../../../shared/types.js";
 import { Column } from "./Column.js";
 import { CardView } from "./CardView.js";
+import { SelectionBar } from "./SelectionBar.js";
 import { membersOf } from "./group-members.js";
 import type { StartRequest } from "../../lib/start-request.js";
 import { useLastOpened } from "../../hooks/useUnseenActivity.js";
@@ -58,6 +59,29 @@ export function Board({
   const activeCard = activeCardId
     ? (cards.find((c) => c.id === activeCardId) ?? null)
     : null;
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setSelectedIds(new Set());
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedIds.size]);
 
   const lastOpenedMap = useLastOpened();
   const overlaySelected =
@@ -137,66 +161,75 @@ export function Board({
   }
 
   return (
-    <DndContext
-      sensors={sensors}
-      onDragStart={({ active }: DragStartEvent) =>
-        setActiveCardId(String(active.id))
-      }
-      onDragEnd={(e) => {
-        setActiveCardId(null);
-        handleDragEnd(e);
-      }}
-      onDragCancel={() => {
-        setActiveCardId(null);
-        armClickSuppressionUntilPointerUp();
-      }}
-    >
-      <div
-        style={{
-          flex: "1 1 auto",
-          minHeight: 0,
-          display: "flex",
-          justifyContent: isLarge ? "safe center" : "flex-start",
-          gap: isLarge ? "var(--board-gutter-lg)" : "var(--space-lg)",
-          padding: isLarge ? "var(--board-gutter-lg)" : "var(--space-lg)",
-          overflowX: "auto",
-          overflowY: "hidden",
-          scrollSnapType:
-            isCarousel && activeCardId == null ? "x mandatory" : "none",
-          scrollPaddingInline: "var(--space-lg)",
+    <>
+      <DndContext
+        sensors={sensors}
+        onDragStart={({ active }: DragStartEvent) =>
+          setActiveCardId(String(active.id))
+        }
+        onDragEnd={(e) => {
+          setActiveCardId(null);
+          handleDragEnd(e);
+        }}
+        onDragCancel={() => {
+          setActiveCardId(null);
+          armClickSuppressionUntilPointerUp();
         }}
       >
-        {COLUMNS.map((column) => (
-          <Column
-            key={column}
-            column={column}
-            cards={cards.filter(
-              (card) => card.column === column && card.groupId == null,
-            )}
-            groupMembersById={groupMembersById}
-            selectedCardId={selectedCardId}
-            onSelectCard={handleSelectCard}
-            onStartRequest={onStartRequest}
-            isCarousel={isCarousel}
-            phone={isPhone}
-            large={isLarge}
-            resizeDisabled={activeCardId != null}
-          />
-        ))}
-      </div>
-      <DragOverlay dropAnimation={null} style={{ pointerEvents: "none" }}>
-        {activeCard ? (
-          <CardView
-            card={activeCard}
-            selected={overlaySelected}
-            showDot={overlayShowDot}
-            showGone={overlayShowGone}
-            hover={false}
-            elevated
-            domProps={{ "aria-hidden": true, inert: true }}
-          />
-        ) : null}
-      </DragOverlay>
-    </DndContext>
+        <div
+          style={{
+            flex: "1 1 auto",
+            minHeight: 0,
+            display: "flex",
+            justifyContent: isLarge ? "safe center" : "flex-start",
+            gap: isLarge ? "var(--board-gutter-lg)" : "var(--space-lg)",
+            padding: isLarge ? "var(--board-gutter-lg)" : "var(--space-lg)",
+            overflowX: "auto",
+            overflowY: "hidden",
+            scrollSnapType:
+              isCarousel && activeCardId == null ? "x mandatory" : "none",
+            scrollPaddingInline: "var(--space-lg)",
+          }}
+        >
+          {COLUMNS.map((column) => (
+            <Column
+              key={column}
+              column={column}
+              cards={cards.filter(
+                (card) => card.column === column && card.groupId == null,
+              )}
+              groupMembersById={groupMembersById}
+              selectedCardId={selectedCardId}
+              selectedIds={selectedIds}
+              onSelectCard={handleSelectCard}
+              onStartRequest={onStartRequest}
+              onToggleSelect={toggleSelect}
+              isCarousel={isCarousel}
+              phone={isPhone}
+              large={isLarge}
+              resizeDisabled={activeCardId != null}
+            />
+          ))}
+        </div>
+        <DragOverlay dropAnimation={null} style={{ pointerEvents: "none" }}>
+          {activeCard ? (
+            <CardView
+              card={activeCard}
+              selected={overlaySelected}
+              showDot={overlayShowDot}
+              showGone={overlayShowGone}
+              hover={false}
+              elevated
+              domProps={{ "aria-hidden": true, inert: true }}
+            />
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+      <SelectionBar
+        count={selectedIds.size}
+        onStartGroup={() => {}}
+        onClear={() => setSelectedIds(new Set())}
+      />
+    </>
   );
 }

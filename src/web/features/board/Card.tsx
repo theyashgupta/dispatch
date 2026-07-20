@@ -8,17 +8,21 @@ import { deriveShowDot, deriveShowGone } from "../../lib/card-badges.js";
 interface CardProps {
   card: CardModel;
   selected?: boolean;
+  multiSelected?: boolean;
   members?: CardModel[];
   onSelect?: (id: string) => void;
   onStartRequest?: (id: string) => void;
+  onToggleSelect?: (id: string) => void;
 }
 
 export function Card({
   card,
   selected = false,
+  multiSelected = false,
   members,
   onSelect,
   onStartRequest,
+  onToggleSelect,
 }: CardProps) {
   const [hover, setHover] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -35,6 +39,7 @@ export function Card({
     <CardView
       card={card}
       selected={selected}
+      multiSelected={multiSelected}
       showDot={showDot}
       showGone={showGone}
       hover={hover}
@@ -50,8 +55,18 @@ export function Card({
         ...attributes,
         onMouseEnter: () => setHover(true),
         onMouseLeave: () => setHover(false),
-        onClick: () => {
+        onClick: (event) => {
           if (isDragging) return;
+          if (event.metaKey || event.ctrlKey) {
+            if (
+              card.column === "todo" &&
+              card.groupId == null &&
+              card.source !== "group"
+            ) {
+              onToggleSelect?.(card.id);
+            }
+            return;
+          }
           onSelect?.(card.id);
         },
       }}

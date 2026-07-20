@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertTriangle,
+  Check,
   ChevronDown,
   ChevronRight,
   Play,
@@ -27,6 +28,7 @@ export const PRIORITY_DOT: Record<number, { color: string; label: string }> = {
 interface CardViewProps {
   card: CardModel;
   selected: boolean;
+  multiSelected?: boolean;
   showDot: boolean;
   showGone: boolean;
   hover: boolean;
@@ -59,6 +61,7 @@ function errorCopy(card: CardModel): { heading: string; detail?: string } {
 export function CardView({
   card,
   selected,
+  multiSelected = false,
   showDot,
   showGone,
   hover,
@@ -76,6 +79,7 @@ export function CardView({
     useResumeFeedback(card);
   const compact = card.column === "done";
   const isGroup = card.source === "group";
+  const selectable = card.column === "todo" && card.groupId == null && !isGroup;
   const needsAttention =
     card.startError != null ||
     (card.sessionLost === true && card.column !== "done") ||
@@ -133,18 +137,21 @@ export function CardView({
     ) : null;
 
   const hoverOrSelected = hover || selected;
-  const border = needsAttention
-    ? "1px solid var(--accent)"
-    : !elevated && hoverOrSelected
-      ? "1px solid var(--text-muted)"
-      : "1px solid var(--border)";
+  const border =
+    needsAttention || multiSelected
+      ? "1px solid var(--accent)"
+      : !elevated && hoverOrSelected
+        ? "1px solid var(--text-muted)"
+        : "1px solid var(--border)";
   const background = elevated
     ? "var(--surface-card)"
     : hoverOrSelected
       ? "var(--surface-card-hover)"
       : "var(--surface-card)";
   const boxShadowParts: string[] = [];
-  if (needsAttention) boxShadowParts.push("0 0 0 1px var(--accent)");
+  if (needsAttention || multiSelected) {
+    boxShadowParts.push("0 0 0 1px var(--accent)");
+  }
   if (elevated) boxShadowParts.push("0 6px 16px rgba(0,0,0,0.45)");
   if (hover && !elevated && !selected && !needsAttention) {
     boxShadowParts.push("0 2px 8px rgba(0,0,0,0.3)");
@@ -156,6 +163,13 @@ export function CardView({
     <div
       ref={rootRef}
       {...domProps}
+      aria-label={
+        selectable
+          ? multiSelected
+            ? "Selected for group"
+            : "Not selected for group"
+          : undefined
+      }
       style={{
         position: "relative",
         background,
@@ -173,6 +187,31 @@ export function CardView({
         touchAction: "manipulation",
       }}
     >
+      {multiSelected && (
+        <span
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            top: "var(--space-xs)",
+            left: "var(--space-xs)",
+            width: "14px",
+            height: "14px",
+            borderRadius: "50%",
+            background: "var(--accent)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Check
+            size={10}
+            strokeWidth={2.5}
+            aria-hidden="true"
+            style={{ color: "var(--text)" }}
+          />
+        </span>
+      )}
+
       {showDot && (
         <span
           title="Unseen agent activity"

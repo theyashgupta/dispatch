@@ -40,8 +40,10 @@ interface ColumnProps {
   cards: CardModel[];
   groupMembersById?: Map<string, CardModel[]>;
   selectedCardId?: string | null;
+  selectedIds?: Set<string>;
   onSelectCard?: (id: string) => void;
   onStartRequest?: (id: string) => void;
+  onToggleSelect?: (id: string) => void;
   isCarousel?: boolean;
   phone?: boolean;
   large?: boolean;
@@ -54,8 +56,10 @@ export function Column({
   cards,
   groupMembersById,
   selectedCardId,
+  selectedIds,
   onSelectCard,
   onStartRequest,
+  onToggleSelect,
   isCarousel,
   phone,
   large,
@@ -315,9 +319,11 @@ export function Column({
               key={card.id}
               card={card}
               selected={card.id === selectedCardId}
+              multiSelected={selectedIds?.has(card.id) ?? false}
               members={groupMembersById?.get(card.id)}
               onSelect={onSelectCard}
               onStartRequest={onStartRequest}
+              onToggleSelect={onToggleSelect}
             />
           ))
         )}
