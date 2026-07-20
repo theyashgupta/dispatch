@@ -1,5 +1,6 @@
 import type {
   ActivityEvent,
+  Card,
   Column,
   DirListing,
   DiscoveredRepo,
@@ -235,6 +236,57 @@ export async function generatePlaybookDraft(input: {
     }
     const body = (await res.json()) as { draft: string };
     return { ok: true, draft: body.draft };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * Generate a local ticket draft via headless `claude -p`: POST /api/cards/draft. Deliberately does
+ * NOT catch/swallow errors the way `generatePlaybookDraft` does — the caller passes an
+ * `AbortSignal` and needs to distinguish a user-initiated abort (the fetch promise rejects with
+ * `AbortError`) from every other failure. Non-OK statuses (the route's 400/409/502 cases) resolve
+ * `{ ok: false }`; a genuine abort or network failure REJECTS, left for the caller's catch block.
+ */
+export async function generateTicketDraft(
+  direction: string,
+  signal: AbortSignal,
+): Promise<{ ok: true; title: string; description: string } | { ok: false }> {
+  const res = await fetch("/api/cards/draft", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ direction }),
+    signal,
+  });
+  if (!res.ok) {
+    return { ok: false };
+  }
+  const body = (await res.json()) as { title: string; description: string };
+  return { ok: true, title: body.title, description: body.description };
+}
+
+/**
+ * Persist a reviewed/edited ticket draft: POST /api/cards. The server mints the `LOCAL-<n>`
+ * identifier and re-validates title/description (incl. the DISPATCH_STATUS footgun guard) — the
+ * client's draft is never trusted. Resolves the created `Card` on 201; any error (validation
+ * rejection or network failure) collapses to `{ ok: false }` since the modal has one shared
+ * "couldn't reach the server" failure line, mirroring `deletePlaybook`'s bare-boolean approach.
+ */
+export async function createLocalTicket(
+  title: string,
+  description: string,
+): Promise<{ ok: true; card: Card } | { ok: false }> {
+  try {
+    const res = await fetch("/api/cards", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, description }),
+    });
+    if (!res.ok) {
+      return { ok: false };
+    }
+    const card = (await res.json()) as Card;
+    return { ok: true, card };
   } catch {
     return { ok: false };
   }
