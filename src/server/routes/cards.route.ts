@@ -352,10 +352,12 @@ cardsRouter.post("/cards/draft", (req, res) => {
 
   generateTicketDraft(direction, controller.signal)
     .then((draft) => {
+      if (controller.signal.aborted) return;
       res.status(200).json(draft);
     })
-    .catch(() => {
+    .catch((err) => {
       if (controller.signal.aborted) return;
+      console.warn("[cards/draft] generation failed:", (err as Error).message);
       res.status(502).json({ error: "generate-failed" });
     })
     .finally(() => {
