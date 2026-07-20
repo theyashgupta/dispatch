@@ -241,6 +241,22 @@ export function GroupStartModal({
                   pick another and press Start again.
                 </div>
               </>
+            ) : error.variant === "ineligible" ? (
+              <>
+                <Notice
+                  tone="destructive"
+                  label="Can't start — some members are no longer eligible"
+                />
+                <div
+                  style={{
+                    fontSize: "var(--font-body)",
+                    lineHeight: "var(--line-body)",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  {error.text}
+                </div>
+              </>
             ) : (
               <div
                 style={{

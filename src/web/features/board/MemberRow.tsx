@@ -6,9 +6,10 @@ import { IconButton } from "../../primitives/IconButton.js";
 
 interface MemberRowProps {
   member: CardModel;
+  dense?: boolean;
 }
 
-export function MemberRow({ member }: MemberRowProps) {
+export function MemberRow({ member, dense = true }: MemberRowProps) {
   return (
     <div
       style={{
@@ -23,9 +24,9 @@ export function MemberRow({ member }: MemberRowProps) {
       </Field>
       <span
         style={{
-          fontSize: "var(--font-label)",
+          fontSize: dense ? "var(--font-label)" : "var(--font-body)",
           fontWeight: "var(--weight-regular)",
-          lineHeight: "var(--line-label)",
+          lineHeight: dense ? "var(--line-label)" : "var(--line-body)",
           color: "var(--text)",
           flex: "1 1 auto",
           minWidth: 0,
@@ -40,6 +41,7 @@ export function MemberRow({ member }: MemberRowProps) {
       {member.source === "linear" && member.url != null && (
         <IconButton
           aria-label={`Open ${member.identifier} in Linear`}
+          onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();
             window.open(member.url, "_blank", "noopener,noreferrer");
