@@ -31,6 +31,7 @@ interface BoardProps {
   onSelectCard?: (id: string) => void;
   onStartRequest?: (req: string | StartRequest) => void;
   onCleanupRequest?: (id: string) => void;
+  onEditPlaybooks: () => void;
 }
 
 function isColumn(id: unknown): id is ColumnId {
@@ -43,6 +44,7 @@ export function Board({
   onSelectCard,
   onStartRequest,
   onCleanupRequest,
+  onEditPlaybooks,
 }: BoardProps) {
   const [cards, setCards] = useState<CardModel[]>(board?.cards ?? []);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -256,6 +258,7 @@ export function Board({
           members={groupModalMembers}
           onClose={() => setGroupModalMembers(null)}
           onStarted={() => setSelectedIds(new Set())}
+          onEditPlaybooks={onEditPlaybooks}
         />
       )}
     </>

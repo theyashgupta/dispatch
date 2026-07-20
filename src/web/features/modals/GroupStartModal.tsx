@@ -12,6 +12,7 @@ interface GroupStartModalProps {
   members: CardModel[];
   onClose: () => void;
   onStarted?: () => void;
+  onEditPlaybooks: () => void;
 }
 
 const focusRing = (on: boolean): string =>
@@ -21,6 +22,7 @@ export function GroupStartModal({
   members,
   onClose,
   onStarted,
+  onEditPlaybooks,
 }: GroupStartModalProps) {
   const titleRef = useRef<HTMLInputElement>(null);
   const modalRef = useRef<ModalControl>(null);
@@ -119,6 +121,7 @@ export function GroupStartModal({
           <input
             ref={titleRef}
             value={title}
+            maxLength={300}
             onChange={(e) => setTitle(e.target.value)}
             onFocus={() => setTitleFocus(true)}
             onBlur={() => setTitleFocus(false)}
@@ -146,7 +149,7 @@ export function GroupStartModal({
 
         <StartModal.PlaybookPicker
           playbook={playbook}
-          onEditPlaybooks={() => {}}
+          onEditPlaybooks={onEditPlaybooks}
         />
 
         <div

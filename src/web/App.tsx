@@ -264,6 +264,10 @@ export function App() {
             onSelectCard={setSelectedCardId}
             onStartRequest={requestStart}
             onCleanupRequest={setCleanupCardId}
+            onEditPlaybooks={() => {
+              setSettingsInitialTab("playbooks");
+              setSettingsOpen(true);
+            }}
           />
         )
       }
