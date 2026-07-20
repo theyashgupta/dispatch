@@ -438,7 +438,9 @@ function screenAdoptedFields(
  * for the SAME card can never race past the guard; a DIFFERENT card's sync is unaffected (the guard
  * is keyed by card id, never a global flag). The subprocess call carries NO abort-on-disconnect
  * wiring — the service's own no-signal decision — so the server owns the full timeout bound and a
- * client disconnect can never orphan a created-but-unadopted Linear issue mid-flight.
+ * client disconnect can never orphan a created-but-unadopted Linear issue mid-flight. The 200 body
+ * is drawn from `snapshot()` — the store's single outbound redaction chokepoint — never the live
+ * Map entry, so a started local card's `hookToken` can never ride the response (SECURITY).
  */
 async function syncLinearHandler(
   req: Request<{ id: string }>,
@@ -478,7 +480,7 @@ async function syncLinearHandler(
 
     const adopted = screenAdoptedFields(result, card);
     await store.adoptLinearIdentity(id, adopted);
-    res.status(200).json(store.getCard(id));
+    res.status(200).json(store.snapshot().cards.find((c) => c.id === id));
   } catch (err) {
     console.warn(
       `[sync-linear] failed for card ${id}:`,
