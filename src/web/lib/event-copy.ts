@@ -72,6 +72,8 @@ export function describeEvent(event: ActivityEvent): string {
       return "created locally";
     case "sync_out":
       return "synced to Linear";
+    case "group_created":
+      return "group created";
     default:
       return describeUnknownEvent(event.type);
   }

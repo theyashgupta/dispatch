@@ -64,6 +64,13 @@ export interface BoardMeta {
    * precedent; no migration machinery needed for a legacy meta row that predates this field.
    */
   localTicketCounter?: number;
+  /**
+   * Minted-at-create counter for `GROUP-<n>` identifiers (Phase 63), incremented inside
+   * `createGroupCard`'s enqueue mutator. SEPARATE from `localTicketCounter` (Claude's Discretion,
+   * 63-CONTEXT.md) — a shared counter would only interleave the two id spaces cosmetically.
+   * Optional — defaults to 0 at hydrate time, matching `localTicketCounter`'s precedent.
+   */
+  groupTicketCounter?: number;
 }
 
 /**

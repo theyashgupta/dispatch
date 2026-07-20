@@ -101,6 +101,13 @@ class BoardStore extends EventEmitter {
    * mutex needed (mirrors every other counter/id-minting decision in this codebase).
    */
   private localTicketCounter = 0;
+  /**
+   * Minted-at-create counter for `GROUP-<n>` identifiers (Phase 63), persisted in the meta row
+   * alongside every other mutation. Incremented ONLY inside {@link createGroupCard}'s enqueue
+   * mutator (localTicketCounter precedent) — a SEPARATE counter from localTicketCounter's, per
+   * 63-CONTEXT.md Claude's Discretion.
+   */
+  private groupTicketCounter = 0;
   /** Serializes every mutation so mutate -> persist -> emit runs to completion before the next. */
   private queue: Promise<void> = Promise.resolve();
   /**
@@ -152,6 +159,24 @@ class BoardStore extends EventEmitter {
     if (card.hookToken) this.releaseHookToken(card.hookToken, card.id);
     card.hookToken = undefined;
     card.hookRoutedAt = undefined;
+  }
+
+  /**
+   * Fan a group card's column write out to its members, silently, in the SAME enqueue closure as
+   * the group's own `column` assignment (Phase 63, Pattern 1) — a no-op for every ordinary card
+   * (`memberIds` absent/empty). Called from exactly the five runtime column-writing mutators
+   * (`attachExistingSession`, `applyMarker`, `flipBack`, `moveCardManual`, `completeStart`); never
+   * from a cleanup/session-field mutator (members never carry `tmuxSession`/`hookToken`/
+   * `workspacePath` — there is no per-member teardown surface to guard) and never from the
+   * boot-hydration column write. Emits no event of its own — the locked design is ONE activity
+   * event per group move, member mirroring silent.
+   */
+  private mirrorMemberColumn(card: Card, column: Column): void {
+    if (!card.memberIds || card.memberIds.length === 0) return;
+    for (const id of card.memberIds) {
+      const member = this.cards.get(id);
+      if (member) member.column = column;
+    }
   }
 
   /**
@@ -235,6 +260,7 @@ class BoardStore extends EventEmitter {
       workspaceFolders: this.workspaceFolders,
       lastUsed: this.lastUsedFolder,
       localTicketCounter: this.localTicketCounter,
+      groupTicketCounter: this.groupTicketCounter,
     };
   }
 
@@ -277,6 +303,8 @@ class BoardStore extends EventEmitter {
     });
     this.localTicketCounter =
       typeof meta.localTicketCounter === "number" ? meta.localTicketCounter : 0;
+    this.groupTicketCounter =
+      typeof meta.groupTicketCounter === "number" ? meta.groupTicketCounter : 0;
     console.log(`[store] loaded ${this.cards.size} card(s) from board.db.`);
   }
 
@@ -730,6 +758,7 @@ class BoardStore extends EventEmitter {
       card.tmuxSession = s.tmuxSession;
       card.ttydPort = s.ttydPort;
       card.column = "in_progress";
+      this.mirrorMemberColumn(card, "in_progress");
       card.statusReason = "Already running — reattached";
       card.provisioningStep = null;
       card.startError = null;
@@ -865,6 +894,7 @@ class BoardStore extends EventEmitter {
       if (c.lastMarker === markerKey) return [];
       const from = c.column;
       c.column = column;
+      this.mirrorMemberColumn(c, column);
       c.statusReason = statusReason;
       c.lastMarker = markerKey;
       return [
@@ -915,6 +945,7 @@ class BoardStore extends EventEmitter {
       if (!c || c.column !== "needs_input") return [];
       const target = "in_progress";
       c.column = target;
+      this.mirrorMemberColumn(c, target);
       c.statusReason = undefined;
       return [
         this.event("move_auto", {
@@ -952,6 +983,7 @@ class BoardStore extends EventEmitter {
       if (!c) return [];
       const from = c.column;
       c.column = column;
+      this.mirrorMemberColumn(c, column);
       if (from === "inbox" && column === "todo") {
         c.promotedAt = new Date().toISOString();
       }
@@ -985,6 +1017,7 @@ class BoardStore extends EventEmitter {
       card.tmuxSession = s.tmuxSession;
       card.ttydPort = s.ttydPort;
       card.column = "in_progress";
+      this.mirrorMemberColumn(card, "in_progress");
       card.provisioningStep = null;
       card.startError = null;
       card.startWarning = null;
@@ -1219,6 +1252,50 @@ class BoardStore extends EventEmitter {
           cardId: created.id,
           toCol: "todo",
           source: "local",
+        }),
+      ];
+    }).then(() => created);
+  }
+
+  /**
+   * Mint a new `source: "group"` card (Phase 63, GROUP-01/04): mirrors {@link createLocalCard}'s
+   * mint pattern exactly (own `groupTicketCounter`, `id === issueId === identifier`) but ALSO
+   * links membership two-sided in the SAME enqueue closure — every found member gets
+   * `groupId = created.id`. Members' `column` is left untouched at creation (the route
+   * re-validates every id is already sitting in To Do before calling this), so no
+   * `mirrorMemberColumn` fan-out runs here; the group card itself lands in To Do and the
+   * subsequent start saga's `completeStart` performs the first real fan-out. Emits exactly ONE
+   * `group_created` event (Pitfall 4 — no per-member event).
+   */
+  createGroupCard(title: string, memberIds: string[]): Promise<Card> {
+    let created!: Card;
+    return this.enqueue(() => {
+      this.groupTicketCounter += 1;
+      const identifier = `GROUP-${this.groupTicketCounter}`;
+      const now = new Date().toISOString();
+      created = {
+        id: identifier,
+        issueId: identifier,
+        identifier,
+        title,
+        description: null,
+        priority: 0,
+        column: "todo",
+        updatedAt: now,
+        promotedAt: now,
+        source: "group",
+        memberIds: [...memberIds],
+      };
+      this.cards.set(created.id, created);
+      for (const id of memberIds) {
+        const member = this.cards.get(id);
+        if (member) member.groupId = created.id;
+      }
+      return [
+        this.event("group_created", {
+          cardId: created.id,
+          toCol: "todo",
+          source: "group",
         }),
       ];
     }).then(() => created);

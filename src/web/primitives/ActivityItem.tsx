@@ -13,6 +13,7 @@ import {
   Trash2,
   Unplug,
   Upload,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import type { EventType } from "../../shared/types.js";
@@ -32,6 +33,7 @@ const EVENT_GLYPH: Record<EventType, LucideIcon> = {
   cleanup: Trash2,
   local_created: FilePlus,
   sync_out: Upload,
+  group_created: Users,
 };
 
 const EVENT_TINT: Record<EventType, string> = {
@@ -49,6 +51,7 @@ const EVENT_TINT: Record<EventType, string> = {
   cleanup: "var(--text-muted)",
   local_created: "var(--text-muted)",
   sync_out: "var(--text-muted)",
+  group_created: "var(--text-muted)",
 };
 
 const GLYPH_LOOKUP: Partial<Record<string, LucideIcon>> = EVENT_GLYPH;
