@@ -268,27 +268,33 @@ export async function generateTicketDraft(
 /**
  * Persist a reviewed/edited ticket draft: POST /api/cards. The server mints the `LOCAL-<n>`
  * identifier and re-validates title/description (incl. the DISPATCH_STATUS footgun guard) — the
- * client's draft is never trusted. Resolves the created `Card` on 201; any error (validation
- * rejection or network failure) collapses to `{ ok: false }` since the modal has one shared
- * "couldn't reach the server" failure line, mirroring `deletePlaybook`'s bare-boolean approach.
+ * client's draft is never trusted. Resolves the created `Card` on 201. Mirrors
+ * `addWorkspaceFolder`'s 400 discrimination: a validation rejection returns the parsed `{ error }`
+ * code so the modal can render actionable copy (the server WAS reached and retrying can't help),
+ * while network failures and every other status resolve `{ ok: false, error: null }` for the
+ * generic unreachable-server line.
  */
 export async function createLocalTicket(
   title: string,
   description: string,
-): Promise<{ ok: true; card: Card } | { ok: false }> {
+): Promise<{ ok: true; card: Card } | { ok: false; error: string | null }> {
   try {
     const res = await fetch("/api/cards", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title, description }),
     });
+    if (res.status === 400) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      return { ok: false, error: body.error ?? null };
+    }
     if (!res.ok) {
-      return { ok: false };
+      return { ok: false, error: null };
     }
     const card = (await res.json()) as Card;
     return { ok: true, card };
   } catch {
-    return { ok: false };
+    return { ok: false, error: null };
   }
 }
 

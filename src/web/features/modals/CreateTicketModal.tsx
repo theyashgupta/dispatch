@@ -26,6 +26,19 @@ const inlineErrorStyle: CSSProperties = {
   color: "var(--destructive)",
 };
 
+function acceptErrorCopy(error: string | null): string {
+  switch (error) {
+    case "invalid-title":
+      return "Title is too long (max 300 characters).";
+    case "invalid-description":
+      return "Description is too long (max 20,000 characters).";
+    case "content contains the DISPATCH_STATUS marker":
+      return "The ticket can't contain the reserved DISPATCH_STATUS marker.";
+    default:
+      return "Couldn't reach the server. Try again.";
+  }
+}
+
 export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
   const modalRef = useRef<ModalControl>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -39,7 +52,7 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
   const [description, setDescription] = useState("");
   const [draftNotice, setDraftNotice] = useState(false);
   const [editedSinceGenerate, setEditedSinceGenerate] = useState(false);
-  const [acceptError, setAcceptError] = useState(false);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
   const [accepting, setAccepting] = useState(false);
 
   const [promptFocus, setPromptFocus] = useState(false);
@@ -100,13 +113,13 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
     const trimmedDescription = description.trim();
     if (trimmedTitle === "" || trimmedDescription === "") return;
     setAccepting(true);
-    setAcceptError(false);
+    setAcceptError(null);
     const result = await createLocalTicket(trimmedTitle, trimmedDescription);
     if (result.ok) {
       onClose();
       return;
     }
-    setAcceptError(true);
+    setAcceptError(acceptErrorCopy(result.error));
     setAccepting(false);
   }
 
@@ -261,9 +274,9 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
                 />
               )}
 
-              {acceptError && (
+              {acceptError !== null && (
                 <div role="alert" style={inlineErrorStyle}>
-                  Couldn't reach the server. Try again.
+                  {acceptError}
                 </div>
               )}
             </>
