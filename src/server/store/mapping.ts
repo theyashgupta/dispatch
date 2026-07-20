@@ -87,6 +87,7 @@ export function reconcile(
         priority: issue.priority,
         updatedAt: issue.updatedAt,
         project: issue.project ?? undefined,
+        goneFromLinear: false,
       });
     } else if (existing.column === "todo" || existing.column === "inbox") {
       upserts.push({
