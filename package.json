@@ -1,6 +1,6 @@
 {
   "name": "@theyashgupta/dispatch",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "description": "A local kanban board that turns Linear tickets into live Claude Code agent sessions - one git worktree per ticket, real terminals in the browser.",
   "keywords": [
     "kanban",
