@@ -1348,10 +1348,12 @@ class BoardStore extends EventEmitter {
    * here (its hook token released through the clearHookToken chokepoint) so the sync-triggered card
    * (stable `Card.id`) stays the sole owner of the issueId, meeting PUSH-02's zero-duplicate
    * guarantee even when this race window is hit. The delete carries `reconcile()`'s removal guards:
-   * a duplicate that is past To Do/Inbox or is starting/carries session state (isStartingCard) is
-   * NEVER deleted — deleting it would orphan a live tmux/ttyd session (the `inFlightStarts`
-   * hazard). In that case adoption itself is REFUSED — the card stays local with a
-   * manual-resolution `syncError` — rather than leaving two cards contending over one issueId.
+   * a duplicate that is past To Do/Inbox, is linked into a group (`groupId != null` — deleting it
+   * would leave the group's `memberIds` referencing a nonexistent card, the two-sided-invariant
+   * hazard), or is starting/carries session state (isStartingCard) is NEVER deleted — deleting an
+   * active one would orphan a live tmux/ttyd session (the `inFlightStarts` hazard). In that case
+   * adoption itself is REFUSED — the card stays local with a manual-resolution `syncError` —
+   * rather than leaving two cards contending over one issueId.
    */
   adoptLinearIdentity(
     id: string,
@@ -1372,6 +1374,7 @@ class BoardStore extends EventEmitter {
       const unsafe = duplicates.find(
         (dup) =>
           (dup.column !== "todo" && dup.column !== "inbox") ||
+          dup.groupId != null ||
           isStartingCard(dup, this.inFlightStarts),
       );
       if (unsafe) {
