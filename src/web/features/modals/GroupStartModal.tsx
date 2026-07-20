@@ -82,12 +82,22 @@ export function GroupStartModal({
         void reloadPlaybooks();
         return;
       }
+      if (result.variant === "ineligible") {
+        const stale = members
+          .filter((m) => result.ineligibleIds?.includes(m.id))
+          .map((m) => m.identifier);
+        setError({
+          text:
+            stale.length > 0
+              ? `No longer eligible: ${stale.join(", ")}. Remove ${stale.length === 1 ? "it" : "them"} and try again.`
+              : result.error,
+          variant: "ineligible",
+        });
+        return;
+      }
       setError({
         text: result.error,
-        variant:
-          result.variant === "config" || result.variant === "ineligible"
-            ? result.variant
-            : null,
+        variant: result.variant === "config" ? result.variant : null,
       });
     } catch (err) {
       console.error("startGroup failed", err);
