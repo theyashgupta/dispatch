@@ -16,6 +16,7 @@ import type {
 } from "../../../shared/types.js";
 import { Column } from "./Column.js";
 import { CardView } from "./CardView.js";
+import { membersOf } from "./group-members.js";
 import type { StartRequest } from "../../lib/start-request.js";
 import { useLastOpened } from "../../hooks/useUnseenActivity.js";
 import { useMediaQuery } from "../../hooks/useMediaQuery.js";
@@ -45,6 +46,13 @@ export function Board({
   useEffect(() => {
     setCards(board?.cards ?? []);
   }, [board]);
+
+  const groupMembersById = new Map<string, CardModel[]>();
+  for (const card of cards) {
+    if (card.source === "group") {
+      groupMembersById.set(card.id, membersOf(card, cards));
+    }
+  }
 
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const activeCard = activeCardId
@@ -162,7 +170,10 @@ export function Board({
           <Column
             key={column}
             column={column}
-            cards={cards.filter((card) => card.column === column)}
+            cards={cards.filter(
+              (card) => card.column === column && card.groupId == null,
+            )}
+            groupMembersById={groupMembersById}
             selectedCardId={selectedCardId}
             onSelectCard={handleSelectCard}
             onStartRequest={onStartRequest}

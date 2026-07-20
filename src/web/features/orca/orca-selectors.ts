@@ -20,6 +20,7 @@ export function groupCardsByColumn(
     grouped.set(column, []);
   }
   for (const card of cards) {
+    if (card.groupId != null) continue;
     grouped.get(card.column)?.push(card);
   }
   return grouped;

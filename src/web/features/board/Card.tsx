@@ -8,6 +8,7 @@ import { deriveShowDot, deriveShowGone } from "../../lib/card-badges.js";
 interface CardProps {
   card: CardModel;
   selected?: boolean;
+  members?: CardModel[];
   onSelect?: (id: string) => void;
   onStartRequest?: (id: string) => void;
 }
@@ -15,10 +16,12 @@ interface CardProps {
 export function Card({
   card,
   selected = false,
+  members,
   onSelect,
   onStartRequest,
 }: CardProps) {
   const [hover, setHover] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const showGone = deriveShowGone(card);
 
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -39,6 +42,9 @@ export function Card({
       rootRef={setNodeRef}
       onSelect={onSelect}
       onStartRequest={onStartRequest}
+      expanded={expanded}
+      onToggleExpand={() => setExpanded((v) => !v)}
+      members={members}
       domProps={{
         ...listeners,
         ...attributes,

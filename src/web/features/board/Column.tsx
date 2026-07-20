@@ -38,6 +38,7 @@ export const COLUMN_ACCENT: Record<ColumnId, string> = {
 interface ColumnProps {
   column: ColumnId;
   cards: CardModel[];
+  groupMembersById?: Map<string, CardModel[]>;
   selectedCardId?: string | null;
   onSelectCard?: (id: string) => void;
   onStartRequest?: (id: string) => void;
@@ -51,6 +52,7 @@ interface ColumnProps {
 export function Column({
   column,
   cards,
+  groupMembersById,
   selectedCardId,
   onSelectCard,
   onStartRequest,
@@ -313,6 +315,7 @@ export function Column({
               key={card.id}
               card={card}
               selected={card.id === selectedCardId}
+              members={groupMembersById?.get(card.id)}
               onSelect={onSelectCard}
               onStartRequest={onStartRequest}
             />

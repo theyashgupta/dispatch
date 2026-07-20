@@ -1,4 +1,11 @@
-import { Activity, AlertTriangle, Play, RotateCw } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  Play,
+  RotateCw,
+} from "lucide-react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { startCard } from "../../lib/api.js";
 import { formatAge, nowMs } from "../../lib/format-age.js";
@@ -6,7 +13,9 @@ import { useResumeFeedback } from "../../hooks/useResumeFeedback.js";
 import { GoneBadge, SourceBadge } from "../badges/index.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
+import { IconButton } from "../../primitives/IconButton.js";
 import { Notice } from "../../primitives/Notice.js";
+import { MemberRow } from "./MemberRow.js";
 
 export const PRIORITY_DOT: Record<number, { color: string; label: string }> = {
   1: { color: "var(--prio-urgent)", label: "Urgent priority" },
@@ -27,6 +36,9 @@ interface CardViewProps {
   domProps?: React.HTMLAttributes<HTMLDivElement>;
   onSelect?: (id: string) => void;
   onStartRequest?: (id: string) => void;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
+  members?: CardModel[];
 }
 
 function errorCopy(card: CardModel): { heading: string; detail?: string } {
@@ -56,15 +68,20 @@ export function CardView({
   domProps,
   onSelect,
   onStartRequest,
+  expanded,
+  onToggleExpand,
+  members,
 }: CardViewProps) {
   const { resuming, resumeFailed, watchdogFired, failureCopy, onResume } =
     useResumeFeedback(card);
   const compact = card.column === "done";
+  const isGroup = card.source === "group";
   const needsAttention =
     card.startError != null ||
     (card.sessionLost === true && card.column !== "done") ||
     (card.cleanupBlocked != null && card.cleanupBlocked.length > 0);
-  const priorityDot = PRIORITY_DOT[card.priority];
+  const priorityDot = isGroup ? undefined : PRIORITY_DOT[card.priority];
+  const memberCount = members?.length ?? 0;
   const chipStyle: React.CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
@@ -211,7 +228,35 @@ export function CardView({
           }}
         >
           <SourceBadge source={card.source ?? "linear"} />
+          {isGroup && (
+            <span
+              style={{
+                ...chipStyle,
+                border: "1px solid var(--border)",
+                color: "var(--text-muted)",
+              }}
+            >
+              {memberCount === 1 ? "1 ticket" : `${memberCount} tickets`}
+            </span>
+          )}
           {showGone && <GoneBadge />}
+          {isGroup && (
+            <IconButton
+              aria-expanded={expanded ?? false}
+              aria-label={expanded ? "Hide members" : "Show members"}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleExpand?.();
+              }}
+            >
+              {expanded ? (
+                <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+              ) : (
+                <ChevronRight size={14} strokeWidth={2} aria-hidden="true" />
+              )}
+            </IconButton>
+          )}
         </div>
       </div>
 
@@ -490,6 +535,20 @@ export function CardView({
             }
             label="Uncommitted work — cleanup blocked"
           />
+        </div>
+      )}
+
+      {isGroup && expanded && (
+        <div
+          style={{
+            borderTop: "1px solid var(--border)",
+            marginTop: "var(--space-xs)",
+            paddingTop: "var(--space-xs)",
+          }}
+        >
+          {(members ?? []).map((member) => (
+            <MemberRow key={member.id} member={member} />
+          ))}
         </div>
       )}
     </div>
