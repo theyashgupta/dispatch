@@ -82,7 +82,10 @@ export function parseTicketDraft(stdout: string): {
  * hazard a strict format-contract prompt (mirroring the existing playbook-body register) avoids.
  * `signal` (optional) threads an `AbortSignal` through to `execFile` via `run()`'s opts spread —
  * `run()` needed no body change for this, since Node's `execFile` already honors `signal` natively
- * — so the route layer can kill the subprocess on client disconnect (modal Cancel). The
+ * — so the route layer can kill the subprocess on client disconnect (modal Cancel).
+ * `killEscalationMs` arms `run()`'s SIGTERM→grace→SIGKILL escalation: both the abort and timeout
+ * paths kill with a default SIGTERM, and a `claude` that ignores it would pend the promise forever
+ * and wedge the route's `draftInFlight` single-flight guard into permanent 409s. The
  * `hasDispatchMarker` check inside {@link parseTicketDraft} is defense-in-depth alongside the
  * accept-time route guard in `cards.route.ts` (POST /cards), which covers a user editing the
  * marker back in during State 3 review.
@@ -110,6 +113,7 @@ export async function generateTicketDraft(
       timeout: 150_000,
       maxBuffer: 10 * 1024 * 1024,
       signal,
+      killEscalationMs: 5_000,
     },
   );
 

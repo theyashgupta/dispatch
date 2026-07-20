@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
@@ -21,9 +21,40 @@ const perfExec = process.env.DISPATCH_PERF_EXEC === "1";
 const perfCalls: { cmd: string; ms: number }[] = [];
 
 /**
+ * Arm SIGTERM→grace→SIGKILL escalation for one child: schedule a `SIGKILL` `graceMs` after each
+ * event that makes `execFile` send its default `SIGTERM` (an `opts.signal` abort, or the
+ * `opts.timeout` deadline), mirroring the perf-harness kill pattern (`scripts/perf-boot.mjs`).
+ * Without this, a child that ignores SIGTERM keeps the promisified `execFile` promise pending
+ * forever — a caller's single-flight guard then wedges until backend restart. Returns a disarm
+ * callback the caller MUST run on settle so a normally-exiting child's PID is never re-signalled.
+ */
+function armKillEscalation(
+  child: ChildProcess,
+  opts: { timeout?: number; signal?: AbortSignal },
+  graceMs: number,
+): () => void {
+  const timers: NodeJS.Timeout[] = [];
+  const onAbort = (): void => {
+    timers.push(setTimeout(() => child.kill("SIGKILL"), graceMs));
+  };
+  opts.signal?.addEventListener("abort", onAbort, { once: true });
+  if (opts.timeout !== undefined) {
+    timers.push(
+      setTimeout(() => child.kill("SIGKILL"), opts.timeout + graceMs),
+    );
+  }
+  return () => {
+    opts.signal?.removeEventListener("abort", onAbort);
+    for (const t of timers) clearTimeout(t);
+  };
+}
+
+/**
  * Run an argv command and capture stdout/stderr.
  * On non-zero exit / spawn failure, throws an Error carrying `.stderr` and `.stdout`
  * (both always strings) so callers can surface the underlying git/tmux stderr on the card.
+ * `killEscalationMs` (opt-in, inert when unset) arms {@link armKillEscalation} for callers whose
+ * child may ignore the abort/timeout SIGTERM (headless `claude -p` drafts).
  * @remarks Uses the Node built-in `execFile`, NOT execa — execa is not installed and none is
  * added (NEW-11). The promisified `execFile` rejects with `.stderr`/`.stdout` populated on Node
  * 22, and that captured stderr IS the card's error payload; swapping in a library whose rejection
@@ -38,14 +69,18 @@ export async function run(
     timeout?: number;
     maxBuffer?: number;
     signal?: AbortSignal;
+    killEscalationMs?: number;
   } = {},
 ): Promise<ExecResult> {
   const t0 = perfExec ? performance.now() : 0;
+  const { killEscalationMs, ...execOpts } = opts;
+  const pending = execFileP(cmd, args, { ...execOpts, encoding: "utf8" });
+  const disarm =
+    killEscalationMs === undefined
+      ? null
+      : armKillEscalation(pending.child, execOpts, killEscalationMs);
   try {
-    const { stdout, stderr } = await execFileP(cmd, args, {
-      ...opts,
-      encoding: "utf8",
-    });
+    const { stdout, stderr } = await pending;
     if (perfExec) perfCalls.push({ cmd, ms: performance.now() - t0 });
     return { stdout, stderr };
   } catch (err) {
@@ -55,6 +90,8 @@ export async function run(
       stderr: e.stderr ?? "",
       stdout: e.stdout ?? "",
     });
+  } finally {
+    disarm?.();
   }
 }
 
