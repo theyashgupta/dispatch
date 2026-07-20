@@ -6,10 +6,12 @@ import {
   Maximize2,
   Minimize2,
   Play,
+  Upload,
   X,
 } from "lucide-react";
+import { useState } from "react";
 import type { Card as CardModel } from "../../../shared/types.js";
-import { moveCard, openEditor } from "../../lib/api.js";
+import { moveCard, openEditor, syncCardToLinear } from "../../lib/api.js";
 import { isDemoteEligible } from "../../../shared/demote-eligibility.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
@@ -41,6 +43,7 @@ export function PanelHeader({
   onStartRequest,
 }: PanelHeaderProps) {
   const c = card;
+  const [syncPending, setSyncPending] = useState(false);
   return (
     <div
       style={{
@@ -150,6 +153,26 @@ export function PanelHeader({
           >
             <ArrowDown size={12} strokeWidth={2} aria-hidden="true" />
             Move to Inbox
+          </Button>
+        )}
+        {c?.source === "local" && (
+          <Button
+            variant="secondary"
+            disabled={syncPending || c.syncing === true}
+            onClick={() => {
+              setSyncPending(true);
+              syncCardToLinear(c.id)
+                .then((result) => {
+                  if (!result.ok && result.error === null) {
+                    console.error("syncCardToLinear: network failure");
+                  }
+                })
+                .catch(console.error)
+                .finally(() => setSyncPending(false));
+            }}
+          >
+            <Upload size={12} strokeWidth={2} aria-hidden="true" />
+            {syncPending || c.syncing === true ? "Syncing…" : "Sync Linear"}
           </Button>
         )}
         {docked && c?.column === "todo" && onStartRequest && (
