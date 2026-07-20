@@ -68,6 +68,8 @@ export function describeEvent(event: ActivityEvent): string {
       return "resume failed";
     case "cleanup":
       return "workspace cleaned up";
+    case "local_created":
+      return "created locally";
     default:
       return describeUnknownEvent(event.type);
   }

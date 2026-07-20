@@ -38,7 +38,8 @@ export type EventType =
   | "session_lost"
   | "session_failed"
   | "resume_failed"
-  | "cleanup";
+  | "cleanup"
+  | "local_created";
 
 /** One immutable board-activity log row; append-only; carries no secrets. */
 export interface ActivityEvent {

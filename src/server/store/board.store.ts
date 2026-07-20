@@ -94,6 +94,13 @@ class BoardStore extends EventEmitter {
   private workspaceFolders: string[] = [];
   /** Folder used on the last successful start, preselected in the modal; null when none yet. */
   private lastUsedFolder: string | null = null;
+  /**
+   * Minted-at-accept counter for `LOCAL-<n>` ticket identifiers (Phase 61), persisted in the meta
+   * row alongside every other mutation. Incremented ONLY inside {@link createLocalCard}'s enqueue
+   * mutator — the store's existing single-writer queue is the concurrency guard, no separate
+   * mutex needed (mirrors every other counter/id-minting decision in this codebase).
+   */
+  private localTicketCounter = 0;
   /** Serializes every mutation so mutate -> persist -> emit runs to completion before the next. */
   private queue: Promise<void> = Promise.resolve();
   /**
@@ -220,6 +227,7 @@ class BoardStore extends EventEmitter {
       syncedAt: this.syncedAt,
       workspaceFolders: this.workspaceFolders,
       lastUsed: this.lastUsedFolder,
+      localTicketCounter: this.localTicketCounter,
     };
   }
 
@@ -260,6 +268,8 @@ class BoardStore extends EventEmitter {
       workspaceFolders: meta.workspaceFolders,
       lastUsed: meta.lastUsed,
     });
+    this.localTicketCounter =
+      typeof meta.localTicketCounter === "number" ? meta.localTicketCounter : 0;
     console.log(`[store] loaded ${this.cards.size} card(s) from board.db.`);
   }
 
@@ -1123,6 +1133,53 @@ class BoardStore extends EventEmitter {
       }
       return [];
     });
+  }
+
+  /**
+   * Mint a new `source: "local"` card (Phase 61, TICKET-02/04): a first-class ordinary `Card` with
+   * no upstream issue, landing straight in To Do. The identifier is minted AT ACCEPT TIME —
+   * `"LOCAL-" + counter` — INSIDE this enqueue mutator, so the store's single-writer queue is the
+   * only concurrency guard sequential creates need (no separate mutex, mirroring every other
+   * id-minting decision in this codebase); `localTicketCounter` persists in the same meta-row
+   * transaction as the card write, so the counter survives a restart. `id`/`issueId`/`identifier`
+   * are ALL set to the minted string — there is no second, different upstream id to track for a
+   * locally-authored ticket, extending the codebase's own documented Phase-1 precedent that `id`
+   * can equal `issueId`. `priority: 0` ("none" — no Linear priority concept applies) and
+   * `promotedAt: now` are both stamped so the new ticket sorts to the TOP of To Do via
+   * compareTodoOrder's promoted tier, exactly like a freshly-promoted Inbox card (the user just
+   * made this and expects to see it immediately). Deliberately does NOT set `url`/`project`/any
+   * session field — those stay genuinely absent for a card with no Linear origin.
+   * @remarks Uses the {@link setTtydPortIfSession} closure-capture technique to return a value out
+   * of the enqueue-wrapped mutation (every other mutator here returns `Promise<void>`), since the
+   * route layer needs the minted `Card` — including its real identifier — to respond to the client.
+   */
+  createLocalCard(title: string, description: string): Promise<Card> {
+    let created!: Card;
+    return this.enqueue(() => {
+      this.localTicketCounter += 1;
+      const identifier = `LOCAL-${this.localTicketCounter}`;
+      const now = new Date().toISOString();
+      created = {
+        id: identifier,
+        issueId: identifier,
+        identifier,
+        title,
+        description,
+        priority: 0,
+        column: "todo",
+        updatedAt: now,
+        promotedAt: now,
+        source: "local",
+      };
+      this.cards.set(created.id, created);
+      return [
+        this.event("local_created", {
+          cardId: created.id,
+          toCol: "todo",
+          source: "local",
+        }),
+      ];
+    }).then(() => created);
   }
 
   /**

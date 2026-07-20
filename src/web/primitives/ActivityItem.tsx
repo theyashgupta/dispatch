@@ -6,6 +6,7 @@ import {
   CircleAlert,
   CircleCheck,
   Download,
+  FilePlus,
   Play,
   RotateCw,
   TriangleAlert,
@@ -28,6 +29,7 @@ const EVENT_GLYPH: Record<EventType, LucideIcon> = {
   session_failed: TriangleAlert,
   resume_failed: TriangleAlert,
   cleanup: Trash2,
+  local_created: FilePlus,
 };
 
 const EVENT_TINT: Record<EventType, string> = {
@@ -43,6 +45,7 @@ const EVENT_TINT: Record<EventType, string> = {
   session_failed: "var(--destructive)",
   resume_failed: "var(--destructive)",
   cleanup: "var(--text-muted)",
+  local_created: "var(--text-muted)",
 };
 
 const GLYPH_LOOKUP: Partial<Record<string, LucideIcon>> = EVENT_GLYPH;

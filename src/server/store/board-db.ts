@@ -57,6 +57,13 @@ export interface BoardMeta {
   syncedAt: string | null;
   workspaceFolders: string[];
   lastUsed: string | null;
+  /**
+   * Minted-at-accept counter for `LOCAL-<n>` ticket identifiers (Phase 61), incremented inside
+   * the store's single-writer enqueue queue so concurrent local-card creates can never collide.
+   * Optional — defaults to 0 at hydrate time, matching the `syncedAt`/`workspaceFolders`/`lastUsed`
+   * precedent; no migration machinery needed for a legacy meta row that predates this field.
+   */
+  localTicketCounter?: number;
 }
 
 /**

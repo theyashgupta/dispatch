@@ -83,7 +83,11 @@ const STATUS_PROTOCOL = [
  * unchanged. The slim-vs-description branch keys off `card.source ?? "linear"` (the absent-is-
  * linear convention documented on `Card.source`): Linear-sourced cards get the MCP-read ticket
  * slot, every other source keeps the inline description path byte-identical to before, so
- * Phase 61 local cards and Phase 63 group-member inlining fall to it unchanged.
+ * Phase 61 local cards and Phase 63 group-member inlining fall to it unchanged. The opening
+ * sentence's head wording reuses the SAME `slim` flag (Phase 61, Pitfall 2 fix): Linear-sourced
+ * cards keep the byte-identical "You are working on Linear ticket …" head, every other source
+ * reads the source-generic "You are working on ticket …" — cosmetic only, the status-protocol
+ * block and the slim/fat branch below are untouched by this change.
  * @see docs/ARCHITECTURE.md#marker-protocol
  */
 export function buildKickoff(
@@ -103,7 +107,7 @@ export function buildKickoff(
 
   return [
     ...(url ? [`Linear ticket: ${url}`, ``] : []),
-    `You are working on Linear ticket ${card.identifier}: ${card.title}`,
+    `You are working on ${slim ? "Linear ticket" : "ticket"} ${card.identifier}: ${card.title}`,
     ``,
     ...(slim
       ? [
