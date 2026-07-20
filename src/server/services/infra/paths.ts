@@ -46,3 +46,28 @@ export const TTYD_INDEX_PATH = path.join(
   DISPATCH_DIR,
   "ttyd-index.patched.html",
 );
+
+/**
+ * The launchd label shared by the generated plist, every `launchctl` target, and uninstall's
+ * bootout — kept as one constant so the three never drift onto different label strings.
+ */
+export const SERVICE_LABEL = "com.dispatch.app";
+
+/**
+ * The per-user LaunchAgent plist path. Lives under `~/Library/LaunchAgents`, NOT `DISPATCH_DIR`,
+ * because that is the fixed location launchd itself scans to discover per-user agents.
+ */
+export const SERVICE_PLIST_PATH = path.join(
+  os.homedir(),
+  "Library",
+  "LaunchAgents",
+  `${SERVICE_LABEL}.plist`,
+);
+
+/**
+ * launchd `StandardOutPath`/`StandardErrorPath` sinks for the background service. Kept beside the
+ * other `.dispatch` artifacts (not under LaunchAgents with the plist) and deliberately preserved by
+ * uninstall — the plist is disposable, the logs are diagnostic history.
+ */
+export const SERVICE_LOG_PATH = path.join(DISPATCH_DIR, "service.log");
+export const SERVICE_ERR_LOG_PATH = path.join(DISPATCH_DIR, "service.err.log");

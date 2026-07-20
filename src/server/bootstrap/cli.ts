@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -16,6 +16,13 @@ import {
   scanFootprint,
 } from "../services/orchestration/uninstall.js";
 import { checkForUpdate, runUpdate } from "../services/orchestration/update.js";
+import {
+  installService,
+  restartService,
+  serviceStatus,
+  uninstallService,
+} from "../services/orchestration/service.js";
+import { SERVICE_PLIST_PATH } from "../services/infra/paths.js";
 
 const HELP = `dispatch — local Kanban that turns Linear tickets into Claude Code sessions
 
@@ -25,6 +32,8 @@ Usage:
   dispatch update                     Check for and guide you through an update
   dispatch uninstall [--purge] [--dry-run] [--yes]
                                       Stop dispatch sessions and remove its config/hooks
+  dispatch service <install|status|restart|uninstall>
+                                      Run dispatch as a background launchd service (macOS)
   dispatch --help | --version
 
 Options:
@@ -33,6 +42,7 @@ Options:
   --purge      uninstall: also delete board data (your playbooks are still kept)
   --dry-run    uninstall: print the plan and change nothing
   --yes        uninstall: skip the confirmation prompt
+  --print      service install: print the plist and exit, no side effects
 
 Uninstall never deletes git worktrees — it lists them for you to remove.`;
 
@@ -232,11 +242,47 @@ async function update(): Promise<void> {
     return;
   }
   const result = await runUpdate({ interactive: true });
-  process.stdout.write(
-    result.ok
-      ? `  Updated to v${result.version} — restart dispatch to use it.\n`
-      : `  Update failed — run it yourself: ${result.command}\n`,
+  if (result.ok) {
+    process.stdout.write(
+      existsSync(SERVICE_PLIST_PATH)
+        ? `  Updated to v${result.version} — restart the service to use it: dispatch service restart\n`
+        : `  Updated to v${result.version} — restart dispatch to use it.\n`,
+    );
+  } else {
+    process.stdout.write(
+      `  Update failed — run it yourself: ${result.command}\n`,
+    );
+  }
+}
+
+/**
+ * Route the `dispatch service <sub>` family to its action and exit with the returned code. Unknown
+ * or missing sub-command prints HELP and exits 2, matching the top-level unknown-command style.
+ */
+async function service(
+  sub: string | undefined,
+  values: {
+    port?: string;
+    print?: boolean;
+  },
+): Promise<void> {
+  if (sub === "install") {
+    const port = values.port ? Number(values.port) : undefined;
+    process.exit(await installService({ port, print: values.print }));
+  }
+  if (sub === "status") {
+    process.exit(await serviceStatus());
+  }
+  if (sub === "restart") {
+    process.exit(await restartService());
+  }
+  if (sub === "uninstall") {
+    process.exit(await uninstallService());
+  }
+  process.stderr.write(
+    `Unknown service command: ${sub ?? "(none)"}\n\n${HELP}\n`,
   );
+  process.exit(2);
 }
 
 /**
@@ -306,6 +352,7 @@ async function cli(): Promise<void> {
         purge: { type: "boolean" },
         "dry-run": { type: "boolean" },
         yes: { type: "boolean" },
+        print: { type: "boolean" },
         help: { type: "boolean", short: "h" },
         version: { type: "boolean" },
       },
@@ -336,6 +383,10 @@ async function cli(): Promise<void> {
   if (positionals[0] === "update") {
     await update();
     process.exit(0);
+  }
+  if (positionals[0] === "service") {
+    await service(positionals[1], values);
+    return;
   }
   if (positionals.length > 0) {
     process.stderr.write(`Unknown command: ${positionals[0]}\n\n${HELP}\n`);

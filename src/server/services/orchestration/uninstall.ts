@@ -12,8 +12,11 @@ import {
   DISPATCH_DIR,
   HOOK_SCRIPT_PATH,
   HOOK_SETTINGS_PATH,
+  SERVICE_LABEL,
+  SERVICE_PLIST_PATH,
 } from "../infra/paths.js";
 import { worktreePath } from "../domain/workspace-paths.js";
+import { run } from "../../adapters/exec.js";
 
 /**
  * The three groups `uninstall` reasons about, produced once by `scanFootprint` and consumed by both
@@ -22,11 +25,12 @@ import { worktreePath } from "../domain/workspace-paths.js";
  * @remarks `stop.ttydPids` holds the pids captured AT SCAN TIME, not a count to re-derive later:
  * `runUninstall` kills exactly this set, so a ttyd that starts between the scan and the (interactive,
  * possibly long) confirmation is never killed unseen. Rendered as a count only — the pids never reach
- * the user's terminal.
+ * the user's terminal. `stop.service` is true only when the LaunchAgent plist exists AND the platform
+ * is darwin, so a loaded agent gets booted out before its plist is removed via the plain `remove` list.
  */
 export interface UninstallPlan {
   remove: string[];
-  stop: { sessions: string[]; ttydPids: number[] };
+  stop: { sessions: string[]; ttydPids: number[]; service: boolean };
   keep: { boardData: string[]; playbooks: string | null; worktrees: string[] };
 }
 
@@ -99,9 +103,13 @@ function scanWorktrees(): string[] {
 export async function scanFootprint(opts: {
   purge: boolean;
 }): Promise<UninstallPlan> {
-  const footprint = [CONFIG_PATH, HOOK_SCRIPT_PATH, HOOK_SETTINGS_PATH].filter(
-    (p) => fs.existsSync(p),
-  );
+  const servicePlistExists = fs.existsSync(SERVICE_PLIST_PATH);
+  const footprint = [
+    CONFIG_PATH,
+    HOOK_SCRIPT_PATH,
+    HOOK_SETTINGS_PATH,
+    ...(servicePlistExists ? [SERVICE_PLIST_PATH] : []),
+  ].filter((p) => fs.existsSync(p));
   const boardData = boardDataPaths();
   const playbooks = path.join(DISPATCH_DIR, "playbooks");
   const sessions = [...(await listSessions())]
@@ -112,7 +120,11 @@ export async function scanFootprint(opts: {
     remove: opts.purge
       ? [...footprint, ...boardData, ...boardSidecarPaths()]
       : footprint,
-    stop: { sessions, ttydPids: await findDspTtydOrphans() },
+    stop: {
+      sessions,
+      ttydPids: await findDspTtydOrphans(),
+      service: servicePlistExists && process.platform === "darwin",
+    },
     keep: {
       boardData: opts.purge ? [] : boardData,
       playbooks: fs.existsSync(playbooks) ? playbooks : null,
@@ -142,7 +154,7 @@ export function renderPlan(plan: UninstallPlan): string {
   }
 
   const ttydCount = plan.stop.ttydPids.length;
-  if (plan.stop.sessions.length > 0 || ttydCount > 0) {
+  if (plan.stop.sessions.length > 0 || ttydCount > 0 || plan.stop.service) {
     lines.push("Stop:");
     for (const s of plan.stop.sessions) lines.push(`  tmux session ${s}`);
     if (ttydCount > 0) {
@@ -152,6 +164,9 @@ export function renderPlan(plan: UninstallPlan): string {
         `    includes ANY "ttyd … tmux attach" process on this machine, even one`,
         `    dispatch did not start.`,
       );
+    }
+    if (plan.stop.service) {
+      lines.push(`  launchd service ${SERVICE_LABEL}`);
     }
     lines.push("");
   }
@@ -188,9 +203,13 @@ export function renderPlan(plan: UninstallPlan): string {
   return lines.join("\n");
 }
 
-/** Is there any live session or ttyd for `runUninstall` to stop? */
+/** Is there any live session, ttyd, or loaded service for `runUninstall` to stop? */
 function hasStopWork(plan: UninstallPlan): boolean {
-  return plan.stop.sessions.length > 0 || plan.stop.ttydPids.length > 0;
+  return (
+    plan.stop.sessions.length > 0 ||
+    plan.stop.ttydPids.length > 0 ||
+    plan.stop.service
+  );
 }
 
 /**
@@ -222,6 +241,14 @@ export async function runUninstall(
   for (const session of plan.stop.sessions) {
     await killSession(`=${session}`);
   }
+  if (plan.stop.service) {
+    try {
+      await run("launchctl", [
+        "bootout",
+        `gui/${process.getuid?.()}/${SERVICE_LABEL}`,
+      ]);
+    } catch {}
+  }
 
   const removed: string[] = [];
   const failed: { path: string; reason: string }[] = [];
@@ -237,7 +264,11 @@ export async function runUninstall(
   }
 
   return {
-    plan: { ...plan, remove: [], stop: { sessions: [], ttydPids: [] } },
+    plan: {
+      ...plan,
+      remove: [],
+      stop: { sessions: [], ttydPids: [], service: false },
+    },
     removed,
     failed,
   };
