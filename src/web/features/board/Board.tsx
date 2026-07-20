@@ -45,8 +45,23 @@ export function Board({
   onCleanupRequest,
 }: BoardProps) {
   const [cards, setCards] = useState<CardModel[]>(board?.cards ?? []);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   useEffect(() => {
-    setCards(board?.cards ?? []);
+    const next = board?.cards ?? [];
+    setCards(next);
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const eligible = new Set(
+        next
+          .filter(
+            (c) =>
+              c.column === "todo" && c.groupId == null && c.source !== "group",
+          )
+          .map((c) => c.id),
+      );
+      const pruned = new Set([...prev].filter((id) => eligible.has(id)));
+      return pruned.size === prev.size ? prev : pruned;
+    });
   }, [board]);
 
   const groupMembersById = new Map<string, CardModel[]>();
@@ -61,7 +76,6 @@ export function Board({
     ? (cards.find((c) => c.id === activeCardId) ?? null)
     : null;
 
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [groupModalMembers, setGroupModalMembers] = useState<
     CardModel[] | null
   >(null);
@@ -219,6 +233,7 @@ export function Board({
           {activeCard ? (
             <CardView
               card={activeCard}
+              members={groupMembersById.get(activeCard.id)}
               selected={overlaySelected}
               showDot={overlayShowDot}
               showGone={overlayShowGone}
