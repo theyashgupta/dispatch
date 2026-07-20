@@ -273,21 +273,6 @@ export function CardView({
         >
           Syncing to Linear…
         </div>
-      ) : card.syncError != null ? (
-        <div style={{ marginTop: "var(--space-xs)" }}>
-          <Notice
-            tone="destructive"
-            icon={
-              <AlertTriangle
-                size={12}
-                strokeWidth={2}
-                aria-hidden="true"
-                style={{ flex: "0 0 auto" }}
-              />
-            }
-            label={card.syncError}
-          />
-        </div>
       ) : card.startError != null ? (
         <div
           style={{
@@ -463,6 +448,21 @@ export function CardView({
               Restart
             </Button>
           )}
+        </div>
+      ) : card.syncError != null ? (
+        <div style={{ marginTop: "var(--space-xs)" }}>
+          <Notice
+            tone="destructive"
+            icon={
+              <AlertTriangle
+                size={12}
+                strokeWidth={2}
+                aria-hidden="true"
+                style={{ flex: "0 0 auto" }}
+              />
+            }
+            label={card.syncError}
+          />
         </div>
       ) : card.statusReason != null ? (
         <Notice tone="muted">{card.statusReason}</Notice>
