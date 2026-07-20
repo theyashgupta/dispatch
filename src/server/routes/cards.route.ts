@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { COLUMNS, type Card, type Column } from "../../shared/types.js";
 import { isDemoteEligible } from "../../shared/demote-eligibility.js";
 import { store } from "../store/board.store.js";
@@ -14,6 +14,7 @@ import {
   hasDispatchMarker,
 } from "../services/domain/playbooks.js";
 import { generateTicketDraft } from "../services/orchestration/ticket-generate.js";
+import { syncCardToLinear } from "../services/orchestration/linear-sync.js";
 
 export const cardsRouter = Router();
 
@@ -392,3 +393,105 @@ cardsRouter.post("/cards", async (req, res) => {
   const card = await store.createLocalCard(title, description);
   res.status(201).json(card);
 });
+
+/**
+ * Adoption-time footgun screen (RESEARCH pitfall 4): the adopted title/description come back from
+ * Linear's canonical copy, which could theoretically carry the reserved marker (e.g. a
+ * pre-existing issue found via the idempotency search). A field carrying it falls back to the
+ * card's CURRENT local value instead of failing the sync — the issue already exists, so identity
+ * must still adopt.
+ */
+function screenAdoptedFields(
+  result: {
+    identifier: string;
+    url: string;
+    issueId: string;
+    title: string;
+    description: string;
+  },
+  card: Card,
+): {
+  identifier: string;
+  url: string;
+  issueId: string;
+  title: string;
+  description: string;
+} {
+  return {
+    identifier: result.identifier,
+    url: result.url,
+    issueId: result.issueId,
+    title: hasDispatchMarker(result.title) ? card.title : result.title,
+    description: hasDispatchMarker(result.description)
+      ? (card.description ?? "")
+      : result.description,
+  };
+}
+
+/**
+ * Promote a `source:"local"` card to a real Linear issue (PUSH-01/02/03). Mounted on `cardsRouter`
+ * -> already behind `apiRouter`'s `isLocalRequest` loopback gate (`routes/index.ts`) — no new gate
+ * code needed here. Uses a 404 for an unknown card id, a DELIBERATE deviation from this file's other
+ * routes' 400-for-unknown-card (documented per the RESEARCH contract). The per-card single-flight
+ * guard follows the `isStarting` discipline EXACTLY: `store.isSyncing` is checked and
+ * `store.beginSync` is called SYNCHRONOUSLY with no `await` between them, so a concurrent request
+ * for the SAME card can never race past the guard; a DIFFERENT card's sync is unaffected (the guard
+ * is keyed by card id, never a global flag). The subprocess call carries NO abort-on-disconnect
+ * wiring — the service's own no-signal decision — so the server owns the full timeout bound and a
+ * client disconnect can never orphan a created-but-unadopted Linear issue mid-flight.
+ */
+async function syncLinearHandler(
+  req: Request<{ id: string }>,
+  res: Response,
+): Promise<void> {
+  const { id } = req.params;
+
+  const card = store.getCard(id);
+  if (!card) {
+    res.status(404).json({ error: `unknown card id: ${id}` });
+    return;
+  }
+
+  if ((card.source ?? "linear") !== "local") {
+    res
+      .status(409)
+      .json({ error: "only local tickets can be synced to Linear" });
+    return;
+  }
+
+  if (store.isSyncing(id)) {
+    res
+      .status(409)
+      .json({ error: "a sync is already in flight for this card" });
+    return;
+  }
+
+  store.beginSync(id);
+  void store.setSyncing(id, true);
+
+  try {
+    const result = await syncCardToLinear({
+      id: card.id,
+      title: card.title,
+      description: card.description,
+    });
+
+    const adopted = screenAdoptedFields(result, card);
+    await store.adoptLinearIdentity(id, adopted);
+    res.status(200).json(store.getCard(id));
+  } catch (err) {
+    console.warn(
+      `[sync-linear] failed for card ${id}:`,
+      (err as Error).message,
+    );
+    await store.recordSyncError(
+      id,
+      "Sync to Linear failed — retrying is safe, no duplicate will be created.",
+    );
+    res.status(502).json({ error: "sync-failed" });
+  } finally {
+    store.endSync(id);
+  }
+}
+
+cardsRouter.post("/cards/:id/sync-linear", syncLinearHandler);
