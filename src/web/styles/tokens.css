@@ -102,15 +102,20 @@ html,
 body {
   margin: 0;
   height: 100%;
+  /* The page root itself never scrolls (the board owns its own overflow), so opt it
+     out of the global stable gutter below to avoid a dead reserved strip at the window edge. */
+  scrollbar-gutter: auto;
 }
 
 /* Thin, translucent, theme-consistent scrollbars app-wide (columns, panels,
-   modals, drawers all use overflowY:auto) so the native bar never paints an
-   opaque gutter over card/content chrome. */
+   modals, drawers all use overflowY:auto). scrollbar-gutter:stable reserves the
+   bar's space on every scroll container (it only affects elements that actually
+   scroll) so the bar can never paint over card/content chrome anywhere. */
 * {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--text-muted) 40%, transparent)
     transparent;
+  scrollbar-gutter: stable;
 }
 
 *::-webkit-scrollbar {

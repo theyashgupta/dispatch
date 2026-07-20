@@ -206,6 +206,7 @@ export function Board({
             padding: isLarge ? "var(--board-gutter-lg)" : "var(--space-lg)",
             overflowX: "auto",
             overflowY: "hidden",
+            scrollbarGutter: "auto",
             scrollSnapType:
               isCarousel && activeCardId == null ? "x mandatory" : "none",
             scrollPaddingInline: "var(--space-lg)",
