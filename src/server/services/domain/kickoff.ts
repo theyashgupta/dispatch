@@ -70,6 +70,39 @@ const STATUS_PROTOCOL = [
 ];
 
 /**
+ * The group-arm's ticket slot (Phase 63, KICK-06): Linear members get a `## Tickets` heading with
+ * one identifier/title/url bullet each plus ONE batched MCP-read instruction; local members follow
+ * with an inlined `## <identifier>: <title>` section and their trimmed description (falling back
+ * to the same "(no description provided)" copy the single-card description branch uses). Pure —
+ * called only from the `card.source === "group"` branch below, in place of the slim/fat ticket
+ * slot; never touches the head line, extra-direction slot, workspace orientation, or the
+ * STATUS_PROTOCOL tail (the kickoff sandwich's bread stays untouched).
+ */
+function groupTicketSection(members: Card[]): string[] {
+  const linear = members.filter((m) => (m.source ?? "linear") === "linear");
+  const local = members.filter((m) => (m.source ?? "linear") !== "linear");
+  const lines: string[] = [`## Tickets`];
+  for (const m of linear) {
+    const url = m.url?.trim();
+    lines.push(`- ${m.identifier}: ${m.title}${url ? ` — ${url}` : ""}`);
+  }
+  if (linear.length > 0) {
+    lines.push(
+      ``,
+      `Read each Linear ticket above — description and comments — via the Linear MCP.`,
+    );
+  }
+  for (const m of local) {
+    lines.push(
+      ``,
+      `## ${m.identifier}: ${m.title}`,
+      m.description?.trim() || "(no description provided)",
+    );
+  }
+  return lines;
+}
+
+/**
  * Build the multi-line kickoff prompt: ticket line, a slim MCP-read ticket slot for
  * Linear-sourced cards (or an inline description block for any other source), optional
  * extra direction, workspace orientation, and the required Phase-4 status protocol. Pure —
@@ -87,16 +120,20 @@ const STATUS_PROTOCOL = [
  * sentence's head wording reuses the SAME `slim` flag (Phase 61, Pitfall 2 fix): Linear-sourced
  * cards keep the byte-identical "You are working on Linear ticket …" head, every other source
  * reads the source-generic "You are working on ticket …" — cosmetic only, the status-protocol
- * block and the slim/fat branch below are untouched by this change.
+ * block and the slim/fat branch below are untouched by this change. A `source: "group"` card is
+ * never `slim` (its source is neither absent nor `"linear"`), so its head line reads "You are
+ * working on ticket GROUP-<n>: <title>" with zero code change — only its middle ticket slot is
+ * swapped for {@link groupTicketSection}, per the locked "only the middle slot" constraint.
  * @see docs/ARCHITECTURE.md#marker-protocol
  */
 export function buildKickoff(
   card: Card,
   extraDirection: string,
   repoNames: string[],
-  opts: { restarted?: boolean; playbookBody?: string } = {},
+  opts: { restarted?: boolean; playbookBody?: string; members?: Card[] } = {},
 ): string {
   const slim = (card.source ?? "linear") === "linear";
+  const isGroup = card.source === "group";
   const description = card.description?.trim() || "(no description provided)";
   const extra = extraDirection.trim();
   const url = card.url?.trim();
@@ -109,12 +146,14 @@ export function buildKickoff(
     ...(url ? [`Linear ticket: ${url}`, ``] : []),
     `You are working on ${slim ? "Linear ticket" : "ticket"} ${card.identifier}: ${card.title}`,
     ``,
-    ...(slim
-      ? [
-          `## Ticket`,
-          `Read the full ticket — description and comments — via the Linear MCP. If the MCP is unavailable, ${url ? "fall back to the ticket URL above or " : ""}ask the user.`,
-        ]
-      : [`## Description`, description]),
+    ...(isGroup
+      ? groupTicketSection(opts.members ?? [])
+      : slim
+        ? [
+            `## Ticket`,
+            `Read the full ticket — description and comments — via the Linear MCP. If the MCP is unavailable, ${url ? "fall back to the ticket URL above or " : ""}ask the user.`,
+          ]
+        : [`## Description`, description]),
     ...(substituted !== null
       ? substituted
         ? [``, ...substituted.split("\n")]

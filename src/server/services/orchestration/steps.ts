@@ -361,9 +361,13 @@ const sendKickoff: SagaStep = {
     const repoNames = (ctx.card.workspace?.repos ?? []).map((r) =>
       path.basename(r.path),
     );
+    const members = (ctx.card.memberIds ?? [])
+      .map((id) => store.getCard(id))
+      .filter((c): c is Card => c != null);
     const kickoff = buildKickoff(ctx.card, ctx.extraDirection, repoNames, {
       restarted: ctx.restarted,
       playbookBody: ctx.playbookBody,
+      members,
     });
     const tmpFile = path.join(
       os.tmpdir(),
