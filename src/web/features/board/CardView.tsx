@@ -261,7 +261,34 @@ export function CardView({
         </span>
       </div>
 
-      {card.startError != null ? (
+      {card.syncing === true ? (
+        <div
+          style={{
+            marginTop: "var(--space-xs)",
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            lineHeight: "var(--line-label)",
+            color: "var(--text-muted)",
+          }}
+        >
+          Syncing to Linear…
+        </div>
+      ) : card.syncError != null ? (
+        <div style={{ marginTop: "var(--space-xs)" }}>
+          <Notice
+            tone="destructive"
+            icon={
+              <AlertTriangle
+                size={12}
+                strokeWidth={2}
+                aria-hidden="true"
+                style={{ flex: "0 0 auto" }}
+              />
+            }
+            label={card.syncError}
+          />
+        </div>
+      ) : card.startError != null ? (
         <div
           style={{
             display: "flex",
