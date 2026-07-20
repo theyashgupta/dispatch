@@ -171,7 +171,12 @@ export function parseSyncResult(stdout: string): {
  * `Card.issueId` on (see {@link parseSyncResult}'s `@remarks`): the MCP tool surface never exposes
  * it. Throws when the config has no key configured, on a network/HTTP failure, or when the response
  * carries no matching issue — all of which the caller treats as a normal sync failure (retry-safe
- * via the idempotency token, no partial identity ever adopted).
+ * via the idempotency token, no partial identity ever adopted). The fetch is bounded by a 15s
+ * AbortSignal — the subprocess's carefully-tuned 240s budget already ended before this call, so an
+ * unbounded lookup against a hung Linear endpoint would silently extend the sync (and hold the
+ * route's single-flight guard plus the wire-visible `syncing` flag) toward undici's ~300s defaults.
+ * A 200 carrying a GraphQL `errors` array throws with the error CODES only — never the key or raw
+ * messages — instead of collapsing into the generic no-id message.
  */
 async function resolveIssueId(identifier: string): Promise<string> {
   const apiKey = getOrchestrationConfig()?.linearApiKey;
@@ -185,14 +190,21 @@ async function resolveIssueId(identifier: string): Promise<string> {
       query: "query($id: String!) { issue(id: $id) { id } }",
       variables: { id: identifier },
     }),
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
     throw new Error(`issue id lookup failed: HTTP ${res.status}`);
   }
   const data = (await res.json()) as {
     data?: { issue?: { id?: string } | null };
-    errors?: unknown;
+    errors?: { extensions?: { code?: string } }[];
   };
+  if (Array.isArray(data.errors) && data.errors.length > 0) {
+    const codes = data.errors
+      .map((e) => e?.extensions?.code ?? "unknown")
+      .join(", ");
+    throw new Error(`issue id lookup returned GraphQL errors: ${codes}`);
+  }
   const id = data.data?.issue?.id;
   if (typeof id !== "string" || id.trim() === "") {
     throw new Error(`issue id lookup returned no id for ${identifier}`);
@@ -221,6 +233,9 @@ async function resolveIssueId(identifier: string): Promise<string> {
  * live-proven single-tool invocation, generalized) rather than one comma-joined string; 62-03's live
  * smoke is the first real proof of the variadic form against the CLI, and is the sanctioned place to
  * flip to a comma-joined single argument if the CLI rejects it.
+ * @remarks Fails fast on a missing Linear API key BEFORE spawning the subprocess — deferring to
+ * {@link resolveIssueId}'s own check would run the full 240s create only to guarantee a failed
+ * adoption afterward (retry-safe via the token, but a wasted 4-minute run).
  */
 export async function syncCardToLinear(card: {
   id: string;
@@ -233,6 +248,9 @@ export async function syncCardToLinear(card: {
   title: string;
   description: string;
 }> {
+  if (!getOrchestrationConfig()?.linearApiKey) {
+    throw new Error("no Linear API key configured — cannot resolve issue id");
+  }
   const prompt = buildPrompt(card);
   const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
   const { stdout } = await run(
