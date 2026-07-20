@@ -306,6 +306,7 @@ export function Column({
         style={{
           flex: "1 1 auto",
           overflowY: "auto",
+          scrollbarGutter: "stable",
           display: "flex",
           flexDirection: "column",
           gap: "var(--space-sm)",

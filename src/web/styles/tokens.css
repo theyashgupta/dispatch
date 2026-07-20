@@ -104,6 +104,33 @@ body {
   height: 100%;
 }
 
+/* Thin, translucent, theme-consistent scrollbars app-wide (columns, panels,
+   modals, drawers all use overflowY:auto) so the native bar never paints an
+   opaque gutter over card/content chrome. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 40%, transparent)
+    transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 35%, transparent);
+  border-radius: var(--radius);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-muted) 50%, transparent);
+}
+
 body {
   background: var(--bg);
   color: var(--text);
