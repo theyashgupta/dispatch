@@ -33,7 +33,12 @@ const perfCalls: { cmd: string; ms: number }[] = [];
 export async function run(
   cmd: string,
   args: string[],
-  opts: { cwd?: string; timeout?: number; maxBuffer?: number } = {},
+  opts: {
+    cwd?: string;
+    timeout?: number;
+    maxBuffer?: number;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<ExecResult> {
   const t0 = perfExec ? performance.now() : 0;
   try {

@@ -83,9 +83,11 @@ function parseFrontMatter(raw: string): Playbook | null {
 /**
  * The single write-time-AND-load-time footgun predicate: a playbook body must never be able to
  * smuggle the status-protocol marker into a kickoff. Both `loadPlaybooks` (skip) and the write
- * path (reject) call this one expression so the two checks can never drift apart.
+ * path (reject) call this one expression so the two checks can never drift apart. Exported so
+ * `ticket-generate.ts`'s parse-time guard and `cards.route.ts`'s accept-time guard reuse the exact
+ * same predicate for AI-generated ticket titles/descriptions (Phase 61 footgun defense-in-depth).
  */
-function hasDispatchMarker(body: string): boolean {
+export function hasDispatchMarker(body: string): boolean {
   return body.includes("DISPATCH_STATUS:");
 }
 
