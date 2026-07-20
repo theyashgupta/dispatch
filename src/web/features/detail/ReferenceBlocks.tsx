@@ -1,18 +1,37 @@
 import { AlertTriangle, RotateCw } from "lucide-react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { cleanupCard } from "../../lib/api.js";
+import { MemberRow } from "../board/index.js";
 import { Button } from "../../primitives/Button.js";
+import { Field } from "../../primitives/Field.js";
 import { Markdown } from "../../primitives/Markdown.js";
 import { Notice } from "../../primitives/Notice.js";
 
 interface ReferenceBlocksProps {
   card: CardModel | null;
+  members?: CardModel[];
 }
 
-export function ReferenceBlocks({ card }: ReferenceBlocksProps) {
+export function ReferenceBlocks({ card, members }: ReferenceBlocksProps) {
   const c = card;
   return (
     <>
+      {c != null && c.source === "group" && members != null && (
+        <div
+          style={{
+            marginBottom: "var(--space-lg)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-xs)",
+          }}
+        >
+          <Field>{`Members (${members.length})`}</Field>
+          {members.map((member) => (
+            <MemberRow key={member.id} member={member} />
+          ))}
+        </div>
+      )}
+
       {c != null && c.description != null && c.description.trim() !== "" ? (
         <div
           style={{

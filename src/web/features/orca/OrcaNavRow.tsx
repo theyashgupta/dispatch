@@ -75,6 +75,21 @@ export function OrcaNavRow({ card, selected, onSelect }: OrcaNavRowProps) {
       >
         {card.title}
       </span>
+      {card.source === "group" && (
+        <span
+          style={{
+            flex: "0 0 auto",
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-regular)",
+            lineHeight: "var(--line-label)",
+            color: "var(--text-muted)",
+          }}
+        >
+          {(card.memberIds?.length ?? 0) === 1
+            ? "1 ticket"
+            : `${card.memberIds?.length ?? 0} tickets`}
+        </span>
+      )}
       {unseen && (
         <span
           aria-hidden="true"

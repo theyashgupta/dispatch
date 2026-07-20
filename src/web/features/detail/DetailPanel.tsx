@@ -21,6 +21,7 @@ interface DetailPanelProps {
   editors?: { code: boolean; cursor: boolean };
   activityEvents?: ActivityEvent[];
   cardIdentifiers?: Record<string, string>;
+  members?: CardModel[];
   onClose: () => void;
   onStartRequest?: (id: string) => void;
   docked?: boolean;
@@ -31,6 +32,7 @@ export function DetailPanel({
   editors,
   activityEvents,
   cardIdentifiers,
+  members,
   onClose,
   onStartRequest,
   docked = false,
@@ -345,7 +347,7 @@ export function DetailPanel({
                       padding: "var(--space-lg)",
                     }}
                   >
-                    <ReferenceBlocks card={c} />
+                    <ReferenceBlocks card={c} members={members} />
                     {c && (
                       <CardTimeline
                         cardId={c.id}
@@ -363,7 +365,7 @@ export function DetailPanel({
                     padding: "var(--space-xl)",
                   }}
                 >
-                  <ReferenceBlocks card={c} />
+                  <ReferenceBlocks card={c} members={members} />
                   {c && (
                     <CardTimeline
                       cardId={c.id}

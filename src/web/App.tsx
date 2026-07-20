@@ -13,7 +13,7 @@ import { useTransitionNotifications } from "./hooks/useTransitionNotifications.j
 import { AppShell } from "./AppShell.js";
 import { SyncStrip } from "./features/sync/index.js";
 import { Glyph } from "./primitives/Glyph.js";
-import { Board } from "./features/board/index.js";
+import { Board, membersOf } from "./features/board/index.js";
 import { InboxView } from "./features/inbox/index.js";
 import { OrcaView, mostRecentCardId } from "./features/orca/index.js";
 import { DetailPanel } from "./features/detail/index.js";
@@ -111,6 +111,10 @@ export function App() {
 
   const selectedCard =
     board?.cards.find((card) => card.id === selectedCardId) ?? null;
+  const selectedCardMembers =
+    selectedCard != null && selectedCard.source === "group"
+      ? membersOf(selectedCard, board?.cards ?? [])
+      : undefined;
 
   useEffect(() => {
     if (viewMode !== "orca" || selectedCard != null || board == null) {
@@ -269,6 +273,7 @@ export function App() {
           editors={board?.editors}
           activityEvents={feed.events}
           cardIdentifiers={cardIdentifiers}
+          members={selectedCardMembers}
           onClose={() => setSelectedCardId(null)}
           onStartRequest={requestStart}
           docked={viewMode === "orca"}
