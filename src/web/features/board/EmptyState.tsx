@@ -5,7 +5,7 @@ interface EmptyStateProps {
   column: ColumnId;
 }
 
-const SINGLE_LINE_COPY: Record<Exclude<ColumnId, "todo">, string> = {
+export const SINGLE_LINE_COPY: Record<Exclude<ColumnId, "todo">, string> = {
   in_progress: "Nothing running.",
   needs_input: "Nothing waiting on your input.",
   agent_done: "No finished agents yet.",

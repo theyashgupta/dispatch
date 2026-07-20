@@ -35,3 +35,19 @@ export function errorCopy(card: CardModel): {
       return { heading: `Start failed — ${err.step}` };
   }
 }
+
+/**
+ * Returns the tooltip string for the Orca sidebar's attention-badge override, or `null` when the
+ * card doesn't need attention.
+ * @remarks Mirrors CardView's own branch priority (startError wins, then sessionLost, then
+ * cleanupBlocked) so the two surfaces never disagree on which condition "wins" when more than one
+ * is true at once.
+ */
+export function attentionTitle(card: CardModel): string | null {
+  if (card.startError != null) return errorCopy(card).heading;
+  if (card.sessionLost === true && card.column !== "done")
+    return "Session lost";
+  if (card.cleanupBlocked != null && card.cleanupBlocked.length > 0)
+    return "Uncommitted work — cleanup blocked";
+  return null;
+}

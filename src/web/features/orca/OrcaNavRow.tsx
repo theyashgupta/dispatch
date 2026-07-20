@@ -1,8 +1,14 @@
+import { AlertTriangle, Users } from "lucide-react";
 import { useState } from "react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { isUnseen, useLastOpened } from "../../hooks/useUnseenActivity.js";
 import { Field } from "../../primitives/Field.js";
-import { COLUMN_ACCENT } from "../board/index.js";
+import { SourceBadge } from "../badges/index.js";
+import {
+  COLUMN_ACCENT,
+  attentionTitle,
+  needsAttention,
+} from "../board/index.js";
 
 interface OrcaNavRowProps {
   card: CardModel;
@@ -10,10 +16,26 @@ interface OrcaNavRowProps {
   onSelect: (id: string) => void;
 }
 
+const chipStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "var(--space-xs)",
+  borderRadius: "var(--radius)",
+  padding: "0 var(--space-xs)",
+  fontSize: "var(--font-label)",
+  fontWeight: "var(--weight-semibold)",
+  lineHeight: "var(--line-label)",
+  whiteSpace: "nowrap",
+  flex: "0 0 auto",
+};
+
 export function OrcaNavRow({ card, selected, onSelect }: OrcaNavRowProps) {
   const [hover, setHover] = useState(false);
+  const [focused, setFocused] = useState(false);
   const lastOpenedMap = useLastOpened();
   const unseen = isUnseen(card.outputChangedAt, lastOpenedMap[card.id]);
+  const attention = needsAttention(card);
+  const memberCount = card.memberIds?.length ?? 0;
 
   function select() {
     onSelect(card.id);
@@ -35,6 +57,10 @@ export function OrcaNavRow({ card, selected, onSelect }: OrcaNavRowProps) {
       }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      onFocus={(event) => {
+        setFocused(event.currentTarget.matches(":focus-visible"));
+      }}
+      onBlur={() => setFocused(false)}
       style={{
         display: "flex",
         alignItems: "center",
@@ -44,18 +70,10 @@ export function OrcaNavRow({ card, selected, onSelect }: OrcaNavRowProps) {
           ? "2px solid var(--accent)"
           : "2px solid transparent",
         background: hover ? "var(--surface-card-hover)" : "transparent",
+        boxShadow: focused ? "0 0 0 2px var(--accent)" : "none",
         cursor: "pointer",
       }}
     >
-      <span
-        style={{
-          width: "6px",
-          height: "6px",
-          borderRadius: "50%",
-          background: COLUMN_ACCENT[card.column],
-          flex: "0 0 auto",
-        }}
-      />
       <Field mono style={{ flex: "0 0 auto" }}>
         {card.identifier}
       </Field>
@@ -75,20 +93,42 @@ export function OrcaNavRow({ card, selected, onSelect }: OrcaNavRowProps) {
       >
         {card.title}
       </span>
-      {card.source === "group" && (
+      {attention ? (
+        <span
+          title={attentionTitle(card) ?? undefined}
+          style={{ flex: "0 0 auto", display: "flex" }}
+        >
+          <AlertTriangle
+            size={12}
+            strokeWidth={2}
+            aria-hidden="true"
+            style={{ color: "var(--destructive)" }}
+          />
+        </span>
+      ) : (
         <span
           style={{
+            width: "6px",
+            height: "6px",
+            borderRadius: "50%",
+            background: COLUMN_ACCENT[card.column],
             flex: "0 0 auto",
-            fontSize: "var(--font-label)",
-            fontWeight: "var(--weight-regular)",
-            lineHeight: "var(--line-label)",
+          }}
+        />
+      )}
+      {card.source === "group" ? (
+        <span
+          style={{
+            ...chipStyle,
+            border: "1px solid var(--border)",
             color: "var(--text-muted)",
           }}
         >
-          {(card.memberIds?.length ?? 0) === 1
-            ? "1 ticket"
-            : `${card.memberIds?.length ?? 0} tickets`}
+          <Users size={12} strokeWidth={2} aria-hidden="true" />
+          {memberCount === 1 ? "1 ticket" : `${memberCount} tickets`}
         </span>
+      ) : (
+        <SourceBadge source={card.source ?? "linear"} />
       )}
       {unseen && (
         <span

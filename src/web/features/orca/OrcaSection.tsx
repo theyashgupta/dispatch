@@ -1,33 +1,33 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
 import type { Card as CardModel, Column } from "../../../shared/types.js";
-import { COLUMN_ACCENT, COLUMN_LABELS } from "../board/index.js";
+import {
+  COLUMN_ACCENT,
+  COLUMN_LABELS,
+  SINGLE_LINE_COPY,
+} from "../board/index.js";
 import { OrcaNavRow } from "./OrcaNavRow.js";
 
 interface OrcaSectionProps {
   column: Column;
   cards: CardModel[];
-  collapsed: boolean;
-  onToggle: () => void;
   selectedCardId: string | null;
   onSelectCard: (id: string) => void;
 }
 
+const ORCA_EMPTY_COPY: Record<Column, string> = {
+  ...SINGLE_LINE_COPY,
+  todo: "No tickets in To Do.",
+};
+
 export function OrcaSection({
   column,
   cards,
-  collapsed,
-  onToggle,
   selectedCardId,
   onSelectCard,
 }: OrcaSectionProps) {
   return (
     <div>
-      <button
-        type="button"
-        aria-expanded={!collapsed}
-        onClick={onToggle}
+      <div
         style={{
-          width: "100%",
           height: "var(--column-header-height)",
           position: "sticky",
           top: 0,
@@ -37,35 +37,19 @@ export function OrcaSection({
           alignItems: "center",
           justifyContent: "space-between",
           padding: "0 var(--space-lg)",
-          border: "none",
           color: "var(--text-muted)",
-          font: "inherit",
-          cursor: "pointer",
         }}
       >
         <span
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "var(--space-xs)",
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            lineHeight: "var(--line-label)",
+            letterSpacing: "0.04em",
+            color: "var(--text-muted)",
           }}
         >
-          {collapsed ? (
-            <ChevronRight size={14} strokeWidth={2} aria-hidden="true" />
-          ) : (
-            <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
-          )}
-          <span
-            style={{
-              fontSize: "var(--font-label)",
-              fontWeight: "var(--weight-semibold)",
-              lineHeight: "var(--line-label)",
-              letterSpacing: "0.04em",
-              color: "var(--text-muted)",
-            }}
-          >
-            {COLUMN_LABELS[column]}
-          </span>
+          {COLUMN_LABELS[column]}
         </span>
         <span
           style={{
@@ -78,8 +62,19 @@ export function OrcaSection({
         >
           {cards.length}
         </span>
-      </button>
-      {!collapsed &&
+      </div>
+      {cards.length === 0 ? (
+        <div
+          style={{
+            padding: "var(--space-xs) var(--space-sm)",
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-regular)",
+            color: "var(--text-muted)",
+          }}
+        >
+          {ORCA_EMPTY_COPY[column]}
+        </div>
+      ) : (
         cards.map((card) => (
           <OrcaNavRow
             key={card.id}
@@ -87,7 +82,8 @@ export function OrcaSection({
             selected={card.id === selectedCardId}
             onSelect={onSelectCard}
           />
-        ))}
+        ))
+      )}
     </div>
   );
 }
