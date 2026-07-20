@@ -77,7 +77,18 @@ export function reconcile(
       upserts.push(newInboxCard(issue, sourceId));
       continue;
     }
-    if (existing.column === "todo" || existing.column === "inbox") {
+    if (existing.groupId != null) {
+      upserts.push({
+        ...existing,
+        identifier: issue.identifier,
+        title: issue.title,
+        url: issue.url,
+        description: issue.description,
+        priority: issue.priority,
+        updatedAt: issue.updatedAt,
+        project: issue.project ?? undefined,
+      });
+    } else if (existing.column === "todo" || existing.column === "inbox") {
       upserts.push({
         ...existing,
         identifier: issue.identifier,
@@ -99,6 +110,7 @@ export function reconcile(
   for (const card of current.values()) {
     if (seen.has(card.issueId)) continue;
     if (
+      card.groupId == null &&
       (card.column === "todo" || card.column === "inbox") &&
       !isStartingCard(card, inFlightStartIds)
     ) {

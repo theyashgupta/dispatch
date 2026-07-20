@@ -312,6 +312,147 @@ cardsRouter.post("/cards/:id/cleanup", (req, res) => {
 });
 
 /**
+ * Server-side re-validation for a `POST /cards/group` member id: the client's `GroupStartModal`
+ * selection is a frozen snapshot, so every id is re-checked against the LIVE store at submit time,
+ * never trusted (a TOCTOU defense — a member could be started/removed/grouped elsewhere between
+ * selection and submit). Distinct from `inboxTransitionError`'s shape (returns the FIRST failing
+ * id's reason via the caller's loop) since the route must collect every offending id for the 409
+ * `ineligibleIds` list, not just fail fast on the first.
+ */
+function memberIneligibleReason(card: Card | undefined): string | null {
+  if (!card) return "unknown card id";
+  if (card.column !== "todo") return "not in To Do";
+  if (card.groupId != null) return "already grouped";
+  if (card.source === "group") return "is itself a group";
+  return null;
+}
+
+/**
+ * Atomic group create+start (Phase 63, GROUP-01/03/04): validates `title` (MAX_TITLE_LEN +
+ * marker screening, the `POST /cards` precedent) and `memberIds` (>=2, distinct, each
+ * re-validated live via {@link memberIneligibleReason} — all-or-nothing 409 per the ratified
+ * ALL-OR-NOTHING posture, Open Question 3), replicates `/cards/:id/start`'s exact
+ * playbook/workspace/base-branch/restatRepos checks (the workspace payload is REQUIRED here — a
+ * brand-new group card has no prior `card.workspace` to fall back to), then mints the group card
+ * and calls the UNMODIFIED `startSession` keyed by its id — the saga itself needs zero
+ * group-awareness (it only ever reads `card.workspace`/`card.identifier`).
+ */
+async function createGroupHandler(req: Request, res: Response): Promise<void> {
+  const body = req.body as
+    | {
+        title?: unknown;
+        memberIds?: unknown;
+        folder?: unknown;
+        repos?: unknown;
+        playbook?: unknown;
+        extraDirection?: unknown;
+      }
+    | undefined;
+
+  const title = typeof body?.title === "string" ? body.title.trim() : "";
+  if (title === "" || title.length > MAX_TITLE_LEN) {
+    res.status(400).json({ error: "invalid-title" });
+    return;
+  }
+  if (hasDispatchMarker(title)) {
+    res
+      .status(400)
+      .json({ error: "content contains the DISPATCH_STATUS marker" });
+    return;
+  }
+
+  const rawMemberIds = body?.memberIds;
+  if (
+    !Array.isArray(rawMemberIds) ||
+    rawMemberIds.length < 2 ||
+    !rawMemberIds.every((id) => typeof id === "string") ||
+    new Set(rawMemberIds).size !== rawMemberIds.length
+  ) {
+    res.status(400).json({
+      error: "memberIds must be an array of >=2 distinct card ids",
+    });
+    return;
+  }
+  const memberIds = rawMemberIds;
+
+  const ineligibleIds = memberIds.filter(
+    (id) => memberIneligibleReason(store.getCard(id)) != null,
+  );
+  if (ineligibleIds.length > 0) {
+    res.status(409).json({
+      error: "some selected cards are no longer eligible to be grouped",
+      ineligibleIds,
+    });
+    return;
+  }
+
+  const config = getOrchestrationConfig();
+  if (!config) {
+    res
+      .status(400)
+      .json({ error: "orchestration config is not loaded", variant: "config" });
+    return;
+  }
+
+  const playbook =
+    typeof body?.playbook === "string" ? body.playbook : undefined;
+  if (playbook !== undefined) {
+    const known = (await loadPlaybooks()).some((p) => p.name === playbook);
+    if (!known) {
+      res.status(400).json({ error: "unknown playbook", variant: "playbook" });
+      return;
+    }
+  }
+
+  const folder = body?.folder;
+  const rawRepos = body?.repos;
+  const hasWorkspacePayload =
+    typeof folder === "string" &&
+    Array.isArray(rawRepos) &&
+    rawRepos.length > 0 &&
+    rawRepos.every(
+      (r) =>
+        r !== null &&
+        typeof r === "object" &&
+        typeof (r as { path?: unknown }).path === "string" &&
+        typeof (r as { base?: unknown }).base === "string",
+    );
+  if (!hasWorkspacePayload) {
+    res.status(400).json({
+      error: "No workspace selected for this group",
+      variant: "config",
+    });
+    return;
+  }
+
+  const repos = (rawRepos as { path: string; base: string }[]).map((r) => ({
+    path: r.path,
+    base: r.base,
+  }));
+  if (repos.some((r) => r.base.startsWith("-"))) {
+    res.status(400).json({ error: "invalid base branch", variant: "config" });
+    return;
+  }
+  if (!(await restatRepos(repos))) {
+    res.status(400).json({
+      error: "Can't start — a selected repo is missing",
+      variant: "config",
+    });
+    return;
+  }
+
+  const extraDirection =
+    typeof body?.extraDirection === "string" ? body.extraDirection : "";
+
+  const groupCard = await store.createGroupCard(title, memberIds);
+  await store.setCardWorkspace(groupCard.id, { folder, repos });
+  void startSession(groupCard.id, extraDirection, config, { playbook });
+  res.status(202).json({ started: true, card: groupCard });
+}
+
+cardsRouter.post("/cards/group", createGroupHandler);
+
+/**
  * Module-level single-flight guard for `POST /cards/draft`, deliberately its OWN state — NEVER
  * shared with `playbooks.route.ts`'s `generateInFlight` (mirrors that file's precedent exactly,
  * but the two draft-generation surfaces are unrelated features a user could legitimately have
