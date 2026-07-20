@@ -22,6 +22,7 @@ import {
   StartModal,
   CleanupModal,
   SettingsModal,
+  CreateTicketModal,
   type SettingsTab,
 } from "./features/modals/index.js";
 import { FirstRunSetup } from "./features/setup/index.js";
@@ -162,6 +163,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] =
     useState<SettingsTab>("filters");
+  const [createTicketOpen, setCreateTicketOpen] = useState(false);
 
   const [setupState, setSetupState] = useState<
     "loading" | "needsKey" | "ready"
@@ -232,6 +234,7 @@ export function App() {
             onOpenInbox={() => setInboxOpen((v) => !v)}
             inboxCount={board.cards.filter((c) => c.column === "inbox").length}
             inboxOpen={inboxOpen}
+            onOpenCreateTicket={() => setCreateTicketOpen(true)}
             viewMode={viewMode}
             onSelectViewMode={setViewMode}
           />
@@ -317,6 +320,9 @@ export function App() {
             setSettingsInitialTab("filters");
           }}
         />
+      )}
+      {createTicketOpen && (
+        <CreateTicketModal onClose={() => setCreateTicketOpen(false)} />
       )}
     </AppShell>
   );

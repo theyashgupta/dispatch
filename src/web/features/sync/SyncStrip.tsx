@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { Activity, Inbox, Kanban, PanelLeft, Settings } from "lucide-react";
+import {
+  Activity,
+  Inbox,
+  Kanban,
+  PanelLeft,
+  Plus,
+  Settings,
+} from "lucide-react";
 import type { ConnectionStatus } from "../../hooks/useBoardStream.js";
 import { Glyph } from "../../primitives/Glyph.js";
 import { IconButton } from "../../primitives/IconButton.js";
@@ -16,6 +23,7 @@ interface SyncStripProps {
   onOpenInbox?: () => void;
   inboxCount?: number;
   inboxOpen?: boolean;
+  onOpenCreateTicket?: () => void;
   viewMode?: "board" | "orca";
   onSelectViewMode?: (mode: "board" | "orca") => void;
 }
@@ -41,6 +49,7 @@ export function SyncStrip({
   onOpenInbox,
   inboxCount,
   inboxOpen,
+  onOpenCreateTicket,
   viewMode,
   onSelectViewMode,
 }: SyncStripProps) {
@@ -157,6 +166,9 @@ export function SyncStrip({
           />
           {text}
         </div>
+        <IconButton aria-label="New ticket" onClick={onOpenCreateTicket}>
+          <Plus size={16} strokeWidth={2} aria-hidden="true" />
+        </IconButton>
         <div style={{ display: "flex", gap: "var(--space-xs)" }}>
           <IconButton
             aria-label="Board view"

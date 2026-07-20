@@ -64,6 +64,8 @@ export function EmptyState({ column }: EmptyStateProps) {
       >
         Issues assigned to you in Linear that are in an unstarted state show up
         here within a minute.
+        <br />
+        Or click + above to draft one yourself.
       </div>
     </div>
   );
