@@ -316,6 +316,17 @@ cardsRouter.post("/cards/:id/cleanup", (req, res) => {
  * but the two draft-generation surfaces are unrelated features a user could legitimately have
  * open at once). Rejects a concurrent call with 409 rather than fanning out parallel `claude -p`
  * subprocesses (a denial-of-service concern for this endpoint, per the phase's threat register).
+ *
+ * @remarks Live-smoke-discovered fix (61-03): the handler's abort-on-disconnect wiring listens on
+ * `res`, not `req`. `req.on("close")` fires as soon as the request's readable stream is fully
+ * consumed (i.e. once `express.json()` finishes reading the body) — well before any response is
+ * sent — regardless of whether the client is still connected and waiting. That made every real
+ * invocation abort itself within milliseconds of entering the handler, silently dropping the
+ * response (the `.catch` branch returns early on an aborted signal without ever calling
+ * `res.status(...)`), so the client hung until its own timeout. `res.on("close")` only fires when
+ * the underlying connection ends WITHOUT the response having been fully written, which is what
+ * "the client disconnected before generation finished" actually means; the existing
+ * `!res.writableEnded` guard still excludes the normal-completion case.
  */
 let draftInFlight = false;
 
@@ -335,7 +346,7 @@ cardsRouter.post("/cards/draft", (req, res) => {
 
   draftInFlight = true;
   const controller = new AbortController();
-  req.on("close", () => {
+  res.on("close", () => {
     if (!res.writableEnded) controller.abort();
   });
 
