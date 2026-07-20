@@ -46,6 +46,12 @@ Step 4 — final output:
 After the above steps, output ONE line containing ONLY a strict JSON object with exactly these five string fields and nothing else before or after it, no markdown code fence, no commentary:
 {"identifier":"...","url":"...","issueId":"...","title":"...","description":"..."}
 
+CRITICAL — "issueId" vs "identifier" are DIFFERENT fields, do not confuse them: "identifier" is the
+short human-readable code (e.g. "ENG-123"). "issueId" is the issue's OTHER, internal "id" field — a
+long UUID (e.g. "b300bccb-64a1-4794-8938-04ba75214509") returned alongside "identifier" by
+save_issue/list_issues. Copy that UUID "id" value into "issueId". NEVER put the "identifier" value
+(the short code) into the "issueId" field — they must not be equal.
+
 Never emit the literal text "DISPATCH_STATUS:" anywhere in your output.`;
 }
 
@@ -90,9 +96,13 @@ function findLastJsonObject(stdout: string): Record<string, unknown> | null {
  * Parse a `syncCardToLinear` stdout into the five-field adopted-identity shape. Exported
  * (undecorated by any subprocess spawn) so a scratchpad script can assert its shape/footgun guards
  * without invoking `claude` (the `parseTicketDraft` precedent). Throws a plain `Error` when no JSON
- * object is found, when any of the five fields is not a non-empty string, or when `identifier`
+ * object is found, when any of the five fields is not a non-empty string, when `identifier`
  * fails the exact regex the start route enforces — an adopted identifier that cannot start a
- * session would brick the card.
+ * session would brick the card — or when `issueId` equals `identifier` or is itself
+ * identifier-shaped (62-03 live-smoke finding: the model can conflate Linear's short human-readable
+ * `identifier` with its internal UUID `id`; `mapping.ts`'s poller reconcile keys strictly on the
+ * latter, so a wrong `issueId` here never matches a future poll refresh and produces a duplicate
+ * card instead of an in-place update).
  */
 export function parseSyncResult(stdout: string): {
   identifier: string;
@@ -125,6 +135,13 @@ export function parseSyncResult(stdout: string): {
   const identifier = out.identifier!;
   if (!IDENTIFIER_PATTERN.test(identifier)) {
     throw new Error(`invalid Linear identifier in sync output: ${identifier}`);
+  }
+
+  const issueId = out.issueId!;
+  if (issueId === identifier || IDENTIFIER_PATTERN.test(issueId)) {
+    throw new Error(
+      `sync output confused issueId with identifier (got "${issueId}") — issueId must be Linear's internal id, not the short identifier`,
+    );
   }
 
   return {
