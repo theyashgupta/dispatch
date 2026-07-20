@@ -1,7 +1,8 @@
 import { AlertTriangle, Users } from "lucide-react";
 import { useState } from "react";
 import type { Card as CardModel } from "../../../shared/types.js";
-import { isUnseen, useLastOpened } from "../../hooks/useUnseenActivity.js";
+import { useLastOpened } from "../../hooks/useUnseenActivity.js";
+import { deriveShowDot } from "../../lib/card-badges.js";
 import { Field } from "../../primitives/Field.js";
 import { SourceBadge } from "../badges/index.js";
 import {
@@ -33,7 +34,7 @@ export function OrcaNavRow({ card, selected, onSelect }: OrcaNavRowProps) {
   const [hover, setHover] = useState(false);
   const [focused, setFocused] = useState(false);
   const lastOpenedMap = useLastOpened();
-  const unseen = isUnseen(card.outputChangedAt, lastOpenedMap[card.id]);
+  const unseen = deriveShowDot(card, selected, lastOpenedMap);
   const attention = needsAttention(card);
   const memberCount = card.memberIds?.length ?? 0;
 
