@@ -1236,6 +1236,13 @@ class BoardStore extends EventEmitter {
    * @remarks In-queue re-check (the `applyMarker` precedent): re-reads the live Map and no-ops
    * (returns `[]`, no event) unless the card exists AND is still `source: "local"` — a raced/repeated
    * call after adoption already landed is therefore idempotent, the retry-safety belt for PUSH-03.
+   * @remarks Poller-race dedup (62-03 live-smoke finding): a poll cycle can complete WHILE this
+   * card's sync is still in flight — the issue already exists on Linear (assigned, unstarted) but
+   * this card hasn't adopted yet, so `applyIssues`'s linear-scoped `current` map (keyed by issueId)
+   * doesn't know about it and upserts a brand-new card keyed by the raw issueId. Any OTHER card
+   * already holding `adopted.issueId` at adoption time is exactly that race's leftover — removed
+   * here so the sync-triggered card (stable `Card.id`) stays the sole owner of the issueId, meeting
+   * PUSH-02's zero-duplicate guarantee even when this race window is hit.
    */
   adoptLinearIdentity(
     id: string,
@@ -1250,6 +1257,11 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card || (card.source ?? "linear") !== "local") return [];
+      for (const [otherId, otherCard] of this.cards) {
+        if (otherId !== id && otherCard.issueId === adopted.issueId) {
+          this.cards.delete(otherId);
+        }
+      }
       card.source = "linear";
       card.identifier = adopted.identifier;
       card.url = adopted.url;
