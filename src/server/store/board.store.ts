@@ -14,7 +14,7 @@ import type {
   TerminalError,
 } from "../../shared/types.js";
 import { type BoardDb, type BoardMeta, openBoardDb } from "./board-db.js";
-import { reconcile } from "./mapping.js";
+import { isStartingCard, reconcile } from "./mapping.js";
 
 const BOARD_DIR = path.join(os.homedir(), ".dispatch");
 export const BOARD_PATH = path.join(BOARD_DIR, "board.json");
@@ -1241,8 +1241,13 @@ class BoardStore extends EventEmitter {
    * this card hasn't adopted yet, so `applyIssues`'s linear-scoped `current` map (keyed by issueId)
    * doesn't know about it and upserts a brand-new card keyed by the raw issueId. Any OTHER card
    * already holding `adopted.issueId` at adoption time is exactly that race's leftover — removed
-   * here so the sync-triggered card (stable `Card.id`) stays the sole owner of the issueId, meeting
-   * PUSH-02's zero-duplicate guarantee even when this race window is hit.
+   * here (its hook token released through the clearHookToken chokepoint) so the sync-triggered card
+   * (stable `Card.id`) stays the sole owner of the issueId, meeting PUSH-02's zero-duplicate
+   * guarantee even when this race window is hit. The delete carries `reconcile()`'s removal guards:
+   * a duplicate that is past To Do/Inbox or is starting/carries session state (isStartingCard) is
+   * NEVER deleted — deleting it would orphan a live tmux/ttyd session (the `inFlightStarts`
+   * hazard). In that case adoption itself is REFUSED — the card stays local with a
+   * manual-resolution `syncError` — rather than leaving two cards contending over one issueId.
    */
   adoptLinearIdentity(
     id: string,
@@ -1257,10 +1262,25 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card || (card.source ?? "linear") !== "local") return [];
-      for (const [otherId, otherCard] of this.cards) {
-        if (otherId !== id && otherCard.issueId === adopted.issueId) {
-          this.cards.delete(otherId);
-        }
+      const duplicates = [...this.cards.values()].filter(
+        (other) => other.id !== id && other.issueId === adopted.issueId,
+      );
+      const unsafe = duplicates.find(
+        (dup) =>
+          (dup.column !== "todo" && dup.column !== "inbox") ||
+          isStartingCard(dup, this.inFlightStarts),
+      );
+      if (unsafe) {
+        console.warn(
+          `[store] sync dedup refused adoption for ${id} — duplicate ${unsafe.id} is active or has a session`,
+        );
+        card.syncError = `Synced to Linear as ${adopted.identifier}, but another card for that issue is already active on the board — resolve the duplicate manually, then retry.`;
+        card.syncing = undefined;
+        return [];
+      }
+      for (const dup of duplicates) {
+        this.clearHookToken(dup);
+        this.cards.delete(dup.id);
       }
       card.source = "linear";
       card.identifier = adopted.identifier;

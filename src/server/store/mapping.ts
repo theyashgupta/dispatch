@@ -18,8 +18,8 @@ function newInboxCard(issue: SourceIssue, sourceId: string): Card {
   };
 }
 
-/** CR-01 predicate: a start saga is in flight for the card, or it already carries provisioning/session state from one. */
-function isStartingCard(
+/** CR-01 predicate: a start saga is in flight for the card, or it already carries provisioning/session state from one. Exported so `adoptLinearIdentity`'s poll-race dedup applies the SAME removal guard reconcile does. */
+export function isStartingCard(
   card: Card,
   inFlightStartIds: ReadonlySet<string>,
 ): boolean {
