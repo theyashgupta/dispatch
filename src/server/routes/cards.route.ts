@@ -9,9 +9,17 @@ import { ensureTerminal } from "../services/orchestration/terminal.js";
 import { editorPath, launchEditor } from "../adapters/editors.js";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
 import { restatRepos } from "../services/domain/workspaces.js";
-import { loadPlaybooks } from "../services/domain/playbooks.js";
+import {
+  loadPlaybooks,
+  hasDispatchMarker,
+} from "../services/domain/playbooks.js";
+import { generateTicketDraft } from "../services/orchestration/ticket-generate.js";
 
 export const cardsRouter = Router();
+
+const MAX_DIRECTION_LEN = 10000;
+const MAX_TITLE_LEN = 300;
+const MAX_DESCRIPTION_LEN = 20000;
 
 /**
  * `/move`'s own whitelist, distinct from `COLUMNS` (the board's render list). Inbox is a valid
@@ -300,4 +308,74 @@ cardsRouter.post("/cards/:id/cleanup", (req, res) => {
     console.error(`[cleanup] failed for card ${id}:`, (err as Error).message);
   });
   res.status(202).json({ cleaning: true });
+});
+
+/**
+ * Module-level single-flight guard for `POST /cards/draft`, deliberately its OWN state — NEVER
+ * shared with `playbooks.route.ts`'s `generateInFlight` (mirrors that file's precedent exactly,
+ * but the two draft-generation surfaces are unrelated features a user could legitimately have
+ * open at once). Rejects a concurrent call with 409 rather than fanning out parallel `claude -p`
+ * subprocesses (a denial-of-service concern for this endpoint, per the phase's threat register).
+ */
+let draftInFlight = false;
+
+cardsRouter.post("/cards/draft", (req, res) => {
+  const rawDirection = (req.body as { direction?: unknown } | undefined)
+    ?.direction;
+  const direction = typeof rawDirection === "string" ? rawDirection.trim() : "";
+  if (direction === "" || direction.length > MAX_DIRECTION_LEN) {
+    res.status(400).json({ error: "invalid-direction" });
+    return;
+  }
+
+  if (draftInFlight) {
+    res.status(409).json({ error: "generate-in-progress" });
+    return;
+  }
+
+  draftInFlight = true;
+  const controller = new AbortController();
+  req.on("close", () => {
+    if (!res.writableEnded) controller.abort();
+  });
+
+  generateTicketDraft(direction, controller.signal)
+    .then((draft) => {
+      res.status(200).json(draft);
+    })
+    .catch(() => {
+      if (controller.signal.aborted) return;
+      res.status(502).json({ error: "generate-failed" });
+    })
+    .finally(() => {
+      draftInFlight = false;
+    });
+});
+
+cardsRouter.post("/cards", async (req, res) => {
+  const body = req.body as
+    { title?: unknown; description?: unknown } | undefined;
+
+  const title = typeof body?.title === "string" ? body.title.trim() : "";
+  if (title === "" || title.length > MAX_TITLE_LEN) {
+    res.status(400).json({ error: "invalid-title" });
+    return;
+  }
+
+  const description =
+    typeof body?.description === "string" ? body.description.trim() : "";
+  if (description === "" || description.length > MAX_DESCRIPTION_LEN) {
+    res.status(400).json({ error: "invalid-description" });
+    return;
+  }
+
+  if (hasDispatchMarker(title) || hasDispatchMarker(description)) {
+    res
+      .status(400)
+      .json({ error: "content contains the DISPATCH_STATUS marker" });
+    return;
+  }
+
+  const card = await store.createLocalCard(title, description);
+  res.status(201).json(card);
 });
