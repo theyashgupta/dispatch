@@ -1,8 +1,11 @@
 import { run } from "../../adapters/exec.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
+import { getOrchestrationConfig } from "../infra/config-holder.js";
 import { DISPATCH_DIR } from "../infra/paths.js";
 
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9]+-\d+$/;
+
+const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 
 const SYNC_MCP_TOOLS = [
   "mcp__linear__list_issues",
@@ -43,14 +46,8 @@ The description you write MUST end with its own final line containing exactly th
 ${token}
 
 Step 4 — final output:
-After the above steps, output ONE line containing ONLY a strict JSON object with exactly these five string fields and nothing else before or after it, no markdown code fence, no commentary:
-{"identifier":"...","url":"...","issueId":"...","title":"...","description":"..."}
-
-CRITICAL — "issueId" vs "identifier" are DIFFERENT fields, do not confuse them: "identifier" is the
-short human-readable code (e.g. "ENG-123"). "issueId" is the issue's OTHER, internal "id" field — a
-long UUID (e.g. "b300bccb-64a1-4794-8938-04ba75214509") returned alongside "identifier" by
-save_issue/list_issues. Copy that UUID "id" value into "issueId". NEVER put the "identifier" value
-(the short code) into the "issueId" field — they must not be equal.
+After the above steps, output ONE line containing ONLY a strict JSON object with exactly these four string fields and nothing else before or after it, no markdown code fence, no commentary:
+{"identifier":"...","url":"...","title":"...","description":"..."}
 
 Never emit the literal text "DISPATCH_STATUS:" anywhere in your output.`;
 }
@@ -93,21 +90,24 @@ function findLastJsonObject(stdout: string): Record<string, unknown> | null {
 }
 
 /**
- * Parse a `syncCardToLinear` stdout into the five-field adopted-identity shape. Exported
+ * Parse a `syncCardToLinear` stdout into the four-field adopted-content shape. Exported
  * (undecorated by any subprocess spawn) so a scratchpad script can assert its shape/footgun guards
  * without invoking `claude` (the `parseTicketDraft` precedent). Throws a plain `Error` when no JSON
- * object is found, when any of the five fields is not a non-empty string, when `identifier`
+ * object is found, when any of the four fields is not a non-empty string, or when `identifier`
  * fails the exact regex the start route enforces — an adopted identifier that cannot start a
- * session would brick the card — or when `issueId` equals `identifier` or is itself
- * identifier-shaped (62-03 live-smoke finding: the model can conflate Linear's short human-readable
- * `identifier` with its internal UUID `id`; `mapping.ts`'s poller reconcile keys strictly on the
- * latter, so a wrong `issueId` here never matches a future poll refresh and produces a duplicate
- * card instead of an in-place update).
+ * session would brick the card.
+ * @remarks Deliberately does NOT ask the model for `issueId` (62-03 live-smoke finding): every
+ * Linear MCP tool in this allowlist (`save_issue`/`list_issues`, and `get_issue` on manual probe)
+ * exposes only the short human-readable `identifier` under the field name `id` — the internal
+ * GraphQL UUID `mapping.ts`'s poller reconcile keys on is never surfaced to the model at all. Asking
+ * for it produced either a wrong value (the model copying `identifier` into `issueId`) or the model
+ * stalling/erroring while hunting for data it structurally cannot obtain via MCP. The true UUID is
+ * resolved separately by {@link resolveIssueId} via a READ-ONLY GraphQL call with the stored
+ * (never-writing) API key, exactly like the poller's own lookups.
  */
 export function parseSyncResult(stdout: string): {
   identifier: string;
   url: string;
-  issueId: string;
   title: string;
   description: string;
 } {
@@ -116,13 +116,7 @@ export function parseSyncResult(stdout: string): {
     throw new Error("no JSON object found in sync output");
   }
 
-  const fields = [
-    "identifier",
-    "url",
-    "issueId",
-    "title",
-    "description",
-  ] as const;
+  const fields = ["identifier", "url", "title", "description"] as const;
   const out: Partial<Record<(typeof fields)[number], string>> = {};
   for (const field of fields) {
     const value = obj[field];
@@ -137,26 +131,56 @@ export function parseSyncResult(stdout: string): {
     throw new Error(`invalid Linear identifier in sync output: ${identifier}`);
   }
 
-  const issueId = out.issueId!;
-  if (issueId === identifier || IDENTIFIER_PATTERN.test(issueId)) {
-    throw new Error(
-      `sync output confused issueId with identifier (got "${issueId}") — issueId must be Linear's internal id, not the short identifier`,
-    );
-  }
-
   return {
     identifier,
     url: out.url!,
-    issueId: out.issueId!,
     title: out.title!,
     description: out.description!,
   };
 }
 
 /**
+ * Resolve Linear's internal GraphQL `id` (a UUID) for `identifier` via a READ-ONLY query using the
+ * stored, never-writing config API key — the same key `sources/linear/linear.source.ts` uses for
+ * every poll. This is the ONLY reliable source for the value `mapping.ts`'s poller reconcile keys
+ * `Card.issueId` on (see {@link parseSyncResult}'s `@remarks`): the MCP tool surface never exposes
+ * it. Throws when the config has no key configured, on a network/HTTP failure, or when the response
+ * carries no matching issue — all of which the caller treats as a normal sync failure (retry-safe
+ * via the idempotency token, no partial identity ever adopted).
+ */
+async function resolveIssueId(identifier: string): Promise<string> {
+  const apiKey = getOrchestrationConfig()?.linearApiKey;
+  if (!apiKey) {
+    throw new Error("no Linear API key configured — cannot resolve issue id");
+  }
+  const res = await fetch(LINEAR_GRAPHQL_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: apiKey },
+    body: JSON.stringify({
+      query: "query($id: String!) { issue(id: $id) { id } }",
+      variables: { id: identifier },
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`issue id lookup failed: HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as {
+    data?: { issue?: { id?: string } | null };
+    errors?: unknown;
+  };
+  const id = data.data?.issue?.id;
+  if (typeof id !== "string" || id.trim() === "") {
+    throw new Error(`issue id lookup returned no id for ${identifier}`);
+  }
+  return id;
+}
+
+/**
  * Sync a `source:"local"` card out to Linear via a headless `claude -p` subprocess restricted to
- * the five Linear MCP tools, reusing the USER-SCOPE MCP config already registered for the CLI
- * (never the stored, read-only Linear API key — PUSH-01). Deliberately deviates from
+ * the five Linear MCP tools, reusing the USER-SCOPE MCP config already registered for the CLI —
+ * the stored, read-only Linear API key never creates or updates anything (PUSH-01); it is only
+ * used afterward, by {@link resolveIssueId}, for a read lookup of the created issue's internal id.
+ * Deliberately deviates from
  * `ticket-generate.ts`'s invocation in two ways, both load-bearing: NO `--tools ""` and NO
  * `--strict-mcp-config` — both would sever the user-scope Linear MCP this feature exists to use.
  * NO `AbortSignal` is threaded through (asymmetric with `/cards/draft`'s cancel-on-disconnect):
@@ -201,5 +225,7 @@ export async function syncCardToLinear(card: {
     },
   );
 
-  return parseSyncResult(stdout);
+  const parsed = parseSyncResult(stdout);
+  const issueId = await resolveIssueId(parsed.identifier);
+  return { ...parsed, issueId };
 }

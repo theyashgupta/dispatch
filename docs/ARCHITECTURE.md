@@ -817,11 +817,17 @@ JSDoc in `src/web/**/*.tsx`, enforced by the `allowJsdoc: false` lint scoping in
 Linear INTO the board; this half pushes a `source:"local"` card OUT to a real Linear issue on
 explicit user action (`POST /cards/:id/sync-linear`, `services/orchestration/linear-sync.ts`).
 MCP-only writes: the stored Linear API key is READ-ONLY toward Linear everywhere in this app — the
-sync path never touches it, instead spawning a headless `claude -p` that reuses the CLI's own
-user-scope Linear MCP OAuth session, restricted via `--allowedTools` to five read/write tools
-(`list_issues`, `save_issue`, `list_teams`, `list_users`, `list_issue_statuses`). The sole sanctioned
-exception to "API key never writes" is GraphQL `issueDelete` for TEST-cleanup only (user decision
-2026-07-20) — never issue creation or update. Idempotency: the sync prompt embeds
+sync path never uses it to create or update anything, instead spawning a headless `claude -p` that
+reuses the CLI's own user-scope Linear MCP OAuth session, restricted via `--allowedTools` to five
+read/write tools (`list_issues`, `save_issue`, `list_teams`, `list_users`, `list_issue_statuses`).
+The sole sanctioned exceptions to "API key never writes" are (1) GraphQL `issueDelete` for
+TEST-cleanup only (user decision 2026-07-20), and (2) a single READ-ONLY `issue(id:...) { id }`
+lookup the sync service makes with the stored key AFTER the MCP create/find succeeds — 62-03 live
+smoke found that no Linear MCP tool in this allowlist (nor `get_issue`, checked live) ever exposes
+the issue's internal GraphQL `id` to the model, only its short `identifier` under the confusingly
+reused field name `id`; `resolveIssueId` in `linear-sync.ts` resolves the identifier to the true
+internal id the exact way `linear.source.ts`'s poller already does, since that is the ONLY value
+`Card.issueId` may ever hold. Idempotency: the sync prompt embeds
 `dispatch-sync:<card.id>` as the final line of the created issue's description and searches for that
 exact token via `list_issues` BEFORE ever calling `save_issue` to create — `save_issue` is
 upsert-shaped (an `id` field means UPDATE), so the create branch is instructed to omit `id` entirely.
@@ -833,7 +839,12 @@ in the SAME transaction (the standard `enqueue` persist+broadcast chokepoint, `S
 `Card.id` NEVER changes, which is exactly what lets the NEXT Linear poll refresh the card in place: the
 card now carries `source: "linear"` and the real `issueId`, so `applyIssues`'s per-source `current` map
 (keyed by `issueId`) picks it up and `reconcile()`'s existing in-place-refresh branch (`SYNC-02` above)
-applies — no separate poller code path exists for a freshly-synced card. Per-card single-flight:
+applies — no separate poller code path exists for a freshly-synced card. Because a sync can legitimately
+take longer than one poll interval, a poll cycle can complete WHILE the sync is still in flight: the
+issue already exists on Linear but the card hasn't adopted yet, so the poller doesn't recognize it and
+upserts its own new card for the same issue. `adoptLinearIdentity` removes any other card already
+holding the adopted `issueId` as part of the same fused mutation, so the sync-triggered card (stable
+`Card.id`) ends up the sole owner even when this race is hit (62-03 live-smoke finding). Per-card single-flight:
 `store.isSyncing`/`beginSync`/`endSync` mirror the start saga's `isStarting` guard exactly (a
 synchronous `Set<string>` keyed by card id, checked and set with no `await` between), so two DIFFERENT
 local cards may sync concurrently while the SAME card is single-flighted; failure records a fixed,
