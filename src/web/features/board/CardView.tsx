@@ -16,6 +16,10 @@ import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { IconButton } from "../../primitives/IconButton.js";
 import { Notice } from "../../primitives/Notice.js";
+import {
+  errorCopy,
+  needsAttention as getNeedsAttention,
+} from "./card-attention.js";
 import { MemberRow } from "./MemberRow.js";
 
 export const PRIORITY_DOT: Record<number, { color: string; label: string }> = {
@@ -43,21 +47,6 @@ interface CardViewProps {
   members?: CardModel[];
 }
 
-function errorCopy(card: CardModel): { heading: string; detail?: string } {
-  const err = card.startError!;
-  switch (err.variant) {
-    case "branch-conflict":
-      return {
-        heading: "Start failed — branch checked out elsewhere",
-        detail: `Branch ${card.identifier} is attached to another worktree.`,
-      };
-    case "repl-timeout":
-      return { heading: "Start failed — Claude didn't start" };
-    default:
-      return { heading: `Start failed — ${err.step}` };
-  }
-}
-
 export function CardView({
   card,
   selected,
@@ -80,10 +69,7 @@ export function CardView({
   const compact = card.column === "done";
   const isGroup = card.source === "group";
   const selectable = card.column === "todo" && card.groupId == null && !isGroup;
-  const needsAttention =
-    card.startError != null ||
-    (card.sessionLost === true && card.column !== "done") ||
-    (card.cleanupBlocked != null && card.cleanupBlocked.length > 0);
+  const needsAttention = getNeedsAttention(card);
   const priorityDot = isGroup ? undefined : PRIORITY_DOT[card.priority];
   const memberCount = members?.length ?? 0;
   const chipStyle: React.CSSProperties = {

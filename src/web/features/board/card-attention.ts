@@ -1,0 +1,37 @@
+import type { Card as CardModel } from "../../../shared/types.js";
+
+/**
+ * Returns true when a card needs human attention: a start failure, a lost session outside the
+ * Done column, or blocked cleanup.
+ * @remarks Shared by CardView's accent ring and the Orca sidebar's attention-badge override —
+ * the Phase 64 UI-SPEC mandates a single predicate here so the two surfaces cannot drift apart.
+ */
+export function needsAttention(card: CardModel): boolean {
+  return (
+    card.startError != null ||
+    (card.sessionLost === true && card.column !== "done") ||
+    (card.cleanupBlocked != null && card.cleanupBlocked.length > 0)
+  );
+}
+
+/**
+ * Maps a card's `startError` variant to the exact heading/detail copy shown in the board's
+ * destructive Notice and reused verbatim as the Orca attention-badge tooltip.
+ */
+export function errorCopy(card: CardModel): {
+  heading: string;
+  detail?: string;
+} {
+  const err = card.startError!;
+  switch (err.variant) {
+    case "branch-conflict":
+      return {
+        heading: "Start failed — branch checked out elsewhere",
+        detail: `Branch ${card.identifier} is attached to another worktree.`,
+      };
+    case "repl-timeout":
+      return { heading: "Start failed — Claude didn't start" };
+    default:
+      return { heading: `Start failed — ${err.step}` };
+  }
+}
