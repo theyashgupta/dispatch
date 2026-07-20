@@ -188,6 +188,10 @@ async function resolveIssueId(identifier: string): Promise<string> {
  * so the `timeout` alone bounds the run. `killEscalationMs` still arms the SIGTERM->SIGKILL
  * escalation so a `claude` that ignores the timeout's SIGTERM cannot wedge the route's per-card
  * single-flight guard forever.
+ * @remarks `timeout` is 210s, not `ticket-generate.ts`'s 150s: 62-03 live smoke measured the
+ * idempotency-search-then-adopt branch (Step 1 found the token) taking up to ~145s on its own,
+ * leaving too thin a margin at 150s and causing spurious retry failures — retry-safe via the
+ * idempotency token regardless, but avoidable.
  * @remarks `--allowedTools` is passed the five tool names as SEPARATE argv elements (the spike's
  * live-proven single-tool invocation, generalized) rather than one comma-joined string; 62-03's live
  * smoke is the first real proof of the variadic form against the CLI, and is the sanctioned place to
@@ -219,7 +223,7 @@ export async function syncCardToLinear(card: {
     ],
     {
       cwd: DISPATCH_DIR,
-      timeout: 150_000,
+      timeout: 210_000,
       maxBuffer: 10 * 1024 * 1024,
       killEscalationMs: 5_000,
     },
