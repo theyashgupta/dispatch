@@ -1260,20 +1260,46 @@ class BoardStore extends EventEmitter {
   /**
    * Mint a new `source: "group"` card (Phase 63, GROUP-01/04): mirrors {@link createLocalCard}'s
    * mint pattern exactly (own `groupTicketCounter`, `id === issueId === identifier`) but ALSO
-   * links membership two-sided in the SAME enqueue closure — every found member gets
-   * `groupId = created.id`. Members' `column` is left untouched at creation (the route
-   * re-validates every id is already sitting in To Do before calling this), so no
+   * links membership two-sided in the SAME enqueue closure — every member gets
+   * `groupId = created.id`. Members' `column` is left untouched at creation, so no
    * `mirrorMemberColumn` fan-out runs here; the group card itself lands in To Do and the
    * subsequent start saga's `completeStart` performs the first real fan-out. Emits exactly ONE
    * `group_created` event (Pitfall 4 — no per-member event).
+   * @remarks In-queue re-check (the `adoptLinearIdentity` precedent): the route's eligibility
+   * validation runs OUTSIDE the single-writer queue, so already-queued mutations (a poll's
+   * `applyIssues` removing a member, a competing group mint claiming one) can invalidate a member
+   * between validation and this closure executing. Every member is therefore re-checked here at
+   * mutation time — must exist, sit in To Do, be ungrouped, and not itself be a group — and ANY
+   * failure refuses the whole mint (no card created, no partial links, no counter burn) via the
+   * `ok: false` result the route maps to its 409 `ineligibleIds` response, preserving the
+   * ratified ALL-OR-NOTHING posture and the two-sided `memberIds`/`groupId` invariant.
    */
-  createGroupCard(title: string, memberIds: string[]): Promise<Card> {
-    let created!: Card;
+  createGroupCard(
+    title: string,
+    memberIds: string[],
+  ): Promise<
+    { ok: true; card: Card } | { ok: false; ineligibleIds: string[] }
+  > {
+    let result!:
+      { ok: true; card: Card } | { ok: false; ineligibleIds: string[] };
     return this.enqueue(() => {
+      const ineligibleIds = memberIds.filter((id) => {
+        const member = this.cards.get(id);
+        return (
+          member == null ||
+          member.column !== "todo" ||
+          member.groupId != null ||
+          member.source === "group"
+        );
+      });
+      if (ineligibleIds.length > 0) {
+        result = { ok: false, ineligibleIds };
+        return [];
+      }
       this.groupTicketCounter += 1;
       const identifier = `GROUP-${this.groupTicketCounter}`;
       const now = new Date().toISOString();
-      created = {
+      const created: Card = {
         id: identifier,
         issueId: identifier,
         identifier,
@@ -1291,6 +1317,7 @@ class BoardStore extends EventEmitter {
         const member = this.cards.get(id);
         if (member) member.groupId = created.id;
       }
+      result = { ok: true, card: created };
       return [
         this.event("group_created", {
           cardId: created.id,
@@ -1298,7 +1325,7 @@ class BoardStore extends EventEmitter {
           source: "group",
         }),
       ];
-    }).then(() => created);
+    }).then(() => result);
   }
 
   /**

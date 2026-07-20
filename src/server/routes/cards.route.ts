@@ -373,7 +373,9 @@ function memberIneligibleReason(card: Card | undefined): string | null {
 /**
  * Atomic group create+start (Phase 63, GROUP-01/03/04): validates `title` (MAX_TITLE_LEN +
  * marker screening, the `POST /cards` precedent) and `memberIds` (>=2, distinct, each
- * re-validated live via {@link memberIneligibleReason} — all-or-nothing 409 per the ratified
+ * re-validated live via {@link memberIneligibleReason} as a fast pre-check AND re-checked a
+ * second time INSIDE the store's mutation queue by `createGroupCard`, which refuses the whole
+ * mint if any member was raced ineligible — all-or-nothing 409 per the ratified
  * ALL-OR-NOTHING posture, Open Question 3), replicates `/cards/:id/start`'s exact
  * playbook/workspace/base-branch/restatRepos checks (the workspace payload is REQUIRED here — a
  * brand-new group card has no prior `card.workspace` to fall back to), then mints the group card
@@ -487,7 +489,15 @@ async function createGroupHandler(req: Request, res: Response): Promise<void> {
   const extraDirection =
     typeof body?.extraDirection === "string" ? body.extraDirection : "";
 
-  const groupCard = await store.createGroupCard(title, memberIds);
+  const groupResult = await store.createGroupCard(title, memberIds);
+  if (!groupResult.ok) {
+    res.status(409).json({
+      error: "some selected cards are no longer eligible to be grouped",
+      ineligibleIds: groupResult.ineligibleIds,
+    });
+    return;
+  }
+  const groupCard = groupResult.card;
   await store.setCardWorkspace(groupCard.id, { folder, repos });
   void startSession(groupCard.id, extraDirection, config, { playbook });
   res.status(202).json({ started: true, card: groupCard });
