@@ -87,6 +87,69 @@ export async function startCard(
   throw new Error(`startCard failed: ${res.status} ${res.statusText}`);
 }
 
+/** Discriminated result of a POST /cards/group request. */
+export type StartGroupResult =
+  | { ok: true; card: Card }
+  | {
+      ok: false;
+      error: string;
+      variant?: "config" | "playbook" | "ineligible";
+      ineligibleIds?: string[];
+    };
+
+/**
+ * Atomic create+start for a multi-ticket group: POST /api/cards/group. Mirrors startCard's
+ * 200/400 discrimination, with the group route's 202 (create-and-start in one shot) carrying the
+ * freshly-minted `card`, and a 409 surfacing the server's re-validated `ineligibleIds` so the modal
+ * can report exactly which frozen-selection member fell out of eligibility between select and
+ * submit — the server, not this client, is the source of truth for that check.
+ */
+export async function startGroup(input: {
+  title: string;
+  memberIds: string[];
+  folder: string;
+  repos: { path: string; base: string }[];
+  playbook?: string;
+  extraDirection?: string;
+}): Promise<StartGroupResult> {
+  const res = await fetch("/api/cards/group", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.status === 202) {
+    const body = (await res.json()) as { card: Card };
+    return { ok: true, card: body.card };
+  }
+  if (res.status === 400) {
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      variant?: string;
+    };
+    return {
+      ok: false,
+      error: body.error ?? "Start failed.",
+      variant:
+        body.variant === "config" || body.variant === "playbook"
+          ? body.variant
+          : undefined,
+    };
+  }
+  if (res.status === 409) {
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      ineligibleIds?: string[];
+    };
+    return {
+      ok: false,
+      error: body.error ?? "Some selected tickets are no longer eligible.",
+      variant: "ineligible",
+      ineligibleIds: body.ineligibleIds ?? [],
+    };
+  }
+  throw new Error(`startGroup failed: ${res.status} ${res.statusText}`);
+}
+
 /**
  * Promote a `source:"local"` card to a real Linear issue: POST /api/cards/:id/sync-linear. Mirrors
  * createLocalTicket's discrimination exactly: 200 → `{ ok: true, card }` (the swapped Card, already

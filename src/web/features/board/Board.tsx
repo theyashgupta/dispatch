@@ -18,6 +18,7 @@ import { Column } from "./Column.js";
 import { CardView } from "./CardView.js";
 import { SelectionBar } from "./SelectionBar.js";
 import { membersOf } from "./group-members.js";
+import { GroupStartModal } from "../modals/index.js";
 import type { StartRequest } from "../../lib/start-request.js";
 import { useLastOpened } from "../../hooks/useUnseenActivity.js";
 import { useMediaQuery } from "../../hooks/useMediaQuery.js";
@@ -61,6 +62,9 @@ export function Board({
     : null;
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [groupModalMembers, setGroupModalMembers] = useState<
+    CardModel[] | null
+  >(null);
 
   function toggleSelect(id: string) {
     setSelectedIds((prev) => {
@@ -75,13 +79,13 @@ export function Board({
   }
 
   useEffect(() => {
-    if (selectedIds.size === 0) return;
+    if (selectedIds.size === 0 || groupModalMembers != null) return;
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") setSelectedIds(new Set());
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedIds.size]);
+  }, [selectedIds.size, groupModalMembers]);
 
   const lastOpenedMap = useLastOpened();
   const overlaySelected =
@@ -227,9 +231,18 @@ export function Board({
       </DndContext>
       <SelectionBar
         count={selectedIds.size}
-        onStartGroup={() => {}}
+        onStartGroup={() =>
+          setGroupModalMembers(cards.filter((c) => selectedIds.has(c.id)))
+        }
         onClear={() => setSelectedIds(new Set())}
       />
+      {groupModalMembers != null && (
+        <GroupStartModal
+          members={groupModalMembers}
+          onClose={() => setGroupModalMembers(null)}
+          onStarted={() => setSelectedIds(new Set())}
+        />
+      )}
     </>
   );
 }

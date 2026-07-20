@@ -747,7 +747,7 @@ function EditInSettingsLink({ onClick }: EditInSettingsLinkProps) {
   );
 }
 
-interface WorkspacePicker {
+export interface WorkspacePicker {
   folders: string[];
   selectedFolder: string | null;
   lastUsed: string | null;
@@ -765,7 +765,7 @@ interface WorkspacePicker {
   removeFolder: (path: string) => void;
 }
 
-function useWorkspacePicker(onInteraction: () => void): WorkspacePicker {
+export function useWorkspacePicker(onInteraction: () => void): WorkspacePicker {
   const [folders, setFolders] = useState<string[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [lastUsed, setLastUsed] = useState<string | null>(null);
@@ -989,7 +989,7 @@ function WorkspacePickerSection({
   );
 }
 
-interface PlaybookPicker {
+export interface PlaybookPicker {
   pickerValid: Playbook[];
   pickerInvalid: InvalidPlaybook[];
   lastUsedPlaybook: string | null;
@@ -1001,7 +1001,7 @@ interface PlaybookPicker {
   reload: () => Promise<void>;
 }
 
-function usePlaybookPicker(onInteraction: () => void): PlaybookPicker {
+export function usePlaybookPicker(onInteraction: () => void): PlaybookPicker {
   const [pickerValid, setPickerValid] = useState<Playbook[]>([]);
   const [pickerInvalid, setPickerInvalid] = useState<InvalidPlaybook[]>([]);
   const [lastUsedPlaybook, setLastUsedPlaybook] = useState<string | null>(null);
@@ -1333,3 +1333,5 @@ export function StartModal({
 
 StartModal.WorkspacePicker = WorkspacePickerSection;
 StartModal.PlaybookPicker = PlaybookPickerSection;
+StartModal.useWorkspacePicker = useWorkspacePicker;
+StartModal.usePlaybookPicker = usePlaybookPicker;
