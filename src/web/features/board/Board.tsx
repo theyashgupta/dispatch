@@ -16,6 +16,7 @@ import type {
 } from "../../../shared/types.js";
 import { Column } from "./Column.js";
 import { CardView } from "./CardView.js";
+import { StatusPillSwitcher } from "./StatusPillSwitcher.js";
 import { SelectionBar } from "./SelectionBar.js";
 import { membersOf } from "./group-members.js";
 import { GroupStartModal } from "../modals/index.js";
@@ -115,6 +116,55 @@ export function Board({
   const isPhone = useMediaQuery("(max-width: 767px)");
   const isLarge = useMediaQuery("(min-width: 1600px)");
 
+  const scrollRowRef = useRef<HTMLDivElement | null>(null);
+  const [activeColumn, setActiveColumn] = useState<ColumnId | null>(null);
+
+  useEffect(() => {
+    const root = scrollRowRef.current;
+    if (!isCarousel || root == null) {
+      setActiveColumn(null);
+      return;
+    }
+    const ratios = new Map<ColumnId, number>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const col = (entry.target as HTMLElement).dataset.column as
+            ColumnId | undefined;
+          if (col == null) continue;
+          ratios.set(col, entry.intersectionRatio);
+        }
+        let best: ColumnId | null = null;
+        let bestRatio = 0.6;
+        for (const column of COLUMNS) {
+          const ratio = ratios.get(column) ?? 0;
+          if (ratio >= bestRatio && best == null) {
+            best = column;
+            bestRatio = ratio;
+          } else if (ratio > bestRatio) {
+            best = column;
+            bestRatio = ratio;
+          }
+        }
+        if (best != null) setActiveColumn(best);
+      },
+      { root, threshold: 0.6 },
+    );
+    for (const el of root.querySelectorAll("[data-column]")) {
+      observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [isCarousel]);
+
+  function handlePillSelect(column: ColumnId) {
+    const el = scrollRowRef.current?.querySelector(`[data-column="${column}"]`);
+    el?.scrollIntoView({
+      behavior: "smooth",
+      inline: "start",
+      block: "nearest",
+    });
+  }
+
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, {
@@ -201,36 +251,53 @@ export function Board({
             flex: "1 1 auto",
             minHeight: 0,
             display: "flex",
-            justifyContent: isLarge ? "safe center" : "flex-start",
-            gap: isLarge ? "var(--board-gutter-lg)" : "var(--space-lg)",
-            padding: isLarge ? "var(--board-gutter-lg)" : "var(--space-lg)",
-            overflowX: "auto",
-            overflowY: "hidden",
-            scrollbarGutter: "auto",
-            scrollSnapType:
-              isCarousel && activeCardId == null ? "x mandatory" : "none",
-            scrollPaddingInline: "var(--space-lg)",
+            flexDirection: "column",
           }}
         >
-          {COLUMNS.map((column) => (
-            <Column
-              key={column}
-              column={column}
-              cards={cards.filter(
-                (card) => card.column === column && card.groupId == null,
-              )}
-              groupMembersById={groupMembersById}
-              selectedCardId={selectedCardId}
-              selectedIds={selectedIds}
-              onSelectCard={handleSelectCard}
-              onStartRequest={onStartRequest}
-              onToggleSelect={toggleSelect}
-              isCarousel={isCarousel}
-              phone={isPhone}
-              large={isLarge}
-              resizeDisabled={activeCardId != null}
+          {isCarousel && (
+            <StatusPillSwitcher
+              cards={cards}
+              active={activeColumn}
+              onSelect={handlePillSelect}
             />
-          ))}
+          )}
+          <div
+            ref={scrollRowRef}
+            style={{
+              flex: "1 1 auto",
+              minHeight: 0,
+              display: "flex",
+              justifyContent: isLarge ? "safe center" : "flex-start",
+              gap: isLarge ? "var(--board-gutter-lg)" : "var(--space-lg)",
+              padding: isLarge ? "var(--board-gutter-lg)" : "var(--space-lg)",
+              overflowX: "auto",
+              overflowY: "hidden",
+              scrollbarGutter: "auto",
+              scrollSnapType:
+                isCarousel && activeCardId == null ? "x mandatory" : "none",
+              scrollPaddingInline: "var(--space-lg)",
+            }}
+          >
+            {COLUMNS.map((column) => (
+              <Column
+                key={column}
+                column={column}
+                cards={cards.filter(
+                  (card) => card.column === column && card.groupId == null,
+                )}
+                groupMembersById={groupMembersById}
+                selectedCardId={selectedCardId}
+                selectedIds={selectedIds}
+                onSelectCard={handleSelectCard}
+                onStartRequest={onStartRequest}
+                onToggleSelect={toggleSelect}
+                isCarousel={isCarousel}
+                phone={isPhone}
+                large={isLarge}
+                resizeDisabled={activeCardId != null}
+              />
+            ))}
+          </div>
         </div>
         <DragOverlay dropAnimation={null} style={{ pointerEvents: "none" }}>
           {activeCard ? (

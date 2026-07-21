@@ -6,6 +6,7 @@ import type {
 } from "../../../shared/types.js";
 import { Card } from "./Card.js";
 import { EmptyState } from "./EmptyState.js";
+import { COLUMN_ACCENT, COLUMN_LABELS } from "./column-meta.js";
 import {
   clearColumnWidth,
   setColumnWidth,
@@ -14,26 +15,6 @@ import {
 
 const MIN_COL_WIDTH = 220;
 const MAX_COL_WIDTH = 480;
-
-export const COLUMN_LABELS: Record<ColumnId, string> = {
-  todo: "TO DO",
-  in_progress: "IN PROGRESS",
-  needs_input: "NEEDS INPUT",
-  agent_done: "AGENT DONE",
-  in_review: "IN REVIEW",
-  done: "DONE",
-  inbox: "INBOX",
-};
-
-export const COLUMN_ACCENT: Record<ColumnId, string> = {
-  todo: "var(--col-todo)",
-  in_progress: "var(--col-in-progress)",
-  needs_input: "var(--col-needs-input)",
-  agent_done: "var(--col-agent-done)",
-  in_review: "var(--col-in-review)",
-  done: "var(--col-done)",
-  inbox: "var(--accent)",
-};
 
 interface ColumnProps {
   column: ColumnId;
@@ -214,6 +195,7 @@ export function Column({
         setNodeRef(node);
         wrapperRef.current = node;
       }}
+      data-column={column}
       style={{
         ...sizing,
         display: "flex",
