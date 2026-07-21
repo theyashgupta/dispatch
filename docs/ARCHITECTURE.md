@@ -423,7 +423,13 @@ incapable of moving the card, which is exactly why it is safe to run on an In Re
 The per-session ttyd manager (`adapters/ttyd.ts`) spawns, tracks, and reuses a writable,
 loopback-only web terminal attached to an existing `dsp-<identifier>` tmux session, so the live
 `claude` REPL can be embedded in the detail-panel iframe (`TERM-01`). Its invocation is fixed and
-load-bearing: `ttyd -W -i 127.0.0.1 -p 0 -t disableLeaveAlert=true tmux attach -t =<session>`.
+load-bearing: `ttyd -W -i 127.0.0.1 -p 0 -t disableLeaveAlert=true -t
+fontFamily=<bundled Nerd Font family> -t fontSize=15 -t theme={...dark ITheme...} tmux attach -t
+=<session>`. The `fontFamily`/`fontSize`/`theme` values are fixed, server-authored constants (never
+Linear- or user-sourced) forwarded to xterm's `Terminal` constructor over ttyd's own
+`SET_PREFERENCES` websocket frame post-connect (`TERM-02`); the theme's hex/rgba values are
+hardcoded because the ttyd client is a separate origin/process that cannot read dispatch's
+`tokens.css` custom properties.
 
 **Writable + loopback are BOTH mandatory.** `-W` (writable) AND `-i 127.0.0.1` (loopback-only bind)
 are each required and neither may be dropped: a missing `-W` yields a dead read-only terminal, and
@@ -443,18 +449,25 @@ first-spawn-per-boot measured ~5s).
 
 **Patched served index — named independent patches.** Boot provisioning (`provisionTtydIndex`,
 `bootstrap/ttyd-index-setup.ts`, fire-and-forget after reconcileSessions) captures ttyd's stock
-served index and applies a list of named independent patches: `cmd-click-weblinks` (modifier-gates
-`WebLinksAddon`'s plain-text URL click handler), `cmd-click-osc8` (sets
-`terminal.options.linkHandler` so OSC-8 hyperlinks from real Claude Code `⏺` output are Cmd/Ctrl-gated
-instead of xterm's stock ungated confirm-and-open), and `shift-enter` (`attachCustomKeyEventHandler`
-sends raw LF via the Dispatcher's own `sendData` so Claude Code inserts a newline instead of
-submitting; keydown-only, IME-composition-safe, exact Shift+Enter with no Ctrl/Alt/Meta). Each patch
-is anchored to an exact-count-1 literal in the captured bundle; a drifted anchor skips ONLY that
-patch with a boot warning naming the disabled feature — the other patches still apply. The artifact
-is written whenever at least one patch applied, so "artifact exists" (spawnTtyd's conditional `-I`
-below) now means "at least one patch applied this boot", and artifact-absent means every patch
-failed and the terminal serves fully stock ttyd/xterm.js behavior. Both link patches keep the
-reverse-tabnabbing guard (`window.open()` then `opener=null` before navigating) from the
+served index and applies a list of named independent patches, in order: `font-load-gate` (defers
+`terminal.open()` behind a `Promise.race` of `document.fonts.load()` and a 1500ms timeout, so
+glyph width/metrics measure against the bundled Nerd Font instead of a browser fallback — fixes
+Nerd Font PUA icon tofu; `TERM-01`), `cmd-click-weblinks` (modifier-gates `WebLinksAddon`'s
+plain-text URL click handler), `cmd-click-osc8` (sets `terminal.options.linkHandler` so OSC-8
+hyperlinks from real Claude Code `⏺` output are Cmd/Ctrl-gated instead of xterm's stock ungated
+confirm-and-open), `shift-enter` (`attachCustomKeyEventHandler` sends raw LF via the Dispatcher's
+own `sendData` so Claude Code inserts a newline instead of submitting; keydown-only,
+IME-composition-safe, exact Shift+Enter with no Ctrl/Alt/Meta), and `font-face-inject` (injects a
+base64-inlined `@font-face` for the bundled Nerd Font woff2 at the served index's sole `</style>`
+anchor; `TERM-01`). `font-load-gate` must stay FIRST and `font-face-inject` LAST — the load-gate's
+target string is a superset of the two link/newline patches' own anchors, so it re-emits both
+verbatim inside its wrapping `.then()` to keep their exact-count-1 matches intact downstream. Each
+patch is anchored to an exact-count-1 literal in the captured bundle; a drifted anchor skips ONLY
+that patch with a boot warning naming the disabled feature — the other patches still apply. The
+artifact is written whenever at least one patch applied, so "artifact exists" (spawnTtyd's
+conditional `-I` below) now means "at least one patch applied this boot", and artifact-absent means
+every patch failed and the terminal serves fully stock ttyd/xterm.js behavior. Both link patches
+keep the reverse-tabnabbing guard (`window.open()` then `opener=null` before navigating) from the
 [Security Threat Model](#security-threat-model) — `@see` that table for the STRIDE home — and
 nothing about this patch pipeline changes the loopback-only bind above.
 
@@ -1158,7 +1171,8 @@ is a behavior change, not a refactor.
    `new-session -d -s <name> -c <cwd> -x 200 -y 50 <argv>`; `capture-pane -p -J -t =<name>:`; exact-name
    `=` targeting; `load-buffer -b`/`paste-buffer -b -p -d`; separate `send-keys Enter`. Geometry `200×50`
    is load-bearing for readiness/marker parsing.
-6. **ttyd invocation + tracking.** `ttyd -W -i 127.0.0.1 -p 0 -t disableLeaveAlert=true tmux attach -t
+6. **ttyd invocation + tracking.** `ttyd -W -i 127.0.0.1 -p 0 -t disableLeaveAlert=true -t
+fontFamily=<Nerd Font family> -t fontSize=15 -t theme={...dark ITheme...} tmux attach -t
 =<session>`; port parsed from stderr `Listening on port: N`; loopback bind mandatory; orphan-sweep
    fingerprint (`basename(argv0)==="ttyd"` AND argv includes `tmux`+`attach`); iframe src
    `http://127.0.0.1:${ttydPort}`.
