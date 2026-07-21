@@ -72,6 +72,15 @@ class BoardStore extends EventEmitter {
   /** Non-fatal sync problem from the last poll cycle (e.g. truncated pull); null when healthy. */
   private syncWarning: string | null = null;
   /**
+   * Network-level poll-failure flag (transport error, not a data/auth error) — mirrors
+   * `syncWarning`'s posture exactly: rides the wire (SSE/REST) so the header can flip to
+   * "Reconnecting…" immediately, but is transient runtime state, never persisted to disk.
+   * Set true by the poller's TypeError branch, cleared on any successful poll or a
+   * RateLimited response (both prove the network is reachable).
+   * @see docs/ARCHITECTURE.md#linear-sync
+   */
+  private syncUnreachable = false;
+  /**
    * Static poll interval (ms) surfaced on every snapshot so the client can compute sync
    * staleness. Set once at boot from config via setPollInterval — boot-time static config,
    * NOT a card mutation, so it never goes through the enqueue queue.
@@ -388,6 +397,7 @@ class BoardStore extends EventEmitter {
       cards: [...todo, ...rest],
       syncedAt: this.syncedAt,
       syncWarning: this.syncWarning,
+      syncUnreachable: this.syncUnreachable,
       pollIntervalMs: this.pollIntervalMs ?? undefined,
       editors: this.editors,
       workspaceFolders: this.workspaceFolders,
@@ -433,6 +443,20 @@ class BoardStore extends EventEmitter {
    */
   setEditors(e: { code: boolean; cursor: boolean }): void {
     this.editors = e;
+  }
+
+  /**
+   * Flip the network-unreachable flag from the poller's TypeError branch and broadcast it —
+   * routed through `enqueue()` (unlike `setPollInterval`/`setEditors`) because this is runtime
+   * state that changes throughout the process's life and the header needs to see every flip
+   * immediately, not just at boot. Returns no activity events: connectivity blips are not
+   * user-facing activity, only a header-state signal.
+   */
+  setSyncUnreachable(flag: boolean): Promise<void> {
+    return this.enqueue(() => {
+      this.syncUnreachable = flag;
+      return [];
+    });
   }
 
   /** Does a card with this id exist? Synchronous read for REST payload validation. */
@@ -1512,6 +1536,7 @@ class BoardStore extends EventEmitter {
         this.syncWarning = null;
       }
       this.syncedAt = syncedAt;
+      this.syncUnreachable = false;
       return syncedIn.map((cardId) =>
         this.event("sync_in", {
           cardId,

@@ -46,7 +46,14 @@ async function pollOnce(): Promise<void> {
       console.warn(
         `[poller] ${source.id} rate-limited — backing off ${Math.round(backoffMs / 1000)}s, keeping last-known-good.`,
       );
+      void store.setSyncUnreachable(false);
       scheduleNext(backoffMs);
+    } else if (err instanceof TypeError) {
+      console.error(
+        `[poller] network-level poll failure — keeping last-known-good: ${err.message}`,
+      );
+      void store.setSyncUnreachable(true);
+      scheduleNext(baseIntervalMs);
     } else {
       console.error(
         `[poller] poll failed — keeping last-known-good: ${(err as Error).message}`,

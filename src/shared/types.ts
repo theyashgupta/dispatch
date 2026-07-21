@@ -275,6 +275,11 @@ export interface BoardSnapshot {
   /** Non-fatal sync problem from the last poll cycle (e.g. truncated pull); null when healthy. */
   syncWarning?: string | null;
   /**
+   * A network-level poll failure (transport error, not a data/auth error), distinct from
+   * data-age "stale". Non-secret; never carries the Linear key.
+   */
+  syncUnreachable?: boolean;
+  /**
    * Static poll interval (ms) from config, broadcast so the client can compute sync staleness
    * (`now - syncedAt > 2×pollIntervalMs`). A FLAT field — not a `meta` envelope; `syncedAt`
    * already carries lastSyncAt. Non-secret; never carries the Linear key.
