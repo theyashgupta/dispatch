@@ -186,6 +186,11 @@ body {
     opacity: 0;
   }
 }
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 /* Markdown description body: the UI-SPEC margin-collapse rule — the first and
    last rendered blocks must not leak their outer margins into the panel's own

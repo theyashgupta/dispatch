@@ -4,11 +4,13 @@ import {
   type CSSProperties,
   type Ref,
 } from "react";
+import { Spinner } from "./Spinner.js";
 
 type ButtonVariant = "secondary" | "primary" | "danger";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
+  loading?: boolean;
   ref?: Ref<HTMLButtonElement>;
 }
 
@@ -63,16 +65,19 @@ export function Button({
   variant = "secondary",
   style,
   disabled,
+  loading,
   type = "button",
   onMouseEnter,
   onMouseLeave,
   onFocus,
   onBlur,
+  children,
   ...rest
 }: ButtonProps) {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  if (disabled && (hovered || focused)) {
+  const isDisabled = disabled || loading;
+  if (isDisabled && (hovered || focused)) {
     setHovered(false);
     setFocused(false);
   }
@@ -91,13 +96,21 @@ export function Button({
           : "transparent"
         : base.background,
     boxShadow: focused ? "0 0 0 2px var(--accent)" : "none",
-    ...(disabled ? { cursor: "default", opacity: 0.5 } : null),
+    ...(isDisabled ? { cursor: "default", opacity: 0.5 } : null),
+    ...(loading
+      ? {
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "var(--space-xs)",
+        }
+      : null),
     ...style,
   };
   return (
     <button
       type={type}
-      disabled={disabled}
+      disabled={isDisabled}
       {...rest}
       onMouseEnter={(event) => {
         setHovered(true);
@@ -116,6 +129,10 @@ export function Button({
         onBlur?.(event);
       }}
       style={composed}
-    />
+      {...(loading ? { "aria-busy": true } : null)}
+    >
+      {loading ? <Spinner /> : null}
+      {children}
+    </button>
   );
 }
