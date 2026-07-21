@@ -1,15 +1,13 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const execFileP = promisify(execFile);
+import { run } from "./exec.js";
 
 /**
  * Every listening TCP port owned by each named session's process tree, keyed by session name —
  * an entry for EVERY key in `panePids`, deduplicated and sorted ascending. Read-only diagnostic
  * with a fixed argv array and only `Number()`-parsed integers interpolated (never a shell string,
- * never client input) — the same carve-out precedent `ttyd.ts`'s `pidsListeningOnPorts` and
- * `findDspTtydOrphans` already document, so this bypasses the `adapters/exec.ts` chokepoint
- * deliberately, not accidentally.
+ * never client input). Goes through the `adapters/exec.ts` chokepoint like every other subprocess
+ * caller: `run()` surfaces `.code` alongside `.stdout`, which is all the exit-1 discrimination
+ * below needs, so no carve-out is warranted here — and staying on the chokepoint keeps these
+ * per-tick calls visible to the `DISPATCH_PERF_EXEC` harness that every optimization claim cites.
  *
  * @remarks
  * Three steps, three subprocess calls TOTAL regardless of session/tree size: (1) one system-wide
@@ -47,7 +45,7 @@ export async function listeningPortsBySession(
 
   let psOut: string;
   try {
-    ({ stdout: psOut } = await execFileP("ps", ["-axo", "pid=,ppid="]));
+    ({ stdout: psOut } = await run("ps", ["-axo", "pid=,ppid="]));
   } catch {
     return null;
   }
@@ -84,7 +82,7 @@ export async function listeningPortsBySession(
 
   let lsofOut: string;
   try {
-    ({ stdout: lsofOut } = await execFileP("lsof", [
+    ({ stdout: lsofOut } = await run("lsof", [
       "-a",
       "-nP",
       "-p",

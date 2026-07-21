@@ -52,7 +52,11 @@ function armKillEscalation(
 /**
  * Run an argv command and capture stdout/stderr.
  * On non-zero exit / spawn failure, throws an Error carrying `.stderr` and `.stdout`
- * (both always strings) so callers can surface the underlying git/tmux stderr on the card.
+ * (both always strings) so callers can surface the underlying git/tmux stderr on the card, plus
+ * `.code` — a NUMBER for a real exit status, a STRING for a spawn failure such as `ENOENT`. That
+ * distinction is load-bearing for probes whose success path can still exit non-zero: `lsof` exits 1
+ * with perfectly valid stdout when its `-p` list names a pid that has since died, so a caller must
+ * be able to tell "exited 1, parse the stdout anyway" from "binary missing, give up".
  * `killEscalationMs` (opt-in, inert when unset) arms {@link armKillEscalation} for callers whose
  * child may ignore the abort/timeout SIGTERM (headless `claude -p` drafts).
  * @remarks Uses the Node built-in `execFile`, NOT execa — execa is not installed and none is
@@ -85,10 +89,15 @@ export async function run(
     return { stdout, stderr };
   } catch (err) {
     if (perfExec) perfCalls.push({ cmd, ms: performance.now() - t0 });
-    const e = err as Error & { stderr?: string; stdout?: string };
+    const e = err as Error & {
+      stderr?: string;
+      stdout?: string;
+      code?: number | string;
+    };
     throw Object.assign(new Error(e.message), {
       stderr: e.stderr ?? "",
       stdout: e.stdout ?? "",
+      code: e.code,
     });
   } finally {
     disarm?.();
