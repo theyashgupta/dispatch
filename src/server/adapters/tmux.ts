@@ -112,6 +112,41 @@ export async function listSessions(): Promise<Set<string>> {
 }
 
 /**
+ * Every live pane's PID, grouped by owning session (`list-panes -a -F "#{session_name}
+ * #{pane_pid}"`, one call for every session, live-verified: a session can hold more than one
+ * pane so each session name maps to an array). Returns `null` — NOT an empty Map — on any
+ * throw, deliberately diverging from listSessions' empty-Set-on-error tolerance: here `null`
+ * means "unknown this tick, leave every card's derived state untouched", whereas an empty Map
+ * would mean "no session owns any pane", which would incorrectly clear every live card's preview
+ * state on a transient tmux hiccup.
+ * @see docs/ARCHITECTURE.md#dev-server-preview-detection
+ */
+export async function panePidsBySession(): Promise<Map<
+  string,
+  number[]
+> | null> {
+  try {
+    const { stdout } = await run("tmux", [
+      "list-panes",
+      "-a",
+      "-F",
+      "#{session_name} #{pane_pid}",
+    ]);
+    const bySession = new Map<string, number[]>();
+    for (const line of stdout.split("\n")) {
+      const m = line.match(/^(\S+)\s+(\d+)$/);
+      if (!m) continue;
+      const list = bySession.get(m[1]) ?? [];
+      list.push(Number(m[2]));
+      bySession.set(m[1], list);
+    }
+    return bySession;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Create a detached session running `commandArgv` in `cwd`:
  *   `tmux new-session -d -s <name> -c <cwd> -x 200 -y 50 [-e KEY=VALUE ...] <...commandArgv>`
  * The explicit -x/-y geometry is required for sane capture-pane output BEFORE any client

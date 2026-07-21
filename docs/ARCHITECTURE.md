@@ -34,6 +34,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Startup Preflight](#startup-preflight)
   - [Cleanup Lifecycle](#cleanup-lifecycle)
   - [Hooks Status Channel](#hooks-status-channel)
+  - [Dev-Server Preview Detection](#dev-server-preview-detection)
 - [Do Not Change Contracts](#do-not-change-contracts)
 - [Security Threat Model](#security-threat-model)
 - [Known Residuals](#known-residuals)
@@ -1142,6 +1143,46 @@ the same activity via both channels (two SSE frames, same semantic — cosmetic,
 view). Under `hooks`, a hook-silent session gets NO status routing at all — the user's explicit
 mode choice; dead-session detection still covers it. A pathological >1mb PostToolUse payload is
 rejected by the body limit and drops one cosmetic stamp, self-healing on the next event.
+
+### Dev-Server Preview Detection
+
+Detecting a dev server running inside a session's process tree is a three-call chain, all
+batched: `tmux list-panes -a` returns every live pane's PID grouped by session in ONE call, then
+one system-wide `ps -axo pid=,ppid=` builds a ppid→children index, then one PID-scoped
+`lsof -a -p <pids> -iTCP -sTCP:LISTEN -Fpn` resolves every discovered pid's listening ports in
+ONE call. Regardless of how many sessions are live or how deep their process trees run, this is
+exactly three subprocess calls per detection tick — never a per-session or per-pid loop.
+
+**`-a` is mandatory.** `lsof` ORs `-p` against `-i`/`-s` by default; omitting `-a` returns every
+listening socket on the machine from any process, attributing a foreign process's port to a
+session that never opened it.
+
+**`lsof` exit 1 is not failure.** A pid can exit between the `ps` scan and the `lsof` call, so
+the ordinary "no listeners" case and the "one stale pid in the list" case both exit non-zero
+while `stdout` still carries every other pid's valid records. The rejection's error shape is the
+discriminator: `typeof err.code === "number"` with a populated `err.stdout` is a usable result to
+parse; `typeof err.code === "string"` (e.g. `ENOENT`) is the only genuine failure.
+
+**`null` vs `[]` is the entire staleness contract.** `null` means detection failed this tick —
+the caller leaves every card's previous `previews` value untouched, exactly the tolerant-swallow
+discipline `listSessions`/`pidsListeningOnPorts` already established. An empty array means
+detection succeeded and genuinely found nothing — the caller clears the field. Collapsing these
+two into one signal would either wipe a live card's badges on a transient tool hiccup, or wedge a
+dead port's badge on the board forever.
+
+**The card's own `ttydPort` is excluded** from the ports attributed to its session before the
+write — the writable terminal iframe's own port must never be offered back as a one-click
+"preview" link.
+
+**`previews` rides both wire and disk exactly like `prs`.** No `buildMeta`-style per-card disk
+filter exists (`board-db.ts` `JSON.stringify(card)`s the whole card unfiltered), so there is
+nothing to build: a stale disk value after a crash mid-session either gets overwritten by the
+next tick (session still alive) or cleared by whichever teardown mutator runs (session died) —
+self-healing, with no special-casing in `hydrateFromParsed`.
+
+**Detection is a passenger, never a second timer.** The scan runs inside the existing 60s poller
+tick, behind the existing single-flight guard — never its own `setInterval`/`setTimeout` and
+never a second in-flight guard variable.
 
 ## Do Not Change Contracts
 
