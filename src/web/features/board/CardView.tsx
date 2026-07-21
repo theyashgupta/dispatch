@@ -22,6 +22,7 @@ import {
   GoneBadge,
   LinearStateBadge,
   PrBadge,
+  PreviewBadge,
   SourceBadge,
 } from "../badges/index.js";
 import { Button } from "../../primitives/Button.js";
@@ -281,6 +282,9 @@ export function CardView({
             <LinearStateBadge card={card} />
             {card.prs?.map((pr) => (
               <PrBadge key={pr.url} pr={pr} />
+            ))}
+            {card.previews?.map((preview) => (
+              <PreviewBadge key={preview.port} preview={preview} />
             ))}
             {isGroup && (
               <span
