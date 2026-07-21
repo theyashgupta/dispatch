@@ -368,3 +368,49 @@ compiler adoption.
 
 **After (main):** N/A — REJECT path, main's `package.json`/`package-lock.json`/`vite.config.ts`
 are unchanged from before this plan; no adoption, no post-adoption numbers to record.
+
+## Cleanup
+
+- **Date:** 2026-07-22
+- **Git SHA measured:** `ba0386c`
+- **Machine:** Apple Silicon, local (Node v22.23.1, repo floor >=22.22)
+- **Command:** `npm run build && node scripts/perf-cleanup.mjs --repos=3 --runs=5`
+- **Method:** 3 repos, 5 measured runs, each against a FULLY FRESH sandbox: `scripts/perf-cleanup.mjs`
+  creates 3 real independent git repos (one commit each), cuts one real worktree per repo under a
+  single ticket workspace folder at the exact layout `worktreePath()` builds, seeds one Done card
+  directly into a sandbox `board.db`, boots the production build with `DISPATCH_PERF_CLEANUP=1`, and
+  drives the REAL `POST /api/cards/:id/cleanup` route (`{"force": false}`, so the preflight
+  `worktreeStatus` loop is measured too — the seeded repos are clean, so preflight falls through to
+  teardown). Timed via five `performance.now()` brackets inside `cleanupWorkspace` itself (preflight,
+  kill, worktree-remove, fs.rm, prune, plus a total), dumped as one `DISPATCH_PERF_CLEANUP_STEPS`
+  stderr line per run. This run measures the STILL-SEQUENTIAL pre-fan-out code (three separate
+  sequential `for` loops) — the BEFORE number for PERF-01.
+
+```
+  run   preflight     kill  wt_remove    fs_rm    prune     total
+     1       32.9      0.0       31.3      0.3     27.3      93.4
+     2       33.8      0.0       30.7      0.4     25.0      91.8
+     3       32.2      0.0       29.5      0.3     24.0      87.5
+     4       34.1      0.0       29.9      0.4     26.8      93.1
+     5       30.4      0.0       29.0      0.3     24.4      85.7
+
+PERF-CLEANUP repos=3 runs=5 mean=90.3 p50=91.8 p95=93.4
+PERF-CLEANUP-STEPS preflight=32.7 kill=0.0 worktree_remove=30.1 fs_rm=0.3 prune=25.5
+```
+
+**Before:** the block above — `PERF-CLEANUP repos=3 runs=5 mean=90.3 p50=91.8 p95=93.4` /
+`PERF-CLEANUP-STEPS preflight=32.7 kill=0.0 worktree_remove=30.1 fs_rm=0.3 prune=25.5`, measured
+against the still-sequential three-loop code at SHA `ba0386c`.
+
+**After:** pending — recorded in this phase's fan-out task.
+
+**Verdict:** pending.
+
+**fs.rm vs. git-loop dominance (resolves 71-RESEARCH.md's Open Question 1):** the combined per-repo
+git-loop time (`preflight_ms + worktree_remove_ms + prune_ms` = 32.7 + 30.1 + 25.5 = 88.3ms mean)
+dwarfs `fs_rm_ms` (0.3ms mean) by roughly 294x at this project's actual worktree sizes (near-empty
+seeded repos, consistent with the `PERF-SUBPROC` baseline's single-digit-to-tens-of-ms
+per-subprocess-call cost above) — **the git loops dominate, not fs.rm.** Resulting decision for the
+next task: the fan-out is scoped to the three per-repo git loops (preflight `worktreeStatus`,
+teardown `worktreeRemove`, `worktreePrune`) and `fs.rm` stays a single call spanning the whole
+workspace folder, unchanged.
