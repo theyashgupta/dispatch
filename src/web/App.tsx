@@ -229,6 +229,7 @@ export function App() {
             connection={connection}
             pollIntervalMs={board?.pollIntervalMs ?? null}
             syncWarning={board?.syncWarning ?? null}
+            syncUnreachable={board?.syncUnreachable ?? false}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenActivity={() => {
               setActivityOpen(true);

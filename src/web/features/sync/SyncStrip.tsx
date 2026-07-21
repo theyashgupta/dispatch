@@ -16,6 +16,7 @@ interface SyncStripProps {
   connection: ConnectionStatus;
   pollIntervalMs: number | null;
   syncWarning: string | null;
+  syncUnreachable?: boolean;
   onOpenSettings?: () => void;
   onOpenActivity?: () => void;
   activityUnseen?: boolean;
@@ -42,6 +43,7 @@ export function SyncStrip({
   connection,
   pollIntervalMs,
   syncWarning,
+  syncUnreachable,
   onOpenSettings,
   onOpenActivity,
   activityUnseen,
@@ -74,6 +76,10 @@ export function SyncStrip({
     text = "Disconnected — reconnecting…";
   } else if (syncedAt === null) {
     text = "Syncing…";
+  } else if (syncUnreachable) {
+    text = syncedTsValid
+      ? `Reconnecting… (last synced ${formatSynced(syncedTs, now)})`
+      : "Reconnecting…";
   } else if (!syncedTsValid) {
     text = "Synced";
   } else if (stale) {
@@ -92,14 +98,18 @@ export function SyncStrip({
 
   const dotColor = disconnected
     ? "var(--status-down)"
-    : stale
-      ? "var(--status-stale)"
-      : "var(--status-ok)";
+    : syncUnreachable
+      ? "var(--accent)"
+      : stale
+        ? "var(--status-stale)"
+        : "var(--status-ok)";
   const dotTitle = disconnected
     ? "Disconnected — reconnecting…"
-    : stale
-      ? "Sync stale"
-      : "Connected";
+    : syncUnreachable
+      ? "Reconnecting…"
+      : stale
+        ? "Sync stale"
+        : "Connected";
 
   return (
     <div
