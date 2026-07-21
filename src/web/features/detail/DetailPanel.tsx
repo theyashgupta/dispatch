@@ -460,7 +460,7 @@ export function DetailPanel({
 
               {c?.tmuxSession && !c.sessionLost && <TerminalRegion card={c} />}
 
-              {c?.sessionLost === true && c.column !== "done" && (
+              {c?.sessionLost === true && (
                 <SessionLostSection card={c} onStartRequest={onStartRequest} />
               )}
             </div>

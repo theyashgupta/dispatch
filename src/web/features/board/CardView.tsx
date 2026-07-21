@@ -505,7 +505,7 @@ export function CardView({
           >
             {card.provisioningStep}
           </div>
-        ) : card.sessionLost === true && card.column !== "done" ? (
+        ) : card.sessionLost === true ? (
           <div
             style={{
               display: "flex",
@@ -527,7 +527,7 @@ export function CardView({
               label="Session lost"
             />
 
-            {card.column === "in_review" && card.workspacePath ? (
+            {card.workspacePath ? (
               <div
                 style={{
                   display: "flex",

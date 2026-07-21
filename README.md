@@ -30,7 +30,7 @@ One user, one machine, localhost only. That's the design, not a limitation we're
 - **Real terminals in the browser.** Each session gets its own [ttyd](https://github.com/tsl0922/ttyd) instance bound to loopback. What you see is the actual REPL: type into it, go fullscreen, or pop the workspace open in your editor.
 - **Attention routing.** A watcher scans tmux panes every 2 seconds for status markers the agent prints. `NEEDS_INPUT` moves the card to Needs Input and shows the reason right on it; `DONE` moves it to Agent Done. Reply in the terminal and the card flips back on its own.
 - **In Review keeps everything alive.** A finished ticket can sit in In Review with its session, terminal, and worktree intact. Prompt the agent with follow-ups whenever you like. Nothing is torn down until _you_ drop the card on Done.
-- **Sessions survive restarts.** tmux is the source of truth, so the backend can restart (or your laptop can reboot) and the board reconciles. If a session died but the worktree survived, In Review offers **Resume**: `claude --continue` in the same worktree, same conversation, no kickoff re-sent.
+- **Sessions survive restarts.** tmux is the source of truth, so the backend can restart (or your laptop can reboot) and the board reconciles. If a session died but the worktree survived, its card offers **Resume** in any column: `claude --continue` in the same worktree, same conversation, no kickoff re-sent.
 - **Done means cleanup.** Dropping a card on Done confirms, kills the session and terminal, and removes the worktrees. Branches are always kept; they're the whole point.
 
 <div align="center">

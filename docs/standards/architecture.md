@@ -143,7 +143,7 @@ Tier definition (verbatim, applies to every item below): **byte-identical** = th
 
 **Source:** `.planning/PROJECT.md` line 212 (v0.4 audit note) — "`/resume` route lacks a server-side `in_review` column check (client-gated only)."
 **Tier: BEHAVIOR CHANGE** — adding the server-side check introduces a new 4xx response path that does not exist today.
-**Resolution:** Resolved (Phase 57-02) — `POST /cards/:id/resume` now 409s for any card outside `in_review`, curl-verified live (409 for `needs_input`, 202 for `in_review`) — commit `25d9ce5`.
+**Resolution:** Superseded after Phase 57-02. Resume is now intentionally column-independent because the operation preserves the card's current column; the route still requires a lost session and preserved workspace.
 
 ### recap-overlay watcher no-op
 
@@ -237,7 +237,7 @@ Tier definition (verbatim, applies to every item below): **byte-identical** = th
 Every behavior-change-tier item above, named once, with a one-line description of the observable change:
 
 1. **statusReason first-line truncation fix** — the status text shown on a card changes (no longer cut to the first wrapped pane line).
-2. **`/resume` server-side `in_review` column check** — a new 4xx response path exists where none did before (server now rejects resume attempts on a non-`in_review` card, not just the client).
+2. **`/resume` eligibility checks** — the route rejects cards without a lost session or preserved workspace but no longer restricts recovery by column.
 3. **recap-overlay watcher no-op fix** — marker-scan behavior changes for the previously-no-op edge case.
 4. **Unborn-HEAD `discoverRepos` 500 fix** — the route returns a handled response instead of an unhandled 500 for a repo with zero commits.
 5. **steps.ts trust-dialog regex fix** — first-ever launch no longer times out; the newer "Bypass Permissions mode" dialog is now detected.

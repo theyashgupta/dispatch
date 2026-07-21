@@ -410,14 +410,13 @@ plain optimistic move — To Do → In Progress remains the only orchestrating d
 remains Done-ONLY: In Review inherits NONE of Done's parked semantics or teardown wiring, so its
 session, terminal, and worktrees stay alive until an explicit drop into Done.
 
-**Resume is column-preserving by construction (`REVIEW-01`).** When an In Review session dies, the
-panel offers Resume, which relaunches `claude --continue` in the preserved `card.workspacePath`
-cwd with NO kickoff prompt re-sent. Its store mutation sets `tmuxSession` and clears `sessionLost`
-but DELIBERATELY never writes `column` — deliberately unlike `completeStart`/`attachExistingSession`,
-which force `in_progress`. This is how Resume coexists with the [Resilience and Reconcile](#resilience-and-reconcile)
-`IN-03` hazard: `IN-03` protects against a non-drag column promotion yanking a card out of a
-parked column, and a column-preserving mutation performs no promotion at all — it is structurally
-incapable of moving the card, which is exactly why it is safe to run on an In Review card.
+**Resume is column-independent and column-preserving by construction (`REVIEW-01`).** When any
+session dies but its `card.workspacePath` survives, the card and panel offer Resume. Resume
+relaunches `claude --continue` in the preserved cwd with NO kickoff prompt re-sent. Its store
+mutation sets `tmuxSession` and clears `sessionLost` but DELIBERATELY never writes `column`, unlike
+`completeStart`/`attachExistingSession`, which force `in_progress`. This is how Resume coexists with
+the [Resilience and Reconcile](#resilience-and-reconcile) `IN-03` hazard: a column-preserving
+mutation performs no promotion and is therefore safe in every column.
 
 ### Terminal ttyd
 

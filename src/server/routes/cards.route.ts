@@ -219,13 +219,6 @@ cardsRouter.post("/cards/:id/resume", (req, res) => {
     return;
   }
 
-  if (card.column !== "in_review") {
-    res.status(409).json({
-      error: "can only resume a session for an In Review card",
-    });
-    return;
-  }
-
   if (!/^[A-Za-z0-9]+-\d+$/.test(card.identifier)) {
     res
       .status(400)

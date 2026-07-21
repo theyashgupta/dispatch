@@ -16,9 +16,7 @@ export function SessionLostSection({
 }: SessionLostSectionProps) {
   const { resuming, resumeFailed, watchdogFired, failureCopy, onResume } =
     useResumeFeedback(card);
-  const inResumableColumn = card.column === "in_review";
-  const canResume = inResumableColumn && Boolean(card.workspacePath);
-  const workspaceGone = inResumableColumn && !card.workspacePath;
+  const canResume = Boolean(card.workspacePath);
 
   function handleRestart() {
     if (card.workspace) {
@@ -32,12 +30,9 @@ export function SessionLostSection({
   if (canResume) {
     helper =
       "The tmux session ended (likely after a reboot). Resume continues the same Claude conversation in the same worktree — no kickoff prompt is re-sent.";
-  } else if (workspaceGone) {
-    helper =
-      "The workspace is no longer available. Restart begins a fresh session in the same branch.";
   } else {
     helper =
-      "The tmux session is gone (likely after a reboot). Restart resumes it in the same workspace and branch.";
+      "The workspace is no longer available. Restart begins a fresh session in the same branch.";
   }
 
   return (
