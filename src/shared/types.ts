@@ -55,6 +55,19 @@ export interface ActivityEvent {
   ts: string;
 }
 
+/**
+ * A pull request detected via `gh pr list` for a card's branch. `ci` is null when the repo has
+ * no checks configured (D-06) — a badge/row renders no dot rather than a neutral one in that case.
+ */
+export interface PrInfo {
+  number: number;
+  url: string;
+  title: string;
+  state: "open" | "merged" | "closed";
+  isDraft: boolean;
+  ci: "pass" | "fail" | "pending" | null;
+}
+
 export interface Card {
   /** Internal card id (can equal issueId in Phase 1). */
   id: string;
@@ -98,6 +111,15 @@ export interface Card {
   workspace?: { folder: string; repos: { path: string; base: string }[] };
   /** Branch name used for the ticket's worktrees. */
   branch?: string;
+  /**
+   * Pull request(s) detected for this card's branch across every repo in `card.workspace.repos`
+   * (multi-repo workspaces can legitimately open more than one). Group-card-only by construction —
+   * member cards never carry this, since session/workspace fields live exclusively on the group
+   * card. NON-SECRET: rides `snapshot()` UNREDACTED like `hookRoutedAt`/`claudeSessionId`/
+   * `cleanupBlocked`. Absent (not `[]`) when no PR is open, cleared with the other session fields
+   * at Done cleanup and whenever a detection pass finds none for the branch.
+   */
+  prs?: PrInfo[];
   /** tmux session name hosting the claude REPL. */
   tmuxSession?: string;
   /**
