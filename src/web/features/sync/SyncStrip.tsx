@@ -166,12 +166,17 @@ export function SyncStrip({
           />
           {text}
         </div>
-        <IconButton aria-label="New ticket" onClick={onOpenCreateTicket}>
+        <IconButton
+          aria-label="New ticket"
+          title="New ticket"
+          onClick={onOpenCreateTicket}
+        >
           <Plus size={16} strokeWidth={2} aria-hidden="true" />
         </IconButton>
         <div style={{ display: "flex", gap: "var(--space-xs)" }}>
           <IconButton
             aria-label="Board view"
+            title="Board view"
             aria-pressed={viewMode === "board"}
             onClick={() => onSelectViewMode?.("board")}
             style={{
@@ -186,6 +191,7 @@ export function SyncStrip({
           </IconButton>
           <IconButton
             aria-label="Orca view"
+            title="Orca view"
             aria-pressed={viewMode === "orca"}
             onClick={() => onSelectViewMode?.("orca")}
             style={{
@@ -209,6 +215,11 @@ export function SyncStrip({
                   : inboxCount != null && inboxCount > 0
                     ? `Open inbox, ${inboxCount} ticket${inboxCount === 1 ? "" : "s"}`
                     : "Open inbox"
+              }
+              title={
+                inboxCount != null && inboxCount > 0
+                  ? `Inbox — ${inboxCount} ticket${inboxCount === 1 ? "" : "s"}`
+                  : "Inbox"
               }
               aria-expanded={inboxOpen}
               aria-controls="inbox-view"
@@ -249,6 +260,7 @@ export function SyncStrip({
           <IconButton
             id="activity-toggle"
             aria-label="Activity feed"
+            title={activityUnseen ? "Activity — unseen" : "Activity"}
             aria-expanded={activityOpen}
             aria-controls="activity-drawer"
             onClick={onOpenActivity}
@@ -271,7 +283,11 @@ export function SyncStrip({
             />
           )}
         </div>
-        <IconButton aria-label="Sync filters" onClick={onOpenSettings}>
+        <IconButton
+          aria-label="Sync filters"
+          title="Settings"
+          onClick={onOpenSettings}
+        >
           <Settings size={16} />
         </IconButton>
       </div>
