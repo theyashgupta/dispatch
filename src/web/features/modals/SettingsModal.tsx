@@ -435,6 +435,7 @@ function FiltersTabSection({
       )}
       {capabilities && draft && (
         <div
+          className="scroll-stable-y"
           style={{
             display: "flex",
             flexDirection: "column",
@@ -727,6 +728,7 @@ function PlaybooksTabSection({ playbooksTab }: PlaybooksTabSectionProps) {
 
   return (
     <div
+      className="scroll-stable-y"
       style={{
         display: "flex",
         flexDirection: "column",

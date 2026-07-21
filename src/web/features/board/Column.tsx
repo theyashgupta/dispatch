@@ -303,6 +303,7 @@ export function Column({
       </div>
 
       <div
+        className="scroll-stable-y"
         style={{
           flex: "1 1 auto",
           overflowY: "auto",

@@ -143,6 +143,7 @@ export function PlaybookEditorModal({
       </Modal.Header>
       <Modal.Body>
         <div
+          className="scroll-stable-y"
           style={{
             display: "flex",
             flexDirection: "column",

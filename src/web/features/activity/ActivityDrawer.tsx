@@ -110,6 +110,7 @@ export function ActivityDrawer({
         </div>
 
         <div
+          className="scroll-stable-y"
           aria-live="polite"
           aria-relevant="additions"
           style={{

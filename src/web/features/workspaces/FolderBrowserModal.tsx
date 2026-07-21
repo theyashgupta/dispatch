@@ -364,6 +364,7 @@ export function FolderBrowserModal({
                 if (listing.parent !== null) navigate(listing.parent);
               }
             }}
+            className="scroll-stable-y"
             style={{
               height: "360px",
               overflowY: "auto",

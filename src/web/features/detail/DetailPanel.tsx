@@ -340,6 +340,7 @@ export function DetailPanel({
               {hasLiveSession ? (
                 detailsExpanded && (
                   <div
+                    className="scroll-stable-y"
                     style={{
                       flex: "0 1 auto",
                       maxHeight: "40%",
@@ -359,6 +360,7 @@ export function DetailPanel({
                 )
               ) : (
                 <div
+                  className="scroll-stable-y"
                   style={{
                     flex: c?.tmuxSession ? "0 1 auto" : "1 1 auto",
                     overflowY: "auto",

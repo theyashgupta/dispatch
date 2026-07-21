@@ -18,6 +18,7 @@ export function OrcaView({
   return (
     <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex" }}>
       <nav
+        className="scroll-stable-y"
         aria-label="Tickets"
         style={{
           width: "var(--orca-nav-width)",

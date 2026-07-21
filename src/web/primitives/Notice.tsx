@@ -94,7 +94,12 @@ export function Notice({
 }: NoticeProps) {
   if (mono) {
     return (
-      <div style={clamp ? monoClampStyle : monoScrollStyle}>{children}</div>
+      <div
+        className={clamp ? undefined : "scroll-stable-y"}
+        style={clamp ? monoClampStyle : monoScrollStyle}
+      >
+        {children}
+      </div>
     );
   }
   if (tone === "destructive") {

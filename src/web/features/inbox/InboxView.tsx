@@ -95,7 +95,10 @@ export function InboxView({
         visibleCount={visibleCards.length}
         totalCount={inboxCards.length}
       />
-      <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
+      <div
+        className="scroll-stable-y"
+        style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}
+      >
         {inboxCards.length === 0 ? (
           <div style={emptyBlockStyle}>
             <Glyph size={48} style={{ opacity: 0.08, alignSelf: "center" }} />

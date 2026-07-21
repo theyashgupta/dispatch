@@ -284,6 +284,7 @@ export function MultiSelect({
             />
           </div>
           <div
+            className="scroll-stable-y"
             role="listbox"
             id={listboxId}
             style={{

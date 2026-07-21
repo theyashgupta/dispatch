@@ -226,6 +226,7 @@ function FolderPicker({
             maxHeight: "240px",
             overflowY: "auto",
           }}
+          className="scroll-stable-y"
         >
           {folders.map((f) => (
             <FolderRow
@@ -518,6 +519,7 @@ function KickoffPlaybookPicker({
             maxHeight: "240px",
             overflowY: "auto",
           }}
+          className="scroll-stable-y"
         >
           {validRows.map((row, index) => (
             <div key={row.slug ?? row.name}>

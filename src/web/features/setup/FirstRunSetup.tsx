@@ -127,6 +127,7 @@ export function FirstRunSetup({
 
   return (
     <div
+      className="scroll-stable-y"
       style={{
         height: "100vh",
         display: "flex",

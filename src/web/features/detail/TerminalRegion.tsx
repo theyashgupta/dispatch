@@ -36,6 +36,7 @@ export function TerminalRegion({ card }: TerminalRegionProps) {
       >
         {c.terminalError != null ? (
           <div
+            className="scroll-stable-y"
             style={{
               flex: "1 1 auto",
               minHeight: 0,
