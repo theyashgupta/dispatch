@@ -73,6 +73,15 @@ interface NamedPatch {
  * `font-face-inject` targets the served index's single `</style>` closing tag and has no anchor
  * overlap with any other patch, so its position past the other four is unconstrained beyond
  * "last" (TERM-01, 67-RESEARCH.md Pattern 1/2).
+ * @remarks `font-load-gate`'s built expression guards `document.fonts&&document.fonts.load`
+ * BEFORE constructing the `Promise.race`, falling back to `Promise.resolve()` when the CSS Font
+ * Loading API is absent entirely — a bare `document.fonts.load(...)` reference would throw
+ * synchronously in that case (before any promise exists, so the `.catch(()=>{})` on the load
+ * promise itself cannot help), which would propagate out of `open(e)` and leave the terminal
+ * never opening: strictly worse than stock ttyd. With the guard, an absent API immediately
+ * resolves and calls `t.open(e),i.fit()` — matching stock behavior exactly, so "degrades to
+ * today's behavior, never worse" (67-RESEARCH.md, 67-01-PLAN.md) holds for every browser, not
+ * only ones where the API exists but its promise rejects.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 const PATCHES: NamedPatch[] = [
@@ -81,8 +90,8 @@ const PATCHES: NamedPatch[] = [
     target: "t.loadAddon(new l.WebLinksAddon),t.open(e),i.fit()}",
     build: () =>
       "t.loadAddon(new l.WebLinksAddon)," +
-      `Promise.race([document.fonts.load('${FONT_SPEC}').catch(()=>{}),` +
-      `new Promise(r=>setTimeout(r,1500))]).then(()=>{t.open(e),i.fit()})}`,
+      `(document.fonts&&document.fonts.load?Promise.race([document.fonts.load('${FONT_SPEC}').catch(()=>{}),` +
+      `new Promise(r=>setTimeout(r,1500))]):Promise.resolve()).then(()=>{t.open(e),i.fit()})}`,
     disabledWarning:
       "Nerd Font glyph load-gate disabled (glyphs may render with wrong metrics)",
   },
