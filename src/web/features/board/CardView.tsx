@@ -18,7 +18,12 @@ import { startCard } from "../../lib/api.js";
 import { MoveToPicker } from "./MoveToPicker.js";
 import { formatAge, nowMs } from "../../lib/format-age.js";
 import { useResumeFeedback } from "../../hooks/useResumeFeedback.js";
-import { GoneBadge, LinearStateBadge, SourceBadge } from "../badges/index.js";
+import {
+  GoneBadge,
+  LinearStateBadge,
+  PrBadge,
+  SourceBadge,
+} from "../badges/index.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { IconButton } from "../../primitives/IconButton.js";
@@ -274,6 +279,9 @@ export function CardView({
           >
             <SourceBadge source={card.source ?? "linear"} />
             <LinearStateBadge card={card} />
+            {card.prs?.map((pr) => (
+              <PrBadge key={pr.number} pr={pr} />
+            ))}
             {isGroup && (
               <span
                 style={{
