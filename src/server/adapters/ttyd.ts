@@ -3,8 +3,43 @@ import net from "node:net";
 import path from "node:path";
 import { promisify } from "node:util";
 import { store } from "../store/board.store.js";
+import { FONT_FAMILY } from "../../shared/nerd-font-mono.js";
 
 const execFileP = promisify(execFile);
+
+/**
+ * Dark xterm `ITheme` delivered to ttyd via `-t theme=` (SET_PREFERENCES over the websocket).
+ * Hardcoded hex/rgba, not a CSS-variable reference, because the ttyd client is a separate
+ * origin/process that cannot read dispatch's `tokens.css` custom properties — these values are
+ * the resolved hexes for `--bg`/`--text`/`--accent` etc. `selectionForeground` is deliberately
+ * left unset so the underlying text color still shows through the translucent selection overlay.
+ * @remarks TERM-02.
+ * @see docs/ARCHITECTURE.md#terminal-ttyd
+ */
+const DARK_THEME = {
+  background: "#0b0c0e",
+  foreground: "#e8e9ea",
+  cursor: "#5e6ad2",
+  cursorAccent: "#0b0c0e",
+  selectionBackground: "rgba(94,106,210,0.35)",
+  selectionInactiveBackground: "rgba(94,106,210,0.18)",
+  black: "#26272b",
+  red: "#e5484d",
+  green: "#3fb950",
+  yellow: "#d9b23c",
+  blue: "#5e6ad2",
+  magenta: "#a371f7",
+  cyan: "#56d4dd",
+  white: "#e8e9ea",
+  brightBlack: "#8a8f98",
+  brightRed: "#ff6b6b",
+  brightGreen: "#56d364",
+  brightYellow: "#e3b341",
+  brightBlue: "#79c0ff",
+  brightMagenta: "#d2a8ff",
+  brightCyan: "#76e3ea",
+  brightWhite: "#ffffff",
+};
 
 interface TtydProc {
   child: ChildProcess | null;
@@ -120,6 +155,12 @@ async function spawnTtyd(
       ...(indexPath != null ? ["-I", indexPath] : []),
       "-t",
       "disableLeaveAlert=true",
+      "-t",
+      `fontFamily=${FONT_FAMILY}`,
+      "-t",
+      "fontSize=15",
+      "-t",
+      `theme=${JSON.stringify(DARK_THEME)}`,
       "tmux",
       "attach",
       "-t",
