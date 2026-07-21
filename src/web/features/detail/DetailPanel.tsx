@@ -13,6 +13,7 @@ import {
 } from "../../hooks/usePanelWidth.js";
 import { CardTimeline } from "./CardTimeline.js";
 import { PanelHeader } from "./PanelHeader.js";
+import { PrRow } from "./PrRow.js";
 import { ReferenceBlocks } from "./ReferenceBlocks.js";
 import { SessionLostSection } from "./SessionLostSection.js";
 import { TerminalRegion } from "./TerminalRegion.js";
@@ -432,6 +433,22 @@ export function DetailPanel({
                       identifiers={cardIdentifiers}
                     />
                   )}
+                </div>
+              )}
+
+              {c != null && c.prs != null && c.prs.length > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "var(--space-sm)",
+                    padding: "var(--space-lg)",
+                    borderBottom: "1px solid var(--border)",
+                  }}
+                >
+                  {c.prs.map((pr) => (
+                    <PrRow key={pr.number} pr={pr} />
+                  ))}
                 </div>
               )}
 
