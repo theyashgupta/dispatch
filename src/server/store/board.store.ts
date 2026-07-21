@@ -8,6 +8,7 @@ import type {
   Card,
   Column,
   EventType,
+  PrInfo,
   SessionFields,
   SourceIssue,
   StartError,
@@ -713,6 +714,22 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Record the PR(s) detected for a card's branch this tick. Mirrors setOutputChanged: a
+   * single-field enqueue, no column/other-field interaction, no activity event (D-12 keeps the
+   * EventType union frozen). Collapses an empty result to `undefined` rather than `[]` so a
+   * deleted/merged-away-then-gone PR clears the field in the same write a fresh detection would
+   * use, satisfying D-11's "cleared when a detection pass finds no PR" without a second mutator.
+   * No-op if the id is unknown.
+   */
+  setPrs(id: string, prs: PrInfo[]): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) card.prs = prs.length > 0 ? prs : undefined;
+      return [];
+    });
+  }
+
+  /**
    * Latch the session as hook-routed for channel selection: the ISO timestamp of its first
    * authenticated hook event. Write-once per session by service-side guard — the store stays
    * policy-free (no throttling, no read-before-write here). Mirrors setOutputChanged: a
@@ -1159,8 +1176,9 @@ class BoardStore extends EventEmitter {
    * and make the DetailPanel render the destructive "Terminal disconnected" block on a card whose
    * cleanup should surface only this muted warning. `terminalError` is nulled for the same reason;
    * only the worktree/folder outcome is uncertain on this path, so `workspacePath` is left as-is.
-   * `hookToken` is cleared AND unregistered with the session fields (clearHookToken). Column
-   * untouched. No-op if the id is unknown.
+   * `hookToken` is cleared AND unregistered with the session fields (clearHookToken). `prs` is
+   * cleared alongside the other session fields (D-11). Column untouched. No-op if the id is
+   * unknown.
    */
   recordCleanupWarning(id: string, warning: string): Promise<void> {
     return this.enqueue(() => {
@@ -1172,6 +1190,7 @@ class BoardStore extends EventEmitter {
       card.terminalError = null;
       this.clearHookToken(card);
       card.claudeSessionId = undefined;
+      card.prs = undefined;
       return [
         this.event("cleanup", {
           cardId: id,
@@ -1187,10 +1206,10 @@ class BoardStore extends EventEmitter {
    * Successful Done-cleanup quiet-state clear (LIFE-01) in ONE atomic mutation (markSessionLost /
    * completeStart precedent — a split write would broadcast a torn frame). Clears the session
    * fields the teardown removed AND neutralizes any lingering/racing error chrome so the cleaned
-   * Done card reads quietly: `tmuxSession`/`ttydPort`/`workspacePath`/`cleanupWarning`/`hookToken`
-   * undefined (the token also unregistered via clearHookToken), `sessionLost` false,
-   * `terminalError` null. KEEPS `branch` (branches always survive per lock), `outputChangedAt`,
-   * and `lastMarker`. No-op if the id is unknown.
+   * Done card reads quietly: `tmuxSession`/`ttydPort`/`workspacePath`/`cleanupWarning`/`hookToken`/
+   * `prs` undefined (the token also unregistered via clearHookToken; `prs` cleared per D-11),
+   * `sessionLost` false, `terminalError` null. KEEPS `branch` (branches always survive per lock),
+   * `outputChangedAt`, and `lastMarker`. No-op if the id is unknown.
    */
   finishCleanup(id: string): Promise<void> {
     return this.enqueue(() => {
@@ -1205,6 +1224,7 @@ class BoardStore extends EventEmitter {
       c.cleanupBlocked = undefined;
       this.clearHookToken(c);
       c.claudeSessionId = undefined;
+      c.prs = undefined;
       return [
         this.event("cleanup", { cardId: id, fromCol: "done", toCol: "done" }),
       ];

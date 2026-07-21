@@ -1,4 +1,5 @@
 import type { Config } from "../../shared/types.js";
+import { listPrsForBranch } from "./gh.js";
 import { store } from "../store/board.store.js";
 import { getLinearSource } from "../sources/registry.js";
 import { RateLimited, type TicketSource } from "../sources/ticket.source.js";
@@ -43,6 +44,9 @@ async function pollOnce(): Promise<void> {
       source: source.id,
     });
     if (gen !== generation) return;
+    detectPullRequests().catch((err) =>
+      console.error("[pr-detect] tick failed:", (err as Error).message),
+    );
     backoffMs = baseIntervalMs;
     scheduleNext(baseIntervalMs);
   } catch (err) {
@@ -71,6 +75,34 @@ async function pollOnce(): Promise<void> {
       scheduleNext(baseIntervalMs);
     }
   }
+}
+
+/**
+ * Fan out a `gh pr list` probe across every live-session card's workspace repos, piggybacking on
+ * the existing 60s tick. Fire-and-forget from its `pollOnce` call site (never awaited there): a
+ * hung or slow `gh` process must degrade only badge freshness, never the Linear-sync cadence or
+ * `scheduleNext`'s reschedule. Scopes via `cardsWithSession()` (already excludes member cards,
+ * which never carry `tmuxSession`) filtered to a branch, matching D-02's live-session scoping with
+ * zero new store surface. Uses `repo.path` — the STABLE registered main-repo path — never the
+ * per-ticket worktree directory Done cleanup deletes, which is not the repo `gh` needs to resolve
+ * the remote from anyway.
+ */
+async function detectPullRequests(): Promise<void> {
+  const cards = store
+    .cardsWithSession()
+    .filter((c) => c.branch != null && c.workspace != null);
+  await Promise.all(
+    cards.map(async (card) => {
+      const branch = card.branch as string;
+      const repos = card.workspace?.repos ?? [];
+      const results = await Promise.all(
+        repos.map((repo) => listPrsForBranch(repo.path, branch)),
+      );
+      const next = results.flat();
+      if (JSON.stringify(card.prs ?? []) === JSON.stringify(next)) return;
+      await store.setPrs(card.id, next);
+    }),
+  );
 }
 
 /**
