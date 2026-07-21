@@ -182,8 +182,8 @@ export interface Card {
   /**
    * Transient wire-visible in-flight flag for a running Sync-to-Linear attempt. Follows the
    * `isStarting` posture: never persisted as meaningful state across a restart — `hydrateFromParsed`
-   * resets it alongside `ttydPort`/`terminalError`, since a sync cannot survive a backend restart and
-   * a stale `true` would permanently disable the Sync Linear button.
+   * resets it alongside `terminalError`, since a sync cannot survive a backend restart and a stale
+   * `true` would permanently disable the Sync Linear button.
    */
   syncing?: boolean;
   /**

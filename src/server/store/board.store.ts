@@ -271,8 +271,9 @@ class BoardStore extends EventEmitter {
    * and an empty DB hydrates an empty board with no error. A corrupt primary self-heals inside
    * openBoardDb (renamed to board.db.corrupt, restored from the newest clean snapshot with a loud
    * named log — STORE-04), so this path never throws on a bad file. The DB rows feed the SAME
-   * hydrateFromParsed used before, so interrupted-provisioning -> retryable startError and the
-   * transient ttydPort/terminalError reset happen identically on the import and DB-row paths.
+   * hydrateFromParsed used before, so interrupted-provisioning -> retryable startError, the
+   * unconditional `terminalError` reset, and the column-guarded `ttydPort` handling (ROBU-01)
+   * happen identically on the import and DB-row paths.
    * @see docs/ARCHITECTURE.md#single-writer-store
    */
   async load(): Promise<void> {
@@ -312,7 +313,13 @@ class BoardStore extends EventEmitter {
    * Apply a parsed snapshot to the in-memory Map, shared by the healthy-load and backup-recovery
    * paths so a recovered board hydrates byte-for-byte identically to a healthy one: rebuild the
    * cards Map, rewrite any interrupted in-flight provisioning into a retryable startError, reset
-   * the transient ttydPort/terminalError, and default syncedAt / workspaceFolders / lastUsed.
+   * the transient `terminalError`/`syncing`, and default syncedAt / workspaceFolders / lastUsed.
+   * `ttydPort` is preserved for any card outside the To Do / Done columns (ROBU-01) — a parked
+   * card structurally carries no live session, so clearing it there costs nothing, but an
+   * active-column card's port is the one thing boot-time reconcile needs to attempt re-adopting
+   * the still-running ttyd instead of reaping it; `reconcileSessions()` clears it back via
+   * `clearStaleTtydPort` for any candidate whose adoption attempt fails, so a genuinely dead port
+   * never lingers past the first reconcile pass.
    *
    * @remarks Also migrates any card stranded on the retired `in_planning` column (KICK-02): a
    * card carrying a live `tmuxSession` resolves to `in_progress` (the session keeps running — a
@@ -351,7 +358,9 @@ class BoardStore extends EventEmitter {
           };
           card.provisioningStep = null;
         }
-        card.ttydPort = undefined;
+        if (card.column === "todo" || card.column === "done") {
+          card.ttydPort = undefined;
+        }
         card.terminalError = null;
         card.syncing = undefined;
         this.cards.set(card.id, card);
@@ -813,6 +822,21 @@ class BoardStore extends EventEmitter {
         card.ttydPort = undefined;
         card.terminalError = e;
       }
+      return [];
+    });
+  }
+
+  /**
+   * Clear a card's persisted `ttydPort` after a boot-time adoption attempt declined to adopt it
+   * (ROBU-01) — the port answered no probe, or its owning PID could not be confirmed via `lsof`,
+   * so it degrades to today's pre-fix state. No event: the panel for this card may not even be
+   * open, so nothing needs to observe this cleanup; the next panel open transparently fresh-spawns
+   * a ttyd via the existing `ensureTerminal` flow. No-op if the id is unknown.
+   */
+  clearStaleTtydPort(id: string): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) card.ttydPort = undefined;
       return [];
     });
   }
