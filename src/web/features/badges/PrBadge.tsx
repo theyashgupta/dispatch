@@ -96,7 +96,7 @@ export function PrBadge({ pr }: { pr: PrInfo }) {
         background,
         color,
         cursor: "pointer",
-        font: "inherit",
+        fontFamily: "inherit",
         opacity: hovered ? 0.85 : 1,
       }}
     >

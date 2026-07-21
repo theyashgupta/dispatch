@@ -1,4 +1,4 @@
-import type { Config } from "../../shared/types.js";
+import type { Config, PrInfo } from "../../shared/types.js";
 import { listPrsForBranch } from "./gh.js";
 import { store } from "../store/board.store.js";
 import { getLinearSource } from "../sources/registry.js";
@@ -12,6 +12,7 @@ let baseIntervalMs = DEFAULT_POLL_INTERVAL_MS;
 let backoffMs = DEFAULT_POLL_INTERVAL_MS;
 let generation = 0;
 let pending: ReturnType<typeof setTimeout> | null = null;
+let prDetectInFlight: Promise<void> | null = null;
 
 /**
  * Run one poll of the active source, then reschedule the next. The captured `gen` is the race guard:
@@ -86,8 +87,22 @@ async function pollOnce(): Promise<void> {
  * zero new store surface. Uses `repo.path` — the STABLE registered main-repo path — never the
  * per-ticket worktree directory Done cleanup deletes, which is not the repo `gh` needs to resolve
  * the remote from anyway.
+ *
+ * @remarks
+ * Single-flighted, following the `ensureTtyd` precedent: `pollNow()` re-enters `pollOnce` on every
+ * filter change and settings save, so without this guard a fresh `cards x repos` subprocess fan-out
+ * would stack on top of one still in flight.
  */
 async function detectPullRequests(): Promise<void> {
+  if (prDetectInFlight != null) return prDetectInFlight;
+
+  prDetectInFlight = runPrDetection().finally(() => {
+    prDetectInFlight = null;
+  });
+  return prDetectInFlight;
+}
+
+async function runPrDetection(): Promise<void> {
   const cards = store
     .cardsWithSession()
     .filter((c) => c.branch != null && c.workspace != null);
@@ -99,7 +114,8 @@ async function detectPullRequests(): Promise<void> {
       const results = await Promise.all(
         repos.map((repo) => listPrsForBranch(repo.path, branch)),
       );
-      const next = results.flat();
+      if (results.some((r) => r == null)) return;
+      const next = (results as PrInfo[][]).flat();
       if (JSON.stringify(card.prs ?? []) === JSON.stringify(next)) return;
       await store.setPrsIfSession(card.id, session, next);
     }),

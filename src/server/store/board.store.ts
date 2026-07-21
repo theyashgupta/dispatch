@@ -909,6 +909,7 @@ class BoardStore extends EventEmitter {
       card.tmuxSession = undefined;
       card.ttydPort = undefined;
       card.terminalError = null;
+      card.prs = undefined;
       this.clearHookToken(card);
       return wasTransition
         ? [
@@ -1166,6 +1167,7 @@ class BoardStore extends EventEmitter {
       card.tmuxSession = undefined;
       card.ttydPort = undefined;
       card.terminalError = null;
+      card.prs = undefined;
       this.clearHookToken(card);
       card.resumeError =
         "Resume failed — the worktree may be gone. Use Restart to begin a fresh session in the same branch.";
