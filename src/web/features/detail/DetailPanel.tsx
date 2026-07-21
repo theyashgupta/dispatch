@@ -85,8 +85,12 @@ export function DetailPanel({
   }, [panelActive]);
 
   const requestClose = useCallback(() => {
-    if (pushedHistoryRef.current) window.history.back();
-    else onCloseRef.current();
+    if (pushedHistoryRef.current) {
+      pushedHistoryRef.current = false;
+      pendingBackRef.current += 1;
+      window.history.back();
+    }
+    onCloseRef.current();
   }, []);
 
   const persistedWidth = usePanelWidth();
