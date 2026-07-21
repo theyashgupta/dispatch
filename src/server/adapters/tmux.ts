@@ -126,12 +126,11 @@ export async function panePidsBySession(): Promise<Map<
   number[]
 > | null> {
   try {
-    const { stdout } = await run("tmux", [
-      "list-panes",
-      "-a",
-      "-F",
-      "#{session_name} #{pane_pid}",
-    ]);
+    const { stdout } = await run(
+      "tmux",
+      ["list-panes", "-a", "-F", "#{session_name} #{pane_pid}"],
+      { timeout: 5000 },
+    );
     const bySession = new Map<string, number[]>();
     for (const line of stdout.split("\n")) {
       const m = line.match(/^(\S+)\s+(\d+)$/);

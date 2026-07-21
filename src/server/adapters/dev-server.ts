@@ -1,6 +1,25 @@
 import { run } from "./exec.js";
 
 /**
+ * Bind addresses a `http://localhost:<port>` link actually reaches.
+ *
+ * @remarks
+ * The preview badge asserts reachability, and the design has no dead/stale state to fall back on,
+ * so a bind this list does not cover must not produce a badge at all. A server bound to a specific
+ * LAN address is genuinely NOT reachable at `localhost`, and matching on the port alone would
+ * promise otherwise.
+ */
+const LOCALLY_REACHABLE = new Set([
+  "*",
+  "0.0.0.0",
+  "127.0.0.1",
+  "localhost",
+  "[::]",
+  "[::1]",
+  "::1",
+]);
+
+/**
  * Every listening TCP port owned by each named session's process tree, keyed by session name —
  * an entry for EVERY key in `panePids`, deduplicated and sorted ascending. Read-only diagnostic
  * with a fixed argv array and only `Number()`-parsed integers interpolated (never a shell string,
@@ -45,7 +64,9 @@ export async function listeningPortsBySession(
 
   let psOut: string;
   try {
-    ({ stdout: psOut } = await run("ps", ["-axo", "pid=,ppid="]));
+    ({ stdout: psOut } = await run("ps", ["-axo", "pid=,ppid="], {
+      timeout: 5000,
+    }));
   } catch {
     return null;
   }
@@ -82,15 +103,11 @@ export async function listeningPortsBySession(
 
   let lsofOut: string;
   try {
-    ({ stdout: lsofOut } = await run("lsof", [
-      "-a",
-      "-nP",
-      "-p",
-      allPids.join(","),
-      "-iTCP",
-      "-sTCP:LISTEN",
-      "-Fpn",
-    ]));
+    ({ stdout: lsofOut } = await run(
+      "lsof",
+      ["-a", "-nP", "-p", allPids.join(","), "-iTCP", "-sTCP:LISTEN", "-Fpn"],
+      { timeout: 5000 },
+    ));
   } catch (err) {
     const code = (err as { code?: unknown }).code;
     if (typeof code === "number") {
@@ -105,11 +122,12 @@ export async function listeningPortsBySession(
     if (line.startsWith("p")) {
       currentPid = Number(line.slice(1));
     } else if (line.startsWith("n") && currentPid !== null) {
-      const m = line.match(/:(\d+)$/);
+      const m = line.slice(1).match(/^(.*):(\d+)$/);
       if (!m) continue;
+      if (!LOCALLY_REACHABLE.has(m[1])) continue;
       const session = sessionOfPid.get(currentPid);
       if (session == null) continue;
-      result.get(session)?.push(Number(m[1]));
+      result.get(session)?.push(Number(m[2]));
     }
   }
 

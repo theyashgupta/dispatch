@@ -134,8 +134,8 @@ async function runArtifactDetection(): Promise<void> {
         }
       }
 
-      const ports = portsBySession?.get(session);
-      if (portsBySession == null || ports == null) return;
+      if (portsBySession == null) return;
+      const ports = portsBySession.get(session) ?? [];
       const next: PreviewInfo[] = ports
         .filter((port) => port !== card.ttydPort)
         .map((port) => ({ port, url: `http://localhost:${port}` }));
