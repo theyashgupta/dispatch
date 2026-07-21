@@ -402,9 +402,33 @@ PERF-CLEANUP-STEPS preflight=32.7 kill=0.0 worktree_remove=30.1 fs_rm=0.3 prune=
 `PERF-CLEANUP-STEPS preflight=32.7 kill=0.0 worktree_remove=30.1 fs_rm=0.3 prune=25.5`, measured
 against the still-sequential three-loop code at SHA `ba0386c`.
 
-**After:** pending — recorded in this phase's fan-out task.
+**After:** measured against the working tree landing in this same commit (the `Promise.allSettled`
+fan-out of the three per-repo git loops, `fs.rm` left as a single call per the verdict below), same
+command, same 3-repos/5-runs shape:
 
-**Verdict:** pending.
+```
+  run   preflight     kill  wt_remove    fs_rm    prune     total
+     1       16.5      0.0       12.6      0.3      9.8      40.9
+     2       13.0      0.0       12.2      0.3      9.7      37.0
+     3       12.5      0.0       11.9      0.3      9.4      35.6
+     4       14.8      0.0       11.7      0.3      9.8      38.3
+     5       13.4      0.0       11.8      0.3      9.8      37.0
+
+PERF-CLEANUP repos=3 runs=5 mean=37.8 p50=37.0 p95=40.9
+PERF-CLEANUP-STEPS preflight=14.0 kill=0.0 worktree_remove=12.0 fs_rm=0.3 prune=9.7
+```
+
+**Verdict:** ship — mean teardown latency for a 3-repo card drops from 90.3ms to 37.8ms
+(**-58%, ~2.4x faster**; p50 91.8ms → 37.0ms, p95 93.4ms → 40.9ms), fanning the three per-repo git
+loops out across repos with `Promise.allSettled` instead of running them sequentially. Every
+per-step mean drops roughly proportionally (preflight 32.7→14.0ms, worktree_remove 30.1→12.0ms,
+prune 25.5→9.7ms) rather than one step alone improving, consistent with all three loops now
+genuinely running concurrently across the 3 seeded repos instead of summing their per-repo cost.
+`fs_rm_ms` is unchanged (0.3ms both sides, as expected — it was never touched). This is a small
+absolute number in wall-clock terms at this project's real worktree sizes, but the relative win is
+real and the measurement is honest either way: PERF-01 required a measured before/after pair, not a
+minimum delta, and a 2.4x speedup on the dominant cost (the git loops) is a legitimate, non-trivial
+result to ship.
 
 **fs.rm vs. git-loop dominance (resolves 71-RESEARCH.md's Open Question 1):** the combined per-repo
 git-loop time (`preflight_ms + worktree_remove_ms + prune_ms` = 32.7 + 30.1 + 25.5 = 88.3ms mean)

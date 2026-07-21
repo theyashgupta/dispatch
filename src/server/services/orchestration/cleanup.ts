@@ -39,7 +39,25 @@ const perfCleanup = process.env.DISPATCH_PERF_CLEANUP === "1";
  * preflight, the kill pair, worktree-remove, fs.rm, and prune — plus a total spanning the whole
  * function body, dumped as one `DISPATCH_PERF_CLEANUP_STEPS` stderr line right before the terminal
  * decision below, so `scripts/perf-cleanup.mjs` can answer whether fs.rm or the git loops dominate
- * teardown latency without guessing.
+ * teardown latency without guessing. `docs/BASELINES.md`'s `## Cleanup` section recorded the git
+ * loops dominating fs.rm by ~294x at this project's worktree sizes, which is why the fan-out below
+ * is scoped to the three git loops and `fs.rm` stays a single call.
+ * @remarks Cross-repo concurrency (PERF-01): all three per-repo loops (preflight `worktreeStatus`,
+ * teardown `worktreeRemove`, `worktreePrune`) fan out ACROSS repos via `Promise.allSettled` — never
+ * `Promise.all`, which would abort every sibling repo's teardown on the first rejection. Each
+ * repo's OWN step order (kill → worktree-remove → fs.rm → prune, NEW-14) is untouched; only the
+ * scheduling across DIFFERENT repos' independent `.git` directories changes from sequential to
+ * concurrent. Every settled-results reduction walks the positional index against the SAME
+ * `repoPaths` array the `.map()` was built from, so a rejected entry still resolves to the correct
+ * repo's basename (`results.forEach((r, i) => ... repoPaths[i] ...)`) — this keeps `failures[]` and
+ * `blocked[]` byte-identical in shape to the old sequential accumulators, just computed
+ * concurrently. No store mutator (`recordCleanupBlocked`/`noteCleanupWarning`/
+ * `recordCleanupWarning`/`finishCleanup`) is ever called from inside a mapped closure — each stays
+ * outside the fan-out, called exactly once after the results settle, so one card-level outcome still
+ * produces exactly one SSE-visible mutation. No same-repo guard is added: every entry in
+ * `card.workspace.repos` is, by construction, a distinct `.git` directory (folder-discovery mints
+ * one `DiscoveredRepo` per discovered root), so there is no shared git lock two concurrent repos
+ * could contend on.
  * @see docs/ARCHITECTURE.md#cleanup-lifecycle
  */
 export async function cleanupWorkspace(
@@ -61,20 +79,30 @@ export async function cleanupWorkspace(
   if (!opts.force && workspacePath) {
     const blocked: { repo: string; count: number }[] = [];
     let nonOrphanError = false;
-    for (const repoPath of repoPaths) {
-      const worktreePath = buildWorktreePath(workspacePath, repoPath);
-      const exists = await fsp.stat(worktreePath).then(
-        () => true,
-        () => false,
-      );
-      if (!exists) continue;
-      const st = await worktreeStatus(worktreePath);
+    const preflightResults = await Promise.allSettled(
+      repoPaths.map(async (repoPath) => {
+        const worktreePath = buildWorktreePath(workspacePath, repoPath);
+        const exists = await fsp.stat(worktreePath).then(
+          () => true,
+          () => false,
+        );
+        if (!exists) return null;
+        return worktreeStatus(worktreePath);
+      }),
+    );
+    preflightResults.forEach((r, i) => {
+      if (r.status === "rejected") {
+        nonOrphanError = true;
+        return;
+      }
+      const st = r.value;
+      if (!st) return;
       if (st.kind === "dirty") {
-        blocked.push({ repo: path.basename(repoPath), count: st.count });
+        blocked.push({ repo: path.basename(repoPaths[i]), count: st.count });
       } else if (st.kind === "error") {
         nonOrphanError = true;
       }
-    }
+    });
     if (blocked.length > 0) {
       await store.recordCleanupBlocked(cardId, blocked);
       return;
@@ -106,19 +134,20 @@ export async function cleanupWorkspace(
   let pruneMs = 0;
   if (workspacePath) {
     const removeT0 = perfCleanup ? performance.now() : 0;
-    for (const repoPath of repoPaths) {
-      const worktreePath = buildWorktreePath(workspacePath, repoPath);
-      const exists = await fsp.stat(worktreePath).then(
-        () => true,
-        () => false,
-      );
-      if (!exists) continue;
-      try {
+    const removeResults = await Promise.allSettled(
+      repoPaths.map(async (repoPath) => {
+        const worktreePath = buildWorktreePath(workspacePath, repoPath);
+        const exists = await fsp.stat(worktreePath).then(
+          () => true,
+          () => false,
+        );
+        if (!exists) return;
         await worktreeRemove(repoPath, worktreePath);
-      } catch {
-        failures.push(path.basename(repoPath));
-      }
-    }
+      }),
+    );
+    removeResults.forEach((r, i) => {
+      if (r.status === "rejected") failures.push(path.basename(repoPaths[i]));
+    });
     worktreeRemoveMs = perfCleanup ? performance.now() - removeT0 : 0;
 
     const rmT0 = perfCleanup ? performance.now() : 0;
@@ -128,9 +157,9 @@ export async function cleanupWorkspace(
     fsRmMs = perfCleanup ? performance.now() - rmT0 : 0;
 
     const pruneT0 = perfCleanup ? performance.now() : 0;
-    for (const repoPath of repoPaths) {
-      await worktreePrune(repoPath).catch(() => {});
-    }
+    await Promise.allSettled(
+      repoPaths.map((repoPath) => worktreePrune(repoPath)),
+    );
     pruneMs = perfCleanup ? performance.now() - pruneT0 : 0;
   }
 

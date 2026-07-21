@@ -976,22 +976,44 @@ and no-op tolerant so a re-run after a partial failure is safe:
    so no spurious `terminalError` is broadcast. Idempotent no-op if the session is untracked.
 2. **`killSession`** — kills the tmux session by EXACT-name target (`=<name>`, mirroring the
    attach/capture argv); swallows if already gone.
-3. **Per-repo `worktreeRemove`** — for each configured repo, removes that repo's worktree. The
-   worktree path is built BYTE-IDENTICALLY to the start saga's construction in `steps.ts` (a wrong
-   path would remove the wrong directory); an already-removed worktree is treated as SUCCESS, not a
-   failure, and each repo is wrapped in its own try/catch so one failing repo never aborts the loop.
-4. **`fs.rm` the workspace folder** — `recursive: true, force: true` so absence is tolerated.
-5. **`worktreePrune`** per repo — run LAST, after the directories are gone, so prune actually
-   deregisters any `.git/worktrees/<name>` registration whose `worktreeRemove` failed in step 3
-   (`git worktree prune` only drops registrations whose directories no longer exist). Skipping it
-   would leave a dangling registration marking a branch as checked out in a phantom deleted path,
-   breaking manual `git checkout` in the main repo until the next start saga's boot prune. Prune is
-   failure-tolerant per repo and never masks the earlier outcome.
+3. **Per-repo `worktreeRemove`, fanned out ACROSS repos (`PERF-01`)** — every configured repo's
+   removal runs CONCURRENTLY via `Promise.allSettled` (never `Promise.all`, which would abort every
+   sibling repo's teardown on the first rejection), never within a single repo (each repo's own
+   kill → remove → fs.rm → prune order is unchanged). The worktree path is built BYTE-IDENTICALLY to
+   the start saga's construction in `steps.ts` (a wrong path would remove the wrong directory); an
+   already-removed worktree is treated as SUCCESS, not a failure. One failing repo never aborts its
+   siblings' teardown — the settled results are reduced by positional index into the same
+   `failures[]` array the old sequential loop built, so the outcome's SHAPE (per-repo basenames,
+   count-gated warning) is unchanged, only the SCHEDULING is concurrent. The preflight
+   `worktreeStatus` probe (above this ordered list) fans out the same way, across the same repos, for
+   the same reason.
+4. **`fs.rm` the workspace folder** — `recursive: true, force: true` so absence is tolerated. Stays a
+   SINGLE call spanning every repo's worktree directory (not split per-repo): measured evidence in
+   `docs/BASELINES.md`'s `## Cleanup` section showed the three per-repo git loops dominating this
+   step by ~294x at this project's worktree sizes, so PERF-01's fan-out scope excludes `fs.rm`.
+5. **`worktreePrune`** per repo, ALSO fanned out via `Promise.allSettled` — run LAST, after the
+   directories are gone, so prune actually deregisters any `.git/worktrees/<name>` registration whose
+   `worktreeRemove` failed in step 3 (`git worktree prune` only drops registrations whose directories
+   no longer exist). Skipping it would leave a dangling registration marking a branch as checked out
+   in a phantom deleted path, breaking manual `git checkout` in the main repo until the next start
+   saga's boot prune. Prune is failure-tolerant per repo because `Promise.allSettled` collects every
+   rejection without throwing, and never masks the earlier outcome.
 
 **Branches are NEVER deleted (`NEW-14`).** No step in this saga touches branches — worktrees and the
 workspace folder are removed, but the underlying git branches ALWAYS survive so the work is never
 lost (`T-08b-05`). Any partial failure across the steps records the muted `cleanupWarning`; a fully
 clean run calls `finishCleanup`.
+
+**Concurrent fan-out across repos, not within a repo (`PERF-01`).** All three per-repo loops above
+(preflight `worktreeStatus`, teardown `worktreeRemove`, `worktreePrune`) run their per-repo work
+CONCURRENTLY across a card's `card.workspace.repos` via `Promise.allSettled`, measured in
+`docs/BASELINES.md`'s `## Cleanup` section at a 2.4x mean-latency reduction for a 3-repo card. No
+same-repo guard exists or is needed: every entry in `card.workspace.repos` is, by construction, a
+distinct `.git` directory (folder-discovery mints one entry per discovered root), so two concurrently
+running repos never contend on the same git lock. Every store mutation
+(`recordCleanupBlocked`/`noteCleanupWarning`/`recordCleanupWarning`/`finishCleanup`) stays OUTSIDE the
+fan-out, called exactly once after the results settle — one card-level outcome still produces exactly
+one SSE-visible mutation, unchanged from the pre-concurrency saga.
 
 ### Hooks Status Channel
 
