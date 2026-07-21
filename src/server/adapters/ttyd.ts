@@ -41,8 +41,9 @@ const READY_POLL_CADENCE_MS = 100;
  *   1. Live tracked process → return its port (reuse, mirrors tmux reattach).
  *   1a. Adopted (childless) entry → re-probe via `probeAdoption` instead of trusting it forever:
  *       an adopted entry has no `child.on("exit")` wiring, so a `net.connect` round-trip is the
- *       only way to learn it died after boot (Pitfall 3); a dead probe drops the entry and falls
- *       through to a fresh spawn.
+ *       only way to learn it died after boot (Pitfall 3); a dead probe drops ONLY the entry it
+ *       observed (identity guard) and rejoins any in-flight spawn before starting a fresh one, so
+ *       concurrent callers on a dead adopted entry share one spawn instead of double-spawning (WR-01).
  *   2. Spawn already in flight → return THAT promise (concurrent callers share one spawn).
  *   3. Otherwise start the spawn, record it in-flight BEFORE any await, and clear the
  *      in-flight entry on settle (success or failure).
@@ -66,7 +67,9 @@ export function ensureTtyd(
     if (existing.child === null) {
       return probeAdoption(existing.port).then((alive) => {
         if (alive) return existing.port;
-        procs.delete(session);
+        if (procs.get(session) === existing) procs.delete(session);
+        const pending = inFlight.get(session);
+        if (pending) return pending;
         return ensureTtyd(session, indexPath);
       });
     }
@@ -270,11 +273,15 @@ async function pidsListeningOnPorts(
 
 /**
  * Boot-time adopt-then-narrow-sweep (ROBU-01), replacing an unconditional
- * `killDspTtydOrphans()` call: probe every candidate's persisted port, confirm each surviving
- * port's owning PID via `pidsListeningOnPorts`, register a childless `procs` entry for each
- * confirmed candidate, and exclude those PIDs from the orphan sweep so a re-adopted ttyd is never
- * killed out from under the still-open iframe. A candidate whose probe fails, or whose PID
- * cannot be confirmed, is silently left un-adopted — it degrades to exactly today's behavior
+ * `killDspTtydOrphans()` call: probe every candidate's persisted port, resolve each surviving
+ * port's owning PID via `pidsListeningOnPorts`, and adopt ONLY when that owner is a confirmed
+ * dsp-ttyd — its PID must be in the `findDspTtydOrphans` fingerprint set — so a kernel-reused
+ * ephemeral port grabbed by a foreign loopback listener is never bound to the card's writable
+ * iframe — the boot-adoption threat model's foreign-service case. Each confirmed candidate gets a
+ * childless `procs` entry and its PID is excluded
+ * from the orphan sweep so a re-adopted ttyd is never killed out from under the still-open iframe.
+ * A candidate whose probe fails, or whose owner is not a confirmed dsp-ttyd, is silently left
+ * un-adopted — it degrades to exactly today's behavior
  * (swept as an orphan, panel fresh-spawns on next open); never a crash, never a `terminalError`
  * banner for a panel that may not even be open (Anti-Pattern). `findDspTtydOrphans`'s fingerprint
  * is untouched — only the resulting kill LIST is narrowed by the spared-PID set.
@@ -289,18 +296,17 @@ export async function adoptAndSweep(
   );
   const alive = probed.filter((c) => c.alive);
   const pidByPort = await pidsListeningOnPorts(alive.map((c) => c.port));
+  const ttydPids = new Set(await findDspTtydOrphans());
   const adopted = new Set<string>();
   const sparedPids = new Set<number>();
   for (const c of alive) {
     const pid = pidByPort.get(c.port);
-    if (pid == null) continue;
+    if (pid == null || !ttydPids.has(pid)) continue;
     procs.set(c.session, { child: null, port: c.port, pid });
     adopted.add(c.session);
     sparedPids.add(pid);
   }
-  const orphans = (await findDspTtydOrphans()).filter(
-    (pid) => !sparedPids.has(pid),
-  );
+  const orphans = [...ttydPids].filter((pid) => !sparedPids.has(pid));
   killTtydPids(orphans);
   return adopted;
 }
