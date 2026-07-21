@@ -82,7 +82,7 @@ async function pollOnce(): Promise<void> {
  * the existing 60s tick. Fire-and-forget from its `pollOnce` call site (never awaited there): a
  * hung or slow `gh` process must degrade only badge freshness, never the Linear-sync cadence or
  * `scheduleNext`'s reschedule. Scopes via `cardsWithSession()` (already excludes member cards,
- * which never carry `tmuxSession`) filtered to a branch, matching D-02's live-session scoping with
+ * which never carry `tmuxSession`) filtered to a branch, scoping detection to live sessions with
  * zero new store surface. Uses `repo.path` — the STABLE registered main-repo path — never the
  * per-ticket worktree directory Done cleanup deletes, which is not the repo `gh` needs to resolve
  * the remote from anyway.

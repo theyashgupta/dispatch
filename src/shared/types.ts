@@ -57,7 +57,7 @@ export interface ActivityEvent {
 
 /**
  * A pull request detected via `gh pr list` for a card's branch. `ci` is null when the repo has
- * no checks configured (D-06) — a badge/row renders no dot rather than a neutral one in that case.
+ * no checks configured — a badge/row then renders no dot at all, rather than a neutral one.
  */
 export interface PrInfo {
   number: number;

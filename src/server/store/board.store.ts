@@ -716,13 +716,13 @@ class BoardStore extends EventEmitter {
   /**
    * Record the PR(s) detected for a card's branch this tick, ONLY if the card still names
    * `session` as its tmux session. Mirrors setOutputChanged: a single-field enqueue, no
-   * column/other-field interaction, no activity event (D-12 keeps the EventType union frozen).
+   * column/other-field interaction, no activity event (the EventType union stays frozen).
    * Collapses an empty result to `undefined` rather than `[]` so a deleted/merged-away-then-gone
-   * PR clears the field in the same write a fresh detection would use, satisfying D-11's "cleared
+   * PR clears the field in the same write a fresh detection would use, satisfying the "cleared
    * when a detection pass finds no PR" without a second mutator. The session guard runs INSIDE the
    * mutation queue (setTtydPortIfSession precedent) because a detection tick holds its result for
    * up to the 8s `gh` timeout: a Done-drag cleanup enqueued during that window must win, or this
-   * write would resurrect a stale badge on an already-torn-down card and break D-11. No-op if the
+   * write would resurrect a stale badge on an already-torn-down card. No-op if the
    * id is unknown.
    * @see docs/ARCHITECTURE.md#single-writer-store
    */
@@ -1183,7 +1183,7 @@ class BoardStore extends EventEmitter {
    * cleanup should surface only this muted warning. `terminalError` is nulled for the same reason;
    * only the worktree/folder outcome is uncertain on this path, so `workspacePath` is left as-is.
    * `hookToken` is cleared AND unregistered with the session fields (clearHookToken). `prs` is
-   * cleared alongside the other session fields (D-11). Column untouched. No-op if the id is
+   * cleared alongside the other session fields. Column untouched. No-op if the id is
    * unknown.
    */
   recordCleanupWarning(id: string, warning: string): Promise<void> {
@@ -1213,7 +1213,7 @@ class BoardStore extends EventEmitter {
    * completeStart precedent — a split write would broadcast a torn frame). Clears the session
    * fields the teardown removed AND neutralizes any lingering/racing error chrome so the cleaned
    * Done card reads quietly: `tmuxSession`/`ttydPort`/`workspacePath`/`cleanupWarning`/`hookToken`/
-   * `prs` undefined (the token also unregistered via clearHookToken; `prs` cleared per D-11),
+   * `prs` undefined (the token also unregistered via clearHookToken),
    * `sessionLost` false, `terminalError` null. KEEPS `branch` (branches always survive per lock),
    * `outputChangedAt`, and `lastMarker`. No-op if the id is unknown.
    */
