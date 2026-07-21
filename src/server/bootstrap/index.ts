@@ -15,7 +15,10 @@ import { checkHooksCapability, installHookArtifacts } from "./hook-setup.js";
 import { provisionTtydIndex } from "./ttyd-index-setup.js";
 import { ensureHyperlinksTerminalFeature } from "../adapters/tmux.js";
 import { unregisterHookToken } from "../services/domain/hook-tokens.js";
-import { reapActivityThrottle } from "../services/domain/hook-events.js";
+import {
+  reapActivityThrottle,
+  reapMismatchThrottle,
+} from "../services/domain/hook-events.js";
 import { seedPlaybooks } from "../services/domain/playbooks.js";
 import { startPoller } from "../adapters/poller.js";
 import { buildRegistry, getLinearSource } from "../sources/registry.js";
@@ -164,6 +167,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   store.setHookTokenReleaser((token, cardId) => {
     unregisterHookToken(token);
     reapActivityThrottle(cardId);
+    reapMismatchThrottle(cardId);
   });
 
   await seedPlaybooks();

@@ -54,6 +54,39 @@ export function reapActivityThrottle(cardId: string): void {
 }
 
 /**
+ * Per-card map of `"recorded|incoming"` tuple to the epoch ms it last logged — the
+ * `session_id mismatch` dedupe state. Nested one level deeper than {@link lastActivityStampMs}
+ * so the whole per-card bucket drops in O(1) at session death via {@link reapMismatchThrottle},
+ * matching that same map's reap discipline rather than a separate TTL-sweep timer. `recorded`
+ * is first-event-wins for a session's life, so in practice at most one tuple exists per card —
+ * but a token-holding client sending a distinct `incoming` on every event would otherwise grow
+ * the inner map unboundedly for the life of a single session, which the outer reap alone cannot
+ * bound; see {@link MISMATCH_MAX_TUPLES_PER_CARD}.
+ * @see docs/ARCHITECTURE.md#hooks-status-channel
+ */
+const mismatchLoggedAt = new Map<string, Map<string, number>>();
+
+/** Suppression window for a repeated identical `session_id mismatch` tuple. */
+const MISMATCH_LOG_WINDOW_MS = 60_000;
+
+/**
+ * Upper bound on distinct `(recorded, incoming)` tuples tracked per card within a single live
+ * session, enforced by evicting the oldest (lowest `lastLoggedMs`) entry before insertion would
+ * exceed it. Bounds the inner map DURING a session, not only at session death.
+ */
+const MISMATCH_MAX_TUPLES_PER_CARD = 16;
+
+/**
+ * Drop a card's mismatch-dedupe bucket when its hook channel dies. Wired into the same
+ * session-death chokepoint as {@link reapActivityThrottle} so the outer map is bounded by
+ * construction — no separate timer.
+ * @see docs/ARCHITECTURE.md#hooks-status-channel
+ */
+export function reapMismatchThrottle(cardId: string): void {
+  mismatchLoggedAt.delete(cardId);
+}
+
+/**
  * Per-card monotonic counter used ONLY as the fallback discriminator for a synthesized
  * `PreToolUse` marker when the payload carries no usable `tool_use_id` (HOOK-03 follow-up):
  * `markerKey` is entirely derived from `Marker.reason`, so a SECOND same-session pause with the
@@ -209,9 +242,28 @@ export async function applyHookEvent(
     if (recorded == null) {
       await store.setClaudeSessionId(cardId, sid);
     } else if (recorded !== sid) {
-      console.warn(
-        `[hook] session_id mismatch card=${cardId} recorded=${recorded} incoming=${sid}`,
-      );
+      const key = `${recorded}|${sid}`;
+      const perCard = mismatchLoggedAt.get(cardId) ?? new Map<string, number>();
+      const last = perCard.get(key);
+      const now = Date.now();
+      if (last === undefined || now - last >= MISMATCH_LOG_WINDOW_MS) {
+        console.warn(
+          `[hook] session_id mismatch card=${cardId} recorded=${recorded} incoming=${sid}`,
+        );
+        if (!perCard.has(key) && perCard.size >= MISMATCH_MAX_TUPLES_PER_CARD) {
+          let oldestKey: string | undefined;
+          let oldestMs = Infinity;
+          for (const [k, ms] of perCard) {
+            if (ms < oldestMs) {
+              oldestMs = ms;
+              oldestKey = k;
+            }
+          }
+          if (oldestKey !== undefined) perCard.delete(oldestKey);
+        }
+        perCard.set(key, now);
+        mismatchLoggedAt.set(cardId, perCard);
+      }
     }
   }
 
