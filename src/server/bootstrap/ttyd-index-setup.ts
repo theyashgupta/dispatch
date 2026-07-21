@@ -3,6 +3,11 @@ import fsp from "node:fs/promises";
 import writeFileAtomic from "write-file-atomic";
 import { parsePort } from "../adapters/ttyd.js";
 import { DISPATCH_DIR, TTYD_INDEX_PATH } from "../services/infra/paths.js";
+import {
+  FONT_FAMILY,
+  FONT_SPEC,
+  NERD_FONT_WOFF2_BASE64,
+} from "../../shared/nerd-font-mono.js";
 
 /**
  * Reverse-tabnabbing-safe modifier-gated link activator, shared verbatim by both cmd-click
@@ -36,7 +41,7 @@ interface NamedPatch {
 }
 
 /**
- * Three independent patches applied to ttyd's served index, in order. Each anchor is checked for
+ * Five independent patches applied to ttyd's served index, in order. Each anchor is checked for
  * an exact-count-1 occurrence before being applied; a drifted anchor skips ONLY that patch, never
  * the others, and is never force-applied via regex or fuzzy matching (59-RESEARCH.md Anchors 1-3).
  * @remarks `cmd-click-osc8` sets `terminal.options.linkHandler` because real Claude Code `⏺`
@@ -53,9 +58,34 @@ interface NamedPatch {
  * also swallowing keypress, xterm's stock keypress path independently `triggerDataEvent`s the
  * Enter key's own CR right after our injected LF, submitting the message instead of inserting a
  * newline (live-discovered defect, fixed same-plan, 59-02-SUMMARY.md).
+ * @remarks `font-load-gate` MUST stay the FIRST entry and `font-face-inject` the LAST: the
+ * gate's target (`t.loadAddon(new l.WebLinksAddon),t.open(e),i.fit()}`) is a SUPERSET of both
+ * `cmd-click-weblinks`'s anchor (`new l.WebLinksAddon`) and `shift-enter`'s anchor
+ * (`t.open(e),i.fit()}`) — superset-anchor coupling. Anchor counts run against the
+ * ALREADY-MUTATED string in array order (see `patchIndexHtml`'s own remark below), so if either
+ * of those two patches ran BEFORE font-load-gate it would consume/alter the shared substring and
+ * silently break font-load-gate's own count-1 match (or vice versa if font-load-gate ran last),
+ * disabling a feature with no anchor-drift warning to distinguish it from real ttyd version
+ * drift. font-load-gate's `build()` deliberately re-emits both downstream anchors VERBATIM inside
+ * its `.then()` callback — the sanctioned exception to "no patch's build() output may contain
+ * another patch's anchor substring" noted below, required here so cmd-click-weblinks and
+ * shift-enter still find their (now one level deeper) anchors at exact-count-1 on their turn.
+ * `font-face-inject` targets the served index's single `</style>` closing tag and has no anchor
+ * overlap with any other patch, so its position past the other four is unconstrained beyond
+ * "last" (TERM-01, 67-RESEARCH.md Pattern 1/2).
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 const PATCHES: NamedPatch[] = [
+  {
+    name: "font-load-gate",
+    target: "t.loadAddon(new l.WebLinksAddon),t.open(e),i.fit()}",
+    build: () =>
+      "t.loadAddon(new l.WebLinksAddon)," +
+      `Promise.race([document.fonts.load('${FONT_SPEC}').catch(()=>{}),` +
+      `new Promise(r=>setTimeout(r,1500))]).then(()=>{t.open(e),i.fit()})}`,
+    disabledWarning:
+      "Nerd Font glyph load-gate disabled (glyphs may render with wrong metrics)",
+  },
   {
     name: "cmd-click-weblinks",
     target: PATCH_TARGET,
@@ -79,6 +109,16 @@ const PATCHES: NamedPatch[] = [
       'if(e.key==="Enter"&&e.shiftKey&&!e.ctrlKey&&!e.altKey&&!e.metaKey){' +
       'if(e.type==="keydown")this.sendData("\\n");return!1}return!0})),i.fit()}',
     disabledWarning: "shift+enter newline disabled",
+  },
+  {
+    name: "font-face-inject",
+    target: "</style>",
+    build: () =>
+      `@font-face{font-family:"${FONT_FAMILY}";` +
+      `src:url(data:font/woff2;charset=utf-8;base64,${NERD_FONT_WOFF2_BASE64}) format("woff2");` +
+      `font-weight:400;font-style:normal;font-display:block}</style>`,
+    disabledWarning:
+      "Nerd Font CSS injection disabled (falls back to whatever font-family is set)",
   },
 ];
 
