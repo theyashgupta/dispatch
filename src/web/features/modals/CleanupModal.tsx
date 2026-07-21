@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { Button } from "../../primitives/Button.js";
 import { Modal, type ModalControl } from "../../primitives/Modal.js";
+import { Notice } from "../../primitives/Notice.js";
 
 interface CleanupModalProps {
   card: CardModel;
-  onConfirm: (force: boolean) => void;
+  onConfirm: (force: boolean) => Promise<void>;
   onClose: () => void;
 }
 
@@ -13,18 +14,29 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
   const keepRef = useRef<HTMLButtonElement>(null);
   const modalRef = useRef<ModalControl>(null);
   const [pending, setPending] = useState(false);
+  const [confirmError, setConfirmError] = useState(false);
+  const attemptRef = useRef<number | undefined>(undefined);
 
   const blocked = card.cleanupBlocked;
   const isBlocked = blocked != null && blocked.length > 0;
 
   useEffect(() => {
-    setPending(false);
-  }, [isBlocked]);
+    if (pending && card.cleanupAttempt !== attemptRef.current)
+      setPending(false);
+  }, [card.cleanupAttempt, pending]);
 
-  const handleConfirm = (force: boolean) => {
+  const handleConfirm = async (force: boolean) => {
     if (pending) return;
+    attemptRef.current = card.cleanupAttempt;
     setPending(true);
-    onConfirm(force);
+    setConfirmError(false);
+    keepRef.current?.focus();
+    try {
+      await onConfirm(force);
+    } catch {
+      setConfirmError(true);
+      setPending(false);
+    }
   };
 
   return (
@@ -76,6 +88,14 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
             branches are kept.
           </div>
         )}
+        {confirmError && (
+          <div role="alert" style={{ marginTop: "var(--space-sm)" }}>
+            <Notice
+              tone="destructive"
+              label="Couldn't reach the server — try again."
+            />
+          </div>
+        )}
       </Modal.Body>
       <Modal.Actions>
         <div
@@ -100,18 +120,20 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
           {isBlocked ? (
             <Button
               variant="danger"
-              disabled={pending}
-              onClick={() => handleConfirm(true)}
+              loading={pending}
+              onClick={() => void handleConfirm(true)}
             >
-              Discard uncommitted changes and clean up
+              {pending
+                ? "Cleaning up…"
+                : "Discard uncommitted changes and clean up"}
             </Button>
           ) : (
             <Button
               variant="primary"
-              disabled={pending}
-              onClick={() => handleConfirm(false)}
+              loading={pending}
+              onClick={() => void handleConfirm(false)}
             >
-              Clean up
+              {pending ? "Cleaning up…" : "Clean up"}
             </Button>
           )}
         </div>

@@ -316,8 +316,9 @@ export function App() {
           card={cleanupCard}
           onConfirm={(force) => {
             setCleanupAttempted(true);
-            void cleanupCardApi(cleanupCardId!, force).catch((err) => {
+            return cleanupCardApi(cleanupCardId!, force).catch((err) => {
               console.error("cleanupCard failed", err);
+              throw err;
             });
           }}
           onClose={() => setCleanupCardId(null)}
