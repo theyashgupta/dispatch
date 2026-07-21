@@ -22,7 +22,7 @@ import { membersOf } from "./group-members.js";
 import { GroupStartModal } from "../modals/index.js";
 import type { StartRequest } from "../../lib/start-request.js";
 import { useLastOpened } from "../../hooks/useUnseenActivity.js";
-import { useMediaQuery } from "../../hooks/useMediaQuery.js";
+import { CAROUSEL_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
 import { moveCard } from "../../lib/api.js";
 import { deriveShowDot, deriveShowGone } from "../../lib/card-badges.js";
 
@@ -112,7 +112,7 @@ export function Board({
     activeCard != null &&
     deriveShowDot(activeCard, overlaySelected, lastOpenedMap);
 
-  const isCarousel = useMediaQuery("(max-width: 1023px)");
+  const isCarousel = useMediaQuery(CAROUSEL_QUERY);
   const isPhone = useMediaQuery("(max-width: 767px)");
   const isLarge = useMediaQuery("(min-width: 1600px)");
 
@@ -125,6 +125,7 @@ export function Board({
       setActiveColumn(null);
       return;
     }
+    setActiveColumn((prev) => prev ?? COLUMNS[0]);
     const ratios = new Map<ColumnId, number>();
     const observer = new IntersectionObserver(
       (entries) => {
@@ -135,13 +136,10 @@ export function Board({
           ratios.set(col, entry.intersectionRatio);
         }
         let best: ColumnId | null = null;
-        let bestRatio = 0.6;
+        let bestRatio = 0;
         for (const column of COLUMNS) {
           const ratio = ratios.get(column) ?? 0;
-          if (ratio >= bestRatio && best == null) {
-            best = column;
-            bestRatio = ratio;
-          } else if (ratio > bestRatio) {
+          if (ratio >= 0.6 && ratio > bestRatio) {
             best = column;
             bestRatio = ratio;
           }

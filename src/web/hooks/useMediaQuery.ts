@@ -1,6 +1,17 @@
 import { useEffect, useState } from "react";
 
 /**
+ * The single narrow-width breakpoint shared by the board carousel and the detail-panel
+ * takeover.
+ *
+ * @remarks
+ * Both surfaces must switch on the exact same pixel: a divergence produces a board that
+ * is a carousel while the panel is still docked (or the reverse), which is precisely the
+ * broken intermediate state the responsive layout exists to avoid.
+ */
+export const CAROUSEL_QUERY = "(max-width: 1023px)";
+
+/**
  * Subscribe to a CSS media query and return its current match state.
  *
  * @remarks

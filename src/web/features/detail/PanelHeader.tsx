@@ -213,7 +213,7 @@ export function PanelHeader({
           <IconButton
             onClick={onClose}
             aria-label={takeover ? "Back to board" : "Close panel"}
-            style={takeover ? { padding: "8px", margin: "-8px" } : undefined}
+            style={takeover ? { width: "44px", height: "44px" } : undefined}
           >
             {takeover ? (
               <ArrowLeft size={16} strokeWidth={2} aria-hidden="true" />

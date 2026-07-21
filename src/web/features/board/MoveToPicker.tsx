@@ -1,11 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Check } from "lucide-react";
 import { COLUMNS } from "../../../shared/types.js";
 import type {
   Card as CardModel,
   Column as ColumnId,
 } from "../../../shared/types.js";
-import { COLUMN_LABELS } from "./column-meta.js";
+import { COLUMN_LABELS } from "../../lib/event-copy.js";
 
 interface MoveToPickerProps {
   card: CardModel;
@@ -14,7 +14,8 @@ interface MoveToPickerProps {
   onClose: () => void;
 }
 
-const MENU_WIDTH = 240;
+const MIN_WIDTH = 200;
+const MAX_WIDTH = 260;
 const ROW_HEIGHT = 44;
 const GAP = 4;
 
@@ -24,22 +25,38 @@ export function MoveToPicker({
   onSelect,
   onClose,
 }: MoveToPickerProps) {
+  const firstRowRef = useRef<HTMLButtonElement | null>(null);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("resize", onClose);
+    window.addEventListener("orientationchange", onClose);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onClose);
+      window.removeEventListener("orientationchange", onClose);
+    };
   }, [onClose]);
 
+  useEffect(() => {
+    firstRowRef.current?.focus();
+  }, []);
+
+  const menuWidth = Math.min(
+    MAX_WIDTH,
+    Math.max(MIN_WIDTH, window.innerWidth * 0.6),
+  );
   const estimatedHeight = COLUMNS.length * ROW_HEIGHT + GAP * 2;
   const openAbove = anchorRect.bottom + estimatedHeight > window.innerHeight;
   const top = openAbove
     ? Math.max(GAP, anchorRect.top - estimatedHeight - GAP)
     : anchorRect.bottom + GAP;
-  const left = Math.min(
-    Math.max(GAP, anchorRect.left),
-    window.innerWidth - MENU_WIDTH - GAP,
+  const left = Math.max(
+    GAP,
+    Math.min(anchorRect.left, window.innerWidth - menuWidth - GAP),
   );
 
   return (
@@ -59,7 +76,7 @@ export function MoveToPicker({
         }}
       />
       <div
-        role="menu"
+        role="group"
         aria-label={`Move ${card.identifier} to`}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
@@ -68,7 +85,7 @@ export function MoveToPicker({
           top,
           left,
           zIndex: 16,
-          width: "clamp(200px, 60vw, 260px)",
+          width: `${menuWidth}px`,
           background: "var(--surface-card)",
           border: "1px solid var(--border)",
           borderRadius: "var(--radius)",
@@ -78,13 +95,14 @@ export function MoveToPicker({
           flexDirection: "column",
         }}
       >
-        {COLUMNS.map((column) => {
+        {COLUMNS.map((column, index) => {
           const current = card.column === column;
           return (
             <button
               key={column}
+              ref={index === 0 ? firstRowRef : undefined}
               type="button"
-              role="menuitem"
+              aria-current={current ? "true" : undefined}
               aria-disabled={current}
               onClick={() => {
                 if (current) {

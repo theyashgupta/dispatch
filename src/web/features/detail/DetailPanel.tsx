@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ActivityEvent,
   Card as CardModel,
 } from "../../../shared/types.js";
 import { ensureTerminal } from "../../lib/api.js";
 import { stampLastOpened } from "../../hooks/useUnseenActivity.js";
-import { useMediaQuery } from "../../hooks/useMediaQuery.js";
+import { CAROUSEL_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
 import {
   clearPanelWidth,
   setPanelWidth,
@@ -43,7 +43,7 @@ export function DetailPanel({
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
 
-  const isCarousel = useMediaQuery("(max-width: 1023px)");
+  const isCarousel = useMediaQuery(CAROUSEL_QUERY);
   const takeover = !docked && isCarousel;
   const effectiveFullscreen = fullscreen || takeover;
   const onCloseRef = useRef(onClose);
@@ -51,30 +51,43 @@ export function DetailPanel({
     onCloseRef.current = onClose;
   }, [onClose]);
   const pushedHistoryRef = useRef(false);
+  const pendingBackRef = useRef(0);
   const panelActive = open && takeover;
+
+  useEffect(() => {
+    const entry = window.history.state as { dspPanel?: boolean } | null;
+    if (entry?.dspPanel === true) {
+      window.history.replaceState(null, "");
+    }
+    const onPop = () => {
+      if (pendingBackRef.current > 0) {
+        pendingBackRef.current -= 1;
+        return;
+      }
+      if (!pushedHistoryRef.current) return;
+      pushedHistoryRef.current = false;
+      onCloseRef.current();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   useEffect(() => {
     if (!panelActive) return;
     window.history.pushState({ dspPanel: true }, "");
     pushedHistoryRef.current = true;
-    const onPop = () => {
-      pushedHistoryRef.current = false;
-      onCloseRef.current();
-    };
-    window.addEventListener("popstate", onPop);
     return () => {
-      window.removeEventListener("popstate", onPop);
-      if (pushedHistoryRef.current) {
-        pushedHistoryRef.current = false;
-        window.history.back();
-      }
+      if (!pushedHistoryRef.current) return;
+      pushedHistoryRef.current = false;
+      pendingBackRef.current += 1;
+      window.history.back();
     };
   }, [panelActive]);
 
-  function requestClose() {
+  const requestClose = useCallback(() => {
     if (pushedHistoryRef.current) window.history.back();
-    else onClose();
-  }
+    else onCloseRef.current();
+  }, []);
 
   const persistedWidth = usePanelWidth();
   const asideRef = useRef<HTMLElement | null>(null);
@@ -197,8 +210,7 @@ export function DetailPanel({
         return;
       }
       if (takeover) {
-        if (pushedHistoryRef.current) window.history.back();
-        else onClose();
+        requestClose();
         return;
       }
       if (fullscreen) setFullscreen(false);
@@ -206,7 +218,7 @@ export function DetailPanel({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, fullscreen, docked, onClose, takeover]);
+  }, [open, fullscreen, docked, onClose, takeover, requestClose]);
 
   const spawnedForRef = useRef<string | null>(null);
   useEffect(() => {

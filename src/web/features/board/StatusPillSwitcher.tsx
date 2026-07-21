@@ -17,8 +17,7 @@ export function StatusPillSwitcher({
   onSelect,
 }: StatusPillSwitcherProps) {
   return (
-    <div
-      role="tablist"
+    <nav
       aria-label="Jump to board column"
       style={{
         display: "flex",
@@ -40,8 +39,7 @@ export function StatusPillSwitcher({
           <button
             key={column}
             type="button"
-            role="tab"
-            aria-selected={isActive}
+            aria-current={isActive ? "true" : undefined}
             aria-label={`${COLUMN_LABELS[column]}, ${count} card${
               count === 1 ? "" : "s"
             }`}
@@ -92,6 +90,6 @@ export function StatusPillSwitcher({
           </button>
         );
       })}
-    </div>
+    </nav>
   );
 }

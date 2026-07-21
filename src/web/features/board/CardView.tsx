@@ -8,7 +8,8 @@ import {
   Play,
   RotateCw,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type {
   Card as CardModel,
   Column as ColumnId,
@@ -75,6 +76,13 @@ export function CardView({
   onMoveTo,
 }: CardViewProps) {
   const [pickerRect, setPickerRect] = useState<DOMRect | null>(null);
+  const moveTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const [prevCarousel, setPrevCarousel] = useState(isCarousel);
+  if (prevCarousel !== isCarousel) {
+    setPrevCarousel(isCarousel);
+    if (pickerRect != null) setPickerRect(null);
+  }
   const { resuming, resumeFailed, watchdogFired, failureCopy, onResume } =
     useResumeFeedback(card);
   const compact = card.column === "done";
@@ -338,6 +346,10 @@ export function CardView({
               fontSize: "var(--font-label)",
               lineHeight: "var(--line-label)",
               color: "var(--text-muted)",
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
             }}
           >
             {formatAge(card.updatedAt, nowMs())}
@@ -350,10 +362,12 @@ export function CardView({
                 e.stopPropagation();
                 setPickerRect(e.currentTarget.getBoundingClientRect());
               }}
+              ref={moveTriggerRef}
+              aria-expanded={pickerRect != null}
               style={{
                 marginLeft: "auto",
-                paddingBlock: "8px",
-                marginBlock: "-8px",
+                flex: "0 0 auto",
+                height: "44px",
               }}
             >
               <ArrowRightLeft size={12} strokeWidth={2} aria-hidden="true" />
@@ -613,14 +627,21 @@ export function CardView({
           </div>
         )}
       </div>
-      {pickerRect != null && onMoveTo != null && (
-        <MoveToPicker
-          card={card}
-          anchorRect={pickerRect}
-          onSelect={(column) => onMoveTo(card.id, column)}
-          onClose={() => setPickerRect(null)}
-        />
-      )}
+      {isCarousel &&
+        pickerRect != null &&
+        onMoveTo != null &&
+        createPortal(
+          <MoveToPicker
+            card={card}
+            anchorRect={pickerRect}
+            onSelect={(column) => onMoveTo(card.id, column)}
+            onClose={() => {
+              setPickerRect(null);
+              moveTriggerRef.current?.focus();
+            }}
+          />,
+          document.body,
+        )}
     </>
   );
 }
