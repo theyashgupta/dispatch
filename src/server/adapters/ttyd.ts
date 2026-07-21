@@ -7,11 +7,18 @@ import { store } from "../store/board.store.js";
 const execFileP = promisify(execFile);
 
 interface TtydProc {
-  child: ChildProcess;
+  child: ChildProcess | null;
   port: number;
+  /** Resolved OS pid for a `child === null` (adopted) entry only — the sole handle `killTtyd` has left to actually terminate a re-adopted process it never spawned. Absent for a normally-spawned entry (`entry.child.kill()` is used instead). */
+  pid?: number;
 }
 
-/** Live ttyd processes, keyed by tmux session name ("dsp-<identifier>"). In-memory only. */
+/**
+ * Live ttyd processes, keyed by tmux session name ("dsp-<identifier>"). In-memory only. A
+ * `child: null` entry means this backend never spawned the process — it was re-adopted at boot
+ * from a prior backend's still-running ttyd (ROBU-01) — so there is no `child.on("exit")` wiring
+ * for it; its liveness can only be learned by re-probing (see `ensureTtyd`'s adopted-entry branch).
+ */
 const procs = new Map<string, TtydProc>();
 
 /**
@@ -32,6 +39,10 @@ const READY_POLL_CADENCE_MS = 100;
  * Ensure a writable, loopback-only ttyd is listening for `session`, returning its port.
  * Idempotent + single-flight:
  *   1. Live tracked process → return its port (reuse, mirrors tmux reattach).
+ *   1a. Adopted (childless) entry → re-probe via `probeAdoption` instead of trusting it forever:
+ *       an adopted entry has no `child.on("exit")` wiring, so a `net.connect` round-trip is the
+ *       only way to learn it died after boot (Pitfall 3); a dead probe drops the entry and falls
+ *       through to a fresh spawn.
  *   2. Spawn already in flight → return THAT promise (concurrent callers share one spawn).
  *   3. Otherwise start the spawn, record it in-flight BEFORE any await, and clear the
  *      in-flight entry on settle (success or failure).
@@ -51,8 +62,16 @@ export function ensureTtyd(
   indexPath: string | null,
 ): Promise<number> {
   const existing = procs.get(session);
-  if (existing && existing.child.exitCode === null)
-    return Promise.resolve(existing.port);
+  if (existing) {
+    if (existing.child === null) {
+      return probeAdoption(existing.port).then((alive) => {
+        if (alive) return existing.port;
+        procs.delete(session);
+        return ensureTtyd(session, indexPath);
+      });
+    }
+    if (existing.child.exitCode === null) return Promise.resolve(existing.port);
+  }
 
   const pending = inFlight.get(session);
   if (pending) return pending;
@@ -180,6 +199,112 @@ function waitForListening(
   });
 }
 
+/** Boot-time adoption probe timeout: an already-running process answers in ms or is dead. */
+const ADOPTION_PROBE_TIMEOUT_MS = 1500;
+
+/**
+ * One-shot readiness probe for boot-time ttyd adoption (ROBU-01) — deliberately NOT
+ * `waitForListening`'s retry-until-10s loop: a process left running by a PRIOR backend boot
+ * either accepts a connect attempt within milliseconds or is already dead, so looping would slow
+ * boot proportionally to the number of open cards. Also reused by `ensureTtyd` to re-check an
+ * already-adopted (childless) entry's liveness on every call (Pitfall 3).
+ * @see docs/ARCHITECTURE.md#terminal-ttyd
+ */
+function probeAdoption(
+  port: number,
+  timeoutMs = ADOPTION_PROBE_TIMEOUT_MS,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = net.connect({ host: "127.0.0.1", port });
+    const done = (ok: boolean) => {
+      sock.destroy();
+      resolve(ok);
+    };
+    sock.once("connect", () => done(true));
+    sock.once("error", () => done(false));
+    sock.setTimeout(timeoutMs, () => done(false));
+  });
+}
+
+/**
+ * Batched port→PID resolution via `lsof -Fpn` (verified live on this machine across both a
+ * single process holding multiple ports and distinct processes each holding one port — the
+ * `p<pid>` record line always precedes the `n<host>:<port>` line(s) it owns, so a `p`/`n` scan is
+ * an unambiguous port→PID map even for several DISTINCT owning PIDs in one invocation). Tolerant:
+ * ANY failure (lsof absent, no match, unexpected output) resolves an EMPTY map — callers MUST
+ * treat that as "ownership unconfirmed, decline adoption for those ports", never "adopt
+ * everything" (Pitfall 4). Read-only diagnostic with a fixed argv array and server-derived
+ * `number` ports only (never a shell string, never client input) — same carve-out precedent as
+ * `findDspTtydOrphans`'s `ps` call, so this deliberately bypasses the `adapters/exec.ts` chokepoint.
+ * SECURITY: callers report the resulting COUNT only — never these PIDs or ports (T-04-04
+ * precedent).
+ * @see docs/ARCHITECTURE.md#terminal-ttyd
+ * @see docs/ARCHITECTURE.md#security-threat-model
+ */
+async function pidsListeningOnPorts(
+  ports: number[],
+): Promise<Map<number, number>> {
+  if (ports.length === 0) return new Map();
+  try {
+    const { stdout } = await execFileP("lsof", [
+      "-nP",
+      `-iTCP:${ports.join(",")}`,
+      "-sTCP:LISTEN",
+      "-Fpn",
+    ]);
+    const byPort = new Map<number, number>();
+    let currentPid: number | null = null;
+    for (const line of stdout.split("\n")) {
+      if (line.startsWith("p")) {
+        currentPid = Number(line.slice(1));
+      } else if (line.startsWith("n") && currentPid !== null) {
+        const m = line.match(/:(\d+)$/);
+        if (m) byPort.set(Number(m[1]), currentPid);
+      }
+    }
+    return byPort;
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * Boot-time adopt-then-narrow-sweep (ROBU-01), replacing an unconditional
+ * `killDspTtydOrphans()` call: probe every candidate's persisted port, confirm each surviving
+ * port's owning PID via `pidsListeningOnPorts`, register a childless `procs` entry for each
+ * confirmed candidate, and exclude those PIDs from the orphan sweep so a re-adopted ttyd is never
+ * killed out from under the still-open iframe. A candidate whose probe fails, or whose PID
+ * cannot be confirmed, is silently left un-adopted — it degrades to exactly today's behavior
+ * (swept as an orphan, panel fresh-spawns on next open); never a crash, never a `terminalError`
+ * banner for a panel that may not even be open (Anti-Pattern). `findDspTtydOrphans`'s fingerprint
+ * is untouched — only the resulting kill LIST is narrowed by the spared-PID set.
+ * @see docs/ARCHITECTURE.md#terminal-ttyd
+ * @see docs/ARCHITECTURE.md#security-threat-model
+ */
+export async function adoptAndSweep(
+  candidates: { session: string; port: number }[],
+): Promise<Set<string>> {
+  const probed = await Promise.all(
+    candidates.map(async (c) => ({ ...c, alive: await probeAdoption(c.port) })),
+  );
+  const alive = probed.filter((c) => c.alive);
+  const pidByPort = await pidsListeningOnPorts(alive.map((c) => c.port));
+  const adopted = new Set<string>();
+  const sparedPids = new Set<number>();
+  for (const c of alive) {
+    const pid = pidByPort.get(c.port);
+    if (pid == null) continue;
+    procs.set(c.session, { child: null, port: c.port, pid });
+    adopted.add(c.session);
+    sparedPids.add(pid);
+  }
+  const orphans = (await findDspTtydOrphans()).filter(
+    (pid) => !sparedPids.has(pid),
+  );
+  killTtydPids(orphans);
+  return adopted;
+}
+
 /**
  * Reconcile a tracked ttyd's exit. The tracked-child guard is essential: a stale/replaced child
  * exiting (a re-spawn already took over the slot) must NOT clear a live port or set a died error.
@@ -198,13 +323,17 @@ function onExit(session: string, exitedChild: ChildProcess): void {
  * Tear down the tracked ttyd for `session` (later-phase teardown). Idempotent — no-op if
  * untracked. Deletes the entry BEFORE killing so the child's exit handler sees no tracked
  * entry and does not flag a spurious `died` error (a deliberate kill is teardown, not death).
+ * An adopted (`child === null`) entry has no child handle to call — it is torn down via its
+ * resolved `pid` instead (ROBU-01), so a re-adopted-then-torn-down session doesn't leak the
+ * underlying process past this backend's own lifetime.
  */
 export function killTtyd(session: string): void {
   const entry = procs.get(session);
   if (!entry) return;
   procs.delete(session);
   try {
-    entry.child.kill();
+    if (entry.child) entry.child.kill();
+    else if (entry.pid != null) process.kill(entry.pid, "SIGTERM");
   } catch {}
 }
 
@@ -267,21 +396,4 @@ export function killTtydPids(pids: number[]): number {
     } catch {}
   }
   return killed;
-}
-
-/**
- * Boot-time orphan sweep (Phase 5, RESIL-01): kill every untracked `ttyd … tmux attach`
- * process the fingerprint scan finds, returning the killed COUNT. After any restart the
- * procs/inFlight maps are empty, so every live dsp-ttyd is untracked; ports were already cleared
- * on load and the panel re-ensures on open, so a fresh spawn beats adopting a possibly-broken ttyd.
- * @remarks TERM-01 / RESIL-01: the fingerprint itself lives in `findDspTtydOrphans` — a `ps`
- * failure surfaces there as an empty list and still returns 0 killed here, so the sweep never
- * crashes boot. Scan-then-kill in one call is correct HERE (boot owns no prior plan to honor) but
- * NOT for `uninstall`, which must kill the set it already showed the user. SECURITY: logs the count
- * only — never PIDs or argv (T-04-04 precedent).
- * @see docs/ARCHITECTURE.md#terminal-ttyd
- * @see docs/ARCHITECTURE.md#security-threat-model
- */
-export async function killDspTtydOrphans(): Promise<number> {
-  return killTtydPids(await findDspTtydOrphans());
 }
