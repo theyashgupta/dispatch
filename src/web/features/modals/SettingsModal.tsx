@@ -406,6 +406,7 @@ function FiltersTabSection({
     loadError,
   } = filters;
   const [cycleFocus, setCycleFocus] = useState(false);
+  const [activeFocus, setActiveFocus] = useState(false);
 
   const previewText =
     preview.status === "counting"
@@ -559,6 +560,57 @@ function FiltersTabSection({
               </div>
             ),
           )}
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-xs)",
+            }}
+          >
+            <Field>Active tickets</Field>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "var(--space-sm)",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={draft.includeActive}
+                onChange={() =>
+                  setDraft((prev) =>
+                    prev
+                      ? { ...prev, includeActive: !prev.includeActive }
+                      : prev,
+                  )
+                }
+                onFocus={(e) =>
+                  setActiveFocus(e.currentTarget.matches(":focus-visible"))
+                }
+                onBlur={() => setActiveFocus(false)}
+                style={{
+                  accentColor: "var(--accent)",
+                  borderRadius: "var(--radius)",
+                  outline: "none",
+                  boxShadow: focusRing(activeFocus),
+                  flex: "0 0 auto",
+                }}
+              />
+              <span
+                style={{
+                  fontFamily: "var(--font-ui)",
+                  fontSize: "var(--font-body)",
+                  lineHeight: "var(--line-body)",
+                  color: "var(--text)",
+                }}
+              >
+                Include active tickets (In Progress, In Review, ...)
+              </span>
+            </label>
+          </div>
 
           <span
             style={{
