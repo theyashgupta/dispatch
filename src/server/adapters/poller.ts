@@ -58,6 +58,7 @@ async function pollOnce(): Promise<void> {
       console.error(
         `[poller] poll failed — keeping last-known-good: ${(err as Error).message}`,
       );
+      void store.setSyncUnreachable(false);
       scheduleNext(baseIntervalMs);
     }
   }
