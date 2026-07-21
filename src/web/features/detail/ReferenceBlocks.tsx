@@ -27,7 +27,12 @@ export function ReferenceBlocks({ card, members }: ReferenceBlocksProps) {
         >
           <Field>{`Members (${members.length})`}</Field>
           {members.map((member) => (
-            <MemberRow key={member.id} member={member} dense={false} />
+            <MemberRow
+              key={member.id}
+              member={member}
+              dense={false}
+              groupPr={c.prs}
+            />
           ))}
         </div>
       )}
