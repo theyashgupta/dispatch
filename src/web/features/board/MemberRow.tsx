@@ -1,6 +1,10 @@
 import { ExternalLink } from "lucide-react";
-import type { Card as CardModel, PrInfo } from "../../../shared/types.js";
-import { PrBadge, SourceBadge } from "../badges/index.js";
+import type {
+  Card as CardModel,
+  PrInfo,
+  PreviewInfo,
+} from "../../../shared/types.js";
+import { PrBadge, PreviewBadge, SourceBadge } from "../badges/index.js";
 import { Field } from "../../primitives/Field.js";
 import { IconButton } from "../../primitives/IconButton.js";
 
@@ -8,9 +12,15 @@ interface MemberRowProps {
   member: CardModel;
   dense?: boolean;
   groupPr?: PrInfo[];
+  groupPreviews?: PreviewInfo[];
 }
 
-export function MemberRow({ member, dense = true, groupPr }: MemberRowProps) {
+export function MemberRow({
+  member,
+  dense = true,
+  groupPr,
+  groupPreviews,
+}: MemberRowProps) {
   return (
     <div
       style={{
@@ -40,6 +50,9 @@ export function MemberRow({ member, dense = true, groupPr }: MemberRowProps) {
       </span>
       {groupPr?.map((pr) => (
         <PrBadge key={pr.url} pr={pr} />
+      ))}
+      {groupPreviews?.map((preview) => (
+        <PreviewBadge key={preview.port} preview={preview} />
       ))}
       <SourceBadge source={member.source ?? "linear"} />
       {member.source === "linear" && member.url != null && (

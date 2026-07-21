@@ -634,7 +634,12 @@ export function CardView({
             }}
           >
             {(members ?? []).map((member) => (
-              <MemberRow key={member.id} member={member} groupPr={card.prs} />
+              <MemberRow
+                key={member.id}
+                member={member}
+                groupPr={card.prs}
+                groupPreviews={card.previews}
+              />
             ))}
           </div>
         )}
