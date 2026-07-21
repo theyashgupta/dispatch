@@ -199,14 +199,7 @@ export function Board({
     onSelectCard?.(id);
   }
 
-  function handleDragEnd(event: DragEndEvent) {
-    armClickSuppression();
-
-    const { active, over } = event;
-    if (!over || !isColumn(over.id)) return;
-
-    const cardId = String(active.id);
-    const targetColumn = over.id;
+  function performMove(cardId: string, targetColumn: ColumnId) {
     const card = cards.find((c) => c.id === cardId);
     if (!card) return;
 
@@ -228,6 +221,15 @@ export function Board({
     if (targetColumn === "done" && (card.tmuxSession || card.workspacePath)) {
       onCleanupRequest?.(cardId);
     }
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    armClickSuppression();
+
+    const { active, over } = event;
+    if (!over || !isColumn(over.id)) return;
+
+    performMove(String(active.id), over.id);
   }
 
   return (
@@ -291,6 +293,7 @@ export function Board({
                 onSelectCard={handleSelectCard}
                 onStartRequest={onStartRequest}
                 onToggleSelect={toggleSelect}
+                onMoveTo={performMove}
                 isCarousel={isCarousel}
                 phone={isPhone}
                 large={isLarge}

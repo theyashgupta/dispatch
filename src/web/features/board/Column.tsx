@@ -25,6 +25,7 @@ interface ColumnProps {
   onSelectCard?: (id: string) => void;
   onStartRequest?: (id: string) => void;
   onToggleSelect?: (id: string) => void;
+  onMoveTo?: (cardId: string, targetColumn: ColumnId) => void;
   isCarousel?: boolean;
   phone?: boolean;
   large?: boolean;
@@ -41,6 +42,7 @@ export function Column({
   onSelectCard,
   onStartRequest,
   onToggleSelect,
+  onMoveTo,
   isCarousel,
   phone,
   large,
@@ -307,6 +309,8 @@ export function Column({
               onSelect={onSelectCard}
               onStartRequest={onStartRequest}
               onToggleSelect={onToggleSelect}
+              isCarousel={isCarousel}
+              onMoveTo={onMoveTo}
             />
           ))
         )}

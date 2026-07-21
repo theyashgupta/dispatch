@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
-import type { Card as CardModel } from "../../../shared/types.js";
+import type {
+  Card as CardModel,
+  Column as ColumnId,
+} from "../../../shared/types.js";
 import { CardView } from "./CardView.js";
 import { useLastOpened } from "../../hooks/useUnseenActivity.js";
 import { deriveShowDot, deriveShowGone } from "../../lib/card-badges.js";
@@ -13,6 +16,8 @@ interface CardProps {
   onSelect?: (id: string) => void;
   onStartRequest?: (id: string) => void;
   onToggleSelect?: (id: string) => void;
+  isCarousel?: boolean;
+  onMoveTo?: (cardId: string, targetColumn: ColumnId) => void;
 }
 
 export function Card({
@@ -23,6 +28,8 @@ export function Card({
   onSelect,
   onStartRequest,
   onToggleSelect,
+  isCarousel,
+  onMoveTo,
 }: CardProps) {
   const [hover, setHover] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -50,6 +57,8 @@ export function Card({
       expanded={expanded}
       onToggleExpand={() => setExpanded((v) => !v)}
       members={members}
+      isCarousel={isCarousel}
+      onMoveTo={onMoveTo}
       domProps={{
         ...listeners,
         ...attributes,
