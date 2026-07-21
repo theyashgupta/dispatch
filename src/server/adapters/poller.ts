@@ -19,6 +19,12 @@ let pending: ReturnType<typeof setTimeout> | null = null;
  * board nor reschedules, leaving the newer poll in sole control (Pitfall P3). The guard is
  * re-checked after the store apply too: a save landing during that await must not let the stale
  * poll reschedule, or its timer and the new poll's timer would each perpetuate a chain forever.
+ * @remarks The unreachable branch is scoped to `TypeError` WITH a `.cause`: undici's `fetch()`
+ * rejects a real transport failure (ECONNREFUSED/ENOTFOUND/etc.) with a `TypeError` carrying that
+ * underlying error as `.cause`, whereas a programming `TypeError` thrown inside applyIssues/mapping
+ * is causeless. Gating on `.cause` keeps a genuine blip → "Reconnecting…" (ROBU-03) while letting an
+ * internal bug fall through to the generic branch (surfaced as a real fault, flag cleared) rather
+ * than being masked as connectivity loss.
  */
 async function pollOnce(): Promise<void> {
   const source = currentSource;
@@ -48,7 +54,10 @@ async function pollOnce(): Promise<void> {
       );
       void store.setSyncUnreachable(false);
       scheduleNext(backoffMs);
-    } else if (err instanceof TypeError) {
+    } else if (
+      err instanceof TypeError &&
+      (err as { cause?: unknown }).cause != null
+    ) {
       console.error(
         `[poller] network-level poll failure — keeping last-known-good: ${err.message}`,
       );
