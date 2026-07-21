@@ -42,6 +42,7 @@ function acceptErrorCopy(error: string | null): string {
 export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
   const modalRef = useRef<ModalControl>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const [phase, setPhase] = useState<Phase>("prompt");
@@ -113,6 +114,7 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
     const trimmedDescription = description.trim();
     if (trimmedTitle === "" || trimmedDescription === "") return;
     setAccepting(true);
+    titleInputRef.current?.focus();
     setAcceptError(null);
     const result = await createLocalTicket(trimmedTitle, trimmedDescription);
     if (result.ok) {
@@ -209,6 +211,7 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
               >
                 <Field>Title</Field>
                 <input
+                  ref={titleInputRef}
                   value={title}
                   onChange={(e) => handleTitleChange(e.target.value)}
                   onFocus={() => setTitleFocus(true)}
@@ -331,9 +334,10 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
               <Button
                 variant="primary"
                 disabled={!canAccept}
+                loading={accepting}
                 onClick={() => void handleAccept()}
               >
-                Accept ticket
+                {accepting ? "Creating ticket…" : "Accept ticket"}
               </Button>
             </>
           )}

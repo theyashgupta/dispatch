@@ -37,6 +37,7 @@ export function PlaybookEditorModal({
 }: PlaybookEditorModalProps) {
   const modalRef = useRef<ModalControl>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const discardRef = useRef<HTMLButtonElement>(null);
   const [name, setName] = useState(playbook?.name ?? "");
   const [body, setBody] = useState(playbook?.body ?? "");
   const [nameFocus, setNameFocus] = useState(false);
@@ -99,6 +100,7 @@ export function PlaybookEditorModal({
     if (!canSave) return;
     if (mode === "edit" && playbook?.slug === undefined) return;
     setSaving(true);
+    discardRef.current?.focus();
     setSaveError(false);
     setFootgunError(false);
     try {
@@ -436,16 +438,16 @@ export function PlaybookEditorModal({
             flex: "0 0 auto",
           }}
         >
-          <Button variant="secondary" onClick={onClose}>
+          <Button ref={discardRef} variant="secondary" onClick={onClose}>
             Discard changes
           </Button>
           <Button
             variant="primary"
             disabled={!canSave}
-            aria-busy={saving}
+            loading={saving}
             onClick={() => void handleSave()}
           >
-            Save playbook
+            {saving ? "Saving playbook…" : "Save playbook"}
           </Button>
         </div>
       </Modal.Actions>
