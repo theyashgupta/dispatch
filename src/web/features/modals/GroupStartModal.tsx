@@ -56,6 +56,7 @@ export function GroupStartModal({
   async function handleStart() {
     if (startDisabled) return;
     setSubmitting(true);
+    titleRef.current?.focus();
     setError(null);
     try {
       const chosen = (repos ?? [])
@@ -293,8 +294,9 @@ export function GroupStartModal({
             variant="primary"
             onClick={() => void handleStart()}
             disabled={startDisabled}
+            loading={submitting}
           >
-            Start group
+            {submitting ? "Starting group…" : "Start group"}
           </Button>
         </div>
       </Modal.Actions>

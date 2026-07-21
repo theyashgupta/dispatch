@@ -144,6 +144,7 @@ function PlaybookDeleteConfirm({
   async function handleDelete() {
     if (pending || playbook.slug === undefined) return;
     setPending(true);
+    keepRef.current?.focus();
     setError(false);
     try {
       const result = await deletePlaybook(playbook.slug);
@@ -204,10 +205,10 @@ function PlaybookDeleteConfirm({
           </Button>
           <Button
             variant="danger"
-            disabled={pending}
+            loading={pending}
             onClick={() => void handleDelete()}
           >
-            Delete playbook
+            {pending ? "Deleting playbook…" : "Delete playbook"}
           </Button>
         </div>
       </Modal.Actions>
@@ -894,10 +895,14 @@ export function SettingsModal({
           >
             <Button
               variant="primary"
-              onClick={filters.handleSave}
-              disabled={filters.saving || !filters.draft}
+              onClick={() => {
+                firstTriggerRef.current?.focus();
+                void filters.handleSave();
+              }}
+              disabled={!filters.draft}
+              loading={filters.saving}
             >
-              Save Filters
+              {filters.saving ? "Saving filters…" : "Save Filters"}
             </Button>
           </div>
         ) : null}

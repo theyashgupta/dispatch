@@ -1161,6 +1161,7 @@ export function StartModal({
   async function handleStart() {
     if (startDisabled) return;
     setSubmitting(true);
+    textareaRef.current?.focus();
     setError(null);
     try {
       const chosen = (repos ?? [])
@@ -1324,8 +1325,9 @@ export function StartModal({
             variant="primary"
             onClick={handleStart}
             disabled={startDisabled}
+            loading={submitting}
           >
-            Start
+            {submitting ? "Starting…" : "Start"}
           </Button>
         </div>
       </Modal.Actions>
