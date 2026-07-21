@@ -447,7 +447,7 @@ export function DetailPanel({
                   }}
                 >
                   {c.prs.map((pr) => (
-                    <PrRow key={pr.number} pr={pr} />
+                    <PrRow key={pr.url} pr={pr} />
                   ))}
                 </div>
               )}

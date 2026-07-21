@@ -94,13 +94,14 @@ async function detectPullRequests(): Promise<void> {
   await Promise.all(
     cards.map(async (card) => {
       const branch = card.branch as string;
+      const session = card.tmuxSession as string;
       const repos = card.workspace?.repos ?? [];
       const results = await Promise.all(
         repos.map((repo) => listPrsForBranch(repo.path, branch)),
       );
       const next = results.flat();
       if (JSON.stringify(card.prs ?? []) === JSON.stringify(next)) return;
-      await store.setPrs(card.id, next);
+      await store.setPrsIfSession(card.id, session, next);
     }),
   );
 }

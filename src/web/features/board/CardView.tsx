@@ -280,7 +280,7 @@ export function CardView({
             <SourceBadge source={card.source ?? "linear"} />
             <LinearStateBadge card={card} />
             {card.prs?.map((pr) => (
-              <PrBadge key={pr.number} pr={pr} />
+              <PrBadge key={pr.url} pr={pr} />
             ))}
             {isGroup && (
               <span

@@ -714,17 +714,23 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Record the PR(s) detected for a card's branch this tick. Mirrors setOutputChanged: a
-   * single-field enqueue, no column/other-field interaction, no activity event (D-12 keeps the
-   * EventType union frozen). Collapses an empty result to `undefined` rather than `[]` so a
-   * deleted/merged-away-then-gone PR clears the field in the same write a fresh detection would
-   * use, satisfying D-11's "cleared when a detection pass finds no PR" without a second mutator.
-   * No-op if the id is unknown.
+   * Record the PR(s) detected for a card's branch this tick, ONLY if the card still names
+   * `session` as its tmux session. Mirrors setOutputChanged: a single-field enqueue, no
+   * column/other-field interaction, no activity event (D-12 keeps the EventType union frozen).
+   * Collapses an empty result to `undefined` rather than `[]` so a deleted/merged-away-then-gone
+   * PR clears the field in the same write a fresh detection would use, satisfying D-11's "cleared
+   * when a detection pass finds no PR" without a second mutator. The session guard runs INSIDE the
+   * mutation queue (setTtydPortIfSession precedent) because a detection tick holds its result for
+   * up to the 8s `gh` timeout: a Done-drag cleanup enqueued during that window must win, or this
+   * write would resurrect a stale badge on an already-torn-down card and break D-11. No-op if the
+   * id is unknown.
+   * @see docs/ARCHITECTURE.md#single-writer-store
    */
-  setPrs(id: string, prs: PrInfo[]): Promise<void> {
+  setPrsIfSession(id: string, session: string, prs: PrInfo[]): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) card.prs = prs.length > 0 ? prs : undefined;
+      if (card?.tmuxSession === session)
+        card.prs = prs.length > 0 ? prs : undefined;
       return [];
     });
   }

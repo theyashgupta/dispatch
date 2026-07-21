@@ -39,7 +39,7 @@ export function MemberRow({ member, dense = true, groupPr }: MemberRowProps) {
         {member.title}
       </span>
       {groupPr?.map((pr) => (
-        <PrBadge key={pr.number} pr={pr} />
+        <PrBadge key={pr.url} pr={pr} />
       ))}
       <SourceBadge source={member.source ?? "linear"} />
       {member.source === "linear" && member.url != null && (
