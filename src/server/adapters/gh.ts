@@ -121,7 +121,7 @@ export async function listPrsForBranch(
         : "gh pr list failed";
     if (!loggedCategories.has(category)) {
       loggedCategories.add(category);
-      console.error(`[pr-detect] ${category}`);
+      console.error(`[artifact-detect] ${category}`);
     }
     return null;
   }

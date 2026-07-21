@@ -1,5 +1,7 @@
-import type { Config, PrInfo } from "../../shared/types.js";
+import type { Config, PreviewInfo, PrInfo } from "../../shared/types.js";
 import { listPrsForBranch } from "./gh.js";
+import { panePidsBySession } from "./tmux.js";
+import { listeningPortsBySession } from "./dev-server.js";
 import { store } from "../store/board.store.js";
 import { getLinearSource } from "../sources/registry.js";
 import { RateLimited, type TicketSource } from "../sources/ticket.source.js";
@@ -12,7 +14,7 @@ let baseIntervalMs = DEFAULT_POLL_INTERVAL_MS;
 let backoffMs = DEFAULT_POLL_INTERVAL_MS;
 let generation = 0;
 let pending: ReturnType<typeof setTimeout> | null = null;
-let prDetectInFlight: Promise<void> | null = null;
+let artifactDetectInFlight: Promise<void> | null = null;
 
 /**
  * Run one poll of the active source, then reschedule the next. The captured `gen` is the race guard:
@@ -45,8 +47,8 @@ async function pollOnce(): Promise<void> {
       source: source.id,
     });
     if (gen !== generation) return;
-    detectPullRequests().catch((err) =>
-      console.error("[pr-detect] tick failed:", (err as Error).message),
+    detectCardArtifacts().catch((err) =>
+      console.error("[artifact-detect] tick failed:", (err as Error).message),
     );
     backoffMs = baseIntervalMs;
     scheduleNext(baseIntervalMs);
@@ -79,45 +81,66 @@ async function pollOnce(): Promise<void> {
 }
 
 /**
- * Fan out a `gh pr list` probe across every live-session card's workspace repos, piggybacking on
- * the existing 60s tick. Fire-and-forget from its `pollOnce` call site (never awaited there): a
- * hung or slow `gh` process must degrade only badge freshness, never the Linear-sync cadence or
- * `scheduleNext`'s reschedule. Scopes via `cardsWithSession()` (already excludes member cards,
- * which never carry `tmuxSession`) filtered to a branch, scoping detection to live sessions with
- * zero new store surface. Uses `repo.path` — the STABLE registered main-repo path — never the
- * per-ticket worktree directory Done cleanup deletes, which is not the repo `gh` needs to resolve
- * the remote from anyway.
+ * Fan out the combined per-card artifact detection (PR lookup + dev-server preview scan) across
+ * every live-session card, piggybacking on the existing 60s tick. Fire-and-forget from its
+ * `pollOnce` call site (never awaited there): a hung or slow `gh`/`lsof` process must degrade
+ * only badge freshness, never the Linear-sync cadence or `scheduleNext`'s reschedule.
  *
  * @remarks
  * Single-flighted, following the `ensureTtyd` precedent: `pollNow()` re-enters `pollOnce` on every
- * filter change and settings save, so without this guard a fresh `cards x repos` subprocess fan-out
- * would stack on top of one still in flight.
+ * filter change and settings save, so without this guard a fresh fan-out would stack on top of one
+ * still in flight. One guard covers BOTH artifact types — preview detection is a passenger on the
+ * same tick and pass, never a second timer or a second in-flight variable.
  */
-async function detectPullRequests(): Promise<void> {
-  if (prDetectInFlight != null) return prDetectInFlight;
+async function detectCardArtifacts(): Promise<void> {
+  if (artifactDetectInFlight != null) return artifactDetectInFlight;
 
-  prDetectInFlight = runPrDetection().finally(() => {
-    prDetectInFlight = null;
+  artifactDetectInFlight = runArtifactDetection().finally(() => {
+    artifactDetectInFlight = null;
   });
-  return prDetectInFlight;
+  return artifactDetectInFlight;
 }
 
-async function runPrDetection(): Promise<void> {
-  const cards = store
-    .cardsWithSession()
-    .filter((c) => c.branch != null && c.workspace != null);
+async function runArtifactDetection(): Promise<void> {
+  const cards = store.cardsWithSession();
+
+  const panePids = await panePidsBySession();
+  let portsBySession: Map<string, number[]> | null = null;
+  if (panePids != null) {
+    const sessionNames = new Set(
+      cards.map((c) => c.tmuxSession).filter((s): s is string => s != null),
+    );
+    const narrowed = new Map(
+      [...panePids].filter(([session]) => sessionNames.has(session)),
+    );
+    portsBySession = await listeningPortsBySession(narrowed);
+  }
+
   await Promise.all(
     cards.map(async (card) => {
-      const branch = card.branch as string;
       const session = card.tmuxSession as string;
-      const repos = card.workspace?.repos ?? [];
-      const results = await Promise.all(
-        repos.map((repo) => listPrsForBranch(repo.path, branch)),
-      );
-      if (results.some((r) => r == null)) return;
-      const next = (results as PrInfo[][]).flat();
-      if (JSON.stringify(card.prs ?? []) === JSON.stringify(next)) return;
-      await store.setPrsIfSession(card.id, session, next);
+
+      if (card.branch != null && card.workspace != null) {
+        const branch = card.branch;
+        const repos = card.workspace.repos;
+        const results = await Promise.all(
+          repos.map((repo) => listPrsForBranch(repo.path, branch)),
+        );
+        if (!results.some((r) => r == null)) {
+          const next = (results as PrInfo[][]).flat();
+          if (JSON.stringify(card.prs ?? []) !== JSON.stringify(next)) {
+            await store.setPrsIfSession(card.id, session, next);
+          }
+        }
+      }
+
+      const ports = portsBySession?.get(session);
+      if (portsBySession == null || ports == null) return;
+      const next: PreviewInfo[] = ports
+        .filter((port) => port !== card.ttydPort)
+        .map((port) => ({ port, url: `http://localhost:${port}` }));
+      if (JSON.stringify(card.previews ?? []) === JSON.stringify(next)) return;
+      await store.setPreviewsIfSession(card.id, session, next);
     }),
   );
 }

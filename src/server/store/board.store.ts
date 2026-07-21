@@ -8,6 +8,7 @@ import type {
   Card,
   Column,
   EventType,
+  PreviewInfo,
   PrInfo,
   SessionFields,
   SourceIssue,
@@ -736,6 +737,29 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Record the dev-server preview(s) detected for a card's session this tick, ONLY if the card
+   * still names `session` as its tmux session — byte-for-byte the `setPrsIfSession` shape. The
+   * session guard runs INSIDE the mutation queue (setPrsIfSession/setTtydPortIfSession precedent):
+   * a Done-drag teardown enqueued during the detection window must win, or this write would
+   * resurrect a badge on an already-torn-down card. Collapses an empty result to `undefined`
+   * rather than `[]` so a died listener clears the field in the same write a fresh detection
+   * would use. No-op if the id is unknown.
+   * @see docs/ARCHITECTURE.md#dev-server-preview-detection
+   */
+  setPreviewsIfSession(
+    id: string,
+    session: string,
+    previews: PreviewInfo[],
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card?.tmuxSession === session)
+        card.previews = previews.length > 0 ? previews : undefined;
+      return [];
+    });
+  }
+
+  /**
    * Latch the session as hook-routed for channel selection: the ISO timestamp of its first
    * authenticated hook event. Write-once per session by service-side guard — the store stays
    * policy-free (no throttling, no read-before-write here). Mirrors setOutputChanged: a
@@ -910,6 +934,7 @@ class BoardStore extends EventEmitter {
       card.ttydPort = undefined;
       card.terminalError = null;
       card.prs = undefined;
+      card.previews = undefined;
       this.clearHookToken(card);
       return wasTransition
         ? [
@@ -1168,6 +1193,7 @@ class BoardStore extends EventEmitter {
       card.ttydPort = undefined;
       card.terminalError = null;
       card.prs = undefined;
+      card.previews = undefined;
       this.clearHookToken(card);
       card.resumeError =
         "Resume failed — the worktree may be gone. Use Restart to begin a fresh session in the same branch.";
@@ -1199,6 +1225,7 @@ class BoardStore extends EventEmitter {
       this.clearHookToken(card);
       card.claudeSessionId = undefined;
       card.prs = undefined;
+      card.previews = undefined;
       return [
         this.event("cleanup", {
           cardId: id,
@@ -1215,7 +1242,7 @@ class BoardStore extends EventEmitter {
    * completeStart precedent — a split write would broadcast a torn frame). Clears the session
    * fields the teardown removed AND neutralizes any lingering/racing error chrome so the cleaned
    * Done card reads quietly: `tmuxSession`/`ttydPort`/`workspacePath`/`cleanupWarning`/`hookToken`/
-   * `prs` undefined (the token also unregistered via clearHookToken),
+   * `prs`/`previews` undefined (the token also unregistered via clearHookToken),
    * `sessionLost` false, `terminalError` null. KEEPS `branch` (branches always survive per lock),
    * `outputChangedAt`, and `lastMarker`. No-op if the id is unknown.
    */
@@ -1233,6 +1260,7 @@ class BoardStore extends EventEmitter {
       this.clearHookToken(c);
       c.claudeSessionId = undefined;
       c.prs = undefined;
+      c.previews = undefined;
       return [
         this.event("cleanup", { cardId: id, fromCol: "done", toCol: "done" }),
       ];

@@ -68,6 +68,16 @@ export interface PrInfo {
   ci: "pass" | "fail" | "pending" | null;
 }
 
+/**
+ * A dev-server port detected inside a card's session process tree. `url` is always
+ * `http://localhost:${port}`, computed once server-side so no render site duplicates URL
+ * construction.
+ */
+export interface PreviewInfo {
+  port: number;
+  url: string;
+}
+
 export interface Card {
   /** Internal card id (can equal issueId in Phase 1). */
   id: string;
@@ -120,6 +130,14 @@ export interface Card {
    * at Done cleanup and whenever a detection pass finds none for the branch.
    */
   prs?: PrInfo[];
+  /**
+   * Dev-server port(s) detected inside this card's session process tree, excluding the card's own
+   * `ttydPort`. Group-card-only by construction, same rationale as `prs`. NON-SECRET: rides
+   * `snapshot()` UNREDACTED. Absent (not `[]`) when nothing is listening, cleared with the other
+   * session fields at Done cleanup and whenever a detection pass finds no listener.
+   * @see docs/ARCHITECTURE.md#dev-server-preview-detection
+   */
+  previews?: PreviewInfo[];
   /** tmux session name hosting the claude REPL. */
   tmuxSession?: string;
   /**
