@@ -5,6 +5,7 @@ import type {
 } from "../../../shared/types.js";
 import { ensureTerminal } from "../../lib/api.js";
 import { stampLastOpened } from "../../hooks/useUnseenActivity.js";
+import { useMediaQuery } from "../../hooks/useMediaQuery.js";
 import {
   clearPanelWidth,
   setPanelWidth,
@@ -41,6 +42,39 @@ export function DetailPanel({
 
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+
+  const isCarousel = useMediaQuery("(max-width: 1023px)");
+  const takeover = !docked && isCarousel;
+  const effectiveFullscreen = fullscreen || takeover;
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  const pushedHistoryRef = useRef(false);
+  const panelActive = open && takeover;
+
+  useEffect(() => {
+    if (!panelActive) return;
+    window.history.pushState({ dspPanel: true }, "");
+    pushedHistoryRef.current = true;
+    const onPop = () => {
+      pushedHistoryRef.current = false;
+      onCloseRef.current();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      if (pushedHistoryRef.current) {
+        pushedHistoryRef.current = false;
+        window.history.back();
+      }
+    };
+  }, [panelActive]);
+
+  function requestClose() {
+    if (pushedHistoryRef.current) window.history.back();
+    else onClose();
+  }
 
   const persistedWidth = usePanelWidth();
   const asideRef = useRef<HTMLElement | null>(null);
@@ -162,12 +196,17 @@ export function DetailPanel({
         cleanupDragRef.current();
         return;
       }
+      if (takeover) {
+        if (pushedHistoryRef.current) window.history.back();
+        else onClose();
+        return;
+      }
       if (fullscreen) setFullscreen(false);
       else if (!docked) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, fullscreen, docked, onClose]);
+  }, [open, fullscreen, docked, onClose, takeover]);
 
   const spawnedForRef = useRef<string | null>(null);
   useEffect(() => {
@@ -210,7 +249,7 @@ export function DetailPanel({
     <>
       {!docked && (
         <div
-          onClick={onClose}
+          onClick={requestClose}
           aria-hidden="true"
           style={{
             position: "fixed",
@@ -237,14 +276,15 @@ export function DetailPanel({
             : "100dvh",
           width: docked
             ? "calc(100% - var(--orca-nav-width))"
-            : fullscreen
+            : effectiveFullscreen
               ? "100vw"
               : persistedWidth != null
                 ? `clamp(360px, ${persistedWidth}px, 90vw)`
                 : "var(--panel-width)",
           maxWidth: "100vw",
           background: "var(--surface-column)",
-          borderLeft: docked || fullscreen ? "none" : "1px solid var(--border)",
+          borderLeft:
+            docked || effectiveFullscreen ? "none" : "1px solid var(--border)",
           display: "flex",
           flexDirection: "column",
           transform: docked
@@ -256,7 +296,7 @@ export function DetailPanel({
           zIndex: 11,
         }}
       >
-        {!docked && !fullscreen && (
+        {!docked && !effectiveFullscreen && (
           <div
             onPointerDown={handleResizePointerDown}
             onClick={(e) => e.stopPropagation()}
@@ -324,8 +364,9 @@ export function DetailPanel({
               onToggleDetails={() => setDetailsExpanded((v) => !v)}
               fullscreen={fullscreen}
               onToggleFullscreen={() => setFullscreen((v) => !v)}
-              onClose={onClose}
+              onClose={requestClose}
               docked={docked}
+              takeover={takeover}
               onStartRequest={onStartRequest}
             />
 

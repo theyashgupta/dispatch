@@ -1,5 +1,6 @@
 import {
   ArrowDown,
+  ArrowLeft,
   ArrowUp,
   ChevronDown,
   ChevronRight,
@@ -49,6 +50,7 @@ interface PanelHeaderProps {
   onToggleFullscreen: () => void;
   onClose: () => void;
   docked?: boolean;
+  takeover?: boolean;
   onStartRequest?: (id: string) => void;
 }
 
@@ -62,6 +64,7 @@ export function PanelHeader({
   onToggleFullscreen,
   onClose,
   docked = false,
+  takeover = false,
   onStartRequest,
 }: PanelHeaderProps) {
   const c = card;
@@ -148,7 +151,7 @@ export function PanelHeader({
           </IconButton>
         )}
 
-        {hasLiveSession && !docked && (
+        {hasLiveSession && !docked && !takeover && (
           <IconButton
             onClick={onToggleFullscreen}
             aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
@@ -207,8 +210,16 @@ export function PanelHeader({
         )}
 
         {!docked && (
-          <IconButton onClick={onClose} aria-label="Close panel">
-            <X size={16} strokeWidth={2} aria-hidden="true" />
+          <IconButton
+            onClick={onClose}
+            aria-label={takeover ? "Back to board" : "Close panel"}
+            style={takeover ? { padding: "8px", margin: "-8px" } : undefined}
+          >
+            {takeover ? (
+              <ArrowLeft size={16} strokeWidth={2} aria-hidden="true" />
+            ) : (
+              <X size={16} strokeWidth={2} aria-hidden="true" />
+            )}
           </IconButton>
         )}
       </div>
