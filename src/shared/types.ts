@@ -212,6 +212,18 @@ export interface Card {
    * the start of every fresh cleanup attempt and by finishCleanup.
    */
   cleanupBlocked?: { repo: string; count: number }[];
+  /**
+   * Monotonic per-card counter bumped ONLY at the four terminal `cleanupWorkspace` branches
+   * (`recordCleanupBlocked`, `noteCleanupWarning`, `recordCleanupWarning`, `finishCleanup`) — NEVER
+   * cleared or reset by any teardown path, unlike `cleanupWarning`/`cleanupBlocked`/the session
+   * fields, which teardown clears. That permanence across repeated attempts on the SAME card is
+   * exactly what makes it a reliable "a terminal cleanup outcome occurred" signal: a repeated
+   * identical failure leaves `cleanupWarning`'s STRING unchanged, and `clearCleanupBlocked` at
+   * cleanup entry flips `cleanupBlocked` off almost immediately on the force path — so neither field
+   * can drive a reliable busy-state reset, but this counter can. NON-SECRET: rides `snapshot()`
+   * UNREDACTED like `hookRoutedAt`/`cleanupBlocked` (only `hookToken` is redacted).
+   */
+  cleanupAttempt?: number;
   /** Optional extra direction text captured at Start; reused by Retry and the Phase-3 detail panel. */
   extraDirection?: string | null;
   /** Structured ttyd (terminal) failure surfaced in the detail panel; null/absent when the terminal is healthy. */

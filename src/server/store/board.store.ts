@@ -1212,7 +1212,7 @@ class BoardStore extends EventEmitter {
    * only the worktree/folder outcome is uncertain on this path, so `workspacePath` is left as-is.
    * `hookToken` is cleared AND unregistered with the session fields (clearHookToken). `prs` is
    * cleared alongside the other session fields. Column untouched. No-op if the id is
-   * unknown.
+   * unknown. Bumps `cleanupAttempt` — this is one of the four terminal cleanup branches.
    */
   recordCleanupWarning(id: string, warning: string): Promise<void> {
     return this.enqueue(() => {
@@ -1226,6 +1226,7 @@ class BoardStore extends EventEmitter {
       card.claudeSessionId = undefined;
       card.prs = undefined;
       card.previews = undefined;
+      card.cleanupAttempt = (card.cleanupAttempt ?? 0) + 1;
       return [
         this.event("cleanup", {
           cardId: id,
@@ -1244,7 +1245,9 @@ class BoardStore extends EventEmitter {
    * Done card reads quietly: `tmuxSession`/`ttydPort`/`workspacePath`/`cleanupWarning`/`hookToken`/
    * `prs`/`previews` undefined (the token also unregistered via clearHookToken),
    * `sessionLost` false, `terminalError` null. KEEPS `branch` (branches always survive per lock),
-   * `outputChangedAt`, and `lastMarker`. No-op if the id is unknown.
+   * `outputChangedAt`, and `lastMarker`. Bumps `cleanupAttempt` (deliberately NOT one of the fields
+   * cleared here — it must survive as the counter's whole point) — this is one of the four terminal
+   * cleanup branches. No-op if the id is unknown.
    */
   finishCleanup(id: string): Promise<void> {
     return this.enqueue(() => {
@@ -1261,6 +1264,7 @@ class BoardStore extends EventEmitter {
       c.claudeSessionId = undefined;
       c.prs = undefined;
       c.previews = undefined;
+      c.cleanupAttempt = (c.cleanupAttempt ?? 0) + 1;
       return [
         this.event("cleanup", { cardId: id, fromCol: "done", toCol: "done" }),
       ];
@@ -1272,7 +1276,8 @@ class BoardStore extends EventEmitter {
    * so set the per-repo `cleanupBlocked` list and touch NOTHING else. Unlike recordCleanupWarning
    * (which runs only AFTER teardown and clears the session fields), this fires BEFORE any
    * destructive step — the tmux session, ttyd, hookToken, and worktrees all stay alive so the card
-   * remains fully usable while the block is surfaced. No-op if the id is unknown.
+   * remains fully usable while the block is surfaced. Bumps `cleanupAttempt` — this is one of the
+   * four terminal cleanup branches. No-op if the id is unknown.
    */
   recordCleanupBlocked(
     id: string,
@@ -1282,6 +1287,7 @@ class BoardStore extends EventEmitter {
       const card = this.cards.get(id);
       if (card) {
         card.cleanupBlocked = blocked;
+        card.cleanupAttempt = (card.cleanupAttempt ?? 0) + 1;
       }
       return [];
     });
@@ -1302,13 +1308,15 @@ class BoardStore extends EventEmitter {
    * Zero-teardown cleanup warning (PRE-04): the preflight-refusal-safe sibling of
    * recordCleanupWarning. Sets ONLY the muted `cleanupWarning` and clears no session fields, because
    * the non-orphan preflight-error path tore nothing down — the live tmux session, ttyd, and
-   * hookToken MUST survive so the terminal stays usable. No-op if the id is unknown.
+   * hookToken MUST survive so the terminal stays usable. Bumps `cleanupAttempt` — this is one of the
+   * four terminal cleanup branches. No-op if the id is unknown.
    */
   noteCleanupWarning(id: string, message: string): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) {
         card.cleanupWarning = message;
+        card.cleanupAttempt = (card.cleanupAttempt ?? 0) + 1;
       }
       return [];
     });
