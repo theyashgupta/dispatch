@@ -125,6 +125,7 @@ function readNestedFilters(parsed: Record<string, unknown>): SourceFilters {
     projects: strArray(f.projects),
     teams: strArray(f.teams),
     currentCycle: f.currentCycle === true,
+    includeActive: f.includeActive === true,
   };
 }
 

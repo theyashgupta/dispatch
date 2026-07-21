@@ -13,6 +13,7 @@ function newInboxCard(issue: SourceIssue, sourceId: string): Card {
     column: "inbox",
     updatedAt: issue.updatedAt,
     project: issue.project ?? undefined,
+    linearState: issue.state,
     goneFromLinear: false,
     source: sourceId,
   };
@@ -87,6 +88,7 @@ export function reconcile(
         priority: issue.priority,
         updatedAt: issue.updatedAt,
         project: issue.project ?? undefined,
+        linearState: issue.state,
         goneFromLinear: false,
       });
     } else if (existing.column === "todo" || existing.column === "inbox") {
@@ -99,6 +101,7 @@ export function reconcile(
         priority: issue.priority,
         updatedAt: issue.updatedAt,
         project: issue.project ?? undefined,
+        linearState: issue.state,
         goneFromLinear: false,
       });
     } else if (existing.goneFromLinear) {

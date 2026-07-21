@@ -77,6 +77,7 @@ interface IssueNode {
   priority: number;
   updatedAt: string;
   project: { id: string; name: string } | null;
+  state: { id: string; name: string; type: string } | null;
 }
 
 interface Connection<N> {
@@ -230,6 +231,7 @@ async function fetchAllIssues(
     priority: n.priority,
     updatedAt: n.updatedAt,
     project: n.project ?? null,
+    state: n.state ? { name: n.state.name, type: n.state.type } : null,
   }));
   return { issues, truncated: lastHasNextPage };
 }

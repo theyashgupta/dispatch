@@ -99,13 +99,20 @@ boardRouter.delete("/workspace-folders", async (req, res) => {
 
 /**
  * Validate an untrusted PUT/POST filter body before it can reach the secret-adjacent config file or
- * an upstream query. It rejects any non-array/non-boolean shape AND any key beyond the four declared
- * dimensions, so an unknown dimension can never be persisted or forwarded to Linear (tampering guard).
+ * an upstream query. It rejects any non-array/non-boolean shape AND any key beyond the declared
+ * `SourceFilters` fields, so an unknown dimension can never be persisted or forwarded to Linear
+ * (tampering guard).
  */
 function isValidFilters(x: unknown): x is SourceFilters {
   if (typeof x !== "object" || x === null || Array.isArray(x)) return false;
   const o = x as Record<string, unknown>;
-  const allowed = new Set(["assignees", "projects", "teams", "currentCycle"]);
+  const allowed = new Set([
+    "assignees",
+    "projects",
+    "teams",
+    "currentCycle",
+    "includeActive",
+  ]);
   if (Object.keys(o).some((k) => !allowed.has(k))) return false;
   const isStrArray = (v: unknown): boolean =>
     Array.isArray(v) && v.every((s) => typeof s === "string");
@@ -113,7 +120,8 @@ function isValidFilters(x: unknown): x is SourceFilters {
     isStrArray(o.assignees) &&
     isStrArray(o.projects) &&
     isStrArray(o.teams) &&
-    typeof o.currentCycle === "boolean"
+    typeof o.currentCycle === "boolean" &&
+    typeof o.includeActive === "boolean"
   );
 }
 

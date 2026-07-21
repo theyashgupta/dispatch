@@ -71,6 +71,11 @@ export interface Card {
    * poll and a Linear issue with no project renders cleanly.
    */
   project?: { id: string; name: string } | null;
+  /**
+   * Linear workflow state { name, type }; optional/nullable so pre-this-plan cards backfill on the
+   * next poll like `project`. WIRE field — rides `snapshot()` unredacted.
+   */
+  linearState?: { name: string; type: string } | null;
   /** Linear priority integer: 0 none, 1 urgent, 2 high, 3 normal, 4 low. */
   priority: number;
   column: Column;
@@ -420,6 +425,8 @@ export interface SourceFilters {
   projects: string[];
   teams: string[];
   currentCycle: boolean;
+  /** Widens the pull to started (in addition to unstarted) tickets; defaults false to preserve today's unstarted-only scope. */
+  includeActive: boolean;
 }
 
 /**
@@ -432,6 +439,7 @@ export const DEFAULT_FILTERS: SourceFilters = {
   projects: [],
   teams: [],
   currentCycle: false,
+  includeActive: false,
 };
 
 /**
@@ -470,6 +478,8 @@ export interface SourceIssue {
   updatedAt: string;
   /** Linear project { id, name }; null when the issue has no project. */
   project: { id: string; name: string } | null;
+  /** Linear workflow state name+type; null when the issue has no state. */
+  state: { name: string; type: string } | null;
 }
 
 /** Result of reconciling a Linear poll against the current board. */
