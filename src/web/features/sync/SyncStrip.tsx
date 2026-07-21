@@ -98,14 +98,14 @@ export function SyncStrip({
 
   const dotColor = disconnected
     ? "var(--status-down)"
-    : syncUnreachable
+    : syncUnreachable && syncedTsValid
       ? "var(--accent)"
       : stale
         ? "var(--status-stale)"
         : "var(--status-ok)";
   const dotTitle = disconnected
     ? "Disconnected — reconnecting…"
-    : syncUnreachable
+    : syncUnreachable && syncedTsValid
       ? "Reconnecting…"
       : stale
         ? "Sync stale"
