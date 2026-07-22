@@ -429,7 +429,10 @@ fontFamily=<bundled Nerd Font family> -t fontSize=15 -t theme={...dark ITheme...
 Linear- or user-sourced) forwarded to xterm's `Terminal` constructor over ttyd's own
 `SET_PREFERENCES` websocket frame post-connect (`TERM-02`); the theme's hex/rgba values are
 hardcoded because the ttyd client is a separate origin/process that cannot read dispatch's
-`tokens.css` custom properties.
+`tokens.css` custom properties. The bundled font's Unicode cmaps must map Claude Code's U+23FA and
+U+23F5 symbols to its existing U+25CF circle and U+25B6 triangle glyphs in every Unicode subtable;
+system fallback is not a substitute because xterm requires deterministic same-cell monospace
+metrics across browser and host configurations.
 
 **Writable + loopback are BOTH mandatory.** `-W` (writable) AND `-i 127.0.0.1` (loopback-only bind)
 are each required and neither may be dropped: a missing `-W` yields a dead read-only terminal, and
