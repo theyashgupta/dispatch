@@ -424,8 +424,9 @@ The per-session ttyd manager (`adapters/ttyd.ts`) spawns, tracks, and reuses a w
 loopback-only web terminal attached to an existing `dsp-<identifier>` tmux session, so the live
 `claude` REPL can be embedded in the detail-panel iframe (`TERM-01`). Its invocation is fixed and
 load-bearing: `ttyd -W -i 127.0.0.1 -p 0 -t disableLeaveAlert=true -t
-fontFamily=<bundled Nerd Font family> -t fontSize=15 -t theme={...dark ITheme...} tmux attach -t
-=<session>`. The `fontFamily`/`fontSize`/`theme` values are fixed, server-authored constants (never
+fontFamily=<bundled Nerd Font family> -t fontSize=15 -t
+theme={...dark ITheme...,"DISPATCH_TTYD_REVISION":<revision>} tmux attach -t =<session>`. The
+`fontFamily`/`fontSize`/`theme` values are fixed, server-authored constants (never
 Linear- or user-sourced) forwarded to xterm's `Terminal` constructor over ttyd's own
 `SET_PREFERENCES` websocket frame post-connect (`TERM-02`); the theme's hex/rgba values are
 hardcoded because the ttyd client is a separate origin/process that cannot read dispatch's
@@ -433,6 +434,21 @@ hardcoded because the ttyd client is a separate origin/process that cannot read 
 U+23F5 symbols to its existing U+25CF circle and U+25B6 triangle glyphs in every Unicode subtable;
 system fallback is not a substitute because xterm requires deterministic same-cell monospace
 metrics across browser and host configurations.
+
+**Adoption is runtime-revision gated.** ttyd rewrites its process title but retains its theme JSON
+and the direct tmux command, so an inert `"DISPATCH_TTYD_REVISION":<revision>` metadata property in
+that JSON keeps both the exact compatibility marker and existing ownership fingerprint visible in
+`ps`; xterm ignores the unknown theme color key, so the attached shell and terminal behavior do not
+change. The legacy ownership fingerprint remains exactly `basename(argv0) === "ttyd"` plus `tmux`
+and `attach`. macOS ttyd's rewritten process title has a fixed buffer, and the full production theme
+can truncate the trailing command; for revised processes, `basename(argv0) === "ttyd"` plus the exact
+Dispatch-only revision literal is the stronger ownership proof. Every legacy fingerprint match and
+every exact-marker match is still an orphan-sweep candidate, but only a PID carrying the exact
+current revision marker may be adopted and spared. Legacy or otherwise incompatible ttyd processes are declined, their
+persisted ports clear through reconcile, and the sweep terminates them; the tmux session survives
+for a fresh ttyd. Bump the revision whenever an upgrade changes the embedded index, font contract,
+client preferences, or other in-memory ttyd behavior that cannot be repaired in an already-running
+process. A failed `ps` or `lsof` scan remains fail-closed for adoption and never crashes boot.
 
 **Writable + loopback are BOTH mandatory.** `-W` (writable) AND `-i 127.0.0.1` (loopback-only bind)
 are each required and neither may be dropped: a missing `-W` yields a dead read-only terminal, and
@@ -1237,9 +1253,11 @@ is a behavior change, not a refactor.
    `=` targeting; `load-buffer -b`/`paste-buffer -b -p -d`; separate `send-keys Enter`. Geometry `200×50`
    is load-bearing for readiness/marker parsing.
 6. **ttyd invocation + tracking.** `ttyd -W -i 127.0.0.1 -p 0 -t disableLeaveAlert=true -t
-fontFamily=<Nerd Font family> -t fontSize=15 -t theme={...dark ITheme...} tmux attach -t
-=<session>`; port parsed from stderr `Listening on port: N`; loopback bind mandatory; orphan-sweep
-   fingerprint (`basename(argv0)==="ttyd"` AND argv includes `tmux`+`attach`); iframe src
+ fontFamily=<Nerd Font family> -t fontSize=15 -t
+ theme={...dark ITheme...,"DISPATCH_TTYD_REVISION":<revision>} tmux attach -t =<session>`; port parsed from stderr
+   `Listening on port: N`; loopback bind mandatory; orphan-sweep ownership proof
+   (`basename(argv0)==="ttyd"` AND either argv includes `tmux`+`attach` or the process title contains
+   the exact Dispatch revision literal); exact-current revision marker required for adoption/spare; iframe src
    `http://127.0.0.1:${ttydPort}`.
 7. **DISPATCH_STATUS marker protocol.** `parse.ts` `MARKER_RE` and the kickoff wording in `kickoff.ts` must
    stay byte-identical to each other (em-dash **U+2014**, the `NEEDS_INPUT`/`DONE` tokens, the

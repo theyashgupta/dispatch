@@ -6,6 +6,9 @@ import { store } from "../store/board.store.js";
 import { FONT_FAMILY } from "../../shared/nerd-font-mono.js";
 
 const execFileP = promisify(execFile);
+const TTYD_RUNTIME_REVISION = 2;
+const TTYD_RUNTIME_REVISION_KEY = "DISPATCH_TTYD_REVISION";
+const TTYD_RUNTIME_REVISION_MARKER = `"${TTYD_RUNTIME_REVISION_KEY}":${TTYD_RUNTIME_REVISION}`;
 
 /**
  * Dark xterm `ITheme` delivered to ttyd via `-t theme=` (SET_PREFERENCES over the websocket).
@@ -39,6 +42,7 @@ const DARK_THEME = {
   brightMagenta: "#d2a8ff",
   brightCyan: "#76e3ea",
   brightWhite: "#ffffff",
+  [TTYD_RUNTIME_REVISION_KEY]: TTYD_RUNTIME_REVISION,
 };
 
 interface TtydProc {
@@ -337,12 +341,12 @@ export async function adoptAndSweep(
   );
   const alive = probed.filter((c) => c.alive);
   const pidByPort = await pidsListeningOnPorts(alive.map((c) => c.port));
-  const ttydPids = new Set(await findDspTtydOrphans());
+  const { candidates: ttydPids, compatible } = await scanDspTtydProcesses();
   const adopted = new Set<string>();
   const sparedPids = new Set<number>();
   for (const c of alive) {
     const pid = pidByPort.get(c.port);
-    if (pid == null || !ttydPids.has(pid)) continue;
+    if (pid == null || !compatible.has(pid)) continue;
     procs.set(c.session, { child: null, port: c.port, pid });
     adopted.add(c.session);
     sparedPids.add(pid);
@@ -389,13 +393,15 @@ export function killTtyd(session: string): void {
  * sweep, split out so a non-destructive caller (`uninstall --dry-run`) can COUNT orphans without
  * killing them.
  *
- * Fingerprint (RESEARCH Probe 2/3): match iff basename(argv[0]) === "ttyd" AND argv includes
- * "tmux" AND "attach". ttyd rewrites its own proctitle and STRIPS the `=dsp-<session>` target,
- * so dsp-scoping is impossible — the fingerprint is the app's unique signature on this
- * single-user host. The basename check excludes the backend's own node/ps/shell commands that
- * merely mention "ttyd" (Pitfall 1); a full-command-line substring match would self-match the
- * backend (Pitfall 2), so we parse `ps` and inspect argv[0] instead. Own pid/ppid are skipped
- * explicitly. Tolerant: `ps` failure returns an empty list, never crashes boot.
+ * Fingerprint (RESEARCH Probe 2/3): match iff basename(argv[0]) === "ttyd" AND either argv includes
+ * "tmux" + "attach" or the command has Dispatch's exact current revision marker. The original
+ * tmux fingerprint remains unchanged for legacy processes; the marker is the stronger ownership
+ * proof for current processes because macOS ttyd truncates the rewritten proctitle before the
+ * trailing command once the full theme JSON reaches its fixed buffer. The basename check excludes
+ * the backend's own node/ps/shell commands that merely mention "ttyd" (Pitfall 1); a generic
+ * full-command-line substring match would self-match the backend (Pitfall 2), so only the exact
+ * fixed marker is accepted. Own pid/ppid are skipped explicitly. Tolerant: `ps` failure returns an
+ * empty list, never crashes boot.
  * @remarks TERM-01 / RESIL-01 orphan sweep: keep the fingerprint EXACT — broadening it
  * over-matches a non-dsp ttyd/user process (denial of service). SECURITY: callers report the
  * COUNT only — never these PIDs or any argv (T-04-04 precedent).
@@ -403,13 +409,27 @@ export function killTtyd(session: string): void {
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
 export async function findDspTtydOrphans(): Promise<number[]> {
+  const { candidates } = await scanDspTtydProcesses();
+  return [...candidates];
+}
+
+/**
+ * Classify the unchanged Dispatch ttyd ownership fingerprint by runtime-contract compatibility.
+ * Every fingerprint match remains sweepable, while only an exact current revision is adoptable.
+ * @see docs/ARCHITECTURE.md#terminal-ttyd
+ */
+async function scanDspTtydProcesses(): Promise<{
+  candidates: Set<number>;
+  compatible: Set<number>;
+}> {
   let out: string;
   try {
     ({ stdout: out } = await execFileP("ps", ["-axww", "-o", "pid=,command="]));
   } catch {
-    return [];
+    return { candidates: new Set(), compatible: new Set() };
   }
-  const pids: number[] = [];
+  const candidates = new Set<number>();
+  const compatible = new Set<number>();
   for (const line of out.split("\n")) {
     const m = line.match(/^\s*(\d+)\s+(.*)$/);
     if (!m) continue;
@@ -417,10 +437,16 @@ export async function findDspTtydOrphans(): Promise<number[]> {
     if (pid === process.pid || pid === process.ppid) continue;
     const argv = m[2].trim().split(/\s+/);
     if (path.basename(argv[0]) !== "ttyd") continue;
-    if (!(argv.includes("tmux") && argv.includes("attach"))) continue;
-    pids.push(pid);
+    const hasCurrentRevision = m[2].includes(TTYD_RUNTIME_REVISION_MARKER);
+    if (
+      !(argv.includes("tmux") && argv.includes("attach")) &&
+      !hasCurrentRevision
+    )
+      continue;
+    candidates.add(pid);
+    if (hasCurrentRevision) compatible.add(pid);
   }
-  return pids;
+  return { candidates, compatible };
 }
 
 /**
