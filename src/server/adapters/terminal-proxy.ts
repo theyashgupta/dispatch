@@ -7,6 +7,16 @@ import { store } from "../store/board.store.js";
 import { getLiveTtydPort } from "./ttyd.js";
 
 /**
+ * Write a minimal status line before closing a rejected upgrade socket, so a failed handshake
+ * surfaces a diagnosable `HTTP/1.1 <status>` on the wire instead of a bare connection reset.
+ * Skips already-destroyed sockets since writing to one throws.
+ */
+function rejectUpgrade(socket: Duplex, status: string): void {
+  if (socket.destroyed) return;
+  socket.end(`HTTP/1.1 ${status}\r\n\r\n`);
+}
+
+/**
  * Resolve a card.id to its currently-live loopback ttyd port, or `null` when the card is
  * unknown, has no session, or its ttyd is not currently tracked as alive. Both `httpForward`
  * and `terminalProxyUpgrade` call this fresh on every request/upgrade (PROXY-03) — never cached
@@ -78,8 +88,8 @@ export function upgradeForward(
  * The single named upgrade call site `bootstrap/index.ts`'s `server.on("upgrade", ...)` delegates
  * to for every `/sessions/*` upgrade — kept as one wrappable chokepoint so Phase 73's auth gate
  * has exactly one place to wrap (T-72-05). Resolves `:id` from the URL itself (no Express router
- * for raw upgrades) and destroys the socket instead of forwarding when the id or its live port
- * can't be resolved, rather than falling back to any default target.
+ * for raw upgrades) and rejects with a minimal status line (IN-02) instead of a bare destroy when
+ * the id or its live port can't be resolved, rather than falling back to any default target.
  */
 export function terminalProxyUpgrade(
   req: IncomingMessage,
@@ -90,10 +100,10 @@ export function terminalProxyUpgrade(
   const id = match?.[1];
   const port = id != null ? resolveLiveTtydPort(id) : null;
   if (port == null) {
-    socket.destroy();
+    rejectUpgrade(socket, "404 Not Found");
     return;
   }
   upgradeForward(req, socket, head, port);
 }
 
-export { resolveLiveTtydPort };
+export { resolveLiveTtydPort, rejectUpgrade };

@@ -8,7 +8,10 @@ import { loadConfig } from "./config.js";
 import { store } from "../store/board.store.js";
 import { apiRouter } from "../routes/index.js";
 import { terminalProxyRouter } from "../routes/terminal-proxy.route.js";
-import { terminalProxyUpgrade } from "../adapters/terminal-proxy.js";
+import {
+  rejectUpgrade,
+  terminalProxyUpgrade,
+} from "../adapters/terminal-proxy.js";
 import { probePreflight } from "../services/infra/preflight.js";
 import {
   setHooksRuntime,
@@ -99,7 +102,7 @@ function handleUpgrade(
   head: Buffer,
 ): void {
   if (!req.url?.startsWith("/sessions/")) {
-    socket.destroy();
+    rejectUpgrade(socket, "404 Not Found");
     return;
   }
   terminalProxyUpgrade(req, socket, head);
