@@ -31,6 +31,14 @@ export default defineConfig({
         target: "http://localhost:4700",
         changeOrigin: true,
       },
+      // Same anchoring rationale as /api/ above; ws:true also proxies the
+      // terminal's WebSocket upgrade, or the relative iframe src 404s/blanks
+      // under `npm run dev` even though the production single-origin build works.
+      "^/sessions/": {
+        target: "http://localhost:4700",
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
 });

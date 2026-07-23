@@ -92,7 +92,7 @@ export function TerminalRegion({ card }: TerminalRegionProps) {
           </div>
         ) : c.ttydPort != null ? (
           <iframe
-            src={`http://127.0.0.1:${c.ttydPort}`}
+            src={`/sessions/${c.id}/terminal/`}
             title={`Live terminal for ${c.identifier}`}
             sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
             style={{ width: "100%", height: "100%", border: 0 }}
