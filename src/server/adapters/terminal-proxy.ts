@@ -88,8 +88,10 @@ export function upgradeForward(
  * The single named upgrade call site `bootstrap/index.ts`'s `server.on("upgrade", ...)` delegates
  * to for every `/sessions/*` upgrade — kept as one wrappable chokepoint so Phase 73's auth gate
  * has exactly one place to wrap (T-72-05). Resolves `:id` from the URL itself (no Express router
- * for raw upgrades) and rejects with a minimal status line (IN-02) instead of a bare destroy when
- * the id or its live port can't be resolved, rather than falling back to any default target.
+ * for raw upgrades), decoding it the same way Express decodes `req.params.id` on the HTTP route
+ * (IN-01) so the same card.id maps to the same target on both entry points, and rejects with a
+ * minimal status line (IN-02) instead of a bare destroy when the id or its live port can't be
+ * resolved, rather than falling back to any default target.
  */
 export function terminalProxyUpgrade(
   req: IncomingMessage,
@@ -97,13 +99,26 @@ export function terminalProxyUpgrade(
   head: Buffer,
 ): void {
   const match = req.url?.match(/^\/sessions\/([^/]+)\/terminal\//);
-  const id = match?.[1];
+  const id = decodeSegment(match?.[1]);
   const port = id != null ? resolveLiveTtydPort(id) : null;
   if (port == null) {
     rejectUpgrade(socket, "404 Not Found");
     return;
   }
   upgradeForward(req, socket, head, port);
+}
+
+/**
+ * `decodeURIComponent` throws on a malformed percent-encoding; treat that the same as "no id"
+ * (resolves to a 404) rather than crashing the raw-upgrade handler on untrusted input.
+ */
+function decodeSegment(raw: string | undefined): string | null {
+  if (raw == null) return null;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
 }
 
 export { resolveLiveTtydPort, rejectUpgrade };
