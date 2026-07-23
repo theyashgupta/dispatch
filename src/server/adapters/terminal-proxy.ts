@@ -56,6 +56,12 @@ function resolveLiveTtydPort(id: string): number | null {
  * exactly when it frames one (`content-length` or `transfer-encoding`); reading `req` when there is
  * no body buys nothing and is what dragged the abort guard above into the hot path, so bodyless
  * methods end the upstream request outright instead.
+ *
+ * @remarks `agent: false` forces a fresh upstream socket per request instead of Node's default
+ * pooling agent. ttyd 1.7.7 wedges its own keep-alive handling once a body-bearing request crosses
+ * a persistent connection; with pooling, that poisoned socket is handed to the NEXT request for the
+ * same ttyd port — from any card — which then stalls until the timeout and 502s. A local loopback
+ * hop gains nothing measurable from pooling, so the reuse hazard is not worth carrying.
  */
 export function httpForward(req: Request, res: Response, port: number): void {
   const upstream = http.request(
@@ -66,6 +72,7 @@ export function httpForward(req: Request, res: Response, port: number): void {
       path: req.originalUrl,
       headers: { ...req.headers, host: `127.0.0.1:${port}` },
       timeout: UPSTREAM_TIMEOUT_MS,
+      agent: false,
     },
     (upstreamRes) => {
       res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
