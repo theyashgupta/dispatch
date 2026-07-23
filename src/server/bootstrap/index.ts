@@ -210,8 +210,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   store.setEditors(editors);
 
   const app = express();
-  app.use(express.json({ limit: "1mb" }));
-  app.use("/api", apiRouter);
+  app.use("/api", express.json({ limit: "1mb" }), apiRouter);
   app.use("/sessions", terminalProxyRouter);
 
   if (process.env.NODE_ENV === "production") {
