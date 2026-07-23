@@ -547,8 +547,10 @@ invariant-dense files; its rules live here so a Phase 12/13 restructure — and 
 re-derivation below — can preserve them without reading the original body comments.
 
 **The ttyd iframe is a single, always-rendered, never-keyed element (`PANEL-03`).** For a live
-session the terminal region is exactly one `<iframe src="http://127.0.0.1:${ttydPort}">` rendered at
-a FIXED position in the JSX tree, and it must stay identity-stable across four separate mutations:
+session the terminal region is exactly one `<iframe src="/sessions/${card.id}/terminal/">` (a
+relative path, resolved same-origin against the app's own origin via the reverse-proxy described in
+[Terminal (ttyd)](#terminal-ttyd)) rendered at a FIXED position in the JSX tree, and it must stay
+identity-stable across four separate mutations:
 
 - **Conditional siblings render FIRST, at a stable index.** The expandable Details slot rides an
   INDEPENDENT conditional slot placed BEFORE the terminal region; when collapsed it evaluates falsy
@@ -582,7 +584,10 @@ a FIXED position in the JSX tree, and it must stay identity-stable across four s
   after the code ships gets the current value at first mount, identically to any other prop.
 - **The left-edge resize handle's drag shields the iframe with a drag-duration overlay, not
   `setPointerCapture` alone.** `setPointerCapture` only overrides hit-testing within the SAME
-  top-level browsing context; a cross-origin `<iframe>` is a separate browsing context, and a
+  top-level browsing context; an `<iframe>` is always a separate browsing context regardless of
+  origin (the terminal iframe is same-origin as of Phase 72's reverse-proxy, `src` is a relative
+  `/sessions/${card.id}/terminal/` path — `@see` [Terminal (ttyd)](#terminal-ttyd) — but that does
+  not change the browsing-context boundary), and a
   live, 5/5-reproduced defect (headless and headed Chrome) showed `pointerup` never reaching
   `window` at all when the release happened to land over the iframe's rendered area — the drag
   would silently abandon mid-resize, leaving `document.body.style.cursor` stuck and the orphaned
@@ -1258,7 +1263,8 @@ is a behavior change, not a refactor.
    `Listening on port: N`; loopback bind mandatory; orphan-sweep ownership proof
    (`basename(argv0)==="ttyd"` AND either argv includes `tmux`+`attach` or the process title contains
    the exact Dispatch revision literal); exact-current revision marker required for adoption/spare; iframe src
-   `http://127.0.0.1:${ttydPort}`.
+   `/sessions/${card.id}/terminal/` (same-origin, forwarded by the reverse-proxy — `@see`
+   [Terminal (ttyd)](#terminal-ttyd)).
 7. **DISPATCH_STATUS marker protocol.** `parse.ts` `MARKER_RE` and the kickoff wording in `kickoff.ts` must
    stay byte-identical to each other (em-dash **U+2014**, the `NEEDS_INPUT`/`DONE` tokens, the
    `<one-line reason>`/`<one-line summary>` placeholders). Dedup semantics (`markerKey`,
