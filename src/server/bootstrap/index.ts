@@ -1,11 +1,14 @@
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { Server } from "node:http";
+import type { IncomingMessage, Server } from "node:http";
+import type { Duplex } from "node:stream";
 import express from "express";
 import { StartupError } from "./binary-check.js";
 import { loadConfig } from "./config.js";
 import { store } from "../store/board.store.js";
 import { apiRouter } from "../routes/index.js";
+import { terminalProxyRouter } from "../routes/terminal-proxy.route.js";
+import { terminalProxyUpgrade } from "../adapters/terminal-proxy.js";
 import { probePreflight } from "../services/infra/preflight.js";
 import {
   setHooksRuntime,
@@ -81,6 +84,26 @@ const jsonBodyErrorHandler: express.ErrorRequestHandler = (
   }
   next(err);
 };
+
+/**
+ * The single named target for Node's raw `'upgrade'` event — Express never routes it (WS upgrades
+ * are Node-level, not Express-level), so this is the one place a terminal WebSocket handshake can
+ * be intercepted. Destroys the socket for any path outside `/sessions/*` since that prefix is the
+ * only upgrade surface this phase creates; kept as one wrappable chokepoint (T-72-05) so Phase
+ * 73's auth gate has a single named call site to wrap rather than a scattered inline handler.
+ * @see docs/ARCHITECTURE.md#terminal-ttyd
+ */
+function handleUpgrade(
+  req: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+): void {
+  if (!req.url?.startsWith("/sessions/")) {
+    socket.destroy();
+    return;
+  }
+  terminalProxyUpgrade(req, socket, head);
+}
 
 /** Options for {@link main}; `desiredPort` overrides the configured port (the CLI's `--port`). */
 export interface MainOptions {
@@ -189,6 +212,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
   app.use("/api", apiRouter);
+  app.use("/sessions", terminalProxyRouter);
 
   if (process.env.NODE_ENV === "production") {
     app.use(
@@ -209,10 +233,12 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   app.use(jsonBodyErrorHandler);
 
   const desiredPort = opts.desiredPort ?? config.port ?? DEFAULT_PORT;
-  const { port } = await listenWithFallback(app, desiredPort);
+  const { server, port } = await listenWithFallback(app, desiredPort);
   console.log(
     `[server] Dispatch backend listening on http://127.0.0.1:${port}`,
   );
+
+  server.on("upgrade", handleUpgrade);
 
   setHooksRuntime({ capable, port, statusChannel });
   if (config.linearApiKey) {
