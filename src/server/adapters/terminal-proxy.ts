@@ -7,6 +7,14 @@ import { store } from "../store/board.store.js";
 import { getLiveTtydPort } from "./ttyd.js";
 
 /**
+ * Bound for a live-but-wedged upstream (TCP accepted, ttyd never actually responds): matches the
+ * repo's other hand-rolled forward/fetch adapter (`image-proxy.ts`'s `TIMEOUT_MS`). For the WS leg
+ * this only guards the handshake wait — it is cleared the instant the first upstream byte arrives
+ * so a genuinely live, merely-idle interactive terminal is never killed for silence.
+ */
+const UPSTREAM_TIMEOUT_MS = 10_000;
+
+/**
  * Write a minimal status line before closing a rejected upgrade socket, so a failed handshake
  * surfaces a diagnosable `HTTP/1.1 <status>` on the wire instead of a bare connection reset.
  * Skips already-destroyed sockets since writing to one throws.
@@ -35,6 +43,10 @@ function resolveLiveTtydPort(id: string): number | null {
  * since ttyd was spawned with `-b` matching this exact prefix (PROXY-01). Builtin `node:http`
  * only, matching this repo's zero-dep-for-plumbing convention (raw SSE, hand-written GraphQL,
  * `image-proxy.ts`'s own fetch+pipeline forward) rather than a proxy library.
+ *
+ * @remarks A bounded socket timeout guards a live-but-wedged ttyd (connects but never responds),
+ * and `req`'s `close` is wired to abort the upstream leg so a client that navigates away
+ * mid-request doesn't leave the outbound request running until ttyd itself closes it (WR-02).
  */
 export function httpForward(req: Request, res: Response, port: number): void {
   const upstream = http.request(
@@ -44,15 +56,20 @@ export function httpForward(req: Request, res: Response, port: number): void {
       method: req.method,
       path: req.originalUrl,
       headers: { ...req.headers, host: `127.0.0.1:${port}` },
+      timeout: UPSTREAM_TIMEOUT_MS,
     },
     (upstreamRes) => {
       res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
       upstreamRes.pipe(res);
     },
   );
+  upstream.on("timeout", () => upstream.destroy(new Error("upstream timeout")));
   upstream.on("error", () => {
     if (!res.headersSent) res.status(502).end();
     else res.destroy();
+  });
+  req.on("close", () => {
+    if (!res.writableEnded) upstream.destroy();
   });
   req.pipe(upstream);
 }
@@ -63,6 +80,12 @@ export function httpForward(req: Request, res: Response, port: number): void {
  * lowercased/deduped `req.headers`) and the already-buffered `head` bytes before piping, in that
  * order: dropping either produces a handshake that reports success (101) while truncating the
  * first frame or mangling a header ttyd's libwebsockets is strict about (T-72-03).
+ *
+ * @remarks `UPSTREAM_TIMEOUT_MS` bounds only the wait for the FIRST byte back from ttyd (a
+ * live-but-wedged process that accepts the TCP connection but never answers the handshake); it is
+ * cleared on the first `data` event so an established, merely-idle interactive session is never
+ * killed for silence. Client disconnect (`close`) is wired to abort the upstream leg immediately
+ * rather than leaving it running until ttyd notices (WR-02).
  */
 export function upgradeForward(
   req: IncomingMessage,
@@ -80,8 +103,14 @@ export function upgradeForward(
     upstream.pipe(clientSocket);
     clientSocket.pipe(upstream);
   });
+  upstream.setTimeout(UPSTREAM_TIMEOUT_MS);
+  upstream.once("timeout", () =>
+    upstream.destroy(new Error("upstream handshake timeout")),
+  );
+  upstream.once("data", () => upstream.setTimeout(0));
   upstream.on("error", () => clientSocket.destroy());
   clientSocket.on("error", () => upstream.destroy());
+  clientSocket.on("close", () => upstream.destroy());
 }
 
 /**
