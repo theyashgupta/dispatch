@@ -45,8 +45,17 @@ function resolveLiveTtydPort(id: string): number | null {
  * `image-proxy.ts`'s own fetch+pipeline forward) rather than a proxy library.
  *
  * @remarks A bounded socket timeout guards a live-but-wedged ttyd (connects but never responds),
- * and `req`'s `close` is wired to abort the upstream leg so a client that navigates away
- * mid-request doesn't leave the outbound request running until ttyd itself closes it (WR-02).
+ * and the client-disconnect abort that keeps a navigated-away request from running until ttyd
+ * itself closes it (WR-02) is wired to `res`'s `close`, never `req`'s: a server-side
+ * `IncomingMessage` emits `close` the moment its stream is fully read, which for a bodyless GET is
+ * immediately — so the `req`-keyed guard fired mid-forward and destroyed the upstream before it had
+ * flushed a single byte, surfacing as a 100%-reproducible `ECONNRESET`/502 on every GET.
+ * `writableFinished` distinguishes a genuine premature disconnect from normal completion.
+ *
+ * @remarks Only a request that actually carries a body is piped. Per RFC 9112 a request has a body
+ * exactly when it frames one (`content-length` or `transfer-encoding`); reading `req` when there is
+ * no body buys nothing and is what dragged the abort guard above into the hot path, so bodyless
+ * methods end the upstream request outright instead.
  */
 export function httpForward(req: Request, res: Response, port: number): void {
   const upstream = http.request(
@@ -68,10 +77,14 @@ export function httpForward(req: Request, res: Response, port: number): void {
     if (!res.headersSent) res.status(502).end();
     else res.destroy();
   });
-  req.on("close", () => {
-    if (!res.writableEnded) upstream.destroy();
+  res.on("close", () => {
+    if (!res.writableFinished) upstream.destroy();
   });
-  req.pipe(upstream);
+  const framesBody =
+    req.headers["content-length"] !== undefined ||
+    req.headers["transfer-encoding"] !== undefined;
+  if (framesBody) req.pipe(upstream);
+  else upstream.end();
 }
 
 /**
@@ -120,14 +133,17 @@ export function upgradeForward(
  * for raw upgrades), decoding it the same way Express decodes `req.params.id` on the HTTP route
  * (IN-01) so the same card.id maps to the same target on both entry points, and rejects with a
  * minimal status line (IN-02) instead of a bare destroy when the id or its live port can't be
- * resolved, rather than falling back to any default target.
+ * resolved, rather than falling back to any default target. The trailing separator is optional so
+ * the set of URL shapes that yield an `:id` here stays identical to the set the HTTP route's
+ * `/:id/terminal{/*rest}` matches — the two entry points must never disagree about which requests
+ * carry a resolvable card id.
  */
 export function terminalProxyUpgrade(
   req: IncomingMessage,
   socket: Duplex,
   head: Buffer,
 ): void {
-  const match = req.url?.match(/^\/sessions\/([^/]+)\/terminal\//);
+  const match = req.url?.match(/^\/sessions\/([^/]+)\/terminal(?:\/|$)/);
   const id = decodeSegment(match?.[1]);
   const port = id != null ? resolveLiveTtydPort(id) : null;
   if (port == null) {
