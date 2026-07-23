@@ -6,7 +6,7 @@ import { store } from "../store/board.store.js";
 import { FONT_FAMILY } from "../../shared/nerd-font-mono.js";
 
 const execFileP = promisify(execFile);
-const TTYD_RUNTIME_REVISION = 2;
+const TTYD_RUNTIME_REVISION = 3;
 const TTYD_RUNTIME_REVISION_KEY = "DISPATCH_TTYD_REVISION";
 const TTYD_RUNTIME_REVISION_MARKER = `"${TTYD_RUNTIME_REVISION_KEY}":${TTYD_RUNTIME_REVISION}`;
 
@@ -92,6 +92,8 @@ const READY_POLL_CADENCE_MS = 100;
  * by the caller rather than imported here: `services/infra/paths.js` lives one layer above `adapters` in
  * the backend DAG (boundaries/element-types), so the existence check happens in
  * `services/orchestration/terminal.ts` and the result is threaded through as plain data.
+ * `cardId` threads through to `spawnTtyd`'s `-b /sessions/<cardId>/terminal` base-path so the
+ * card.id-keyed reverse proxy (PROXY-01) can route to this exact process.
  * @remarks TERM-01: writable + loopback-only ttyd, single-flight spawn (T-03-07), port parsed
  * from stderr `Listening on port: N`.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
@@ -99,6 +101,7 @@ const READY_POLL_CADENCE_MS = 100;
  */
 export function ensureTtyd(
   session: string,
+  cardId: string,
   indexPath: string | null,
 ): Promise<number> {
   const existing = procs.get(session);
@@ -109,7 +112,7 @@ export function ensureTtyd(
         if (procs.get(session) === existing) procs.delete(session);
         const pending = inFlight.get(session);
         if (pending) return pending;
-        return ensureTtyd(session, indexPath);
+        return ensureTtyd(session, cardId, indexPath);
       });
     }
     if (existing.child.exitCode === null) return Promise.resolve(existing.port);
@@ -118,7 +121,7 @@ export function ensureTtyd(
   const pending = inFlight.get(session);
   if (pending) return pending;
 
-  const promise = spawnTtyd(session, indexPath).finally(() =>
+  const promise = spawnTtyd(session, cardId, indexPath).finally(() =>
     inFlight.delete(session),
   );
   inFlight.set(session, promise);
@@ -138,14 +141,34 @@ export function trackedTtydSessions(): string[] {
 }
 
 /**
+ * Read-only live-port lookup for the terminal proxy (PROXY-03) — never spawns, never mutates
+ * `procs`; the proxy must re-resolve the port on every request/upgrade rather than caching it
+ * once, so a mid-session ttyd respawn or boot re-adoption keeps reconnecting. Liveness follows
+ * the same rule as `ensureTtyd`'s own check: a `child === null` entry is adopted-alive, a
+ * non-null child is alive only while its `exitCode` is still `null`.
+ * @see docs/ARCHITECTURE.md#terminal-ttyd
+ */
+export function getLiveTtydPort(session: string): number | null {
+  const entry = procs.get(session);
+  if (!entry) return null;
+  if (entry.child === null) return entry.port;
+  return entry.child.exitCode === null ? entry.port : null;
+}
+
+/**
  * Spawn a fresh ttyd, parse its port, confirm readiness, and track it. Rejects on failure. The
  * `-I` flag is added only when the caller resolved a non-null `indexPath` (TTYD_INDEX_PATH exists
  * at spawn time) — provisionTtydIndex deletes that file on any failed boot-time patch, so its
  * existence is a trustworthy, per-spawn signal for the cmd+click-gated index versus stock ttyd
- * behavior.
+ * behavior. `-b /sessions/<cardId>/terminal` scopes ttyd's own asset/WS routing to the
+ * card.id-keyed prefix the reverse proxy forwards under (PROXY-01) — confirmed by a live spike
+ * (72-RESEARCH.md) to change ttyd's server-side routing only, never the served bytes, so the
+ * boot-time index-patch pipeline needs no change. ttyd stays loopback-bound (`-i 127.0.0.1 -p 0`
+ * unchanged) — reachable only through the proxy.
  */
 async function spawnTtyd(
   session: string,
+  cardId: string,
   indexPath: string | null,
 ): Promise<number> {
   const child = spawn(
@@ -156,6 +179,8 @@ async function spawnTtyd(
       "127.0.0.1",
       "-p",
       "0",
+      "-b",
+      `/sessions/${cardId}/terminal`,
       ...(indexPath != null ? ["-I", indexPath] : []),
       "-t",
       "disableLeaveAlert=true",
