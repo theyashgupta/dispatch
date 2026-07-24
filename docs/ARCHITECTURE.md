@@ -1349,6 +1349,26 @@ served terminal page), and (c) xterm.js rendering terminal OUTPUT as text, never
 HTML — so there is no realistic script-injection vector into the iframe's JS context. This is the
 same class of single-user-loopback-bounded risk already accepted at `T-01-05c`.
 
+### Phase 73 CR-01 — Loopback Classifier Is Host-Header-Based (Phase-74 Hard-Block)
+
+`isLocalRequest` (`routes/loopback.ts`), the predicate both the HTTP gate (`T-73-01`) and the raw
+WS-upgrade gate (`T-73-02`) call FIRST to grant a credential-free bypass, decides "local" from the
+client-supplied `Origin`/`Host` headers, never from `req.socket.remoteAddress`. This is BY DESIGN
+and is sound TODAY: the server binds `127.0.0.1` only, so nothing remote can open a socket to it,
+and a Phase-74 `cloudflared` sidecar would itself connect over loopback — meaning the TCP peer
+address cannot distinguish a local browser from tunnel-forwarded traffic, so a socket check would
+not help while the tunnel's own leg is loopback. The classifier logic is therefore INTENTIONALLY
+left unchanged in Phase 73.
+
+The residual is a HARD-BLOCKING Phase-74 item: the moment a tunnel forwards the client's own `Host`
+header unmodified (a common reverse-proxy default), a remote attacker who sets `Host: 127.0.0.1`
+(and omits `Origin`) walks past the entire gate onto every `/api/*` route AND the writable terminal
+WebSocket, with zero knowledge of the passphrase. Before ANY tunnel ships, Phase 74 MUST make
+tunnel traffic always present a NON-loopback Host — via a `cloudflared --http-host-header` sentinel
+or a dedicated internal tunnel port the gate always treats as remote — and MUST live-verify that a
+spoofed `Host: 127.0.0.1` routed through the real tunnel is rejected before granting the bypass.
+This gate is a blocker on Phase 74, not an optional hardening.
+
 ### Worktree Path
 
 The worktree path builder `path.join(workspacePath, path.basename(repoPath))` was once duplicated

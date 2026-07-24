@@ -14,6 +14,17 @@ function hostnameIsLocal(hostname: string): boolean {
  * @remarks Typed at `IncomingMessage` (not Express's `Request`) so the same function composes,
  * byte-for-byte, into both the Express app pipeline and the raw `http.Server` upgrade handler —
  * Express's `Request` is structurally assignable to `IncomingMessage`, so no call site changes.
+ *
+ * SECURITY: the loopback-vs-remote verdict is Host-header-based BY DESIGN, not socket-based. The
+ * server binds `127.0.0.1` and a Phase-74 `cloudflared` sidecar also connects over loopback, so
+ * `req.socket.remoteAddress` cannot distinguish a local browser from tunnel-forwarded traffic —
+ * both arrive on a loopback socket. This classifier is therefore sound ONLY while the server is
+ * loopback-bound with NO active tunnel. Before any tunnel ships, Phase 74 MUST make tunnel traffic
+ * always present a NON-loopback Host (a `cloudflared --http-host-header` sentinel, or a dedicated
+ * internal tunnel port the gate always treats as remote) and live-verify that a spoofed
+ * `Host: 127.0.0.1` through the real tunnel is rejected. Do not treat this predicate as the public
+ * trust boundary until that hard-block is closed.
+ * @see docs/ARCHITECTURE.md#known-residuals
  */
 export function isLocalRequest(req: IncomingMessage): boolean {
   const origin = req.headers.origin;
