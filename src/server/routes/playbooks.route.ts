@@ -20,12 +20,13 @@ const MAX_DIRECTION_LEN = 10000;
 const MAX_SOURCE_PATHS = 8;
 
 /**
- * Playbook CRUD + read routes, mounted behind the shared `apiRouter` loopback gate (never a
- * standalone router). Kickoff/picker resolution stays keyed on `Playbook.name` everywhere else in
- * the codebase; the `:slug` route param here is CRUD-only addressing, derived server-side by the
- * service layer, never accepted raw from a client as a filesystem path. Every mutating handler
- * re-validates its own body independently of any client-side check (the route is loopback-gated,
- * not trust-gated — any local process can POST arbitrary JSON) and maps every unexpected throw to
+ * Playbook CRUD + read routes, mounted behind the single app-level gate hoisted in
+ * `bootstrap/index.ts` (never a standalone router). Kickoff/picker resolution stays keyed on
+ * `Playbook.name` everywhere else in the codebase; the `:slug` route param here is CRUD-only
+ * addressing, derived server-side by the service layer, never accepted raw from a client as a
+ * filesystem path. Every mutating handler re-validates its own body independently of any
+ * client-side check (the route is gated by loopback OR a valid remote session, not trust-gated —
+ * any request past the gate can still POST arbitrary JSON) and maps every unexpected throw to
  * a generic 500 with no stack/path/fs-error text. `GET /playbooks/picker` is the one read route
  * with no client input reaching any path operation, so it maps unexpected throws to the same
  * generic-500 discipline without needing per-field validation first — it is the StartModal

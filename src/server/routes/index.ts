@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { isLocalRequest } from "./loopback.js";
 import { boardRouter } from "./board.route.js";
 import { cardsRouter } from "./cards.route.js";
 import { eventsRouter } from "./events.route.js";
@@ -10,15 +9,13 @@ import { updateRouter } from "./update.route.js";
 import { imagesRouter } from "./images.route.js";
 import { playbooksRouter } from "./playbooks.route.js";
 
+/**
+ * Plain composition of the sub-routers — no nested gate here. The single enforcement point for
+ * every `/api/*` request is the hoisted `remoteAuthRouter`, mounted as the FIRST `app.use()` in
+ * `bootstrap/index.ts`, ahead of this router's mount.
+ * @see docs/ARCHITECTURE.md#security-threat-model
+ */
 export const apiRouter = Router();
-
-apiRouter.use((req, res, next) => {
-  if (!isLocalRequest(req)) {
-    res.status(403).json({ error: "non-local requests are not allowed" });
-    return;
-  }
-  next();
-});
 
 apiRouter.use(boardRouter);
 apiRouter.use(cardsRouter);

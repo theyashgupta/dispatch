@@ -7,6 +7,11 @@ import { StartupError } from "./binary-check.js";
 import { loadConfig } from "./config.js";
 import { store } from "../store/board.store.js";
 import { apiRouter } from "../routes/index.js";
+import {
+  isRequestAllowed,
+  remoteAuthRouter,
+} from "../routes/remote-auth-gate.js";
+import { mintToken } from "../services/infra/remote-auth.js";
 import { terminalProxyRouter } from "../routes/terminal-proxy.route.js";
 import {
   rejectUpgrade,
@@ -91,16 +96,22 @@ const jsonBodyErrorHandler: express.ErrorRequestHandler = (
 /**
  * The single named target for Node's raw `'upgrade'` event — Express never routes it (WS upgrades
  * are Node-level, not Express-level), so this is the one place a terminal WebSocket handshake can
- * be intercepted. Destroys the socket for any path outside `/sessions/*` since that prefix is the
- * only upgrade surface this phase creates; kept as one wrappable chokepoint (T-72-05) so Phase
- * 73's auth gate has a single named call site to wrap rather than a scattered inline handler.
- * @see docs/ARCHITECTURE.md#terminal-ttyd
+ * be intercepted. The auth gate now runs FIRST, ahead of the path check: `isRequestAllowed` is the
+ * same predicate the hoisted `remoteAuthRouter` uses, so a loopback or valid-session request is
+ * unaffected and an unauthenticated non-loopback upgrade is rejected before it ever reaches
+ * `terminalProxyUpgrade`/ttyd (T-72-05, T-73-02). Destroys the socket for any path outside
+ * `/sessions/*` since that prefix is the only upgrade surface this phase creates.
+ * @see docs/ARCHITECTURE.md#security-threat-model
  */
 function handleUpgrade(
   req: IncomingMessage,
   socket: Duplex,
   head: Buffer,
 ): void {
+  if (!isRequestAllowed(req)) {
+    rejectUpgrade(socket, "401 Unauthorized");
+    return;
+  }
   if (!req.url?.startsWith("/sessions/")) {
     rejectUpgrade(socket, "404 Not Found");
     return;
@@ -212,7 +223,11 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   const editors = await resolveEditors();
   store.setEditors(editors);
 
+  const accessCode = mintToken();
+  console.log(`[remote-auth] access code: ${accessCode}`);
+
   const app = express();
+  app.use(remoteAuthRouter);
   app.use("/api", express.json({ limit: "1mb" }), apiRouter);
   app.use("/sessions", terminalProxyRouter);
 

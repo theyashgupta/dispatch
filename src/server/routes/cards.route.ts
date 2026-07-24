@@ -617,9 +617,10 @@ function screenAdoptedFields(
 
 /**
  * Promote a `source:"local"` card to a real Linear issue (PUSH-01/02/03). Mounted on `cardsRouter`
- * -> already behind `apiRouter`'s `isLocalRequest` loopback gate (`routes/index.ts`) — no new gate
- * code needed here. Uses a 404 for an unknown card id, a DELIBERATE deviation from this file's other
- * routes' 400-for-unknown-card (documented per the RESEARCH contract). The per-card single-flight
+ * -> already behind the single app-level gate hoisted in `bootstrap/index.ts` (loopback OR a valid
+ * remote session) — no new gate code needed here. Uses a 404 for an unknown card id, a DELIBERATE
+ * deviation from this file's other routes' 400-for-unknown-card (documented per the RESEARCH
+ * contract). The per-card single-flight
  * guard follows the `isStarting` discipline EXACTLY: `store.isSyncing` is checked and
  * `store.beginSync` is called SYNCHRONOUSLY with no `await` between them, so a concurrent request
  * for the SAME card can never race past the guard; a DIFFERENT card's sync is unaffected (the guard
