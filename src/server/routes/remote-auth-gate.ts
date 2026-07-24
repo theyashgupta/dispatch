@@ -332,9 +332,10 @@ function remoteAuthMiddleware(
 }
 
 /**
- * The remote-auth gate router: NOT yet mounted anywhere (a later phase hoists it as the first
- * `app.use()` in `bootstrap/index.ts`, per RESEARCH). Registers the verify POST first so it is
- * exempted from `remoteAuthMiddleware`'s catch-all before that catch-all is reached.
+ * The remote-auth gate router: mounted LIVE as the first `app.use()` in `bootstrap/index.ts`, ahead
+ * of `/api`, `/sessions`, and the static/SPA fallback, so one gate covers them all. Registers the
+ * verify POST first so it is exempted from `remoteAuthMiddleware`'s catch-all before that catch-all
+ * is reached.
  */
 export const remoteAuthRouter = Router();
 
