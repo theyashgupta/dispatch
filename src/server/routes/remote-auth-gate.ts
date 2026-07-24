@@ -57,19 +57,25 @@ type CodeAttemptResult =
 
 /**
  * Shared submission path for both the verify POST and the `?code=` GET consume: CSRF-checked,
- * rate-limited, then constant-time-verified, in that order — so a request that never even had a
- * matching Origin/Host never touches the rate-limit budget or the credential compare.
+ * then constant-time-verified, and only THEN — on a wrong code — consulted against the backoff.
+ * SECURITY: the credential compare runs BEFORE the rate-limit check so a byte-correct code always
+ * authenticates and resets the bucket, even while the global backoff is active; otherwise a
+ * zero-knowledge attacker trickling wrong guesses could keep the bucket blocked and lock the real
+ * user out of their own session (self-DoS). The compare runs identically regardless of block state,
+ * so the reorder adds no timing oracle distinguishing "locked" from "wrong"; only a FAILED attempt
+ * ever consults or advances the backoff, and a request with no matching Origin/Host never reaches
+ * the compare at all.
  */
 function attemptCode(req: Request, code: string): CodeAttemptResult {
   if (!originMatchesHost(req)) return { ok: false, reason: "csrf" };
+  if (verifyCode(code)) {
+    recordSuccess();
+    return { ok: true };
+  }
   const { allowed } = checkRateLimit();
   if (!allowed) return { ok: false, reason: "rate-limited" };
-  if (!verifyCode(code)) {
-    recordFailure();
-    return { ok: false, reason: "invalid" };
-  }
-  recordSuccess();
-  return { ok: true };
+  recordFailure();
+  return { ok: false, reason: "invalid" };
 }
 
 /**
