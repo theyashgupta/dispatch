@@ -1006,7 +1006,9 @@ function RemoteTabSection({ tunnelState, remoteTab }: RemoteTabSectionProps) {
             </IconButton>
           </div>
         </div>
-        <QrCode value={tunnelState.url} />
+        <QrCode
+          value={`${tunnelState.url}?code=${encodeURIComponent(tunnelState.code)}`}
+        />
         <div style={remoteFieldBlockStyle}>
           <Field>Access code — enter this on a device without the QR</Field>
           <div style={remoteMonoRowStyle}>
