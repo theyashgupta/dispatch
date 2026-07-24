@@ -55,15 +55,23 @@ export function isRequestAllowed(req: IncomingMessage): boolean {
  * legitimate remote Origin (`https://<random>.trycloudflare.com`) would never match the rewritten
  * Host. `getKnownPublicHost()` (the hostname tunnel.ts actually parsed from cloudflared's output) is
  * the only value a remote Origin can ever match; skipping this branch would 403 every legitimate
- * remote code submission the moment the sentinel is live.
+ * remote code submission the moment the sentinel is live. When a non-loopback request arrives with
+ * no known public host (before the first enable, or during/after a disable), the check FAILS CLOSED
+ * by construction rather than relying on the coincidence that `verifyCode` also rejects a null
+ * token — nothing can legitimately match an unknown host, so a remote submission is rejected here.
  * @remarks T-74-02.
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
 function originMatchesHost(req: Request): boolean {
-  const expectedHost = isLocalRequest(req)
-    ? req.headers.host
-    : getKnownPublicHost();
-  if (!expectedHost) return true;
+  let expectedHost: string | undefined;
+  if (isLocalRequest(req)) {
+    expectedHost = req.headers.host;
+    if (!expectedHost) return true;
+  } else {
+    const knownHost = getKnownPublicHost();
+    if (!knownHost) return false;
+    expectedHost = knownHost;
+  }
   const origin = req.headers.origin;
   if (typeof origin === "string") {
     try {
