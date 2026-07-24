@@ -59,6 +59,7 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
     let sseHealthy = false;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let boardGen = 0;
 
     const scheduleReconnect = () => {
       if (disposed) return;
@@ -77,11 +78,12 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
     };
 
     const fetchBoard = async () => {
+      const gen = ++boardGen;
       try {
         const res = await fetch("/api/board");
         if (!res.ok) return;
         const snap = (await res.json()) as BoardSnapshot;
-        if (!disposed) {
+        if (!disposed && gen === boardGen && !sseHealthy) {
           setBoard(snap);
           setConnection("connected");
         }
@@ -121,6 +123,7 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
         lastEventAt = Date.now();
         backoffMs = BACKOFF_START_MS;
         sseHealthy = true;
+        boardGen++;
         if (idleTimer != null) {
           clearTimeout(idleTimer);
           idleTimer = null;
