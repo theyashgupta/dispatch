@@ -104,6 +104,7 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
     const connect = () => {
       if (disposed) return;
       lastEventAt = Date.now();
+      sseHealthy = false;
       const src = new EventSource("/api/stream");
       es = src;
 
