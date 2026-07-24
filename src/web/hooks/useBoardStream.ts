@@ -26,6 +26,9 @@ const WATCHDOG_TICK_MS = 5_000;
 const BACKOFF_START_MS = 1_000;
 const BACKOFF_MAX_MS = 5_000;
 
+const SSE_IDLE_MS = 7_000;
+const POLL_MS = 4_000;
+
 /**
  * Own the single `/api/stream` EventSource. The optional `onActivity` callback is held in a ref
  * refreshed every render and read inside the existing `activity` listener, so a changing callback
@@ -53,6 +56,9 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
     let backoffMs = BACKOFF_START_MS;
     let lastEventAt = Date.now();
     let disposed = false;
+    let sseHealthy = false;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
     const scheduleReconnect = () => {
       if (disposed) return;
@@ -75,8 +81,24 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
         const res = await fetch("/api/board");
         if (!res.ok) return;
         const snap = (await res.json()) as BoardSnapshot;
-        if (!disposed) setBoard(snap);
+        if (!disposed) {
+          setBoard(snap);
+          setConnection("connected");
+        }
       } catch {}
+    };
+
+    const stopPolling = () => {
+      if (pollTimer != null) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+
+    const startPolling = () => {
+      if (disposed || pollTimer != null) return;
+      void fetchBoard();
+      pollTimer = setInterval(() => void fetchBoard(), POLL_MS);
     };
 
     const connect = () => {
@@ -85,6 +107,11 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
       const src = new EventSource("/api/stream");
       es = src;
 
+      if (idleTimer != null) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        if (!sseHealthy && !disposed) startPolling();
+      }, SSE_IDLE_MS);
+
       src.onopen = () => {
         lastEventAt = Date.now();
         setConnection("connected");
@@ -92,6 +119,12 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
       src.onmessage = (e) => {
         lastEventAt = Date.now();
         backoffMs = BACKOFF_START_MS;
+        sseHealthy = true;
+        if (idleTimer != null) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
+        stopPolling();
         setBoard(JSON.parse(e.data) as BoardSnapshot);
         setConnection("connected");
       };
@@ -108,7 +141,11 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
         onTunnelStateRef.current?.(JSON.parse(e.data) as TunnelState);
       });
       src.onerror = () => {
-        if (es === src) scheduleReconnect();
+        if (es === src) {
+          sseHealthy = false;
+          startPolling();
+          scheduleReconnect();
+        }
       };
     };
 
@@ -124,6 +161,8 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
       disposed = true;
       if (reconnectTimer != null) clearTimeout(reconnectTimer);
       if (watchdog != null) clearInterval(watchdog);
+      if (idleTimer != null) clearTimeout(idleTimer);
+      stopPolling();
       if (es != null) es.close();
     };
   }, []);
