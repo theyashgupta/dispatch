@@ -30,6 +30,7 @@ import { Field } from "../../primitives/Field.js";
 import { IconButton } from "../../primitives/IconButton.js";
 import { Modal, type ModalControl } from "../../primitives/Modal.js";
 import { Notice } from "../../primitives/Notice.js";
+import { QrCode } from "../../primitives/QrCode.js";
 import { MultiSelect } from "./MultiSelect.js";
 import { PlaybookEditorModal } from "./PlaybookEditorModal.js";
 
@@ -915,13 +916,6 @@ const remoteMonoLinkStyle = {
   textDecoration: "none",
 } as const;
 
-const remoteQrSlotStyle = {
-  width: "160px",
-  height: "160px",
-  borderRadius: "var(--radius)",
-  border: "1px solid var(--border)",
-} as const;
-
 function RemoteStatusRow({ color, text }: { color: string; text: string }) {
   return (
     <div role="status" aria-live="polite" style={remoteStatusRowStyle}>
@@ -1004,7 +998,7 @@ function RemoteTabSection({ tunnelState, remoteTab }: RemoteTabSectionProps) {
             </IconButton>
           </div>
         </div>
-        <div style={remoteQrSlotStyle} />
+        <QrCode value={tunnelState.url} />
         <div style={remoteFieldBlockStyle}>
           <Field>Access code — enter this on a device without the QR</Field>
           <div style={remoteMonoRowStyle}>
