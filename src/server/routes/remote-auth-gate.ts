@@ -35,18 +35,35 @@ export function isRequestAllowed(req: IncomingMessage): boolean {
 
 /**
  * A same-request-Host cross-check, not a stored allowlist: a legitimate top-level POST from the
- * code-entry page carries an Origin/Referer matching that same request's own Host (whatever it
- * is — loopback in dev, the eventual tunnel host in Phase 74); a cross-site forged POST carries
- * the attacker's own origin, which never matches the victim's Host. A request with neither header
- * (e.g. a bare `curl`) is allowed through — there is nothing to cross-check.
+ * code-entry page carries an Origin (or, failing that, a Referer) matching that same request's own
+ * Host (whatever it is — loopback in dev, the eventual tunnel host in Phase 74); a cross-site forged
+ * POST carries the attacker's own origin, which never matches the victim's Host.
+ *
+ * @remarks A present `Origin` is always enforced, for every method. The `Referer` fallback is
+ * applied ONLY to state-changing (non-GET) submissions: the GET `?code=` magic-link is a top-level
+ * navigation from a QR scan / Slack / email link, which legitimately carries a FOREIGN or absent
+ * Referer (and never an Origin), so failing it on Referer alone would break the very own-phone flow
+ * the feature exists to serve. CSRF stays meaningful where it matters — the POST `/verify` submit —
+ * while the low-value GET consume (an attacker forging it would already need the secret code) is not
+ * defeated by its own check. The consumed code is still exchanged for a cookie and stripped from the
+ * URL via a 302 redirect with `Referrer-Policy: no-referrer`, so the token never lingers or leaks.
  */
 function originMatchesHost(req: Request): boolean {
   const host = req.headers.host;
   if (!host) return true;
-  const candidate = req.headers.origin ?? req.headers.referer;
-  if (typeof candidate !== "string") return true;
+  const origin = req.headers.origin;
+  if (typeof origin === "string") {
+    try {
+      return new URL(origin).host === host;
+    } catch {
+      return false;
+    }
+  }
+  if (req.method === "GET") return true;
+  const referer = req.headers.referer;
+  if (typeof referer !== "string") return true;
   try {
-    return new URL(candidate).host === host;
+    return new URL(referer).host === host;
   } catch {
     return false;
   }
