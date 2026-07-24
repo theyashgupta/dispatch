@@ -439,6 +439,19 @@ export interface PreflightReport {
 }
 
 /**
+ * The on-demand Cloudflare Quick Tunnel's status, broadcast on the `tunnel` SSE frame and shared
+ * verbatim with the web Remote tab. `code` on the `on` variant is the live in-memory passphrase —
+ * runtime-broadcast only, never persisted to disk (matches `remote-auth.ts`'s in-memory-only
+ * credential contract).
+ */
+export type TunnelState =
+  | { status: "off" }
+  | { status: "starting" }
+  | { status: "on"; url: string; code: string }
+  | { status: "error"; message: string }
+  | { status: "binary-missing"; installHint: string };
+
+/**
  * The single-source-of-truth update-check snapshot shared by `dispatch update`, `dispatch doctor`,
  * the boot-time check loop, and the web update banner.
  */

@@ -60,6 +60,15 @@ export function getCurrentToken(): string | null {
 }
 
 /**
+ * Invalidate the live credential — every cookie/code check collapses back to the same
+ * `currentToken == null` fail-closed path {@link mintToken} exists to leave, with no separate
+ * disabled branch anywhere in this module.
+ */
+export function clearToken(): void {
+  currentToken = null;
+}
+
+/**
  * Deterministic HMAC-SHA256 of a fixed label keyed by the live token — the cookie's entire value.
  * SECURITY: the passphrase itself is the HMAC key, so there is no separate signing secret to
  * generate, store, or rotate; recomputing this under a rotated or absent token no longer matches

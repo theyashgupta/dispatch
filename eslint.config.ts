@@ -511,6 +511,7 @@ export default tseslint.config(
     files: [
       "src/server/adapters/exec.ts",
       "src/server/adapters/ttyd.ts",
+      "src/server/adapters/cloudflared.ts",
       "src/server/bootstrap/ttyd-index-setup.ts",
       "src/server/bootstrap/cli.ts",
     ],

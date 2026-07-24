@@ -8,6 +8,7 @@ import { setupRouter } from "./setup.route.js";
 import { updateRouter } from "./update.route.js";
 import { imagesRouter } from "./images.route.js";
 import { playbooksRouter } from "./playbooks.route.js";
+import { remoteRouter } from "./remote.route.js";
 
 /**
  * Plain composition of the sub-routers — no nested gate here. The single enforcement point for
@@ -26,3 +27,4 @@ apiRouter.use(setupRouter);
 apiRouter.use(updateRouter);
 apiRouter.use(imagesRouter);
 apiRouter.use(playbooksRouter);
+apiRouter.use(remoteRouter);

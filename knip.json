@@ -7,5 +7,5 @@
   ],
   "project": ["src/**/*.{ts,tsx}"],
   "ignoreExportsUsedInFile": true,
-  "ignoreBinaries": ["which", "ttyd"]
+  "ignoreBinaries": ["which", "ttyd", "cloudflared"]
 }

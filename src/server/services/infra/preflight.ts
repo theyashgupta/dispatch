@@ -200,6 +200,26 @@ export async function probePreflight(): Promise<PreflightReport> {
   };
 }
 
+/**
+ * Lazy, feature-scoped `cloudflared` presence check — deliberately NOT part of
+ * {@link REQUIRED_BINARIES}/`probePreflight()` (TUNNEL-03): appending it there would nag every
+ * user who never opens Settings' Remote tab. Called only from the tunnel enable path. Treated like
+ * the `claude` special-case (`installable: false`, print-only) rather than routed through
+ * `installArgv`/`INSTALLABLE_BINARIES` — most Linux distros don't carry `cloudflared` in their
+ * default package-manager repos, so a generic `apt-get install cloudflared` button would fail
+ * silently.
+ */
+export async function checkCloudflaredPresence(): Promise<PrerequisiteStatus> {
+  const present = (await resolveBinaryPath("cloudflared")) != null;
+  return {
+    name: "cloudflared",
+    present,
+    hint: present ? null : "brew install cloudflared",
+    installable: false,
+    command: null,
+  };
+}
+
 /** Re-probe a binary's status after an install attempt, unioning known install prefixes (INST-04). */
 async function reprobeStatus(target: string): Promise<PrerequisiteStatus> {
   return statusFor(target, (await resolveWithPrefixes(target)) != null);
