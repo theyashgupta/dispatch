@@ -41,14 +41,20 @@ export function isRequestAllowed(req: IncomingMessage): boolean {
  * host when remote; a cross-site forged POST carries the attacker's own origin, which never
  * matches either.
  *
- * @remarks A present `Origin` is always enforced, for every method. The `Referer` fallback is
- * applied ONLY to state-changing (non-GET) submissions: the GET `?code=` magic-link is a top-level
- * navigation from a QR scan / Slack / email link, which legitimately carries a FOREIGN or absent
- * Referer (and never an Origin), so failing it on Referer alone would break the very own-phone flow
- * the feature exists to serve. CSRF stays meaningful where it matters — the POST `/verify` submit —
- * while the low-value GET consume (an attacker forging it would already need the secret code) is not
- * defeated by its own check. The consumed code is still exchanged for a cookie and stripped from the
- * URL via a 302 redirect with `Referrer-Policy: no-referrer`, so the token never lingers or leaks.
+ * @remarks A GENUINE `Origin` (a real `https://…` value) is always enforced, for every method. The
+ * literal string `"null"` is treated as NO usable Origin, not as an unparseable foreign one: the
+ * code-entry page sets `Referrer-Policy: no-referrer`, and per the Fetch spec a same-origin non-GET
+ * navigation under that policy serializes its Origin as the opaque string `"null"` — so the page's
+ * OWN correct-code POST arrives with `Origin: null` and must fall through to the method/Referer
+ * branch rather than be URL-parsed and rejected (which 403'd every real browser submission). The
+ * `Referer` fallback is applied ONLY to state-changing (non-GET) submissions: the GET `?code=`
+ * magic-link is a top-level navigation from a QR scan / Slack / email link, which legitimately
+ * carries a FOREIGN or absent Referer (and never an Origin), so failing it on Referer alone would
+ * break the very own-phone flow the feature exists to serve. CSRF stays meaningful where it matters:
+ * a cross-site forger still cannot supply a real matching `Origin`, and forging the same-origin
+ * no-referrer submit already requires knowing the secret code. The consumed code is still exchanged
+ * for a cookie and stripped from the URL via a 302 redirect with `Referrer-Policy: no-referrer`, so
+ * the token never lingers or leaks.
  *
  * SECURITY: for a non-loopback request, `req.headers.host` is NEVER the expected value — cloudflared's
  * `--http-host-header` sentinel unconditionally rewrites it before the origin ever sees it, so a
@@ -73,7 +79,7 @@ function originMatchesHost(req: Request): boolean {
     expectedHost = knownHost;
   }
   const origin = req.headers.origin;
-  if (typeof origin === "string") {
+  if (typeof origin === "string" && origin !== "null") {
     try {
       return new URL(origin).host === expectedHost;
     } catch {
