@@ -15,6 +15,16 @@ let status: TunnelState = { status: "off" };
 let publicHost: string | null = null;
 
 /**
+ * Monotonic enable epoch. Captured at the start of every {@link enableTunnel} and bumped by both a
+ * new enable and {@link disableTunnel}; an in-flight enable whose captured value no longer matches
+ * after an `await` has been superseded and MUST NOT commit `on`/mint a token — the fail-closed
+ * guard that stops a Disable clicked during `starting` from being silently undone when the slow
+ * `spawnTunnel` finally resolves.
+ * @see docs/ARCHITECTURE.md#security-threat-model
+ */
+let epoch = 0;
+
+/**
  * Fired with the new {@link TunnelState} on every transition (starting/on/error/binary-missing/
  * off) — `sse.route.ts` subscribes this to the `tunnel` named SSE frame, mirroring the board
  * store's `activity` emitter shape.
@@ -46,18 +56,23 @@ export function getKnownPublicHost(): string | null {
 /**
  * Enable the tunnel: lazily check `cloudflared` presence, spawn it against `localPort`, mint a
  * fresh token, and transition to `on`. Re-entry-guarded — a call while already `starting`/`on` is
- * a no-op, mirroring `start-session.ts`'s in-flight guard. On a later unexpected child exit (the
- * adapter's `onTunnelDrop` callback), transitions to `error` with no auto-retry — the user
- * re-toggles for a fresh tunnel (locked decision).
+ * a no-op, mirroring `start-session.ts`'s in-flight guard. Additionally epoch-guarded across every
+ * `await`: if a concurrent {@link disableTunnel} (or newer enable) bumped {@link epoch} while this
+ * call was awaiting the ~8s cold start, it bails without committing `on` and kills the child it
+ * spawned, so a Disable clicked during `starting` can never be silently reactivated. On a later
+ * unexpected child exit (the adapter's `onTunnelDrop` callback), transitions to `error` with no
+ * auto-retry — the user re-toggles for a fresh tunnel (locked decision).
  * @remarks T-74-05: the token is minted fresh on every enable and never reused across a
  * disable/re-enable cycle, in memory only.
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
 export async function enableTunnel(localPort: number): Promise<void> {
   if (status.status === "starting" || status.status === "on") return;
+  const myEpoch = ++epoch;
   setStatus({ status: "starting" });
 
   const presence = await checkCloudflaredPresence();
+  if (myEpoch !== epoch) return;
   if (!presence.present) {
     setStatus({
       status: "binary-missing",
@@ -68,6 +83,10 @@ export async function enableTunnel(localPort: number): Promise<void> {
 
   try {
     const url = await spawnTunnel(localPort);
+    if (myEpoch !== epoch) {
+      killTunnel();
+      return;
+    }
     publicHost = new URL(url).hostname;
     const code = mintToken();
     setStatus({ status: "on", url, code });
@@ -79,19 +98,22 @@ export async function enableTunnel(localPort: number): Promise<void> {
       });
     });
   } catch (err) {
+    if (myEpoch !== epoch) return;
     publicHost = null;
     setStatus({ status: "error", message: (err as Error).message });
   }
 }
 
 /**
- * Kill the tunnel child, clear the token, and reset to `off`. Idempotent.
+ * Kill the tunnel child, clear the token, and reset to `off`. Idempotent. Bumps {@link epoch}
+ * first so any enable still awaiting its cold start is invalidated and cannot resurrect the tunnel.
  * @remarks T-74-05: `clearToken()` runs synchronously here, so `hasValidSession` starts rejecting
  * every outstanding cookie the instant disable/shutdown is called, independent of how long
  * cloudflared itself takes to actually exit.
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
 export function disableTunnel(): void {
+  epoch++;
   onTunnelDrop(null);
   killTunnel();
   clearToken();
