@@ -807,6 +807,14 @@ interface RemoteTab {
 
 function useRemoteTab(): RemoteTab {
   const [pending, setPending] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   async function handleEnable() {
     if (pending) return;
@@ -816,7 +824,7 @@ function useRemoteTab(): RemoteTab {
     } catch (err) {
       console.error("enableRemote failed", err);
     } finally {
-      setPending(false);
+      if (mountedRef.current) setPending(false);
     }
   }
 
@@ -828,7 +836,7 @@ function useRemoteTab(): RemoteTab {
     } catch (err) {
       console.error("disableRemote failed", err);
     } finally {
-      setPending(false);
+      if (mountedRef.current) setPending(false);
     }
   }
 
