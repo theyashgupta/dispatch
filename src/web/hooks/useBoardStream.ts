@@ -70,6 +70,15 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
       }, delay);
     };
 
+    const fetchBoard = async () => {
+      try {
+        const res = await fetch("/api/board");
+        if (!res.ok) return;
+        const snap = (await res.json()) as BoardSnapshot;
+        if (!disposed) setBoard(snap);
+      } catch {}
+    };
+
     const connect = () => {
       if (disposed) return;
       lastEventAt = Date.now();
@@ -103,6 +112,7 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
       };
     };
 
+    void fetchBoard();
     connect();
 
     watchdog = setInterval(() => {
