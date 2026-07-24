@@ -72,6 +72,19 @@ const spaFallback: express.RequestHandler = (req, res, next) => {
 };
 
 /**
+ * Anti-clickjacking headers on every response, set as the FIRST middleware so it covers the gate
+ * page, the board UI, and the terminal proxy alike. `SAMEORIGIN` / `frame-ancestors 'self'` (not
+ * `DENY`/`'none'`) is deliberate: the app frames its OWN same-origin terminal at
+ * `/sessions/<id>/terminal/`, so a same-origin allowance must survive while every third-party
+ * origin is refused — the relevant threat once Phase 74 makes the app publicly reachable.
+ */
+const frameGuardHeaders: express.RequestHandler = (_req, res, next) => {
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Content-Security-Policy", "frame-ancestors 'self'");
+  next();
+};
+
+/**
  * Turn a body-parser JSON failure into a clean JSON 400 so a malformed request body returns
  * `{ error }` instead of Express's default HTML error page (which also leaks a SyntaxError, and
  * fires before a route's own auth check). Registered after the router so it only catches parse
@@ -227,6 +240,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   console.log(`[remote-auth] access code: ${accessCode}`);
 
   const app = express();
+  app.use(frameGuardHeaders);
   app.use(remoteAuthRouter);
   app.use("/api", express.json({ limit: "1mb" }), apiRouter);
   app.use("/sessions", terminalProxyRouter);
