@@ -29,7 +29,7 @@ import { FirstRunSetup } from "./features/setup/index.js";
 import { UpdateBanner } from "./features/update/index.js";
 import { cleanupCard as cleanupCardApi, getSetup } from "./lib/api.js";
 import type { StartRequest } from "./lib/start-request.js";
-import type { PrerequisiteStatus } from "../shared/types.js";
+import type { PrerequisiteStatus, TunnelState } from "../shared/types.js";
 
 function BootScreen({ connection }: { connection: ConnectionStatus }) {
   const statusText =
@@ -86,7 +86,13 @@ function BootScreen({ connection }: { connection: ConnectionStatus }) {
 
 export function App() {
   const feed = useActivityFeed();
-  const { board, connection } = useBoardStream({ onActivity: feed.append });
+  const [tunnelState, setTunnelState] = useState<TunnelState>({
+    status: "off",
+  });
+  const { board, connection } = useBoardStream({
+    onActivity: feed.append,
+    onTunnelState: setTunnelState,
+  });
 
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
@@ -327,6 +333,7 @@ export function App() {
       {settingsOpen && (
         <SettingsModal
           initialTab={settingsInitialTab}
+          tunnelState={tunnelState}
           onClose={() => {
             setSettingsOpen(false);
             setSettingsInitialTab("filters");

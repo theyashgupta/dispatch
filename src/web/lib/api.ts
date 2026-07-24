@@ -767,6 +767,29 @@ export async function saveLinearKey(
 }
 
 /**
+ * Enable remote access: POST /api/remote/enable. Fire-and-forget from the caller's perspective —
+ * the authoritative status (starting/on/error/binary-missing) arrives over the `tunnel` SSE frame,
+ * not this response. Rejects on non-2xx so the caller can log (mirrors moveCard).
+ */
+export async function enableRemote(): Promise<void> {
+  const res = await fetch("/api/remote/enable", { method: "POST" });
+  if (!res.ok) {
+    throw new Error(`enableRemote failed: ${res.status} ${res.statusText}`);
+  }
+}
+
+/**
+ * Disable remote access: POST /api/remote/disable. The `tunnel` SSE frame carries the resulting
+ * `off` state. Rejects on non-2xx so the caller can log (mirrors moveCard).
+ */
+export async function disableRemote(): Promise<void> {
+  const res = await fetch("/api/remote/disable", { method: "POST" });
+  if (!res.ok) {
+    throw new Error(`disableRemote failed: ${res.status} ${res.statusText}`);
+  }
+}
+
+/**
  * Read the cached update status: GET /api/update. Fired once on the update banner's mount; the
  * server serves the 24h-cached registry check, never a fresh network hit per page load. Throws on
  * any non-2xx so the banner stays hidden on failure (fail-silent, per the locked design).

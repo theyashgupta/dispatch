@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { ActivityEvent, BoardSnapshot } from "../../shared/types.js";
+import type {
+  ActivityEvent,
+  BoardSnapshot,
+  TunnelState,
+} from "../../shared/types.js";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
@@ -11,6 +15,8 @@ export interface BoardStream {
 export interface BoardStreamOptions {
   /** Invoked with each parsed activity event from the single stream's named `activity` frame. */
   onActivity?: (event: ActivityEvent) => void;
+  /** Invoked with each parsed tunnel-status transition from the named `tunnel` frame. */
+  onTunnelState?: (state: TunnelState) => void;
 }
 
 const HEARTBEAT_MS = 15_000;
@@ -33,6 +39,11 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
   const onActivityRef = useRef(options.onActivity);
   useEffect(() => {
     onActivityRef.current = options.onActivity;
+  });
+
+  const onTunnelStateRef = useRef(options.onTunnelState);
+  useEffect(() => {
+    onTunnelStateRef.current = options.onTunnelState;
   });
 
   useEffect(() => {
@@ -82,6 +93,10 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
       src.addEventListener("activity", (e: MessageEvent) => {
         lastEventAt = Date.now();
         onActivityRef.current?.(JSON.parse(e.data) as ActivityEvent);
+      });
+      src.addEventListener("tunnel", (e: MessageEvent) => {
+        lastEventAt = Date.now();
+        onTunnelStateRef.current?.(JSON.parse(e.data) as TunnelState);
       });
       src.onerror = () => {
         if (es === src) scheduleReconnect();

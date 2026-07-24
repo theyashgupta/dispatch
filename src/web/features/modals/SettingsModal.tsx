@@ -7,15 +7,18 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
 import type {
   FilterCapabilities,
   FilterOption,
   Playbook,
   SourceFilters,
+  TunnelState,
 } from "../../../shared/types.js";
 import {
   deletePlaybook,
+  disableRemote,
+  enableRemote,
   getLinearFilters,
   getLinearOptions,
   getPlaybooks,
@@ -30,7 +33,7 @@ import { Notice } from "../../primitives/Notice.js";
 import { MultiSelect } from "./MultiSelect.js";
 import { PlaybookEditorModal } from "./PlaybookEditorModal.js";
 
-export type SettingsTab = "filters" | "playbooks";
+export type SettingsTab = "filters" | "playbooks" | "remote";
 
 interface SettingsTabButtonProps {
   label: string;
@@ -795,14 +798,291 @@ function PlaybooksTabSection({ playbooksTab }: PlaybooksTabSectionProps) {
   );
 }
 
+interface RemoteTab {
+  pending: boolean;
+  handleEnable: () => Promise<void>;
+  handleDisable: () => Promise<void>;
+}
+
+function useRemoteTab(): RemoteTab {
+  const [pending, setPending] = useState(false);
+
+  async function handleEnable() {
+    if (pending) return;
+    setPending(true);
+    try {
+      await enableRemote();
+    } catch (err) {
+      console.error("enableRemote failed", err);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function handleDisable() {
+    if (pending) return;
+    setPending(true);
+    try {
+      await disableRemote();
+    } catch (err) {
+      console.error("disableRemote failed", err);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return { pending, handleEnable, handleDisable };
+}
+
+function useCopyFlash(): [boolean, (text: string) => void] {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const id = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(id);
+  }, [copied]);
+  const copy = (text: string) => {
+    void navigator.clipboard.writeText(text).then(() => setCopied(true));
+  };
+  return [copied, copy];
+}
+
+const remoteSectionStyle = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "var(--space-lg)",
+  flex: "1 1 auto",
+  minHeight: 0,
+} as const;
+
+const remoteBodyTextStyle = {
+  fontFamily: "var(--font-ui)",
+  fontSize: "var(--font-body)",
+  lineHeight: "var(--line-body)",
+  color: "var(--text)",
+} as const;
+
+const remoteHelperTextStyle = {
+  fontFamily: "var(--font-ui)",
+  fontSize: "var(--font-label)",
+  lineHeight: "var(--line-label)",
+  color: "var(--text-muted)",
+} as const;
+
+const remoteStatusRowStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--space-xs)",
+  fontFamily: "var(--font-ui)",
+  fontSize: "var(--font-label)",
+  fontWeight: "var(--weight-semibold)",
+  lineHeight: "var(--line-label)",
+  color: "var(--text)",
+} as const;
+
+const remoteDotStyle = {
+  width: "8px",
+  height: "8px",
+  borderRadius: "50%",
+  flex: "0 0 auto",
+} as const;
+
+const remoteFieldBlockStyle = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "var(--space-xs)",
+} as const;
+
+const remoteMonoRowStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--space-xs)",
+} as const;
+
+const remoteMonoTextStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: "var(--font-label)",
+  lineHeight: "var(--line-label)",
+  color: "var(--text)",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+} as const;
+
+const remoteMonoLinkStyle = {
+  ...remoteMonoTextStyle,
+  color: "var(--accent)",
+  textDecoration: "none",
+} as const;
+
+const remoteQrSlotStyle = {
+  width: "160px",
+  height: "160px",
+  borderRadius: "var(--radius)",
+  border: "1px solid var(--border)",
+} as const;
+
+function RemoteStatusRow({ color, text }: { color: string; text: string }) {
+  return (
+    <div role="status" aria-live="polite" style={remoteStatusRowStyle}>
+      <span
+        aria-hidden="true"
+        style={{ ...remoteDotStyle, background: color }}
+      />
+      {text}
+    </div>
+  );
+}
+
+interface RemoteTabSectionProps {
+  tunnelState: TunnelState;
+  remoteTab: RemoteTab;
+}
+
+function RemoteTabSection({ tunnelState, remoteTab }: RemoteTabSectionProps) {
+  const { pending, handleEnable, handleDisable } = remoteTab;
+  const [urlCopied, copyUrl] = useCopyFlash();
+  const [codeCopied, copyCode] = useCopyFlash();
+  const [brewCopied, copyBrew] = useCopyFlash();
+
+  if (tunnelState.status === "off") {
+    return (
+      <div style={remoteSectionStyle}>
+        <div style={remoteBodyTextStyle}>
+          Reach this board — including live terminals — from any device over a
+          temporary public link, guarded by an access code.
+        </div>
+        <div>
+          <Button
+            variant="primary"
+            loading={pending}
+            onClick={() => void handleEnable()}
+          >
+            {pending ? "Starting…" : "Enable remote access"}
+          </Button>
+        </div>
+        <span style={remoteHelperTextStyle}>
+          Uses an on-demand Cloudflare tunnel — requires cloudflared.
+        </span>
+      </div>
+    );
+  }
+
+  if (tunnelState.status === "starting") {
+    return (
+      <div style={remoteSectionStyle}>
+        <RemoteStatusRow color="var(--status-stale)" text="Starting tunnel…" />
+        <div>
+          <Button variant="primary" disabled loading>
+            Enable remote access
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (tunnelState.status === "on") {
+    return (
+      <div style={remoteSectionStyle}>
+        <RemoteStatusRow color="var(--status-ok)" text="Remote access on" />
+        <div style={remoteFieldBlockStyle}>
+          <Field>Public URL</Field>
+          <div style={remoteMonoRowStyle}>
+            <a
+              href={tunnelState.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={remoteMonoLinkStyle}
+            >
+              {tunnelState.url}
+            </a>
+            <IconButton
+              aria-label={urlCopied ? "Copied" : "Copy public URL"}
+              onClick={() => copyUrl(tunnelState.url)}
+            >
+              <Copy size={14} strokeWidth={2} aria-hidden="true" />
+            </IconButton>
+          </div>
+        </div>
+        <div style={remoteQrSlotStyle} />
+        <div style={remoteFieldBlockStyle}>
+          <Field>Access code — enter this on a device without the QR</Field>
+          <div style={remoteMonoRowStyle}>
+            <span style={remoteMonoTextStyle}>{tunnelState.code}</span>
+            <IconButton
+              aria-label={codeCopied ? "Copied" : "Copy access code"}
+              onClick={() => copyCode(tunnelState.code)}
+            >
+              <Copy size={14} strokeWidth={2} aria-hidden="true" />
+            </IconButton>
+          </div>
+        </div>
+        <div>
+          <Button
+            variant="secondary"
+            loading={pending}
+            onClick={() => void handleDisable()}
+          >
+            {pending ? "Disabling…" : "Disable remote access"}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (tunnelState.status === "error") {
+    return (
+      <div style={remoteSectionStyle}>
+        <RemoteStatusRow
+          color="var(--status-down)"
+          text={tunnelState.message}
+        />
+        <div>
+          <Button
+            variant="primary"
+            loading={pending}
+            onClick={() => void handleEnable()}
+          >
+            {pending ? "Starting…" : "Enable remote access"}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={remoteSectionStyle}>
+      <RemoteStatusRow
+        color="var(--status-down)"
+        text="cloudflared not found"
+      />
+      <div style={remoteBodyTextStyle}>{tunnelState.installHint}</div>
+      <div style={remoteFieldBlockStyle}>
+        <Field>Install command</Field>
+        <div style={remoteMonoRowStyle}>
+          <span style={remoteMonoTextStyle}>brew install cloudflared</span>
+          <IconButton
+            aria-label={brewCopied ? "Copied" : "Copy install command"}
+            onClick={() => copyBrew("brew install cloudflared")}
+          >
+            <Copy size={14} strokeWidth={2} aria-hidden="true" />
+          </IconButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface SettingsModalProps {
   onClose: () => void;
   initialTab?: SettingsTab;
+  tunnelState: TunnelState;
 }
 
 export function SettingsModal({
   onClose,
   initialTab = "filters",
+  tunnelState,
 }: SettingsModalProps) {
   const modalRef = useRef<ModalControl>(null);
   const firstTriggerRef = useRef<HTMLButtonElement>(null);
@@ -810,6 +1090,7 @@ export function SettingsModal({
 
   const filters = useFiltersTab(modalRef);
   const playbooksTab = usePlaybooksTab(tab === "playbooks");
+  const remoteTab = useRemoteTab();
 
   return (
     <Modal
@@ -843,6 +1124,11 @@ export function SettingsModal({
             active={tab === "playbooks"}
             onClick={() => setTab("playbooks")}
           />
+          <SettingsTabButton
+            label="Remote"
+            active={tab === "remote"}
+            onClick={() => setTab("remote")}
+          />
         </div>
 
         {tab === "filters" && (
@@ -854,6 +1140,13 @@ export function SettingsModal({
 
         {tab === "playbooks" && (
           <SettingsModal.PlaybooksTab playbooksTab={playbooksTab} />
+        )}
+
+        {tab === "remote" && (
+          <SettingsModal.RemoteTab
+            tunnelState={tunnelState}
+            remoteTab={remoteTab}
+          />
         )}
 
         {playbooksTab.editorState && (
@@ -913,3 +1206,4 @@ export function SettingsModal({
 
 SettingsModal.FiltersTab = FiltersTabSection;
 SettingsModal.PlaybooksTab = PlaybooksTabSection;
+SettingsModal.RemoteTab = RemoteTabSection;
