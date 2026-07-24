@@ -40,11 +40,24 @@ export function onTunnelDrop(cb: (() => void) | null): void {
  * The child is never detached and the handle is never released early — the inverse of
  * `adapters/ttyd.ts`'s survive-a-restart lifecycle: cloudflared MUST die with this process so a
  * crash/restart cannot leave a public URL pointing at a server the token no longer recognizes
- * (TUNNEL-04). `--no-autoupdate` stops cloudflared from swapping its own binary mid-session. The
- * child's `exit`/`error` listeners stay live after the URL resolves so a later unexpected exit
- * invokes {@link onTunnelDrop}'s callback.
+ * (TUNNEL-04). `--no-autoupdate` stops cloudflared from swapping its own binary mid-session.
+ *
+ * Every failure path (parse timeout, spawn `error`, early `exit`) SIGTERMs the child and drops the
+ * module handle before rejecting, so a slow-but-alive cloudflared can never outlive the enable that
+ * spawned it and become an untracked public ingress no `killTunnel`/shutdown can reach. A late URL
+ * from a child that is no longer the tracked handle (superseded by a disable/re-enable) is likewise
+ * killed rather than adopted. The stderr accumulator is detached the instant the promise settles so
+ * a long-lived tunnel does not grow it unbounded. The `exit`/`error` listeners stay live after the
+ * URL resolves so a later unexpected exit invokes {@link onTunnelDrop}'s callback.
  */
 export function spawnTunnel(localPort: number): Promise<string> {
+  if (child) {
+    return Promise.reject(
+      new Error(
+        "cloudflared child already tracked — refusing to spawn a second",
+      ),
+    );
+  }
   const proc = spawn(
     "cloudflared",
     [
@@ -62,35 +75,56 @@ export function spawnTunnel(localPort: number): Promise<string> {
   return new Promise((resolve, reject) => {
     let buf = "";
     let settled = false;
+
+    const settle = () => {
+      settled = true;
+      clearTimeout(timer);
+      proc.stderr?.off("data", onData);
+    };
+
+    const killProc = () => {
+      try {
+        proc.kill("SIGTERM");
+      } catch {}
+      if (child === proc) child = null;
+    };
+
     const timer = setTimeout(() => {
       if (settled) return;
-      settled = true;
+      settle();
+      killProc();
       reject(new Error("cloudflared did not report a URL within 15s"));
     }, TUNNEL_PARSE_TIMEOUT_MS);
 
     const onData = (d: Buffer) => {
+      if (settled) return;
       buf += d.toString();
       const m = buf.match(TUNNEL_URL_RE);
-      if (m && !settled) {
-        settled = true;
-        clearTimeout(timer);
-        resolve(m[0]);
+      if (!m) return;
+      settle();
+      buf = "";
+      if (child !== proc) {
+        killProc();
+        reject(
+          new Error("cloudflared tunnel superseded before it reported a URL"),
+        );
+        return;
       }
+      resolve(m[0]);
     };
     proc.stderr?.on("data", onData);
 
     proc.once("error", (err) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        reject(err);
-      }
+      if (settled) return;
+      settle();
+      if (child === proc) child = null;
+      reject(err);
     });
 
     proc.once("exit", (code) => {
       if (!settled) {
-        settled = true;
-        clearTimeout(timer);
+        settle();
+        if (child === proc) child = null;
         reject(new Error(`cloudflared exited early (${code}): ${buf}`));
         return;
       }
