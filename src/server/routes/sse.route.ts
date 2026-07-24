@@ -1,6 +1,14 @@
 import { Router, type Request, type Response } from "express";
 import { store } from "../store/board.store.js";
-import type { ActivityEvent, BoardSnapshot } from "../../shared/types.js";
+import type {
+  ActivityEvent,
+  BoardSnapshot,
+  TunnelState,
+} from "../../shared/types.js";
+import {
+  getTunnelState,
+  tunnelEmitter,
+} from "../services/orchestration/tunnel.js";
 
 /** Active SSE clients; broadcast writes to each and drops them on disconnect. */
 const clients = new Set<Response>();
@@ -22,6 +30,11 @@ function frame(snapshot: BoardSnapshot): string {
 /** Serialize one durably-inserted event into a NAMED `activity` SSE frame, distinct from the board `data:` frame. */
 function activityFrame(event: ActivityEvent): string {
   return `event: activity\ndata: ${JSON.stringify(event)}\n\n`;
+}
+
+/** Serialize a tunnel status transition into a NAMED `tunnel` SSE frame. */
+function tunnelFrame(state: TunnelState): string {
+  return `event: tunnel\ndata: ${JSON.stringify(state)}\n\n`;
 }
 
 /**
@@ -49,6 +62,7 @@ export function sseHandler(req: Request, res: Response): void {
   res.flushHeaders();
 
   safeWrite(res, frame(store.snapshot()));
+  safeWrite(res, tunnelFrame(getTunnelState()));
   clients.add(res);
 
   const keepAlive = setInterval(() => {
@@ -73,6 +87,13 @@ store.on("change", (snapshot: BoardSnapshot) => {
 
 store.on("activity", (event: ActivityEvent) => {
   const payload = activityFrame(event);
+  for (const client of clients) {
+    if (!safeWrite(client, payload)) clients.delete(client);
+  }
+});
+
+tunnelEmitter.on("change", (state: TunnelState) => {
+  const payload = tunnelFrame(state);
   for (const client of clients) {
     if (!safeWrite(client, payload)) clients.delete(client);
   }

@@ -7,6 +7,7 @@ import {
 } from "express";
 import express from "express";
 import { isLocalRequest } from "./loopback.js";
+import { getKnownPublicHost } from "../services/orchestration/tunnel.js";
 import {
   COOKIE_NAME,
   checkRateLimit,
@@ -35,9 +36,10 @@ export function isRequestAllowed(req: IncomingMessage): boolean {
 
 /**
  * A same-request-Host cross-check, not a stored allowlist: a legitimate top-level POST from the
- * code-entry page carries an Origin (or, failing that, a Referer) matching that same request's own
- * Host (whatever it is — loopback in dev, the eventual tunnel host in Phase 74); a cross-site forged
- * POST carries the attacker's own origin, which never matches the victim's Host.
+ * code-entry page carries an Origin (or, failing that, a Referer) matching the request's EXPECTED
+ * Host — loopback's own `req.headers.host` when local, or the tunnel manager's real known public
+ * host when remote; a cross-site forged POST carries the attacker's own origin, which never
+ * matches either.
  *
  * @remarks A present `Origin` is always enforced, for every method. The `Referer` fallback is
  * applied ONLY to state-changing (non-GET) submissions: the GET `?code=` magic-link is a top-level
@@ -47,14 +49,23 @@ export function isRequestAllowed(req: IncomingMessage): boolean {
  * while the low-value GET consume (an attacker forging it would already need the secret code) is not
  * defeated by its own check. The consumed code is still exchanged for a cookie and stripped from the
  * URL via a 302 redirect with `Referrer-Policy: no-referrer`, so the token never lingers or leaks.
+ *
+ * SECURITY: for a non-loopback request, `req.headers.host` is NEVER the expected value — cloudflared's
+ * `--http-host-header` sentinel unconditionally rewrites it before the origin ever sees it, so a
+ * legitimate remote Origin (`https://<random>.trycloudflare.com`) would never match the rewritten
+ * Host. `getKnownPublicHost()` (the hostname tunnel.ts actually parsed from cloudflared's output) is
+ * the only value a remote Origin can ever match; skipping this branch would 403 every legitimate
+ * remote code submission the moment the sentinel is live.
  */
 function originMatchesHost(req: Request): boolean {
-  const host = req.headers.host;
-  if (!host) return true;
+  const expectedHost = isLocalRequest(req)
+    ? req.headers.host
+    : getKnownPublicHost();
+  if (!expectedHost) return true;
   const origin = req.headers.origin;
   if (typeof origin === "string") {
     try {
-      return new URL(origin).host === host;
+      return new URL(origin).host === expectedHost;
     } catch {
       return false;
     }
@@ -63,7 +74,7 @@ function originMatchesHost(req: Request): boolean {
   const referer = req.headers.referer;
   if (typeof referer !== "string") return true;
   try {
-    return new URL(referer).host === host;
+    return new URL(referer).host === expectedHost;
   } catch {
     return false;
   }
