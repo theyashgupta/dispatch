@@ -49,6 +49,9 @@ export function getKnownPublicHost(): string | null {
  * a no-op, mirroring `start-session.ts`'s in-flight guard. On a later unexpected child exit (the
  * adapter's `onTunnelDrop` callback), transitions to `error` with no auto-retry — the user
  * re-toggles for a fresh tunnel (locked decision).
+ * @remarks T-74-05: the token is minted fresh on every enable and never reused across a
+ * disable/re-enable cycle, in memory only.
+ * @see docs/ARCHITECTURE.md#security-threat-model
  */
 export async function enableTunnel(localPort: number): Promise<void> {
   if (status.status === "starting" || status.status === "on") return;
@@ -81,7 +84,13 @@ export async function enableTunnel(localPort: number): Promise<void> {
   }
 }
 
-/** Kill the tunnel child, clear the token, and reset to `off`. Idempotent. */
+/**
+ * Kill the tunnel child, clear the token, and reset to `off`. Idempotent.
+ * @remarks T-74-05: `clearToken()` runs synchronously here, so `hasValidSession` starts rejecting
+ * every outstanding cookie the instant disable/shutdown is called, independent of how long
+ * cloudflared itself takes to actually exit.
+ * @see docs/ARCHITECTURE.md#security-threat-model
+ */
 export function disableTunnel(): void {
   onTunnelDrop(null);
   killTunnel();

@@ -1,11 +1,17 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, execFile, type ChildProcess } from "node:child_process";
+import path from "node:path";
+import { promisify } from "node:util";
+
+const execFileP = promisify(execFile);
 
 /**
  * RFC 2606 reserved TLD, guaranteed never a real DNS host — the fixed non-loopback Host value
  * `cloudflared --http-host-header` rewrites onto EVERY request it forwards to the local origin
  * (live-verified: even a client-supplied `Host: 127.0.0.1`/the real tunnel host is overwritten).
  * This makes `isLocalRequest` classify all tunnel traffic non-loopback unconditionally, closing
- * CR-01. Also the boot-sweep fingerprint substring (added in a later task alongside the sweep).
+ * CR-01. Also the boot-sweep fingerprint substring (see {@link sweepStrayTunnels}).
+ * @remarks T-74-01.
+ * @see docs/ARCHITECTURE.md#security-threat-model
  */
 export const TUNNEL_HOST_SENTINEL = "dispatch.invalid";
 
@@ -107,4 +113,38 @@ export function killTunnel(): void {
     } catch {}
     child = null;
   }
+}
+
+/**
+ * Boot-time orphan sweep (opposite of `ttyd.ts`'s `adoptAndSweep`): kill every stray `cloudflared`
+ * process carrying THIS process's exact sentinel argv, never adopt. A surviving tunnel from a
+ * crashed prior boot is a live, unauthenticated public shell — there is no scenario where reusing
+ * it is correct. Matches on `basename(argv[0]) === "cloudflared"` AND the exact
+ * {@link TUNNEL_HOST_SENTINEL} substring (never binary-name alone) so an unrelated cloudflared the
+ * user runs for their own purposes is never touched. Tolerant of `ps` failure (returns 0).
+ * @remarks T-74-04.
+ * @see docs/ARCHITECTURE.md#security-threat-model
+ */
+export async function sweepStrayTunnels(): Promise<number> {
+  let out: string;
+  try {
+    ({ stdout: out } = await execFileP("ps", ["-axww", "-o", "pid=,command="]));
+  } catch {
+    return 0;
+  }
+  let killed = 0;
+  for (const line of out.split("\n")) {
+    const m = line.match(/^\s*(\d+)\s+(.*)$/);
+    if (!m) continue;
+    const pid = Number(m[1]);
+    if (pid === process.pid || pid === process.ppid) continue;
+    const argv = m[2].trim().split(/\s+/);
+    if (path.basename(argv[0]) !== "cloudflared") continue;
+    if (!m[2].includes(TUNNEL_HOST_SENTINEL)) continue;
+    try {
+      process.kill(pid, "SIGTERM");
+      killed++;
+    } catch {}
+  }
+  return killed;
 }

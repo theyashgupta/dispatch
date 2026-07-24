@@ -56,6 +56,8 @@ export function isRequestAllowed(req: IncomingMessage): boolean {
  * Host. `getKnownPublicHost()` (the hostname tunnel.ts actually parsed from cloudflared's output) is
  * the only value a remote Origin can ever match; skipping this branch would 403 every legitimate
  * remote code submission the moment the sentinel is live.
+ * @remarks T-74-02.
+ * @see docs/ARCHITECTURE.md#security-threat-model
  */
 function originMatchesHost(req: Request): boolean {
   const expectedHost = isLocalRequest(req)

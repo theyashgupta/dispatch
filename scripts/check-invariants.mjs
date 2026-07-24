@@ -38,7 +38,7 @@ const ID_RE =
  * regeneration) can never silently disarm the gate into `PASS: 0/0`. Bump this
  * ONLY together with a deliberate, human-ratified baseline regeneration.
  */
-const FROZEN_COUNT = 92;
+const FROZEN_COUNT = 98;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");

@@ -11,7 +11,8 @@ import {
   isRequestAllowed,
   remoteAuthRouter,
 } from "../routes/remote-auth-gate.js";
-import { mintToken } from "../services/infra/remote-auth.js";
+import { sweepStrayTunnels } from "../adapters/cloudflared.js";
+import { disableTunnel } from "../services/orchestration/tunnel.js";
 import { terminalProxyRouter } from "../routes/terminal-proxy.route.js";
 import {
   rejectUpgrade,
@@ -143,6 +144,24 @@ function handleUpgrade(
   terminalProxyUpgrade(req, socket, head);
 }
 
+/**
+ * The FIRST `process.on("SIGINT"/"SIGTERM", ...)` handler in this codebase — every other
+ * subprocess (ttyd, tmux, git) is either deliberately detached-to-survive or short-lived-and-
+ * awaited, so nothing else needed a "clean up before I die" hook until cloudflared. Scoped
+ * NARROWLY to `disableTunnel()` (kills cloudflared + clears the token) — it does NOT tear down
+ * ttyd/tmux sessions, which intentionally survive a backend restart.
+ * @remarks T-74-03: `disableTunnel()`'s `clearToken()` call is synchronous, so the token stops
+ * validating immediately even though cloudflared's own default 30s grace period means the OS
+ * process can take longer to fully exit; the sentinel Host rewrite (T-74-01) also gates any
+ * straggler request that reaches a still-draining cloudflared in that window.
+ * @see docs/ARCHITECTURE.md#security-threat-model
+ */
+function shutdown(signal: NodeJS.Signals): void {
+  console.log(`[shutdown] ${signal} received — tearing down remote access`);
+  disableTunnel();
+  process.exit(0);
+}
+
 /** Options for {@link main}; `desiredPort` overrides the configured port (the CLI's `--port`). */
 export interface MainOptions {
   desiredPort?: number;
@@ -243,12 +262,14 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
       `[ttyd-index] provisioning rejected unexpectedly: ${(err as Error).message}`,
     );
   });
+  await sweepStrayTunnels().catch((err: unknown) => {
+    console.warn(
+      `[cloudflared] boot orphan sweep rejected unexpectedly: ${(err as Error).message}`,
+    );
+  });
 
   const editors = await resolveEditors();
   store.setEditors(editors);
-
-  const accessCode = mintToken();
-  console.log(`[remote-auth] access code: ${accessCode}`);
 
   const app = express();
   app.use(frameGuardHeaders);
@@ -281,6 +302,9 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   );
 
   server.on("upgrade", handleUpgrade);
+
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
 
   setHooksRuntime({ capable, port, statusChannel });
   if (config.linearApiKey) {
