@@ -28,6 +28,7 @@ const BACKOFF_MAX_MS = 5_000;
 
 const SSE_IDLE_MS = 7_000;
 const POLL_MS = 4_000;
+const POLL_MAX_MS = 30_000;
 
 /**
  * Own the single `/api/stream` EventSource. The optional `onActivity` callback is held in a ref
@@ -57,7 +58,8 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
     let lastEventAt = Date.now();
     let disposed = false;
     let sseHealthy = false;
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
+    let pollFailures = 0;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let boardGen = 0;
 
@@ -77,30 +79,46 @@ export function useBoardStream(options: BoardStreamOptions = {}): BoardStream {
       }, delay);
     };
 
-    const fetchBoard = async () => {
+    const fetchBoard = async (): Promise<boolean> => {
       const gen = ++boardGen;
       try {
         const res = await fetch("/api/board");
-        if (!res.ok) return;
+        if (!res.ok) return false;
         const snap = (await res.json()) as BoardSnapshot;
         if (!disposed && gen === boardGen && !sseHealthy) {
           setBoard(snap);
           setConnection("connected");
         }
-      } catch {}
+        return true;
+      } catch {
+        return false;
+      }
     };
 
     const stopPolling = () => {
       if (pollTimer != null) {
-        clearInterval(pollTimer);
+        clearTimeout(pollTimer);
         pollTimer = null;
       }
+      pollFailures = 0;
+    };
+
+    const scheduleNextPoll = (delay: number) => {
+      pollTimer = setTimeout(() => {
+        void (async () => {
+          const ok = await fetchBoard();
+          if (disposed || pollTimer == null) return;
+          pollFailures = ok ? 0 : pollFailures + 1;
+          scheduleNextPoll(
+            ok ? POLL_MS : Math.min(POLL_MS * 2 ** pollFailures, POLL_MAX_MS),
+          );
+        })();
+      }, delay);
     };
 
     const startPolling = () => {
       if (disposed || pollTimer != null) return;
-      void fetchBoard();
-      pollTimer = setInterval(() => void fetchBoard(), POLL_MS);
+      scheduleNextPoll(0);
     };
 
     const connect = () => {
