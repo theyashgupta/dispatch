@@ -85,10 +85,13 @@ const frameGuardHeaders: express.RequestHandler = (_req, res, next) => {
 };
 
 /**
- * Turn a body-parser JSON failure into a clean JSON 400 so a malformed request body returns
- * `{ error }` instead of Express's default HTML error page (which also leaks a SyntaxError, and
- * fires before a route's own auth check). Registered after the router so it only catches parse
- * errors that fell through the API.
+ * Turn ANY body-parser failure into a clean JSON error so a malformed or oversized request body
+ * returns `{ error }` instead of Express's default HTML error page (which leaks a stack). Matches on
+ * the body-parser error shape (an `entity.*` `type` string) rather than `SyntaxError` alone, so it
+ * also normalizes the `express.urlencoded` failures on the unauthenticated `/__remote/verify` route
+ * — e.g. a `PayloadTooLargeError` (`entity.too.large`, 413) from a body over its 1KB limit — which a
+ * `SyntaxError`-only guard would fall through to the default handler. Registered after the router so
+ * it only catches parse errors that fell through the API.
  */
 const jsonBodyErrorHandler: express.ErrorRequestHandler = (
   err,
@@ -96,11 +99,19 @@ const jsonBodyErrorHandler: express.ErrorRequestHandler = (
   res,
   next,
 ) => {
-  if (
-    err instanceof SyntaxError &&
-    (err as unknown as { type?: unknown }).type === "entity.parse.failed"
-  ) {
-    res.status(400).json({ error: "invalid JSON body" });
+  const shaped = err as {
+    type?: unknown;
+    status?: unknown;
+    statusCode?: unknown;
+  };
+  if (typeof shaped.type === "string" && shaped.type.startsWith("entity.")) {
+    const status =
+      typeof shaped.status === "number"
+        ? shaped.status
+        : typeof shaped.statusCode === "number"
+          ? shaped.statusCode
+          : 400;
+    res.status(status).json({ error: "invalid request body" });
     return;
   }
   next(err);
