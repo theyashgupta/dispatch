@@ -559,6 +559,121 @@ function checkRetainedSnapshot(home) {
   return violations;
 }
 
+/** `{ exists, mtimeMs, size }` for `path`, or an all-null/false shape when it doesn't exist. */
+function statFile(path) {
+  try {
+    const st = statSync(path);
+    return { exists: true, mtimeMs: st.mtimeMs, size: st.size };
+  } catch {
+    return { exists: false, mtimeMs: null, size: null };
+  }
+}
+
+/**
+ * Boot 2 must not overwrite the retained pre-migration snapshot: `board.db.pre-v3`'s mtime and
+ * size after boot 2 must equal what they were after boot 1 (this is only true because boot 2's
+ * persisted `schemaVersion` already equals {@link SESSION_SCHEMA_VERSION}'s target, so its own
+ * `load()` never calls `snapshotPreV3()` again — `snapshotPreV3()`'s own `existsSync` guard would
+ * also refuse a second write, but a boot that skips the call entirely is the stronger proof).
+ */
+function checkRetainedSnapshotStable(preV3AfterBoot1, preV3AfterBoot2) {
+  const violations = [];
+  const stable =
+    preV3AfterBoot1.exists &&
+    preV3AfterBoot2.exists &&
+    preV3AfterBoot1.mtimeMs === preV3AfterBoot2.mtimeMs &&
+    preV3AfterBoot1.size === preV3AfterBoot2.size;
+  console.log(
+    `retained snapshot: board.db.pre-v3 unchanged across boot 2 = ${stable} ` +
+      `(after boot 1: ${JSON.stringify(preV3AfterBoot1)}, after boot 2: ${JSON.stringify(preV3AfterBoot2)})`,
+  );
+  if (!stable) {
+    violations.push(
+      `board.db.pre-v3 changed between boot 1 and boot 2 (after boot 1: ${JSON.stringify(preV3AfterBoot1)}, ` +
+        `after boot 2: ${JSON.stringify(preV3AfterBoot2)}) — boot 2 must not overwrite the retained snapshot`,
+    );
+  }
+  return violations;
+}
+
+/**
+ * PASS iff `cardA`/`cardB` (the SAME fixture read back after two independent boots) agree on the
+ * flat field, the active session's field, and — for `branch` — that neither active session ever
+ * carries a `branch` key. Mirrors {@link columnPass} but compares two AFTER states to each other
+ * instead of BEFORE to AFTER, which is what makes idempotency (not just correctness) checkable.
+ */
+function afterColumnEqual(col, cardA, activeA, cardB, activeB) {
+  if (col === "branch") {
+    return (
+      deepEqual(cardA.branch, cardB.branch) &&
+      (!activeA || !("branch" in activeA)) &&
+      (!activeB || !("branch" in activeB))
+    );
+  }
+  return (
+    deepEqual(cardA[col], cardB[col]) &&
+    deepEqual(activeA?.[col], activeB?.[col])
+  );
+}
+
+/**
+ * The idempotency proof ROADMAP success criterion 2 requires: for every fixture card, boot 1 and
+ * boot 2 must agree on session COUNT, the session id SET (compared as sets, per card — this is
+ * what makes re-minting on the second pass detectable), `activeSessionId`, and all seven compared
+ * columns. A session-id-set mismatch is the single strongest signal a migration re-ran and re-
+ * minted ids on an already-migrated card.
+ */
+function checkCrossBoot(fixtures, boot1Cards, boot2Cards) {
+  const violations = [];
+  for (const before of fixtures) {
+    const c1 = boot1Cards.get(before.id);
+    const c2 = boot2Cards.get(before.id);
+    if (!c1 || !c2) {
+      violations.push(`${before.id}: missing from boot 1 or boot 2 read`);
+      continue;
+    }
+    const ids1 = new Set((c1.sessions ?? []).map((s) => s.id));
+    const ids2 = new Set((c2.sessions ?? []).map((s) => s.id));
+    const countOk = ids1.size === ids2.size;
+    const idSetOk = countOk && [...ids1].every((id) => ids2.has(id));
+    const pointerOk = c1.activeSessionId === c2.activeSessionId;
+    const active1 = resolveActive(c1);
+    const active2 = resolveActive(c2);
+    let columnsOk = true;
+    for (const col of COMPARED_COLUMNS) {
+      if (!afterColumnEqual(col, c1, active1, c2, active2)) {
+        columnsOk = false;
+        const detail =
+          col === "hookToken"
+            ? "<redacted>"
+            : `boot1=${JSON.stringify(c1[col])} boot2=${JSON.stringify(c2[col])}`;
+        violations.push(
+          `${before.id}.${col}: differs between boot 1 and boot 2 (${detail})`,
+        );
+      }
+    }
+    const rowOk = countOk && idSetOk && pointerOk && columnsOk;
+    console.log(
+      `  cross-boot     ${before.id.padEnd(13)} count(${ids1.size}==${ids2.size}) idSet=${idSetOk} activeSessionId=${pointerOk} columns=${columnsOk} ${rowOk ? "PASS" : "MISMATCH"}`,
+    );
+    if (!countOk) {
+      violations.push(
+        `${before.id}: session count differs between boot 1 (${ids1.size}) and boot 2 (${ids2.size})`,
+      );
+    } else if (!idSetOk) {
+      violations.push(
+        `${before.id}: session id set differs between boot 1 (${[...ids1]}) and boot 2 (${[...ids2]})`,
+      );
+    }
+    if (!pointerOk) {
+      violations.push(
+        `${before.id}: activeSessionId differs between boot 1 (${c1.activeSessionId}) and boot 2 (${c2.activeSessionId})`,
+      );
+    }
+  }
+  return violations;
+}
+
 function statRealBoardDb() {
   const p = join(homedir(), ".dispatch", "board.db");
   try {
@@ -597,6 +712,30 @@ async function main() {
     violations.push(...columnViolations);
     violations.push(...checkStructural(fixtures, boot1.cards));
     violations.push(...checkRetainedSnapshot(home));
+
+    const preV3Path = join(home, ".dispatch", "board.db.pre-v3");
+    const preV3AfterBoot1 = statFile(preV3Path);
+
+    const boot2 = await bootAndRead(home);
+    console.log(
+      `\nboot 2: pid=${boot2.pid} start=${boot2.startedAt} end=${boot2.endedAt}`,
+    );
+    console.log(`boot 2: meta.schemaVersion=${boot2.meta.schemaVersion}`);
+    console.log(
+      `boot PIDs distinct: boot1=${boot1.pid} boot2=${boot2.pid} distinct=${boot1.pid !== boot2.pid}`,
+    );
+    if (boot1.pid === boot2.pid) {
+      violations.push(
+        `boot 1 and boot 2 share the same pid (${boot1.pid}) — they were not genuinely separate processes`,
+      );
+    }
+
+    const preV3AfterBoot2 = statFile(preV3Path);
+    violations.push(
+      ...checkRetainedSnapshotStable(preV3AfterBoot1, preV3AfterBoot2),
+    );
+
+    violations.push(...checkCrossBoot(fixtures, boot1.cards, boot2.cards));
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
