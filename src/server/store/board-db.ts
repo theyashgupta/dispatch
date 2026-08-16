@@ -71,6 +71,14 @@ export interface BoardMeta {
    * Optional — defaults to 0 at hydrate time, matching `localTicketCounter`'s precedent.
    */
   groupTicketCounter?: number;
+  /**
+   * Version counter for the store's boot-time schema migrations, written once by the
+   * session-entity migration pass (Phase 90). Optional — defaults to `0` on a legacy row that
+   * predates it, matching the `localTicketCounter`/`groupTicketCounter` precedent. This is the
+   * idempotency gate a later boot reads back to no-op: once persisted at the current migration's
+   * target version, the migration pass never runs again against the same database.
+   */
+  schemaVersion?: number;
 }
 
 /**
@@ -90,7 +98,25 @@ export interface BoardDb {
   ): number[];
   importParsed(parsed: Partial<BoardSnapshot>): void;
   listEvents(cardId: string | null, limit: number): ActivityEvent[];
-  backupTick(): Promise<void>;
+  /**
+   * Fold a WAL-consistent snapshot into the rotating `.bak.N` chain, throttled to once per hour
+   * unless `force` is set. Never throws — a failure is logged once and the primary write proceeds
+   * unaffected.
+   * @remarks `force` exists so a one-time migration can fold a genuine pre-migration snapshot into
+   * the rotating chain without waiting out the hourly throttle; it skips ONLY the elapsed check —
+   * the `VACUUM INTO` and slot rotation stay identical, and the never-throw contract is unchanged.
+   */
+  backupTick(force?: boolean): Promise<void>;
+  /**
+   * Take the one-off, never-rotated pre-migration copy of `board.db` at `${BOARD_DB_PATH}.pre-v3`.
+   * Best-effort and NEVER throws, mirroring `backupTick`'s contract, so a snapshot failure can never
+   * fail boot.
+   * @remarks Guarded by an `existsSync` check on the TARGET so a second boot can never overwrite a
+   * legitimate pre-migration snapshot with an already-migrated database. The rotating five-slot
+   * `.bak.N` chain is not sufficient on its own for this purpose: five boots can age a
+   * pre-migration snapshot out of the chain, while this file is deliberately never rotated away.
+   */
+  snapshotPreV3(): void;
 }
 
 /**
@@ -495,13 +521,15 @@ export function openBoardDb(): BoardDb {
         ts: r.ts,
       }));
     },
-    backupTick(): Promise<void> {
+    backupTick(force?: boolean): Promise<void> {
       try {
         let elapsed = true;
-        try {
-          const { mtimeMs } = fs.statSync(bak(1));
-          elapsed = Date.now() - mtimeMs >= HOUR_MS;
-        } catch {}
+        if (!force) {
+          try {
+            const { mtimeMs } = fs.statSync(bak(1));
+            elapsed = Date.now() - mtimeMs >= HOUR_MS;
+          } catch {}
+        }
         if (elapsed) {
           const tmp = `${BOARD_DB_PATH}.bak.tmp`;
           fs.rmSync(tmp, { force: true });
@@ -523,6 +551,19 @@ export function openBoardDb(): BoardDb {
         }
       }
       return Promise.resolve();
+    },
+    snapshotPreV3() {
+      const target = `${BOARD_DB_PATH}.pre-v3`;
+      try {
+        if (!fs.existsSync(target)) {
+          fs.copyFileSync(BOARD_DB_PATH, target);
+        }
+      } catch (err) {
+        console.error(
+          "[store] board.db.pre-v3 snapshot failed (migration proceeds unaffected):",
+          (err as Error).message,
+        );
+      }
     },
   };
 }
