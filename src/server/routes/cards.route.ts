@@ -446,6 +446,12 @@ function memberIneligibleReason(card: Card | undefined): string | null {
  * brand-new group card has no prior `card.workspace` to fall back to), then mints the group card
  * and calls the UNMODIFIED `startSession` keyed by its id — the saga itself needs zero
  * group-awareness (it only ever reads `card.workspace`/`card.identifier`).
+ * @remarks The 202 body passes the card through {@link redactCard}, never the live `Map` entry.
+ * By the time this responds, `setCardWorkspace` has already minted the card's first session
+ * record, so serializing the live object would put the whole `sessions` array on the wire — and
+ * the per-session `hookToken` with it the moment `startSession`'s internal `await` placement
+ * changes. A secret boundary must not depend on the scheduling of a `void`-ed promise in another
+ * module, so every card-emitting route reaches the wire through the one redaction chokepoint.
  */
 async function createGroupHandler(req: Request, res: Response): Promise<void> {
   const body = req.body as
@@ -565,7 +571,7 @@ async function createGroupHandler(req: Request, res: Response): Promise<void> {
   const groupCard = groupResult.card;
   await store.setCardWorkspace(groupCard.id, { folder, repos });
   void startSession(groupCard.id, extraDirection, config, { playbook });
-  res.status(202).json({ started: true, card: groupCard });
+  res.status(202).json({ started: true, card: redactCard(groupCard) });
 }
 
 cardsRouter.post("/cards/group", createGroupHandler);
@@ -772,7 +778,7 @@ cardsRouter.post("/cards", async (req, res) => {
   }
 
   const card = await store.createLocalCard(title, description);
-  res.status(201).json(card);
+  res.status(201).json(redactCard(card));
 });
 
 /**
