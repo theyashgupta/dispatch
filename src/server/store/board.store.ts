@@ -116,6 +116,85 @@ function syncedFieldsChanged(prev: Card, next: Card): boolean {
   );
 }
 
+/**
+ * The version `load()`'s boot migration pass writes into the meta row's `schemaVersion` field
+ * (SESS-04), and the value a later boot compares its own persisted version against to no-op —
+ * the idempotency gate that makes a second boot produce the same session count and the same
+ * session ids (`NEW-21`). Bump this ONLY when a new migration pass genuinely needs to run again.
+ */
+const SESSION_SCHEMA_VERSION = 1;
+
+/**
+ * Does at least one raw card in `cards` still need {@link migrateCardsToSessionEntity}? Read-only
+ * — never mutates — so `load()` can decide whether the reversibility snapshots are worth taking
+ * before running the migration pass for real, and skip them outright on a fresh install with zero
+ * cards or a board with no session-bearing cards.
+ */
+function needsSessionEntityMigration(cards: Card[]): boolean {
+  return cards.some(
+    (card) =>
+      card.sessions === undefined &&
+      (card.tmuxSession !== undefined ||
+        card.ttydPort !== undefined ||
+        card.hookToken !== undefined ||
+        card.claudeSessionId !== undefined ||
+        card.workspacePath !== undefined ||
+        card.workspace !== undefined),
+  );
+}
+
+/**
+ * Migrate every v2.9-shaped card in `cards` into the session-entity shape, in place, returning
+ * the count migrated. Per-card idempotent: a card already carrying `sessions` is skipped
+ * untouched, so a re-run can never re-mint an id. A card holding at least one of the six session
+ * fields gets exactly ONE session record, built as an object literal with the six fields copied
+ * straight across — absent fields stay `undefined`, never synthesized, never dropped — and
+ * `card.activeSessionId` set to that record's id. A card with none of the six fields gets neither
+ * `sessions` nor `activeSessionId` (not an empty array, not a placeholder record) — the "zero
+ * session records, no active pointer" invariant. Never writes any flat field, and never writes
+ * `card.branch`.
+ */
+function migrateCardsToSessionEntity(cards: Card[]): number {
+  let migrated = 0;
+  for (const card of cards) {
+    if (card.sessions !== undefined) continue;
+    const {
+      tmuxSession,
+      ttydPort,
+      hookToken,
+      claudeSessionId,
+      workspacePath,
+      workspace,
+    } = card;
+    if (
+      tmuxSession === undefined &&
+      ttydPort === undefined &&
+      hookToken === undefined &&
+      claudeSessionId === undefined &&
+      workspacePath === undefined &&
+      workspace === undefined
+    ) {
+      continue;
+    }
+    const now = new Date().toISOString();
+    const session: Session = {
+      id: randomUUID(),
+      createdAt: now,
+      updatedAt: now,
+      tmuxSession,
+      ttydPort,
+      hookToken,
+      claudeSessionId,
+      workspacePath,
+      workspace,
+    };
+    card.sessions = [session];
+    card.activeSessionId = session.id;
+    migrated += 1;
+  }
+  return migrated;
+}
+
 class BoardStore extends EventEmitter {
   /** The sole mutable truth. */
   private readonly cards = new Map<string, Card>();
@@ -176,6 +255,12 @@ class BoardStore extends EventEmitter {
    * 63-CONTEXT.md Claude's Discretion.
    */
   private groupTicketCounter = 0;
+  /**
+   * The persisted `meta.schemaVersion` counter (SESS-04), read back in {@link load} and re-emitted
+   * by {@link buildMeta} so a migration that already ran stays recorded across every later
+   * mutation's persist. Defaults to `0` on a legacy row that predates it.
+   */
+  private schemaVersion = 0;
   /** Serializes every mutation so mutate -> persist -> emit runs to completion before the next. */
   private queue: Promise<void> = Promise.resolve();
   /**
@@ -393,6 +478,7 @@ class BoardStore extends EventEmitter {
       lastUsed: this.lastUsedFolder,
       localTicketCounter: this.localTicketCounter,
       groupTicketCounter: this.groupTicketCounter,
+      schemaVersion: this.schemaVersion,
     };
   }
 
@@ -406,6 +492,22 @@ class BoardStore extends EventEmitter {
    * hydrateFromParsed used before, so interrupted-provisioning -> retryable startError, the
    * unconditional `terminalError` reset, and the column-guarded `ttydPort` handling (ROBU-01)
    * happen identically on the import and DB-row paths.
+   *
+   * Between reading the raw rows and hydrating them, the session-entity boot migration runs
+   * (SESS-04, `NEW-21`): every v2.9-shaped card gets projected into exactly one `Session` record
+   * behind `card.activeSessionId`, BEFORE `hydrateFromParsed` — the point any reader first sees a
+   * card — ever runs.
+   * @remarks The persisted `meta.schemaVersion` is the idempotency gate: a boot whose persisted
+   * version is already at {@link SESSION_SCHEMA_VERSION} takes no snapshot and runs no migration
+   * pass at all, so a second boot reproduces the same session count and the same session ids. When
+   * migration IS due, the two reversibility snapshots run in the approved order — the cheap
+   * never-rotated `snapshotPreV3()` copy FIRST, then the forced `backupTick(true)` fold into the
+   * rotating chain — so even if the (contractually never-throwing) forced tick somehow threw, the
+   * retained snapshot already landed on disk. Both are skipped only when nothing on the board needs
+   * migrating (a fresh install, or a board with no session-bearing card). The migrated in-memory
+   * state is persisted through the EXISTING transactional `enqueue`/`persist` path rather than a
+   * separate raw-SQL write, so a crash mid-persist rolls back to the unmigrated, version-0 meta row
+   * and the next boot re-runs the pass cleanly — a half-migrated database is impossible.
    * @see docs/ARCHITECTURE.md#single-writer-store
    */
   async load(): Promise<void> {
@@ -428,6 +530,20 @@ class BoardStore extends EventEmitter {
       }
     }
     const { cards, meta } = this.db.readAll();
+    const persistedSchemaVersion =
+      typeof meta.schemaVersion === "number" ? meta.schemaVersion : 0;
+    const migrationDue = persistedSchemaVersion < SESSION_SCHEMA_VERSION;
+    let migratedCount = 0;
+    if (migrationDue) {
+      if (needsSessionEntityMigration(cards)) {
+        this.db.snapshotPreV3();
+        await this.db.backupTick(true);
+        migratedCount = migrateCardsToSessionEntity(cards);
+      }
+      this.schemaVersion = SESSION_SCHEMA_VERSION;
+    } else {
+      this.schemaVersion = persistedSchemaVersion;
+    }
     this.hydrateFromParsed({
       cards,
       syncedAt: meta.syncedAt ?? null,
@@ -439,6 +555,12 @@ class BoardStore extends EventEmitter {
     this.groupTicketCounter =
       typeof meta.groupTicketCounter === "number" ? meta.groupTicketCounter : 0;
     console.log(`[store] loaded ${this.cards.size} card(s) from board.db.`);
+    if (migrationDue) {
+      console.log(
+        `[store] session-entity migration: migrated ${migratedCount} card(s), schema version now ${this.schemaVersion}.`,
+      );
+      await this.enqueue(() => []);
+    }
   }
 
   /**
