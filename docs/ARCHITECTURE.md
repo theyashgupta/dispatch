@@ -160,7 +160,8 @@ getters, because that is what keeps the reader modules, raw `board.db` inspectio
 recovery byte-identical to v2.9 — a getter would require every one of those paths to change how it
 reads a card.
 
-The ten non-owner reader files whose read expressions of the six fields must never change are:
+The ten non-owner **server-side** reader files whose read expressions of the six fields must never
+change are:
 `src/server/bootstrap/reconcile.ts`, `src/server/adapters/artifact-detect.ts`,
 `src/server/adapters/terminal-proxy.ts`, `src/server/adapters/ttyd.ts`,
 `src/server/adapters/markers/watcher.ts`, `src/server/routes/cards.route.ts`,
@@ -172,6 +173,19 @@ OWNER — it is expected to change, since it is where `setActiveSession` itself 
 of the six fields and is therefore deliberately absent from this list. In `steps.ts`,
 `ctx.workspacePath` is the `SagaContext`'s own string field, NOT `card.workspacePath` — it must
 never be counted as a Card read against this list.
+
+The census above is server-side only. The **client-side** readers are enumerated separately here,
+because a phase that changes a projection must consult both halves, and a list presented as complete
+while omitting half the readers is worse than no list at all. Seven `src/web` files hold read
+expressions against the six flat fields on the wire `Card`: `src/web/App.tsx`,
+`src/web/features/board/CardView.tsx`, `src/web/features/board/Column.tsx`,
+`src/web/features/detail/DetailPanel.tsx` (`tmuxSession` only — its `ttydPort` gate reads
+`activeSession`, per the rule below), `src/web/features/detail/PanelHeader.tsx`,
+`src/web/features/detail/SessionLostSection.tsx`, and `src/web/lib/card-badges.ts`. Two files are
+deliberately excluded and named so the exclusion is a decision rather than an omission:
+`src/web/features/detail/TerminalRegion.tsx` reads the SESSION, not the projection
+(`activeSession.ttydPort`), and `src/web/lib/api.ts` mentions two of the field names in JSDoc prose
+with no read expression at all.
 
 A card is never observable with `sessions` set and no `activeSessionId`, nor with an
 `activeSessionId` naming a session absent from `sessions`: `setActiveSession` mints a session
