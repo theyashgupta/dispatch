@@ -90,7 +90,7 @@ export function TerminalRegion({ card }: TerminalRegionProps) {
               Reconnect
             </Button>
           </div>
-        ) : c.ttydPort != null ? (
+        ) : c.activeSession?.ttydPort != null ? (
           <iframe
             src={`/sessions/${c.id}/terminal/`}
             title={`Live terminal for ${c.identifier}`}
