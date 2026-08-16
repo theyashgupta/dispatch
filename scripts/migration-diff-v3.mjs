@@ -6,7 +6,12 @@
  * v2.9-shaped card into exactly the right session shape, across two genuinely separate boots, with
  * a retained pre-migration snapshot — not "does the board look right".
  *
- * SANDBOX SAFETY (non-negotiable, enforced by assertSandboxSafe before any fs/spawn call): this
+ * SANDBOX SAFETY IS SCOPED TO STATE ON DISK, NOT TO PROCESS STATE. What assertSandboxSafe enforces
+ * before any fs/spawn call is the database and the port; it does NOT and cannot fence the
+ * machine-wide ttyd sweep documented under KNOWN, ACCEPTED SIDE EFFECT below, and the
+ * before/after mtime+size assertion at the end verifies only board.db — it will report a clean
+ * PASS on a run that reaped every live ttyd. Read that section before running this against a
+ * machine with live sessions. Within that scope the guarantee is absolute: this
  * harness seeds a throwaway board.db and boots the BUILT server twice against it. It never opens,
  * migrates, or mutates the real `~/.dispatch/board.db` — every sandbox HOME lives under
  * `os.tmpdir()` with a `dispatch-migration-diff-v3-` basename, verified structurally, and the
@@ -87,6 +92,11 @@ function sleep(ms) {
  * The structural guarantee behind "never touches the user's real board.db or port 4700": called
  * before any filesystem write or child-process spawn touching `home`. Throws (never silently
  * degrades) if any check fails.
+ * @remarks Its scope is exactly the four checks below — port, real-HOME identity, tmpdir
+ * containment, basename prefix. PROCESS state is deliberately outside that scope: nothing here
+ * prevents the sandbox server's boot-time `reconcileSessions()` from sweeping `dsp-` ttyd
+ * processes machine-wide, because that sweep is not scoped by HOME. The name promises a sandbox
+ * for the DATABASE; do not read it as a sandbox for the machine.
  */
 function assertSandboxSafe(home) {
   if (SANDBOX_PORT === 4700) {
