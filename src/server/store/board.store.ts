@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
@@ -11,6 +12,7 @@ import type {
   PreviewInfo,
   PrInfo,
   ProbeUnknown,
+  Session,
   SessionFields,
   SourceIssue,
   StartError,
@@ -234,6 +236,55 @@ class BoardStore extends EventEmitter {
     if (card.hookToken) this.releaseHookToken(card.hookToken, card.id);
     card.hookToken = undefined;
     card.hookRoutedAt = undefined;
+  }
+
+  /**
+   * The single projection chokepoint (`NEW-21`): the six flat session fields on `Card` —
+   * `tmuxSession`, `ttydPort`, `hookToken`, `claudeSessionId`, `workspacePath`, `workspace` — are a
+   * PROJECTION of the card's ACTIVE session record, and this is the ONLY method in the codebase
+   * that may assign them. Every write site funnels its field(s) through this call instead of
+   * assigning the card directly.
+   * @remarks Create-if-absent minting: if no session resolves from `card.activeSessionId` AND
+   * `patch` carries at least one defined value, a fresh {@link Session} is minted (opaque
+   * `randomUUID()` id, `createdAt`/`updatedAt` stamped to the same instant) and appended to
+   * `card.sessions`, with `card.activeSessionId` set to its id in the SAME synchronous block — so
+   * no interleaving can ever observe `sessions` without an active pointer, or an active pointer
+   * naming a session that does not exist. The mint is guarded by an ALL-UNDEFINED-PATCH check: if
+   * no session resolves and every value in `patch` is `undefined`, nothing is minted — without
+   * this, `hydrateFromParsed`'s To-Do `ttydPort` correction would mint an empty session record on
+   * every To Do card at boot, contradicting the invariant that a card with no session owns zero
+   * session records.
+   * @remarks Clear-in-place: a mutator that clears session fields (`markSessionLost`,
+   * `recordResumeFailure`, `recordCleanupWarning`, `finishCleanup`) sets those fields to
+   * `undefined` ON the existing active session record. It NEVER removes the record from
+   * `card.sessions` and NEVER clears `card.activeSessionId` — this reproduces today's exact
+   * semantics (one record whose individual fields may legitimately be undefined) and defers the
+   * dead-session removal/tombstone question to the phases that own liveness and cleanup.
+   * @see docs/ARCHITECTURE.md#session-projection-chokepoint
+   */
+  private setActiveSession(
+    card: Card,
+    patch: Partial<Omit<Session, "id" | "createdAt" | "updatedAt">>,
+  ): void {
+    let active = card.sessions?.find((s) => s.id === card.activeSessionId);
+    const patchHasValue = Object.values(patch).some((v) => v !== undefined);
+    if (!active && patchHasValue) {
+      const now = new Date().toISOString();
+      active = { id: randomUUID(), createdAt: now, updatedAt: now };
+      card.sessions = card.sessions ?? [];
+      card.sessions.push(active);
+      card.activeSessionId = active.id;
+    }
+    if (active) {
+      Object.assign(active, patch);
+      active.updatedAt = new Date().toISOString();
+    }
+    card.tmuxSession = active?.tmuxSession;
+    card.ttydPort = active?.ttydPort;
+    card.hookToken = active?.hookToken;
+    card.claudeSessionId = active?.claudeSessionId;
+    card.workspacePath = active?.workspacePath;
+    card.workspace = active?.workspace;
   }
 
   /**
