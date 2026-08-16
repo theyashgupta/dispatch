@@ -303,7 +303,7 @@ export function DetailPanel({
       spawnedForRef.current = null;
       return;
     }
-    if (card.ttydPort != null) {
+    if (card.activeSession?.ttydPort != null) {
       spawnedForRef.current = null;
       return;
     }

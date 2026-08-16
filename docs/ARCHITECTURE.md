@@ -178,6 +178,22 @@ A card is never observable with `sessions` set and no `activeSessionId`, nor wit
 record and assigns `card.activeSessionId` in the same synchronous block inside the store's
 single-writer queue, so no interleaving can ever expose a half-state.
 
+**One decision reads one wire field.** `activeSession` is a deliberate wire-level redundancy with
+the six flat fields, so that a wire-shape regression shows up on screen (a permanent "Connecting to
+terminal…") instead of hiding in the store. That property survives only while every gate belonging
+to ONE decision reads ONE field. The live case is the terminal: `TerminalRegion.tsx` renders the
+terminal `<iframe>` on `activeSession.ttydPort`, so `DetailPanel.tsx`'s "a terminal already exists,
+do not spawn" gate reads `activeSession.ttydPort` too — NOT the flat `card.ttydPort`. Split across
+both fields, the intended canary becomes a wedge: when they disagree in the direction "flat port
+set, no active session", the panel shows "Connecting to terminal…" forever while suppressing the
+`ensureTerminal` spawn that would clear it, and the Reconnect affordance lives on the
+`terminalError` branch, which is not the branch being rendered. That disagreement is reachable —
+a v2.9 binary run against a migrated `board.db` round-trips `sessions`/`activeSessionId` as opaque
+JSON while writing the flat fields directly, and the next v3.0 boot sees `schemaVersion === 1` and
+runs no repair pass. This is a wire-read pairing, not a store invariant, so it is not something
+`check-invariants.mjs` fences; it is recorded here because a future phase moving one of the two
+gates without the other reintroduces the wedge.
+
 ### Marker Protocol
 
 The agent tells the board its state out-of-band through the `DISPATCH_STATUS` marker protocol: it prints

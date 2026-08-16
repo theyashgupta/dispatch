@@ -244,6 +244,12 @@ export interface Card {
    * purpose, so a wire-shape regression in this field is visible on screen (a permanent "Connecting
    * to terminal…") instead of hiding inside the store. The full `sessions` array is deliberately
    * not part of the wire shape.
+   * @remarks That visible-regression property only holds while EVERY gate in one decision reads
+   * ONE field. `TerminalRegion` renders the terminal `<iframe>` on `activeSession.ttydPort`, so
+   * `DetailPanel`'s "a terminal already exists, do not spawn" gate reads it too. Splitting that
+   * single decision across `activeSession.ttydPort` and the flat `card.ttydPort` turns the intended
+   * canary into a wedge: the panel would show "Connecting to terminal…" while suppressing the spawn
+   * that clears it, with no recovery affordance on that branch.
    * @see docs/ARCHITECTURE.md#session-projection-chokepoint
    */
   activeSession?: ActiveSessionWire;
