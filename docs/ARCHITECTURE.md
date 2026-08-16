@@ -19,6 +19,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
 - [Module Map](#module-map)
 - Cross-Module Invariants
   - [Single Writer Store](#single-writer-store)
+  - [Session Projection Chokepoint](#session-projection-chokepoint)
   - [Marker Protocol](#marker-protocol)
   - [Column Transition Specification](#column-transition-specification)
   - [Group Card Titles](#group-card-titles)
@@ -131,6 +132,42 @@ own tracked and in-flight sessions when reconciling (`WR-02`), so a ttyd spawn r
 `adapters/ttyd.ts` + `adapters/markers/watcher.ts` and referenced here only so the single-writer
 picture is complete. Finally, the store is content-free in its logging: a failed persist or a
 failed mutation logs only the error, never card fields, marker reasons, or pane text.
+
+### Session Projection Chokepoint
+
+A card's six flat session fields — `tmuxSession`, `ttydPort`, `hookToken`, `claudeSessionId`,
+`workspacePath`, `workspace` — are a **projection** of `card.sessions[card.activeSessionId]`,
+never the truth (`NEW-21`). The truth is the `Session` record (`src/shared/types.ts`), which a card
+can hold N of; the flat fields exist only so the eleven reader modules below keep compiling and
+reading byte-identical values while the entity lands underneath them. `branch` and `hookRoutedAt`
+sit adjacent to the six on `Card` but are card-only and stay OUT of the chokepoint's scope — they
+do not move onto the session record and are not projected from it.
+
+Exactly one method may assign the six flat fields: `BoardStore#setActiveSession`
+(`src/server/store/board.store.ts`). Every other assignment of any of the six field names anywhere
+in `src/` is a defect, and `scripts/check-invariants.mjs` polices this repo-wide by grep. The flat
+fields stay **persisted** (rewritten on every session mutation) rather than becoming derived-on-read
+getters, because that is what keeps the reader modules, raw `board.db` inspection, and crash
+recovery byte-identical to v2.9 — a getter would require every one of those paths to change how it
+reads a card.
+
+The ten non-owner reader files whose read expressions of the six fields must never change are:
+`src/server/bootstrap/reconcile.ts`, `src/server/adapters/artifact-detect.ts`,
+`src/server/adapters/terminal-proxy.ts`, `src/server/adapters/ttyd.ts`,
+`src/server/adapters/markers/watcher.ts`, `src/server/routes/cards.route.ts`,
+`src/server/services/orchestration/start-session.ts`,
+`src/server/services/orchestration/cleanup.ts`, `src/server/services/orchestration/steps.ts`, and
+`src/server/store/mapping.ts`. `src/server/store/board.store.ts` is the eleventh reader and the
+OWNER — it is expected to change, since it is where `setActiveSession` itself lives.
+`src/server/services/orchestration/cleanup-scheduler.ts` was verified to contain ZERO direct reads
+of the six fields and is therefore deliberately absent from this list. In `steps.ts`,
+`ctx.workspacePath` is the `SagaContext`'s own string field, NOT `card.workspacePath` — it must
+never be counted as a Card read against this list.
+
+A card is never observable with `sessions` set and no `activeSessionId`, nor with an
+`activeSessionId` naming a session absent from `sessions`: `setActiveSession` mints a session
+record and assigns `card.activeSessionId` in the same synchronous block inside the store's
+single-writer queue, so no interleaving can ever expose a half-state.
 
 ### Marker Protocol
 

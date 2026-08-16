@@ -42,8 +42,10 @@ const ID_RE =
  * ONLY together with a deliberate, human-ratified baseline regeneration.
  * @remarks Moved from 120 to 121 for the deliberate one-ID terminal-fence
  * re-freeze (`NEW-20`) — see docs/ARCHITECTURE.md#design-system-invariants.
+ * @remarks Moved from 121 to 122 for the deliberate one-ID session-projection
+ * chokepoint re-freeze (`NEW-21`) — see docs/ARCHITECTURE.md#session-projection-chokepoint.
  */
-const FROZEN_COUNT = 121;
+const FROZEN_COUNT = 122;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");

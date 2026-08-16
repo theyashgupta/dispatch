@@ -221,6 +221,23 @@ export interface Card {
   /** Port of the per-session ttyd instance. */
   ttydPort?: number;
   /**
+   * All session records this card owns, in creation order. Absent (not `[]`) on a card that has
+   * never carried session data. The six flat fields above (`tmuxSession`, `ttydPort`, `hookToken`,
+   * `claudeSessionId`, `workspacePath`, `workspace`) are a PROJECTION of the session named by
+   * `activeSessionId`, written only by the store's single `setActiveSession` chokepoint — never
+   * assigned directly anywhere else. A card is never observable with `sessions` set and no
+   * `activeSessionId`, nor with an `activeSessionId` naming a session absent from `sessions`.
+   * @see docs/ARCHITECTURE.md#session-projection-chokepoint
+   */
+  sessions?: Session[];
+  /**
+   * The id of this card's ACTIVE session within `sessions` — the one the six flat fields mirror.
+   * Paired 1:1 with `sessions` being present; absent on a card that has never carried session
+   * data. The store's `setActiveSession` chokepoint is the only writer of either field.
+   * @see docs/ARCHITECTURE.md#session-projection-chokepoint
+   */
+  activeSessionId?: string;
+  /**
    * Set when the card's `dsp-<identifier>` tmux session is gone — by boot reconcile (session
    * absent from the live `list-sessions` set after a reboot) AND by the Plan-02 watcher's
    * runtime dead-session detector (3 consecutive failed captures). Cleared by completeStart on
@@ -328,6 +345,46 @@ export interface Card {
    * the group card.
    */
   groupId?: string;
+}
+
+/**
+ * A persisted session record — the entity a v3.0 card can hold N of. `NEW-21`'s projection
+ * chokepoint mirrors the ACTIVE one of these (named by `Card.activeSessionId`) onto the six flat
+ * fields still living on `Card`, written only by `BoardStore#setActiveSession`. This is a
+ * DIFFERENT type from `SessionFields` below (the saga-input DTO passed into `completeStart`/
+ * `attachExistingSession`) — do not unify, rename, or extend either to look like the other.
+ * @see docs/ARCHITECTURE.md#session-projection-chokepoint
+ */
+export interface Session {
+  /**
+   * Opaque `randomUUID()` identity, minted once at record creation. NEVER derived from
+   * `tmuxSession` or any other mutable field, so a tmux session rename or restart can never
+   * collide two sessions onto one identity.
+   */
+  id: string;
+  /** ISO timestamp the record was minted, owned by the record (not by the card). */
+  createdAt: string;
+  /** ISO timestamp of the record's last field mutation, owned by the record. */
+  updatedAt: string;
+  /** tmux session name hosting the claude REPL. Mirrored onto `Card.tmuxSession` while active. */
+  tmuxSession?: string;
+  /** Port of the per-session ttyd instance. Mirrored onto `Card.ttydPort` while active. */
+  ttydPort?: number;
+  /**
+   * Per-session hook-auth secret. NEVER serialized to the wire — the store's
+   * `redactCard`/`snapshot()` chokepoint strips it from the card AND from every session copy,
+   * matching `Card.hookToken`'s policy exactly.
+   */
+  hookToken?: string;
+  /**
+   * The Claude CLI session id captured first-event-wins from the hook payload. NON-SECRET by
+   * explicit decision: rides `snapshot()` unredacted, matching `Card.claudeSessionId`.
+   */
+  claudeSessionId?: string;
+  /** Per-ticket workspace folder containing the git worktrees. Mirrored onto `Card.workspacePath` while active. */
+  workspacePath?: string;
+  /** Chosen workspace snapshot at start — absolute repo paths. Mirrored onto `Card.workspace` while active. */
+  workspace?: { folder: string; repos: { path: string; base: string }[] };
 }
 
 /**
