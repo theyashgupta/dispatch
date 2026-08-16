@@ -238,6 +238,16 @@ export interface Card {
    */
   activeSessionId?: string;
   /**
+   * Wire-only projection of the session named by `activeSessionId`, populated exclusively by the
+   * store's `redactCard` chokepoint and absent from the persisted row. It mirrors the same session
+   * the six flat fields above already project — a deliberate redundancy the detail panel reads on
+   * purpose, so a wire-shape regression in this field is visible on screen (a permanent "Connecting
+   * to terminal…") instead of hiding inside the store. The full `sessions` array is deliberately
+   * not part of the wire shape.
+   * @see docs/ARCHITECTURE.md#session-projection-chokepoint
+   */
+  activeSession?: ActiveSessionWire;
+  /**
    * Set when the card's `dsp-<identifier>` tmux session is gone — by boot reconcile (session
    * absent from the live `list-sessions` set after a reboot) AND by the Plan-02 watcher's
    * runtime dead-session detector (3 consecutive failed captures). Cleared by completeStart on
@@ -384,6 +394,27 @@ export interface Session {
   /** Per-ticket workspace folder containing the git worktrees. Mirrored onto `Card.workspacePath` while active. */
   workspacePath?: string;
   /** Chosen workspace snapshot at start — absolute repo paths. Mirrored onto `Card.workspace` while active. */
+  workspace?: { folder: string; repos: { path: string; base: string }[] };
+}
+
+/**
+ * Wire-only projection of the active `Session` record, built by the store's `redactCard`
+ * chokepoint via a field pick (never a spread) so the secret field is omitted BY CONSTRUCTION — a
+ * future field added to `Session` cannot silently reintroduce it through this type. Never the
+ * persisted shape; the full record (with the secret) is what lives on disk.
+ */
+export interface ActiveSessionWire {
+  /** Mirrors `Session.id`. */
+  id: string;
+  /** Mirrors `Session.tmuxSession`. */
+  tmuxSession?: string;
+  /** Mirrors `Session.ttydPort`. */
+  ttydPort?: number;
+  /** Mirrors `Session.claudeSessionId`. */
+  claudeSessionId?: string;
+  /** Mirrors `Session.workspacePath`. */
+  workspacePath?: string;
+  /** Mirrors `Session.workspace`. */
   workspace?: { folder: string; repos: { path: string; base: string }[] };
 }
 
