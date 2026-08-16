@@ -59,6 +59,20 @@ const TERMINAL_CLIENT_PATHS = [
   join("src", "web", "terminal-main.ts"),
   join("src", "web", "terminal.html"),
 ];
+const BOARD_STORE_PATH = join("src", "server", "store", "board.store.ts");
+const SET_ACTIVE_SESSION_MARKER = "private setActiveSession(";
+const SESSION_FIELDS = [
+  "tmuxSession",
+  "ttydPort",
+  "hookToken",
+  "claudeSessionId",
+  "workspacePath",
+  "workspace",
+];
+const SESSION_FIELD_ASSIGN_RE = new RegExp(
+  `(\\w+)\\.(?:${SESSION_FIELDS.join("|")})\\b\\s*=(?![=>])`,
+  "g",
+);
 
 /**
  * Recursively list every .ts/.tsx source file, skipping the built web bundle.
@@ -293,6 +307,143 @@ function checkTerminalFence() {
 }
 
 /**
+ * Locate `setActiveSession`'s own method body inside `board.store.ts` by brace-counting from its
+ * declaration marker — the same plain-text marker-slice idiom `checkStripCascades` uses for the
+ * narrow-viewport `@media` block, not an AST parse. The method's parameter types contain no
+ * braces of their own, so the FIRST `{` found after the marker is reliably the method's opening
+ * brace; depth-counting from there to the matching `}` needs no knowledge of the method's contents.
+ * @param content Full text of `board.store.ts`.
+ * @returns `[startIndex, endIndex]` character offsets spanning the marker through the method's
+ * closing brace (inclusive), or `null` if the marker is missing.
+ */
+function sliceSetActiveSessionBody(content) {
+  const markerIdx = content.indexOf(SET_ACTIVE_SESSION_MARKER);
+  if (markerIdx === -1) return null;
+  const braceStart = content.indexOf("{", markerIdx);
+  if (braceStart === -1) return null;
+  let depth = 0;
+  for (let i = braceStart; i < content.length; i++) {
+    if (content[i] === "{") depth++;
+    else if (content[i] === "}") {
+      depth--;
+      if (depth === 0) return [markerIdx, i];
+    }
+  }
+  return null;
+}
+
+/**
+ * Find every `<receiver>.<sessionField> =` assignment in a file's text, one line at a time.
+ * @remarks The `(?![=>])` guard immediately after the required `=` rejects `==`/`===`/`=>` — a
+ * `!=`/`!==`/`<=`/`>=` comparison never reaches that guard at all, because the character
+ * immediately after the field name (once whitespace is skipped) is `!`/`<`/`>`, not the literal
+ * `=` this pattern anchors on, so those comparisons fail to match in the first place. The `\b`
+ * after the field alternation is load-bearing: without it `workspace` would falsely match as a
+ * prefix of `workspaceFolders`/`workspacePath`, and `hookToken`/`hookRoutedAt` would otherwise
+ * rely on lucky non-overlap instead of an asserted boundary.
+ * @param content Full file text.
+ * @returns One entry per match: its 1-based line number, absolute character offset into
+ * `content` (for the tier-2 slice-containment check), and the receiver identifier text (so
+ * `ctx.workspacePath` — `SagaContext`'s own unrelated field, not `card.workspacePath` — can be
+ * excluded by name).
+ */
+function scanSessionFieldAssignments(content) {
+  const results = [];
+  const lines = content.split("\n");
+  let offset = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const re = new RegExp(SESSION_FIELD_ASSIGN_RE.source, "g");
+    let m;
+    while ((m = re.exec(line))) {
+      results.push({
+        lineNumber: i + 1,
+        charOffset: offset + m.index,
+        receiver: m[1],
+      });
+    }
+    offset += line.length + 1;
+  }
+  return results;
+}
+
+/**
+ * Session-projection chokepoint gate (`NEW-21`): the six flat session fields on `Card` —
+ * `tmuxSession`, `ttydPort`, `hookToken`, `claudeSessionId`, `workspacePath`, `workspace` — are a
+ * projection of the card's active session, and `board.store.ts#setActiveSession` is the ONLY
+ * method allowed to assign them. This is a TWO-TIER check because all sixteen legitimate write
+ * sites live in one file: Tier 1 is a repo-wide fence (any match outside
+ * `src/server/store/board.store.ts` is a violation by construction — that file is never even
+ * inspected for scope, it is simply not the owner), and Tier 2 is an in-file slice (inside
+ * `board.store.ts`, only a match falling within `setActiveSession`'s own body, located by
+ * {@link sliceSetActiveSessionBody}, is exempt — "the write lives in the owner file" is not by
+ * itself sufficient to pass).
+ * @remarks Three deliberate scope exclusions, each because firing on it would be a permanent
+ * false positive that trains the gate to be ignored: (1) `ctx.workspacePath` in
+ * `src/server/services/orchestration/steps.ts` is `SagaContext`'s own plain string field on an
+ * orchestration-local object, not `card.workspacePath` — excluded by receiver identifier name.
+ * (2) `hookRoutedAt` and `branch` are Card-only fields this phase deliberately left outside the
+ * chokepoint's scope; neither is a substring of any of the six field names (the `\b` boundary in
+ * {@link scanSessionFieldAssignments} makes this an assertion, not luck). (3) Object-literal
+ * properties (`tmuxSession: value` inside `{ … }`) never match — the pattern requires a leading
+ * `.`, which a colon-form property never has.
+ * @remarks This is a plain line-scan + marker-slice, deliberately not an AST/compiler-API pass —
+ * every other leg in this file works the same way, and a parser here would be the first of its
+ * kind in the file (no new dependency).
+ * @remarks If `setActiveSession`'s declaration marker cannot be found (renamed, deleted), this
+ * emits a missing-subject sentinel rather than silently reporting zero violations — the exact
+ * dead-instrument failure mode v2.9's audit found nine of, three of them in this milestone's own
+ * prior plans. A rule whose subject vanished must FAIL, never pass vacuously.
+ * @see docs/ARCHITECTURE.md#session-projection-chokepoint
+ * @returns Violation report lines, one per illegal assignment, plus the missing-subject sentinel
+ * if `setActiveSession` cannot be located.
+ */
+function checkSessionProjectionChokepoint() {
+  const violations = [];
+  const boardStoreContent = existsSync(BOARD_STORE_PATH)
+    ? readFileSync(BOARD_STORE_PATH, "utf8")
+    : null;
+  const slice =
+    boardStoreContent !== null
+      ? sliceSetActiveSessionBody(boardStoreContent)
+      : null;
+
+  if (boardStoreContent === null || slice === null) {
+    violations.push(
+      `${BOARD_STORE_PATH}: setActiveSession not found — NEW-21's projection-chokepoint subject is missing or renamed`,
+    );
+  }
+
+  for (const file of walkSrc(SRC_DIR)) {
+    const content =
+      file === BOARD_STORE_PATH
+        ? boardStoreContent
+        : readFileSync(file, "utf8");
+    if (content === null) continue;
+    for (const match of scanSessionFieldAssignments(content)) {
+      if (match.receiver === "ctx") continue;
+      if (file === BOARD_STORE_PATH) {
+        if (
+          slice &&
+          match.charOffset >= slice[0] &&
+          match.charOffset <= slice[1]
+        ) {
+          continue;
+        }
+        violations.push(
+          `${file}:${match.lineNumber}: retired pattern NEW-21 — flat session-field assignment outside setActiveSession, the sole projection chokepoint`,
+        );
+      } else {
+        violations.push(
+          `${file}:${match.lineNumber}: retired pattern NEW-21 — flat session-field assignment outside the projection chokepoint (${BOARD_STORE_PATH}#setActiveSession)`,
+        );
+      }
+    }
+  }
+  return violations;
+}
+
+/**
  * Collect invariant IDs that appear inside JSDoc blocks only.
  * @remarks Toggles an in-block flag on `/**` and `*\/`; body/line `//` comments
  * are never scanned, so an undeleted original body comment is not a false home.
@@ -386,24 +537,32 @@ function generateBaseline() {
 
 /**
  * Run the invariant-home diff, the global retired-pattern scan, the file-scoped
- * strip-cascade check, the directory-scoped board reading-rhythm check, and the
- * file-scoped terminal-client fence, then set the process exit code.
- * @remarks All five diff legs gate the exit, not just MISSING: in a
+ * strip-cascade check, the directory-scoped board reading-rhythm check, the
+ * file-scoped terminal-client fence, and the session-projection chokepoint
+ * check, then set the process exit code.
+ * @remarks All six diff legs gate the exit, not just MISSING: in a
  * frozen-baseline world an EXTRA (homed but unbaselined — a typo'd ID in docs
  * or an unratified new ID in JSDoc) and an ORPHAN (present in src but
  * unbaselined) are always defects, and an informational-only leg would let
  * them accumulate silently through the body-comment deletion phases. The
- * retired-pattern leg, the strip-cascade leg, the board reading-rhythm leg, and
- * the terminal-fence leg are all independent of the ID-baseline arithmetic
- * above — a design literal coming back, or the terminal-client subject set
- * changing, is a defect regardless of whether any invariant ID also moved.
- * The strip-cascade leg (`NEW-18`), the board reading-rhythm leg (`NEW-19`),
- * and the terminal-fence leg (`NEW-20`) are all deliberately scoped (file- or
- * directory-scoped) rather than folded into `RETIRED_PATTERNS`, since each
- * pattern is legitimate outside its own scope. The terminal-fence leg only
- * proves the fenced SUBJECT SET is intact — it cannot prove the fenced files'
- * CONTENTS are unchanged; see `checkTerminalFence`'s own JSDoc for the split.
- * @returns Nothing; exits 0 iff MISSING, ORPHAN, EXTRA, RETIRED, STRIP CASCADES, BOARD READING RHYTHM, and TERMINAL FENCE are all empty.
+ * retired-pattern leg, the strip-cascade leg, the board reading-rhythm leg,
+ * the terminal-fence leg, and the session-projection chokepoint leg are all
+ * independent of the ID-baseline arithmetic above — a design literal coming
+ * back, the terminal-client subject set changing, or a flat session field
+ * being assigned outside its sole chokepoint is a defect regardless of
+ * whether any invariant ID also moved. The strip-cascade leg (`NEW-18`), the
+ * board reading-rhythm leg (`NEW-19`), the terminal-fence leg (`NEW-20`), and
+ * the session-projection chokepoint leg (`NEW-21`) are all deliberately
+ * scoped (file- or directory-scoped) rather than folded into
+ * `RETIRED_PATTERNS`, since each pattern is legitimate outside its own scope.
+ * The terminal-fence leg only proves the fenced SUBJECT SET is intact — it
+ * cannot prove the fenced files' CONTENTS are unchanged; see
+ * `checkTerminalFence`'s own JSDoc for the split. See
+ * `checkSessionProjectionChokepoint`'s own JSDoc for its two-tier fence/slice
+ * split and its missing-subject sentinel.
+ * @returns Nothing; exits 0 iff MISSING, ORPHAN, EXTRA, RETIRED, STRIP
+ * CASCADES, BOARD READING RHYTHM, TERMINAL FENCE, and SESSION PROJECTION
+ * CHOKEPOINT are all empty.
  */
 function run() {
   const home = new Set();
@@ -425,6 +584,7 @@ function run() {
   const stripCascades = checkStripCascades();
   const boardReadingRhythm = checkBoardReadingRhythm();
   const terminalFence = checkTerminalFence();
+  const sessionChokepoint = checkSessionProjectionChokepoint();
 
   report("MISSING (baseline - home)", missing);
   report("ORPHAN  (present - baseline)", orphan);
@@ -433,6 +593,7 @@ function run() {
   report("STRIP CASCADES (NEW-18)", stripCascades);
   report("BOARD READING RHYTHM (NEW-19)", boardReadingRhythm);
   report("TERMINAL FENCE (NEW-20)", terminalFence);
+  report("SESSION PROJECTION CHOKEPOINT (NEW-21)", sessionChokepoint);
 
   const defects =
     missing.length +
@@ -441,7 +602,8 @@ function run() {
     retired.length +
     stripCascades.length +
     boardReadingRhythm.length +
-    terminalFence.length;
+    terminalFence.length +
+    sessionChokepoint.length;
   console.log(
     `\n${defects === 0 ? "PASS" : "FAIL"}: ${baseline.size - missing.length}/${baseline.size} invariants homed` +
       (missing.length ? ` (${missing.length} missing a home)` : "") +
@@ -459,6 +621,9 @@ function run() {
         : "") +
       (terminalFence.length
         ? ` (${terminalFence.length} terminal-fence regression(s))`
+        : "") +
+      (sessionChokepoint.length
+        ? ` (${sessionChokepoint.length} session-projection-chokepoint violation(s))`
         : ""),
   );
   process.exit(defects === 0 ? 0 : 1);
