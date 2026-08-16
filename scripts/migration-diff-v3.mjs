@@ -422,15 +422,22 @@ function columnPass(col, before, after, active) {
   return flatOk && before[col] === undefined;
 }
 
-/** A safe-to-print description of a mismatch — `hookToken` is NEVER printed by value. */
+/**
+ * A safe-to-print description of a mismatch — `hookToken` is NEVER printed by value, and its
+ * flat and session copies are reported as SEPARATE equal/not-equal booleans (a dropped-field bug
+ * like BREAK A only fails the session copy while the flat mirror, which the migration never
+ * touches, stays correct — collapsing the two into one boolean would misreport which side failed).
+ */
 function describeMismatch(cardId, col, before, after, active) {
   if (col === "hookToken") {
     const b = before.hookToken;
-    const a = active?.hookToken ?? after.hookToken;
-    const equal = b === a;
+    const flatEqual = b === after.hookToken;
+    const sessionEqual = b === active?.hookToken;
     return (
-      `${cardId}.${col}: <redacted> equal=${equal} ` +
-      `(before ${b === undefined ? "absent" : "present"}, after ${a === undefined ? "absent" : "present"})`
+      `${cardId}.${col}: <redacted> flatEqual=${flatEqual} sessionEqual=${sessionEqual} ` +
+      `(before ${b === undefined ? "absent" : "present"}, ` +
+      `flat ${after.hookToken === undefined ? "absent" : "present"}, ` +
+      `session ${active?.hookToken === undefined ? "absent" : "present"})`
     );
   }
   return (
