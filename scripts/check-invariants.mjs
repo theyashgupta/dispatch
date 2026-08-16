@@ -60,8 +60,19 @@ const TERMINAL_CLIENT_PATHS = [
   join("src", "web", "terminal.html"),
 ];
 const BOARD_STORE_PATH = join("src", "server", "store", "board.store.ts");
-const SET_ACTIVE_SESSION_MARKER = "private setActiveSession(";
-const SESSION_FIELDS = [
+const STEPS_PATH = join(
+  "src",
+  "server",
+  "services",
+  "orchestration",
+  "steps.ts",
+);
+
+/**
+ * The six flat session fields on `Card`. These are a PROJECTION of the card's active session
+ * record — derived convenience, not truth.
+ */
+const PROJECTION_FIELDS = [
   "tmuxSession",
   "ttydPort",
   "hookToken",
@@ -69,8 +80,42 @@ const SESSION_FIELDS = [
   "workspacePath",
   "workspace",
 ];
+
+/**
+ * The two fields whose PAIRING is invariant `NEW-21` itself: a card is never observable with
+ * `sessions` set and no `activeSessionId`, and `activeSessionId` never names a session absent from
+ * `sessions`. Fencing only {@link PROJECTION_FIELDS} would police the derived convenience while
+ * leaving the actual correctness property open to any future writer.
+ */
+const ENTITY_FIELDS = ["sessions", "activeSessionId"];
+
+const SESSION_FIELDS = [...PROJECTION_FIELDS, ...ENTITY_FIELDS];
+
+/**
+ * The DECLARED writers of the fenced fields, each with the exact subset it is allowed to write.
+ * Every other write anywhere in `src/` is a violation. Two properties make this a carve-out rather
+ * than a blind spot: each entry is greppable by name, and each carries its own missing-subject
+ * sentinel (see {@link checkSessionProjectionChokepoint}) so a rename or deletion FAILS instead of
+ * silently widening the exemption to nothing.
+ * @remarks `migrateCardsToSessionEntity` is deliberately allowed ONLY {@link ENTITY_FIELDS}. Its
+ * own contract says it "never writes any flat field"; granting it the projection fields too would
+ * turn a documented promise into an unenforced one.
+ */
+const SANCTIONED_WRITERS = [
+  {
+    name: "setActiveSession",
+    marker: "private setActiveSession(",
+    fields: SESSION_FIELDS,
+  },
+  {
+    name: "migrateCardsToSessionEntity",
+    marker: "function migrateCardsToSessionEntity(",
+    fields: ENTITY_FIELDS,
+  },
+];
+
 const SESSION_FIELD_ASSIGN_RE = new RegExp(
-  `(\\w+)\\.(?:${SESSION_FIELDS.join("|")})\\b\\s*=(?![=>])`,
+  `(\\w+)\\.(${SESSION_FIELDS.join("|")})\\b\\s*=(?![=>])`,
   "g",
 );
 
@@ -307,17 +352,18 @@ function checkTerminalFence() {
 }
 
 /**
- * Locate `setActiveSession`'s own method body inside `board.store.ts` by brace-counting from its
+ * Locate a sanctioned writer's own body inside `board.store.ts` by brace-counting from its
  * declaration marker — the same plain-text marker-slice idiom `checkStripCascades` uses for the
- * narrow-viewport `@media` block, not an AST parse. The method's parameter types contain no
- * braces of their own, so the FIRST `{` found after the marker is reliably the method's opening
- * brace; depth-counting from there to the matching `}` needs no knowledge of the method's contents.
+ * narrow-viewport `@media` block, not an AST parse. Neither writer's parameter types contain
+ * braces of their own, so the FIRST `{` found after the marker is reliably the opening brace;
+ * depth-counting from there to the matching `}` needs no knowledge of the contents.
  * @param content Full text of `board.store.ts`.
- * @returns `[startIndex, endIndex]` character offsets spanning the marker through the method's
+ * @param marker The writer's declaration marker text.
+ * @returns `[startIndex, endIndex]` character offsets spanning the marker through the writer's
  * closing brace (inclusive), or `null` if the marker is missing.
  */
-function sliceSetActiveSessionBody(content) {
-  const markerIdx = content.indexOf(SET_ACTIVE_SESSION_MARKER);
+function sliceWriterBody(content, marker) {
+  const markerIdx = content.indexOf(marker);
   if (markerIdx === -1) return null;
   const braceStart = content.indexOf("{", markerIdx);
   if (braceStart === -1) return null;
@@ -343,9 +389,10 @@ function sliceSetActiveSessionBody(content) {
  * rely on lucky non-overlap instead of an asserted boundary.
  * @param content Full file text.
  * @returns One entry per match: its 1-based line number, absolute character offset into
- * `content` (for the tier-2 slice-containment check), and the receiver identifier text (so
+ * `content` (for the tier-2 slice-containment check), the receiver identifier text (so
  * `ctx.workspacePath` — `SagaContext`'s own unrelated field, not `card.workspacePath` — can be
- * excluded by name).
+ * excluded by name), and the fenced field name (so a sanctioned writer can be granted a SUBSET of
+ * the fenced fields rather than all of them).
  */
 function scanSessionFieldAssignments(content) {
   const results = [];
@@ -360,6 +407,7 @@ function scanSessionFieldAssignments(content) {
         lineNumber: i + 1,
         charOffset: offset + m.index,
         receiver: m[1],
+        field: m[2],
       });
     }
     offset += line.length + 1;
@@ -368,50 +416,59 @@ function scanSessionFieldAssignments(content) {
 }
 
 /**
- * Session-projection chokepoint gate (`NEW-21`): the six flat session fields on `Card` —
- * `tmuxSession`, `ttydPort`, `hookToken`, `claudeSessionId`, `workspacePath`, `workspace` — are a
- * projection of the card's active session, and `board.store.ts#setActiveSession` is the ONLY
- * method allowed to assign them. This is a TWO-TIER check because all sixteen legitimate write
- * sites live in one file: Tier 1 is a repo-wide fence (any match outside
- * `src/server/store/board.store.ts` is a violation by construction — that file is never even
- * inspected for scope, it is simply not the owner), and Tier 2 is an in-file slice (inside
- * `board.store.ts`, only a match falling within `setActiveSession`'s own body, located by
- * {@link sliceSetActiveSessionBody}, is exempt — "the write lives in the owner file" is not by
- * itself sufficient to pass).
+ * Session-projection chokepoint gate (`NEW-21`). The fenced set is EIGHT fields, in two groups
+ * that fail differently: the six {@link PROJECTION_FIELDS} (a derived mirror of the card's active
+ * session) and the two {@link ENTITY_FIELDS} `sessions`/`activeSessionId`, whose PAIRING is the
+ * invariant itself. Fencing only the projection would leave any future writer free to set
+ * `sessions` with no pointer, or to repoint `activeSessionId` at a session that is not in the
+ * array, and still pass green.
+ * @remarks This is a TWO-TIER check because every legitimate write site lives in one file: Tier 1
+ * is a repo-wide fence (any match outside `src/server/store/board.store.ts` is a violation by
+ * construction — that file is never even inspected for scope, it is simply not the owner), and
+ * Tier 2 is an in-file slice (inside `board.store.ts`, a match is exempt only when it falls within
+ * a {@link SANCTIONED_WRITERS} body, located by {@link sliceWriterBody}, AND the field it writes is
+ * in that writer's own allowed subset — "the write lives in the owner file" is not by itself
+ * sufficient to pass, and neither is "the write lives in a sanctioned writer").
  * @remarks Three deliberate scope exclusions, each because firing on it would be a permanent
  * false positive that trains the gate to be ignored: (1) `ctx.workspacePath` in
  * `src/server/services/orchestration/steps.ts` is `SagaContext`'s own plain string field on an
  * orchestration-local object, not `card.workspacePath` — excluded by receiver identifier name.
  * (2) `hookRoutedAt` and `branch` are Card-only fields this phase deliberately left outside the
- * chokepoint's scope; neither is a substring of any of the six field names (the `\b` boundary in
+ * chokepoint's scope; neither is a substring of any fenced field name (the `\b` boundary in
  * {@link scanSessionFieldAssignments} makes this an assertion, not luck). (3) Object-literal
  * properties (`tmuxSession: value` inside `{ … }`) never match — the pattern requires a leading
  * `.`, which a colon-form property never has.
  * @remarks This is a plain line-scan + marker-slice, deliberately not an AST/compiler-API pass —
  * every other leg in this file works the same way, and a parser here would be the first of its
  * kind in the file (no new dependency).
- * @remarks If `setActiveSession`'s declaration marker cannot be found (renamed, deleted), this
+ * @remarks If a sanctioned writer's declaration marker cannot be found (renamed, deleted), this
  * emits a missing-subject sentinel rather than silently reporting zero violations — the exact
  * dead-instrument failure mode v2.9's audit found nine of, three of them in this milestone's own
- * prior plans. A rule whose subject vanished must FAIL, never pass vacuously.
+ * prior plans. A rule whose subject vanished must FAIL, never pass vacuously. Each sanctioned
+ * writer carries its OWN sentinel, so widening the carve-out by deleting one of them fails loudly.
  * @see docs/ARCHITECTURE.md#session-projection-chokepoint
- * @returns Violation report lines, one per illegal assignment, plus the missing-subject sentinel
- * if `setActiveSession` cannot be located.
+ * @returns Violation report lines, one per illegal assignment, plus one missing-subject sentinel
+ * per sanctioned writer that cannot be located.
  */
 function checkSessionProjectionChokepoint() {
   const violations = [];
   const boardStoreContent = existsSync(BOARD_STORE_PATH)
     ? readFileSync(BOARD_STORE_PATH, "utf8")
     : null;
-  const slice =
-    boardStoreContent !== null
-      ? sliceSetActiveSessionBody(boardStoreContent)
-      : null;
 
-  if (boardStoreContent === null || slice === null) {
-    violations.push(
-      `${BOARD_STORE_PATH}: setActiveSession not found — NEW-21's projection-chokepoint subject is missing or renamed`,
-    );
+  const writers = [];
+  for (const writer of SANCTIONED_WRITERS) {
+    const slice =
+      boardStoreContent !== null
+        ? sliceWriterBody(boardStoreContent, writer.marker)
+        : null;
+    if (slice === null) {
+      violations.push(
+        `${BOARD_STORE_PATH}: ${writer.name} not found — NEW-21's projection-chokepoint subject is missing or renamed`,
+      );
+      continue;
+    }
+    writers.push({ ...writer, slice });
   }
 
   for (const file of walkSrc(SRC_DIR)) {
@@ -421,21 +478,21 @@ function checkSessionProjectionChokepoint() {
         : readFileSync(file, "utf8");
     if (content === null) continue;
     for (const match of scanSessionFieldAssignments(content)) {
-      if (match.receiver === "ctx") continue;
+      if (file === STEPS_PATH && match.receiver === "ctx") continue;
       if (file === BOARD_STORE_PATH) {
-        if (
-          slice &&
-          match.charOffset >= slice[0] &&
-          match.charOffset <= slice[1]
-        ) {
-          continue;
-        }
+        const owner = writers.find(
+          (w) =>
+            match.charOffset >= w.slice[0] &&
+            match.charOffset <= w.slice[1] &&
+            w.fields.includes(match.field),
+        );
+        if (owner) continue;
         violations.push(
-          `${file}:${match.lineNumber}: retired pattern NEW-21 — flat session-field assignment outside setActiveSession, the sole projection chokepoint`,
+          `${file}:${match.lineNumber}: retired pattern NEW-21 — \`${match.field}\` assigned outside the sanctioned writers (${SANCTIONED_WRITERS.map((w) => w.name).join(", ")})`,
         );
       } else {
         violations.push(
-          `${file}:${match.lineNumber}: retired pattern NEW-21 — flat session-field assignment outside the projection chokepoint (${BOARD_STORE_PATH}#setActiveSession)`,
+          `${file}:${match.lineNumber}: retired pattern NEW-21 — \`${match.field}\` assigned outside the projection chokepoint (${BOARD_STORE_PATH}#setActiveSession)`,
         );
       }
     }
