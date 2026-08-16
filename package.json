@@ -51,8 +51,11 @@
     "start": "NODE_ENV=production node dist/server/bootstrap/index.js",
     "replay-gate": "tsx scripts/replay-watcher.ts --check",
     "doc-drift": "node scripts/check-doc-drift.mjs",
+    "invariants": "node scripts/check-invariants.mjs",
     "sim": "node scripts/fresh-env-sim.mjs",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run deadcode && npm run replay-gate && npm run doc-drift",
+    "migration-diff": "node scripts/migration-diff-v3.mjs",
+    "redaction-capture": "node scripts/redaction-capture-v3.mjs",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants",
     "prepack": "npm run build"
   },
   "dependencies": {

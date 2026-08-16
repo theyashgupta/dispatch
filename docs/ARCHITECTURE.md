@@ -145,7 +145,16 @@ do not move onto the session record and are not projected from it.
 
 Exactly one method may assign the six flat fields: `BoardStore#setActiveSession`
 (`src/server/store/board.store.ts`). Every other assignment of any of the six field names anywhere
-in `src/` is a defect, and `scripts/check-invariants.mjs` polices this repo-wide by grep. The flat
+in `src/` is a defect. `scripts/check-invariants.mjs` polices this repo-wide, and it fences the two
+entity fields `sessions` and `activeSessionId` on the same footing — fencing only the six would
+police the derived projection while leaving the pairing that IS this invariant open to any future
+writer. There are exactly TWO declared writers, each allowed a named subset: `setActiveSession`
+(all eight fields) and the boot-time `migrateCardsToSessionEntity` (the two entity fields only,
+which is what makes its own "never writes any flat field" contract enforced rather than merely
+stated). The check runs on the TypeScript parser, not a line scan, because a mutation has more
+surface forms than a regex can enumerate — `Object.assign(card, { … })`, computed member access,
+destructuring assignment and a line break before the `=` were all invisible to the scan that
+preceded it. The flat
 fields stay **persisted** (rewritten on every session mutation) rather than becoming derived-on-read
 getters, because that is what keeps the reader modules, raw `board.db` inspection, and crash
 recovery byte-identical to v2.9 — a getter would require every one of those paths to change how it
@@ -2364,18 +2373,27 @@ Dev tooling, not test code (repo rule — no unit/e2e tests). Each gate answers 
 mechanically-checkable question; none of them read prose for truth.
 
 - **`npm run check`** — the standing CI-shaped gate: `format:check`, `lint`, `typecheck`,
-  `deadcode` (knip), `replay-gate`, and `doc-drift` (below), run in sequence.
-- **`node scripts/check-invariants.mjs`** — invariant-home audit: every ID in the frozen
-  baseline (`scripts/invariant-baseline.txt`) must have a durable home (a JSDoc block in `src/`
-  or anywhere in this doc). Deliberately NOT wired into `npm run check` — it gates the
-  Phase 10 knowledge-migration baseline specifically, run on demand. `package.json`'s `check`
-  script runs `format`, `lint`, `typecheck`, `deadcode`, `replay-gate`, and `doc-drift` only; a
-  clean `npm run check` says nothing about this gate's legs. One of its legs is
-  `checkSessionProjectionChokepoint`, reported as `SESSION PROJECTION CHOKEPOINT (NEW-21)`: a
-  two-tier line-scan proving the six flat session fields on `Card` are assigned ONLY inside
-  `board.store.ts#setActiveSession` (a repo-wide fence for every other file, an in-file slice
-  for `board.store.ts` itself), and that it fails — rather than passing vacuously — if
-  `setActiveSession` is ever renamed or deleted out from under it.
+  `deadcode` (knip), `replay-gate`, `doc-drift`, and `invariants` (all below), run in sequence.
+- **`node scripts/check-invariants.mjs`** (`npm run invariants`, wired into `npm run check`) —
+  invariant-home audit: every ID in the frozen baseline (`scripts/invariant-baseline.txt`) must
+  have a durable home (a JSDoc block in `src/` or anywhere in this doc). It was previously
+  run-on-demand only, which meant every claim in this doc that it "fails the build" was false —
+  nothing invoked it, so a violation could sit green indefinitely. It is now part of `check`, and
+  those claims hold. One of its legs is `checkSessionProjectionChokepoint`, reported as
+  `SESSION PROJECTION CHOKEPOINT (NEW-21)`: a two-tier check, driven by the TypeScript parser
+  rather than a line scan, proving the six flat session fields on `Card` AND the two entity
+  fields `sessions`/`activeSessionId` are assigned ONLY inside a declared writer in
+  `board.store.ts` — `setActiveSession` for all eight, `migrateCardsToSessionEntity` for the two
+  entity fields only. It is a repo-wide fence for every other file and an in-file span check for
+  `board.store.ts` itself, and it fails — rather than passing vacuously — if either declared
+  writer is renamed or deleted out from under it. See the leg's own JSDoc for the mutation forms
+  it covers and the two (`Object.assign` with an opaque source, and `delete`) it deliberately
+  does not.
+- **`node scripts/migration-diff-v3.mjs`** (`npm run migration-diff`) and
+  **`node scripts/redaction-capture-v3.mjs`** (`npm run redaction-capture`) — sandbox harnesses
+  that boot a real server against a throwaway `HOME`, so they are deliberately OUTSIDE
+  `npm run check` and run on demand. Read each script's header for its sandbox guarantees and
+  its accepted side effects before running it.
 - **`node scripts/check-doc-drift.mjs`** (`npm run doc-drift`, wired into `npm run check`) —
   catches two classes of drift between this doc and `src/`: (1) `@see docs/ARCHITECTURE.md#...`
   pointers and backtick-quoted source-file citations in this doc that no longer resolve, and
