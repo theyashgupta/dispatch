@@ -88,13 +88,33 @@ export function compareDoneOrder(a: Card, b: Card): number {
 }
 
 /**
- * Strip a card's `hookToken` before it leaves the process — the SINGLE sanctioned place a card
- * loses its secret. Every new read path (windowed `snapshot()`, and any future one) must call
- * this rather than duplicate the delete, so the redaction boundary can never drift.
+ * Strip a card's secrets before it leaves the process — the SINGLE sanctioned place a card loses
+ * them. Every new read path (windowed `snapshot()`, and any future one) must call this rather than
+ * duplicate the strip, so the redaction boundary can never drift. Three responsibilities:
+ * (1) remove the card's own secret field; (2) remove `sessions` outright — the full array is
+ * server-side only and carries every session's own secret field; (3) resolve the ACTIVE
+ * session by `card.activeSessionId` and, when one resolves, FIELD-PICK exactly the six
+ * `ActiveSessionWire` keys onto `wireCard.activeSession` — never spread the session object, so the
+ * secret is omitted by construction and a future field added to `Session` cannot leak through this
+ * path. Operates on the shallow copy only; never mutates the source card's `sessions` array or any
+ * session object.
+ * @see docs/ARCHITECTURE.md#session-projection-chokepoint
  */
 export function redactCard(card: Card): Card {
   const wireCard = { ...card };
   delete wireCard.hookToken;
+  delete wireCard.sessions;
+  const active = card.sessions?.find((s) => s.id === card.activeSessionId);
+  wireCard.activeSession = active
+    ? {
+        id: active.id,
+        tmuxSession: active.tmuxSession,
+        ttydPort: active.ttydPort,
+        claudeSessionId: active.claudeSessionId,
+        workspacePath: active.workspacePath,
+        workspace: active.workspace,
+      }
+    : undefined;
   return wireCard;
 }
 
@@ -667,9 +687,10 @@ class BoardStore extends EventEmitter {
    * `membersOf()` never sees a half-populated group (RESEARCH Open Question 1).
    * SECURITY: this is the single outbound chokepoint — each kept card is redacted via
    * {@link redactCard}, so the per-session hook-auth secret never rides an SSE frame or a REST
-   * response (only the persisted board.json carries it). Redact future secret-adjacent card
-   * fields there (hookRoutedAt was considered and deliberately rides the wire — a non-secret
-   * timestamp).
+   * response, from the card OR from any session copy (only the persisted board.json carries it).
+   * `activeSession` is a field-picked projection, never a spread, so a future `Session` field
+   * cannot leak through it. Redact future secret-adjacent card fields there (hookRoutedAt was
+   * considered and deliberately rides the wire — a non-secret timestamp).
    * @see docs/ARCHITECTURE.md#sse-transport
    */
   snapshot(opts?: { doneLimit?: number }): BoardSnapshot {
