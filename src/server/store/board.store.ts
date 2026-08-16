@@ -234,7 +234,7 @@ class BoardStore extends EventEmitter {
    */
   private clearHookToken(card: Card): void {
     if (card.hookToken) this.releaseHookToken(card.hookToken, card.id);
-    card.hookToken = undefined;
+    this.setActiveSession(card, { hookToken: undefined });
     card.hookRoutedAt = undefined;
   }
 
@@ -491,8 +491,8 @@ class BoardStore extends EventEmitter {
           };
           card.provisioningStep = null;
         }
-        if (card.column === "todo") {
-          card.ttydPort = undefined;
+        if (card.column === "todo" && card.ttydPort != null) {
+          this.setActiveSession(card, { ttydPort: undefined });
         }
         card.terminalError = null;
         card.syncing = undefined;
@@ -863,7 +863,7 @@ class BoardStore extends EventEmitter {
   ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) card.workspace = workspace;
+      if (card) this.setActiveSession(card, { workspace });
       return [];
     });
   }
@@ -911,7 +911,7 @@ class BoardStore extends EventEmitter {
   mintHookChannel(id: string, token: string): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) card.hookToken = token;
+      if (card) this.setActiveSession(card, { hookToken: token });
       return [];
     });
   }
@@ -929,7 +929,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card && card.claudeSessionId == null)
-        card.claudeSessionId = sessionId;
+        this.setActiveSession(card, { claudeSessionId: sessionId });
       return [];
     });
   }
@@ -947,7 +947,7 @@ class BoardStore extends EventEmitter {
   resetClaudeSessionId(id: string): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) card.claudeSessionId = undefined;
+      if (card) this.setActiveSession(card, { claudeSessionId: undefined });
       return [];
     });
   }
@@ -1130,10 +1130,12 @@ class BoardStore extends EventEmitter {
       const card = this.cards.get(id);
       if (!card) return [];
       const prev = card.column;
-      card.workspacePath = s.workspacePath;
+      this.setActiveSession(card, {
+        workspacePath: s.workspacePath,
+        tmuxSession: s.tmuxSession,
+        ttydPort: s.ttydPort,
+      });
       card.branch = s.branch;
-      card.tmuxSession = s.tmuxSession;
-      card.ttydPort = s.ttydPort;
       card.column = "in_progress";
       this.mirrorMemberColumn(card, "in_progress");
       card.statusReason = "Already running — reattached";
@@ -1169,7 +1171,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card && card.tmuxSession === session) {
-        card.ttydPort = port;
+        this.setActiveSession(card, { ttydPort: port });
         card.terminalError = null;
         recorded = true;
       }
@@ -1187,7 +1189,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) {
-        card.ttydPort = undefined;
+        this.setActiveSession(card, { ttydPort: undefined });
         card.terminalError = e;
       }
       return [];
@@ -1204,7 +1206,7 @@ class BoardStore extends EventEmitter {
   clearStaleTtydPort(id: string): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) card.ttydPort = undefined;
+      if (card) this.setActiveSession(card, { ttydPort: undefined });
       return [];
     });
   }
@@ -1227,8 +1229,10 @@ class BoardStore extends EventEmitter {
       if (!card) return [];
       const wasTransition = !(card.sessionLost && card.tmuxSession == null);
       card.sessionLost = true;
-      card.tmuxSession = undefined;
-      card.ttydPort = undefined;
+      this.setActiveSession(card, {
+        tmuxSession: undefined,
+        ttydPort: undefined,
+      });
       card.terminalError = null;
       card.prs = undefined;
       card.prsUnknown = undefined;
@@ -1476,10 +1480,12 @@ class BoardStore extends EventEmitter {
       const card = this.cards.get(id);
       if (!card) return [];
       const prev = card.column;
-      card.workspacePath = s.workspacePath;
+      this.setActiveSession(card, {
+        workspacePath: s.workspacePath,
+        tmuxSession: s.tmuxSession,
+        ttydPort: s.ttydPort,
+      });
       card.branch = s.branch;
-      card.tmuxSession = s.tmuxSession;
-      card.ttydPort = s.ttydPort;
       card.column = "in_progress";
       this.mirrorMemberColumn(card, "in_progress");
       card.provisioningStep = null;
@@ -1511,10 +1517,12 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card) return [];
-      card.tmuxSession = session;
+      this.setActiveSession(card, {
+        tmuxSession: session,
+        ttydPort: undefined,
+      });
       card.sessionLost = false;
       card.terminalError = null;
-      card.ttydPort = undefined;
       card.resumeError = null;
       card.statusReason = "Resumed — reattached";
       return [
@@ -1556,8 +1564,10 @@ class BoardStore extends EventEmitter {
       const card = this.cards.get(id);
       if (!card) return [];
       card.sessionLost = true;
-      card.tmuxSession = undefined;
-      card.ttydPort = undefined;
+      this.setActiveSession(card, {
+        tmuxSession: undefined,
+        ttydPort: undefined,
+      });
       card.terminalError = null;
       card.prs = undefined;
       card.prsUnknown = undefined;
@@ -1590,11 +1600,13 @@ class BoardStore extends EventEmitter {
       const card = this.cards.get(id);
       if (!card) return [];
       card.cleanupWarning = warning;
-      card.tmuxSession = undefined;
-      card.ttydPort = undefined;
+      this.setActiveSession(card, {
+        tmuxSession: undefined,
+        ttydPort: undefined,
+        claudeSessionId: undefined,
+      });
       card.terminalError = null;
       this.clearHookToken(card);
-      card.claudeSessionId = undefined;
       card.prs = undefined;
       card.prsUnknown = undefined;
       card.previews = undefined;
@@ -1630,15 +1642,17 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const c = this.cards.get(id);
       if (!c) return [];
-      c.tmuxSession = undefined;
-      c.ttydPort = undefined;
-      c.workspacePath = undefined;
+      this.setActiveSession(c, {
+        tmuxSession: undefined,
+        ttydPort: undefined,
+        workspacePath: undefined,
+        claudeSessionId: undefined,
+      });
       c.sessionLost = false;
       c.terminalError = null;
       c.cleanupWarning = undefined;
       c.cleanupBlocked = undefined;
       this.clearHookToken(c);
-      c.claudeSessionId = undefined;
       c.prs = undefined;
       c.prsUnknown = undefined;
       c.previews = undefined;
