@@ -115,6 +115,15 @@ export interface BoardDb {
    * legitimate pre-migration snapshot with an already-migrated database. The rotating five-slot
    * `.bak.N` chain is not sufficient on its own for this purpose: five boots can age a
    * pre-migration snapshot out of the chain, while this file is deliberately never rotated away.
+   * @remarks Written with `VACUUM INTO`, the same WAL-aware mechanism `backupTick` uses — NOT a
+   * raw `copyFileSync` of the main database file. In WAL mode the main file is only part of the
+   * database; committed transactions can still be sitting in `board.db-wal`, which a file copy
+   * omits. The boot-time `wal_checkpoint(TRUNCATE)` is not a sufficient guarantee on its own: it
+   * runs before `busy_timeout` is set, so with the default timeout of zero any concurrent reader
+   * makes it return `busy=1`, and its result row is discarded by `db.exec`. This is the one
+   * artifact the migration's whole reversibility story rests on, so it must not be able to become
+   * a silently partial database. `VACUUM INTO` also refuses to write an existing target, which
+   * preserves the `existsSync` guard's intent a second time over.
    */
   snapshotPreV3(): void;
 }
@@ -556,7 +565,7 @@ export function openBoardDb(): BoardDb {
       const target = `${BOARD_DB_PATH}.pre-v3`;
       try {
         if (!fs.existsSync(target)) {
-          fs.copyFileSync(BOARD_DB_PATH, target);
+          db.prepare("VACUUM INTO ?").run(target);
         }
       } catch (err) {
         console.error(
