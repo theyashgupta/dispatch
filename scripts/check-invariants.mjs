@@ -31,6 +31,7 @@
  */
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import ts from "typescript";
 
 const ID_RE =
   /\b(?:PANEL|WR|MARK|TERM|RESIL|REVIEW|ATTN|BUG|IN|ORCH|SYNC|LIFE|MODAL|BOARD|SEC|T)-\d+[a-z]?(?:-\d+[a-z]?)?|\bNEW-\d+|\bRATIFIED\b/g;
@@ -102,22 +103,9 @@ const SESSION_FIELDS = [...PROJECTION_FIELDS, ...ENTITY_FIELDS];
  * turn a documented promise into an unenforced one.
  */
 const SANCTIONED_WRITERS = [
-  {
-    name: "setActiveSession",
-    marker: "private setActiveSession(",
-    fields: SESSION_FIELDS,
-  },
-  {
-    name: "migrateCardsToSessionEntity",
-    marker: "function migrateCardsToSessionEntity(",
-    fields: ENTITY_FIELDS,
-  },
+  { name: "setActiveSession", fields: SESSION_FIELDS },
+  { name: "migrateCardsToSessionEntity", fields: ENTITY_FIELDS },
 ];
-
-const SESSION_FIELD_ASSIGN_RE = new RegExp(
-  `(\\w+)\\.(${SESSION_FIELDS.join("|")})\\b\\s*=(?![=>])`,
-  "g",
-);
 
 /**
  * Recursively list every .ts/.tsx source file, skipping the built web bundle.
@@ -352,66 +340,177 @@ function checkTerminalFence() {
 }
 
 /**
- * Locate a sanctioned writer's own body inside `board.store.ts` by brace-counting from its
- * declaration marker — the same plain-text marker-slice idiom `checkStripCascades` uses for the
- * narrow-viewport `@media` block, not an AST parse. Neither writer's parameter types contain
- * braces of their own, so the FIRST `{` found after the marker is reliably the opening brace;
- * depth-counting from there to the matching `}` needs no knowledge of the contents.
- * @param content Full text of `board.store.ts`.
- * @param marker The writer's declaration marker text.
- * @returns `[startIndex, endIndex]` character offsets spanning the marker through the writer's
- * closing brace (inclusive), or `null` if the marker is missing.
+ * Parse one `src/` file with the TypeScript compiler's own parser.
+ * @remarks This is the ONE leg in this file that parses rather than pattern-matches, and the
+ * reason is specific: the chokepoint leg is the only rule here whose subject is a mutation rather
+ * than a literal, and a mutation has too many surface forms for a line scan to enumerate — a
+ * line-scan predecessor was blind to `Object.assign(card, { … })`, which is the very idiom
+ * `setActiveSession` uses internally, so the rule could not see its own house style. `typescript`
+ * is already a devDependency (`npm run typecheck`), so this adds no dependency.
+ * @param file Path, used for the AST's file name and to pick the TSX scanner.
+ * @param content Full file text.
+ * @returns The parsed source file, with parent pointers set.
  */
-function sliceWriterBody(content, marker) {
-  const markerIdx = content.indexOf(marker);
-  if (markerIdx === -1) return null;
-  const braceStart = content.indexOf("{", markerIdx);
-  if (braceStart === -1) return null;
-  let depth = 0;
-  for (let i = braceStart; i < content.length; i++) {
-    if (content[i] === "{") depth++;
-    else if (content[i] === "}") {
-      depth--;
-      if (depth === 0) return [markerIdx, i];
-    }
-  }
-  return null;
+function parseSource(file, content) {
+  return ts.createSourceFile(
+    file,
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
 }
 
 /**
- * Find every `<receiver>.<sessionField> =` assignment in a file's text, one line at a time.
- * @remarks The `(?![=>])` guard immediately after the required `=` rejects `==`/`===`/`=>` — a
- * `!=`/`!==`/`<=`/`>=` comparison never reaches that guard at all, because the character
- * immediately after the field name (once whitespace is skipped) is `!`/`<`/`>`, not the literal
- * `=` this pattern anchors on, so those comparisons fail to match in the first place. The `\b`
- * after the field alternation is load-bearing: without it `workspace` would falsely match as a
- * prefix of `workspaceFolders`/`workspacePath`, and `hookToken`/`hookRoutedAt` would otherwise
- * rely on lucky non-overlap instead of an asserted boundary.
- * @param content Full file text.
- * @returns One entry per match: its 1-based line number, absolute character offset into
- * `content` (for the tier-2 slice-containment check), the receiver identifier text (so
- * `ctx.workspacePath` — `SagaContext`'s own unrelated field, not `card.workspacePath` — can be
- * excluded by name), and the fenced field name (so a sanctioned writer can be granted a SUBSET of
- * the fenced fields rather than all of them).
+ * Map every named function and method declaration in a parsed file to its full character span.
+ * @remarks Replaces a brace-counting text slice, which had a silent-failure direction: an
+ * unbalanced `{` inside a string literal or comment in a sanctioned writer's body would have
+ * extended the exempt span PAST its real closing brace, silently exempting every method after it.
+ * A parser cannot be confused by a brace in a string.
+ * @param sourceFile Parsed file.
+ * @returns Map of declaration name to `[start, end]` character offsets.
  */
-function scanSessionFieldAssignments(content) {
-  const results = [];
-  const lines = content.split("\n");
-  let offset = 0;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const re = new RegExp(SESSION_FIELD_ASSIGN_RE.source, "g");
-    let m;
-    while ((m = re.exec(line))) {
-      results.push({
-        lineNumber: i + 1,
-        charOffset: offset + m.index,
-        receiver: m[1],
-        field: m[2],
-      });
+function declarationSpans(sourceFile) {
+  const spans = new Map();
+  const visit = (node) => {
+    if (
+      (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) &&
+      node.name &&
+      ts.isIdentifier(node.name)
+    ) {
+      spans.set(node.name.text, [node.getStart(sourceFile), node.getEnd()]);
     }
-    offset += line.length + 1;
-  }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(sourceFile, visit);
+  return spans;
+}
+
+/**
+ * Is this operator token any form of assignment (`=`, `+=`, `??=`, …)?
+ * @remarks The `FirstAssignment`/`LastAssignment` range is a contiguous block in `ts.SyntaxKind`
+ * that includes the logical-assignment operators and excludes `==`/`===`/`=>` — the three forms
+ * the predecessor regex needed an explicit `(?![=>])` guard to reject.
+ * @param kind A `ts.SyntaxKind`.
+ * @returns True for assignment operators only.
+ */
+function isAssignmentToken(kind) {
+  return (
+    kind >= ts.SyntaxKind.FirstAssignment &&
+    kind <= ts.SyntaxKind.LastAssignment
+  );
+}
+
+/**
+ * Find every write to a fenced session field in a parsed file, across all four mutation forms the
+ * rule can see: plain and compound assignment (`card.ttydPort = p`, `card.ttydPort ??= p`),
+ * computed member assignment (`card["ttydPort"] = p`), destructuring assignment
+ * (`({ ttydPort: card.ttydPort } = fields)`, including array and defaulted forms), and
+ * `Object.assign(card, { ttydPort })` with a literal source object. Increment/decrement
+ * (`card.ttydPort++`) counts too.
+ * @remarks TWO forms are deliberately NOT detected, and neither can be closed without type
+ * information this parse-only pass does not have. (1) `Object.assign(card, opaqueVariable)` — the
+ * source object's keys are unknown without resolving the variable; flagging every `Object.assign`
+ * with a non-literal source would fire on unrelated call sites and train the gate to be ignored.
+ * (2) `delete card.hookToken` — `redactCard` legitimately deletes `hookToken` and `sessions` from
+ * its own shallow copy on every snapshot, so detecting deletion would be a permanent false
+ * positive on the redaction chokepoint itself. Both residues are recorded here rather than left
+ * implied, because an undocumented gap reads as coverage.
+ * @param sourceFile Parsed file.
+ * @returns One entry per write: 1-based line number, character offset (for the tier-2
+ * span-containment check), the receiver's source text (so `ctx.workspacePath` — `SagaContext`'s
+ * own unrelated field, not `card.workspacePath` — can be excluded by name), and the fenced field
+ * name (so a sanctioned writer can be granted a SUBSET of the fenced fields, not all of them).
+ */
+function scanSessionFieldAssignments(sourceFile) {
+  const results = [];
+  const record = (node, field, receiver) => {
+    const pos = node.getStart(sourceFile);
+    results.push({
+      lineNumber: sourceFile.getLineAndCharacterOfPosition(pos).line + 1,
+      charOffset: pos,
+      receiver,
+      field,
+    });
+  };
+
+  const recordTarget = (node) => {
+    if (ts.isParenthesizedExpression(node)) {
+      recordTarget(node.expression);
+    } else if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+    ) {
+      recordTarget(node.left);
+    } else if (
+      ts.isPropertyAccessExpression(node) &&
+      ts.isIdentifier(node.name) &&
+      SESSION_FIELDS.includes(node.name.text)
+    ) {
+      record(node, node.name.text, node.expression.getText(sourceFile));
+    } else if (
+      ts.isElementAccessExpression(node) &&
+      ts.isStringLiteralLike(node.argumentExpression) &&
+      SESSION_FIELDS.includes(node.argumentExpression.text)
+    ) {
+      record(
+        node,
+        node.argumentExpression.text,
+        node.expression.getText(sourceFile),
+      );
+    } else if (ts.isObjectLiteralExpression(node)) {
+      for (const prop of node.properties) {
+        if (ts.isPropertyAssignment(prop)) recordTarget(prop.initializer);
+      }
+    } else if (ts.isArrayLiteralExpression(node)) {
+      for (const element of node.elements) recordTarget(element);
+    }
+  };
+
+  const visit = (node) => {
+    if (
+      ts.isBinaryExpression(node) &&
+      isAssignmentToken(node.operatorToken.kind)
+    ) {
+      recordTarget(node.left);
+    } else if (
+      (ts.isPostfixUnaryExpression(node) || ts.isPrefixUnaryExpression(node)) &&
+      (node.operator === ts.SyntaxKind.PlusPlusToken ||
+        node.operator === ts.SyntaxKind.MinusMinusToken)
+    ) {
+      recordTarget(node.operand);
+    } else if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.expression.text === "Object" &&
+      node.expression.name.text === "assign" &&
+      node.arguments.length > 0
+    ) {
+      const receiver = node.arguments[0].getText(sourceFile);
+      for (const arg of node.arguments.slice(1)) {
+        if (!ts.isObjectLiteralExpression(arg)) continue;
+        for (const prop of arg.properties) {
+          if (
+            !ts.isPropertyAssignment(prop) &&
+            !ts.isShorthandPropertyAssignment(prop)
+          ) {
+            continue;
+          }
+          const name =
+            ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name)
+              ? prop.name.text
+              : null;
+          if (name && SESSION_FIELDS.includes(name)) {
+            record(prop, name, receiver);
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  ts.forEachChild(sourceFile, visit);
   return results;
 }
 
@@ -426,22 +525,23 @@ function scanSessionFieldAssignments(content) {
  * is a repo-wide fence (any match outside `src/server/store/board.store.ts` is a violation by
  * construction — that file is never even inspected for scope, it is simply not the owner), and
  * Tier 2 is an in-file slice (inside `board.store.ts`, a match is exempt only when it falls within
- * a {@link SANCTIONED_WRITERS} body, located by {@link sliceWriterBody}, AND the field it writes is
- * in that writer's own allowed subset — "the write lives in the owner file" is not by itself
+ * a {@link SANCTIONED_WRITERS} body, located by {@link declarationSpans}, AND the field it writes
+ * is in that writer's own allowed subset — "the write lives in the owner file" is not by itself
  * sufficient to pass, and neither is "the write lives in a sanctioned writer").
  * @remarks Three deliberate scope exclusions, each because firing on it would be a permanent
  * false positive that trains the gate to be ignored: (1) `ctx.workspacePath` in
  * `src/server/services/orchestration/steps.ts` is `SagaContext`'s own plain string field on an
- * orchestration-local object, not `card.workspacePath` — excluded by receiver identifier name.
- * (2) `hookRoutedAt` and `branch` are Card-only fields this phase deliberately left outside the
- * chokepoint's scope; neither is a substring of any fenced field name (the `\b` boundary in
- * {@link scanSessionFieldAssignments} makes this an assertion, not luck). (3) Object-literal
- * properties (`tmuxSession: value` inside `{ … }`) never match — the pattern requires a leading
- * `.`, which a colon-form property never has.
- * @remarks This is a plain line-scan + marker-slice, deliberately not an AST/compiler-API pass —
- * every other leg in this file works the same way, and a parser here would be the first of its
- * kind in the file (no new dependency).
- * @remarks If a sanctioned writer's declaration marker cannot be found (renamed, deleted), this
+ * orchestration-local object, not `card.workspacePath`. That exclusion is FILE-SCOPED to
+ * `steps.ts`: as a bare repo-wide identifier exemption it would have let any file in `src/` name a
+ * `Card`-holding variable `ctx` — one of the commonest identifiers in an Express/saga codebase —
+ * and write every fenced field on it with zero resistance. (2) `hookRoutedAt` and `branch` are
+ * Card-only fields this phase deliberately left outside the chokepoint's scope; a parsed property
+ * name matches whole, so neither can collide with a fenced name. (3) Object-literal properties
+ * (`tmuxSession: value` inside a plain `{ … }`) are not writes to a card and never match — only a
+ * destructuring TARGET or an `Object.assign` source object is treated as one.
+ * @remarks See {@link scanSessionFieldAssignments} for the four mutation forms this covers and the
+ * two it deliberately does not.
+ * @remarks If a sanctioned writer's declaration cannot be found (renamed, deleted), this
  * emits a missing-subject sentinel rather than silently reporting zero violations — the exact
  * dead-instrument failure mode v2.9's audit found nine of, three of them in this milestone's own
  * prior plans. A rule whose subject vanished must FAIL, never pass vacuously. Each sanctioned
@@ -456,13 +556,15 @@ function checkSessionProjectionChokepoint() {
     ? readFileSync(BOARD_STORE_PATH, "utf8")
     : null;
 
+  const boardStoreSpans =
+    boardStoreContent !== null
+      ? declarationSpans(parseSource(BOARD_STORE_PATH, boardStoreContent))
+      : new Map();
+
   const writers = [];
   for (const writer of SANCTIONED_WRITERS) {
-    const slice =
-      boardStoreContent !== null
-        ? sliceWriterBody(boardStoreContent, writer.marker)
-        : null;
-    if (slice === null) {
+    const slice = boardStoreSpans.get(writer.name);
+    if (slice === undefined) {
       violations.push(
         `${BOARD_STORE_PATH}: ${writer.name} not found — NEW-21's projection-chokepoint subject is missing or renamed`,
       );
@@ -477,7 +579,9 @@ function checkSessionProjectionChokepoint() {
         ? boardStoreContent
         : readFileSync(file, "utf8");
     if (content === null) continue;
-    for (const match of scanSessionFieldAssignments(content)) {
+    for (const match of scanSessionFieldAssignments(
+      parseSource(file, content),
+    )) {
       if (file === STEPS_PATH && match.receiver === "ctx") continue;
       if (file === BOARD_STORE_PATH) {
         const owner = writers.find(
