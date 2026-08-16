@@ -349,6 +349,15 @@ class BoardStore extends EventEmitter {
    * PROJECTION of the card's ACTIVE session record, and this is the ONLY method in the codebase
    * that may assign them. Every write site funnels its field(s) through this call instead of
    * assigning the card directly.
+   * @remarks `updatedAt` means what {@link Session} says it means — the timestamp of the record's
+   * last FIELD MUTATION, not of the last mutator call. It is re-stamped only when the patch
+   * actually changes a value, so the no-op patches this chokepoint legitimately receives
+   * (`clearHookToken` on a card whose token is already `undefined`, `resetClaudeSessionId` on a
+   * card with no id, `clearStaleTtydPort` on a card with no port) leave it alone. A consumer using
+   * `updatedAt` to detect real change — a diff, a staleness heuristic, a "last activity" line —
+   * can therefore trust it. On the mint path it is not re-stamped at all, which is what keeps the
+   * same-instant promise below literally true rather than true-unless-the-two-clock-reads-straddle-
+   * a-millisecond.
    * @remarks Create-if-absent minting: if no session resolves from `card.activeSessionId` AND
    * `patch` carries at least one defined value, a fresh {@link Session} is minted (opaque
    * `randomUUID()` id, `createdAt`/`updatedAt` stamped to the same instant) and appended to
@@ -373,16 +382,24 @@ class BoardStore extends EventEmitter {
   ): void {
     let active = card.sessions?.find((s) => s.id === card.activeSessionId);
     const patchHasValue = Object.values(patch).some((v) => v !== undefined);
+    let minted = false;
     if (!active && patchHasValue) {
       const now = new Date().toISOString();
       active = { id: randomUUID(), createdAt: now, updatedAt: now };
       card.sessions = card.sessions ?? [];
       card.sessions.push(active);
       card.activeSessionId = active.id;
+      minted = true;
     }
     if (active) {
-      Object.assign(active, patch);
-      active.updatedAt = new Date().toISOString();
+      const record = active;
+      const entries = Object.entries(patch) as [
+        keyof typeof patch,
+        Session[keyof typeof patch],
+      ][];
+      const changed = entries.some(([key, value]) => record[key] !== value);
+      Object.assign(record, patch);
+      if (changed && !minted) record.updatedAt = new Date().toISOString();
     }
     card.tmuxSession = active?.tmuxSession;
     card.ttydPort = active?.ttydPort;
