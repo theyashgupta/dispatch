@@ -153,7 +153,7 @@ const SESSION_SCHEMA_VERSION = 1;
 function needsSessionEntityMigration(cards: Card[]): boolean {
   return cards.some(
     (card) =>
-      card.sessions === undefined &&
+      card.sessions == null &&
       (card.tmuxSession !== undefined ||
         card.ttydPort !== undefined ||
         card.hookToken !== undefined ||
@@ -173,11 +173,18 @@ function needsSessionEntityMigration(cards: Card[]): boolean {
  * `sessions` nor `activeSessionId` (not an empty array, not a placeholder record) — the "zero
  * session records, no active pointer" invariant. Never writes any flat field, and never writes
  * `card.branch`.
+ * @remarks The already-migrated skip and {@link needsSessionEntityMigration}'s counterpart test
+ * both use `== null`, not `=== undefined`. A blob carrying `"sessions": null` — a hand edit, a
+ * partial future writer, or any producer that normalises an absent array to `null` — satisfies
+ * neither `=== undefined` nor its negation, so under a strict check it would be skipped by the
+ * migration AND skipped by the needs-migration probe: permanently record-free while still holding
+ * flat fields, which is the one card shape {@link BoardStore.setActiveSession}'s projection guard
+ * exists to refuse.
  */
 function migrateCardsToSessionEntity(cards: Card[]): number {
   let migrated = 0;
   for (const card of cards) {
-    if (card.sessions !== undefined) continue;
+    if (card.sessions != null) continue;
     const {
       tmuxSession,
       ttydPort,
@@ -368,6 +375,17 @@ class BoardStore extends EventEmitter {
    * this, `hydrateFromParsed`'s To-Do `ttydPort` correction would mint an empty session record on
    * every To Do card at boot, contradicting the invariant that a card with no session owns zero
    * session records.
+   * @remarks The mirror at the end is guarded, not unconditional. If no session resolves AND the
+   * patch mints nothing, writing `active?.field` into all six flat fields would set every one of
+   * them to `undefined` — a silent, event-free destruction of `workspacePath`/`workspace` that
+   * makes the card's session unrecoverable (`SessionLostSection`'s Resume affordance reads
+   * `card.workspacePath`; the Restart route 400s on a missing `card.workspace`). No current call
+   * site reaches that state — post-migration every card holding flat fields also holds a
+   * resolvable record — but that is a property inherited from the migration's completeness, not
+   * one this method asserts, so it asserts it: a card holding flat session state with no
+   * resolvable record is a corrupt card, and this logs and refuses rather than quietly erasing
+   * what is left. Cards with no flat state fall through to the mirror as before, which is what
+   * keeps the boot-time To-Do `ttydPort` correction working.
    * @remarks Clear-in-place: a mutator that clears session fields (`markSessionLost`,
    * `recordResumeFailure`, `recordCleanupWarning`, `finishCleanup`) sets those fields to
    * `undefined` ON the existing active session record. It NEVER removes the record from
@@ -400,6 +418,11 @@ class BoardStore extends EventEmitter {
       const changed = entries.some(([key, value]) => record[key] !== value);
       Object.assign(record, patch);
       if (changed && !minted) record.updatedAt = new Date().toISOString();
+    } else if (card.tmuxSession != null || card.workspacePath != null) {
+      console.error(
+        `[store] card ${card.id} carries flat session fields with no resolvable active session — refusing to project`,
+      );
+      return;
     }
     card.tmuxSession = active?.tmuxSession;
     card.ttydPort = active?.ttydPort;
