@@ -69,7 +69,7 @@ you can contribute. Until that suite exists, behavior is held in place by:
 
 - **The replay gate.** 16 recorded watcher fixtures (`scripts/replay-fixtures/`) diffed byte for byte
   against their golden decisions. This is what catches a silent watcher regression.
-- **The invariant checker.** 81 documented cross-module invariants (`scripts/check-invariants.mjs`),
+- **The invariant checker.** 122 documented cross-module invariants (`scripts/check-invariants.mjs`),
   each with a durable home in a JSDoc block or `docs/ARCHITECTURE.md`, machine-verified.
 - **Strict TypeScript and lint**, gated above.
 - **The running app.** The pieces that matter (tmux, ttyd, real Claude sessions) get exercised by
