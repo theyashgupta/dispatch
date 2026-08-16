@@ -2368,7 +2368,14 @@ mechanically-checkable question; none of them read prose for truth.
 - **`node scripts/check-invariants.mjs`** — invariant-home audit: every ID in the frozen
   baseline (`scripts/invariant-baseline.txt`) must have a durable home (a JSDoc block in `src/`
   or anywhere in this doc). Deliberately NOT wired into `npm run check` — it gates the
-  Phase 10 knowledge-migration baseline specifically, run on demand.
+  Phase 10 knowledge-migration baseline specifically, run on demand. `package.json`'s `check`
+  script runs `format`, `lint`, `typecheck`, `deadcode`, `replay-gate`, and `doc-drift` only; a
+  clean `npm run check` says nothing about this gate's legs. One of its legs is
+  `checkSessionProjectionChokepoint`, reported as `SESSION PROJECTION CHOKEPOINT (NEW-21)`: a
+  two-tier line-scan proving the six flat session fields on `Card` are assigned ONLY inside
+  `board.store.ts#setActiveSession` (a repo-wide fence for every other file, an in-file slice
+  for `board.store.ts` itself), and that it fails — rather than passing vacuously — if
+  `setActiveSession` is ever renamed or deleted out from under it.
 - **`node scripts/check-doc-drift.mjs`** (`npm run doc-drift`, wired into `npm run check`) —
   catches two classes of drift between this doc and `src/`: (1) `@see docs/ARCHITECTURE.md#...`
   pointers and backtick-quoted source-file citations in this doc that no longer resolve, and
