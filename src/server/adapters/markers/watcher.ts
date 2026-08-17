@@ -71,9 +71,11 @@ const markerFreeTicks = new Map<string, number>();
 
 /**
  * Consecutive `capture-pane` FAILURES observed per session (RESIL-01 runtime dead-session detector).
- * Three in a row (~6s at the 2s tick) means the tmux session is genuinely gone, so the card is
- * marked session-lost (store.markSessionLost) — which clears tmuxSession, drops the card out of
- * cardsWithSession(), and makes it Restart-able instead of frozen in a silent warn-once state.
+ * Three in a row (~6s at the 2s tick) means the tmux session is genuinely gone, so that ONE session
+ * is marked lost (store.markSessionLost, Phase 91: targets this session's own id, never the card's
+ * active pointer) — clearing its `tmuxSession` and dropping it out of `sessionsWithTmux()`. A card
+ * with no other live session becomes Restart-able instead of frozen in a silent warn-once state; a
+ * card with a live sibling stays untouched, its own capture continuing on its own strike count.
  * The threshold survives the two benign transient cases: a tsx-watch reload kills the whole backend
  * process before 3 failures can accrue, and boot reconcile re-validates a still-live session at
  * startup — so only a REAL mid-run kill reaches 3. Accepted tradeoff: a session wedged (uncapturable)
