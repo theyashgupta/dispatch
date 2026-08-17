@@ -45,8 +45,10 @@ const ID_RE =
  * re-freeze (`NEW-20`) — see docs/ARCHITECTURE.md#design-system-invariants.
  * @remarks Moved from 121 to 122 for the deliberate one-ID session-projection
  * chokepoint re-freeze (`NEW-21`) — see docs/ARCHITECTURE.md#session-projection-chokepoint.
+ * @remarks Moved from 122 to 123 for the deliberate one-ID attention single-source
+ * re-freeze (`NEW-22`) — see docs/ARCHITECTURE.md#design-system-invariants.
  */
-const FROZEN_COUNT = 122;
+const FROZEN_COUNT = 123;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");
@@ -61,6 +63,25 @@ const TERMINAL_CLIENT_PATHS = [
   join("src", "web", "terminal.html"),
 ];
 const BOARD_STORE_PATH = join("src", "server", "store", "board.store.ts");
+const CARD_ATTENTION_PATH = join(
+  "src",
+  "web",
+  "features",
+  "board",
+  "card-attention.ts",
+);
+
+/**
+ * The exact four files a correct `needsAttention`/`attentionTitle` census must return: the
+ * definition, the barrel re-export (a plain re-export line, NOT an independent computation, and
+ * expected on purpose so this leg does not false-alarm on it), and the two real consumers.
+ */
+const EXPECTED_ATTENTION_FILES = [
+  CARD_ATTENTION_PATH,
+  join("src", "web", "features", "board", "index.ts"),
+  join("src", "web", "features", "board", "CardView.tsx"),
+  join("src", "web", "features", "orca", "OrcaNavRow.tsx"),
+];
 const STEPS_PATH = join(
   "src",
   "server",
@@ -334,6 +355,72 @@ function checkTerminalFence() {
           `${full}: retired pattern NEW-20 — a new embedded-terminal-client file appeared outside the fenced set`,
         );
       }
+    }
+  }
+  return violations;
+}
+
+/**
+ * Attention single-source census (`NEW-22`). Answers one question: does the shared
+ * `needsAttention`/`attentionTitle` predicate still have exactly one definition and the two
+ * consumers the board/Orca attention agreement (`91-UI-SPEC.md`'s criterion 5) depends on?
+ * Modeled on {@link checkTerminalFence}'s shape: a closed-set file census plus a
+ * missing-subject sentinel.
+ * @remarks FOUR files, not three: `src/web/features/board/index.ts` is a plain re-export line,
+ * not a second computation, and is deliberately part of the expected set. A check that expects
+ * three files would false-alarm on the barrel on its very first run — a check that cries wolf
+ * gets disbelieved, which is a dead instrument by a slower route.
+ * @remarks The missing-subject sentinel mirrors {@link checkSessionProjectionChokepoint}'s: if
+ * `card-attention.ts` no longer declares BOTH `export function needsAttention` and
+ * `export function attentionTitle`, this reports a violation instead of quietly passing at a
+ * smaller census — a renamed or deleted subject must FAIL, never silently widen the exemption.
+ * @see docs/ARCHITECTURE.md#design-system-invariants
+ * @returns Violation report lines: one per unexpected (fifth) site, one per expected file that
+ * stopped matching, plus the missing-subject sentinel(s) if the definitions themselves are gone.
+ */
+function checkAttentionSingleSource() {
+  const violations = [];
+  if (!existsSync(CARD_ATTENTION_PATH)) {
+    violations.push(
+      `${CARD_ATTENTION_PATH}: file not found — NEW-22's attention-predicate subject is missing or renamed`,
+    );
+  } else {
+    const content = readFileSync(CARD_ATTENTION_PATH, "utf8");
+    if (!content.includes("export function needsAttention")) {
+      violations.push(
+        `${CARD_ATTENTION_PATH}: export function needsAttention not found — NEW-22's attention-predicate subject is missing or renamed`,
+      );
+    }
+    if (!content.includes("export function attentionTitle")) {
+      violations.push(
+        `${CARD_ATTENTION_PATH}: export function attentionTitle not found — NEW-22's attention-predicate subject is missing or renamed`,
+      );
+    }
+  }
+
+  const actual = new Set();
+  for (const file of walkSrc(WEB_DIR)) {
+    const content = readFileSync(file, "utf8");
+    if (
+      content.includes("needsAttention") ||
+      content.includes("attentionTitle")
+    ) {
+      actual.add(file);
+    }
+  }
+
+  for (const file of actual) {
+    if (!EXPECTED_ATTENTION_FILES.includes(file)) {
+      violations.push(
+        `${file}: retired pattern NEW-22 — a fifth site references needsAttention/attentionTitle outside the single-source set (${EXPECTED_ATTENTION_FILES.join(", ")})`,
+      );
+    }
+  }
+  for (const file of EXPECTED_ATTENTION_FILES) {
+    if (!actual.has(file)) {
+      violations.push(
+        `${file}: retired pattern NEW-22 — expected reference to needsAttention/attentionTitle is missing`,
+      );
     }
   }
   return violations;
@@ -699,31 +786,34 @@ function generateBaseline() {
 /**
  * Run the invariant-home diff, the global retired-pattern scan, the file-scoped
  * strip-cascade check, the directory-scoped board reading-rhythm check, the
- * file-scoped terminal-client fence, and the session-projection chokepoint
- * check, then set the process exit code.
- * @remarks All six diff legs gate the exit, not just MISSING: in a
+ * file-scoped terminal-client fence, the session-projection chokepoint check,
+ * and the attention single-source census, then set the process exit code.
+ * @remarks All seven diff legs gate the exit, not just MISSING: in a
  * frozen-baseline world an EXTRA (homed but unbaselined — a typo'd ID in docs
  * or an unratified new ID in JSDoc) and an ORPHAN (present in src but
  * unbaselined) are always defects, and an informational-only leg would let
  * them accumulate silently through the body-comment deletion phases. The
  * retired-pattern leg, the strip-cascade leg, the board reading-rhythm leg,
- * the terminal-fence leg, and the session-projection chokepoint leg are all
- * independent of the ID-baseline arithmetic above — a design literal coming
- * back, the terminal-client subject set changing, or a flat session field
- * being assigned outside its sole chokepoint is a defect regardless of
- * whether any invariant ID also moved. The strip-cascade leg (`NEW-18`), the
- * board reading-rhythm leg (`NEW-19`), the terminal-fence leg (`NEW-20`), and
- * the session-projection chokepoint leg (`NEW-21`) are all deliberately
- * scoped (file- or directory-scoped) rather than folded into
+ * the terminal-fence leg, the session-projection chokepoint leg, and the
+ * attention single-source leg are all independent of the ID-baseline
+ * arithmetic above — a design literal coming back, the terminal-client
+ * subject set changing, a flat session field being assigned outside its sole
+ * chokepoint, or a second independent computation of "does this card need
+ * attention" is a defect regardless of whether any invariant ID also moved.
+ * The strip-cascade leg (`NEW-18`), the board reading-rhythm leg (`NEW-19`),
+ * the terminal-fence leg (`NEW-20`), the session-projection chokepoint leg
+ * (`NEW-21`), and the attention single-source leg (`NEW-22`) are all
+ * deliberately scoped (file- or directory-scoped) rather than folded into
  * `RETIRED_PATTERNS`, since each pattern is legitimate outside its own scope.
  * The terminal-fence leg only proves the fenced SUBJECT SET is intact — it
  * cannot prove the fenced files' CONTENTS are unchanged; see
  * `checkTerminalFence`'s own JSDoc for the split. See
- * `checkSessionProjectionChokepoint`'s own JSDoc for its two-tier fence/slice
- * split and its missing-subject sentinel.
+ * `checkSessionProjectionChokepoint`'s and `checkAttentionSingleSource`'s own
+ * JSDoc for their respective two-tier fence/slice split and missing-subject
+ * sentinels.
  * @returns Nothing; exits 0 iff MISSING, ORPHAN, EXTRA, RETIRED, STRIP
- * CASCADES, BOARD READING RHYTHM, TERMINAL FENCE, and SESSION PROJECTION
- * CHOKEPOINT are all empty.
+ * CASCADES, BOARD READING RHYTHM, TERMINAL FENCE, SESSION PROJECTION
+ * CHOKEPOINT, and ATTENTION SINGLE SOURCE are all empty.
  */
 function run() {
   const home = new Set();
@@ -746,6 +836,7 @@ function run() {
   const boardReadingRhythm = checkBoardReadingRhythm();
   const terminalFence = checkTerminalFence();
   const sessionChokepoint = checkSessionProjectionChokepoint();
+  const attentionSingleSource = checkAttentionSingleSource();
 
   report("MISSING (baseline - home)", missing);
   report("ORPHAN  (present - baseline)", orphan);
@@ -755,6 +846,7 @@ function run() {
   report("BOARD READING RHYTHM (NEW-19)", boardReadingRhythm);
   report("TERMINAL FENCE (NEW-20)", terminalFence);
   report("SESSION PROJECTION CHOKEPOINT (NEW-21)", sessionChokepoint);
+  report("ATTENTION SINGLE SOURCE (NEW-22)", attentionSingleSource);
 
   const defects =
     missing.length +
@@ -764,7 +856,8 @@ function run() {
     stripCascades.length +
     boardReadingRhythm.length +
     terminalFence.length +
-    sessionChokepoint.length;
+    sessionChokepoint.length +
+    attentionSingleSource.length;
   console.log(
     `\n${defects === 0 ? "PASS" : "FAIL"}: ${baseline.size - missing.length}/${baseline.size} invariants homed` +
       (missing.length ? ` (${missing.length} missing a home)` : "") +
@@ -785,6 +878,9 @@ function run() {
         : "") +
       (sessionChokepoint.length
         ? ` (${sessionChokepoint.length} session-projection-chokepoint violation(s))`
+        : "") +
+      (attentionSingleSource.length
+        ? ` (${attentionSingleSource.length} attention-single-source violation(s))`
         : ""),
   );
   process.exit(defects === 0 ? 0 : 1);

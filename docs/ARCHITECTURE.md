@@ -2418,7 +2418,13 @@ mechanically-checkable question; none of them read prose for truth.
   `board.store.ts` itself, and it fails — rather than passing vacuously — if either declared
   writer is renamed or deleted out from under it. See the leg's own JSDoc for the mutation forms
   it covers and the two (`Object.assign` with an opaque source, and `delete`) it deliberately
-  does not.
+  does not. Another leg is `checkAttentionSingleSource`, reported as
+  `ATTENTION SINGLE SOURCE (NEW-22)`: a closed-set census of every `src/web` file referencing
+  `needsAttention`/`attentionTitle`, which must resolve to exactly four files — the definition
+  (`card-attention.ts`), the barrel re-export (`features/board/index.ts`), and the two consumers
+  (`CardView.tsx`, `OrcaNavRow.tsx`) — so a board/Orca attention disagreement is structurally
+  impossible unless a fifth, independently-computed site appears. It fails, rather than passing
+  vacuously, if `card-attention.ts` no longer declares both `needsAttention` and `attentionTitle`.
 - **`node scripts/migration-diff-v3.mjs`** (`npm run migration-diff`) and
   **`node scripts/redaction-capture-v3.mjs`** (`npm run redaction-capture`) — sandbox harnesses
   that boot a real server against a throwaway `HOME`, so they are deliberately OUTSIDE
