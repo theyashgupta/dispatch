@@ -31,8 +31,10 @@ import { registerHookToken } from "../services/domain/hook-tokens.js";
  * the loop. A card with some sessions live and some dead has the dead ones marked lost
  * individually (the store derives the card-level lost flag and repairs the active pointer if it
  * named a dead session), the live ones untouched: a card is never swept because a sibling of the
- * same ticket died. The four counters below now count SESSIONS, not cards — their names are left
- * unchanged so an operator's mental model of the log line does not shift silently.
+ * same ticket died. The four counters below now count SESSIONS, not cards, and the log line says
+ * so (`IN-03`): keeping a "cards" label that had become false is what would actually shift an
+ * operator's mental model silently, since at N greater than 1 a session count read as a card count
+ * is simply wrong.
  * @see docs/ARCHITECTURE.md#resilience-and-reconcile
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  * @see docs/ARCHITECTURE.md#terminal-ttyd
@@ -75,6 +77,6 @@ export async function reconcileSessions(): Promise<void> {
       await store.clearStaleTtydPort(c.cardId, c.sessionId);
   }
   console.log(
-    `[reconcile] session-lost cards: ${lost}; hook tokens rebuilt: ${rebuilt}; ttyd adopted: ${adopted.size}; ttyd candidates not adopted: ${candidates.length - adopted.size}`,
+    `[reconcile] session-lost sessions: ${lost}; hook tokens rebuilt: ${rebuilt}; ttyd adopted: ${adopted.size}; ttyd candidates not adopted: ${candidates.length - adopted.size}`,
   );
 }
