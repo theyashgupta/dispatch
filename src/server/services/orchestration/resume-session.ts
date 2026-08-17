@@ -41,7 +41,13 @@ import { ensureTerminal } from "./terminal.js";
  * token-before-session sequencing hazard structurally, mirroring `steps.ts#startClaude`:
  * `store.mintHookChannel` persists the token AND reports which session it landed on, and only
  * then is the token registered against that real id — a `mintHookChannel` reporting no session
- * (unknown card id) skips registration and falls through to the hook-silent launch.
+ * (unknown card id, or one whose active pointer names no record) skips registration and falls
+ * through to the hook-silent launch.
+ * @remarks (`WR-01`) The stale token is SNAPSHOTTED before the mint, matching `steps.ts`'s own
+ * ordering. `store.getCard` returns the live Map entry, so `mintHookChannel` overwrites
+ * `card.hookToken` in place: reading it after the mint would hand `registerHookToken` the token it
+ * is about to register, degenerating re-mint hygiene into `delete(token)` then `set(token)` and
+ * leaving the genuinely stale credential resolving forever.
  * @see docs/ARCHITECTURE.md#in-review-lifecycle
  */
 export async function resumeSession(cardId: string): Promise<void> {
@@ -74,10 +80,11 @@ export async function resumeSession(cardId: string): Promise<void> {
     const runtime = getHooksRuntime();
     let launchedHooksCapable = false;
     if (runtime?.capable && runtime.statusChannel !== "pane") {
+      const previousToken = card.hookToken;
       const token = newHookTokenValue();
       const sessionId = await store.mintHookChannel(cardId, token);
       if (sessionId !== undefined) {
-        registerHookToken(token, cardId, sessionId, card.hookToken);
+        registerHookToken(token, cardId, sessionId, previousToken);
         await newSession(
           session,
           card.workspacePath,
