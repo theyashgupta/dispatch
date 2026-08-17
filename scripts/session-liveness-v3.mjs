@@ -51,6 +51,10 @@
  *   node scripts/session-liveness-v3.mjs --check reconcile         RECON-01/C3: a live sibling's ttyd
  *                                                                   survives a real backend restart on
  *                                                                   its own port, held by the same PID
+ *   node scripts/session-liveness-v3.mjs --check attention          UI-02/C5: any session's NEEDS_INPUT
+ *                                                                   marker moves the card, a SIBLING's
+ *                                                                   reply cannot clear it, the firing
+ *                                                                   session's own reply can
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -803,6 +807,25 @@ async function postHook(token, body) {
   return res.status;
 }
 
+/**
+ * POST a `UserPromptSubmit` hook event through `token` — the exact event `applyPromptSubmit`
+ * (`hook-events.ts:171`) maps onto `store.flipBack`, driving the cross-session gate this file's
+ * `--check attention` proves. No message body is required: `applyPromptSubmit` binds only on the
+ * event name plus the token-resolved session identity, never on payload text.
+ */
+async function postPromptSubmit(token) {
+  const res = await fetch(`http://127.0.0.1:${SANDBOX_PORT}/api/hook/claude`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-dispatch-token": token,
+    },
+    body: JSON.stringify({ hook_event_name: "UserPromptSubmit" }),
+  });
+  await res.body?.cancel().catch(() => {});
+  return res.status;
+}
+
 /** Read one persisted card row via a FRESH `readOnly: true` node:sqlite connection, or `undefined`. */
 function readCard(dbPath, cardId) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
@@ -1367,12 +1390,126 @@ async function checkReconcile() {
   return violations;
 }
 
+/**
+ * Cross-session attention proof (UI-02/criterion 5, Task 1): "a ticket where ANY session needs
+ * input reads as needing input, and stays that way while another session replies." Reads
+ * `GET /api/board` — the identical wire the board and Orca both consume — between every step,
+ * never a store-internal read, so this check is falsified by exactly the same signal a human
+ * would see on screen.
+ * @remarks Session B is deliberately the NON-active session (`built.sessionA` is the
+ * `activeSessionId` per {@link standUpFixture}) — step 1 firing through the non-active sibling's
+ * own token is what proves attention is not active-session-only. Step 2 (session A, the working
+ * sibling, replies) is the cross-session gate under test: `flipBack`'s "any OTHER session still
+ * needs input" clause (`board.store.ts`) must suppress the move. Step 3 (session B's OWN reply)
+ * is the positive control the plan requires — without it, step 2 passing could mean flip-back is
+ * broken outright rather than that the cross-session gate specifically works.
+ */
+async function checkAttention(built) {
+  const violations = [];
+  const reasonB = "attention-cross-session-reason-B";
+
+  console.log(
+    `attention: active session at standup = ${built.sessionA.id} (A); firing session = ${built.sessionB.id} (B, non-active)`,
+  );
+
+  const statusStopB = await postHook(
+    built.sessionB.token,
+    stopBodyWithReason(reasonB),
+  );
+  console.log(
+    `attention: step 1 POST Stop/NEEDS_INPUT via session B (non-active) -> ${statusStopB} (expected 204)`,
+  );
+  if (statusStopB !== 204) {
+    violations.push(
+      `step 1: POST Stop via session B returned ${statusStopB}, expected 204`,
+    );
+  }
+  let card = await fetchFixtureCard(built.cardId);
+  console.log(
+    `attention: step 1 card.column = ${card?.column} (expected needs_input)`,
+  );
+  if (card?.column !== "needs_input") {
+    violations.push(
+      `step 1: card.column expected "needs_input" after session B's (non-active) NEEDS_INPUT marker, actual "${card?.column}"`,
+    );
+  }
+
+  const statusPromptA = await postPromptSubmit(built.sessionA.token);
+  console.log(
+    `attention: step 2 POST UserPromptSubmit via session A (active, working sibling replying) -> ${statusPromptA} (expected 204)`,
+  );
+  if (statusPromptA !== 204) {
+    violations.push(
+      `step 2: POST UserPromptSubmit via session A returned ${statusPromptA}, expected 204`,
+    );
+  }
+  card = await fetchFixtureCard(built.cardId);
+  console.log(
+    `attention: step 2 card.column = ${card?.column} (expected still needs_input — B still holds its marker)`,
+  );
+  if (card?.column !== "needs_input") {
+    violations.push(
+      `step 2: card.column expected to REMAIN "needs_input" after A's reply (session B still holds a needs-input marker), actual "${card?.column}" — a card that flipped here would read as answered while B is still blocked`,
+    );
+  }
+
+  const statusPromptB = await postPromptSubmit(built.sessionB.token);
+  console.log(
+    `attention: step 3 POST UserPromptSubmit via session B (its own reply, positive control) -> ${statusPromptB} (expected 204)`,
+  );
+  if (statusPromptB !== 204) {
+    violations.push(
+      `step 3: POST UserPromptSubmit via session B returned ${statusPromptB}, expected 204`,
+    );
+  }
+  card = await fetchFixtureCard(built.cardId);
+  console.log(
+    `attention: step 3 card.column = ${card?.column} (expected in_progress)`,
+  );
+  if (card?.column !== "in_progress") {
+    violations.push(
+      `step 3: card.column expected "in_progress" after session B's own reply, actual "${card?.column}" — without this passing, step 2 could be passing because flip-back is broken outright rather than because the cross-session gate works`,
+    );
+  }
+
+  await killAndWait(built.server?.child);
+  const persisted = readCard(built.dbPath, built.cardId);
+  if (!persisted) {
+    violations.push(
+      `step 4: card ${built.cardId} missing from persisted board.db after kill`,
+    );
+    return violations;
+  }
+  const recordA = persisted.sessions?.find((s) => s.id === built.sessionA.id);
+  const recordB = persisted.sessions?.find((s) => s.id === built.sessionB.id);
+  const expectedMarkerKeyB = `NEEDS_INPUT ${reasonB}`;
+  console.log(
+    `attention: step 4 persisted session A (${built.sessionA.id}) lastMarker = ${JSON.stringify(recordA?.lastMarker)}`,
+  );
+  console.log(
+    `attention: step 4 persisted session B (${built.sessionB.id}) lastMarker = ${JSON.stringify(recordB?.lastMarker)}`,
+  );
+  if (recordB?.lastMarker !== expectedMarkerKeyB) {
+    violations.push(
+      `step 4: session B persisted lastMarker expected "${expectedMarkerKeyB}" (FLOW-05: flipping out of needs_input leaves lastMarker untouched), actual "${recordB?.lastMarker}"`,
+    );
+  }
+  if (recordA?.lastMarker !== undefined) {
+    violations.push(
+      `step 4: session A persisted lastMarker expected undefined (A never posted a marker), actual "${recordA?.lastMarker}" — the dedup key stayed per-session while the column stayed card-level`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
     withFixture("hook-attribution", checkHookAttribution),
   liveness: checkLiveness,
   reconcile: checkReconcile,
+  attention: () => withFixture("attention", checkAttention),
 };
 
 /**
