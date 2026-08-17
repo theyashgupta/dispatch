@@ -4,7 +4,7 @@ import { preSeedTrust } from "../../adapters/claude-trust.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { awaitReplReady, StartStepError } from "./steps.js";
 import { getHooksRuntime } from "../infra/config-holder.js";
-import { mintHookToken, registerHookToken } from "../domain/hook-tokens.js";
+import { newHookTokenValue, registerHookToken } from "../domain/hook-tokens.js";
 import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
 import { REATTACH_STATUS_CLEAR_MS } from "./start-session.js";
 import { ensureTerminal } from "./terminal.js";
@@ -34,6 +34,14 @@ import { ensureTerminal } from "./terminal.js";
  * SECURITY: errors
  * are logged content-free — no stderr or pane text leaks (the pane payload rides
  * StartStepError.message, so only the step name may be logged).
+ * @remarks (Phase 91) Both reattach paths — the already-live-tmux-session branch above and
+ * `start-session.ts`'s own reattach — register the card's persisted token against
+ * `card.activeSessionId` because a reattach always targets the card's ACTIVE session by
+ * construction; neither path can ever reattach onto a sibling. The fresh-mint branch closes the
+ * token-before-session sequencing hazard structurally, mirroring `steps.ts#startClaude`:
+ * `store.mintHookChannel` persists the token AND reports which session it landed on, and only
+ * then is the token registered against that real id — a `mintHookChannel` reporting no session
+ * (unknown card id) skips registration and falls through to the hook-silent launch.
  * @see docs/ARCHITECTURE.md#in-review-lifecycle
  */
 export async function resumeSession(cardId: string): Promise<void> {
@@ -49,7 +57,9 @@ export async function resumeSession(cardId: string): Promise<void> {
       : ["--continue"];
 
     if (await hasSession(`=${session}`)) {
-      if (card.hookToken) registerHookToken(card.hookToken, cardId);
+      if (card.hookToken && card.activeSessionId) {
+        registerHookToken(card.hookToken, cardId, card.activeSessionId);
+      }
       await store.resumeSession(cardId, { session });
       setTimeout(
         () => void store.setStatusReason(cardId, null),
@@ -62,26 +72,32 @@ export async function resumeSession(cardId: string): Promise<void> {
     await preSeedTrust(card.workspacePath);
     const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
     const runtime = getHooksRuntime();
+    let launchedHooksCapable = false;
     if (runtime?.capable && runtime.statusChannel !== "pane") {
-      const token = mintHookToken(cardId, card.hookToken);
-      await store.mintHookChannel(cardId, token);
-      await newSession(
-        session,
-        card.workspacePath,
-        [
-          claudePath,
-          ...resumeArgs,
-          "--settings",
-          HOOK_SETTINGS_PATH,
-          "--dangerously-skip-permissions",
-        ],
-        {
-          DISPATCH_HOOK_PORT: String(runtime.port),
-          DISPATCH_HOOK_TOKEN: token,
-          DISPATCH_CARD_ID: cardId,
-        },
-      );
-    } else {
+      const token = newHookTokenValue();
+      const sessionId = await store.mintHookChannel(cardId, token);
+      if (sessionId !== undefined) {
+        registerHookToken(token, cardId, sessionId, card.hookToken);
+        await newSession(
+          session,
+          card.workspacePath,
+          [
+            claudePath,
+            ...resumeArgs,
+            "--settings",
+            HOOK_SETTINGS_PATH,
+            "--dangerously-skip-permissions",
+          ],
+          {
+            DISPATCH_HOOK_PORT: String(runtime.port),
+            DISPATCH_HOOK_TOKEN: token,
+            DISPATCH_CARD_ID: cardId,
+          },
+        );
+        launchedHooksCapable = true;
+      }
+    }
+    if (!launchedHooksCapable) {
       await store.clearHookChannel(cardId);
       await newSession(session, card.workspacePath, [
         claudePath,

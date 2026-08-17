@@ -50,6 +50,9 @@ function toStartError(err: unknown, stepName: string): StartError {
  * explicitly chosen `playbook` (not the intent fallback) is persisted as the picker's remembered
  * default only after `completeStart` succeeds, matching the "saved on successful kickoff" contract
  * — a failed start must never overwrite a working remembered default.
+ * @remarks (Phase 91) The reattach branch registers the card's persisted token against
+ * `card.activeSessionId` because this reattach always targets the card's ACTIVE session by
+ * construction — it can never reattach onto a sibling.
  * @see docs/ARCHITECTURE.md#orchestration-saga
  */
 export async function startSession(
@@ -78,7 +81,9 @@ export async function startSession(
     );
 
     if (await hasSession(session)) {
-      if (card.hookToken) registerHookToken(card.hookToken, cardId);
+      if (card.hookToken && card.activeSessionId) {
+        registerHookToken(card.hookToken, cardId, card.activeSessionId);
+      }
       await store.attachExistingSession(cardId, {
         workspacePath,
         branch: card.identifier,

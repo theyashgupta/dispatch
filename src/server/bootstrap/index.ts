@@ -246,10 +246,10 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
         "or flip this run",
     );
   }
-  store.setHookTokenReleaser((token, cardId) => {
+  store.setHookTokenReleaser((token, cardId, sessionId) => {
     unregisterHookToken(token);
-    reapActivityThrottle(cardId);
-    reapMismatchThrottle(cardId);
+    reapActivityThrottle(cardId, sessionId);
+    reapMismatchThrottle(cardId, sessionId);
   });
 
   await seedPlaybooks();

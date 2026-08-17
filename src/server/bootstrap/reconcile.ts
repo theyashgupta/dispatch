@@ -21,6 +21,11 @@ import { registerHookToken } from "../services/domain/hook-tokens.js";
  * teardown, now adopt-then-narrow-sweep rather than reap-everything; tolerant swallow-to-default
  * (NEW-10) via `listSessions`; a card whose adoption attempt fails clears its stale `ttydPort` and
  * degrades to exactly the pre-ROBU-01 reap+respawn behavior.
+ * @remarks (Phase 91) `registerHookToken` now requires a session id; this loop still iterates
+ * `cardsWithSession()` (card-scoped, the active projection only) and registers against
+ * `card.activeSessionId`, matching this file's existing single-session-per-card sweep exactly.
+ * Widening the sweep itself to every session a card owns via `sessionsWithTmux()` is a later
+ * plan's scope (Phase 91, RECON-01).
  * @see docs/ARCHITECTURE.md#resilience-and-reconcile
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  * @see docs/ARCHITECTURE.md#terminal-ttyd
@@ -39,8 +44,8 @@ export async function reconcileSessions(): Promise<void> {
       }
       continue;
     }
-    if (card.hookToken) {
-      registerHookToken(card.hookToken, card.id);
+    if (card.hookToken && card.activeSessionId) {
+      registerHookToken(card.hookToken, card.id, card.activeSessionId);
       rebuilt++;
     }
     if (card.ttydPort != null) {

@@ -118,6 +118,10 @@ const captureFailures = new Map<string, number>();
  * is replay-frozen and carries no event-type field of its own. This I/O shell is where the frozen
  * type's column is turned into the caller-supplied literal `applyMarker` now requires; it must
  * never be pushed back into the store.
+ * @remarks (Phase 91) The store's marker mutators now require a session id; this function still
+ * scans exactly one pane (`card.tmuxSession`, the card's active projection), so every call
+ * passes `card.activeSessionId` — the current single-session-per-card scan's own identity, not a
+ * generalization. Iterating every session a card owns is a later plan's scope.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 async function scanSession(
@@ -225,7 +229,7 @@ async function scanSession(
       case "setOutputChanged":
         break;
       case "clearLastMarker":
-        await store.clearLastMarker(card.id);
+        await store.clearLastMarker(card.id, card.activeSessionId);
         break;
       case "applyMarker": {
         const eventType =
@@ -234,6 +238,7 @@ async function scanSession(
             : "status_agent_done";
         await store.applyMarker(
           card.id,
+          card.activeSessionId,
           decision.column,
           decision.reason,
           decision.key,
@@ -242,7 +247,7 @@ async function scanSession(
         break;
       }
       case "flipBack":
-        await store.flipBack(card.id);
+        await store.flipBack(card.id, card.activeSessionId);
         break;
     }
   }

@@ -28,7 +28,7 @@ import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { store } from "../../store/board.store.js";
 import { buildKickoff } from "../domain/kickoff.js";
 import { getHooksRuntime } from "../infra/config-holder.js";
-import { mintHookToken } from "../domain/hook-tokens.js";
+import { newHookTokenValue, registerHookToken } from "../domain/hook-tokens.js";
 import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
 import { worktreePath as buildWorktreePath } from "../domain/workspace-paths.js";
 
@@ -307,6 +307,13 @@ export async function awaitReplReady(session: string): Promise<void> {
  * carries status alone; that branch first resets the card's hook-channel state so a stale
  * persisted latch/token from an earlier hook-capable session can never survive into a
  * hook-silent one.
+ * @remarks (Phase 91) The mint/register sequencing hazard is closed structurally, not by
+ * ordering discipline: `store.mintHookChannel` persists the token onto the session record AND
+ * reports which session it landed on, and ONLY THEN is the token registered against that real
+ * id — there is no path left that can register a token before the session it names exists. If
+ * `mintHookChannel` reports no session (unknown card id), registration is skipped and the launch
+ * falls through to the hook-silent branch, the existing safe degradation for a card the store
+ * cannot resolve.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 const startClaude: SagaStep = {
@@ -319,26 +326,32 @@ const startClaude: SagaStep = {
 
     const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
     const runtime = getHooksRuntime();
+    let launchedHooksCapable = false;
     if (runtime?.capable && runtime.statusChannel !== "pane") {
       const previousToken = store.getCard(ctx.card.id)?.hookToken;
-      const token = mintHookToken(ctx.card.id, previousToken);
-      await store.mintHookChannel(ctx.card.id, token);
-      await newSession(
-        session,
-        ctx.workspacePath,
-        [
-          claudePath,
-          "--settings",
-          HOOK_SETTINGS_PATH,
-          "--dangerously-skip-permissions",
-        ],
-        {
-          DISPATCH_HOOK_PORT: String(runtime.port),
-          DISPATCH_HOOK_TOKEN: token,
-          DISPATCH_CARD_ID: ctx.card.id,
-        },
-      );
-    } else {
+      const token = newHookTokenValue();
+      const sessionId = await store.mintHookChannel(ctx.card.id, token);
+      if (sessionId !== undefined) {
+        registerHookToken(token, ctx.card.id, sessionId, previousToken);
+        await newSession(
+          session,
+          ctx.workspacePath,
+          [
+            claudePath,
+            "--settings",
+            HOOK_SETTINGS_PATH,
+            "--dangerously-skip-permissions",
+          ],
+          {
+            DISPATCH_HOOK_PORT: String(runtime.port),
+            DISPATCH_HOOK_TOKEN: token,
+            DISPATCH_CARD_ID: ctx.card.id,
+          },
+        );
+        launchedHooksCapable = true;
+      }
+    }
+    if (!launchedHooksCapable) {
       await store.clearHookChannel(ctx.card.id);
       await newSession(session, ctx.workspacePath, [
         claudePath,
