@@ -392,16 +392,38 @@ class BoardStore extends EventEmitter {
    * `card.sessions` and NEVER clears `card.activeSessionId` — this reproduces today's exact
    * semantics (one record whose individual fields may legitimately be undefined) and defers the
    * dead-session removal/tombstone question to the phases that own liveness and cleanup.
+   * @remarks `targetSessionId` (Phase 91) lets a caller address a SPECIFIC session record instead
+   * of the card's active one — defaulting to `card.activeSessionId` when omitted, so every
+   * pre-Phase-91 call site keeps its exact prior behaviour. The mint-on-absent branch fires ONLY
+   * when `targetSessionId` is omitted: an explicit id that resolves to nothing is a caller bug
+   * (a stale or foreign session id), not a mint trigger, and hits the SAME
+   * `console.error`-and-refuse branch below rather than silently minting a record under an id the
+   * caller does not actually own.
+   * @remarks `promoteTarget` (Phase 91) repoints `card.activeSessionId` at the resolved target
+   * BEFORE the closing six-field re-derivation, so the promotion and the mirror it feeds land in
+   * the SAME synchronous call — no interleaving can ever observe a card whose flat projection
+   * still mirrors the just-cleared session. `promoteTarget` is meaningless without an explicit
+   * `targetSessionId`; passing it `true` with no target is a caller bug and hits the same
+   * `console.error`-and-refuse branch.
    * @see docs/ARCHITECTURE.md#session-projection-chokepoint
    */
   private setActiveSession(
     card: Card,
     patch: Partial<Omit<Session, "id" | "createdAt" | "updatedAt">>,
+    targetSessionId?: string,
+    promoteTarget = false,
   ): void {
-    let active = card.sessions?.find((s) => s.id === card.activeSessionId);
+    if (promoteTarget && targetSessionId === undefined) {
+      console.error(
+        `[store] card ${card.id} — promoteTarget requires an explicit targetSessionId, refusing to project`,
+      );
+      return;
+    }
+    const resolvedId = targetSessionId ?? card.activeSessionId;
+    let active = card.sessions?.find((s) => s.id === resolvedId);
     const patchHasValue = Object.values(patch).some((v) => v !== undefined);
     let minted = false;
-    if (!active && patchHasValue) {
+    if (!active && targetSessionId === undefined && patchHasValue) {
       const now = new Date().toISOString();
       active = { id: randomUUID(), createdAt: now, updatedAt: now };
       card.sessions = card.sessions ?? [];
@@ -418,18 +440,24 @@ class BoardStore extends EventEmitter {
       const changed = entries.some(([key, value]) => record[key] !== value);
       Object.assign(record, patch);
       if (changed && !minted) record.updatedAt = new Date().toISOString();
-    } else if (card.tmuxSession != null || card.workspacePath != null) {
+      if (promoteTarget) card.activeSessionId = record.id;
+    } else if (
+      targetSessionId !== undefined ||
+      card.tmuxSession != null ||
+      card.workspacePath != null
+    ) {
       console.error(
-        `[store] card ${card.id} carries flat session fields with no resolvable active session — refusing to project`,
+        `[store] card ${card.id} — no session resolves for ${targetSessionId !== undefined ? `explicit target ${targetSessionId}` : "the active pointer, but flat session fields are set"} — refusing to project`,
       );
       return;
     }
-    card.tmuxSession = active?.tmuxSession;
-    card.ttydPort = active?.ttydPort;
-    card.hookToken = active?.hookToken;
-    card.claudeSessionId = active?.claudeSessionId;
-    card.workspacePath = active?.workspacePath;
-    card.workspace = active?.workspace;
+    const mirrored = card.sessions?.find((s) => s.id === card.activeSessionId);
+    card.tmuxSession = mirrored?.tmuxSession;
+    card.ttydPort = mirrored?.ttydPort;
+    card.hookToken = mirrored?.hookToken;
+    card.claudeSessionId = mirrored?.claudeSessionId;
+    card.workspacePath = mirrored?.workspacePath;
+    card.workspace = mirrored?.workspace;
   }
 
   /**
@@ -1576,6 +1604,27 @@ class BoardStore extends EventEmitter {
    */
   cardsWithSession(): Card[] {
     return [...this.cards.values()].filter((c) => c.tmuxSession != null);
+  }
+
+  /**
+   * Synchronous read of every (card, session) pair with a live tmux session — every SESSION a
+   * card owns, not just the one `cardsWithSession()` reports via the ACTIVE projection. Deliberately
+   * a SEPARATE method rather than a change to `cardsWithSession()`: that method stays card-scoped
+   * because `artifact-detect.ts` depends on its exact card-level filter and per-session artifact
+   * attribution is a later phase's concern (ARTIFACT-01), not this one's. The shared iteration
+   * primitive for the watcher tick loop and boot reconcile's sweep (Phase 91, WATCH-01/RECON-01) to
+   * scan and adopt every live sibling a card owns, not only its active one. Mirrors
+   * `cardsWithSession()`'s own contract: returns live Map entries — callers must NOT mutate them;
+   * all mutations flow through the enqueue-wrapped methods.
+   */
+  sessionsWithTmux(): { card: Card; session: Session }[] {
+    const out: { card: Card; session: Session }[] = [];
+    for (const card of this.cards.values()) {
+      for (const session of card.sessions ?? []) {
+        if (session.tmuxSession != null) out.push({ card, session });
+      }
+    }
+    return out;
   }
 
   /**

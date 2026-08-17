@@ -401,6 +401,23 @@ export interface Session {
   workspacePath?: string;
   /** Chosen workspace snapshot at start — absolute repo paths. Mirrored onto `Card.workspace` while active. */
   workspace?: { folder: string; repos: { path: string; base: string }[] };
+  /**
+   * ISO timestamp of THIS session's first authenticated hook event, same shape and NON-SECRET
+   * policy class as {@link Card.hookRoutedAt}. Deliberately NOT one of the six flat fields
+   * `setActiveSession` projects onto `Card` — routing it through that method's patch would let the
+   * closing six-field re-derivation overwrite a sibling session's own value with the active
+   * session's on any unrelated projection write.
+   * @see docs/ARCHITECTURE.md#hooks-status-channel
+   */
+  hookRoutedAt?: string;
+  /**
+   * Normalized dedup key of THIS session's last consumed DISPATCH_STATUS marker, same shape and
+   * purpose as {@link Card.lastMarker}. Deliberately NOT one of the six flat fields
+   * `setActiveSession` projects onto `Card` — same reasoning as {@link Session.hookRoutedAt}
+   * above: routing it through the patch would let one session's marker dedup key clobber a
+   * sibling's on any unrelated projection write.
+   */
+  lastMarker?: string;
 }
 
 /**
