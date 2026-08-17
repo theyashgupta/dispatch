@@ -126,6 +126,13 @@ const captureFailures = new Map<string, number>();
  * flat mirror. Reading the mirror here would let one session's hook traffic silence the pane scan
  * of a sibling with no hook channel of its own, or let a sibling's marker write masquerade as a
  * change to THIS session's own compare-and-swap inputs below.
+ * @remarks (`CR-01`) `decideScan` CONSUMES the flip-back baseline on the tick it decides
+ * `flipBack` (`nextFlip` becomes `undefined`), which is correct only when the store actually
+ * moved the card. `store.flipBack` now reports whether it did, and a suppressed move RETAINS the
+ * existing baseline instead of deleting it — otherwise the evidence for a refused move is thrown
+ * away and the retry needs two fresh divergent ticks, which an agent that has already finished
+ * replying never produces. Retaining the baseline keeps the retry level-triggered: the next
+ * divergent tick re-fires immediately.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 async function scanSession(
@@ -221,6 +228,7 @@ async function scanSession(
   const decisionInputsStillLive =
     card.column === input.column && session.lastMarker === input.lastMarker;
 
+  let flipSuppressed = false;
   if (decisionInputsStillLive) {
     switch (decision.kind) {
       case "nothing":
@@ -245,13 +253,13 @@ async function scanSession(
         break;
       }
       case "flipBack":
-        await store.flipBack(card.id, session.id);
+        flipSuppressed = !(await store.flipBack(card.id, session.id));
         break;
     }
   }
 
   if (next.flip) sessions.set(tmuxName, next.flip);
-  else sessions.delete(tmuxName);
+  else if (!flipSuppressed) sessions.delete(tmuxName);
   if (next.agentView !== undefined) agentViews.set(tmuxName, next.agentView);
   else agentViews.delete(tmuxName);
   if (next.markerFreeStreak > 0)

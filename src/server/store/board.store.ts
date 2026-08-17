@@ -27,6 +27,7 @@ import {
   FLIP_BACK_SOURCES,
   isManualMoveAllowed,
 } from "../../shared/column-transitions.js";
+import { NEEDS_INPUT_MARKER_PREFIX } from "../../shared/marker-key.js";
 import { isStartingCard, reconcile } from "./mapping.js";
 
 const BOARD_DIR = path.join(os.homedir(), ".dispatch");
@@ -1516,6 +1517,12 @@ class BoardStore extends EventEmitter {
    * shape exactly: the session-field clear and the hook-token clear both fall through to
    * `setActiveSession`'s/`clearHookToken`'s own undefined-target default rather than refusing on
    * an unresolvable EXPLICIT target, so a corrupt card is not made worse by this widening.
+   * @remarks (`CR-01`) The dying session's `lastMarker` is cleared here, and this is its ONLY
+   * clearing site for a session that will never be scanned again: `clearLastMarker` is driven from
+   * the pane watcher, which only ever runs for a session still in `sessionsWithTmux()`, and
+   * `finishCleanup` deliberately keeps the key. Leaving it set would strand a needs-input dedup key
+   * on a record that can no longer answer, which `flipBack`'s cross-session gate would then read as
+   * "a sibling is still waiting on the user" forever.
    * @remarks Artifact fields (`terminalError`, `prs`, `prsUnknown`, `previews`, `previewsUnknown`)
    * clear ONLY on the derived full-card loss, never on a partial one — per-session artifact
    * attribution is a later phase's concern (ARTIFACT-01), not this one's; on a partial loss they
@@ -1540,6 +1547,8 @@ class BoardStore extends EventEmitter {
         resolvedTargetId,
       );
       this.clearHookToken(card, resolvedTargetId);
+      if (target) target.lastMarker = undefined;
+      if (targetId === card.activeSessionId) card.lastMarker = undefined;
       if (target && targetId === card.activeSessionId) {
         const promoted = (card.sessions ?? [])
           .filter((s) => s.id !== target.id && s.tmuxSession != null)
@@ -1713,17 +1722,32 @@ class BoardStore extends EventEmitter {
    * defaulting to `card.activeSessionId` when the caller passes `undefined`. `lastMarker`
    * clearing (FLOW-02) is scoped to THAT session's own field, mirrored to the card only when the
    * target IS the active session. CONTEXT locks a cross-session gate on top of every existing
-   * rule: leaving `needs_input` requires that NO session the card owns still holds a
-   * needs-input marker, not merely that the firing session stopped — a card where any OTHER
-   * session's `lastMarker` still starts with the exact `markerKey` NEEDS_INPUT prefix suppresses
-   * the whole move (per-session state untouched, no event, column stays where it is), so a ticket
-   * with a live sibling still waiting on the user never silently reads as answered. At N=1 no
-   * other session can ever exist, so this branch is unreachable and behavior is byte-identical to
-   * before this remark.
+   * rule: leaving `needs_input` requires that no session the card owns which can still ANSWER
+   * holds a needs-input marker, not merely that the firing session stopped — a card where any
+   * OTHER session is still live (`tmuxSession != null`) AND its `lastMarker` starts with
+   * {@link NEEDS_INPUT_MARKER_PREFIX} suppresses the whole move (per-session state untouched, no
+   * event, column stays where it is), so a ticket with a live sibling still waiting on the user
+   * never silently reads as answered. At N=1 no other session can ever exist, so this branch is
+   * unreachable and behavior is byte-identical to before this remark.
+   * @remarks (`CR-01`) The liveness half of that gate is load-bearing, not defensive. `lastMarker`
+   * is per-session state that NO path clears on a session that is dead or cleaned up — the pane
+   * watcher's `clearLastMarker` only ever runs for a session still in `sessionsWithTmux()` — so a
+   * gate that consulted dead siblings too would be a ONE-WAY LATCH: the first sibling to record a
+   * pause marker and then die would freeze the card in `needs_input` permanently, with no
+   * user-visible reason and no path back but a manual drag. A session whose tmux pane is gone is
+   * definitionally not waiting on the user, so it must not hold the card. `markSessionLost` clears
+   * the dying session's `lastMarker` for the same reason; the two together are what give the gate
+   * an invalidation path.
+   * @returns `true` when the card actually moved, `false` when the move was suppressed (unknown
+   * card, ineligible source column, or the cross-session gate above). The pane watcher needs this
+   * because `decideScan` CONSUMES its flip-back baseline on the decision: without a signal it
+   * would discard the evidence for a move the store silently refused, and the retry would need two
+   * fresh divergent ticks an agent that has finished replying never produces.
    * @see docs/ARCHITECTURE.md#column-transition-specification
    * @see docs/ARCHITECTURE.md#hooks-status-channel
    */
-  flipBack(id: string, sessionId: string | undefined): Promise<void> {
+  flipBack(id: string, sessionId: string | undefined): Promise<boolean> {
+    let moved = false;
     return this.enqueue(() => {
       const c = this.cards.get(id);
       if (!c || !FLIP_BACK_SOURCES.includes(c.column)) return [];
@@ -1732,11 +1756,15 @@ class BoardStore extends EventEmitter {
       if (
         from === "needs_input" &&
         (c.sessions ?? []).some(
-          (s) => s.id !== targetId && s.lastMarker?.startsWith("NEEDS_INPUT "),
+          (s) =>
+            s.id !== targetId &&
+            s.tmuxSession != null &&
+            s.lastMarker?.startsWith(NEEDS_INPUT_MARKER_PREFIX),
         )
       ) {
         return [];
       }
+      moved = true;
       const target = "in_progress";
       c.column = target;
       this.mirrorMemberColumn(c, target);
@@ -1758,7 +1786,7 @@ class BoardStore extends EventEmitter {
           reason: "agent responded",
         }),
       ];
-    });
+    }).then(() => moved);
   }
 
   /**
