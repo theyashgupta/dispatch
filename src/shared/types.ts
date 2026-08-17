@@ -254,6 +254,20 @@ export interface Card {
    */
   activeSession?: ActiveSessionWire;
   /**
+   * How many session records this card owns. NON-SECRET: rides `snapshot()`/`redactCard`
+   * UNREDACTED, same policy class as `hookRoutedAt`/`claudeSessionId`/`prs` (an integer count
+   * carries no credential and no pane content). ABSENT (never `1`) when the card owns zero or one
+   * session record — the existing "absent means nothing to report" idiom `prs?`/`previews?` already
+   * use, so a single-session card's rendered chip stays byte-identical to v2.9. An integer of 2 or
+   * more otherwise. Counts every session record the card owns INCLUDING one whose session has been
+   * marked lost — `markSessionLost` clears a record's fields in place and never deletes it (cleanup
+   * is a later phase), so the multiplicity signal does not silently drop when a sibling dies.
+   * Populated exclusively inside `redactCard`, `activeSession`'s own chokepoint, so it has exactly
+   * one writer like every other session-projection field.
+   * @see docs/ARCHITECTURE.md#session-projection-chokepoint
+   */
+  sessionCount?: number;
+  /**
    * Set when the card's `dsp-<identifier>` tmux session is gone — by boot reconcile (session
    * absent from the live `list-sessions` set after a reboot) AND by the Plan-02 watcher's
    * runtime dead-session detector (3 consecutive failed captures). Cleared by completeStart on

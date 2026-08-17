@@ -115,6 +115,8 @@ export function redactCard(card: Card): Card {
         workspace: active.workspace,
       }
     : undefined;
+  wireCard.sessionCount =
+    (card.sessions?.length ?? 0) >= 2 ? card.sessions!.length : undefined;
   return wireCard;
 }
 
