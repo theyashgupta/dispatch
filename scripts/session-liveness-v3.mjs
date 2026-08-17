@@ -40,7 +40,9 @@
  *
  * The frontend dev-server proxy is never used: it hardcodes its dev-mode targets to the user's
  * real, live dispatch port. This harness only ever boots the production build
- * (`dist/server/bootstrap/index.js`).
+ * (`dist/server/bootstrap/index.js`), and COMPILES it first ({@link assertBuilt}) so what it proves
+ * is always a property of the current `src/` — a `dist` left over from an earlier commit otherwise
+ * reports today's fixes as absent, blaming source that already reads correctly.
  *
  * Usage:
  *   node scripts/session-liveness-v3.mjs --check safety            the fixture-standup/teardown proof
@@ -71,7 +73,7 @@
  * Exit codes: 0 all checks PASS. 1 a safety-envelope refusal, a setup/build error, a check
  * violation, a teardown-verification failure, or the live board.db changing.
  */
-import { spawn, execFile } from "node:child_process";
+import { spawn, execFile, execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -90,6 +92,13 @@ const execFileP = promisify(execFile);
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST_ENTRY = join(REPO_ROOT, "dist", "server", "bootstrap", "index.js");
+
+/**
+ * The package script {@link assertBuilt} shells out to. Named here rather than spelled as a raw
+ * `tsc -p …` invocation so the harness can never compile the server differently from the way the
+ * project does — one build command, not two literals that can drift apart.
+ */
+const BUILD_SERVER_SCRIPT = "build:server";
 
 const SANDBOX_PORT = 47862;
 const SANDBOX_PREFIX = "dispatch-session-liveness-v3-";
@@ -273,11 +282,12 @@ function killAndWait(child) {
  * orphan-token refusal a hook-attribution break proves — has something to grep without re-plumbing
  * stdio per call site. SECURITY: this harness's server never logs token values (matches the app's
  * own hook-tokens.ts contract), so capturing full output is safe.
+ * @remarks The build precondition is re-asserted here through {@link assertBuilt} rather than by a
+ * local `existsSync` copy, so the staleness half can never be enforced at only some of the places
+ * that spawn `dist` — this is the function every boot in the file funnels through.
  */
 function bootServer(home) {
-  if (!existsSync(DIST_ENTRY)) {
-    throw new Error(`Missing ${DIST_ENTRY} — run \`npm run build\` first.`);
-  }
+  assertBuilt();
   const child = spawn("node", [DIST_ENTRY], {
     env: { ...process.env, HOME: home, NODE_ENV: "production" },
     stdio: ["ignore", "pipe", "pipe"],
@@ -515,10 +525,61 @@ async function assertPreflightClean() {
   );
 }
 
+/**
+ * Memoized result of the one server compile per process — see {@link assertBuilt}. `null` until the
+ * first call; every later call reuses it, so the many `dist` boots a multi-fixture check performs
+ * cost exactly one `tsc` run between them.
+ */
+let serverBuild = null;
+
+/**
+ * Compile the server the harness is about to boot, then confirm the entry point exists.
+ *
+ * This REPLACES an existence-only precondition that was actively misleading: the harness boots
+ * `dist`, never `src` (see {@link bootServer}), so a `dist` predating a source fix reported that
+ * fix as absent — a correct source tree failing its own proof, with the violation text blaming
+ * store/watcher code that already read correctly. Detecting that by mtime is not sound here:
+ * `tsc` leaves an output file untouched when its emitted text is unchanged, so `dist` legitimately
+ * holds artifacts months older than the last build, and a comment-only source edit (this codebase
+ * is JSDoc-dense) would trip an mtime guard that no rebuild could clear. Compiling unconditionally
+ * makes the staleness class structurally impossible rather than merely detectable.
+ *
+ * `stdio: "pipe"` keeps a clean transcript on success while folding `tsc`'s own diagnostics into
+ * the thrown error on failure — a source tree that does not compile must stop the run outright,
+ * never fall through to boot the previous build and report its behaviour as today's.
+ *
+ * The one-line announcement is emitted from the compiling call ONLY, never from the memoized ones:
+ * `--check all` funnels six checks and every fixture boot through here, and reprinting the same
+ * duration each time would read as six compiles of a suspiciously identical length.
+ */
 function assertBuilt() {
-  if (!existsSync(DIST_ENTRY)) {
-    throw new Error(`Missing ${DIST_ENTRY} — run \`npm run build\` first.`);
+  if (serverBuild !== null) return serverBuild;
+  const startedAt = Date.now();
+  try {
+    execFileSync("npm", ["run", BUILD_SERVER_SCRIPT], {
+      cwd: REPO_ROOT,
+      stdio: "pipe",
+    });
+  } catch (err) {
+    const detail = [err.stdout?.toString(), err.stderr?.toString()]
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    throw new Error(
+      `refusing to run — \`npm run ${BUILD_SERVER_SCRIPT}\` failed, so dist/ does not reflect ` +
+        `src/ and any result would describe code you are not running:\n${detail || err.message}`,
+    );
   }
+  if (!existsSync(DIST_ENTRY)) {
+    throw new Error(
+      `Missing ${DIST_ENTRY} after a successful \`npm run ${BUILD_SERVER_SCRIPT}\` — run \`npm run build\` first.`,
+    );
+  }
+  serverBuild = { durationMs: Date.now() - startedAt };
+  console.log(
+    `preflight: compiled src/ -> dist/ via \`npm run ${BUILD_SERVER_SCRIPT}\` in ${serverBuild.durationMs}ms — every boot below runs current source`,
+  );
+  return serverBuild;
 }
 
 /**
