@@ -201,12 +201,64 @@ do not spawn" gate reads `activeSession.ttydPort` too — NOT the flat `card.tty
 both fields, the intended canary becomes a wedge: when they disagree in the direction "flat port
 set, no active session", the panel shows "Connecting to terminal…" forever while suppressing the
 `ensureTerminal` spawn that would clear it, and the Reconnect affordance lives on the
-`terminalError` branch, which is not the branch being rendered. That disagreement is reachable —
-a v2.9 binary run against a migrated `board.db` round-trips `sessions`/`activeSessionId` as opaque
-JSON while writing the flat fields directly, and the next v3.0 boot sees `schemaVersion === 1` and
-runs no repair pass. This is a wire-read pairing, not a store invariant, so it is not something
-`check-invariants.mjs` fences; it is recorded here because a future phase moving one of the two
-gates without the other reintroduces the wedge.
+`terminalError` branch, which is not the branch being rendered. That disagreement is reachable — a
+v2.9 binary run against a migrated `board.db` round-trips `sessions`/`activeSessionId` as opaque JSON
+while writing the flat fields directly, and it is exactly the state a downgraded To Do card lands in.
+Downgrade Safety below is what now repairs it at boot; this paragraph stands because the repair is a
+recovery, not a licence to split the pairing. This is a wire-read pairing, not a store invariant, so
+it is not something `check-invariants.mjs` fences; it is recorded here because a future phase moving
+one of the two gates without the other reintroduces the wedge.
+
+### Downgrade Safety
+
+dispatch ships via npx, so one machine updating before another is ordinary, and both builds share
+one `~/.dispatch/board.db`. The store therefore guards BOTH directions of a version mismatch
+(`SESS-05`), with different answers, because the two directions are not symmetric.
+
+**Newer board, older build → refuse.** `assertSchemaOpenable` throws before anything is read,
+migrated, or written when the persisted `meta.schemaVersion` exceeds the build's own
+`SESSION_SCHEMA_VERSION`. A build cannot know what a later migration moved, so continuing would let
+it write a shape it never learned to read and repairing would reconcile toward a projection that may
+no longer be the newer schema's truth. The refusal is total and damage-free — no snapshot, no
+rotation, no quarantine — which is what lets its message promise the board is untouched and name the
+one-command remedy (update, or restore `board.db.pre-v3` to stay behind deliberately).
+
+**Older build already wrote, newer build opens → repair.** `BoardStore#repairDowngradeDrift` runs on
+every boot, before `hydrateFromParsed`, and reconciles any card whose flat projection disagrees with
+its active session record by copying the FLAT value onto the record through `setActiveSession`. The
+direction is forced, not chosen: the flat field is what the older build wrote, so it is the newer
+value; the record is the stale one, and the reverse copy would resurrect a dead tmux session name, a
+stale ttyd port, and a hook token the card no longer believes it holds. Refusing here would be
+useless — the damage has already happened, and refusing to open would strand the user on a board
+whose only other reader is the build that caused the divergence.
+
+Three properties make the repair safe to run unconditionally: it mints no session ids and adds no
+records on an already-migrated card; once repaired the two sides serialize identically, so the next
+boot finds nothing and re-stamps no `updatedAt`; and it announces every repaired card id and the
+field NAMES that moved (never values — `hookToken` is a secret).
+
+**The version counter is not the gate, deliberately.** Both the migration pass and the repair are
+gated on the DATA, never on `meta.schemaVersion`, because the counter is precisely what an older
+build defeats: v2.9's `buildMeta()` has no `schemaVersion` field, so its persist drops the key and
+the next boot reads `0`. That does fire the version gate, but `needsSessionEntityMigration()` then
+finds every card already carrying `sessions` and correctly does nothing. A counter-gated repair
+would be dead on arrival.
+
+**What these guards cannot do.** A guard can only live in the build doing the opening, so the
+refusal protects FORWARD only: it stops this build from opening a future board. It cannot stop the
+already-published v2.9 from opening a v3.0 board, because v2.9 ships without it and cannot be
+changed — that direction is covered after the fact by the repair, not prevented. Between the older
+build's write and the next newer-build boot, the board is genuinely desynced on disk; anything
+reading it in that window (including the older build's own UI) sees the divergence. And the repair
+reconciles the PROJECTION only: it cannot recover session state an older build destroyed outright,
+because a field the old build cleared is, by the repair's own forced direction, the newer truth.
+
+`scripts/downgrade-guard-v3.mjs` is the instrument for both. It compiles and boots the real
+published `v2.9.0` from the git tag against a sandbox board, measures the drift that build causes,
+then boots the current build and grades the repair. Its fixture set is two cards for a reason
+recorded in that file: the obvious session-lost card is healed independently by
+`reconcileSessions()`, so only the To Do card — which no other boot path touches — can discriminate
+whether the repair ran at all.
 
 ### Marker Protocol
 

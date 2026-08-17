@@ -20,7 +20,12 @@ import type {
 } from "../../shared/types.js";
 import { DEFAULT_CLEANUP_DELAY_DAYS } from "../../shared/types.js";
 import type { CardSearchResult } from "../../shared/search.js";
-import { type BoardDb, type BoardMeta, openBoardDb } from "./board-db.js";
+import {
+  BOARD_DB_PATH,
+  type BoardDb,
+  type BoardMeta,
+  openBoardDb,
+} from "./board-db.js";
 import {
   APPLY_MARKER_EXCLUDED_SOURCES,
   FLIP_BACK_CLEARS_LAST_MARKER,
@@ -141,11 +146,86 @@ function syncedFieldsChanged(prev: Card, next: Card): boolean {
 
 /**
  * The version `load()`'s boot migration pass writes into the meta row's `schemaVersion` field
- * (SESS-04), and the value a later boot compares its own persisted version against to no-op —
- * the idempotency gate that makes a second boot produce the same session count and the same
- * session ids (`NEW-21`). Bump this ONLY when a new migration pass genuinely needs to run again.
+ * (SESS-04). Bump this ONLY when a new migration pass genuinely needs to run again.
+ * @remarks It is the version LEDGER, not the migration's gate. `needsSessionEntityMigration()`
+ * gates the pass, because a counter an older build's persist can drop is not something a data-
+ * integrity check may depend on (`SESS-05`); what makes a second boot reproduce the same session
+ * count and the same session ids is the pass being per-card idempotent, not this number (`NEW-21`).
+ * It IS the gate for the opposite direction: {@link assertSchemaOpenable} refuses to open any board
+ * persisted above this version, since a value above it can only have been written by a build that
+ * knows a migration this one does not.
+ * @see docs/ARCHITECTURE.md#downgrade-safety
  */
 const SESSION_SCHEMA_VERSION = 1;
+
+/**
+ * The six flat session fields that mirror the card's active session record, as a value the
+ * downgrade-drift pass can iterate. The authoritative statement of the same six lives in
+ * {@link BoardStore.setActiveSession}; this list exists so the drift comparison cannot check a
+ * subset of them by omission.
+ * @see docs/ARCHITECTURE.md#downgrade-safety
+ */
+const PROJECTED_SESSION_FIELDS = [
+  "tmuxSession",
+  "ttydPort",
+  "hookToken",
+  "claudeSessionId",
+  "workspacePath",
+  "workspace",
+] as const;
+
+/**
+ * Refuse to open a board whose persisted schema is NEWER than this build understands (`SESS-05`).
+ *
+ * The migration gate below is `persisted < SESSION_SCHEMA_VERSION`, which leaves `>` — a build
+ * opening a database an already-updated sibling wrote — with no defined behaviour at all. This
+ * build cannot know what that later migration moved, so every option other than refusing is a
+ * guess about someone else's data: continuing would let this build's writers overwrite a shape it
+ * never learned to read, and repairing would reconcile toward a projection that may no longer be
+ * the newer schema's truth. Refusal is also the option that fails LOUDLY — the alternative silently
+ * produces a board that looks correct and diverges underneath.
+ * @remarks Nothing on disk is touched: no snapshot, no rotation, no quarantine, no write. Throwing
+ * before the migration pass and before `hydrateFromParsed` means the refusing boot leaves the
+ * database byte-identical to how it found it, so updating and restarting is a complete recovery
+ * and the message can honestly promise that.
+ * @remarks A plain `Error`, not a `StartupError`, because a store -> bootstrap import is
+ * DAG-illegal; `connect()`'s non-corruption open failure in `board-db.ts` sets the precedent, and
+ * bootstrap's `main().catch` already prints a thrown error loudly.
+ * @remarks This guard can only ever live in the build doing the opening, so it protects FORWARD:
+ * it stops a v3.0 build from opening a v3.1 board. It cannot stop the already-published v2.9 build
+ * from opening a v3.0 board, because v2.9 ships without it and cannot be changed. That direction is
+ * covered instead — after the fact, not preventively — by
+ * {@link BoardStore.repairDowngradeDrift}.
+ * @see docs/ARCHITECTURE.md#downgrade-safety
+ */
+function assertSchemaOpenable(persistedSchemaVersion: number): void {
+  if (persistedSchemaVersion <= SESSION_SCHEMA_VERSION) return;
+  throw new Error(
+    `[store] ${BOARD_DB_PATH} was written by a NEWER version of dispatch than this one ` +
+      `(board schema version ${persistedSchemaVersion}, this build understands ${SESSION_SCHEMA_VERSION}). ` +
+      `Opening it with this build would let it write a shape it cannot read back, silently ` +
+      `desyncing your sessions, so it refused. Nothing was changed — board.db and every backup ` +
+      `were left exactly as they were. Fix it by updating dispatch: run ` +
+      `\`npx @theyashgupta/dispatch@latest\` (or restart the machine's dispatch service after ` +
+      `updating) and start again. If you instead mean to stay on this older build, restore the ` +
+      `pre-upgrade copy at ${BOARD_DB_PATH}.pre-v3 over ${BOARD_DB_PATH} first — that file is ` +
+      `your board as of before the newer version migrated it.`,
+  );
+}
+
+/**
+ * Do a card's flat projection and its active session record disagree on one field?
+ * @remarks Compared by SERIALIZED value rather than by reference: `workspace` is an object, and a
+ * card read back from `board.db` holds two structurally-identical but distinct copies of it (one
+ * flat, one on the session record), so a reference test would report drift on every boot and a
+ * repair would re-stamp `updatedAt` forever. `?? null` folds `undefined` and `null` together so a
+ * producer that normalises an absent field to `null` is not mistaken for a divergence.
+ */
+function projectionDrifted(cardValue: unknown, sessionValue: unknown): boolean {
+  return (
+    JSON.stringify(cardValue ?? null) !== JSON.stringify(sessionValue ?? null)
+  );
+}
 
 /**
  * Does at least one raw card in `cards` still need {@link migrateCardsToSessionEntity}? Read-only
@@ -506,6 +586,65 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Reconcile every card whose flat projection disagrees with its active session record, at boot,
+   * before any reader sees a card (`SESS-05`). Returns one `id (fields…)` line per repaired card,
+   * for the caller to log; the empty array means the board was already consistent.
+   *
+   * The divergence this repairs is what an OLDER dispatch build does to a migrated board. dispatch
+   * ships via npx, so one machine updating before another is ordinary, and the two builds share
+   * `~/.dispatch/board.db`. A v2.9 build reads a v3.0 card fine — the flat fields are all still
+   * there — and round-trips `sessions`/`activeSessionId` as opaque JSON it never touches, but it
+   * writes the flat fields DIRECTLY, having no {@link BoardStore.setActiveSession}. Its boot-time
+   * reconcile alone is enough: a card whose tmux session is gone gets `tmuxSession`, `ttydPort` and
+   * `hookToken` cleared flat while the session record goes on claiming all three.
+   *
+   * @remarks Repair, not refusal, and the direction is not a coin flip. Refusing here would be
+   * useless in the only direction that matters: this is the newer build, the damage has already
+   * happened, and refusing to open would strand the user on a board whose ONLY other reader is the
+   * older build that caused the divergence — pushing them toward the damaging build rather than
+   * away from it. So it repairs; {@link assertSchemaOpenable} is the refusal, and it covers the
+   * opposite direction. The direction of the copy is forced rather than chosen: the flat field is
+   * the one the older build wrote, so it is the newer value, and the session record is the stale
+   * one. The reverse copy would resurrect a dead tmux session name, a stale ttyd port, and a hook
+   * token the card no longer believes it holds.
+   * @remarks Runs on EVERY boot, deliberately unconditioned on `schemaVersion`. Gating it on the
+   * version counter would make it dead on arrival, because the version counter is the exact thing
+   * an older build defeats: v2.9's `buildMeta()` has no `schemaVersion` field, so its persist drops
+   * the key outright and the next boot reads `0` — which does make the version gate fire, but
+   * `needsSessionEntityMigration()` then finds every card already carrying `sessions` and the pass
+   * correctly does nothing. Version-equal or version-behind, the drift survives either way; only a
+   * check whose subject is the DATA can see it.
+   * @remarks Loud by construction and safe to re-run: the caller logs every repaired card id and
+   * the field NAMES that moved (never values — `hookToken` is a secret). It mints no session ids
+   * and adds or removes no session records on an already-migrated card, and once a card is
+   * repaired the two sides serialize identically, so the next boot finds no drift and re-stamps
+   * nothing. A card holding flat state but no resolvable record is the one shape this cannot
+   * silently fix; it falls through to `setActiveSession`'s own mint-or-refuse branches, which
+   * either mint a record for it or log and refuse rather than erasing what is left.
+   * @see docs/ARCHITECTURE.md#downgrade-safety
+   */
+  private repairDowngradeDrift(cards: Card[]): string[] {
+    const repaired: string[] = [];
+    for (const card of cards) {
+      const active = card.sessions?.find((s) => s.id === card.activeSessionId);
+      const drifted = PROJECTED_SESSION_FIELDS.filter((field) =>
+        projectionDrifted(card[field], active?.[field]),
+      );
+      if (drifted.length === 0) continue;
+      this.setActiveSession(card, {
+        tmuxSession: card.tmuxSession,
+        ttydPort: card.ttydPort,
+        hookToken: card.hookToken,
+        claudeSessionId: card.claudeSessionId,
+        workspacePath: card.workspacePath,
+        workspace: card.workspace,
+      });
+      repaired.push(`${card.id} (${drifted.join(", ")})`);
+    }
+    return repaired;
+  }
+
+  /**
    * Fan a group card's column write out to its members, silently, in the SAME enqueue closure as
    * the group's own `column` assignment (Phase 63, Pattern 1) — a no-op for every ordinary card
    * (`memberIds` absent/empty). Called from exactly the five runtime column-writing mutators
@@ -630,17 +769,28 @@ class BoardStore extends EventEmitter {
    * (SESS-04, `NEW-21`): every v2.9-shaped card gets projected into exactly one `Session` record
    * behind `card.activeSessionId`, BEFORE `hydrateFromParsed` — the point any reader first sees a
    * card — ever runs.
-   * @remarks The persisted `meta.schemaVersion` is the idempotency gate: a boot whose persisted
-   * version is already at {@link SESSION_SCHEMA_VERSION} takes no snapshot and runs no migration
-   * pass at all, so a second boot reproduces the same session count and the same session ids. When
-   * migration IS due, the two reversibility snapshots run in the approved order — the cheap
-   * never-rotated `snapshotPreV3()` copy FIRST, then the forced `backupTick(true)` fold into the
-   * rotating chain — so even if the (contractually never-throwing) forced tick somehow threw, the
-   * retained snapshot already landed on disk. Both are skipped only when nothing on the board needs
+   * @remarks `needsSessionEntityMigration()` — a test on the DATA, not on the version counter — is
+   * what gates the snapshots and the pass, so a board carrying an unmigrated card is migrated
+   * whatever `meta.schemaVersion` claims. The counter still decides whether the version bump has to
+   * be persisted, but it is deliberately not the gate: an older build's persist drops the key
+   * entirely, so a counter-gated pass would run on a board that needs nothing and skip one that
+   * does. Idempotency is preserved by the pass itself, which is per-card idempotent — a card
+   * already carrying `sessions` is skipped untouched and can never have an id re-minted — so a
+   * second boot still reproduces the same session count and the same session ids.
+   * @remarks When migration IS due, the two reversibility snapshots run in the approved order — the
+   * cheap never-rotated `snapshotPreV3()` copy FIRST, then the forced `backupTick(true)` fold into
+   * the rotating chain — so even if the (contractually never-throwing) forced tick somehow threw,
+   * the retained snapshot already landed on disk. Both are skipped when nothing on the board needs
    * migrating (a fresh install, or a board with no session-bearing card). The migrated in-memory
    * state is persisted through the EXISTING transactional `enqueue`/`persist` path rather than a
    * separate raw-SQL write, so a crash mid-persist rolls back to the unmigrated, version-0 meta row
    * and the next boot re-runs the pass cleanly — a half-migrated database is impossible.
+   * @remarks Two downgrade guards bracket the pass, covering opposite directions (`SESS-05`):
+   * {@link assertSchemaOpenable} refuses outright, before anything is read or written, when the
+   * board came from a NEWER build than this one; {@link BoardStore.repairDowngradeDrift} reconciles
+   * the projection an OLDER build desynced, and runs after the migration so a card it has to repair
+   * is guaranteed to own a session record by then.
+   * @see docs/ARCHITECTURE.md#downgrade-safety
    * @see docs/ARCHITECTURE.md#single-writer-store
    */
   async load(): Promise<void> {
@@ -665,18 +815,16 @@ class BoardStore extends EventEmitter {
     const { cards, meta } = this.db.readAll();
     const persistedSchemaVersion =
       typeof meta.schemaVersion === "number" ? meta.schemaVersion : 0;
+    assertSchemaOpenable(persistedSchemaVersion);
     const migrationDue = persistedSchemaVersion < SESSION_SCHEMA_VERSION;
     let migratedCount = 0;
-    if (migrationDue) {
-      if (needsSessionEntityMigration(cards)) {
-        this.db.snapshotPreV3();
-        await this.db.backupTick(true);
-        migratedCount = migrateCardsToSessionEntity(cards);
-      }
-      this.schemaVersion = SESSION_SCHEMA_VERSION;
-    } else {
-      this.schemaVersion = persistedSchemaVersion;
+    if (needsSessionEntityMigration(cards)) {
+      this.db.snapshotPreV3();
+      await this.db.backupTick(true);
+      migratedCount = migrateCardsToSessionEntity(cards);
     }
+    this.schemaVersion = SESSION_SCHEMA_VERSION;
+    const repaired = this.repairDowngradeDrift(cards);
     this.hydrateFromParsed({
       cards,
       syncedAt: meta.syncedAt ?? null,
@@ -692,8 +840,15 @@ class BoardStore extends EventEmitter {
       console.log(
         `[store] session-entity migration: migrated ${migratedCount} card(s), schema version now ${this.schemaVersion}.`,
       );
-      await this.enqueue(() => []);
     }
+    if (repaired.length > 0) {
+      console.warn(
+        `[store] downgrade repair: ${repaired.length} card(s) had flat session fields that ` +
+          `disagreed with their active session record — an older dispatch build wrote this ` +
+          `board. Reconciled the record to the flat value for: ${repaired.join("; ")}.`,
+      );
+    }
+    if (migrationDue || repaired.length > 0) await this.enqueue(() => []);
   }
 
   /**
