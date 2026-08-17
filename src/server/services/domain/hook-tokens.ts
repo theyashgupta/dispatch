@@ -19,7 +19,7 @@ const tokensByValue = new Map<string, HookTokenEntry>();
 
 /**
  * Generate a fresh 256-bit hex token VALUE only — registers nothing. Split out of the old
- * single-function `mintHookToken` (Phase 91) so the sequencing hazard it allowed becomes
+ * single-function mint-and-register shape (Phase 91) so the sequencing hazard it allowed becomes
  * structurally unrepresentable: a caller must first persist this value onto the session record
  * it will name (`store.mintHookChannel`, which mints the record when the card has none and
  * returns its id) and only THEN call {@link registerHookToken} against that real id. There is no
