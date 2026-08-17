@@ -682,8 +682,184 @@ async function checkSafety(built) {
   return violations;
 }
 
+/** The exact `DISPATCH_STATUS: NEEDS_INPUT — <reason>` Stop-payload text `parse.ts#MARKER_RE` matches. */
+function stopBodyWithReason(reason) {
+  return {
+    hook_event_name: "Stop",
+    last_assistant_message: `⏺ DISPATCH_STATUS: NEEDS_INPUT — ${reason}`,
+  };
+}
+
+/** POST `body` to the sandbox's `/api/hook/claude` route carrying `token`, returning the response status. */
+async function postHook(token, body) {
+  const res = await fetch(`http://127.0.0.1:${SANDBOX_PORT}/api/hook/claude`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-dispatch-token": token,
+    },
+    body: JSON.stringify(body),
+  });
+  await res.body?.cancel().catch(() => {});
+  return res.status;
+}
+
+/** Read one persisted card row via a FRESH `readOnly: true` node:sqlite connection, or `undefined`. */
+function readCard(dbPath, cardId) {
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    const row = db.prepare("SELECT data FROM cards WHERE id = ?").get(cardId);
+    return row ? JSON.parse(row.data) : undefined;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Per-session hook attribution proof (Task 2, HOOK-01): POST a NEEDS_INPUT Stop marker carrying a
+ * reason unique to EACH real session's own token, POST once more with a token that was never
+ * minted, then kill the server and re-read the persisted card through a fresh `readOnly: true`
+ * connection — never through the still-live process — and assert against the PERSISTED session
+ * records, KEYED BY SESSION ID, never by array position or "two distinct markers exist somewhere
+ * on this card": {@link expectedReasonBySessionId} is an explicit session-id-keyed map so the
+ * assertion is always "THIS session got THIS marker".
+ * @remarks A mismatch is annotated with a cross-attribution note when the actual value equals a
+ * SIBLING session's expected value — the exact shape Task 3's Break A (mis-registration against
+ * `card.activeSessionId`) and Break B (a swapped expectation table) both need surfaced plainly.
+ */
+async function checkHookAttribution(built) {
+  const violations = [];
+  const reasonA = "reason-unique-to-session-A";
+  const reasonB = "reason-unique-to-session-B";
+
+  const statusA = await postHook(
+    built.sessionA.token,
+    stopBodyWithReason(reasonA),
+  );
+  console.log(
+    `hook-attribution: POST session ${built.sessionA.id} (token A) -> ${statusA} (expected 204)`,
+  );
+  if (statusA !== 204) {
+    violations.push(
+      `session ${built.sessionA.id}: POST with its own token returned ${statusA}, expected 204`,
+    );
+  }
+
+  const statusB = await postHook(
+    built.sessionB.token,
+    stopBodyWithReason(reasonB),
+  );
+  console.log(
+    `hook-attribution: POST session ${built.sessionB.id} (token B) -> ${statusB} (expected 204)`,
+  );
+  if (statusB !== 204) {
+    violations.push(
+      `session ${built.sessionB.id}: POST with its own token returned ${statusB}, expected 204`,
+    );
+  }
+
+  const unmintedToken = randomBytes(32).toString("hex");
+  const statusUnminted = await postHook(
+    unmintedToken,
+    stopBodyWithReason("reason-never-attributed"),
+  );
+  console.log(
+    `hook-attribution: POST an unminted token -> ${statusUnminted} (expected 401)`,
+  );
+  if (statusUnminted !== 401) {
+    violations.push(
+      `unminted token: POST returned ${statusUnminted}, expected 401`,
+    );
+  }
+
+  await killAndWait(built.server?.child);
+  const card = readCard(built.dbPath, built.cardId);
+  if (!card) {
+    violations.push(
+      `card ${built.cardId} missing from persisted board.db after kill`,
+    );
+    return violations;
+  }
+
+  const sessions = Array.isArray(card.sessions) ? card.sessions : [];
+  console.log(
+    `hook-attribution: persisted session count = ${sessions.length} (expected 2)`,
+  );
+  if (sessions.length !== 2) {
+    violations.push(
+      `card ${built.cardId}: expected exactly 2 persisted session records, found ${sessions.length}`,
+    );
+  }
+
+  const expectedReasonBySessionId = new Map([
+    [built.sessionA.id, reasonA],
+    [built.sessionB.id, reasonB],
+  ]);
+
+  for (const [sessionId, expectedReason] of expectedReasonBySessionId) {
+    const expectedMarkerKey = `NEEDS_INPUT ${expectedReason}`;
+    const session = sessions.find((s) => s.id === sessionId);
+    if (!session) {
+      violations.push(
+        `session ${sessionId}: not found in persisted sessions[]`,
+      );
+      continue;
+    }
+    const actualMarker = session.lastMarker;
+    if (actualMarker === expectedMarkerKey) {
+      console.log(
+        `hook-attribution: PASS session ${sessionId} lastMarker = "${actualMarker}"`,
+      );
+    } else {
+      const crossMatch = [...expectedReasonBySessionId.entries()].find(
+        ([otherId, otherReason]) =>
+          otherId !== sessionId &&
+          actualMarker === `NEEDS_INPUT ${otherReason}`,
+      );
+      const crossNote = crossMatch
+        ? ` — matches session ${crossMatch[0]}'s expected marker instead (cross-attribution)`
+        : "";
+      violations.push(
+        `session ${sessionId}: lastMarker expected "${expectedMarkerKey}", actual "${actualMarker}"${crossNote}`,
+      );
+    }
+    if (session.hookRoutedAt == null) {
+      violations.push(
+        `session ${sessionId}: hookRoutedAt is undefined, expected a timestamp`,
+      );
+    } else {
+      console.log(
+        `hook-attribution: PASS session ${sessionId} hookRoutedAt = "${session.hookRoutedAt}"`,
+      );
+    }
+  }
+
+  if (
+    typeof card.activeSessionId !== "string" ||
+    !sessions.some((s) => s.id === card.activeSessionId)
+  ) {
+    violations.push(
+      `card ${built.cardId}: activeSessionId "${card.activeSessionId}" does not name a persisted session`,
+    );
+  } else {
+    console.log(
+      `hook-attribution: PASS activeSessionId "${card.activeSessionId}" still names a persisted session`,
+    );
+  }
+
+  const hooksLogLines = (built.server?.logLines ?? []).filter((l) =>
+    l.includes("[hooks]"),
+  );
+  for (const line of hooksLogLines) {
+    console.log(`hook-attribution: server log: ${line}`);
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: checkSafety,
+  "hook-attribution": checkHookAttribution,
 };
 
 /**
