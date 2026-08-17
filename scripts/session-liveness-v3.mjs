@@ -55,6 +55,11 @@
  *                                                                   marker moves the card, a SIBLING's
  *                                                                   reply cannot clear it, the firing
  *                                                                   session's own reply can
+ *   node scripts/session-liveness-v3.mjs --check attention-dead-sibling
+ *                                                                   CR-01: the same gate RELEASES once
+ *                                                                   the marker-holding sibling is really
+ *                                                                   dead — otherwise needs_input is a
+ *                                                                   one-way latch nothing can clear
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -1503,6 +1508,174 @@ async function checkAttention(built) {
   return violations;
 }
 
+/**
+ * Kill one real tmux session plus its real ttyd child and wait out the REAL 3-strike
+ * capture-failure detector, resolving the elapsed milliseconds. Never calls a store mutator and
+ * never imports the store — the only thing that can clear the session's fields here is
+ * `watcher.ts`'s own detector on its own self-rescheduling tick, which is what makes a check
+ * built on this falsifiable rather than self-fulfilling. Resolves `null` if the detector never
+ * fired inside {@link LIVENESS_POLL_TIMEOUT_MS}, so the caller reports a timeout as its own named
+ * violation instead of hanging.
+ */
+async function killSessionAndAwaitDetector(
+  built,
+  tmuxName,
+  ttydEntry,
+  sessionId,
+) {
+  const start = Date.now();
+  await tmuxKillSession(tmuxName);
+  if (ttydEntry?.child) {
+    try {
+      ttydEntry.child.kill("SIGTERM");
+    } catch {
+      // already gone
+    }
+  }
+  const deadline = Date.now() + LIVENESS_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    let persisted;
+    try {
+      persisted = readCard(built.dbPath, built.cardId);
+    } catch {
+      persisted = undefined;
+    }
+    const record = persisted?.sessions?.find((s) => s.id === sessionId);
+    if (record != null && record.tmuxSession == null) return Date.now() - start;
+    await sleep(LIVENESS_POLL_INTERVAL_MS);
+  }
+  return null;
+}
+
+/**
+ * Cross-session attention proof, DEAD-sibling direction (CR-01). {@link checkAttention} proves the
+ * gate HOLDS while the sibling that fired the marker is still live; this proves the gate RELEASES
+ * once that sibling can no longer answer. The distinction is the whole correctness property: the
+ * gate exists so a ticket where any session needs input reads as needing input, and a session
+ * whose tmux pane is gone is definitionally not waiting on the user, so leaving it able to
+ * suppress the move makes `needs_input` a one-way latch no code path can ever clear.
+ * @remarks Session B (non-active) fires the marker and is then really killed — tmux session and
+ * ttyd child both — and the REAL 3-strike detector, never a store call from this file, is what
+ * clears its `tmuxSession`. Session A (active, still live) then replies through its own token.
+ * Step 3 is the falsifiable subject: a card still reading `needs_input` there is a user-visible
+ * permanent freeze, because every later reply repeats the identical suppression.
+ * @remarks Step 4 reads the PERSISTED record rather than the wire because `redactCard` never
+ * projects a non-active sibling's own fields — B's cleared `lastMarker` is only observable there.
+ */
+async function checkAttentionDeadSibling(built) {
+  const violations = [];
+  const reasonB = "attention-dead-sibling-reason-B";
+
+  console.log(
+    `attention-dead-sibling: active session = ${built.sessionA.id} (A, stays live); firing-then-dying session = ${built.sessionB.id} (B, non-active)`,
+  );
+
+  const statusStopB = await postHook(
+    built.sessionB.token,
+    stopBodyWithReason(reasonB),
+  );
+  console.log(
+    `attention-dead-sibling: step 1 POST Stop/NEEDS_INPUT via session B -> ${statusStopB} (expected 204)`,
+  );
+  if (statusStopB !== 204) {
+    violations.push(
+      `step 1: POST Stop via session B returned ${statusStopB}, expected 204`,
+    );
+  }
+  let card = await fetchFixtureCard(built.cardId);
+  console.log(
+    `attention-dead-sibling: step 1 card.column = ${card?.column} (expected needs_input)`,
+  );
+  if (card?.column !== "needs_input") {
+    violations.push(
+      `step 1: card.column expected "needs_input" after session B's NEEDS_INPUT marker, actual "${card?.column}"`,
+    );
+  }
+
+  const elapsedMs = await killSessionAndAwaitDetector(
+    built,
+    built.tmux.b,
+    built.ttyd.b,
+    built.sessionB.id,
+  );
+  console.log(
+    `attention-dead-sibling: step 2 killed real tmux ${built.tmux.b} + its ttyd; detector cleared session B after elapsedMs=${elapsedMs}`,
+  );
+  if (elapsedMs == null) {
+    violations.push(
+      `step 2: the real 3-strike detector did not clear session ${built.sessionB.id} within ${LIVENESS_POLL_TIMEOUT_MS}ms`,
+    );
+  } else if (elapsedMs < LIVENESS_MIN_ELAPSED_MS) {
+    violations.push(
+      `step 2: session ${built.sessionB.id} cleared after only ${elapsedMs}ms — faster than the real 2000ms tick / 3-strike detector could produce (floor ${LIVENESS_MIN_ELAPSED_MS}ms)`,
+    );
+  }
+  card = await fetchFixtureCard(built.cardId);
+  console.log(
+    `attention-dead-sibling: step 2 wire sessionLost=${card?.sessionLost} (expected falsy — A is still live), column=${card?.column} (expected still needs_input)`,
+  );
+  if (card?.sessionLost === true) {
+    violations.push(
+      `step 2: wire sessionLost is true while session A is still live — a card must never render "Session lost" with a live sibling`,
+    );
+  }
+  if (card?.column !== "needs_input") {
+    violations.push(
+      `step 2: card.column expected to REMAIN "needs_input" after B merely died (nobody has replied yet), actual "${card?.column}"`,
+    );
+  }
+
+  const statusPromptA = await postPromptSubmit(built.sessionA.token);
+  console.log(
+    `attention-dead-sibling: step 3 POST UserPromptSubmit via session A (live, the only session that can still answer) -> ${statusPromptA} (expected 204)`,
+  );
+  if (statusPromptA !== 204) {
+    violations.push(
+      `step 3: POST UserPromptSubmit via session A returned ${statusPromptA}, expected 204`,
+    );
+  }
+  card = await fetchFixtureCard(built.cardId);
+  console.log(
+    `attention-dead-sibling: step 3 card.column = ${card?.column} (expected in_progress)`,
+  );
+  if (card?.column !== "in_progress") {
+    violations.push(
+      `step 3: card.column expected "in_progress" after the live session A replied, actual "${card?.column}" — the dead session B still holds a NEEDS_INPUT marker no code path can clear, so the card is frozen in Needs Input permanently and every later reply repeats this suppression`,
+    );
+  }
+
+  await killAndWait(built.server?.child);
+  const persisted = readCard(built.dbPath, built.cardId);
+  if (!persisted) {
+    violations.push(
+      `step 4: card ${built.cardId} missing from persisted board.db after kill`,
+    );
+    return violations;
+  }
+  const recordB = persisted.sessions?.find((s) => s.id === built.sessionB.id);
+  console.log(
+    `attention-dead-sibling: step 4 persisted session B (${built.sessionB.id}) tmuxSession=${JSON.stringify(recordB?.tmuxSession)} lastMarker=${JSON.stringify(recordB?.lastMarker)}`,
+  );
+  if (!recordB) {
+    violations.push(
+      `step 4: session ${built.sessionB.id} missing from persisted sessions[]`,
+    );
+  } else {
+    if (recordB.tmuxSession !== undefined) {
+      violations.push(
+        `step 4: dead session ${built.sessionB.id} persisted tmuxSession expected absent, actual ${JSON.stringify(recordB.tmuxSession)}`,
+      );
+    }
+    if (recordB.lastMarker !== undefined) {
+      violations.push(
+        `step 4: dead session ${built.sessionB.id} persisted lastMarker expected absent — a session whose tmux pane is gone cannot be waiting on the user, so its needs-input key must not survive the loss, actual ${JSON.stringify(recordB.lastMarker)}`,
+      );
+    }
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -1510,6 +1683,8 @@ const CHECKS = {
   liveness: checkLiveness,
   reconcile: checkReconcile,
   attention: () => withFixture("attention", checkAttention),
+  "attention-dead-sibling": () =>
+    withFixture("attention-dead-sibling", checkAttentionDeadSibling),
 };
 
 /**
