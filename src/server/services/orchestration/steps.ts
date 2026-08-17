@@ -311,9 +311,9 @@ export async function awaitReplReady(session: string): Promise<void> {
  * ordering discipline: `store.mintHookChannel` persists the token onto the session record AND
  * reports which session it landed on, and ONLY THEN is the token registered against that real
  * id — there is no path left that can register a token before the session it names exists. If
- * `mintHookChannel` reports no session (unknown card id), registration is skipped and the launch
- * falls through to the hook-silent branch, the existing safe degradation for a card the store
- * cannot resolve.
+ * `mintHookChannel` reports no session — an unknown card id, or an active pointer naming no
+ * record (`WR-03`) — registration is skipped and the launch falls through to the hook-silent
+ * branch, the existing safe degradation for a card the store cannot resolve.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 const startClaude: SagaStep = {

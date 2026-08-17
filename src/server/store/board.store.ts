@@ -1155,11 +1155,19 @@ class BoardStore extends EventEmitter {
    * a session and leave it with ZERO status channels — no marker scan, no flip-back, no activity
    * dot — permanently. Arbitration must always fail toward HAVING a channel: `markHookRouted`, on
    * the first authenticated event, is the only place the latch may be written.
-   * @remarks (Phase 91) Returns the id of the session the token landed on — `undefined` only when
-   * the card id is unknown — resolved AFTER `setActiveSession` runs, since that is what mints the
-   * session record when the card has none. This is what lets the mint/register call sites close
-   * the token-before-session sequencing hazard structurally: `registerHookToken` can only ever be
-   * called with a session id this method has already proven exists.
+   * @remarks (Phase 91) Returns the id of the session the token landed on, resolved AFTER
+   * `setActiveSession` runs, since that is what mints the session record when the card has none.
+   * This is what lets the mint/register call sites close the token-before-session sequencing
+   * hazard structurally: `registerHookToken` can only ever be called with a session id this method
+   * has already proven exists.
+   * @remarks (`WR-03`) "Proven" is a membership check, not an assumption about the active pointer.
+   * `setActiveSession` has a refuse-to-project branch — a card holding flat session state that
+   * resolves to no record — and on that branch nothing is persisted while `card.activeSessionId`
+   * keeps naming a session that does not exist. Returning it regardless would report success for a
+   * launch whose token authenticates nothing (`registerHookToken` refuses the orphan) AND skip the
+   * hook-silent branch's `clearHookChannel()` reset, so the documented safe degradation would not
+   * happen for the one card shape it was written for. `undefined` therefore means EITHER an unknown
+   * card id OR an active pointer that names no record.
    * @see docs/ARCHITECTURE.md#hooks-status-channel
    */
   mintHookChannel(id: string, token: string): Promise<string | undefined> {
@@ -1168,7 +1176,9 @@ class BoardStore extends EventEmitter {
       const card = this.cards.get(id);
       if (card) {
         this.setActiveSession(card, { hookToken: token });
-        minted = card.activeSessionId;
+        minted = card.sessions?.some((s) => s.id === card.activeSessionId)
+          ? card.activeSessionId
+          : undefined;
       }
       return [];
     }).then(() => minted);
