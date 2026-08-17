@@ -111,6 +111,12 @@ export function CardView({
     whiteSpace: "nowrap",
     flex: "0 0 auto",
   };
+  const sessionCountSuffix =
+    card.sessionCount != null ? ` · ${card.sessionCount}` : "";
+  const sessionChipTitle = (label: string): string | undefined =>
+    card.sessionCount != null
+      ? `${label} · ${card.sessionCount} sessions`
+      : undefined;
   const sessionChip =
     card.provisioningStep != null ? (
       <span
@@ -119,9 +125,10 @@ export function CardView({
           border: "1px solid var(--border)",
           color: "var(--text-muted)",
         }}
+        title={sessionChipTitle("Provisioning")}
       >
         <RotateCw size={12} strokeWidth={2} aria-hidden="true" />
-        Provisioning
+        {`Provisioning${sessionCountSuffix}`}
       </span>
     ) : card.sessionLost === true ? (
       <span
@@ -131,9 +138,10 @@ export function CardView({
             "color-mix(in srgb, var(--destructive) 16%, var(--surface-card))",
           color: "var(--destructive)",
         }}
+        title={sessionChipTitle("Lost")}
       >
         <AlertTriangle size={12} strokeWidth={2} aria-hidden="true" />
-        Lost
+        {`Lost${sessionCountSuffix}`}
       </span>
     ) : card.tmuxSession != null ? (
       <span
@@ -143,9 +151,10 @@ export function CardView({
             "color-mix(in srgb, var(--status-ok) 16%, var(--surface-card))",
           color: "var(--status-ok)",
         }}
+        title={sessionChipTitle("Live")}
       >
         <Activity size={12} strokeWidth={2} aria-hidden="true" />
-        Live
+        {`Live${sessionCountSuffix}`}
       </span>
     ) : null;
 
