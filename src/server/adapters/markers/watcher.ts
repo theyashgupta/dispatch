@@ -127,6 +127,7 @@ async function scanSession(
     tmuxSession?: string;
     lastMarker?: string;
     hookRoutedAt?: string;
+    activeSessionId?: string;
   },
   channel: StatusChannel,
 ): Promise<void> {
@@ -145,7 +146,7 @@ async function scanSession(
     const fails = (captureFailures.get(session) ?? 0) + 1;
     if (fails >= 3) {
       captureFailures.delete(session);
-      await store.markSessionLost(card.id);
+      await store.markSessionLost(card.id, card.activeSessionId);
       return;
     }
     captureFailures.set(session, fails);

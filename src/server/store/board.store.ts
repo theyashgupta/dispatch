@@ -343,10 +343,25 @@ class BoardStore extends EventEmitter {
    * field is RESET pre-spawn by the start saga's launch step (resetClaudeSessionId — a fresh
    * kickoff is a new conversation) and CLEARED by Done cleanup (recordCleanupWarning, finishCleanup)
    * with explicit lines; every other session-clearing mutator KEEPS it.
+   * @remarks `sessionId` (Phase 91) lets a caller clear a SPECIFIC session's token instead of the
+   * card's active one, defaulting to `card.activeSessionId` when omitted — resolved the same way
+   * `setActiveSession` resolves its own target, so the two never disagree on which record they
+   * mean. The RELEASED token is read off the resolved TARGET session's own `hookToken` — never
+   * the card's flat mirror, which may already lag the target on a multi-session card — so a dead
+   * sibling's secret stops resolving at the moment this call clears it, not only when the card's
+   * active session happens to be the one cleared. The target
+   * record's own `hookRoutedAt` is cleared directly on the record (never through
+   * `setActiveSession`'s patch — {@link Session.hookRoutedAt} is deliberately unfenced and must
+   * never ride that method's six-field mirror). `card.hookRoutedAt` itself stays an unconditional
+   * clear here for now, matching this method's six pre-Phase-91 call sites exactly; a later plan
+   * gates it on the cleared session being the card's active one.
    */
-  private clearHookToken(card: Card): void {
-    if (card.hookToken) this.releaseHookToken(card.hookToken, card.id);
-    this.setActiveSession(card, { hookToken: undefined });
+  private clearHookToken(card: Card, sessionId?: string): void {
+    const resolvedId = sessionId ?? card.activeSessionId;
+    const target = card.sessions?.find((s) => s.id === resolvedId);
+    if (target?.hookToken) this.releaseHookToken(target.hookToken, card.id);
+    this.setActiveSession(card, { hookToken: undefined }, sessionId);
+    if (target) target.hookRoutedAt = undefined;
     card.hookRoutedAt = undefined;
   }
 
@@ -1423,33 +1438,66 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Mark a card's tmux session as lost (Phase 5, RESIL-01/02) in ONE atomic mutation: set
-   * `sessionLost` AND clear `tmuxSession`/`ttydPort`/`terminalError` together (recordTtydExit
-   * precedent — a split write would broadcast a torn frame that briefly renders a To-Do-looking
-   * card with no session and no lost line). Clearing `tmuxSession` removes the card from
-   * cardsWithSession() (freeing the watcher) and makes the DetailPanel terminal region disappear
-   * (Pitfall 5); the session name stays derivable as `dsp-` + identifier for restart. Called at
-   * BOTH boot (reconcileSessions) and RUNTIME (Plan 02's watcher dead-session detector, per tick).
-   * `hookToken` is cleared AND unregistered with the session (clearHookToken) — a card without
-   * a live session must not keep a live, still-resolving secret. No-op if the id is unknown.
-   * SECURITY: never logs card contents.
+   * Mark ONE session lost (Phase 91) in ONE atomic mutation: clear only the TARGET session's
+   * `tmuxSession`/`ttydPort`/hook token, promote a live sibling into the active pointer in the
+   * SAME mutation if the target was active, then DERIVE the card-level `sessionLost` from every
+   * session the card owns rather than asserting it — true only when the card has zero session
+   * records or every one of them is dead. A card with a live sibling therefore survives one
+   * session dying: it never shows Lost, its live sibling's fields are untouched, and the active
+   * pointer never names a dead record.
+   * @remarks `sessionId` is a REQUIRED parameter that accepts `undefined` — every call site must
+   * say which session it means, while `undefined` still resolves to `card.activeSessionId`
+   * (today's exact single-session meaning). If the resolved id does not name a record in
+   * `card.sessions` (a pre-entity or otherwise corrupt card), this degrades to the pre-Phase-91
+   * shape exactly: the session-field clear and the hook-token clear both fall through to
+   * `setActiveSession`'s/`clearHookToken`'s own undefined-target default rather than refusing on
+   * an unresolvable EXPLICIT target, so a corrupt card is not made worse by this widening.
+   * @remarks Artifact fields (`terminalError`, `prs`, `prsUnknown`, `previews`, `previewsUnknown`)
+   * clear ONLY on the derived full-card loss, never on a partial one — per-session artifact
+   * attribution is a later phase's concern (ARTIFACT-01), not this one's; on a partial loss they
+   * are left exactly as they were.
+   * @remarks `wasTransition` is recomputed against the DERIVED state, not the raw call: a partial
+   * loss on a card that still has a live sibling never emits `session_lost` (the card is not
+   * actually lost), and a full loss emits it exactly once, on the transition into it.
+   * Called at BOTH boot (reconcileSessions) and RUNTIME (the watcher's per-session dead-session
+   * detector). No-op if the id is unknown. SECURITY: never logs card contents.
    */
-  markSessionLost(id: string): Promise<void> {
+  markSessionLost(id: string, sessionId: string | undefined): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card) return [];
-      const wasTransition = !(card.sessionLost && card.tmuxSession == null);
-      card.sessionLost = true;
-      this.setActiveSession(card, {
-        tmuxSession: undefined,
-        ttydPort: undefined,
-      });
-      card.terminalError = null;
-      card.prs = undefined;
-      card.prsUnknown = undefined;
-      card.previews = undefined;
-      card.previewsUnknown = undefined;
-      this.clearHookToken(card);
+      const wasAlreadyLost = card.sessionLost === true;
+      const targetId = sessionId ?? card.activeSessionId;
+      const target = card.sessions?.find((s) => s.id === targetId);
+      const resolvedTargetId = target ? targetId : undefined;
+      this.setActiveSession(
+        card,
+        { tmuxSession: undefined, ttydPort: undefined },
+        resolvedTargetId,
+      );
+      this.clearHookToken(card, resolvedTargetId);
+      if (target && targetId === card.activeSessionId) {
+        const promoted = (card.sessions ?? [])
+          .filter((s) => s.id !== target.id && s.tmuxSession != null)
+          .sort((a, b) =>
+            a.updatedAt === b.updatedAt
+              ? a.id.localeCompare(b.id)
+              : b.updatedAt.localeCompare(a.updatedAt),
+          )[0];
+        if (promoted) this.setActiveSession(card, {}, promoted.id, true);
+      }
+      const sessions = card.sessions ?? [];
+      const derivedLost =
+        sessions.length === 0 || sessions.every((s) => s.tmuxSession == null);
+      card.sessionLost = derivedLost;
+      if (derivedLost) {
+        card.terminalError = null;
+        card.prs = undefined;
+        card.prsUnknown = undefined;
+        card.previews = undefined;
+        card.previewsUnknown = undefined;
+      }
+      const wasTransition = derivedLost && !wasAlreadyLost;
       return wasTransition
         ? [
             this.event("session_lost", {

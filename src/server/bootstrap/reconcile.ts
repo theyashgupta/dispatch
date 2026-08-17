@@ -34,7 +34,7 @@ export async function reconcileSessions(): Promise<void> {
     const sessionName = card.tmuxSession ?? "dsp-" + card.identifier;
     if (!live.has(sessionName)) {
       if (card.column !== "todo" && card.column !== "done") {
-        await store.markSessionLost(card.id);
+        await store.markSessionLost(card.id, card.activeSessionId);
         lost++;
       }
       continue;
