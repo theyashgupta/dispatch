@@ -40,11 +40,16 @@
  *   node scripts/density-91.mjs --json <path>        measure and write raw readings as JSON
  *   node scripts/density-91.mjs --compare <path>     measure, diff against a previous JSON at
  *                                                     ZERO tolerance, print one line per mismatch
+ *   node scripts/density-91.mjs --chip               additionally assert the session-state chip's
+ *                                                     DOM text/title at every breakpoint (91-08,
+ *                                                     UI-01/UI-02) and that dens-solo/dens-pair each
+ *                                                     render as exactly one card in the board AND in
+ *                                                     the Orca nav — combine with --compare/--json
  *
  * Exit codes: 0 all checks PASS (or plain/--json mode with no comparison requested). 1 a live
  * :4700 (WR-08), a missing production build, a sandbox-safety violation, a card the evaluate could
- * not find or that collided with its sibling, a --compare MISMATCH, the real board.db changing
- * during the run, or a sandbox port still held after teardown.
+ * not find or that collided with its sibling, a --compare MISMATCH, a --chip assertion failure, the
+ * real board.db changing during the run, or a sandbox port still held after teardown.
  */
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -419,8 +424,13 @@ async function seedFixtureCards(home, fixtures) {
  * file's ONE `document.querySelector` call (89-BASELINE.md's scoping rule: every other lookup
  * chains off this asserted root). THROWS if the board root, the done column, its scroll
  * container, or its sticky header cannot be resolved, if either measured card's identifier cannot
- * be found, or if the two measured cards resolve to the SAME DOM node — a reading that silently
- * reports one element twice is the wrong-subject failure this instrument must be immune to.
+ * be found, if the two measured cards resolve to the SAME DOM node — a reading that silently
+ * reports one element twice is the wrong-subject failure this instrument must be immune to — or
+ * (91-08) if either card's session-state chip cannot be resolved to exactly one element: a chip
+ * that gets renamed or removed degrades this instrument to a loud throw, never a vacuous pass.
+ * `findByIdentifier`'s own "matched > 1 card roots" throw is also this file's proof that
+ * dens-solo/dens-pair each render as exactly ONE card in the done column — a two-session card that
+ * silently split into two DOM rows would trip that throw before any chip lookup ever ran.
  */
 const MEASURE_EXPR = `
 (function () {
@@ -465,6 +475,25 @@ const MEASURE_EXPR = `
     throw new Error("dens-solo and dens-pair resolved to the SAME DOM node — wrong-subject failure");
   }
 
+  var SESSION_CHIP_RE = /^(Provisioning|Lost|Live)\\b/;
+  function findSessionChip(cardEl, identifier) {
+    var spans = cardEl.querySelectorAll("span");
+    var matches = [];
+    for (var i = 0; i < spans.length; i++) {
+      if (SESSION_CHIP_RE.test(spans[i].textContent)) matches.push(spans[i]);
+    }
+    if (matches.length === 0) {
+      throw new Error("session-state chip not found on card " + identifier);
+    }
+    if (matches.length > 1) {
+      throw new Error("identifier " + identifier + " matched " + matches.length + " session-state chip candidates");
+    }
+    return matches[0];
+  }
+
+  var soloChipEl = findSessionChip(soloEl, "${SOLO_IDENTIFIER}");
+  var pairChipEl = findSessionChip(pairEl, "${PAIR_IDENTIFIER}");
+
   var containerRect = scrollContainer.getBoundingClientRect();
   var cardsVisible = 0;
   cardRoots.forEach(function (el) {
@@ -481,6 +510,12 @@ const MEASURE_EXPR = `
     pairHeight: pairEl.getBoundingClientRect().height,
     columnHeaderHeight: header.getBoundingClientRect().height,
     cardsVisible: cardsVisible,
+    chip: {
+      soloText: soloChipEl.textContent,
+      soloTitle: soloChipEl.hasAttribute("title") ? soloChipEl.getAttribute("title") : null,
+      pairText: pairChipEl.textContent,
+      pairTitle: pairChipEl.hasAttribute("title") ? pairChipEl.getAttribute("title") : null,
+    },
   };
 })()
 `;
@@ -554,6 +589,105 @@ function compareReadings(before, after) {
   return violations;
 }
 
+/**
+ * The `--chip` assertion pass (91-08, UI-01/UI-02): at every breakpoint, a single-session card's
+ * chip must be byte-identical to v2.9 (`Live`, no `title` attribute at all — not an empty one) and
+ * a two-session card's chip must carry the ` · 2` suffix and the `title="Live · 2 sessions"`
+ * disclosure (91-UI-SPEC.md `## 1`). Returns violations rather than throwing — `MEASURE_EXPR`'s
+ * own chip lookup is what throws on a renamed/missing chip element (see its JSDoc); this function
+ * only compares the resolved text/title against the contract.
+ */
+function assertChipReadings(readings) {
+  const violations = [];
+  for (const bp of BREAKPOINTS) {
+    const chip = readings[bp.name]?.chip;
+    if (!chip) {
+      violations.push(`${bp.name}: no chip readings present`);
+      continue;
+    }
+    if (chip.soloText !== "Live") {
+      violations.push(
+        `${bp.name}.chip.soloText: expected "Live", got ${JSON.stringify(chip.soloText)}`,
+      );
+    }
+    if (chip.soloTitle !== null) {
+      violations.push(
+        `${bp.name}.chip.soloTitle: expected ABSENT (null), got ${JSON.stringify(chip.soloTitle)}`,
+      );
+    }
+    if (chip.pairText !== "Live · 2") {
+      violations.push(
+        `${bp.name}.chip.pairText: expected "Live · 2", got ${JSON.stringify(chip.pairText)}`,
+      );
+    }
+    if (chip.pairTitle !== "Live · 2 sessions") {
+      violations.push(
+        `${bp.name}.chip.pairTitle: expected "Live · 2 sessions", got ${JSON.stringify(chip.pairTitle)}`,
+      );
+    }
+  }
+  return violations;
+}
+
+/**
+ * Flip the already-loaded page to the Orca nav view (`App.tsx`'s `viewMode` lazily reads
+ * `localStorage["dsp.view"]` once on mount) via a real reload — never a synthetic React state
+ * poke — then poll until the Orca nav (`nav[aria-label="Tickets"]`, `OrcaView.tsx`) renders both
+ * fixture identifiers. A transient evaluate failure immediately after `Page.reload` (the old
+ * execution context torn down before the new one is ready) is swallowed and retried, matching
+ * {@link waitForFixtureRendered}'s own polling shape.
+ */
+async function switchToOrcaView(cdp, sessionId) {
+  await evalValue(
+    cdp,
+    sessionId,
+    `localStorage.setItem("dsp.view", "orca")`,
+  );
+  await cdp.send("Page.reload", { ignoreCache: true }, sessionId);
+  const deadline = Date.now() + RENDER_TIMEOUT_MS;
+  const probe = `
+    (function () {
+      var nav = document.querySelector('nav[aria-label="Tickets"]');
+      if (!nav) return false;
+      var text = nav.textContent;
+      return text.indexOf("${SOLO_IDENTIFIER}") !== -1 && text.indexOf("${PAIR_IDENTIFIER}") !== -1;
+    })()
+  `;
+  while (Date.now() < deadline) {
+    try {
+      if (await evalValue(cdp, sessionId, probe)) return;
+    } catch {
+      // execution context torn down mid-reload — keep polling
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    `Orca nav never rendered both fixture identifiers within ${RENDER_TIMEOUT_MS}ms`,
+  );
+}
+
+/**
+ * Count how many Orca nav rows (`[role="button"]` inside `nav[aria-label="Tickets"]`,
+ * `OrcaNavRow.tsx`) contain `identifier` in their text content — the Orca-side half of "one card,
+ * not two" (91-08 acceptance criteria). `OrcaNavRow` renders no session-state chip at all, so this
+ * is a row-count check, never a chip-content check.
+ */
+async function countOrcaRows(cdp, sessionId, identifier) {
+  const expr = `
+    (function () {
+      var nav = document.querySelector('nav[aria-label="Tickets"]');
+      if (!nav) throw new Error("Orca nav (nav[aria-label='Tickets']) not found");
+      var rows = nav.querySelectorAll('[role="button"]');
+      var matches = 0;
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i].textContent.indexOf("${identifier}") !== -1) matches++;
+      }
+      return matches;
+    })()
+  `;
+  return evalValue(cdp, sessionId, expr);
+}
+
 function printTable(readings) {
   console.log(
     "\nbreakpoint  soloHeight  pairHeight  columnHeaderHeight  cardsVisible",
@@ -614,6 +748,7 @@ async function main() {
   const argv = process.argv.slice(2);
   const jsonPath = readFlag(argv, "--json");
   const comparePath = readFlag(argv, "--compare");
+  const chipFlag = argv.includes("--chip");
 
   await assertNoLiveService();
 
@@ -631,6 +766,7 @@ async function main() {
   let cdp = null;
   let readings = null;
   let portsHeld = false;
+  let chipViolations = [];
 
   try {
     const fixtures = makeFixtureCards(home);
@@ -683,6 +819,28 @@ async function main() {
 
     await waitForFixtureRendered(cdp, sessionId);
     readings = await runMeasurement(cdp, sessionId);
+
+    if (chipFlag) {
+      chipViolations = assertChipReadings(readings);
+      for (const v of chipViolations) console.log(`CHIP MISMATCH ${v}`);
+
+      await switchToOrcaView(cdp, sessionId);
+      const soloOrcaCount = await countOrcaRows(cdp, sessionId, SOLO_IDENTIFIER);
+      const pairOrcaCount = await countOrcaRows(cdp, sessionId, PAIR_IDENTIFIER);
+      console.log(
+        `orca row count — ${SOLO_IDENTIFIER}: ${soloOrcaCount}, ${PAIR_IDENTIFIER}: ${pairOrcaCount}`,
+      );
+      if (soloOrcaCount !== 1) {
+        chipViolations.push(
+          `orca: ${SOLO_IDENTIFIER} row count expected 1, got ${soloOrcaCount}`,
+        );
+      }
+      if (pairOrcaCount !== 1) {
+        chipViolations.push(
+          `orca: ${PAIR_IDENTIFIER} row count expected 1, got ${pairOrcaCount}`,
+        );
+      }
+    }
   } finally {
     if (cdp) cdp.close();
     await killAndWait(chromeChild);
@@ -729,8 +887,9 @@ async function main() {
     process.exit(1);
   }
 
-  if (violations.length > 0) {
-    console.log(`\nFAIL: ${violations.length} mismatch(es)`);
+  const totalViolations = violations.length + chipViolations.length;
+  if (totalViolations > 0) {
+    console.log(`\nFAIL: ${totalViolations} mismatch(es)`);
     process.exit(1);
   }
 
