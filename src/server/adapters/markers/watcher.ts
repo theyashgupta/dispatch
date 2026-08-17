@@ -1,4 +1,4 @@
-import type { StatusChannel } from "../../../shared/types.js";
+import type { Session, StatusChannel } from "../../../shared/types.js";
 import { store } from "../../store/board.store.js";
 import { capturePane, paneSize } from "../tmux.js";
 import { killTtyd, trackedTtydSessions } from "../ttyd.js";
@@ -118,44 +118,40 @@ const captureFailures = new Map<string, number>();
  * is replay-frozen and carries no event-type field of its own. This I/O shell is where the frozen
  * type's column is turned into the caller-supplied literal `applyMarker` now requires; it must
  * never be pushed back into the store.
- * @remarks (Phase 91) The store's marker mutators now require a session id; this function still
- * scans exactly one pane (`card.tmuxSession`, the card's active projection), so every call
- * passes `card.activeSessionId` — the current single-session-per-card scan's own identity, not a
- * generalization. Iterating every session a card owns is a later plan's scope.
+ * @remarks (Phase 91) Driven per-session: the tick loop calls this once for every
+ * `store.sessionsWithTmux()` pair, so a card with N live siblings receives N calls per tick, each
+ * addressing its OWN session record's `tmuxSession`/`lastMarker`/`hookRoutedAt` — never the card's
+ * flat mirror. Reading the mirror here would let one session's hook traffic silence the pane scan
+ * of a sibling with no hook channel of its own, or let a sibling's marker write masquerade as a
+ * change to THIS session's own compare-and-swap inputs below.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 async function scanSession(
-  card: {
-    id: string;
-    column: string;
-    tmuxSession?: string;
-    lastMarker?: string;
-    hookRoutedAt?: string;
-    activeSessionId?: string;
-  },
+  card: { id: string; column: string },
+  session: Session,
   channel: StatusChannel,
 ): Promise<void> {
-  const session = card.tmuxSession;
-  if (!session) return;
+  const tmuxName = session.tmuxSession;
+  if (!tmuxName) return;
 
   if (card.column === "todo") return;
 
   let pane: string;
   try {
-    pane = await capturePane(`=${session}:`, { join: true });
-    warnedCaptures.delete(session);
-    captureFailures.delete(session);
+    pane = await capturePane(`=${tmuxName}:`, { join: true });
+    warnedCaptures.delete(tmuxName);
+    captureFailures.delete(tmuxName);
   } catch (err) {
     if (card.column === "done") return;
-    const fails = (captureFailures.get(session) ?? 0) + 1;
+    const fails = (captureFailures.get(tmuxName) ?? 0) + 1;
     if (fails >= 3) {
-      captureFailures.delete(session);
-      await store.markSessionLost(card.id, card.activeSessionId);
+      captureFailures.delete(tmuxName);
+      await store.markSessionLost(card.id, session.id);
       return;
     }
-    captureFailures.set(session, fails);
-    if (!warnedCaptures.has(session)) {
-      warnedCaptures.add(session);
+    captureFailures.set(tmuxName, fails);
+    if (!warnedCaptures.has(tmuxName)) {
+      warnedCaptures.add(tmuxName);
       console.warn(
         `[watcher] capture failed for a session — skipping until it recovers: ${(err as Error).message}`,
       );
@@ -164,15 +160,15 @@ async function scanSession(
   }
 
   const paneRouted =
-    channel === "pane" || (channel === "auto" && card.hookRoutedAt == null);
+    channel === "pane" || (channel === "auto" && session.hookRoutedAt == null);
   if (!paneRouted) return;
 
   if (isRecapOverlay(pane)) return;
 
   const prev: SessionState = {
-    flip: sessions.get(session),
-    agentView: agentViews.get(session),
-    markerFreeStreak: markerFreeTicks.get(session) ?? 0,
+    flip: sessions.get(tmuxName),
+    agentView: agentViews.get(tmuxName),
+    markerFreeStreak: markerFreeTicks.get(tmuxName) ?? 0,
   };
 
   let width = Number.NaN;
@@ -182,11 +178,11 @@ async function scanSession(
     width,
     height,
     column: card.column,
-    lastMarker: card.lastMarker,
+    lastMarker: session.lastMarker,
   };
   if (paneNeedsSize(probe)) {
     try {
-      ({ width, height } = await paneSize(`=${session}:`));
+      ({ width, height } = await paneSize(`=${tmuxName}:`));
     } catch {}
   }
 
@@ -195,7 +191,7 @@ async function scanSession(
     width,
     height,
     column: card.column,
-    lastMarker: card.lastMarker,
+    lastMarker: session.lastMarker,
   };
   const { decision, next } = decideScan(input, prev);
 
@@ -221,7 +217,7 @@ async function scanSession(
   }
 
   const decisionInputsStillLive =
-    card.column === input.column && card.lastMarker === input.lastMarker;
+    card.column === input.column && session.lastMarker === input.lastMarker;
 
   if (decisionInputsStillLive) {
     switch (decision.kind) {
@@ -229,7 +225,7 @@ async function scanSession(
       case "setOutputChanged":
         break;
       case "clearLastMarker":
-        await store.clearLastMarker(card.id, card.activeSessionId);
+        await store.clearLastMarker(card.id, session.id);
         break;
       case "applyMarker": {
         const eventType =
@@ -238,7 +234,7 @@ async function scanSession(
             : "status_agent_done";
         await store.applyMarker(
           card.id,
-          card.activeSessionId,
+          session.id,
           decision.column,
           decision.reason,
           decision.key,
@@ -247,34 +243,36 @@ async function scanSession(
         break;
       }
       case "flipBack":
-        await store.flipBack(card.id, card.activeSessionId);
+        await store.flipBack(card.id, session.id);
         break;
     }
   }
 
-  if (next.flip) sessions.set(session, next.flip);
-  else sessions.delete(session);
-  if (next.agentView !== undefined) agentViews.set(session, next.agentView);
-  else agentViews.delete(session);
+  if (next.flip) sessions.set(tmuxName, next.flip);
+  else sessions.delete(tmuxName);
+  if (next.agentView !== undefined) agentViews.set(tmuxName, next.agentView);
+  else agentViews.delete(tmuxName);
   if (next.markerFreeStreak > 0)
-    markerFreeTicks.set(session, next.markerFreeStreak);
-  else markerFreeTicks.delete(session);
+    markerFreeTicks.set(tmuxName, next.markerFreeStreak);
+  else markerFreeTicks.delete(tmuxName);
 }
 
 /**
  * End-of-tick reaping: per-session map cleanup + orphaned-ttyd teardown (Phase-3 review IN-04), now
  * REACHABLE via the runtime dead-session detector in the scan (a mid-run markSessionLost clears
- * tmuxSession, so cardsWithSession() shrinks). Called AFTER the scan loop so any markSessionLost
- * from this tick is already reflected: for every tracked session key no longer live, drop its
- * entries from all four per-session maps and tear down its now-orphaned ttyd. `killTtyd` is wired
- * HERE (in the shell, never in the store) so the import direction stays acyclic (watcher → ttyd →
- * store).
+ * that session's own `tmuxSession`, so it drops out of `sessionsWithTmux()`). Called AFTER the scan
+ * loop so any markSessionLost from this tick is already reflected: for every tracked session key no
+ * longer live, drop its entries from all four per-session maps and tear down its now-orphaned ttyd.
+ * `sessionsWithTmux()` (Phase 91) reports every session a card owns, not just the active one, so a
+ * sibling's still-live pane is never mistaken for an orphan and reaped alongside a dead one. `killTtyd`
+ * is wired HERE (in the shell, never in the store) so the import direction stays acyclic
+ * (watcher → ttyd → store).
  */
 function reapDeadSessions(): void {
   const liveSessions = new Set(
     store
-      .cardsWithSession()
-      .map((c) => c.tmuxSession)
+      .sessionsWithTmux()
+      .map((pair) => pair.session.tmuxSession)
       .filter(Boolean),
   );
   const tracked = new Set<string>([
@@ -299,19 +297,21 @@ function reapDeadSessions(): void {
 /**
  * Start the fire-and-forget 2s pane watcher (lives beside the Linear poller). Restart re-attach
  * is Phase 5. Loop shape mirrors linear/poller.ts startPoller: an inner `tick` that scans every
- * live session serially then reaps dead ones, a `scheduleNext` self-rescheduling `setTimeout`
- * (never a fixed-interval timer that could overlap a long tick) with `timer.unref?.()` so it
- * never pins the process, a per-tick try/catch so one failure never kills the loop, and an
- * immediate first run. `statusChannel` (boot-static, passed as a plain parameter because
- * adapters must not import services' config-holder) threads to the per-session gate in
- * scanSession — it demotes marker/flip-back/dot scanning per channel, while capture-failure
- * dead-session detection and orphaned-ttyd reaping stay unconditional on every channel.
+ * live SESSION serially (Phase 91: `store.sessionsWithTmux()`, every session a card owns, not
+ * only its active projection — a card with N live siblings gets N scans per tick) then reaps dead
+ * ones, a `scheduleNext` self-rescheduling `setTimeout` (never a fixed-interval timer that could
+ * overlap a long tick) with `timer.unref?.()` so it never pins the process, a per-tick try/catch
+ * so one failure never kills the loop, and an immediate first run. `statusChannel` (boot-static,
+ * passed as a plain parameter because adapters must not import services' config-holder) threads
+ * to the per-session gate in scanSession — it demotes marker/flip-back/dot scanning per channel,
+ * while capture-failure dead-session detection and orphaned-ttyd reaping stay unconditional on
+ * every channel.
  */
 export function startMarkerWatcher(statusChannel: StatusChannel): void {
   async function tick(): Promise<void> {
     try {
-      for (const card of store.cardsWithSession()) {
-        await scanSession(card, statusChannel);
+      for (const { card, session } of store.sessionsWithTmux()) {
+        await scanSession(card, session, statusChannel);
       }
       reapDeadSessions();
     } catch (err) {
