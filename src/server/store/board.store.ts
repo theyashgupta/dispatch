@@ -1479,16 +1479,22 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Clear a card's persisted `ttydPort` after a boot-time adoption attempt declined to adopt it
-   * (ROBU-01) — the port answered no probe, or its owning PID could not be confirmed via `lsof`,
-   * so it degrades to today's pre-fix state. No event: the panel for this card may not even be
-   * open, so nothing needs to observe this cleanup; the next panel open transparently fresh-spawns
-   * a ttyd via the existing `ensureTerminal` flow. No-op if the id is unknown.
+   * Clear a session's persisted `ttydPort` after a boot-time adoption attempt declined to adopt
+   * it (ROBU-01) — the port answered no probe, or its owning PID could not be confirmed via
+   * `lsof`, so it degrades to today's pre-fix state. No event: the panel for this card may not
+   * even be open, so nothing needs to observe this cleanup; the next panel open transparently
+   * fresh-spawns a ttyd via the existing `ensureTerminal` flow. No-op if the id is unknown.
+   * @remarks `sessionId` (Phase 91) is a REQUIRED parameter that accepts `undefined` — every
+   * caller must say which session's port it means, while `undefined` still resolves to
+   * `card.activeSessionId` (today's exact single-session meaning), matching `markSessionLost`'s
+   * own required-but-optional shape. The clear runs through `setActiveSession`'s existing
+   * `targetSessionId` so an unadopted sibling's stale port is cleared on that session alone,
+   * never on the card's active one.
    */
-  clearStaleTtydPort(id: string): Promise<void> {
+  clearStaleTtydPort(id: string, sessionId: string | undefined): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) this.setActiveSession(card, { ttydPort: undefined });
+      if (card) this.setActiveSession(card, { ttydPort: undefined }, sessionId);
       return [];
     });
   }
