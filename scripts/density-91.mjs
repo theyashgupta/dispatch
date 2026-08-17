@@ -600,7 +600,9 @@ async function checkPortsHeld() {
     }));
     const held = stdout.trim() !== "";
     if (held) {
-      console.error(`ASSERTION: sandbox ports still held after teardown:\n${stdout}`);
+      console.error(
+        `ASSERTION: sandbox ports still held after teardown:\n${stdout}`,
+      );
     }
     return held;
   } catch {
@@ -664,7 +666,8 @@ async function main() {
         }
         await sleep(POLL_INTERVAL_MS);
       }
-      if (!up) throw new Error(`Chrome debugging port :${CDP_PORT} did not come up`);
+      if (!up)
+        throw new Error(`Chrome debugging port :${CDP_PORT} did not come up`);
     }
 
     cdp = await connectCDP();
