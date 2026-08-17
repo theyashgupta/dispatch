@@ -324,10 +324,25 @@ class BoardStore extends EventEmitter {
    * (composed with hook-events' activity-throttle reaper, which is why the card id rides along);
    * the no-op default keeps the store safe to use before wiring.
    */
-  private releaseHookToken: (token: string, cardId: string) => void = () => {};
+  private releaseHookToken: (
+    token: string,
+    cardId: string,
+    sessionId: string | undefined,
+  ) => void = () => {};
 
-  /** Wire the hook-token releaser at boot (bootstrap → store is DAG-legal). */
-  setHookTokenReleaser(release: (token: string, cardId: string) => void): void {
+  /**
+   * Wire the hook-token releaser at boot (bootstrap → store is DAG-legal).
+   * @remarks `sessionId` (Phase 91) is the id {@link clearHookToken} resolved the released token
+   * from, so the composite-keyed throttle reapers bootstrap composes with the registry unregister
+   * can drop the correct sibling's own bucket rather than the whole card's.
+   */
+  setHookTokenReleaser(
+    release: (
+      token: string,
+      cardId: string,
+      sessionId: string | undefined,
+    ) => void,
+  ): void {
     this.releaseHookToken = release;
   }
 
@@ -352,17 +367,22 @@ class BoardStore extends EventEmitter {
    * active session happens to be the one cleared. The target
    * record's own `hookRoutedAt` is cleared directly on the record (never through
    * `setActiveSession`'s patch — {@link Session.hookRoutedAt} is deliberately unfenced and must
-   * never ride that method's six-field mirror). `card.hookRoutedAt` itself stays an unconditional
-   * clear here for now, matching this method's six pre-Phase-91 call sites exactly; a later plan
-   * gates it on the cleared session being the card's active one.
+   * never ride that method's six-field mirror). `card.hookRoutedAt` — the flat mirror of the
+   * ACTIVE session's own latch — is gated on `resolvedId === card.activeSessionId`: clearing a
+   * NON-ACTIVE sibling's token must never null the mirror of a still-routed active session (the
+   * debt Plan 02 deliberately parked here). Every pre-Phase-91 call site omits `sessionId`, so
+   * `resolvedId` defaults to `card.activeSessionId` and the gate is trivially true — this change
+   * is byte-identical for all six of them; only `markSessionLost`'s explicit-target call can ever
+   * take the false branch.
    */
   private clearHookToken(card: Card, sessionId?: string): void {
     const resolvedId = sessionId ?? card.activeSessionId;
     const target = card.sessions?.find((s) => s.id === resolvedId);
-    if (target?.hookToken) this.releaseHookToken(target.hookToken, card.id);
+    if (target?.hookToken)
+      this.releaseHookToken(target.hookToken, card.id, resolvedId);
     this.setActiveSession(card, { hookToken: undefined }, sessionId);
     if (target) target.hookRoutedAt = undefined;
-    card.hookRoutedAt = undefined;
+    if (resolvedId === card.activeSessionId) card.hookRoutedAt = undefined;
   }
 
   /**
@@ -1132,14 +1152,23 @@ class BoardStore extends EventEmitter {
    * a session and leave it with ZERO status channels — no marker scan, no flip-back, no activity
    * dot — permanently. Arbitration must always fail toward HAVING a channel: `markHookRouted`, on
    * the first authenticated event, is the only place the latch may be written.
+   * @remarks (Phase 91) Returns the id of the session the token landed on — `undefined` only when
+   * the card id is unknown — resolved AFTER `setActiveSession` runs, since that is what mints the
+   * session record when the card has none. This is what lets the mint/register call sites close
+   * the token-before-session sequencing hazard structurally: `registerHookToken` can only ever be
+   * called with a session id this method has already proven exists.
    * @see docs/ARCHITECTURE.md#hooks-status-channel
    */
-  mintHookChannel(id: string, token: string): Promise<void> {
+  mintHookChannel(id: string, token: string): Promise<string | undefined> {
+    let minted: string | undefined;
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) this.setActiveSession(card, { hookToken: token });
+      if (card) {
+        this.setActiveSession(card, { hookToken: token });
+        minted = card.activeSessionId;
+      }
       return [];
-    });
+    }).then(() => minted);
   }
 
   /**
@@ -1149,13 +1178,24 @@ class BoardStore extends EventEmitter {
    * authoritative HERE: a racing second hook event finds the id already set and no-ops. The
    * differing-id case is handled by the caller (a logged mismatch), never a silent overwrite.
    * No-op if the id is unknown or already stamped.
+   * @remarks `sessionId` (Phase 91) is the RESOLVED session record's own id, required and
+   * defaulting to `card.activeSessionId` when the caller passes `undefined` — the never-overwrite
+   * re-check reads THAT session's own `claudeSessionId`, not the card's flat mirror, so a sibling
+   * that already stamped never suppresses this session's own first-event capture.
    * @see docs/ARCHITECTURE.md#hooks-status-channel
    */
-  setClaudeSessionId(id: string, sessionId: string): Promise<void> {
+  setClaudeSessionId(
+    id: string,
+    sessionId: string | undefined,
+    sid: string,
+  ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card && card.claudeSessionId == null)
-        this.setActiveSession(card, { claudeSessionId: sessionId });
+      if (!card) return [];
+      const targetId = sessionId ?? card.activeSessionId;
+      const target = card.sessions?.find((s) => s.id === targetId);
+      if (target && target.claudeSessionId == null)
+        this.setActiveSession(card, { claudeSessionId: sid }, targetId);
       return [];
     });
   }
@@ -1291,12 +1331,28 @@ class BoardStore extends EventEmitter {
    * ordering the `auto` channel must always preserve: a brief overlap where both channels are live
    * is cosmetic (both converge on `applyMarker`/`flipBack` behind `lastMarker` dedup and the
    * single-writer queue), whereas zero live channels is a card frozen forever.
+   * @remarks `sessionId` (Phase 91) is the RESOLVED session record's own id, required and
+   * defaulting to `card.activeSessionId` when the caller passes `undefined`. The refuse-without-
+   * token guard and the latch write both target THAT session's own `hookToken`/`hookRoutedAt`,
+   * never the card's flat mirror — mirrored to `card.hookRoutedAt` only when the target IS the
+   * active session, so the flat field stays a truthful projection exactly like the six fenced
+   * ones (never routed through `setActiveSession`'s patch — {@link Session.hookRoutedAt} is
+   * deliberately unfenced and the six-field re-derivation would clobber a sibling's value).
    * @see docs/ARCHITECTURE.md#hooks-status-channel
    */
-  markHookRouted(id: string, iso: string): Promise<void> {
+  markHookRouted(
+    id: string,
+    sessionId: string | undefined,
+    iso: string,
+  ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card?.hookToken) card.hookRoutedAt = iso;
+      if (!card) return [];
+      const targetId = sessionId ?? card.activeSessionId;
+      const target = card.sessions?.find((s) => s.id === targetId);
+      if (!target?.hookToken) return [];
+      target.hookRoutedAt = iso;
+      if (targetId === card.activeSessionId) card.hookRoutedAt = iso;
       return [];
     });
   }
@@ -1545,11 +1601,21 @@ class BoardStore extends EventEmitter {
    * `WR-05`: `eventType` is supplied by the CALLER, not derived from `column` in here — a target
    * column and its activity-event type happen to correspond 1:1 today only because there are
    * exactly two attention targets; deriving it here would silently mislabel a future third target.
+   * @remarks `sessionId` (Phase 91) is the RESOLVED session record's own id, required and
+   * defaulting to `card.activeSessionId` when the caller passes `undefined`. The dedup guard and
+   * the `lastMarker` write both target THAT session's own field, mirrored to the card's flat
+   * `lastMarker` only when the target IS the active session — a sibling's marker can never dedup
+   * against or clobber another session's. `column`, `statusReason`, `mirrorMemberColumn`, and the
+   * emitted event stay CARD-level and unchanged: one card has one column regardless of how many
+   * sessions it owns. A card with no resolvable session record (pre-entity/corrupt) degrades to
+   * the pre-Phase-91 card-level dedup/write exactly, matching this file's other corrupt-card
+   * fallbacks.
    * @see docs/ARCHITECTURE.md#single-writer-store
    * @see docs/ARCHITECTURE.md#column-transition-specification
    */
   applyMarker(
     id: string,
+    sessionId: string | undefined,
     column: Column,
     statusReason: string | undefined,
     markerKey: string,
@@ -1558,12 +1624,20 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const c = this.cards.get(id);
       if (!c || APPLY_MARKER_EXCLUDED_SOURCES.includes(c.column)) return [];
-      if (c.lastMarker === markerKey) return [];
+      const targetId = sessionId ?? c.activeSessionId;
+      const target = c.sessions?.find((s) => s.id === targetId);
+      const dedupKey = target ? target.lastMarker : c.lastMarker;
+      if (dedupKey === markerKey) return [];
       const from = c.column;
       c.column = column;
       this.mirrorMemberColumn(c, column);
       c.statusReason = statusReason;
-      c.lastMarker = markerKey;
+      if (target) {
+        target.lastMarker = markerKey;
+        if (targetId === c.activeSessionId) c.lastMarker = markerKey;
+      } else {
+        c.lastMarker = markerKey;
+      }
       return [
         this.event(eventType, {
           cardId: id,
@@ -1583,11 +1657,19 @@ class BoardStore extends EventEmitter {
    * off / new conversation turn) — so a genuinely RE-PRINTED identical marker re-fires (the
    * re-blocked agent surfaces again), while the still-on-screen consumed one stays deduped.
    * No-op if the id is unknown.
+   * @remarks `sessionId` (Phase 91) is the RESOLVED session record's own id, required and
+   * defaulting to `card.activeSessionId` when the caller passes `undefined`. Clears THAT
+   * session's own key, mirrored to the card's flat `lastMarker` only when the target IS the
+   * active session — clearing a sibling's key can never clear the active session's own.
    */
-  clearLastMarker(id: string): Promise<void> {
+  clearLastMarker(id: string, sessionId: string | undefined): Promise<void> {
     return this.enqueue(() => {
       const c = this.cards.get(id);
-      if (c) c.lastMarker = undefined;
+      if (!c) return [];
+      const targetId = sessionId ?? c.activeSessionId;
+      const target = c.sessions?.find((s) => s.id === targetId);
+      if (target) target.lastMarker = undefined;
+      if (targetId === c.activeSessionId) c.lastMarker = undefined;
       return [];
     });
   }
@@ -1619,20 +1701,46 @@ class BoardStore extends EventEmitter {
    * re-checks the card's `column` and `lastMarker` against the values it decided on immediately
    * before dispatching; do not remove that check on the belief that the channel gate makes it
    * unnecessary.
+   * @remarks `sessionId` (Phase 91) is the RESOLVED session record's own id, required and
+   * defaulting to `card.activeSessionId` when the caller passes `undefined`. `lastMarker`
+   * clearing (FLOW-02) is scoped to THAT session's own field, mirrored to the card only when the
+   * target IS the active session. CONTEXT locks a cross-session gate on top of every existing
+   * rule: leaving `needs_input` requires that NO session the card owns still holds a
+   * needs-input marker, not merely that the firing session stopped — a card where any OTHER
+   * session's `lastMarker` still starts with the exact `markerKey` NEEDS_INPUT prefix suppresses
+   * the whole move (per-session state untouched, no event, column stays where it is), so a ticket
+   * with a live sibling still waiting on the user never silently reads as answered. At N=1 no
+   * other session can ever exist, so this branch is unreachable and behavior is byte-identical to
+   * before this remark.
    * @see docs/ARCHITECTURE.md#column-transition-specification
    * @see docs/ARCHITECTURE.md#hooks-status-channel
    */
-  flipBack(id: string): Promise<void> {
+  flipBack(id: string, sessionId: string | undefined): Promise<void> {
     return this.enqueue(() => {
       const c = this.cards.get(id);
       if (!c || !FLIP_BACK_SOURCES.includes(c.column)) return [];
       const from = c.column;
+      const targetId = sessionId ?? c.activeSessionId;
+      if (
+        from === "needs_input" &&
+        (c.sessions ?? []).some(
+          (s) => s.id !== targetId && s.lastMarker?.startsWith("NEEDS_INPUT "),
+        )
+      ) {
+        return [];
+      }
       const target = "in_progress";
       c.column = target;
       this.mirrorMemberColumn(c, target);
       c.statusReason = undefined;
       if (FLIP_BACK_CLEARS_LAST_MARKER.includes(from)) {
-        c.lastMarker = undefined;
+        const targetSession = c.sessions?.find((s) => s.id === targetId);
+        if (targetSession) {
+          targetSession.lastMarker = undefined;
+          if (targetId === c.activeSessionId) c.lastMarker = undefined;
+        } else {
+          c.lastMarker = undefined;
+        }
       }
       return [
         this.event("move_auto", {
