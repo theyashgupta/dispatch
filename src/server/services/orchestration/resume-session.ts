@@ -1,9 +1,14 @@
+import { DEFAULT_CLAUDE_ARGS } from "../../../shared/types.js";
 import { store } from "../../store/board.store.js";
 import { hasSession, killSession, newSession } from "../../adapters/tmux.js";
 import { preSeedTrust } from "../../adapters/claude-trust.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { awaitReplReady, StartStepError } from "./steps.js";
-import { getHooksRuntime } from "../infra/config-holder.js";
+import { parseClaudeArgs } from "../domain/claude-args.js";
+import {
+  getHooksRuntime,
+  getOrchestrationConfig,
+} from "../infra/config-holder.js";
 import { mintHookToken, registerHookToken } from "../domain/hook-tokens.js";
 import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
 import { REATTACH_STATUS_CLEAR_MS } from "./start-session.js";
@@ -61,6 +66,9 @@ export async function resumeSession(cardId: string): Promise<void> {
 
     await preSeedTrust(card.workspacePath);
     const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
+    const claudeArgs = parseClaudeArgs(
+      getOrchestrationConfig()?.claudeArgs ?? DEFAULT_CLAUDE_ARGS,
+    );
     const runtime = getHooksRuntime();
     if (runtime?.capable && runtime.statusChannel !== "pane") {
       const token = mintHookToken(cardId, card.hookToken);
@@ -73,7 +81,7 @@ export async function resumeSession(cardId: string): Promise<void> {
           ...resumeArgs,
           "--settings",
           HOOK_SETTINGS_PATH,
-          "--dangerously-skip-permissions",
+          ...claudeArgs,
         ],
         {
           DISPATCH_HOOK_PORT: String(runtime.port),
@@ -86,7 +94,7 @@ export async function resumeSession(cardId: string): Promise<void> {
       await newSession(session, card.workspacePath, [
         claudePath,
         ...resumeArgs,
-        "--dangerously-skip-permissions",
+        ...claudeArgs,
       ]);
     }
     await awaitReplReady(session);

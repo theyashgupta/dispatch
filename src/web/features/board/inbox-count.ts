@@ -3,7 +3,7 @@ import type { Card } from "../../../shared/types.js";
 /**
  * The single predicate for "this card is a ticket waiting in the Inbox".
  * @remarks Excluding group members matches the counting convention already used by
- * `groupCardsByColumn` (orca-selectors.ts) and `StatusPillSwitcher`'s per-column count — a
+ * `buildWorkspaceGroups` (orca-selectors.ts) and `StatusPillSwitcher`'s per-column count — a
  * deliberate alignment, not an arbitrary choice. Exported (rather than inlined per call site) so
  * the strip badge, the To Do empty state, the Inbox list and its project filter cannot drift onto
  * two different definitions of the same number. A member is also not independently promotable —

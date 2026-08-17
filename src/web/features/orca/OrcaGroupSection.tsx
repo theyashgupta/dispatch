@@ -1,14 +1,12 @@
-import type { Card as CardModel, Column } from "../../../shared/types.js";
-import {
-  COLUMN_ACCENT,
-  COLUMN_LABELS,
-  SINGLE_LINE_COPY,
-} from "../board/index.js";
+import type { Column } from "../../../shared/types.js";
+import { SINGLE_LINE_COPY } from "../board/index.js";
+import type { GroupDimension, WorkspaceGroup } from "./orca-selectors.js";
 import { OrcaNavRow } from "./OrcaNavRow.js";
+import { OrcaSubgroupSection } from "./OrcaSubgroupSection.js";
 
-interface OrcaSectionProps {
-  column: Column;
-  cards: CardModel[];
+interface OrcaGroupSectionProps {
+  dimension: GroupDimension;
+  group: WorkspaceGroup;
   selectedCardId: string | null;
   onSelectCard: (id: string) => void;
 }
@@ -18,12 +16,12 @@ const ORCA_EMPTY_COPY: Record<Column, string> = {
   todo: "No tickets in To Do.",
 };
 
-export function OrcaSection({
-  column,
-  cards,
+export function OrcaGroupSection({
+  dimension,
+  group,
   selectedCardId,
   onSelectCard,
-}: OrcaSectionProps) {
+}: OrcaGroupSectionProps) {
   return (
     <div>
       <div
@@ -49,21 +47,23 @@ export function OrcaSection({
             color: "var(--text-muted)",
           }}
         >
-          {COLUMN_LABELS[column]}
+          {group.label}
         </span>
         <span
           style={{
-            background: `color-mix(in srgb, ${COLUMN_ACCENT[column]} 16%, var(--surface-column))`,
-            color: COLUMN_ACCENT[column],
+            background: group.accent
+              ? `color-mix(in srgb, ${group.accent} 16%, var(--surface-column))`
+              : "var(--surface-card)",
+            color: group.accent ?? "var(--text-muted)",
             borderRadius: "var(--radius-sm)",
             padding: "0 var(--space-xs)",
             fontSize: "var(--font-micro)",
           }}
         >
-          {cards.length}
+          {group.count}
         </span>
       </div>
-      {cards.length === 0 ? (
+      {group.subgroups.length === 0 ? (
         <div
           style={{
             padding: "var(--space-xs) var(--space-sm)",
@@ -72,10 +72,21 @@ export function OrcaSection({
             color: "var(--text-muted)",
           }}
         >
-          {ORCA_EMPTY_COPY[column]}
+          {dimension === "status"
+            ? ORCA_EMPTY_COPY[group.key as Column]
+            : "No tickets."}
         </div>
+      ) : group.subgrouped ? (
+        group.subgroups.map((subgroup) => (
+          <OrcaSubgroupSection
+            key={subgroup.key}
+            subgroup={subgroup}
+            selectedCardId={selectedCardId}
+            onSelectCard={onSelectCard}
+          />
+        ))
       ) : (
-        cards.map((card) => (
+        group.subgroups[0].cards.map((card) => (
           <OrcaNavRow
             key={card.id}
             card={card}

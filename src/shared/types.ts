@@ -596,6 +596,12 @@ export interface Config {
    * resolves to {@link DEFAULT_CLEANUP_DELAY_DAYS}. `0` means clean up immediately on Done.
    */
   cleanupDelayDays?: number;
+  /**
+   * Extra CLI arguments passed to `claude` every time a session starts, resumes, or restarts;
+   * absent resolves to {@link DEFAULT_CLAUDE_ARGS}. An explicit empty string means "no extra
+   * arguments" (Claude's normal permission prompts) rather than falling back to the default.
+   */
+  claudeArgs?: string;
 }
 
 /**
@@ -628,6 +634,13 @@ export const DEFAULT_FILTERS: SourceFilters = {
 
 /** Resolved deferred-cleanup delay (days) when `config.cleanupDelayDays` is absent (`LIFE-02`). */
 export const DEFAULT_CLEANUP_DELAY_DAYS = 7;
+
+/**
+ * Resolved `claude` launch arguments when `config.claudeArgs` is absent — the flag Dispatch has
+ * always launched with, so an un-migrated config keeps today's exact behavior. Settings ▸ Models
+ * lets a user change or clear it (an explicit empty string means no extra arguments).
+ */
+export const DEFAULT_CLAUDE_ARGS = "--dangerously-skip-permissions";
 
 /**
  * A filter dimension a source can constrain on. `cycle` is a boolean toggle (no option list); the

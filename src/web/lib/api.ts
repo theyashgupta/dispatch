@@ -741,6 +741,44 @@ export async function saveCleanupDelay(
 }
 
 /**
+ * Read the persisted `claude` launch arguments: GET /api/config/claude-args. Fired once on the
+ * Settings Models tab's mount to seed the draft. Throws on any non-2xx, mirroring
+ * `getCleanupDelay`.
+ */
+export async function getClaudeArgs(): Promise<{ claudeArgs: string }> {
+  const res = await fetch("/api/config/claude-args");
+  if (!res.ok) {
+    throw new Error(`getClaudeArgs failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as { claudeArgs: string };
+}
+
+/**
+ * Persist the `claude` launch arguments: PUT /api/config/claude-args. Mirrors
+ * `saveCleanupDelay`'s 200/400/throw discrimination exactly.
+ */
+export async function saveClaudeArgs(
+  claudeArgs: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await fetch("/api/config/claude-args", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ claudeArgs }),
+  });
+  if (res.ok) {
+    return { ok: true };
+  }
+  if (res.status === 400) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return {
+      ok: false,
+      error: body.error ?? "Couldn't save Claude arguments.",
+    };
+  }
+  throw new Error(`saveClaudeArgs failed: ${res.status} ${res.statusText}`);
+}
+
+/**
  * Read first-run status: GET /api/setup. Fired once on app mount to gate the setup screen vs the
  * board. Returns `needsKey` plus the live prerequisite checklist; the Linear key never crosses this
  * boundary. Throws on any non-2xx so the caller can fail-open to the board rather than trapping a

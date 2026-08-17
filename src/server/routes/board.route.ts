@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import {
+  DEFAULT_CLAUDE_ARGS,
   DEFAULT_CLEANUP_DELAY_DAYS,
   DEFAULT_FILTERS,
   type SourceFilters,
@@ -13,6 +14,7 @@ import {
 import { store } from "../store/board.store.js";
 import {
   getOrchestrationConfig,
+  updateClaudeArgs,
   updateCleanupDelayDays,
   updateSourceFilters,
 } from "../services/infra/config-holder.js";
@@ -283,4 +285,28 @@ boardRouter.put("/config/cleanup-delay", (req, res) => {
   updateCleanupDelayDays(days);
   store.setCleanupDelayDays(days);
   res.status(200).json({ cleanupDelayDays: days });
+});
+
+/** Same body-shape guard as {@link isValidCleanupDelayDays}, but for the free-text argv string (Settings ▸ Models). Bounded length only — any string tokenizes into a valid argv (`parseClaudeArgs`), including empty. */
+const CLAUDE_ARGS_MAX = 4000;
+function isValidClaudeArgs(x: unknown): x is string {
+  return typeof x === "string" && x.length <= CLAUDE_ARGS_MAX;
+}
+
+boardRouter.get("/config/claude-args", (_req, res) => {
+  res.status(200).json({
+    claudeArgs: getOrchestrationConfig()?.claudeArgs ?? DEFAULT_CLAUDE_ARGS,
+  });
+});
+
+boardRouter.put("/config/claude-args", (req, res) => {
+  const args = (req.body as { claudeArgs?: unknown } | undefined)?.claudeArgs;
+  if (!isValidClaudeArgs(args)) {
+    res.status(400).json({
+      error: `claude arguments must be a string of ${CLAUDE_ARGS_MAX} characters or fewer`,
+    });
+    return;
+  }
+  updateClaudeArgs(args);
+  res.status(200).json({ claudeArgs: args });
 });

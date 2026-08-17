@@ -2,7 +2,12 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { Card, Config, StartError } from "../../../shared/types.js";
+import {
+  DEFAULT_CLAUDE_ARGS,
+  type Card,
+  type Config,
+  type StartError,
+} from "../../../shared/types.js";
 import { sleep } from "../../adapters/exec.js";
 import {
   branchExists,
@@ -27,7 +32,11 @@ import { preSeedTrust } from "../../adapters/claude-trust.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { store } from "../../store/board.store.js";
 import { buildKickoff } from "../domain/kickoff.js";
-import { getHooksRuntime } from "../infra/config-holder.js";
+import { parseClaudeArgs } from "../domain/claude-args.js";
+import {
+  getHooksRuntime,
+  getOrchestrationConfig,
+} from "../infra/config-holder.js";
 import { mintHookToken } from "../domain/hook-tokens.js";
 import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
 import { worktreePath as buildWorktreePath } from "../domain/workspace-paths.js";
@@ -49,10 +58,12 @@ const BYPASS_DIALOG = /Bypass Permissions mode/;
  * REPL-ready footer — present only once the input box is live; absent in the trust dialog.
  * Claude Code changes this hint text between releases (v2.1.200 showed "? for shortcuts";
  * v2.1.201 shows "bypass permissions on (shift+tab to cycle)"), so match ANY known
- * ready-footer signature rather than one version's exact wording. Because sessions launch
- * with --dangerously-skip-permissions, the "bypass permissions on" footer is reliably present.
- * All signatures are footer chrome that the trust dialog never renders, preserving the
- * "not matched until past the trust prompt" property.
+ * ready-footer signature rather than one version's exact wording. Sessions launch with
+ * `config.claudeArgs` (Settings ▸ Models, default `--dangerously-skip-permissions`), so the
+ * "bypass permissions on" footer is reliably present only under the default; matching all three
+ * signatures keeps readiness detection working whether or not the flag is present. All signatures
+ * are footer chrome that the trust dialog never renders, preserving the "not matched until past
+ * the trust prompt" property.
  */
 const READY = /\? for shortcuts|bypass permissions on|shift\+tab to cycle/;
 
@@ -318,6 +329,9 @@ const startClaude: SagaStep = {
     await store.resetClaudeSessionId(ctx.card.id);
 
     const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
+    const claudeArgs = parseClaudeArgs(
+      getOrchestrationConfig()?.claudeArgs ?? DEFAULT_CLAUDE_ARGS,
+    );
     const runtime = getHooksRuntime();
     if (runtime?.capable && runtime.statusChannel !== "pane") {
       const previousToken = store.getCard(ctx.card.id)?.hookToken;
@@ -326,12 +340,7 @@ const startClaude: SagaStep = {
       await newSession(
         session,
         ctx.workspacePath,
-        [
-          claudePath,
-          "--settings",
-          HOOK_SETTINGS_PATH,
-          "--dangerously-skip-permissions",
-        ],
+        [claudePath, "--settings", HOOK_SETTINGS_PATH, ...claudeArgs],
         {
           DISPATCH_HOOK_PORT: String(runtime.port),
           DISPATCH_HOOK_TOKEN: token,
@@ -340,10 +349,7 @@ const startClaude: SagaStep = {
       );
     } else {
       await store.clearHookChannel(ctx.card.id);
-      await newSession(session, ctx.workspacePath, [
-        claudePath,
-        "--dangerously-skip-permissions",
-      ]);
+      await newSession(session, ctx.workspacePath, [claudePath, ...claudeArgs]);
     }
     ctx.tmuxSessionCreated = true;
 

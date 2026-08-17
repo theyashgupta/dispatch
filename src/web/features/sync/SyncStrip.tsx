@@ -121,8 +121,8 @@ interface SyncStripProps {
   inboxCount?: number;
   inboxOpen?: boolean;
   onOpenCreateTicket: () => void;
-  viewMode?: "board" | "orca";
-  onSelectViewMode?: (mode: "board" | "orca") => void;
+  viewMode?: "board" | "workspace";
+  onSelectViewMode?: (mode: "board" | "workspace") => void;
 }
 
 function formatSynced(syncedTs: number, now: number): string {
@@ -235,14 +235,17 @@ export function SyncStrip({
           <Kanban size={16} />
         </IconButton>
         <IconButton
-          aria-label="Orca view"
-          title="Orca view"
-          aria-pressed={viewMode === "orca"}
-          onClick={() => onSelectViewMode?.("orca")}
+          aria-label="Workspace view"
+          title="Workspace view"
+          aria-pressed={viewMode === "workspace"}
+          onClick={() => onSelectViewMode?.("workspace")}
           style={{
             ...viewSegmentStyle,
-            color: viewMode === "orca" ? "var(--accent)" : "var(--text-muted)",
-            ...(viewMode === "orca" ? { background: activeSegmentTint } : {}),
+            color:
+              viewMode === "workspace" ? "var(--accent)" : "var(--text-muted)",
+            ...(viewMode === "workspace"
+              ? { background: activeSegmentTint }
+              : {}),
           }}
         >
           <PanelLeft size={16} />
