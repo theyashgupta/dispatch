@@ -45,7 +45,15 @@
  * Usage:
  *   node scripts/session-liveness-v3.mjs --check safety            the fixture-standup/teardown proof
  *   node scripts/session-liveness-v3.mjs --check hook-attribution  the per-session hook POST proof
- *   node scripts/session-liveness-v3.mjs --check all               every check, one fixture each
+ *   node scripts/session-liveness-v3.mjs --check liveness          WATCH-01/C2: kill one of two real
+ *                                                                   tmux sessions, wait out the real
+ *                                                                   3-strike detector, both directions
+ *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
+ *
+ * `liveness` runs MORE THAN ONE fixture cycle within a single invocation — a rebuilt fixture per
+ * kill direction — because each direction needs to start from BOTH sessions live, independent of
+ * the other direction's own mutation. {@link withFixture} is the shared per-cycle lifecycle every
+ * check (old and new) now goes through.
  *
  * Exit codes: 0 all checks PASS. 1 a safety-envelope refusal, a setup/build error, a check
  * violation, a teardown-verification failure, or the live board.db changing.
@@ -108,6 +116,20 @@ const READY_TIMEOUT_MS = 30_000;
 const KILL_TIMEOUT_MS = 5_000;
 const PORT_PARSE_TIMEOUT_MS = 10_000;
 const LISTEN_POLL_TIMEOUT_MS = 10_000;
+
+/**
+ * The liveness sub-check's own poll budget (WATCH-01/C2): the 3-strike detector is
+ * `captureFailures >= 3` (`watcher.ts:146`) on a self-rescheduling 2000 ms tick
+ * (`watcher.ts:321`), so three consecutive failures trip roughly 4-6s after a real kill, with
+ * worst-case tick-boundary jitter adding up to one more full cycle — 20s is a generous ceiling,
+ * never a target. {@link LIVENESS_MIN_ELAPSED_MS} is the floor a genuine detector-driven
+ * transition cannot beat: a transition observed faster than 4s did not come from the real
+ * 2000 ms tick and 3-strike threshold, which this harness must NEVER shorten (the interval is
+ * itself part of what the criterion verifies).
+ */
+const LIVENESS_POLL_INTERVAL_MS = 500;
+const LIVENESS_POLL_TIMEOUT_MS = 20_000;
+const LIVENESS_MIN_ELAPSED_MS = 4_000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -643,6 +665,65 @@ async function tearDownFixture(built, violations) {
 }
 
 /**
+ * One complete fixture lifecycle: preflight, a fresh sandbox home under `label`, two real tmux
+ * sessions, two real ttyd, `fn(built)`, then unconditional-and-verified teardown — regardless of
+ * what `fn` returns or throws. Every check in {@link CHECKS} is built on this: `safety` and
+ * `hook-attribution` call it exactly once; the `liveness` sub-check (Task 1) calls it more than
+ * once within a single `--check` invocation, because each kill direction needs a fixture that
+ * starts from BOTH sessions live, independent of the other direction's own mutation.
+ * {@link assertPreflightClean} is re-run at the top of every call, not once per `--check`
+ * invocation, so a fixture rebuilt mid-check still refuses to layer onto a leak the prior cycle's
+ * own teardown left behind.
+ */
+async function withFixture(label, fn) {
+  const violations = [];
+  const home = makeSandboxHome(label);
+  const built = {
+    home,
+    cardId: FIXTURE_CARD_ID,
+    tmux: {},
+    ttyd: {},
+    server: null,
+    sessionA: null,
+    sessionB: null,
+    dbPath: join(home, DISPATCH_DIR_NAME, "board.db"),
+  };
+  try {
+    await assertPreflightClean();
+    assertBuilt();
+    await standUpFixture(built);
+    violations.push(...(await fn(built)));
+  } catch (err) {
+    violations.push(
+      `run failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+    );
+  } finally {
+    await tearDownFixture(built, violations);
+  }
+  return violations;
+}
+
+/**
+ * Resolve the fixture card exactly as `GET /api/board` — the wire the UI itself consumes —
+ * reports it: `redactCard`'s shape, never the store's own in-memory `Card`. A non-active
+ * sibling's own fields are therefore NEVER visible here (`redactCard` strips `sessions` and
+ * projects only `activeSession`); the `liveness` sub-check's non-active kill direction reads the
+ * persisted record directly for that reason. Tolerant of a transient fetch failure (a dropped
+ * connection mid-poll) — resolves `undefined` rather than throwing, so a long poll loop degrades
+ * to "not yet observed" instead of crashing the check.
+ */
+async function fetchFixtureCard(cardId) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${SANDBOX_PORT}/api/board`);
+    const body = await res.json();
+    const cards = Array.isArray(body?.cards) ? body.cards : [];
+    return cards.find((c) => c.id === cardId);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * The scaffolding's own falsifiable subject (Task 1): both real tmux sessions appear in
  * `tmux list-sessions`, both real ttyd ports are confirmed LISTENING via `lsof`. No hook traffic,
  * no persisted-state assertions — those belong to the `hook-attribution` check.
@@ -857,50 +938,224 @@ async function checkHookAttribution(built) {
   return violations;
 }
 
+/**
+ * One kill direction of the real-detector liveness proof (WATCH-01/C2, Task 1). Kills exactly
+ * ONE real tmux session by name and polls — this file never calls the store's own per-session
+ * lost-clearing method directly and never imports the store, so the ONLY thing that can ever
+ * clear a session's fields here is the real 3-strike capture-failure detector on its real
+ * self-rescheduling tick. Samples the wire's `sessionLost` on EVERY poll — not only the terminal
+ * read — so a transient `true` is a violation even when the final read looks clean.
+ * @remarks `kind === "active"` kills the card's ACTIVE session (A) and polls the WIRE for the
+ * promotion (`activeSession.tmuxSession` becoming B's) — the wire is enough because the
+ * promoted-to session is, by definition, the new active one. `kind === "sibling"` kills the
+ * NON-active session (B) and polls the PERSISTED record directly instead, because the wire's
+ * `redactCard` projection never exposes a non-active session's own fields — the active pointer
+ * never moves in this direction, so there is no wire signal to poll for a clear.
+ * @remarks On a timeout (the detector never fired within the poll budget), this still falls
+ * through to the final persisted-state assertions below rather than returning early — a
+ * regression that clears the WRONG session's fields (Task 3's Break A) needs those assertions to
+ * run so the report names which session's fields actually disappeared, not just "timed out".
+ */
+async function checkLivenessDirection(kind) {
+  return withFixture(`liveness-${kind}`, async (built) => {
+    const violations = [];
+    const dying = kind === "active" ? built.sessionA : built.sessionB;
+    const surviving = kind === "active" ? built.sessionB : built.sessionA;
+    const dyingTmux = kind === "active" ? built.tmux.a : built.tmux.b;
+    const survivingTmux = kind === "active" ? built.tmux.b : built.tmux.a;
+
+    const start = Date.now();
+    await tmuxKillSession(dyingTmux);
+    console.log(
+      `liveness (${kind}): killed real tmux session ${dyingTmux} (session ${dying.id}) — waiting for the real 3-strike detector`,
+    );
+
+    let sawSessionLostTrue = false;
+    let lastWireCard;
+    let transitioned = false;
+    const deadline = Date.now() + LIVENESS_POLL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      lastWireCard = await fetchFixtureCard(built.cardId);
+      if (lastWireCard?.sessionLost === true) sawSessionLostTrue = true;
+      if (kind === "active") {
+        transitioned =
+          lastWireCard?.activeSession?.tmuxSession === survivingTmux;
+      } else {
+        let persisted;
+        try {
+          persisted = readCard(built.dbPath, built.cardId);
+        } catch {
+          persisted = undefined;
+        }
+        const target = persisted?.sessions?.find((s) => s.id === dying.id);
+        transitioned = target != null && target.tmuxSession == null;
+      }
+      if (transitioned) break;
+      await sleep(LIVENESS_POLL_INTERVAL_MS);
+    }
+    const elapsedMs = Date.now() - start;
+    console.log(
+      `liveness (${kind}): transitioned=${transitioned} elapsedMs=${elapsedMs}`,
+    );
+
+    if (!transitioned) {
+      violations.push(
+        `liveness (${kind}): the real 3-strike detector did not clear session ${dying.id} within ${LIVENESS_POLL_TIMEOUT_MS}ms`,
+      );
+    } else if (elapsedMs < LIVENESS_MIN_ELAPSED_MS) {
+      violations.push(
+        `liveness (${kind}): transition observed after only ${elapsedMs}ms — faster than the real 2000ms tick / 3-strike detector could ` +
+          `produce (floor ${LIVENESS_MIN_ELAPSED_MS}ms); this did not come from the real detector`,
+      );
+    }
+    if (sawSessionLostTrue) {
+      violations.push(
+        `liveness (${kind}): wire sessionLost was observed true at least once while a live sibling still answered — ` +
+          `a card must never render "Session lost" while a sibling is live`,
+      );
+    }
+
+    if (kind === "active") {
+      if (lastWireCard?.sessionCount !== 2) {
+        violations.push(
+          `liveness (${kind}): wire sessionCount expected 2, actual ${lastWireCard?.sessionCount}`,
+        );
+      }
+      if (lastWireCard?.activeSession?.ttydPort !== built.ttyd.b.port) {
+        violations.push(
+          `liveness (${kind}): wire activeSession.ttydPort expected ${built.ttyd.b.port} (survivor's port), actual ${lastWireCard?.activeSession?.ttydPort}`,
+        );
+      }
+    } else {
+      if (lastWireCard?.activeSession?.id !== surviving.id) {
+        violations.push(
+          `liveness (${kind}): wire activeSession.id expected the untouched active session ${surviving.id}, actual ${lastWireCard?.activeSession?.id}`,
+        );
+      }
+      if (lastWireCard?.activeSession?.tmuxSession !== survivingTmux) {
+        violations.push(
+          `liveness (${kind}): wire activeSession.tmuxSession expected the untouched ${survivingTmux}, actual ${lastWireCard?.activeSession?.tmuxSession}`,
+        );
+      }
+    }
+
+    await killAndWait(built.server?.child);
+    const persisted = readCard(built.dbPath, built.cardId);
+    if (!persisted) {
+      violations.push(
+        `liveness (${kind}): card ${built.cardId} missing from persisted board.db after kill`,
+      );
+      return violations;
+    }
+    const dyingRecord = persisted.sessions?.find((s) => s.id === dying.id);
+    const survivingRecord = persisted.sessions?.find(
+      (s) => s.id === surviving.id,
+    );
+    if (!dyingRecord) {
+      violations.push(
+        `liveness (${kind}): dying session ${dying.id} missing from persisted sessions[]`,
+      );
+    } else {
+      for (const field of ["tmuxSession", "ttydPort", "hookToken"]) {
+        if (dyingRecord[field] !== undefined) {
+          violations.push(
+            `liveness (${kind}): session ${dying.id} persisted ${field} expected absent, actual ${JSON.stringify(dyingRecord[field])}`,
+          );
+        } else {
+          console.log(
+            `liveness (${kind}): PASS session ${dying.id} persisted ${field} is absent`,
+          );
+        }
+      }
+    }
+    if (!survivingRecord) {
+      violations.push(
+        `liveness (${kind}): surviving session ${surviving.id} missing from persisted sessions[]`,
+      );
+    } else {
+      const expected =
+        kind === "active"
+          ? {
+              tmuxSession: built.tmux.b,
+              ttydPort: built.ttyd.b.port,
+              hookToken: built.sessionB.token,
+            }
+          : {
+              tmuxSession: built.tmux.a,
+              ttydPort: built.ttyd.a.port,
+              hookToken: built.sessionA.token,
+            };
+      for (const [field, expectedValue] of Object.entries(expected)) {
+        if (survivingRecord[field] !== expectedValue) {
+          violations.push(
+            `liveness (${kind}): session ${surviving.id} persisted ${field} expected ${JSON.stringify(expectedValue)}, actual ${JSON.stringify(survivingRecord[field])}`,
+          );
+        } else {
+          console.log(
+            `liveness (${kind}): PASS session ${surviving.id} persisted ${field} = ${JSON.stringify(expectedValue)}`,
+          );
+        }
+      }
+    }
+    if (persisted.activeSessionId !== surviving.id) {
+      violations.push(
+        `liveness (${kind}): persisted activeSessionId expected ${surviving.id}, actual ${persisted.activeSessionId}`,
+      );
+    } else {
+      console.log(
+        `liveness (${kind}): PASS persisted activeSessionId = ${persisted.activeSessionId}`,
+      );
+    }
+
+    return violations;
+  });
+}
+
+/**
+ * `--check liveness` (WATCH-01/C2, Task 1): both real kill directions, each its own rebuilt
+ * fixture. Neither this function nor any other in this file calls the store's own per-session
+ * lost-clearing method or imports the store — the only path that clears a session here is a real
+ * tmux kill plus the real 2000 ms-tick, 3-strike detector.
+ */
+async function checkLiveness() {
+  const violations = [];
+  violations.push(...(await checkLivenessDirection("active")));
+  violations.push(...(await checkLivenessDirection("sibling")));
+  return violations;
+}
+
 const CHECKS = {
-  safety: checkSafety,
-  "hook-attribution": checkHookAttribution,
+  safety: () => withFixture("safety", checkSafety),
+  "hook-attribution": () =>
+    withFixture("hook-attribution", checkHookAttribution),
+  liveness: checkLiveness,
 };
 
 /**
- * Run one named check end to end: safety envelope, one fresh fixture, the check's own assertions,
- * unconditional-and-verified teardown, the real board.db before/after comparison. Every step above
- * "run the check" throws rather than degrades; a thrown error inside the fixture/check phase is
- * folded into `violations` (not re-thrown) so teardown always still runs in the `finally`.
+ * Run one named check end to end: the WR-08 safety-envelope re-assert, the check's own fixture
+ * lifecycle(s) via {@link withFixture}, the real board.db before/after comparison. A thrown error
+ * anywhere inside a check is folded into `violations` by that check's own `withFixture` call, so
+ * this function's only remaining failure mode is an unknown check name.
  */
 async function runCheck(name) {
   await assertNoLiveService();
-
-  const home = makeSandboxHome("run");
-  const built = {
-    home,
-    cardId: FIXTURE_CARD_ID,
-    tmux: {},
-    ttyd: {},
-    server: null,
-    sessionA: null,
-    sessionB: null,
-    dbPath: join(home, DISPATCH_DIR_NAME, "board.db"),
-  };
+  assertBuilt();
 
   const realBefore = statRealBoardDb();
   console.log(`LIVE ${realBefore.path} BEFORE: ${fmtStat(realBefore)}`);
 
-  const violations = [];
-  try {
-    await assertPreflightClean();
-    assertBuilt();
-    await standUpFixture(built);
-
-    const checkFn = CHECKS[name];
-    if (!checkFn) throw new Error(`unknown check "${name}"`);
-    violations.push(...(await checkFn(built)));
-  } catch (err) {
-    violations.push(
-      `run failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
-    );
-  } finally {
-    await tearDownFixture(built, violations);
+  const checkFn = CHECKS[name];
+  let violations;
+  if (!checkFn) {
+    violations = [`unknown check "${name}"`];
+  } else {
+    try {
+      violations = await checkFn();
+    } catch (err) {
+      violations = [
+        `run failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+      ];
+    }
   }
 
   const realAfter = statRealBoardDb();
