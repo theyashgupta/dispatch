@@ -48,12 +48,16 @@
  *   node scripts/session-liveness-v3.mjs --check liveness          WATCH-01/C2: kill one of two real
  *                                                                   tmux sessions, wait out the real
  *                                                                   3-strike detector, both directions
+ *   node scripts/session-liveness-v3.mjs --check reconcile         RECON-01/C3: a live sibling's ttyd
+ *                                                                   survives a real backend restart on
+ *                                                                   its own port, held by the same PID
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
- * `liveness` runs MORE THAN ONE fixture cycle within a single invocation — a rebuilt fixture per
- * kill direction — because each direction needs to start from BOTH sessions live, independent of
- * the other direction's own mutation. {@link withFixture} is the shared per-cycle lifecycle every
- * check (old and new) now goes through.
+ * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
+ * rebuilt fixture per kill direction for `liveness`, a live-restart stage plus a fresh
+ * dead-session-before-restart stage for `reconcile` — because each needs to start from BOTH
+ * sessions live, independent of any prior direction/stage's own mutation. {@link withFixture} is
+ * the shared per-cycle lifecycle every check (old and new) now goes through.
  *
  * Exit codes: 0 all checks PASS. 1 a safety-envelope refusal, a setup/build error, a check
  * violation, a teardown-verification failure, or the live board.db changing.
@@ -668,12 +672,13 @@ async function tearDownFixture(built, violations) {
  * One complete fixture lifecycle: preflight, a fresh sandbox home under `label`, two real tmux
  * sessions, two real ttyd, `fn(built)`, then unconditional-and-verified teardown — regardless of
  * what `fn` returns or throws. Every check in {@link CHECKS} is built on this: `safety` and
- * `hook-attribution` call it exactly once; the `liveness` sub-check (Task 1) calls it more than
- * once within a single `--check` invocation, because each kill direction needs a fixture that
- * starts from BOTH sessions live, independent of the other direction's own mutation.
- * {@link assertPreflightClean} is re-run at the top of every call, not once per `--check`
- * invocation, so a fixture rebuilt mid-check still refuses to layer onto a leak the prior cycle's
- * own teardown left behind.
+ * `hook-attribution` call it exactly once; `liveness` (Task 1) and `reconcile` (Task 2) call it
+ * more than once within a single `--check` invocation, because each needs a fixture that starts
+ * from BOTH sessions live, independent of any prior direction/stage's own mutation — a rebuilt
+ * fixture per kill direction for `liveness`, a live-restart stage plus a fresh
+ * dead-session-before-restart stage for `reconcile`. {@link assertPreflightClean} is re-run at
+ * the top of every call, not once per `--check` invocation, so a fixture rebuilt mid-check still
+ * refuses to layer onto a leak the prior cycle's own teardown left behind.
  */
 async function withFixture(label, fn) {
   const violations = [];
@@ -721,6 +726,19 @@ async function fetchFixtureCard(cardId) {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Kill the sandbox server and boot it again against the SAME sandbox home — tmux and ttyd are
+ * left untouched by this call, so it is a backend-only restart. Reused by both `reconcile`
+ * stages (Task 2): a live restart (stage 1, both sessions still live) and a restart with one
+ * session already dead (stage 2). `bootServer` always re-captures fresh `logLines`, so a stage
+ * that greps the post-restart `[reconcile]` boot line never sees a pre-restart line by accident.
+ */
+async function restartServer(built) {
+  await killAndWait(built.server?.child);
+  built.server = bootServer(built.home);
+  await waitForReady(SANDBOX_PORT);
 }
 
 /**
@@ -1124,11 +1142,237 @@ async function checkLiveness() {
   return violations;
 }
 
+/**
+ * Reconcile stage 1 (RECON-01/C3, Task 2): both sessions live across a real backend restart.
+ * Records each ttyd port's listening PID with the repo's own `lsof -Fpn` port→PID technique
+ * BEFORE the restart, restarts the sandbox server on the SAME home, and asserts each port is
+ * still LISTENING held by the IDENTICAL PID — a different PID means a respawn, never the
+ * adoption this criterion is about. Then proves the per-session token re-registration by
+ * ATTRIBUTION, not by counting log lines: POST through each session's own token after the
+ * restart and confirm, via a persisted readOnly re-read, that each POST's marker landed on its
+ * own session's record.
+ */
+async function checkReconcileStage1(built) {
+  const violations = [];
+  const pidBeforeA = (await pidsListeningOnPort(built.ttyd.a.port))[0];
+  const pidBeforeB = (await pidsListeningOnPort(built.ttyd.b.port))[0];
+  console.log(
+    `reconcile stage1: before restart — port ${built.ttyd.a.port} (A) pid=${pidBeforeA}, port ${built.ttyd.b.port} (B) pid=${pidBeforeB}`,
+  );
+  if (pidBeforeA == null || pidBeforeB == null) {
+    violations.push(
+      `reconcile stage1: could not resolve a pre-restart lsof PID for both ttyd ports`,
+    );
+    return violations;
+  }
+
+  await restartServer(built);
+
+  const pidAfterA = (await pidsListeningOnPort(built.ttyd.a.port))[0];
+  const pidAfterB = (await pidsListeningOnPort(built.ttyd.b.port))[0];
+  console.log(
+    `reconcile stage1: after restart — port ${built.ttyd.a.port} (A) pid=${pidAfterA}, port ${built.ttyd.b.port} (B) pid=${pidAfterB}`,
+  );
+  if (pidAfterA !== pidBeforeA) {
+    violations.push(
+      `reconcile stage1: session A's port ${built.ttyd.a.port} lsof PID changed across restart — before=${pidBeforeA} after=${pidAfterA} (a respawn, not an adoption)`,
+    );
+  }
+  if (pidAfterB !== pidBeforeB) {
+    violations.push(
+      `reconcile stage1: session B's port ${built.ttyd.b.port} lsof PID changed across restart — before=${pidBeforeB} after=${pidAfterB} (a respawn, not an adoption)`,
+    );
+  }
+
+  const reconcileLines = (built.server?.logLines ?? []).filter((l) =>
+    l.includes("[reconcile]"),
+  );
+  for (const line of reconcileLines)
+    console.log(`reconcile stage1: server log: ${line}`);
+  const adoptedMatch = reconcileLines
+    .map((l) => l.match(/ttyd adopted: (\d+)/))
+    .find((m) => m);
+  const adoptedCount = adoptedMatch ? Number(adoptedMatch[1]) : undefined;
+  if (adoptedCount !== 2) {
+    violations.push(
+      `reconcile stage1: [reconcile] boot line reported ttyd adopted=${adoptedCount}, expected 2`,
+    );
+  }
+
+  const reasonA = "reconcile-stage1-reason-A";
+  const reasonB = "reconcile-stage1-reason-B";
+  const statusA = await postHook(
+    built.sessionA.token,
+    stopBodyWithReason(reasonA),
+  );
+  const statusB = await postHook(
+    built.sessionB.token,
+    stopBodyWithReason(reasonB),
+  );
+  console.log(
+    `reconcile stage1: POST session ${built.sessionA.id} (token A) -> ${statusA}; POST session ${built.sessionB.id} (token B) -> ${statusB}`,
+  );
+  if (statusA !== 204) {
+    violations.push(
+      `reconcile stage1: session ${built.sessionA.id}'s own token POSTed ${statusA}, expected 204`,
+    );
+  }
+  if (statusB !== 204) {
+    violations.push(
+      `reconcile stage1: session ${built.sessionB.id}'s own token POSTed ${statusB}, expected 204`,
+    );
+  }
+
+  await killAndWait(built.server?.child);
+  const persisted = readCard(built.dbPath, built.cardId);
+  const expectedReasonBySessionId = new Map([
+    [built.sessionA.id, reasonA],
+    [built.sessionB.id, reasonB],
+  ]);
+  for (const [sessionId, reason] of expectedReasonBySessionId) {
+    const expectedMarkerKey = `NEEDS_INPUT ${reason}`;
+    const record = persisted?.sessions?.find((s) => s.id === sessionId);
+    if (!record) {
+      violations.push(
+        `reconcile stage1: session ${sessionId} missing from persisted sessions[] after restart`,
+      );
+      continue;
+    }
+    if (record.lastMarker !== expectedMarkerKey) {
+      violations.push(
+        `reconcile stage1: session ${sessionId} persisted lastMarker expected "${expectedMarkerKey}", actual "${record.lastMarker}"`,
+      );
+    } else {
+      console.log(
+        `reconcile stage1: PASS session ${sessionId} lastMarker = "${record.lastMarker}"`,
+      );
+    }
+  }
+
+  return violations;
+}
+
+/**
+ * Reconcile stage 2 (RECON-01/C3, Task 2): one session already dead BEFORE a backend restart —
+ * boot reconcile is the subject here, never the 3-strike detector (`bootstrap/index.ts` awaits
+ * the sweep to completion before it ever starts listening, so there is no watcher wait to budget:
+ * the assertions below run on the FIRST post-restart read). Kills tmux session A and its real
+ * ttyd child directly — a truly dead session, not merely a dead pane — restarts the sandbox
+ * server, and asserts B's port survives on the same PID, A's record is cleared, the wire's
+ * `sessionLost` is falsy, `activeSessionId` still names a live session, and `sessionCount` stays
+ * 2 (a lost session's record is cleared in place, never removed).
+ */
+async function checkReconcileStage2(built) {
+  const violations = [];
+  const pidBeforeB = (await pidsListeningOnPort(built.ttyd.b.port))[0];
+  console.log(
+    `reconcile stage2: before restart — port ${built.ttyd.b.port} (B) pid=${pidBeforeB}`,
+  );
+
+  await tmuxKillSession(built.tmux.a);
+  try {
+    built.ttyd.a.child.kill("SIGTERM");
+  } catch {
+    // already gone
+  }
+  await sleep(300);
+  if (await isPortListening(built.ttyd.a.port)) {
+    for (const pid of await pidsListeningOnPort(built.ttyd.a.port)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // already gone
+      }
+    }
+  }
+  console.log(
+    `reconcile stage2: killed real tmux session ${built.tmux.a} and its ttyd (session ${built.sessionA.id})`,
+  );
+
+  await restartServer(built);
+
+  const pidAfterB = (await pidsListeningOnPort(built.ttyd.b.port))[0];
+  console.log(
+    `reconcile stage2: after restart — port ${built.ttyd.b.port} (B) pid=${pidAfterB}`,
+  );
+  if (pidBeforeB == null) {
+    violations.push(
+      `reconcile stage2: could not resolve a pre-restart lsof PID for B's port`,
+    );
+  } else if (pidAfterB !== pidBeforeB) {
+    violations.push(
+      `reconcile stage2: session B's port ${built.ttyd.b.port} lsof PID changed across restart — before=${pidBeforeB} after=${pidAfterB}`,
+    );
+  }
+
+  const card = await fetchFixtureCard(built.cardId);
+  console.log(
+    `reconcile stage2: wire sessionLost=${card?.sessionLost}, sessionCount=${card?.sessionCount}, activeSession.id=${card?.activeSession?.id}`,
+  );
+  if (card?.sessionLost === true) {
+    violations.push(
+      `reconcile stage2: wire sessionLost is true — a live sibling must keep the card off "Session lost"`,
+    );
+  }
+  if (card?.sessionCount !== 2) {
+    violations.push(
+      `reconcile stage2: wire sessionCount expected 2, actual ${card?.sessionCount}`,
+    );
+  }
+  if (card?.activeSession?.id !== built.sessionB.id) {
+    violations.push(
+      `reconcile stage2: wire activeSession.id expected the live session ${built.sessionB.id}, actual ${card?.activeSession?.id}`,
+    );
+  }
+
+  await killAndWait(built.server?.child);
+  const persisted = readCard(built.dbPath, built.cardId);
+  const deadRecord = persisted?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  if (!deadRecord) {
+    violations.push(
+      `reconcile stage2: dead session ${built.sessionA.id} missing from persisted sessions[]`,
+    );
+  } else {
+    for (const field of ["tmuxSession", "ttydPort", "hookToken"]) {
+      if (deadRecord[field] !== undefined) {
+        violations.push(
+          `reconcile stage2: dead session ${built.sessionA.id} persisted ${field} expected absent, actual ${JSON.stringify(deadRecord[field])}`,
+        );
+      }
+    }
+  }
+  if (persisted?.activeSessionId !== built.sessionB.id) {
+    violations.push(
+      `reconcile stage2: persisted activeSessionId expected ${built.sessionB.id}, actual ${persisted?.activeSessionId}`,
+    );
+  }
+
+  return violations;
+}
+
+/**
+ * `--check reconcile` (RECON-01/C3, Task 2): stage 1 (both sessions live across a restart) and
+ * stage 2 (one already dead before the restart), each its own fresh fixture.
+ */
+async function checkReconcile() {
+  const violations = [];
+  violations.push(
+    ...(await withFixture("reconcile-stage1", checkReconcileStage1)),
+  );
+  violations.push(
+    ...(await withFixture("reconcile-stage2", checkReconcileStage2)),
+  );
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
     withFixture("hook-attribution", checkHookAttribution),
   liveness: checkLiveness,
+  reconcile: checkReconcile,
 };
 
 /**
