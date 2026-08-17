@@ -322,6 +322,13 @@ class BoardStore extends EventEmitter {
    */
   private readonly inFlightCleanups = new Set<string>();
   /**
+   * Card ids already reported by {@link sessionsWithTmux} as holding flat session state that
+   * resolves to no session record (`WR-05`). Transient and in-memory like the three sets above:
+   * it exists purely so a corrupt card is logged ONCE rather than on every 2s watcher tick, and a
+   * restart deliberately re-reports so the operator sees it again.
+   */
+  private readonly warnedOrphanFlatSessions = new Set<string>();
+  /**
    * Bootstrap-injected releaser for cleared hook tokens. The boundaries DAG forbids
    * store → services, so bootstrap wires services/domain/hook-tokens.ts' unregister function in here
    * (composed with hook-events' activity-throttle reaper, which is why the card id rides along);
@@ -1818,13 +1825,66 @@ class BoardStore extends EventEmitter {
    * scan and adopt every live sibling a card owns, not only its active one. Mirrors
    * `cardsWithSession()`'s own contract: returns live Map entries — callers must NOT mutate them;
    * all mutations flow through the enqueue-wrapped methods.
+   * @remarks (`WR-05`) This must be a per-session SUPERSET of `cardsWithSession()`, and iterating
+   * `card.sessions` alone is not: the two agree only while the flat mirror is a faithful
+   * projection, and `setActiveSession`'s own refuse-to-project branch exists precisely because the
+   * codebase accepts that a card can hold flat session state with no resolvable record (a hand
+   * edit, or a producer that normalises `sessions` to an empty array, which
+   * `migrateCardsToSessionEntity` skips since it only tests `sessions != null`). Such a card used
+   * to be scanned every tick, fail capture three times, and be repaired into `sessionLost` —
+   * making it Restartable in the UI. Dropping it here would instead leave it never scanned, never
+   * marked lost, never reaped, rendering a permanent "Live" chip and holding its worktree
+   * indefinitely. So it is yielded as a SYNTHETIC pair built from the flat mirror — exactly the
+   * card-scoped shape the pre-Phase-91 iteration source fed the watcher — and logged once, because
+   * a corrupt card falling silently out of every loop is the one outcome that leaves it frozen.
+   * @remarks The synthetic record's `id` is the card's unresolvable `activeSessionId` (or the
+   * empty string when even that is unset), which is what makes the repair land where it should:
+   * `markSessionLost` cannot resolve it either, so it degrades to its documented undefined-target
+   * default and derives the card-level loss flag — the pre-Phase-91 behaviour — rather than
+   * clearing some unrelated sibling's fields.
+   * @returns Pairs whose `session.tmuxSession` is carried in the TYPE, so consumers narrow without
+   * a runtime guard the iteration source has already made unreachable (`IN-01`).
    */
-  sessionsWithTmux(): { card: Card; session: Session }[] {
-    const out: { card: Card; session: Session }[] = [];
+  sessionsWithTmux(): {
+    card: Card;
+    session: Session & { tmuxSession: string };
+  }[] {
+    const out: { card: Card; session: Session & { tmuxSession: string } }[] =
+      [];
     for (const card of this.cards.values()) {
+      let yielded = false;
       for (const session of card.sessions ?? []) {
-        if (session.tmuxSession != null) out.push({ card, session });
+        if (session.tmuxSession != null) {
+          out.push({
+            card,
+            session: session as Session & { tmuxSession: string },
+          });
+          yielded = true;
+        }
       }
+      if (yielded || card.tmuxSession == null) continue;
+      if (!this.warnedOrphanFlatSessions.has(card.id)) {
+        this.warnedOrphanFlatSessions.add(card.id);
+        console.error(
+          `[store] card ${card.id} — flat tmuxSession is set but no session record carries it; scanning the flat mirror so the dead-session repair path still runs`,
+        );
+      }
+      out.push({
+        card,
+        session: {
+          id: card.activeSessionId ?? "",
+          createdAt: card.updatedAt,
+          updatedAt: card.updatedAt,
+          tmuxSession: card.tmuxSession,
+          ttydPort: card.ttydPort,
+          hookToken: card.hookToken,
+          claudeSessionId: card.claudeSessionId,
+          workspacePath: card.workspacePath,
+          workspace: card.workspace,
+          lastMarker: card.lastMarker,
+          hookRoutedAt: card.hookRoutedAt,
+        },
+      });
     }
     return out;
   }

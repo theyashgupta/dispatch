@@ -16,7 +16,9 @@ import { registerHookToken } from "../services/domain/hook-tokens.js";
  * @remarks IN-01 compares each session's own PERSISTED `tmuxSession`, with no derived-name
  * fallback (Phase 91 removed the `"dsp-" + card.identifier` guess — it was provably unreachable
  * once the iteration source already filters on a non-null `tmuxSession`, and keeping it would let
- * two sibling sessions collide on one derived name at N greater than 1); IN-02 empty-map baseline
+ * two sibling sessions collide on one derived name at N greater than 1) and no null-guard either:
+ * `sessionsWithTmux()` now carries the non-null `tmuxSession` in its RETURN TYPE, so the
+ * narrowing costs no dead runtime branch — the same justification that removed the fallback; IN-02 empty-map baseline
  * recovery (a dead server degrades to an empty live Set, never a crash); IN-03 skips To Do and
  * Done ONLY for session-lost marking/Restart-promotion — a card with a live session in either
  * column still falls through to hookToken re-registration and ttyd candidacy below, which a
@@ -47,7 +49,6 @@ export async function reconcileSessions(): Promise<void> {
   }[] = [];
   for (const { card, session } of store.sessionsWithTmux()) {
     const sessionName = session.tmuxSession;
-    if (sessionName == null) continue;
     if (!live.has(sessionName)) {
       if (card.column !== "todo" && card.column !== "done") {
         await store.markSessionLost(card.id, session.id);
