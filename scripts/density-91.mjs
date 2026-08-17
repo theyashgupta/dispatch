@@ -638,11 +638,7 @@ function assertChipReadings(readings) {
  * {@link waitForFixtureRendered}'s own polling shape.
  */
 async function switchToOrcaView(cdp, sessionId) {
-  await evalValue(
-    cdp,
-    sessionId,
-    `localStorage.setItem("dsp.view", "orca")`,
-  );
+  await evalValue(cdp, sessionId, `localStorage.setItem("dsp.view", "orca")`);
   await cdp.send("Page.reload", { ignoreCache: true }, sessionId);
   const deadline = Date.now() + RENDER_TIMEOUT_MS;
   const probe = `
@@ -825,8 +821,16 @@ async function main() {
       for (const v of chipViolations) console.log(`CHIP MISMATCH ${v}`);
 
       await switchToOrcaView(cdp, sessionId);
-      const soloOrcaCount = await countOrcaRows(cdp, sessionId, SOLO_IDENTIFIER);
-      const pairOrcaCount = await countOrcaRows(cdp, sessionId, PAIR_IDENTIFIER);
+      const soloOrcaCount = await countOrcaRows(
+        cdp,
+        sessionId,
+        SOLO_IDENTIFIER,
+      );
+      const pairOrcaCount = await countOrcaRows(
+        cdp,
+        sessionId,
+        PAIR_IDENTIFIER,
+      );
       console.log(
         `orca row count — ${SOLO_IDENTIFIER}: ${soloOrcaCount}, ${PAIR_IDENTIFIER}: ${pairOrcaCount}`,
       );
