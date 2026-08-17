@@ -25,6 +25,10 @@
  * machine-wide ttyd sweep `assertNoLiveService` exists to prevent. This harness only ever boots
  * the production build (`dist/server/bootstrap/index.js`); the Vite dev-server proxy hardcodes its
  * `/api/`/`/sessions/` targets to the user's real, live dispatch port and must never be used here.
+ * It BUILDS that bundle first ({@link assertBuilt}) so what it measures is always a property of the
+ * current `src/` — this instrument reads DOM served out of `dist/web`, so a leftover bundle renders
+ * a UI predating the change under test and makes "zero delta versus BEFORE" a statement about
+ * nothing.
  * The real board.db's mtime and size are recorded before and after this script runs; a mismatch is
  * a loud non-zero-exit failure, never a warning.
  *
@@ -47,11 +51,11 @@
  *                                                     the Orca nav — combine with --compare/--json
  *
  * Exit codes: 0 all checks PASS (or plain/--json mode with no comparison requested). 1 a live
- * :4700 (WR-08), a missing production build, a sandbox-safety violation, a card the evaluate could
+ * :4700 (WR-08), a failed build, a sandbox-safety violation, a card the evaluate could
  * not find or that collided with its sibling, a --compare MISMATCH, a --chip assertion failure, the
  * real board.db changing during the run, or a sandbox port still held after teardown.
  */
-import { spawn, execFile } from "node:child_process";
+import { spawn, execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import {
   existsSync,
@@ -71,6 +75,16 @@ const execFileP = promisify(execFile);
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST_ENTRY = join(REPO_ROOT, "dist", "server", "bootstrap", "index.js");
+
+/**
+ * The package script {@link assertBuilt} shells out to. This instrument measures RENDERED DOM
+ * geometry, which the booted server serves out of `dist/web` — so unlike the server-only harnesses
+ * in this family it must run the FULL `build` (web + server), never `build:server` alone. A
+ * `build:server` here would recompile the half this instrument never reads and leave the bundle
+ * that actually paints the chip untouched, which is the precise shape of the staleness bug this
+ * guard exists to remove.
+ */
+const BUILD_SCRIPT = "build";
 
 const SANDBOX_PORT = 47861;
 const CDP_PORT = 9366;
@@ -220,14 +234,70 @@ function killAndWait(child) {
 }
 
 /**
- * Boot the harness's own server against `home`. Only ever spawns the production build — refuses
- * with a `npm run build` pointer if it is missing, per the file header's safety-envelope order.
+ * Memoized result of the one project build per process — see {@link assertBuilt}. `null` until the
+ * first call; every later call reuses it, so the warmup boot and the measured boot together cost
+ * exactly one `npm run build` between them.
+ */
+let projectBuild = null;
+
+/**
+ * Build the web bundle and the server this instrument is about to boot, then confirm the entry
+ * point exists.
+ *
+ * This REPLACES an existence-only precondition that was actively misleading. The instrument reads
+ * the DOM the booted server paints out of `dist/web`, never `src/`, so a `dist` predating a
+ * frontend change measured a UI that did not contain it — and "zero delta versus the BEFORE
+ * snapshot" then means nothing at all, because the AFTER run and the BEFORE run rendered the same
+ * stale bundle. A density check that cannot move is not a passing check, it is a dead instrument.
+ *
+ * Detecting that by mtime is not sound here: `tsc` leaves an output file untouched when its emitted
+ * text is unchanged, so `dist` legitimately holds artifacts older than the last build, and a
+ * comment-only source edit (this codebase is JSDoc-dense) would trip an mtime guard that no rebuild
+ * could clear. Building unconditionally makes the staleness class structurally impossible rather
+ * than merely detectable.
+ *
+ * `stdio: "pipe"` keeps a clean transcript on success while folding the build's own diagnostics
+ * into the thrown error on failure — a source tree that does not build must stop the run outright,
+ * never fall through to measure the previous bundle and report its geometry as today's.
+ */
+function assertBuilt() {
+  if (projectBuild !== null) return projectBuild;
+  const startedAt = Date.now();
+  try {
+    execFileSync("npm", ["run", BUILD_SCRIPT], {
+      cwd: REPO_ROOT,
+      stdio: "pipe",
+    });
+  } catch (err) {
+    const detail = [err.stdout?.toString(), err.stderr?.toString()]
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    throw new Error(
+      `refusing to run — \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/ and ` +
+        `any reading would describe a UI you are not running:\n${detail || err.message}`,
+    );
+  }
+  if (!existsSync(DIST_ENTRY)) {
+    throw new Error(
+      `Missing ${DIST_ENTRY} after a successful \`npm run ${BUILD_SCRIPT}\`.`,
+    );
+  }
+  projectBuild = { durationMs: Date.now() - startedAt };
+  console.log(
+    `preflight: built src/ -> dist/ via \`npm run ${BUILD_SCRIPT}\` in ${projectBuild.durationMs}ms — every reading below measures current source`,
+  );
+  return projectBuild;
+}
+
+/**
+ * Boot the harness's own server against `home`. Only ever spawns the production build.
+ * @remarks The build precondition is asserted here through {@link assertBuilt} rather than by a
+ * local `existsSync` copy, so the staleness half can never be enforced at only some of the places
+ * that spawn `dist` — this is the function every boot in the file funnels through.
  */
 function bootServer(home) {
-  if (!existsSync(DIST_ENTRY)) {
-    console.error(`Missing ${DIST_ENTRY} — run \`npm run build\` first.`);
-    process.exit(1);
-  }
+  assertBuilt();
   return spawn("node", [DIST_ENTRY], {
     env: { ...process.env, HOME: home, NODE_ENV: "production" },
     stdio: ["ignore", "ignore", "ignore"],
@@ -748,10 +818,7 @@ async function main() {
 
   await assertNoLiveService();
 
-  if (!existsSync(DIST_ENTRY)) {
-    console.error(`Missing ${DIST_ENTRY} — run \`npm run build\` first.`);
-    process.exit(1);
-  }
+  assertBuilt();
 
   const realBefore = statRealBoardDb();
   console.log(`LIVE ${realBefore.path} BEFORE: ${fmtStat(realBefore)}`);

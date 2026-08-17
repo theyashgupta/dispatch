@@ -21,7 +21,10 @@
  *
  * The frontend dev-server proxy config is never used: it hardcodes its dev-mode `/api/`/`/sessions/`
  * targets to the user's real, live dispatch port, exactly as perf-board.mjs's own header documents.
- * This harness only ever boots the production build (`dist/server/bootstrap/index.js`).
+ * This harness only ever boots the production build (`dist/server/bootstrap/index.js`), and
+ * COMPILES it first ({@link assertBuilt}) so the verdict is always a property of the current
+ * `src/` — a `dist` left over from an earlier commit otherwise reports today's fixes as absent,
+ * blaming source that already reads correctly.
  *
  * KNOWN, ACCEPTED SIDE EFFECT (T-90-19): booting the sandbox server runs `reconcileSessions()`,
  * which sweeps `dsp-` ttyd processes MACHINE-WIDE via `adoptAndSweep` — not scoped by HOME. Running
@@ -40,7 +43,7 @@
  * Exit codes: 0 all checks PASS. 1 setup/build/sandbox-safety error, a MISMATCH in the migration
  * verdict, a failed structural/retained-snapshot/cross-boot check, or the live board.db changing.
  */
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -56,6 +59,13 @@ import { DatabaseSync } from "node:sqlite";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST_ENTRY = join(REPO_ROOT, "dist", "server", "bootstrap", "index.js");
+
+/**
+ * The package script {@link assertBuilt} shells out to. Named here rather than spelled as a raw
+ * `tsc -p …` invocation so the harness can never compile the server differently from the way the
+ * project does — one build command, not two literals that can drift apart.
+ */
+const BUILD_SERVER_SCRIPT = "build:server";
 
 const SANDBOX_PORT = 47831;
 const SANDBOX_PREFIX = "dispatch-migration-diff-v3-";
@@ -186,15 +196,71 @@ function killAndWait(child) {
 }
 
 /**
+ * Memoized result of the one server compile per process — see {@link assertBuilt}. `null` until the
+ * first call; every later call reuses it, so this harness's two boots cost exactly one `tsc` run
+ * between them.
+ */
+let serverBuild = null;
+
+/**
+ * Compile the server this harness is about to boot, then confirm the entry point exists.
+ *
+ * This REPLACES an existence-only precondition that was actively misleading: the harness boots
+ * `dist`, never `src` (see {@link bootServer}), so a `dist` predating a source fix reported that
+ * fix as absent — a correct source tree failing its own migration verdict, with the MISMATCH text
+ * blaming migration code that already read correctly. Detecting that by mtime is not sound here:
+ * `tsc` leaves an output file untouched when its emitted text is unchanged, so `dist` legitimately
+ * holds artifacts older than the last build, and a comment-only source edit (this codebase is
+ * JSDoc-dense) would trip an mtime guard that no rebuild could clear. Compiling unconditionally
+ * makes the staleness class structurally impossible rather than merely detectable.
+ *
+ * `build:server` is the right half here and `build` would be wrong: this harness boots the server
+ * and reads sqlite, never a rendered page, so the web bundle is not part of what it measures.
+ *
+ * `stdio: "pipe"` keeps a clean transcript on success while folding `tsc`'s own diagnostics into
+ * the thrown error on failure — a source tree that does not compile must stop the run outright,
+ * never fall through to boot the previous build and report its behaviour as today's.
+ */
+function assertBuilt() {
+  if (serverBuild !== null) return serverBuild;
+  const startedAt = Date.now();
+  try {
+    execFileSync("npm", ["run", BUILD_SERVER_SCRIPT], {
+      cwd: REPO_ROOT,
+      stdio: "pipe",
+    });
+  } catch (err) {
+    const detail = [err.stdout?.toString(), err.stderr?.toString()]
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    throw new Error(
+      `refusing to run — \`npm run ${BUILD_SERVER_SCRIPT}\` failed, so dist/ does not reflect ` +
+        `src/ and any verdict would describe code you are not running:\n${detail || err.message}`,
+    );
+  }
+  if (!existsSync(DIST_ENTRY)) {
+    throw new Error(
+      `Missing ${DIST_ENTRY} after a successful \`npm run ${BUILD_SERVER_SCRIPT}\`.`,
+    );
+  }
+  serverBuild = { durationMs: Date.now() - startedAt };
+  console.log(
+    `preflight: compiled src/ -> dist/ via \`npm run ${BUILD_SERVER_SCRIPT}\` in ${serverBuild.durationMs}ms — both boots below run current source`,
+  );
+  return serverBuild;
+}
+
+/**
  * Boot the harness's own server against `home`. Only ever spawns the production build — this
  * harness never supports `--dev` (see the file header: the Vite dev proxy is hardcoded to the
  * user's real, live dispatch port).
+ * @remarks The build precondition is asserted here through {@link assertBuilt} rather than by a
+ * local `existsSync` copy, so the staleness half can never be enforced at only some of the places
+ * that spawn `dist` — this is the function every boot in the file funnels through.
  */
 function bootServer(home) {
-  if (!existsSync(DIST_ENTRY)) {
-    console.error(`Missing ${DIST_ENTRY} — run \`npm run build\` first.`);
-    process.exit(1);
-  }
+  assertBuilt();
   return spawn("node", [DIST_ENTRY], {
     env: { ...process.env, HOME: home, NODE_ENV: "production" },
     stdio: ["ignore", "ignore", "ignore"],
