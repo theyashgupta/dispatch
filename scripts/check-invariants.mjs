@@ -72,16 +72,19 @@ const CARD_ATTENTION_PATH = join(
 );
 
 /**
- * The exact four files a correct `needsAttention`/`attentionTitle` census must return: the
- * definition, the barrel re-export (a plain re-export line, NOT an independent computation, and
- * expected on purpose so this leg does not false-alarm on it), and the two real consumers.
+ * The three `Card` fields the attention predicate is composed of. An ATTENTION CLAIM is a boolean
+ * expression that ORs two or more of them together — "this card needs a human" — and
+ * `card-attention.ts` must be the only place one is computed.
+ * @remarks Two is the threshold, not three, because a duplication that drops a condition is worse
+ * than one that copies all three: it is a predicate that silently disagrees with the shared one.
  */
-const EXPECTED_ATTENTION_FILES = [
-  CARD_ATTENTION_PATH,
-  join("src", "web", "features", "board", "index.ts"),
-  join("src", "web", "features", "board", "CardView.tsx"),
-  join("src", "web", "features", "orca", "OrcaNavRow.tsx"),
-];
+const ATTENTION_FIELDS = ["startError", "sessionLost", "cleanupBlocked"];
+
+/**
+ * The two functions that together ARE the shared predicate. `NEW-22`'s single-definition half
+ * asserts no `src/web` file other than {@link CARD_ATTENTION_PATH} declares either.
+ */
+const ATTENTION_EXPORTS = ["needsAttention", "attentionTitle"];
 const STEPS_PATH = join(
   "src",
   "server",
@@ -361,22 +364,95 @@ function checkTerminalFence() {
 }
 
 /**
- * Attention single-source census (`NEW-22`). Answers one question: does the shared
- * `needsAttention`/`attentionTitle` predicate still have exactly one definition and the two
- * consumers the board/Orca attention agreement (`91-UI-SPEC.md`'s criterion 5) depends on?
- * Modeled on {@link checkTerminalFence}'s shape: a closed-set file census plus a
- * missing-subject sentinel.
- * @remarks FOUR files, not three: `src/web/features/board/index.ts` is a plain re-export line,
- * not a second computation, and is deliberately part of the expected set. A check that expects
- * three files would false-alarm on the barrel on its very first run — a check that cries wolf
- * gets disbelieved, which is a dead instrument by a slower route.
- * @remarks The missing-subject sentinel mirrors {@link checkSessionProjectionChokepoint}'s: if
- * `card-attention.ts` no longer declares BOTH `export function needsAttention` and
- * `export function attentionTitle`, this reports a violation instead of quietly passing at a
- * smaller census — a renamed or deleted subject must FAIL, never silently widen the exemption.
+ * Every OR-expression in a parsed file that combines two or more distinct {@link ATTENTION_FIELDS}
+ * — the shape of an independently-computed attention claim.
+ * @remarks Reports only the OUTERMOST operator of a chain: `a || b || c` parses as `(a || b) || c`,
+ * so without the parent check one duplication would report twice and the count would read as two
+ * separate sites.
+ * @remarks `??` counts alongside `||`. It is a strange way to write this predicate, but it is a
+ * disjunction, and a rule that a one-character edit escapes is not a fence.
+ * @param sourceFile Parsed file.
+ * @returns One entry per claim: 1-based line number and the sorted field names it combined.
+ */
+function attentionClaims(sourceFile) {
+  const claims = [];
+  const isDisjunction = (node) =>
+    ts.isBinaryExpression(node) &&
+    (node.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+      node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken);
+
+  const fieldsWithin = (node) => {
+    const found = new Set();
+    const walk = (n) => {
+      if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.name)) {
+        if (ATTENTION_FIELDS.includes(n.name.text)) found.add(n.name.text);
+      } else if (
+        ts.isElementAccessExpression(n) &&
+        n.argumentExpression &&
+        ts.isStringLiteralLike(n.argumentExpression) &&
+        ATTENTION_FIELDS.includes(n.argumentExpression.text)
+      ) {
+        found.add(n.argumentExpression.text);
+      }
+      ts.forEachChild(n, walk);
+    };
+    walk(node);
+    return found;
+  };
+
+  const visit = (node) => {
+    if (isDisjunction(node) && !isDisjunction(node.parent)) {
+      const fields = fieldsWithin(node);
+      if (fields.size >= 2) {
+        claims.push({
+          lineNumber:
+            sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile))
+              .line + 1,
+          fields: [...fields].sort(),
+        });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(sourceFile, visit);
+  return claims;
+}
+
+/**
+ * Attention single-source fence (`NEW-22`). Two halves, because the property has two halves:
+ * the shared predicate has exactly one DEFINITION, and no other `src/web` file computes the
+ * PREDICATE independently.
+ * @remarks (`WR-02`) The predecessor censused files whose text merely CONTAINED the identifiers
+ * `needsAttention`/`attentionTitle` against a closed expected list, which got the subject exactly
+ * backwards on both sides. An independent computation is by definition one that does NOT reference
+ * the shared helper, so it was invisible; meanwhile a new surface that correctly IMPORTED the
+ * single source turned the build red until someone widened the list — a check that fires on the
+ * good event and stays silent on the bad one. Real sites it could not see were already present
+ * (`card-badges.ts`, `DetailPanel.tsx`, `App.tsx`). This is the same shape as Phase 90's `NEW-21`,
+ * which shipped fenced against the wrong subject and reported PASS.
+ * @remarks Consumers are deliberately UNRESTRICTED now. Importing the single source is the
+ * behaviour this invariant wants, so it must never be what fails the build; the closed consumer
+ * census is gone rather than merely widened.
+ * @remarks The carve-out is the DEFINITION file only, and it is a carve-out rather than a blind
+ * spot because {@link ATTENTION_EXPORTS}' own missing-subject sentinel makes a rename or deletion
+ * FAIL instead of silently exempting nothing. Conjunctions are NOT claims: `card.sessionLost !==
+ * true && isUnseen(…)` (`card-badges.ts`, deriving an activity dot), `c.tmuxSession &&
+ * !c.sessionLost` (`DetailPanel.tsx`, deriving liveness), and `card.column !== "todo" &&
+ * card.sessionLost !== true` (`App.tsx`, gating start-eligibility) each narrow ONE attention field
+ * with unrelated state to make a different claim — a dot is not an attention ring — so fencing
+ * them would be the cry-wolf failure in a new costume.
+ * @remarks The definition half fences EXPORTED declarations only. `CardView.tsx` binds the shared
+ * result to a local `const needsAttention` (the import is aliased `getNeedsAttention`), which is a
+ * consumer, not a rival — flagging it would fire on the single source's own correct use. A
+ * file-local rival that is never exported is left to the claim half below, which is what has the
+ * teeth: if it does not OR two attention fields it is not this predicate, and if it does, it is
+ * caught regardless of what it is named or whether it is exported.
+ * @remarks Known residue, recorded rather than left implied: a duplication written as a ternary
+ * chain or an `ATTENTION_FIELDS.some(…)` table is not a disjunction and is not detected. Closing
+ * that needs type information this parse-only pass does not have.
  * @see docs/ARCHITECTURE.md#design-system-invariants
- * @returns Violation report lines: one per unexpected (fifth) site, one per expected file that
- * stopped matching, plus the missing-subject sentinel(s) if the definitions themselves are gone.
+ * @returns Violation report lines: the missing-subject sentinel(s) if the definitions are gone or
+ * renamed, one per rival definition, and one per independently-computed attention claim.
  */
 function checkAttentionSingleSource() {
   const violations = [];
@@ -386,40 +462,34 @@ function checkAttentionSingleSource() {
     );
   } else {
     const content = readFileSync(CARD_ATTENTION_PATH, "utf8");
-    if (!content.includes("export function needsAttention")) {
-      violations.push(
-        `${CARD_ATTENTION_PATH}: export function needsAttention not found — NEW-22's attention-predicate subject is missing or renamed`,
-      );
-    }
-    if (!content.includes("export function attentionTitle")) {
-      violations.push(
-        `${CARD_ATTENTION_PATH}: export function attentionTitle not found — NEW-22's attention-predicate subject is missing or renamed`,
-      );
+    for (const name of ATTENTION_EXPORTS) {
+      if (!content.includes(`export function ${name}`)) {
+        violations.push(
+          `${CARD_ATTENTION_PATH}: export function ${name} not found — NEW-22's attention-predicate subject is missing or renamed`,
+        );
+      }
     }
   }
 
-  const actual = new Set();
   for (const file of walkSrc(WEB_DIR)) {
+    if (file === CARD_ATTENTION_PATH) continue;
     const content = readFileSync(file, "utf8");
-    if (
-      content.includes("needsAttention") ||
-      content.includes("attentionTitle")
-    ) {
-      actual.add(file);
-    }
-  }
 
-  for (const file of actual) {
-    if (!EXPECTED_ATTENTION_FILES.includes(file)) {
-      violations.push(
-        `${file}: retired pattern NEW-22 — a fifth site references needsAttention/attentionTitle outside the single-source set (${EXPECTED_ATTENTION_FILES.join(", ")})`,
-      );
+    for (const name of ATTENTION_EXPORTS) {
+      if (
+        new RegExp(`export\\s+(?:function|const|let|var)\\s+${name}\\b`).test(
+          content,
+        )
+      ) {
+        violations.push(
+          `${file}: retired pattern NEW-22 — exports a rival ${name}; the attention predicate has exactly one definition, in ${CARD_ATTENTION_PATH}`,
+        );
+      }
     }
-  }
-  for (const file of EXPECTED_ATTENTION_FILES) {
-    if (!actual.has(file)) {
+
+    for (const claim of attentionClaims(parseSource(file, content))) {
       violations.push(
-        `${file}: retired pattern NEW-22 — expected reference to needsAttention/attentionTitle is missing`,
+        `${file}:${claim.lineNumber}: retired pattern NEW-22 — computes an attention claim independently (ORs ${claim.fields.join(" + ")}); import needsAttention/attentionTitle from ${CARD_ATTENTION_PATH} instead`,
       );
     }
   }

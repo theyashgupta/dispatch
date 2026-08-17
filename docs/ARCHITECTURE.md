@@ -2419,12 +2419,20 @@ mechanically-checkable question; none of them read prose for truth.
   writer is renamed or deleted out from under it. See the leg's own JSDoc for the mutation forms
   it covers and the two (`Object.assign` with an opaque source, and `delete`) it deliberately
   does not. Another leg is `checkAttentionSingleSource`, reported as
-  `ATTENTION SINGLE SOURCE (NEW-22)`: a closed-set census of every `src/web` file referencing
-  `needsAttention`/`attentionTitle`, which must resolve to exactly four files — the definition
-  (`card-attention.ts`), the barrel re-export (`features/board/index.ts`), and the two consumers
-  (`CardView.tsx`, `OrcaNavRow.tsx`) — so a board/Orca attention disagreement is structurally
-  impossible unless a fifth, independently-computed site appears. It fails, rather than passing
-  vacuously, if `card-attention.ts` no longer declares both `needsAttention` and `attentionTitle`.
+  `ATTENTION SINGLE SOURCE (NEW-22)`: it fences the attention PREDICATE, not the helper's name.
+  Two halves — no `src/web` file outside `card-attention.ts` may export a rival
+  `needsAttention`/`attentionTitle`, and none may OR two or more of
+  `startError`/`sessionLost`/`cleanupBlocked` together into its own attention claim (a parse, so
+  the claim is found wherever it is written and whatever it is called). Consumers that IMPORT the
+  single source are unrestricted. It fails, rather than passing vacuously, if `card-attention.ts`
+  no longer declares both `needsAttention` and `attentionTitle`. The predecessor censused files
+  whose text merely CONTAINED those identifiers against a closed four-file list, which inverted
+  both directions: an independent computation does not reference the helper, so it was invisible,
+  while a correct new consumer turned the build red — the same wrong-subject shape as `NEW-21`
+  before it. Conjunctions that narrow ONE attention field with unrelated state (`card-badges.ts`'s
+  activity dot, `DetailPanel.tsx`'s liveness, `App.tsx`'s start-eligibility) are different claims
+  and are deliberately not fenced; a ternary-chain or table-driven duplication is a recorded
+  residue the parse cannot see.
 - **`node scripts/migration-diff-v3.mjs`** (`npm run migration-diff`) and
   **`node scripts/redaction-capture-v3.mjs`** (`npm run redaction-capture`) — sandbox harnesses
   that boot a real server against a throwaway `HOME`, so they are deliberately OUTSIDE

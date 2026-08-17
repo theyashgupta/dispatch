@@ -6,8 +6,11 @@ import type { Card as CardModel, StartError } from "../../../shared/types.js";
  * condition cannot be added to one surface without the other, and the order encodes CardView's
  * render priority (startError wins, then sessionLost, then cleanupBlocked).
  * @remarks Board and Orca cannot disagree about attention because both consume this one list —
- * `check-invariants.mjs`'s `checkAttentionSingleSource` (`NEW-22`) censuses every `src/web` file
- * referencing `needsAttention`/`attentionTitle` and fails on a fifth, independently-computed site.
+ * `check-invariants.mjs`'s `checkAttentionSingleSource` (`NEW-22`) fails any `src/web` file outside
+ * this one that exports a rival `needsAttention`/`attentionTitle`, or that ORs two or more of
+ * `startError`/`sessionLost`/`cleanupBlocked` together into its own attention claim. Consumers
+ * that IMPORT from here are unrestricted, and deliberately so: a closed consumer census would fire
+ * on a correct new surface while staying blind to the duplication it exists to prevent.
  * @see docs/ARCHITECTURE.md#design-system-invariants
  */
 const ATTENTION_TITLES: ReadonlyArray<(card: CardModel) => string | null> = [
