@@ -113,6 +113,21 @@ carry a torn intermediate frame (`WR-01`): `applyMarker` sets `column` + `status
 reason/marker not yet applied. `flipBack`, `recordTtydExit`, and `markSessionLost` follow the same
 one-mutation rule for the same reason.
 
+**`switchActiveSession` (Phase 92, `SESS-03`) moves the active pointer through the same sanctioned
+promotion path, not around it.** `BoardStore#switchActiveSession(cardId, sessionId)` is a thin
+`enqueue`-wrapped caller of `setActiveSession(card, {}, sessionId, true)` — the identical call shape
+`markSessionLost`'s own re-promotion branch already uses — so a session switch assigns none of the
+eight guarded fields directly and needed no widening of the Session Projection Chokepoint's
+sanctioned-writer set (`NEW-21`, below). Under concurrent switch/read traffic AND a switch racing a
+real session-clearing mutation, the single enqueued mutator is what keeps the active pointer always
+resolvable and the flat mirror always in step with it — proven, not asserted, by `--check
+switch-atomicity`, which found and fixed its own dead-instrument gap on the way: a purely concurrent,
+un-awaited switch/read storm reported ZERO violations even under a real regression (`activeSessionId`
+assigned directly, bypassing `setActiveSession`), because each mutation is a synchronous body+persist
+with no I/O wait, so 60 fire-and-forget switches settle faster than 60 fire-and-forget reads can land
+inside the torn window. A deterministic single AWAITED switch immediately followed by a read is what
+actually catches a flat-mirror bypass on every run, and is now the load-bearing assertion.
+
 Column-sensitive and existence-sensitive decisions are re-checked INSIDE the mutator against the
 live Map, not against a snapshot read outside the queue (`WR-04`). `setTtydPortIfSession` records
 the ttyd port ONLY if the card still names that `tmuxSession`, and it runs that check inside the
@@ -208,6 +223,15 @@ Downgrade Safety below is what now repairs it at boot; this paragraph stands bec
 recovery, not a licence to split the pairing. This is a wire-read pairing, not a store invariant, so
 it is not something `check-invariants.mjs` fences; it is recorded here because a future phase moving
 one of the two gates without the other reintroduces the wedge.
+
+**`Card.sessionSummaries` (Phase 92, `UI-03`) follows `sessionCount`'s absent-at-0-or-1 idiom, never
+spread.** Built in `redactCard` immediately after `sessionCount`: absent when a card has 0 or 1
+sessions, a 2+-element array of `{ id, ordinal, lost }` otherwise — one explicit three-key
+object-literal pick per session (`{ id: s.id, ordinal: i + 1, lost: s.tmuxSession == null }`), never
+`{ ...s }`, so a future `Session` field (`hookToken`, `claudeSessionId`, `workspacePath`) cannot ride
+along even if the entity grows. It deliberately carries no per-entry `active` flag — the client
+compares `entry.id === card.activeSessionId` against the wire's own single source of truth, rather
+than trusting a second, independently-computed boolean that could disagree with it.
 
 ### Downgrade Safety
 
@@ -738,6 +762,25 @@ an older, pre-retirement dispatch build no longer matches `compatible` and is sw
 adopted on the first restart after this ships, a deliberate one-time degradation, never a
 regression).
 
+**Phase 92 re-keyed the base path from the card to the session (`PROXY-01`), and
+`TTYD_RUNTIME_REVISION` bumped to 6 in the same commit.** `resolveLiveTtydPort`
+(`adapters/terminal-proxy.ts`) now resolves a SESSION id against `store.sessionsWithTmux()` — every
+session on every card — rather than a card's active-session projection, which is what makes a
+non-active sibling's terminal independently reachable at its own port: two live sessions on one
+ticket hold two distinct ttyd, both reachable, and neither serves the other's pane (proven by
+distinguishable pane content read back through each session's own proxy path, `--check
+proxy-addressing`, never by the ports merely differing). A ttyd spawned by any pre-92 build carries a
+CARD-keyed `-b` and is therefore unaddressable under the new route, so the revision bump forces
+exactly one classification for it: incompatible, swept, and respawned once on first boot after
+upgrade — a deliberate, user-visible one-time reconnect, not a silent adoption of a pane the new
+route could never reach anyway. `DSP_BASE_PATH_RE` (`adapters/ttyd.ts`) is id-shape-agnostic — it
+matches `-b /sessions/<anything>/terminal` regardless of whether the segment is a card id or a
+session id — so the base-path SWEEP arm needed no change; only the REVISION KEY, a value comparison,
+had to move in lockstep with the base-path change. `--check orphan-sweep` proves this by planting a
+real pre-92-fingerprinted orphan as a genuine persisted session record and watching it get swept on
+restart while the fixture's own current-revision ttyd are re-adopted (same pid) and still serve their
+own pane.
+
 **A pre-2.7.0 ttyd is only sweepable because of the base-path arm (`TERM-05`).** The paragraph
 above understated the problem when it shipped: ttyd rewrites its own argv buffer at startup
 (rendering `-t key=value` as `-t key value`), and when an earlier token is large enough to fill
@@ -1016,6 +1059,23 @@ identity-stable across four separate mutations:
   `coarseGesture` for that drag's closures. This is per-drag capture, not the per-`pointermove`
   `pointerType` sniffing this section warns against elsewhere — the value is fixed for the whole
   gesture, exactly like `isCoarsePointer` is fixed for the whole render.
+
+**A session switch is a FIFTH stable case, not a new mutation of the four above (`PANEL-03`, Phase
+92).** Moving the active pointer between a ticket's sessions re-points the SAME iframe's `src` to the
+new session's `/sessions/<sessionId>/terminal/` — the identical mechanism a card switch while the
+panel stays open already used before Phase 92 existed, since the iframe was already unkeyed and
+already re-pointed by id. Keying the iframe on `activeSession.id` was the phase's original design and
+was reversed after the UI checker blocked it against this section: a session id varies across cards
+exactly as much as it varies across siblings on the same card, so a keyed iframe would remount on
+every CARD switch too — not only on a session switch — which would have been a genuinely new
+`PANEL-03` violation the keyed design did not account for. `scripts/panel-mount-92.mjs` proves the
+reversal was correct by measurement, not by argument: with `key={c.activeSession.id}` temporarily
+reinstated, both card-switch AND session-switch report a remount (an inert expando tagged on the
+iframe goes `null`); with the shipped unkeyed iframe, both re-point `src` while the expando survives,
+and the dispatch-side upstream socket's LOCAL ephemeral port changes at exactly those two steps and
+only those two. Phase 92 therefore adds ZERO new mount events, and `PANEL-03`'s forbidden cases stand
+verbatim — now explicitly re-proven to include the previously-unnamed card-switch-while-open case
+alongside open/close, fullscreen, resize, and the board/Orca view switch.
 
 **The handle is also a keyboard-operable `role="separator"`.** It declares
 `aria-orientation="vertical"`, is focusable (`tabIndex={0}`), and reports
@@ -2499,6 +2559,34 @@ mechanically-checkable question; none of them read prose for truth.
   the script's own header JSDoc for the full scope, its JSDoc-citation carve-out, and what it
   deliberately does not attempt (behavioral claims — no grep proves a paragraph's claim about
   what the code does is still true).
+- **`node scripts/session-liveness-v3.mjs --check <mode>`** (Phase 91/92) — a real-tmux/real-ttyd
+  sandbox harness, deliberately OUTSIDE `npm run check` (it boots real processes and requires the
+  live `com.dispatch.app` service stopped for its duration). Phase 92 added four modes to the seven
+  it inherited from Phase 91: `--check proxy-addressing` (writes a distinguishable marker into each
+  of two real tmux panes and reads it back through each session's OWN proxy path simultaneously —
+  proven able to fail when the proxy misroutes, and proven that "the two ports merely differ" is NOT
+  sufficient evidence on its own); `--check orphan-sweep` (plants a real pre-92-fingerprinted ttyd as
+  a genuine persisted session and proves it is swept on restart while the fixture's own
+  current-revision ttyd are re-adopted, same pid, and still serve their own pane — proven able to
+  fail in the sweep direction, the spare direction, and against a wrong-subject pid); `--check
+switch-sockets` (a pid-scoped, `ESTABLISHED`-only, bounded poll-to-zero proof that a session
+  switch's OLD dispatch-to-ttyd socket count reaches zero and the NEW session's count reaches one —
+  proven able to fail on a real leak, and proven that scoping the count to the wrong port reads a
+  constant unrelated to the leak); `--check switch-atomicity` (60 concurrent switch/read requests
+  plus a deterministic awaited follow-up, and a switch racing a real tmux kill — proven able to fail
+  when `switchActiveSession` bypasses `setActiveSession`, independently corroborated by `NEW-21`).
+- **`node scripts/panel-92.mjs`** (Phase 92; `--legacy`/`--compare`/`--json`) — a CDP structural-
+  presence and zero-gap-geometry instrument. `--legacy` builds and boots the real `v2.9.0` git tag in
+  a throwaway worktree, seeded in that release's OWN pre-`sessions[]` card shape, so `--compare` can
+  diff HEAD's single-session panel against a genuine historical build rather than the live, several-
+  releases-stale `:4700` service. Proven able to fail both on a real regression (the switcher renders
+  at N=1) and on a `display:none` dead-instrument shape the geometry leg alone would miss.
+- **`node scripts/panel-mount-92.mjs`** (Phase 92) — a real-tmux/real-ttyd CDP instrument re-proving
+  `PANEL-03` under the session-keyed terminal, using two independent mount-identity signals (an inert
+  iframe expando, and the dispatch-side upstream socket's LOCAL ephemeral port — never the dispatch
+  server's own pid, which stays constant across a real remount and is demonstrated dead by its own
+  `--dead-signal-demo` mode). Covers all five forbidden mount events plus the newly-named
+  card-switch-while-open case, and the one legitimate re-point (session switch).
 - **`phase-smoke-tester`** — the only BEHAVIORAL verification this project runs: an agent derives
   and executes smoke cases against the running app after each phase's implementation lands. This
   is the one gate above that cannot be reduced to a grep.
