@@ -2849,6 +2849,284 @@ async function checkSwitchSockets(built) {
   return violations;
 }
 
+/**
+ * `--check switch-atomicity` (SESS-03, `92-VALIDATION.md` C3): the single-writer `enqueue` queue
+ * (`92-RESEARCH.md` `## 5`) is exercised with REAL concurrent HTTP traffic and a REAL tmux kill,
+ * never reasoned about from the source alone. Two interleavings:
+ *
+ * 1. 50+ concurrent switch POSTs (alternating A/B, fired with no awaiting between them) plus 50+
+ *    concurrent board reads. Every read is checked against the KNOWN, FIXED values for whichever
+ *    session it reports active — both the wire's `activeSession.tmuxSession`/`ttydPort` (re-derived
+ *    at redaction time straight from the session record, per `redactCard`) AND the card-level flat
+ *    mirror `tmuxSession`/`ttydPort` (`setActiveSession`'s six-field projection,
+ *    `board.store.ts:579-585`) — a torn projection is exactly a flat mirror that lags the pointer,
+ *    and the flat top-level fields are the ones a bypass of `setActiveSession` actually staves,
+ *    since `activeSession.*` is re-derived fresh from `card.sessions` on every read regardless.
+ *    After the storm, the PERSISTED row is read directly (the wire redacts `sessions`) and asserted
+ *    to have `activeSessionId` resolve to a real record, non-empty `sessions`.
+ * 2. Session B's real tmux is killed, then the switch to B is fired WITHOUT awaiting the real
+ *    3-strike detector — a genuine race against `markSessionLost`, not a simulated one. Whichever
+ *    mutation's `enqueue`d body ran first is observed by sampling B's persisted `tmuxSession` the
+ *    instant the switch POST itself resolves (that POST only resolves once its own queued mutator
+ *    has fully committed, `board.store.ts:731`'s `return this.queue`) — printed for diagnosability,
+ *    never asserted as a required winner. Both legitimate final shapes are accepted: `activeSessionId`
+ *    resolves to a real record, `sessions` still holds BOTH records (`markSessionLost` clears fields
+ *    in place, never removes one), and if the pointer settles on the untouched sibling (A), A must
+ *    still read as genuinely alive — the one shape that would actually be torn.
+ */
+async function checkSwitchAtomicity(built) {
+  const violations = [];
+  const knownIds = new Set([built.sessionA.id, built.sessionB.id]);
+  const knownSessions = {
+    [built.sessionA.id]: {
+      tmuxSession: built.tmux.a,
+      ttydPort: built.ttyd.a.port,
+    },
+    [built.sessionB.id]: {
+      tmuxSession: built.tmux.b,
+      ttydPort: built.ttyd.b.port,
+    },
+  };
+
+  const SWITCH_COUNT = 60;
+  const READ_COUNT = 60;
+  const readViolations = [];
+  let non2xxSwitches = 0;
+  const writes = [];
+  for (let i = 0; i < SWITCH_COUNT; i++) {
+    const target = i % 2 === 0 ? built.sessionB.id : built.sessionA.id;
+    writes.push(
+      fetch(
+        `http://127.0.0.1:${built.port}/api/cards/${built.cardId}/session`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId: target }),
+        },
+      )
+        .then((r) => {
+          if (r.status < 200 || r.status >= 300) non2xxSwitches += 1;
+        })
+        .catch(() => {
+          non2xxSwitches += 1;
+        }),
+    );
+  }
+  const reads = [];
+  for (let i = 0; i < READ_COUNT; i++) {
+    reads.push(
+      fetch(`http://127.0.0.1:${built.port}/api/board`)
+        .then((r) => r.json())
+        .then((body) => {
+          const cards = Array.isArray(body?.cards) ? body.cards : [];
+          const card = cards.find((c) => c.id === built.cardId);
+          if (!card) return;
+          const active = card.activeSession;
+          if (active == null) {
+            readViolations.push(`read ${i}: activeSession absent`);
+            return;
+          }
+          if (!knownIds.has(active.id)) {
+            readViolations.push(
+              `read ${i}: activeSession.id "${active.id}" is not one of the two known session ids`,
+            );
+            return;
+          }
+          const known = knownSessions[active.id];
+          if (active.tmuxSession !== known.tmuxSession) {
+            readViolations.push(
+              `read ${i}: activeSession(${active.id}).tmuxSession expected "${known.tmuxSession}", actual ${JSON.stringify(active.tmuxSession)} — torn nested projection`,
+            );
+          }
+          if (active.ttydPort !== known.ttydPort) {
+            readViolations.push(
+              `read ${i}: activeSession(${active.id}).ttydPort expected ${known.ttydPort}, actual ${JSON.stringify(active.ttydPort)} — torn nested projection`,
+            );
+          }
+          if (card.tmuxSession !== known.tmuxSession) {
+            readViolations.push(
+              `read ${i}: card.tmuxSession (flat mirror) expected "${known.tmuxSession}" for active session ${active.id}, actual ${JSON.stringify(card.tmuxSession)} — flat mirror lags the pointer`,
+            );
+          }
+          if (card.ttydPort !== known.ttydPort) {
+            readViolations.push(
+              `read ${i}: card.ttydPort (flat mirror) expected ${known.ttydPort} for active session ${active.id}, actual ${JSON.stringify(card.ttydPort)} — flat mirror lags the pointer`,
+            );
+          }
+          if (
+            !Array.isArray(card.sessionSummaries) ||
+            card.sessionSummaries.length !== 2
+          ) {
+            readViolations.push(
+              `read ${i}: sessionSummaries expected 2 entries, actual ${JSON.stringify(card.sessionSummaries)}`,
+            );
+          }
+        })
+        .catch((err) => {
+          readViolations.push(`read ${i}: fetch failed: ${err.message}`);
+        }),
+    );
+  }
+  await Promise.all([...writes, ...reads]);
+  console.log(
+    `switch-atomicity: interleaving 1 — ${SWITCH_COUNT} switch POSTs (${non2xxSwitches} non-2xx/failed) + ${READ_COUNT} board GETs fired concurrently, ${readViolations.length} mirror-agreement violation(s)`,
+  );
+  violations.push(...readViolations);
+  if (non2xxSwitches > 0) {
+    violations.push(
+      `switch-atomicity: interleaving 1 — ${non2xxSwitches}/${SWITCH_COUNT} switch POSTs did not return 2xx, though both A and B are valid targets throughout`,
+    );
+  }
+
+  const afterStorm = readCard(built.dbPath, built.cardId);
+  if (!afterStorm) {
+    violations.push(
+      `switch-atomicity: interleaving 1 — card ${built.cardId} missing from persisted board.db after the storm`,
+    );
+  } else {
+    const sessions = afterStorm.sessions ?? [];
+    const activeRecord = sessions.find(
+      (s) => s.id === afterStorm.activeSessionId,
+    );
+    console.log(
+      `switch-atomicity: interleaving 1 — persisted activeSessionId=${afterStorm.activeSessionId} resolves=${activeRecord != null}, sessions.length=${sessions.length}`,
+    );
+    if (sessions.length === 0) {
+      violations.push(
+        `switch-atomicity: interleaving 1 — persisted sessions[] is empty — SESS-03's "N sessions and no active one" case`,
+      );
+    }
+    if (afterStorm.activeSessionId == null || !activeRecord) {
+      violations.push(
+        `switch-atomicity: interleaving 1 — persisted activeSessionId "${afterStorm.activeSessionId}" does not resolve to a record in sessions[] — a pointer at a session that does not exist`,
+      );
+    }
+  }
+
+  // Deterministic follow-up, not relying on the concurrent storm's own luck: a single AWAITED
+  // switch to a KNOWN target, then ONE read, asserting the flat mirror against that target's known
+  // values. Empirically, 60 fire-and-forget switches racing 60 fire-and-forget reads settle so fast
+  // (each mutation is a synchronous body + persist, no I/O wait) that the concurrent reads above
+  // rarely land inside the torn window a direct `card.activeSessionId =` assignment would produce —
+  // this deterministic step is what actually proves the flat-mirror claim on every run, not just
+  // probabilistically.
+  const deterministicTarget = built.sessionB.id;
+  const deterministicRes = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${built.cardId}/session`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: deterministicTarget }),
+    },
+  );
+  const deterministicCard = await fetchFixtureCard(built);
+  console.log(
+    `switch-atomicity: interleaving 1 deterministic follow-up — switch to B -> ${deterministicRes.status}; wire activeSession.id=${deterministicCard?.activeSession?.id} card.tmuxSession=${JSON.stringify(deterministicCard?.tmuxSession)} card.ttydPort=${deterministicCard?.ttydPort}`,
+  );
+  if (deterministicCard?.activeSession?.id !== deterministicTarget) {
+    violations.push(
+      `switch-atomicity: interleaving 1 deterministic follow-up — the awaited switch to B never landed (activeSession.id=${deterministicCard?.activeSession?.id})`,
+    );
+  } else {
+    const known = knownSessions[deterministicTarget];
+    if (deterministicCard.tmuxSession !== known.tmuxSession) {
+      violations.push(
+        `switch-atomicity: interleaving 1 deterministic follow-up — card.tmuxSession (flat mirror) expected "${known.tmuxSession}" after an AWAITED switch to B, actual ${JSON.stringify(deterministicCard.tmuxSession)} — the flat mirror lagged its pointer`,
+      );
+    }
+    if (deterministicCard.ttydPort !== known.ttydPort) {
+      violations.push(
+        `switch-atomicity: interleaving 1 deterministic follow-up — card.ttydPort (flat mirror) expected ${known.ttydPort} after an AWAITED switch to B, actual ${JSON.stringify(deterministicCard.ttydPort)} — the flat mirror lagged its pointer`,
+      );
+    }
+    if (deterministicCard.activeSession?.tmuxSession !== known.tmuxSession) {
+      violations.push(
+        `switch-atomicity: interleaving 1 deterministic follow-up — activeSession.tmuxSession expected "${known.tmuxSession}", actual ${JSON.stringify(deterministicCard.activeSession?.tmuxSession)}`,
+      );
+    }
+  }
+
+  await tmuxKillSession(built.tmux.b);
+  const start2 = Date.now();
+  console.log(
+    `switch-atomicity: interleaving 2 — killed real tmux session ${built.tmux.b} (session B, ${built.sessionB.id}); firing the switch to B without awaiting loss detection`,
+  );
+  const switchStatus = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${built.cardId}/session`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: built.sessionB.id }),
+    },
+  )
+    .then((r) => r.status)
+    .catch((err) => `error: ${err.message}`);
+  const elapsedSwitch = Date.now() - start2;
+  const atSwitchSettle = readCard(built.dbPath, built.cardId);
+  const bAtSwitchSettle = atSwitchSettle?.sessions?.find(
+    (s) => s.id === built.sessionB.id,
+  );
+  const order =
+    bAtSwitchSettle?.tmuxSession == null ? "loss-first" : "switch-first";
+  console.log(
+    `switch-atomicity: interleaving 2 — switch POST resolved status=${switchStatus} after ${elapsedSwitch}ms; observed order = ${order} (B's persisted tmuxSession at switch-settle = ${JSON.stringify(bAtSwitchSettle?.tmuxSession)})`,
+  );
+
+  let lossLanded = bAtSwitchSettle?.tmuxSession == null;
+  const deadline2 = start2 + LIVENESS_POLL_TIMEOUT_MS;
+  while (!lossLanded && Date.now() < deadline2) {
+    await sleep(LIVENESS_POLL_INTERVAL_MS);
+    const p = readCard(built.dbPath, built.cardId);
+    const bRecord = p?.sessions?.find((s) => s.id === built.sessionB.id);
+    if (bRecord && bRecord.tmuxSession == null) lossLanded = true;
+  }
+  const elapsed2 = Date.now() - start2;
+  console.log(
+    `switch-atomicity: interleaving 2 — loss detection landed=${lossLanded} elapsedMs=${elapsed2} budget=${LIVENESS_POLL_TIMEOUT_MS}ms`,
+  );
+  if (!lossLanded) {
+    violations.push(
+      `switch-atomicity: interleaving 2 — the real 3-strike detector did not clear session B (${built.sessionB.id}) within ${LIVENESS_POLL_TIMEOUT_MS}ms after the switch settled; a timeout here is a FAILURE, never a retry`,
+    );
+  }
+
+  const finalCard = readCard(built.dbPath, built.cardId);
+  if (!finalCard) {
+    violations.push(
+      `switch-atomicity: interleaving 2 — card ${built.cardId} missing from persisted board.db`,
+    );
+  } else {
+    const sessions = finalCard.sessions ?? [];
+    const aRecord = sessions.find((s) => s.id === built.sessionA.id);
+    const bRecord = sessions.find((s) => s.id === built.sessionB.id);
+    const activeRecord = sessions.find(
+      (s) => s.id === finalCard.activeSessionId,
+    );
+    console.log(
+      `switch-atomicity: interleaving 2 final — activeSessionId=${finalCard.activeSessionId}, A present=${!!aRecord}, B present=${!!bRecord}, B.tmuxSession=${JSON.stringify(bRecord?.tmuxSession)}, A.tmuxSession=${JSON.stringify(aRecord?.tmuxSession)}`,
+    );
+    if (!aRecord || !bRecord) {
+      violations.push(
+        `switch-atomicity: interleaving 2 — expected BOTH session records to survive (markSessionLost clears fields in place, never removes), actual A present=${!!aRecord} B present=${!!bRecord}`,
+      );
+    }
+    if (!activeRecord) {
+      violations.push(
+        `switch-atomicity: interleaving 2 — activeSessionId "${finalCard.activeSessionId}" does not resolve to a session record — a pointer at a session that does not exist`,
+      );
+    } else if (
+      activeRecord.id === built.sessionA.id &&
+      activeRecord.tmuxSession == null
+    ) {
+      violations.push(
+        `switch-atomicity: interleaving 2 — active session resolved to A but A's own persisted tmuxSession is null — A was never killed, so this is a torn state, not the documented lost-sibling case`,
+      );
+    }
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -2864,6 +3142,8 @@ const CHECKS = {
     withFixture("proxy-addressing", checkProxyAddressing),
   "orphan-sweep": () => withFixture("orphan-sweep", checkOrphanSweep),
   "switch-sockets": () => withFixture("switch-sockets", checkSwitchSockets),
+  "switch-atomicity": () =>
+    withFixture("switch-atomicity", checkSwitchAtomicity),
 };
 
 /**
