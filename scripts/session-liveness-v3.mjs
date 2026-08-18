@@ -171,7 +171,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir, homedir } from "node:os";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -320,6 +320,44 @@ const WORKTREE_FIXTURE = {
   sessionKeys: ["a", "b"],
   worktrees: true,
 };
+
+const SECOND_SESSION_SANDBOX_PORT = 47866;
+
+/**
+ * A real ticket identifier the actual start saga will consume (`IDENTIFIER_RE`-shaped), rather
+ * than the `SHL-1` placeholder every other fixture seeds — {@link standUpRealSagaFixture}'s
+ * session 1 is named `dsp-${SECOND_SESSION_IDENTIFIER}`, so this PID-suffixed value doubles as
+ * this fixture's own tmux namespace: `dsp-<identifier>` is a genuine PREFIX of the real saga's own
+ * `dsp-<identifier>-2`, the relationship 94-VALIDATION.md's tmux prefix-match trap needs to be
+ * real rather than simulated by two independently-prefixed harness names.
+ */
+const SECOND_SESSION_IDENTIFIER = `ZZ94${process.pid}-1`;
+
+/**
+ * The first fixture profile whose session 1 is stood up with the PRODUCT'S OWN naming
+ * (`dsp-<identifier>`, not a `tmuxPrefix`-derived synthetic name) and whose session 2 is created
+ * by driving the REAL start saga end to end (Plan 94-05) — `realSaga: true` is the flag
+ * {@link standUpFixture} and {@link tearDownFixture} branch on to reach
+ * {@link standUpRealSagaFixture} / {@link tearDownRealSagaFixture}, leaving every other profile's
+ * behaviour byte-for-byte unchanged. `tmuxPrefix` here is `dsp-<identifier>` itself (not a
+ * separate namespace token) so {@link assertPreflightClean}'s generic prefix filter also catches a
+ * leaked `dsp-<identifier>-2` sibling from a prior failed run without any change to that function.
+ */
+const SECOND_SESSION_FIXTURE = {
+  port: SECOND_SESSION_SANDBOX_PORT,
+  tmuxPrefix: `dsp-${SECOND_SESSION_IDENTIFIER}`,
+  sessionKeys: ["a"],
+  identifier: SECOND_SESSION_IDENTIFIER,
+  realSaga: true,
+};
+
+/**
+ * Ceiling for {@link waitForSagaSettled}'s poll of the real start saga: the stub `claude`'s own
+ * REPL-ready line prints in milliseconds, but `git worktree add` on the throwaway repo plus
+ * `sendKickoff`'s real 500ms paste-settle sleep are genuine wall-clock costs this ceiling must
+ * clear with room to spare.
+ */
+const SECOND_SESSION_SAGA_TIMEOUT_MS = 20_000;
 
 const POLL_INTERVAL_MS = 100;
 const READY_TIMEOUT_MS = 30_000;
@@ -575,11 +613,19 @@ function killAndWait(child) {
  * unresolved tmpdir-rooted path would silently exit 0 with no output rather than start. Defensive
  * here (`DIST_ENTRY` is inside the repo, not under tmpdir), but load-bearing for any check that ever
  * boots from a tmpdir worktree.
+ * @remarks `opts.pathPrefix` (Plan 94-05) is prepended onto the spawned child's `PATH`, so
+ * `resolveBinaryPath("claude")` (`resolve-binary.ts`, a bare `which claude`) resolves a stub
+ * binary planted earlier on that prefix before it ever reaches a real `claude` install. Every
+ * pre-existing call site passes no `opts`, so `PATH` is inherited unchanged for them.
  */
-function bootServer(home) {
+function bootServer(home, opts = {}) {
   assertBuilt();
+  const env = { ...process.env, HOME: home, NODE_ENV: "production" };
+  if (opts.pathPrefix) {
+    env.PATH = `${opts.pathPrefix}${delimiter}${env.PATH ?? ""}`;
+  }
   const child = spawn("node", [realpathSync(DIST_ENTRY)], {
-    env: { ...process.env, HOME: home, NODE_ENV: "production" },
+    env,
     stdio: ["ignore", "pipe", "pipe"],
   });
   const logLines = [];
@@ -632,6 +678,22 @@ async function tmuxNewSession(name, cwd) {
 async function tmuxKillSession(name) {
   try {
     await execFileP("tmux", ["kill-session", "-t", name]);
+  } catch {
+    // already gone — idempotent teardown
+  }
+}
+
+/**
+ * `tmux kill-session -t =<name>` — the `=` EXACT-MATCH form, tolerant of an already-gone session.
+ * Required whenever a target name can be a tmux PREFIX of a live sibling (`dsp-<identifier>`
+ * beside `dsp-<identifier>-2`): the bare form in {@link tmuxKillSession} prefix-matches on tmux
+ * 3.6a when no exact match exists, so killing session 1 by its bare name after session 2 already
+ * exists is not guaranteed to kill session 1 specifically. Never used for `send-keys`/
+ * `capture-pane`, which report "can't find pane" under `=` on this tmux version.
+ */
+async function tmuxKillSessionExact(name) {
+  try {
+    await execFileP("tmux", ["kill-session", "-t", `=${name}`]);
   } catch {
     // already gone — idempotent teardown
   }
@@ -999,6 +1061,45 @@ function seedFixtureCard(home, card) {
   }
 }
 
+/**
+ * Plant a stub `claude` executable under `home/bin/claude` (Plan 94-05). Returns the containing
+ * `bin/` directory, the value {@link bootServer}'s `opts.pathPrefix` needs so
+ * `resolveBinaryPath("claude")` (`resolve-binary.ts`, a bare `which claude`) resolves this stub
+ * before any real install.
+ * @remarks The stub MUST branch on its own argv, not merely block forever: boot itself calls the
+ * resolved `claude` binary with `--version` (`hook-setup.ts#checkHooksCapability`, no timeout on
+ * that `run()` call) BEFORE the sandbox server ever starts listening — a stub that always loops
+ * would hang the server's own boot, not merely the saga. `--version` therefore prints a version
+ * string BELOW `HOOKS_FLOOR` (`1.0.0`) and exits 0 immediately, so boot resolves `capable: false`
+ * and the saga takes the simpler hook-silent launch branch (`steps.ts`'s `startClaude`), which
+ * this fixture has no need to exercise. Any OTHER invocation (the real saga launch) prints ONE
+ * line matching `steps.ts`'s `READY` regex — the literal
+ * `bypass permissions on (shift+tab to cycle)`, never anything matching `TRUST_DIALOG` or
+ * `BYPASS_DIALOG` — and then blocks forever in the exact `while true; do sleep 3600; done` shape
+ * {@link tmuxNewSession}'s own stub panes already use, so `writePaneMarker`/`readPaneThroughProxy`
+ * work against it unchanged (typed input echoes to the pane via the tty driver's local echo, not
+ * because any process consumes it).
+ */
+function writeStubClaudeBinary(home) {
+  const binDir = join(home, "bin");
+  mkdirSync(binDir, { recursive: true });
+  const claudePath = join(binDir, "claude");
+  writeFileSync(
+    claudePath,
+    "#!/bin/sh\n" +
+      'case " $* " in\n' +
+      '  *" --version "*)\n' +
+      '    echo "1.0.0 (Claude Code)"\n' +
+      "    exit 0\n" +
+      "    ;;\n" +
+      "esac\n" +
+      "echo 'bypass permissions on (shift+tab to cycle)'\n" +
+      "while true; do sleep 3600; done\n",
+    { mode: 0o755 },
+  );
+  return binDir;
+}
+
 /** `{ exists, mtimeMs, size }` for `path`, or an all-null/false shape when it doesn't exist. */
 function statFile(path) {
   try {
@@ -1125,7 +1226,122 @@ function assertBuilt() {
  * `workspacePath` alone. Every other profile leaves `built.worktrees` unset and takes none of this
  * path, so their behaviour is unchanged.
  */
+/**
+ * Stand up {@link SECOND_SESSION_FIXTURE}: session 1 named and worktree-homed exactly as the real
+ * product would (`dsp-<identifier>`, `workspaces/<identifier>/alpha`, branch `<identifier>`), plus
+ * a stub `claude` executable on the sandbox's own `bin/` directory so the real start saga's
+ * readiness poll resolves in milliseconds when the harness later drives session 2 through it.
+ * @remarks Same warmup-before-ttyd ordering hazard {@link standUpFixture}'s own remarks document
+ * (a cardless warmup's `reconcileSessions()` would sweep this fixture's own freshly-spawned ttyd)
+ * — the warmup boot runs first here too, before session 1's tmux/ttyd exist.
+ * @remarks Session 2 is deliberately NOT created here: it is created by the checks themselves,
+ * driving the real `POST /cards/:id/start` route ({@link startSecondSession}) against the server
+ * booted at the end of this function — that is the entire point of this fixture shape.
+ */
+async function standUpRealSagaFixture(built) {
+  const warmup = bootServer(built.home);
+  await waitForReady(built.port);
+  await killAndWait(warmup.child);
+
+  built.tmux.a = `dsp-${built.identifier}`;
+  await tmuxNewSession(built.tmux.a, built.home);
+  const live = await tmuxListSessionNames();
+  if (!live.includes(built.tmux.a)) {
+    throw new Error(
+      `session 1 tmux session did not come up: missing ${built.tmux.a}, live=${JSON.stringify(live)}`,
+    );
+  }
+  console.log(`standup (real-saga): tmux session 1 live — ${built.tmux.a}`);
+
+  const handle = { id: randomUUID(), token: randomBytes(32).toString("hex") };
+  built.sessionA = handle;
+  built.ttyd.a = await spawnTtyd(built.tmux.a, handle.id);
+  await waitForPortListening(built.ttyd.a.port);
+  console.log(
+    `standup (real-saga): ttyd for session 1 LISTENING — ${built.ttyd.a.port}`,
+  );
+
+  await seedFixtureRepo(built);
+  console.log(
+    `standup (real-saga): fixture repo ready — ${built.repoPath} (base ${built.repoBase})`,
+  );
+
+  const { worktreeAddNewBranch } = await loadGitAdapter();
+  const { worktreePath } = await loadWorkspacePathsAdapter();
+
+  const workspacePath = join(built.home, "workspaces", built.identifier);
+  assertUnderTmpdir(workspacePath, "workspace path (session 1)");
+  mkdirSync(workspacePath, { recursive: true });
+  const wtPath = worktreePath(workspacePath, built.repoPath);
+  assertUnderTmpdir(wtPath, "worktree path (session 1)");
+  await worktreeAddNewBranch(
+    built.repoPath,
+    wtPath,
+    built.identifier,
+    built.repoBase,
+  );
+  built.session1WorktreePath = wtPath;
+  built.session1WorkspacePath = workspacePath;
+  built.session1Branch = built.identifier;
+  writeFileSync(
+    join(wtPath, "session-a.txt"),
+    "fixture worktree for session 1\n",
+  );
+  await execFileP("git", ["add", "session-a.txt"], { cwd: wtPath });
+  await execFileP(
+    "git",
+    ["commit", "-m", "fixture session 1", "--no-gpg-sign"],
+    { cwd: wtPath },
+  );
+  console.log(`standup (real-saga): session 1 worktree registered — ${wtPath}`);
+
+  const now = new Date().toISOString();
+  const record = {
+    id: handle.id,
+    createdAt: now,
+    updatedAt: now,
+    tmuxSession: built.tmux.a,
+    ttydPort: built.ttyd.a.port,
+    hookToken: handle.token,
+    workspacePath,
+    branch: built.identifier,
+    workspace: {
+      folder: join(built.home, "repos"),
+      repos: [{ path: built.repoPath, base: built.repoBase }],
+    },
+  };
+  const card = {
+    id: built.cardId,
+    issueId: `${built.cardId}-issue`,
+    identifier: built.identifier,
+    title: "session-liveness-v3 real-saga fixture card — 1 real session",
+    description: null,
+    priority: 3,
+    column: "in_progress",
+    updatedAt: now,
+    sessions: [record],
+    activeSessionId: record.id,
+    tmuxSession: record.tmuxSession,
+    ttydPort: record.ttydPort,
+    hookToken: record.hookToken,
+    workspacePath: record.workspacePath,
+    workspace: record.workspace,
+    branch: record.branch,
+  };
+  seedFixtureCard(built.home, card);
+
+  built.pathPrefix = writeStubClaudeBinary(built.home);
+  console.log(
+    `standup (real-saga): stub claude planted — ${join(built.pathPrefix, "claude")}`,
+  );
+
+  built.server = bootServer(built.home, { pathPrefix: built.pathPrefix });
+  await waitForReady(built.port);
+  console.log(`standup (real-saga): sandbox server ready on :${built.port}`);
+}
+
 async function standUpFixture(built) {
+  if (built.realSaga) return standUpRealSagaFixture(built);
   const warmup = bootServer(built.home);
   await waitForReady(built.port);
   await killAndWait(warmup.child);
@@ -1275,6 +1491,7 @@ async function standUpFixture(built) {
  * failure during teardown must halt hard, never degrade into a logged violation.
  */
 async function tearDownFixture(built, violations) {
+  if (built.realSaga) return tearDownRealSagaFixture(built, violations);
   await killAndWait(built.server?.child);
 
   for (const key of built.sessionKeys) {
@@ -1400,6 +1617,139 @@ async function tearDownFixture(built, violations) {
 }
 
 /**
+ * Poll `GET /api/board` on `port` until it REFUSES to connect (the sandbox server is actually
+ * gone), or `timeoutMs` elapses. A server that still answers after its own kill is not a warning —
+ * `94-VALIDATION.md`'s standing rule (a sandboxed server is not sandboxed in its machine-wide
+ * sweep) makes a leaked-but-reported-dead server a real hazard, so the caller turns a `false`
+ * return into a violation rather than logging and moving on.
+ */
+async function waitForServerGone(port, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/board`);
+      await res.body?.cancel().catch(() => {});
+    } catch {
+      return true;
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return false;
+}
+
+/**
+ * Teardown for {@link SECOND_SESSION_FIXTURE}: removes what the REAL SAGA created, not only what
+ * {@link standUpRealSagaFixture} created — session 2's tmux session, worktree and branch exist
+ * only because a check drove `POST /start` through the real route, so this function discovers them
+ * rather than assuming a fixed shape.
+ * @remarks Every tmux kill against a name that can be a PREFIX of a sibling (`dsp-<identifier>`
+ * beside `dsp-<identifier>-2`) uses {@link tmuxKillSessionExact} against a name READ BACK from
+ * `tmux list-sessions`, never a bare prefix target — the harness must not reproduce the very bug
+ * this fixture exists to catch.
+ * @remarks Worktree cleanup is driven by `git worktree list --porcelain` (never a hardcoded path
+ * list), so session 2's worktree — whose exact path this function never independently computes —
+ * is discovered and removed the same way session 1's is.
+ */
+async function tearDownRealSagaFixture(built, violations) {
+  await killAndWait(built.server?.child);
+  const serverGone = await waitForServerGone(
+    built.port,
+    LISTEN_POLL_TIMEOUT_MS,
+  );
+  if (!serverGone) {
+    violations.push(
+      `teardown (real-saga): sandbox server on :${built.port} still answers GET /api/board after kill`,
+    );
+  }
+
+  const ttydA = built.ttyd.a;
+  if (ttydA?.child) {
+    try {
+      ttydA.child.kill("SIGTERM");
+    } catch {
+      // already gone
+    }
+  }
+  await sleep(300);
+  if (ttydA && (await isPortListening(ttydA.port))) {
+    for (const pid of await pidsListeningOnPort(ttydA.port)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // already gone
+      }
+    }
+  }
+
+  const liveNames = (await tmuxListSessionNames()).filter((n) =>
+    n.startsWith(`dsp-${built.identifier}`),
+  );
+  for (const name of liveNames) {
+    await tmuxKillSessionExact(name);
+  }
+
+  if (built.repoPath && existsSync(built.repoPath)) {
+    try {
+      const registered = await gitWorktreeListRegistered(built.repoPath);
+      const { worktreeRemove, worktreePrune } = await loadGitAdapter();
+      const mainWorktree = realpathSync(built.repoPath);
+      for (const wtPath of registered) {
+        if (wtPath === mainWorktree) continue;
+        assertUnderTmpdir(wtPath, "real-saga worktree path");
+        try {
+          await worktreeRemove(built.repoPath, wtPath);
+        } catch (err) {
+          violations.push(
+            `teardown (real-saga): worktreeRemove failed for ${wtPath}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      await worktreePrune(built.repoPath).catch(() => {});
+    } catch (err) {
+      violations.push(
+        `teardown (real-saga): worktree enumeration/removal failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    assertUnderTmpdir(built.repoPath, "fixture repo");
+    rmSync(built.repoPath, { recursive: true, force: true });
+  }
+
+  if (built.home && existsSync(built.home)) {
+    assertUnderTmpdir(built.home, "sandbox home");
+    rmSync(built.home, { recursive: true, force: true });
+  }
+
+  const remaining = (await tmuxListSessionNames()).filter((n) =>
+    n.startsWith(`dsp-${built.identifier}`),
+  );
+  if (remaining.length > 0) {
+    violations.push(
+      `teardown (real-saga): tmux sessions still present after kill-session: ${remaining.join(", ")}`,
+    );
+  }
+  if (ttydA && (await isPortListening(ttydA.port))) {
+    violations.push(
+      `teardown (real-saga): ttyd port ${ttydA.port} (session 1) still LISTENING after kill`,
+    );
+  }
+  if (await isPortListening(built.port)) {
+    violations.push(
+      `teardown (real-saga): sandbox port ${built.port} still LISTENING after server kill`,
+    );
+  }
+  if (built.home && existsSync(built.home)) {
+    violations.push(
+      `teardown (real-saga): sandbox home ${built.home} still exists after rmSync`,
+    );
+  }
+  if (built.repoPath && existsSync(built.repoPath)) {
+    violations.push(
+      `teardown (real-saga): fixture repo still exists after removal: ${built.repoPath}`,
+    );
+  }
+}
+
+/**
  * One complete fixture lifecycle: preflight, a fresh sandbox home under `label`, one real tmux
  * session and one real ttyd per `profile.sessionKeys` entry, `fn(built)`, then
  * unconditional-and-verified teardown — regardless of what `fn` returns or throws. Every check in
@@ -1425,6 +1775,8 @@ async function withFixture(label, fn, profile = TWO_SESSION_FIXTURE) {
     tmuxPrefix: profile.tmuxPrefix,
     sessionKeys: profile.sessionKeys,
     worktrees: profile.worktrees === true,
+    realSaga: profile.realSaga === true,
+    identifier: profile.identifier,
     tmux: {},
     ttyd: {},
     server: null,
@@ -1563,6 +1915,47 @@ async function postCleanup(built, opts) {
   );
   await res.body?.cancel().catch(() => {});
   return res.status;
+}
+
+/**
+ * POST the REAL `/api/cards/:id/start` route (Plan 94-05) — never a direct `store`/saga call — so
+ * a second-session check exercises the exact same request path a real drag-triggered "Start
+ * another session" click sends: server-side 409 re-validation, the reserve-before-run store step,
+ * and every saga step in between.
+ */
+async function startSecondSession(built, { newSession }) {
+  const res = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${built.cardId}/start`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ extraDirection: "", newSession }),
+    },
+  );
+  const body = await res.json().catch(() => undefined);
+  return { status: res.status, body };
+}
+
+/**
+ * Poll {@link fetchFixtureCard} until the real saga has SETTLED: `provisioningStep` is `null` AND
+ * either a second session has landed (`sessionCount >= 2` — `redactCard` emits this field only at
+ * N>=2) or the saga recorded a `startError`. Returns `{ card, timedOut }` rather than throwing on a
+ * timeout, so a caller can report the LAST OBSERVED card state as part of a named violation instead
+ * of an opaque exception.
+ */
+async function waitForSagaSettled(built, { timeoutMs }) {
+  const deadline = Date.now() + timeoutMs;
+  let card;
+  while (Date.now() < deadline) {
+    card = await fetchFixtureCard(built);
+    const settled =
+      card != null &&
+      card.provisioningStep == null &&
+      ((card.sessionCount ?? 1) >= 2 || card.startError != null);
+    if (settled) return { card, timedOut: false };
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return { card, timedOut: true };
 }
 
 /**
@@ -6241,6 +6634,348 @@ async function checkCleanupScheduleRestart() {
   return violations;
 }
 
+/**
+ * Sorted list of every tracked-or-untracked file under `worktreePath`, `.git` excluded — the
+ * "worktree file set" isolation assertions (Plan 94-05) compare before/after, so a session-2
+ * creation that ever wrote into session 1's own worktree directory (a wrong-target bug, not merely
+ * a wrong-name one) would surface here even if every named-file/porcelain assertion missed it.
+ */
+async function listWorktreeFiles(worktreePath) {
+  const { stdout } = await execFileP("find", [
+    worktreePath,
+    "-type",
+    "f",
+    "-not",
+    "-path",
+    "*/.git/*",
+  ]);
+  return stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .sort();
+}
+
+/**
+ * `--check second-session-fixture` (Plan 94-05 Task 1): the direct analog of Phase 93's
+ * `cleanup-fixture` for {@link SECOND_SESSION_FIXTURE} — stands the fixture up, drives ONE real
+ * `POST /start {newSession:true}` through the real route, waits for the saga to settle, and
+ * asserts the fixture itself came up the way a real second start would. Exists so a fixture
+ * failure is diagnosable AS a fixture failure, never mistaken for a product defect by the
+ * criterion checks ({@link checkSecondSessionIsolation}) that build on it.
+ */
+async function checkSecondSessionFixture(built) {
+  const violations = [];
+
+  const { status, body } = await startSecondSession(built, {
+    newSession: true,
+  });
+  console.log(
+    `second-session-fixture: POST /start {newSession:true} -> ${status}`,
+  );
+  if (status !== 202) {
+    violations.push(
+      `second-session-fixture: POST /start returned ${status}, expected 202 (body=${JSON.stringify(body)})`,
+    );
+    return violations;
+  }
+
+  const { card, timedOut } = await waitForSagaSettled(built, {
+    timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+  });
+  if (timedOut) {
+    violations.push(
+      `second-session-fixture: saga did not settle within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (last observed card=${JSON.stringify(card)})`,
+    );
+    return violations;
+  }
+  if (card?.startError != null) {
+    violations.push(
+      `second-session-fixture: saga recorded a startError instead of a second session: ${JSON.stringify(card.startError)}`,
+    );
+    return violations;
+  }
+
+  const session1Name = built.tmux.a;
+  const session2Name = `dsp-${built.identifier}-2`;
+  console.log(
+    `second-session-fixture: session 1 = ${session1Name}, session 2 = ${session2Name}`,
+  );
+
+  const summaryCount = card?.sessionSummaries?.length ?? 0;
+  if (summaryCount !== 2) {
+    violations.push(
+      `second-session-fixture: card.sessionSummaries has ${summaryCount} entries, expected 2 (${JSON.stringify(card?.sessionSummaries)})`,
+    );
+  }
+
+  const live = await tmuxListSessionNames();
+  if (!live.includes(session1Name)) {
+    violations.push(
+      `second-session-fixture: session 1's exact tmux name ${session1Name} not found in list-sessions: ${JSON.stringify(live)}`,
+    );
+  }
+  if (!live.includes(session2Name)) {
+    violations.push(
+      `second-session-fixture: session 2's exact tmux name ${session2Name} not found in list-sessions: ${JSON.stringify(live)}`,
+    );
+  }
+
+  const registered = await gitWorktreeListRegistered(built.repoPath);
+  const session1Wt = existsSync(built.session1WorktreePath)
+    ? realpathSync(built.session1WorktreePath)
+    : built.session1WorktreePath;
+  if (!registered.has(session1Wt)) {
+    violations.push(
+      `second-session-fixture: session 1 worktree not registered in \`git worktree list\`: ${built.session1WorktreePath} (registered=${[...registered].join(", ")})`,
+    );
+  }
+  const session2WorkspacePath = join(
+    built.home,
+    "workspaces",
+    `${built.identifier}-2`,
+  );
+  const session2WtPath = join(session2WorkspacePath, "alpha");
+  const session2Wt = existsSync(session2WtPath)
+    ? realpathSync(session2WtPath)
+    : session2WtPath;
+  if (!registered.has(session2Wt)) {
+    violations.push(
+      `second-session-fixture: session 2 worktree not registered in \`git worktree list\`: ${session2WtPath} (registered=${[...registered].join(", ")})`,
+    );
+  }
+
+  const { stdout: branchOut } = await execFileP("git", ["branch", "--list"], {
+    cwd: built.repoPath,
+  });
+  if (!branchOut.includes(built.identifier)) {
+    violations.push(
+      `second-session-fixture: session 1's branch not found in \`git branch --list\`: ${built.identifier}`,
+    );
+  }
+  if (!branchOut.includes(`${built.identifier}-2`)) {
+    violations.push(
+      `second-session-fixture: session 2's branch not found in \`git branch --list\`: ${built.identifier}-2`,
+    );
+  }
+
+  console.log(
+    `second-session-fixture: registered worktrees=[${[...registered].join(", ")}] branches=[${built.identifier}, ${built.identifier}-2]`,
+  );
+
+  return violations;
+}
+
+/**
+ * `--check second-session-isolation` (Plan 94-05 Task 2, criterion C1, MULTI-01/START-01): drives
+ * the REAL start saga end to end and proves session 1 keeps its worktree, its terminal, and its
+ * ability to ANSWER while session 2 is created — plus the FAN-OUT shape (94-VALIDATION.md's
+ * standing rule: isolation alone risks passing vacuously; only fan-out proved the Phase 93
+ * regression).
+ * @remarks Every tmux survival assertion below compares against session 1's EXACT recorded name
+ * (`.includes(exactName)`/`===`), never a count and never `startsWith` — the tmux 3.6a prefix-match
+ * trap this whole plan exists to close.
+ */
+async function checkSecondSessionIsolation(built) {
+  const violations = [];
+
+  const session1Name = built.tmux.a;
+  const session2Name = `dsp-${built.identifier}-2`;
+
+  writeFileSync(
+    join(built.session1WorktreePath, "session-a.txt"),
+    "uncommitted isolation-check edit\n",
+    { flag: "a" },
+  );
+
+  const beforeHead = (
+    await execFileP("git", ["rev-parse", "HEAD"], {
+      cwd: built.session1WorktreePath,
+    })
+  ).stdout.trim();
+  const beforePorcelain = (
+    await execFileP("git", ["status", "--porcelain"], {
+      cwd: built.session1WorktreePath,
+    })
+  ).stdout;
+  const beforeFiles = await listWorktreeFiles(built.session1WorktreePath);
+  console.log(
+    `second-session-isolation: session 1 BEFORE — HEAD=${beforeHead} porcelain=${JSON.stringify(beforePorcelain)} files=${JSON.stringify(beforeFiles)}`,
+  );
+
+  const marker1 = `pre-second-start-${randomBytes(4).toString("hex")}`;
+  await writePaneMarker(session1Name, built.home, marker1);
+  const read1 = await readPaneThroughProxy({
+    port: built.port,
+    idSegment: built.sessionA.id,
+    expect: marker1,
+    timeoutMs: PROXY_READ_TIMEOUT_MS,
+  });
+  console.log(
+    `second-session-isolation: session 1 answerable BEFORE the second start — found=${read1.text.includes(marker1)}`,
+  );
+  if (!read1.text.includes(marker1)) {
+    violations.push(
+      `second-session-isolation: session 1 did not echo marker "${marker1}" through the proxy BEFORE the second start — the fixture itself is not answerable, so no later claim about it is meaningful`,
+    );
+    return violations;
+  }
+
+  const { status, body } = await startSecondSession(built, {
+    newSession: true,
+  });
+  console.log(
+    `second-session-isolation: POST /start {newSession:true} -> ${status}`,
+  );
+  if (status !== 202) {
+    violations.push(
+      `second-session-isolation: POST /start returned ${status}, expected 202 (body=${JSON.stringify(body)})`,
+    );
+    return violations;
+  }
+
+  const { card, timedOut } = await waitForSagaSettled(built, {
+    timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+  });
+  if (timedOut) {
+    violations.push(
+      `second-session-isolation: saga did not settle within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (last observed card=${JSON.stringify(card)})`,
+    );
+    return violations;
+  }
+  if (card?.startError != null) {
+    violations.push(
+      `second-session-isolation: saga recorded a startError instead of a second session: ${JSON.stringify(card.startError)}`,
+    );
+    return violations;
+  }
+
+  // --- FAN-OUT: assert everything that should be RIGHT, not only that nothing was touched. ---
+  const live = await tmuxListSessionNames();
+  console.log(
+    `second-session-isolation: tmux list-sessions after second start = ${JSON.stringify(live)}`,
+  );
+  if (!live.includes(session1Name)) {
+    violations.push(
+      `second-session-isolation: session 1's EXACT tmux name ${session1Name} not found in list-sessions after the second start: ${JSON.stringify(live)}`,
+    );
+  }
+  if (!live.includes(session2Name)) {
+    violations.push(
+      `second-session-isolation: session 2's EXACT tmux name ${session2Name} not found in list-sessions: ${JSON.stringify(live)}`,
+    );
+  }
+
+  const summaryIds = (card?.sessionSummaries ?? []).map((s) => s.id);
+  if (summaryIds.length !== 2 || new Set(summaryIds).size !== 2) {
+    violations.push(
+      `second-session-isolation: card.sessionSummaries should carry exactly 2 DISTINCT session ids, got ${JSON.stringify(summaryIds)}`,
+    );
+  }
+
+  const persisted = readCard(built.dbPath, built.cardId);
+  const persistedSessions = persisted?.sessions ?? [];
+  if (persistedSessions.length !== 2) {
+    violations.push(
+      `second-session-isolation: persisted card.sessions has ${persistedSessions.length} records, expected 2`,
+    );
+  }
+  const [recA, recB] = persistedSessions;
+  if (recA && recB) {
+    const sixValues = [
+      recA.tmuxSession,
+      recA.branch,
+      recA.workspacePath,
+      recB.tmuxSession,
+      recB.branch,
+      recB.workspacePath,
+    ];
+    console.log(
+      `second-session-isolation: persisted session fields — A=${JSON.stringify({ tmuxSession: recA.tmuxSession, branch: recA.branch, workspacePath: recA.workspacePath })} B=${JSON.stringify({ tmuxSession: recB.tmuxSession, branch: recB.branch, workspacePath: recB.workspacePath })}`,
+    );
+    if (new Set(sixValues).size !== 6) {
+      violations.push(
+        `second-session-isolation: persisted session records must carry SIX pairwise-distinct values (tmuxSession/branch/workspacePath x2), got ${JSON.stringify(sixValues)}`,
+      );
+    }
+  }
+
+  const registeredAfter = await gitWorktreeListRegistered(built.repoPath);
+  const session1Wt = existsSync(built.session1WorktreePath)
+    ? realpathSync(built.session1WorktreePath)
+    : built.session1WorktreePath;
+  const session2WtPath = join(
+    built.home,
+    "workspaces",
+    `${built.identifier}-2`,
+    "alpha",
+  );
+  const session2Wt = existsSync(session2WtPath)
+    ? realpathSync(session2WtPath)
+    : session2WtPath;
+  if (!registeredAfter.has(session1Wt)) {
+    violations.push(
+      `second-session-isolation: session 1 worktree missing from \`git worktree list\` after the second start: ${built.session1WorktreePath}`,
+    );
+  }
+  if (!registeredAfter.has(session2Wt)) {
+    violations.push(
+      `second-session-isolation: session 2 worktree missing from \`git worktree list\`: ${session2WtPath} (registered=${[...registeredAfter].join(", ")})`,
+    );
+  }
+
+  // --- ISOLATION: session 1's own worktree is byte-identical to its BEFORE state. ---
+  const afterHead = (
+    await execFileP("git", ["rev-parse", "HEAD"], {
+      cwd: built.session1WorktreePath,
+    })
+  ).stdout.trim();
+  const afterPorcelain = (
+    await execFileP("git", ["status", "--porcelain"], {
+      cwd: built.session1WorktreePath,
+    })
+  ).stdout;
+  const afterFiles = await listWorktreeFiles(built.session1WorktreePath);
+  console.log(
+    `second-session-isolation: session 1 AFTER — HEAD=${afterHead} porcelain=${JSON.stringify(afterPorcelain)} files=${JSON.stringify(afterFiles)}`,
+  );
+  if (afterHead !== beforeHead) {
+    violations.push(
+      `second-session-isolation: session 1's HEAD changed — before=${beforeHead} after=${afterHead}`,
+    );
+  }
+  if (afterPorcelain !== beforePorcelain) {
+    violations.push(
+      `second-session-isolation: session 1's \`git status --porcelain\` changed — before=${JSON.stringify(beforePorcelain)} after=${JSON.stringify(afterPorcelain)}`,
+    );
+  }
+  if (JSON.stringify(afterFiles) !== JSON.stringify(beforeFiles)) {
+    violations.push(
+      `second-session-isolation: session 1's worktree file set changed — before=${JSON.stringify(beforeFiles)} after=${JSON.stringify(afterFiles)}`,
+    );
+  }
+
+  // --- ANSWERABILITY: the criterion's own bar — a directory surviving is not enough. ---
+  const marker2 = `post-second-start-${randomBytes(4).toString("hex")}`;
+  await writePaneMarker(session1Name, built.home, marker2);
+  const read2 = await readPaneThroughProxy({
+    port: built.port,
+    idSegment: built.sessionA.id,
+    expect: marker2,
+    timeoutMs: PROXY_READ_TIMEOUT_MS,
+  });
+  console.log(
+    `second-session-isolation: session 1 answerable AFTER the second start — found=${read2.text.includes(marker2)}`,
+  );
+  if (!read2.text.includes(marker2)) {
+    violations.push(
+      `second-session-isolation: session 1 did not echo marker "${marker2}" through the proxy AFTER the second start — a directory surviving is not the same as session 1 still ANSWERING`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -6264,6 +6999,18 @@ const CHECKS = {
   "cleanup-refusal": checkCleanupRefusal,
   "cleanup-branches": checkCleanupBranches,
   "cleanup-schedule-restart": checkCleanupScheduleRestart,
+  "second-session-fixture": () =>
+    withFixture(
+      "second-session-fixture",
+      checkSecondSessionFixture,
+      SECOND_SESSION_FIXTURE,
+    ),
+  "second-session-isolation": () =>
+    withFixture(
+      "second-session-isolation",
+      checkSecondSessionIsolation,
+      SECOND_SESSION_FIXTURE,
+    ),
 };
 
 /**
