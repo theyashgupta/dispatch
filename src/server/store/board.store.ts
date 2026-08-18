@@ -421,6 +421,14 @@ class BoardStore extends EventEmitter {
    */
   private readonly warnedOrphanFlatSessions = new Set<string>();
   /**
+   * Card ids already reported by {@link sessionsDueForCleanup} as holding a due card-level
+   * `cleanupDueAt` with no due (or no) session record to attribute it to (`WR-05` sibling for
+   * cleanup scheduling). Transient and in-memory like `warnedOrphanFlatSessions`: logged once per
+   * card so a corrupt card is not re-reported on every scheduler tick, and a restart deliberately
+   * re-reports so the operator sees it again.
+   */
+  private readonly warnedOrphanDueCards = new Set<string>();
+  /**
    * Bootstrap-injected releaser for cleared hook tokens. The boundaries DAG forbids
    * store → services, so bootstrap wires services/domain/hook-tokens.ts' unregister function in here
    * (composed with hook-events' activity-throttle reaper, which is why the card id rides along);
@@ -2087,21 +2095,56 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Synchronous read of every card whose automatic-cleanup schedule has elapsed (`LIFE-03`): still
-   * in Done, `cleanupDueAt` set and at or before `now`, and no start saga in flight. The column and
-   * `isStarting` checks reproduce, in the scheduler's path, the two defense-in-depth guards
-   * `routes/cards.route.ts` already applies to the manual `/cleanup` route — a stray schedule must
-   * never tear down a card that left Done, and cleanup must never race a start saga building the
-   * same worktrees.
+   * Synchronous read of every (card, session) pair whose automatic-cleanup schedule has elapsed
+   * (`LIFE-03`), one entry per due SESSION. The column and `isStarting` checks stay CARD-scoped and
+   * are applied ONCE per card, not folded into the per-session predicate (Pitfall 3): a card mid-
+   * start-saga has ALL its sessions ineligible for this tick regardless of any individual session's
+   * own `cleanupDueAt`, and a card that already left Done carries no schedule for ANY session by
+   * design (`moveCardManual` clears every one on the way out). These reproduce, in the scheduler's
+   * path, the same two defense-in-depth guards `routes/cards.route.ts` already applies to the manual
+   * `/cleanup` route.
+   * @remarks Structurally mirrors {@link sessionsWithTmux}: within an eligible card, every session
+   * whose `cleanupDueAt` is set and at or before `now` yields its own entry. If the card yielded
+   * NOTHING this way but its own `card.cleanupDueAt` is nonetheless due, one SYNTHETIC entry is
+   * yielded with `sessionId: undefined` — the flat-mirror fallback for a card holding legacy flat
+   * session state with no resolvable record (`WR-05`). `sessionId: undefined` is deliberate, not a
+   * placeholder: {@link cleanupWorkspace} treats an `undefined` id as the legacy card-projection
+   * path and falls back to the card, whereas a synthetic non-existent session id would hit its
+   * explicit-miss refusal and produce the exact same stranding this fallback exists to prevent.
+   * Dropping the fallback entirely would leave such a card never scanned, never cleaned, holding its
+   * worktree indefinitely — so a corrupt/legacy card is logged once (`warnedOrphanDueCards`) rather
+   * than silently dropped, mirroring `sessionsWithTmux`'s own once-per-card logging.
    */
-  cardsDueForCleanup(now: number): Card[] {
-    return [...this.cards.values()].filter(
-      (card) =>
-        card.column === "done" &&
-        card.cleanupDueAt != null &&
-        card.cleanupDueAt <= now &&
-        !this.isStarting(card.id),
-    );
+  sessionsDueForCleanup(
+    now: number,
+  ): { card: Card; sessionId: string | undefined; dueAt: number }[] {
+    const out: { card: Card; sessionId: string | undefined; dueAt: number }[] =
+      [];
+    for (const card of this.cards.values()) {
+      if (card.column !== "done" || this.isStarting(card.id)) continue;
+      let yielded = false;
+      for (const session of card.sessions ?? []) {
+        if (session.cleanupDueAt != null && session.cleanupDueAt <= now) {
+          out.push({
+            card,
+            sessionId: session.id,
+            dueAt: session.cleanupDueAt,
+          });
+          yielded = true;
+        }
+      }
+      if (yielded) continue;
+      if (card.cleanupDueAt != null && card.cleanupDueAt <= now) {
+        if (!this.warnedOrphanDueCards.has(card.id)) {
+          this.warnedOrphanDueCards.add(card.id);
+          console.error(
+            `[store] card ${card.id} — due cleanupDueAt is set at the card level but no session record carries it; scanning the flat mirror so cleanup still runs`,
+          );
+        }
+        out.push({ card, sessionId: undefined, dueAt: card.cleanupDueAt });
+      }
+    }
+    return out;
   }
 
   /**
@@ -2117,13 +2160,21 @@ class BoardStore extends EventEmitter {
    * consulted against the live Map inside the enqueue callback (WR-04 precedent), so it holds even
    * if a route-level check were ever removed. No-op if the id is unknown.
    *
-   * Also the sole writer of a FRESH deferred-cleanup schedule (`LIFE-02`): a genuine Done arrival
-   * (`from !== "done"`) of a card still holding a session or workspace stamps `cleanupDueAt` with a
-   * full `cleanupDelayMs`-length delay; leaving Done clears it. The `from !== "done"` guard is
-   * load-bearing — `isManualMoveAllowed` permits a done→done no-op move, and without the guard a
-   * redundant/retried move-to-done would silently push the schedule out by a full delay.
-   * `restoreCleanupDue` (`LIFE-03`) is the one other writer of the field, but it never mints a fresh
-   * delay — it only re-instates a schedule the scheduler's own abandon path cleared moments earlier.
+   * Also the sole writer of a FRESH deferred-cleanup schedule (`LIFE-02`), now stamped PER SESSION: a
+   * genuine Done arrival (`from !== "done"`) stamps `cleanupDueAt` with a full `cleanupDelayMs`-length
+   * delay on EVERY record in `card.sessions` that still holds `tmuxSession != null ||
+   * workspacePath != null` — a ticket can own more than one session, and each is torn down and
+   * scheduled independently. The card-level `cleanupDueAt` is kept as a MIRROR of the ACTIVE
+   * session's stamp (same active-session-mirror discipline every other cleanup mutator here follows),
+   * so the existing countdown render is byte-identical at N=1. A card with no session records but
+   * still holding flat `tmuxSession`/`workspacePath` (the legacy path) gets `card.cleanupDueAt`
+   * stamped directly, exactly as before. Leaving Done clears `cleanupDueAt` on EVERY session AND on
+   * the card — a session left holding a stale schedule after a legal drag back to In Progress would
+   * be torn down out from under a live ticket. The `from !== "done"` guard is load-bearing —
+   * `isManualMoveAllowed` permits a done→done no-op move, and without the guard a redundant/retried
+   * move-to-done would silently push every schedule out by a full delay. `restoreCleanupDue`
+   * (`LIFE-03`) is the one other writer of the field, but it never mints a fresh delay — it only
+   * re-instates a schedule the scheduler's own abandon path cleared moments earlier.
    */
   moveCardManual(id: string, column: Column): Promise<void> {
     return this.enqueue(() => {
@@ -2133,14 +2184,26 @@ class BoardStore extends EventEmitter {
       if (!isManualMoveAllowed(from, column)) return [];
       c.column = column;
       this.mirrorMemberColumn(c, column);
-      if (
-        from !== "done" &&
-        column === "done" &&
-        (c.tmuxSession != null || c.workspacePath != null)
-      ) {
-        c.cleanupDueAt = Date.now() + this.cleanupDelayMs;
+      if (from !== "done" && column === "done") {
+        const sessions = c.sessions ?? [];
+        const dueAt = Date.now() + this.cleanupDelayMs;
+        for (const s of sessions) {
+          if (s.tmuxSession != null || s.workspacePath != null) {
+            s.cleanupDueAt = dueAt;
+          }
+        }
+        if (sessions.length === 0) {
+          if (c.tmuxSession != null || c.workspacePath != null) {
+            c.cleanupDueAt = dueAt;
+          }
+        } else {
+          c.cleanupDueAt = sessions.find(
+            (s) => s.id === c.activeSessionId,
+          )?.cleanupDueAt;
+        }
       }
       if (from === "done" && column !== "done") {
+        for (const s of c.sessions ?? []) s.cleanupDueAt = undefined;
         c.cleanupDueAt = undefined;
       }
       if (from === "inbox" && column === "todo") {
