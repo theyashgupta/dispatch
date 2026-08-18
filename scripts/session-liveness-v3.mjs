@@ -122,6 +122,19 @@
  *                                                                   fan-out click proves the partial
  *                                                                   outcome (one torn down, one
  *                                                                   blocked) coexist
+ *   node scripts/session-liveness-v3.mjs --check cleanup-branches  Phase 93 criterion 4: all FIVE
+ *                                                                   terminal branches of
+ *                                                                   cleanupWorkspace, enumerated
+ *                                                                   from cleanup.ts source (never
+ *                                                                   hardcoded), driven for real,
+ *                                                                   the persisted pointer read
+ *                                                                   after each — both promotion
+ *                                                                   cases (active-with-sibling,
+ *                                                                   last-session), the scheduler's
+ *                                                                   own left-Done and
+ *                                                                   double-dispatch guards, and the
+ *                                                                   isStarting leg's honest
+ *                                                                   NOT-DRIVABLE finding
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -137,6 +150,7 @@ import { spawn, execFile, execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   statSync,
@@ -4657,6 +4671,1163 @@ async function checkCleanupRefusal() {
   return [...violations1, ...violations2, ...crossViolations, ...violations3];
 }
 
+/**
+ * A single-session profile that still owns a REAL git worktree ({@link WORKTREE_FIXTURE}'s own
+ * port/tmux namespace, since every worktree check already runs its own fixture cycles
+ * sequentially, never concurrently, within one `--check` invocation). Branches 1-4 and the
+ * scheduler's own pre-dispatch legs (Phase 93 criterion 4) only ever need ONE session — the
+ * `LAST-SESSION` promotion case needs exactly this shape too.
+ */
+const CLEANUP_BRANCH_SINGLE_FIXTURE = {
+  port: WORKTREE_SANDBOX_PORT,
+  tmuxPrefix: WORKTREE_TMUX_PREFIX,
+  sessionKeys: ["a"],
+  worktrees: true,
+};
+
+const CLEANUP_TS_PATH = join(
+  REPO_ROOT,
+  "src",
+  "server",
+  "services",
+  "orchestration",
+  "cleanup.ts",
+);
+
+/** The four store method NAMES `cleanupWorkspace` calls terminally — `recordCleanupWarning` fires from TWO distinct sites. */
+const CLEANUP_TERMINAL_METHODS = [
+  "recordCleanupBlocked",
+  "noteCleanupWarning",
+  "recordCleanupWarning",
+  "finishCleanup",
+];
+
+/**
+ * Strip `/* ... *\/` (including JSDoc `/** ... *\/`) and `// ...` comments from `src`, LINE BY LINE
+ * so every surviving character keeps its ORIGINAL line number. A raw `grep -c` over uncommented
+ * source would count the JSDoc that DESCRIBES the five branches (this file's own header, and
+ * `cleanup.ts`'s own remarks) and make the enumeration assertion self-satisfying — exactly the trap
+ * `93-07-PLAN.md`'s own Task 1 names. Not a full tokenizer (no string-literal awareness), but
+ * `cleanup.ts` is verified to contain no `//`, `/*`, or `*\/` sequences inside any string/template
+ * literal, so a line-oriented strip is exact for this specific file.
+ */
+function stripCommentsPerLine(src) {
+  const lines = src.split("\n");
+  let inBlock = false;
+  return lines.map((line) => {
+    let out = "";
+    let i = 0;
+    for (;;) {
+      if (i >= line.length) return out;
+      if (inBlock) {
+        const end = line.indexOf("*/", i);
+        if (end === -1) return out;
+        inBlock = false;
+        i = end + 2;
+        continue;
+      }
+      const blockStart = line.indexOf("/*", i);
+      const lineStart = line.indexOf("//", i);
+      if (blockStart !== -1 && (lineStart === -1 || blockStart < lineStart)) {
+        out += line.slice(i, blockStart);
+        const end = line.indexOf("*/", blockStart + 2);
+        if (end === -1) {
+          inBlock = true;
+          return out;
+        }
+        i = end + 2;
+        continue;
+      }
+      if (lineStart !== -1) {
+        out += line.slice(i, lineStart);
+        return out;
+      }
+      out += line.slice(i);
+      return out;
+    }
+  });
+}
+
+/**
+ * The ENUMERATION assertion (Task 1): re-parse `cleanup.ts` FRESH from disk every run (never a
+ * cached count), strip every comment, and count `store.<method>(` call sites for the four terminal
+ * mutator names inside {@link CLEANUP_TERMINAL_METHODS} — `recordCleanupWarning` is expected TWICE
+ * (the post-teardown-failure site and the legacy-workspace site SHARE the store method but are
+ * DISTINCT code paths reached under different preconditions), the other three once each, for a
+ * total of exactly FIVE. A count other than five means a branch was added or removed since this
+ * check was written — that failure is the point, and it is what stops this check from going stale
+ * the way `93-CONTEXT.md`'s own four-branch list did.
+ */
+function enumerateCleanupBranchesFromSource() {
+  const violations = [];
+  const raw = readFileSync(CLEANUP_TS_PATH, "utf8");
+  const strippedLines = stripCommentsPerLine(raw);
+  const hits = [];
+  for (const method of CLEANUP_TERMINAL_METHODS) {
+    const lineRe = new RegExp(`\\bstore\\.${method}\\s*\\(`, "g");
+    strippedLines.forEach((line, idx) => {
+      let m;
+      while ((m = lineRe.exec(line)) !== null) {
+        hits.push({ method, line: idx + 1 });
+      }
+    });
+  }
+  hits.sort((a, b) => a.line - b.line);
+  console.log(
+    `cleanup-branches: ENUMERATION — parsed ${CLEANUP_TS_PATH} (comments stripped) — ` +
+      `${hits.length} terminal call site(s): ${hits.map((h) => `${h.method}:${h.line}`).join(", ")}`,
+  );
+  if (hits.length !== 5) {
+    violations.push(
+      `cleanup-branches: ENUMERATION VIOLATED — expected exactly 5 terminal store call sites inside ` +
+        `cleanupWorkspace, found ${hits.length} (${hits.map((h) => `${h.method}:${h.line}`).join(", ")}) — ` +
+        `a branch was added or removed since this check was written`,
+    );
+    return violations;
+  }
+  const byMethod = {};
+  for (const h of hits) byMethod[h.method] = (byMethod[h.method] ?? 0) + 1;
+  const expectedCounts = {
+    recordCleanupBlocked: 1,
+    noteCleanupWarning: 1,
+    recordCleanupWarning: 2,
+    finishCleanup: 1,
+  };
+  for (const [method, expected] of Object.entries(expectedCounts)) {
+    const actual = byMethod[method] ?? 0;
+    if (actual !== expected) {
+      violations.push(
+        `cleanup-branches: ENUMERATION VIOLATED — expected ${method} to appear ${expected} time(s), found ${actual}`,
+      );
+    }
+  }
+  return violations;
+}
+
+/**
+ * The pointer invariant every branch below is read against directly on the PERSISTED store (never
+ * the wire, which redacts `sessions`): an `activeSessionId` that is set always resolves to a
+ * record present in `sessions`; an empty `sessions` array always carries an absent
+ * `activeSessionId`; a non-empty `sessions` array always carries a set `activeSessionId`; and, when
+ * the pointer resolves, the card's flat six-field mirror equals the resolved active record's own
+ * values verbatim (JSON-compared, matching `board.store.ts#projectionDrifted`'s own `?? null` fold
+ * so `undefined` and absent-field are never mistaken for drift).
+ */
+function assertPointerInvariant(card, label, violations) {
+  if (!card) {
+    violations.push(
+      `cleanup-branches: ${label} — persisted card missing entirely`,
+    );
+    return;
+  }
+  const sessions = card.sessions ?? [];
+  const active = sessions.find((s) => s.id === card.activeSessionId);
+  console.log(
+    `cleanup-branches: ${label} — POINTER sessions=${JSON.stringify(sessions.map((s) => s.id))} ` +
+      `activeSessionId=${card.activeSessionId} resolves=${!!active}`,
+  );
+  if (card.activeSessionId != null && !active) {
+    violations.push(
+      `cleanup-branches: ${label} — POINTER VIOLATED, activeSessionId ${card.activeSessionId} does ` +
+        `not resolve to any record in sessions=${JSON.stringify(sessions.map((s) => s.id))}`,
+    );
+  }
+  if (sessions.length === 0 && card.activeSessionId != null) {
+    violations.push(
+      `cleanup-branches: ${label} — POINTER VIOLATED, sessions is empty but activeSessionId is ` +
+        `${card.activeSessionId}, expected absent`,
+    );
+  }
+  if (sessions.length > 0 && card.activeSessionId == null) {
+    violations.push(
+      `cleanup-branches: ${label} — POINTER VIOLATED, ${sessions.length} session record(s) present ` +
+        `but activeSessionId is absent`,
+    );
+  }
+  if (active) {
+    const mirrorFields = [
+      "tmuxSession",
+      "ttydPort",
+      "hookToken",
+      "claudeSessionId",
+      "workspacePath",
+      "workspace",
+    ];
+    for (const field of mirrorFields) {
+      const cardVal = JSON.stringify(card[field] ?? null);
+      const sessionVal = JSON.stringify(active[field] ?? null);
+      if (cardVal !== sessionVal) {
+        violations.push(
+          `cleanup-branches: ${label} — MIRROR VIOLATED, card.${field}=${cardVal} does not match ` +
+            `the active session's own ${field}=${sessionVal}`,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * The exact admin directory `worktreePath`'s own `.git` POINTER FILE names (`gitdir: <path>`),
+ * never assumed from the session key: `workspace-paths.ts#worktreePath` joins every session's
+ * worktree leaf on `path.basename(repoPath)`, so with one shared fixture repo every session's leaf
+ * is the SAME name (`alpha`) and git disambiguates the second registration with a numeric suffix —
+ * reading the pointer file is the only way to find the real admin dir regardless of key or order.
+ */
+function worktreeAdminDir(worktreePath) {
+  const pointer = readFileSync(join(worktreePath, ".git"), "utf8");
+  const m = pointer.match(/gitdir:\s*(.+)/);
+  if (!m) {
+    throw new Error(
+      `could not parse .git pointer file at ${worktreePath}: ${pointer}`,
+    );
+  }
+  return m[1].trim();
+}
+
+/**
+ * Corrupt the worktree's OWN admin `index` (inside the MAIN repo's `.git/worktrees/<name>/`, never
+ * the worktree's own working files) with random bytes — `git status` on the worktree then fails
+ * with `fatal: index file corrupt`, a stderr that names NEITHER of `worktreeStatus`'s two
+ * `ORPHAN_STDERR` fragments (`"not a git repository"` / `"must be run in a work tree"`), so it
+ * classifies as the non-orphan `kind: "error"` branch 2 needs. Empirically verified against a
+ * throwaway repo before being trusted (this phase's own standing instruction): corrupting the
+ * worktree's `.git` POINTER FILE itself, or its whole admin directory (e.g. via `chmod 000`),
+ * instead makes git report `"not a git repository"` — an ORPHAN fragment that would misclassify
+ * into the WRONG branch. `git worktree remove --force` on a corrupt-index worktree still succeeds
+ * (force bypasses the dirty check entirely), so this fixture's own teardown needs no special
+ * restoration afterward.
+ */
+function corruptWorktreeIndex(worktreePath) {
+  const adminDir = worktreeAdminDir(worktreePath);
+  writeFileSync(join(adminDir, "index"), randomBytes(64));
+}
+
+/**
+ * `git worktree lock <worktreePath>` — unrelated to `git status` (a lock is pure admin metadata,
+ * so the preflight still reports `clean`), but `worktreeRemove`'s single `--force` refuses a
+ * LOCKED tree (`fatal: cannot remove a locked working tree; use 'remove -f -f' to override or
+ * unlock first`), which is exactly the post-teardown `worktreeRemove` rejection branch 3 needs.
+ * `cleanupWorkspace`'s own `fs.rm(workspacePath, ...)` runs UNCONDITIONALLY regardless of
+ * `worktreeRemove`'s outcome, so the directory is still physically removed either way — locking
+ * only makes the git-aware removal step itself fail, which is the branch's whole point. No explicit
+ * unlock is needed afterward: {@link CLEANUP_BRANCH_SINGLE_FIXTURE} is a solo, disposable fixture
+ * repo that {@link tearDownFixture} deletes wholesale (`rmSync` on `built.repoPath`) regardless of
+ * any stale locked admin registration inside it.
+ */
+async function lockWorktree(repoPath, worktreePath) {
+  await execFileP("git", ["worktree", "lock", worktreePath], { cwd: repoPath });
+}
+
+/**
+ * Branch 1 of 5 (Task 1, `T-93-26`): `recordCleanupBlocked` — a dirty, non-forced worktree refuses
+ * teardown before any destructive step. Single-session fixture: dirty the sole session's own
+ * worktree, seed it past-due, drive the REAL scheduler (never a bespoke single-session entry
+ * point), then read the persisted pointer.
+ */
+async function checkCleanupBranchBlocked(built) {
+  const violations = [];
+  const aWt = built.worktreePaths.a;
+  dirtyWorktree(built, "a");
+  const dirtyCount = await porcelainLineCount(aWt);
+  console.log(
+    `cleanup-branches: branch 1 (BLOCKED) PRECONDITION — porcelain lines=${dirtyCount} (expect >0)`,
+  );
+  if (dirtyCount === 0) {
+    violations.push(
+      `cleanup-branches: branch 1 PRECONDITION FAILED — worktree is not dirty`,
+    );
+    return violations;
+  }
+
+  const moveStatus = await moveCard(built, "done");
+  if (moveStatus !== 204) {
+    violations.push(
+      `cleanup-branches: branch 1 — POST /move to done returned ${moveStatus}, expected 204`,
+    );
+    return violations;
+  }
+  await killAndWait(built.server?.child);
+  const cardAtDone = readCard(built.dbPath, built.cardId);
+  const aRecordAtDone = cardAtDone?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  if (!cardAtDone || cardAtDone.column !== "done" || !aRecordAtDone) {
+    violations.push(
+      `cleanup-branches: branch 1 — persisted card missing at Done arrival`,
+    );
+    return violations;
+  }
+  aRecordAtDone.cleanupDueAt = Date.now() - 5_000;
+  seedFixtureCard(built.home, cardAtDone);
+
+  const priorTickEnv = process.env.DISPATCH_CLEANUP_TICK_MS;
+  process.env.DISPATCH_CLEANUP_TICK_MS = "500";
+  try {
+    built.server = bootServer(built.home);
+    await waitForReady(built.port);
+  } finally {
+    if (priorTickEnv === undefined) delete process.env.DISPATCH_CLEANUP_TICK_MS;
+    else process.env.DISPATCH_CLEANUP_TICK_MS = priorTickEnv;
+  }
+
+  const deadline = Date.now() + CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS;
+  let settledCard;
+  let blocked = false;
+  while (Date.now() < deadline) {
+    settledCard = readCard(built.dbPath, built.cardId);
+    const aRecord = settledCard?.sessions?.find(
+      (s) => s.id === built.sessionA.id,
+    );
+    blocked = Boolean(aRecord?.cleanupBlocked?.length);
+    if (blocked) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `cleanup-branches: branch 1 (BLOCKED) — scheduler settle: refused=${blocked} within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+  );
+  if (!blocked) {
+    violations.push(
+      `cleanup-branches: branch 1 — session was NOT refused by the real scheduler within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+    );
+  }
+  const aFinal = settledCard?.sessions?.find((s) => s.id === built.sessionA.id);
+  const liveAfter = await tmuxListSessionNames();
+  const tmuxAfter = liveAfter.includes(built.tmux.a);
+  const listenAfter = await isPortListening(built.ttyd.a.port);
+  console.log(
+    `cleanup-branches: branch 1 (BLOCKED) — record present=${!!aFinal} tmux=${tmuxAfter} ttyd=${listenAfter} ` +
+      `cleanupBlocked=${JSON.stringify(aFinal?.cleanupBlocked)}`,
+  );
+  if (!aFinal || !tmuxAfter || !listenAfter) {
+    violations.push(
+      `cleanup-branches: branch 1 — VIOLATED, a teardown step ran on a BLOCKED branch (record present=${!!aFinal} ` +
+        `tmux=${tmuxAfter} ttyd=${listenAfter})`,
+    );
+  }
+  assertPointerInvariant(settledCard, "branch 1 (BLOCKED)", violations);
+  return violations;
+}
+
+/**
+ * Branch 2 of 5 (Task 1, `T-93-26`): `noteCleanupWarning` — a non-orphan preflight error refuses
+ * with zero teardown, distinct from branch 1's dirty refusal. Single-session fixture: corrupt the
+ * worktree's OWN admin index so `worktreeStatus` classifies it `kind: "error"` (verified via a live
+ * probe BEFORE trusting the scenario — "print which condition was actually produced" per this
+ * plan's own interface note), seed past-due, drive the real scheduler.
+ */
+async function checkCleanupBranchPreflightError(built) {
+  const violations = [];
+  corruptWorktreeIndex(built.worktreePaths.a);
+  const { worktreeStatus } = await loadGitAdapter();
+  const probe = await worktreeStatus(built.worktreePaths.a);
+  console.log(
+    `cleanup-branches: branch 2 (PREFLIGHT ERROR) PRECONDITION — worktreeStatus probe kind=${probe.kind}` +
+      (probe.kind === "error"
+        ? ` stderr="${probe.stderr.trim().split("\n")[0]}"`
+        : ""),
+  );
+  if (probe.kind !== "error") {
+    violations.push(
+      `cleanup-branches: branch 2 PRECONDITION FAILED — the corruption recipe classified as kind=${probe.kind}, ` +
+        `expected the non-orphan "error" kind — this recipe does not reach the intended branch`,
+    );
+    return violations;
+  }
+
+  const moveStatus = await moveCard(built, "done");
+  if (moveStatus !== 204) {
+    violations.push(
+      `cleanup-branches: branch 2 — POST /move to done returned ${moveStatus}, expected 204`,
+    );
+    return violations;
+  }
+  await killAndWait(built.server?.child);
+  const cardAtDone = readCard(built.dbPath, built.cardId);
+  const aRecordAtDone = cardAtDone?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  if (!cardAtDone || cardAtDone.column !== "done" || !aRecordAtDone) {
+    violations.push(
+      `cleanup-branches: branch 2 — persisted card missing at Done arrival`,
+    );
+    return violations;
+  }
+  aRecordAtDone.cleanupDueAt = Date.now() - 5_000;
+  seedFixtureCard(built.home, cardAtDone);
+
+  const priorTickEnv = process.env.DISPATCH_CLEANUP_TICK_MS;
+  process.env.DISPATCH_CLEANUP_TICK_MS = "500";
+  try {
+    built.server = bootServer(built.home);
+    await waitForReady(built.port);
+  } finally {
+    if (priorTickEnv === undefined) delete process.env.DISPATCH_CLEANUP_TICK_MS;
+    else process.env.DISPATCH_CLEANUP_TICK_MS = priorTickEnv;
+  }
+
+  const expectedWarning =
+    "Cleanup preflight failed — a worktree could not be checked.";
+  const deadline = Date.now() + CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS;
+  let settledCard;
+  let warned = false;
+  while (Date.now() < deadline) {
+    settledCard = readCard(built.dbPath, built.cardId);
+    const aRecord = settledCard?.sessions?.find(
+      (s) => s.id === built.sessionA.id,
+    );
+    warned = aRecord?.cleanupWarning === expectedWarning;
+    if (warned) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `cleanup-branches: branch 2 (PREFLIGHT ERROR) — scheduler settle: warned=${warned} within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+  );
+  if (!warned) {
+    violations.push(
+      `cleanup-branches: branch 2 — session was NOT warned with the preflight-error message within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+    );
+  }
+  const aFinal = settledCard?.sessions?.find((s) => s.id === built.sessionA.id);
+  const liveAfter = await tmuxListSessionNames();
+  const tmuxAfter = liveAfter.includes(built.tmux.a);
+  const listenAfter = await isPortListening(built.ttyd.a.port);
+  console.log(
+    `cleanup-branches: branch 2 (PREFLIGHT ERROR) — record present=${!!aFinal} tmux=${tmuxAfter} ttyd=${listenAfter} ` +
+      `cleanupWarning=${JSON.stringify(aFinal?.cleanupWarning)} cleanupBlocked=${JSON.stringify(aFinal?.cleanupBlocked)}`,
+  );
+  if (!aFinal || !tmuxAfter || !listenAfter || aFinal?.cleanupBlocked?.length) {
+    violations.push(
+      `cleanup-branches: branch 2 — VIOLATED, a teardown step ran (or the wrong branch fired) on a PREFLIGHT-ERROR ` +
+        `case (record present=${!!aFinal} tmux=${tmuxAfter} ttyd=${listenAfter} cleanupBlocked=${JSON.stringify(aFinal?.cleanupBlocked)})`,
+    );
+  }
+  assertPointerInvariant(settledCard, "branch 2 (PREFLIGHT ERROR)", violations);
+  return violations;
+}
+
+/**
+ * Branch 3 of 5 (Task 1, `T-93-26`): `recordCleanupWarning` — a post-teardown `worktreeRemove`
+ * rejection. Single-session fixture: leave the worktree CLEAN (so the preflight passes and reaches
+ * the destructive step), lock it (so `worktreeRemove`'s single `--force` rejects), seed past-due,
+ * drive the real scheduler. `killTtyd`/`killSession` run BEFORE the removal attempt (NEW-14), so
+ * this branch's session/tmux/ttyd are cleared regardless of the removal outcome — the record
+ * SURVIVES (recordCleanupWarning is non-removing) carrying the warning.
+ */
+async function checkCleanupBranchPostTeardownFailure(built) {
+  const violations = [];
+  const aWt = built.worktreePaths.a;
+  const cleanCount = await porcelainLineCount(aWt);
+  console.log(
+    `cleanup-branches: branch 3 (POST-TEARDOWN FAILURE) PRECONDITION — porcelain lines=${cleanCount} (expect 0, ` +
+      `so the preflight passes and reaches worktreeRemove)`,
+  );
+  if (cleanCount !== 0) {
+    violations.push(
+      `cleanup-branches: branch 3 PRECONDITION FAILED — worktree is not clean`,
+    );
+    return violations;
+  }
+  await lockWorktree(built.repoPath, aWt);
+  console.log(
+    `cleanup-branches: branch 3 — locked the worktree (\`git worktree remove --force\` refuses a locked ` +
+      `tree; \`git status\` is unaffected by a lock, so the preflight still passes)`,
+  );
+
+  const moveStatus = await moveCard(built, "done");
+  if (moveStatus !== 204) {
+    violations.push(
+      `cleanup-branches: branch 3 — POST /move to done returned ${moveStatus}, expected 204`,
+    );
+    return violations;
+  }
+  await killAndWait(built.server?.child);
+  const cardAtDone = readCard(built.dbPath, built.cardId);
+  const aRecordAtDone = cardAtDone?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  if (!cardAtDone || cardAtDone.column !== "done" || !aRecordAtDone) {
+    violations.push(
+      `cleanup-branches: branch 3 — persisted card missing at Done arrival`,
+    );
+    return violations;
+  }
+  aRecordAtDone.cleanupDueAt = Date.now() - 5_000;
+  seedFixtureCard(built.home, cardAtDone);
+
+  const priorTickEnv = process.env.DISPATCH_CLEANUP_TICK_MS;
+  process.env.DISPATCH_CLEANUP_TICK_MS = "500";
+  try {
+    built.server = bootServer(built.home);
+    await waitForReady(built.port);
+  } finally {
+    if (priorTickEnv === undefined) delete process.env.DISPATCH_CLEANUP_TICK_MS;
+    else process.env.DISPATCH_CLEANUP_TICK_MS = priorTickEnv;
+  }
+
+  const expectedWarning = "Cleanup incomplete — some worktrees may remain.";
+  const deadline = Date.now() + CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS;
+  let settledCard;
+  let warned = false;
+  while (Date.now() < deadline) {
+    settledCard = readCard(built.dbPath, built.cardId);
+    const aRecord = settledCard?.sessions?.find(
+      (s) => s.id === built.sessionA.id,
+    );
+    warned = aRecord?.cleanupWarning === expectedWarning;
+    if (warned) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `cleanup-branches: branch 3 (POST-TEARDOWN FAILURE) — scheduler settle: warned=${warned} within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+  );
+  if (!warned) {
+    violations.push(
+      `cleanup-branches: branch 3 — session was NOT warned with the post-teardown-failure message within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+    );
+  }
+  const aFinal = settledCard?.sessions?.find((s) => s.id === built.sessionA.id);
+  const liveAfter = await tmuxListSessionNames();
+  const tmuxAfter = liveAfter.includes(built.tmux.a);
+  const listenAfter = await isPortListening(built.ttyd.a.port);
+  console.log(
+    `cleanup-branches: branch 3 (POST-TEARDOWN FAILURE) — record present=${!!aFinal} tmux=${tmuxAfter} ` +
+      `ttyd=${listenAfter} cleanupWarning=${JSON.stringify(aFinal?.cleanupWarning)}`,
+  );
+  if (!aFinal || tmuxAfter || listenAfter) {
+    violations.push(
+      `cleanup-branches: branch 3 — VIOLATED, expected the record to survive with tmux/ttyd CLEARED ` +
+        `(record present=${!!aFinal} tmux=${tmuxAfter} ttyd=${listenAfter})`,
+    );
+  }
+  assertPointerInvariant(
+    settledCard,
+    "branch 3 (POST-TEARDOWN FAILURE)",
+    violations,
+  );
+  return violations;
+}
+
+/**
+ * Branch 4 of 5 (Task 1, `T-93-26`): `recordCleanupWarning` — the LEGACY-WORKSPACE site, sharing
+ * `recordCleanupWarning` with branch 3 but reached under a DIFFERENT precondition
+ * (`isLegacyWorkspace`, never a removal failure). Single-session fixture: after Done arrival, strip
+ * `workspace` from the session record (and the card's own mirror, to keep the fixture's OWN
+ * precondition internally consistent with the pointer invariant this check itself asserts) while
+ * leaving `workspacePath` set to the real per-session folder — reproducing a card that predates
+ * per-ticket git workspaces. `repoPaths` resolves empty, so the preflight probes nothing and the
+ * teardown proceeds straight to killing tmux/ttyd and `fs.rm`-ing the workspace folder.
+ */
+async function checkCleanupBranchLegacyWorkspace(built) {
+  const violations = [];
+  const moveStatus = await moveCard(built, "done");
+  if (moveStatus !== 204) {
+    violations.push(
+      `cleanup-branches: branch 4 — POST /move to done returned ${moveStatus}, expected 204`,
+    );
+    return violations;
+  }
+  await killAndWait(built.server?.child);
+  const cardAtDone = readCard(built.dbPath, built.cardId);
+  const aRecordAtDone = cardAtDone?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  if (!cardAtDone || cardAtDone.column !== "done" || !aRecordAtDone) {
+    violations.push(
+      `cleanup-branches: branch 4 — persisted card missing at Done arrival`,
+    );
+    return violations;
+  }
+  const workspacePathBefore = aRecordAtDone.workspacePath;
+  console.log(
+    `cleanup-branches: branch 4 (LEGACY WORKSPACE) — stripping session.workspace (and the card's own ` +
+      `mirror) to reproduce a pre-per-ticket-workspace card; workspacePath ${workspacePathBefore} stays set`,
+  );
+  delete aRecordAtDone.workspace;
+  delete cardAtDone.workspace;
+  aRecordAtDone.cleanupDueAt = Date.now() - 5_000;
+  cardAtDone.cleanupDueAt = aRecordAtDone.cleanupDueAt;
+  seedFixtureCard(built.home, cardAtDone);
+
+  const priorTickEnv = process.env.DISPATCH_CLEANUP_TICK_MS;
+  process.env.DISPATCH_CLEANUP_TICK_MS = "500";
+  try {
+    built.server = bootServer(built.home);
+    await waitForReady(built.port);
+  } finally {
+    if (priorTickEnv === undefined) delete process.env.DISPATCH_CLEANUP_TICK_MS;
+    else process.env.DISPATCH_CLEANUP_TICK_MS = priorTickEnv;
+  }
+
+  const expectedWarning =
+    "Cleanup kept worktree registrations — this ticket predates per-ticket workspaces.";
+  const deadline = Date.now() + CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS;
+  let settledCard;
+  let warned = false;
+  while (Date.now() < deadline) {
+    settledCard = readCard(built.dbPath, built.cardId);
+    const aRecord = settledCard?.sessions?.find(
+      (s) => s.id === built.sessionA.id,
+    );
+    warned = aRecord?.cleanupWarning === expectedWarning;
+    if (warned) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `cleanup-branches: branch 4 (LEGACY WORKSPACE) — scheduler settle: warned=${warned} within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+  );
+  if (!warned) {
+    violations.push(
+      `cleanup-branches: branch 4 — session was NOT warned with the legacy-workspace message within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+    );
+  }
+  const aFinal = settledCard?.sessions?.find((s) => s.id === built.sessionA.id);
+  const liveAfter = await tmuxListSessionNames();
+  const tmuxAfter = liveAfter.includes(built.tmux.a);
+  const listenAfter = await isPortListening(built.ttyd.a.port);
+  const dirGone = !existsSync(workspacePathBefore);
+  console.log(
+    `cleanup-branches: branch 4 (LEGACY WORKSPACE) — record present=${!!aFinal} tmux=${tmuxAfter} ` +
+      `ttyd=${listenAfter} workspaceDirGone=${dirGone} cleanupWarning=${JSON.stringify(aFinal?.cleanupWarning)}`,
+  );
+  if (!aFinal || tmuxAfter || listenAfter || !dirGone) {
+    violations.push(
+      `cleanup-branches: branch 4 — VIOLATED, expected the record to survive with tmux/ttyd cleared and ` +
+        `the workspace folder removed (record present=${!!aFinal} tmux=${tmuxAfter} ttyd=${listenAfter} dirGone=${dirGone})`,
+    );
+  }
+  assertPointerInvariant(
+    settledCard,
+    "branch 4 (LEGACY WORKSPACE)",
+    violations,
+  );
+  return violations;
+}
+
+/**
+ * Branch 5 of 5, ACTIVE-WITH-SIBLING promotion case (Task 1, `T-93-26`): cleaning the card's
+ * ACTIVE session on a two-session card promotes the remaining sibling in the SAME mutation. Session
+ * A is `standUpFixture`'s always-first, always-active key; session B is the untouched sibling.
+ * Seeds ONLY A past-due and drives the real scheduler, polling BOTH the direct store read and the
+ * live wire throughout the teardown — the wire's raw `activeSessionId` (never redacted) alongside
+ * its DERIVED `activeSession` lets a dangling pointer be caught the instant it would first become
+ * externally observable, not just at the final settled read.
+ */
+async function checkCleanupBranchPromotionActiveWithSibling(built) {
+  const violations = [];
+  const moveStatus = await moveCard(built, "done");
+  if (moveStatus !== 204) {
+    violations.push(
+      `cleanup-branches: branch 5a — POST /move to done returned ${moveStatus}, expected 204`,
+    );
+    return violations;
+  }
+  await killAndWait(built.server?.child);
+  const cardAtDone = readCard(built.dbPath, built.cardId);
+  const aRecordAtDone = cardAtDone?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  const bRecordAtDone = cardAtDone?.sessions?.find(
+    (s) => s.id === built.sessionB.id,
+  );
+  if (
+    !cardAtDone ||
+    cardAtDone.column !== "done" ||
+    !aRecordAtDone ||
+    !bRecordAtDone
+  ) {
+    violations.push(
+      `cleanup-branches: branch 5a — persisted card missing a session at Done arrival`,
+    );
+    return violations;
+  }
+  const bCreatedAt = bRecordAtDone.createdAt;
+  aRecordAtDone.cleanupDueAt = Date.now() - 5_000;
+  seedFixtureCard(built.home, cardAtDone);
+  console.log(
+    `cleanup-branches: branch 5a (ACTIVE-WITH-SIBLING) — seeded ONLY A's (active) cleanupDueAt past-due; ` +
+      `B is left untouched, never due`,
+  );
+
+  const priorTickEnv = process.env.DISPATCH_CLEANUP_TICK_MS;
+  process.env.DISPATCH_CLEANUP_TICK_MS = "500";
+  try {
+    built.server = bootServer(built.home);
+    await waitForReady(built.port);
+  } finally {
+    if (priorTickEnv === undefined) delete process.env.DISPATCH_CLEANUP_TICK_MS;
+    else process.env.DISPATCH_CLEANUP_TICK_MS = priorTickEnv;
+  }
+
+  const deadline = Date.now() + CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS;
+  let settledCard;
+  let aGone = false;
+  let wireObservations = 0;
+  let observedDanglingWire = false;
+  while (Date.now() < deadline) {
+    settledCard = readCard(built.dbPath, built.cardId);
+    aGone =
+      settledCard != null &&
+      !(settledCard.sessions ?? []).some((s) => s.id === built.sessionA.id);
+    const wireCard = await fetchFixtureCard(built);
+    if (wireCard) {
+      wireObservations++;
+      if (
+        wireCard.activeSessionId != null &&
+        wireCard.activeSession === undefined
+      ) {
+        observedDanglingWire = true;
+        console.log(
+          `cleanup-branches: branch 5a — WIRE OBSERVED a dangling pointer: activeSessionId=` +
+            `${wireCard.activeSessionId} but activeSession is undefined`,
+        );
+      }
+    }
+    if (aGone) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `cleanup-branches: branch 5a (ACTIVE-WITH-SIBLING) — scheduler settle: A gone=${aGone} within ` +
+      `${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms; wire observations=${wireObservations}, any dangling=${observedDanglingWire}`,
+  );
+  if (!aGone) {
+    violations.push(
+      `cleanup-branches: branch 5a — session A was not torn down by the real scheduler within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+    );
+    return violations;
+  }
+  if (observedDanglingWire) {
+    violations.push(
+      `cleanup-branches: branch 5a — POINTER VIOLATED, the wire showed activeSessionId set with no ` +
+        `resolving activeSession at least once during the teardown`,
+    );
+  }
+
+  const bFinal = settledCard?.sessions?.find((s) => s.id === built.sessionB.id);
+  const liveAfter = await tmuxListSessionNames();
+  const bTmuxAfter = liveAfter.includes(built.tmux.b);
+  const bListenAfter = await isPortListening(built.ttyd.b.port);
+  console.log(
+    `cleanup-branches: branch 5a — STORE sessions=${JSON.stringify((settledCard?.sessions ?? []).map((s) => s.id))} ` +
+      `activeSessionId=${settledCard?.activeSessionId} B present=${!!bFinal} B tmux=${bTmuxAfter} B ttyd=${bListenAfter} ` +
+      `B createdAt unchanged=${bFinal?.createdAt === bCreatedAt}`,
+  );
+  if (!bFinal || !bTmuxAfter || !bListenAfter) {
+    violations.push(
+      `cleanup-branches: branch 5a — VIOLATED, B (the sibling) was disturbed by cleaning A (present=${!!bFinal} ` +
+        `tmux=${bTmuxAfter} ttyd=${bListenAfter})`,
+    );
+  }
+  if (bFinal && bFinal.createdAt !== bCreatedAt) {
+    violations.push(
+      `cleanup-branches: branch 5a — PROMOTION VIOLATED, B's record was RE-MINTED (createdAt changed from ` +
+        `${bCreatedAt} to ${bFinal.createdAt}) rather than the original record being promoted`,
+    );
+  }
+  if (settledCard?.activeSessionId !== built.sessionB.id) {
+    violations.push(
+      `cleanup-branches: branch 5a — PROMOTION VIOLATED, activeSessionId expected ${built.sessionB.id} ` +
+        `(B, the only remaining sibling), actual ${settledCard?.activeSessionId}`,
+    );
+  }
+  assertPointerInvariant(
+    settledCard,
+    "branch 5a (ACTIVE-WITH-SIBLING)",
+    violations,
+  );
+  return violations;
+}
+
+/**
+ * Branch 5 of 5, LAST-SESSION promotion case (Task 1, `T-93-26`): cleaning the card's ONLY session
+ * leaves it genuinely sessionless — `sessions` empty, `activeSessionId` absent (cleared, never
+ * dangling), the flat six-field mirror fully cleared. Single-session fixture.
+ */
+async function checkCleanupBranchPromotionLastSession(built) {
+  const violations = [];
+  const moveStatus = await moveCard(built, "done");
+  if (moveStatus !== 204) {
+    violations.push(
+      `cleanup-branches: branch 5b — POST /move to done returned ${moveStatus}, expected 204`,
+    );
+    return violations;
+  }
+  await killAndWait(built.server?.child);
+  const cardAtDone = readCard(built.dbPath, built.cardId);
+  const aRecordAtDone = cardAtDone?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  if (!cardAtDone || cardAtDone.column !== "done" || !aRecordAtDone) {
+    violations.push(
+      `cleanup-branches: branch 5b — persisted card missing at Done arrival`,
+    );
+    return violations;
+  }
+  aRecordAtDone.cleanupDueAt = Date.now() - 5_000;
+  seedFixtureCard(built.home, cardAtDone);
+  console.log(
+    `cleanup-branches: branch 5b (LAST-SESSION) — seeded the card's ONLY session's cleanupDueAt past-due`,
+  );
+
+  const priorTickEnv = process.env.DISPATCH_CLEANUP_TICK_MS;
+  process.env.DISPATCH_CLEANUP_TICK_MS = "500";
+  try {
+    built.server = bootServer(built.home);
+    await waitForReady(built.port);
+  } finally {
+    if (priorTickEnv === undefined) delete process.env.DISPATCH_CLEANUP_TICK_MS;
+    else process.env.DISPATCH_CLEANUP_TICK_MS = priorTickEnv;
+  }
+
+  const deadline = Date.now() + CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS;
+  let settledCard;
+  let empty = false;
+  while (Date.now() < deadline) {
+    settledCard = readCard(built.dbPath, built.cardId);
+    empty = settledCard != null && (settledCard.sessions ?? []).length === 0;
+    if (empty) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `cleanup-branches: branch 5b (LAST-SESSION) — scheduler settle: sessions empty=${empty} within ` +
+      `${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+  );
+  if (!empty) {
+    violations.push(
+      `cleanup-branches: branch 5b — the card's only session was not fully removed within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+    );
+    return violations;
+  }
+  console.log(
+    `cleanup-branches: branch 5b — STORE sessions=${JSON.stringify(settledCard.sessions)} ` +
+      `activeSessionId=${settledCard.activeSessionId} tmuxSession=${settledCard.tmuxSession} ` +
+      `workspacePath=${settledCard.workspacePath}`,
+  );
+  const flatFields = [
+    "tmuxSession",
+    "ttydPort",
+    "hookToken",
+    "claudeSessionId",
+    "workspacePath",
+    "workspace",
+  ];
+  for (const field of flatFields) {
+    if (settledCard[field] != null) {
+      violations.push(
+        `cleanup-branches: branch 5b — VIOLATED, card.${field} is still set (${JSON.stringify(settledCard[field])}) ` +
+          `after the card became sessionless`,
+      );
+    }
+  }
+  assertPointerInvariant(settledCard, "branch 5b (LAST-SESSION)", violations);
+  return violations;
+}
+
+/**
+ * The scheduler's own LEFT-DONE ABANDON leg (Task 2): a card that left Done must never be torn
+ * down by a later tick, even adversarially. First exercises the REAL `moveCardManual` Done-arrival
+ * then Done-departure path (asserting its own clearing of `cleanupDueAt` as a live precondition —
+ * this alone already discriminates against the plan's literally-prescribed break, see the
+ * SUMMARY's Key Decisions), THEN re-stamps a stale past-due `cleanupDueAt` directly, bypassing the
+ * clear, to prove the SCHEDULER'S OWN `card.column !== "done"` guards (both
+ * `sessionsDueForCleanup`'s snapshot filter and `runDueCleanups`'s fresh re-check) refuse a
+ * non-Done card independently of whether the clear ran.
+ */
+async function checkSchedulerLeftDoneAbandon(built) {
+  const violations = [];
+  const aWt = built.worktreePaths.a;
+
+  let moveStatus = await moveCard(built, "done");
+  if (moveStatus !== 204) {
+    violations.push(
+      `cleanup-branches: LEFT-DONE — POST /move to done returned ${moveStatus}, expected 204`,
+    );
+    return violations;
+  }
+  moveStatus = await moveCard(built, "in_progress");
+  console.log(
+    `cleanup-branches: LEFT-DONE — POST /move done->in_progress -> ${moveStatus} (expected 204)`,
+  );
+  if (moveStatus !== 204) {
+    violations.push(
+      `cleanup-branches: LEFT-DONE — POST /move done->in_progress returned ${moveStatus}, expected 204`,
+    );
+    return violations;
+  }
+  await killAndWait(built.server?.child);
+  const cardAtLeft = readCard(built.dbPath, built.cardId);
+  const aRecordAtLeft = cardAtLeft?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  if (!cardAtLeft || cardAtLeft.column !== "in_progress" || !aRecordAtLeft) {
+    violations.push(
+      `cleanup-branches: LEFT-DONE — persisted card is not in the expected post-departure shape`,
+    );
+    return violations;
+  }
+  console.log(
+    `cleanup-branches: LEFT-DONE — real moveCardManual's own clearing left cleanupDueAt=` +
+      `${aRecordAtLeft.cleanupDueAt} after the done->in_progress move (expect undefined)`,
+  );
+  if (aRecordAtLeft.cleanupDueAt !== undefined) {
+    violations.push(
+      `cleanup-branches: LEFT-DONE VIOLATED — moveCardManual did not clear cleanupDueAt on leaving Done ` +
+        `(still ${aRecordAtLeft.cleanupDueAt})`,
+    );
+  }
+
+  aRecordAtLeft.cleanupDueAt = Date.now() - 5_000;
+  seedFixtureCard(built.home, cardAtLeft);
+  console.log(
+    `cleanup-branches: LEFT-DONE — adversarially re-stamped a stale past-due cleanupDueAt directly, ` +
+      `bypassing the clear, to prove the scheduler's OWN column guards refuse a non-Done card independently`,
+  );
+
+  const priorTickEnv = process.env.DISPATCH_CLEANUP_TICK_MS;
+  process.env.DISPATCH_CLEANUP_TICK_MS = "500";
+  try {
+    built.server = bootServer(built.home);
+    await waitForReady(built.port);
+  } finally {
+    if (priorTickEnv === undefined) delete process.env.DISPATCH_CLEANUP_TICK_MS;
+    else process.env.DISPATCH_CLEANUP_TICK_MS = priorTickEnv;
+  }
+  await sleep(3_000);
+
+  const settledCard = readCard(built.dbPath, built.cardId);
+  const aFinal = settledCard?.sessions?.find((s) => s.id === built.sessionA.id);
+  const liveAfter = await tmuxListSessionNames();
+  const tmuxAfter = liveAfter.includes(built.tmux.a);
+  const listenAfter = await isPortListening(built.ttyd.a.port);
+  const dirAfter = existsSync(aWt);
+  console.log(
+    `cleanup-branches: LEFT-DONE — after ~3s (~6 ticks) of a non-Done card carrying a stale past-due ` +
+      `cleanupDueAt: record present=${!!aFinal} tmux=${tmuxAfter} ttyd=${listenAfter} worktreeDir=${dirAfter} ` +
+      `cleanupAttempt=${aFinal?.cleanupAttempt ?? 0}`,
+  );
+  if (
+    !aFinal ||
+    !tmuxAfter ||
+    !listenAfter ||
+    !dirAfter ||
+    (aFinal?.cleanupAttempt ?? 0) !== 0
+  ) {
+    violations.push(
+      `cleanup-branches: LEFT-DONE VIOLATED — a card that left Done was torn down by a later tick ` +
+        `(record present=${!!aFinal} tmux=${tmuxAfter} ttyd=${listenAfter} worktreeDir=${dirAfter} ` +
+        `cleanupAttempt=${aFinal?.cleanupAttempt ?? 0})`,
+    );
+  }
+  return violations;
+}
+
+/**
+ * The manual route's DOUBLE-DISPATCH guard (Task 2, `WR-01`): two `POST /cards/:id/cleanup`
+ * requests fired back-to-back must settle into exactly one 202 and one 409, and exactly ONE
+ * teardown must actually run. `card.cleanupAttempt` is bumped exactly once by every terminal
+ * cleanup branch (the one deliberately UNGATED mirror field), so its before/after DELTA is a
+ * precise, already-persisted signal for "how many teardown attempts landed" — a second concurrent
+ * dispatch that slipped past the guard would bump it twice. The scheduler's own `isCleaningUp`
+ * `continue` branch shares this SAME card-scoped guard (not a second one), so it is covered through
+ * this same assertion rather than a separately forced tick collision.
+ */
+async function checkSchedulerDoubleDispatchGuard(built) {
+  const violations = [];
+  const moveStatus = await moveCard(built, "done");
+  if (moveStatus !== 204) {
+    violations.push(
+      `cleanup-branches: DOUBLE-DISPATCH — POST /move to done returned ${moveStatus}, expected 204`,
+    );
+    return violations;
+  }
+  const cardBefore = readCard(built.dbPath, built.cardId);
+  const attemptsBefore = cardBefore?.cleanupAttempt ?? 0;
+  console.log(
+    `cleanup-branches: DOUBLE-DISPATCH GUARD — card.cleanupAttempt before=${attemptsBefore}`,
+  );
+
+  const [status1, status2] = await Promise.all([
+    postCleanup(built, { force: false }),
+    postCleanup(built, { force: false }),
+  ]);
+  console.log(
+    `cleanup-branches: DOUBLE-DISPATCH GUARD — two concurrent POST /cleanup -> [${status1}, ${status2}]`,
+  );
+  const statuses = [status1, status2].sort((a, b) => a - b);
+  if (statuses[0] !== 202 || statuses[1] !== 409) {
+    violations.push(
+      `cleanup-branches: DOUBLE-DISPATCH VIOLATED — expected exactly one 202 and one 409, got [${status1}, ${status2}]`,
+    );
+  }
+
+  const deadline = Date.now() + CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS;
+  let settledCard;
+  let gone = false;
+  while (Date.now() < deadline) {
+    settledCard = readCard(built.dbPath, built.cardId);
+    gone =
+      settledCard != null &&
+      !(settledCard.sessions ?? []).some((s) => s.id === built.sessionA.id);
+    if (gone) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `cleanup-branches: DOUBLE-DISPATCH GUARD — settle: session gone=${gone}`,
+  );
+  if (!gone) {
+    violations.push(
+      `cleanup-branches: DOUBLE-DISPATCH — the single dispatch did not settle within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+    );
+    return violations;
+  }
+  const attemptsAfter = settledCard?.cleanupAttempt ?? 0;
+  const delta = attemptsAfter - attemptsBefore;
+  console.log(
+    `cleanup-branches: DOUBLE-DISPATCH GUARD — card.cleanupAttempt after=${attemptsAfter} (delta=${delta}, ` +
+      `expect exactly 1 — a second concurrent teardown would bump it twice)`,
+  );
+  if (delta !== 1) {
+    violations.push(
+      `cleanup-branches: DOUBLE-DISPATCH VIOLATED — expected exactly ONE teardown (cleanupAttempt delta=1), ` +
+        `got delta=${delta} — a second dispatch was not fully blocked`,
+    );
+  }
+  return violations;
+}
+
+/**
+ * Any tmux session matching the REAL product naming convention (`"dsp-" + card.identifier`,
+ * `start-session.ts`/`resume-session.ts`) — distinct from every harness fixture prefix, which all
+ * carry extra characters before their own `-` (`dsp91h-`, `dsp93h-`, ...). A non-empty result here
+ * would mean a real start/resume saga actually spawned a session somewhere during this run.
+ */
+async function scanForRealProductSessions() {
+  const names = await tmuxListSessionNames();
+  return names.filter((n) => /^dsp-/.test(n));
+}
+
+/**
+ * The `isStarting` -> `restoreCleanupDue` leg (Task 2, `T-93-26`): NOT DRIVABLE by this harness,
+ * recorded honestly rather than faked — see the SUMMARY's own section for the full reasoning. In
+ * short: `isStarting` only stays `true` across a real `await` gap (long enough for an independent
+ * async scheduler tick to observe it) on a start/resume saga path, and BOTH sagas
+ * (`start-session.ts`, `resume-session.ts`) unconditionally reach `newSession(...)` — a real
+ * `claude` spawn — once past their synchronous early-return guards, with no legitimate awaited
+ * failure point in between (`preSeedTrust` swallows its own errors into `false`, never throws;
+ * `resolveBinaryPath` falls back to the literal `"claude"` on a miss rather than throwing). The
+ * ONLY early-return path that avoids the spawn runs with ZERO `await` before it, so its
+ * `isStarting` window is a single synchronous JS frame — unobservable to any request-driven
+ * external process. Firing a live request far enough to test this honestly therefore risks
+ * spawning `claude`, which this harness must never do (non-negotiable safety rule 5), so the branch
+ * is left undriven rather than risked.
+ */
+function checkSchedulerIsStartingNotDrivable() {
+  const reason =
+    "cleanup-branches: isStarting -> restoreCleanupDue — NOT DRIVABLE. Both start-session.ts and " +
+    "resume-session.ts hold isStarting=true across a real await gap only on paths that " +
+    "unconditionally reach newSession(...) (a real `claude` spawn) before any awaited call that " +
+    "could legitimately fail first; their only pre-spawn early-return checks run with zero awaits, " +
+    "making the isStarting window a single synchronous JS frame no external async scheduler tick " +
+    "could ever observe. Reaching this branch live would risk violating the never-spawn-claude " +
+    "safety rule, so it was not attempted — recorded narrower-than-literal coverage per " +
+    "92-VERDICT.md's precedent rather than substituting a store-record read as proof.";
+  console.log(reason);
+  return { violations: [], note: reason };
+}
+
+/**
+ * `--check cleanup-branches` (Phase 93 criterion 4, `T-93-26`..`T-93-30`): the ENUMERATION
+ * assertion, all five terminal branches (four single-session fixture cycles plus the two promotion
+ * cases), the scheduler's own three pre-dispatch legs, and a zero-real-product-session scan
+ * bracketing the whole run — the honest backstop for the one leg (isStarting) this harness does not
+ * drive live.
+ */
+async function checkCleanupBranches() {
+  const violations = [];
+  violations.push(...enumerateCleanupBranchesFromSource());
+
+  const realSessionsBefore = await scanForRealProductSessions();
+  console.log(
+    `cleanup-branches: pre-run zero-real-product-session scan — any "dsp-*" tmux session BEFORE this check=` +
+      `${JSON.stringify(realSessionsBefore)}`,
+  );
+
+  violations.push(
+    ...(await withFixture(
+      "cleanup-branches-blocked",
+      checkCleanupBranchBlocked,
+      CLEANUP_BRANCH_SINGLE_FIXTURE,
+    )),
+  );
+  violations.push(
+    ...(await withFixture(
+      "cleanup-branches-preflight-error",
+      checkCleanupBranchPreflightError,
+      CLEANUP_BRANCH_SINGLE_FIXTURE,
+    )),
+  );
+  violations.push(
+    ...(await withFixture(
+      "cleanup-branches-post-teardown-failure",
+      checkCleanupBranchPostTeardownFailure,
+      CLEANUP_BRANCH_SINGLE_FIXTURE,
+    )),
+  );
+  violations.push(
+    ...(await withFixture(
+      "cleanup-branches-legacy-workspace",
+      checkCleanupBranchLegacyWorkspace,
+      CLEANUP_BRANCH_SINGLE_FIXTURE,
+    )),
+  );
+  violations.push(
+    ...(await withFixture(
+      "cleanup-branches-promotion-active-sibling",
+      checkCleanupBranchPromotionActiveWithSibling,
+      WORKTREE_FIXTURE,
+    )),
+  );
+  violations.push(
+    ...(await withFixture(
+      "cleanup-branches-promotion-last-session",
+      checkCleanupBranchPromotionLastSession,
+      CLEANUP_BRANCH_SINGLE_FIXTURE,
+    )),
+  );
+  violations.push(
+    ...(await withFixture(
+      "cleanup-branches-scheduler-left-done",
+      checkSchedulerLeftDoneAbandon,
+      CLEANUP_BRANCH_SINGLE_FIXTURE,
+    )),
+  );
+  violations.push(
+    ...(await withFixture(
+      "cleanup-branches-scheduler-double-dispatch",
+      checkSchedulerDoubleDispatchGuard,
+      CLEANUP_BRANCH_SINGLE_FIXTURE,
+    )),
+  );
+
+  const { violations: isStartingViolations } =
+    checkSchedulerIsStartingNotDrivable();
+  violations.push(...isStartingViolations);
+
+  const realSessionsAfter = await scanForRealProductSessions();
+  console.log(
+    `cleanup-branches: post-run zero-real-product-session scan — any "dsp-*" tmux session AFTER this check=` +
+      `${JSON.stringify(realSessionsAfter)}`,
+  );
+  if (realSessionsBefore.length > 0 || realSessionsAfter.length > 0) {
+    violations.push(
+      `cleanup-branches: SAFETY VIOLATED — a real product-named tmux session was observed (before=` +
+        `${JSON.stringify(realSessionsBefore)} after=${JSON.stringify(realSessionsAfter)}) — a start/resume ` +
+        `saga must never actually run inside this harness`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -4678,6 +5849,7 @@ const CHECKS = {
     withFixture("cleanup-fixture", checkCleanupFixture, WORKTREE_FIXTURE),
   "cleanup-isolation": checkCleanupIsolation,
   "cleanup-refusal": checkCleanupRefusal,
+  "cleanup-branches": checkCleanupBranches,
 };
 
 /**
