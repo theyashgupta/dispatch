@@ -22,14 +22,25 @@ import { worktreePath as buildWorktreePath } from "../domain/workspace-paths.js"
 const perfCleanup = process.env.DISPATCH_PERF_CLEANUP === "1";
 
 /**
- * Tear down a Done card's workspace: kill ttyd + the tmux session, remove each repo's worktree, and
+ * Tear down ONE session's workspace: kill ttyd + the tmux session, remove each repo's worktree, and
  * remove the per-ticket workspace folder — ALWAYS keeping branches. Idempotent / no-op tolerant: a
- * card with no session and no workspace skips every step and still calls finishCleanup (quiet 202).
+ * session with no tmux and no workspace skips every step and still calls finishCleanup (quiet 202).
  * On any partial failure records a muted cleanupWarning instead of finishing quietly.
- * @remarks NEW-14 delete-before-kill ordering: killTtyd deletes the tracked entry BEFORE killing so
- * the orphan-sweep cannot re-adopt it, then killSession, then per-repo worktreeRemove, then fs.rm the
- * workspace folder, then worktreePrune last (once the directories are gone). Every step is idempotent
- * and no-op tolerant, and branches are ALWAYS kept.
+ * @remarks Session-addressed (`LIFE-01`): `sessionId` names the target explicitly, resolved ONCE —
+ * `resolvedId = sessionId ?? card.activeSessionId`, `target = card.sessions?.find(s => s.id ===
+ * resolvedId)`, `src = target ?? card`. An EXPLICIT `sessionId` that does not resolve refuses before
+ * any destructive step (before even `clearCleanupBlocked`) — a stale caller-supplied id must never
+ * fall back to the card's active projection and tear down a sibling's worktrees. The `target ?? card`
+ * fallback applies only when `sessionId` was `undefined`, the legacy/synthetic path for a card
+ * holding flat fields with no resolvable record. Every field this function reads —
+ * `src.tmuxSession`, `src.workspacePath`, `src.workspace?.repos`, `isLegacyWorkspace` — comes off
+ * `src`, never off `card` directly, so a sibling's worktrees are, by construction, never in
+ * `repoPaths` for this call.
+ * @remarks NEW-14 delete-before-kill ordering holds PER SESSION: killTtyd deletes the tracked entry
+ * BEFORE killing so the orphan-sweep cannot re-adopt it, then killSession, then per-repo
+ * worktreeRemove, then fs.rm the workspace folder, then worktreePrune last (once the directories are
+ * gone). The prune runs once per session teardown, inside this function — it is never hoisted to a
+ * caller-level loop. Every step is idempotent and no-op tolerant, and branches are ALWAYS kept.
  * @remarks Preflight (PRE-01/PRE-03/PRE-04): unless `force`, a read-only `git status` probes each
  * repo's worktree ABOVE any destructive step — a dirty repo refuses with zero teardown (records
  * cleanupBlocked, keeps the session/ttyd/worktrees alive), a non-orphan git error refuses with a
@@ -62,18 +73,29 @@ const perfCleanup = process.env.DISPATCH_PERF_CLEANUP === "1";
  */
 export async function cleanupWorkspace(
   cardId: string,
+  sessionId: string | undefined,
   opts: { force?: boolean } = {},
 ): Promise<void> {
   const totalT0 = perfCleanup ? performance.now() : 0;
   const card = store.getCard(cardId);
   if (!card) return;
 
-  const session = card.tmuxSession;
-  const workspacePath = card.workspacePath;
-  const repoPaths = card.workspace?.repos.map((r) => r.path) ?? [];
-  const isLegacyWorkspace = Boolean(workspacePath) && !card.workspace;
+  const resolvedId = sessionId ?? card.activeSessionId;
+  const target = card.sessions?.find((s) => s.id === resolvedId);
+  if (sessionId !== undefined && !target) {
+    console.error(
+      `[cleanup] card ${cardId} — cleanup target ${sessionId} does not resolve, refusing`,
+    );
+    return;
+  }
+  const src = target ?? card;
 
-  await store.clearCleanupBlocked(cardId, undefined);
+  const session = src.tmuxSession;
+  const workspacePath = src.workspacePath;
+  const repoPaths = src.workspace?.repos.map((r) => r.path) ?? [];
+  const isLegacyWorkspace = Boolean(workspacePath) && !src.workspace;
+
+  await store.clearCleanupBlocked(cardId, resolvedId);
 
   const preflightT0 = perfCleanup ? performance.now() : 0;
   if (!opts.force && workspacePath) {
@@ -104,13 +126,13 @@ export async function cleanupWorkspace(
       }
     });
     if (blocked.length > 0) {
-      await store.recordCleanupBlocked(cardId, undefined, blocked);
+      await store.recordCleanupBlocked(cardId, resolvedId, blocked);
       return;
     }
     if (nonOrphanError) {
       await store.noteCleanupWarning(
         cardId,
-        undefined,
+        resolvedId,
         "Cleanup preflight failed — a worktree could not be checked.",
       );
       return;
@@ -184,16 +206,16 @@ export async function cleanupWorkspace(
   if (failures.length > 0) {
     await store.recordCleanupWarning(
       cardId,
-      undefined,
+      resolvedId,
       "Cleanup incomplete — some worktrees may remain.",
     );
   } else if (isLegacyWorkspace) {
     await store.recordCleanupWarning(
       cardId,
-      undefined,
+      resolvedId,
       "Cleanup kept worktree registrations — this ticket predates per-ticket workspaces.",
     );
   } else {
-    await store.finishCleanup(cardId, undefined);
+    await store.finishCleanup(cardId, resolvedId);
   }
 }

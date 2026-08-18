@@ -443,7 +443,7 @@ cardsRouter.post("/cards/:id/cleanup", (req, res) => {
 
   const force = (req.body as { force?: unknown } | undefined)?.force === true;
   store.beginCleanup(id);
-  void cleanupWorkspace(id, { force })
+  void cleanupWorkspace(id, undefined, { force })
     .catch((err) => {
       console.error(`[cleanup] failed for card ${id}:`, (err as Error).message);
     })
