@@ -83,6 +83,17 @@
  *                                                                   the next boot, while the fixture's
  *                                                                   own two current-revision ttyd are
  *                                                                   spared and still serve pane content
+ *   node scripts/session-liveness-v3.mjs --check switch-sockets    PROXY-01/C2: a real switch's OLD
+ *                                                                   dispatch-to-ttyd socket, held by
+ *                                                                   the sandbox server's own pid,
+ *                                                                   polls to zero — never counted as
+ *                                                                   a single instant read
+ *   node scripts/session-liveness-v3.mjs --check switch-atomicity  SESS-03/C3: 50+ concurrent switch
+ *                                                                   and read requests plus a switch
+ *                                                                   racing a real tmux kill, neither
+ *                                                                   interleaving ever strands the
+ *                                                                   active pointer or tears the wire
+ *                                                                   projection
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -2651,6 +2662,193 @@ async function checkOrphanSweep(built) {
   return violations;
 }
 
+/**
+ * Open a proxied WS exactly like {@link readPaneThroughProxy} (same URL shape, the `"tty"`
+ * sub-protocol, the same un-prefixed JSON handshake) but resolve as soon as the upgrade completes
+ * — or the timeout / an error fires — and leave the socket under the CALLER's control rather than
+ * closing it once a marker is found. `--check switch-sockets` needs a client-held socket that stays
+ * open across a real switch, then closes it itself on command: that close is the EXACT
+ * `clientSocket.on('close')` trigger a real browser's iframe navigation would produce, because the
+ * server cannot distinguish the two (`92-RESEARCH.md` `## 3`).
+ */
+async function openProxiedSocket({ port, idSegment, timeoutMs }) {
+  return new Promise((resolve) => {
+    let opened = false;
+    let closeCode = null;
+    let settled = false;
+    const url = `ws://127.0.0.1:${port}/sessions/${idSegment}/terminal/ws`;
+    const ws = new WebSocket(url, ["tty"]);
+    ws.binaryType = "arraybuffer";
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ ws, opened, closeCode });
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    ws.addEventListener("open", () => {
+      opened = true;
+      ws.send(JSON.stringify({ AuthToken: "", columns: 120, rows: 40 }));
+      finish();
+    });
+    ws.addEventListener("close", (event) => {
+      closeCode = event.code;
+      finish();
+    });
+    ws.addEventListener("error", finish);
+  });
+}
+
+/**
+ * Close a socket {@link openProxiedSocket} handed back and wait for its OWN `close` event, never a
+ * bare fire-and-forget `ws.close()` — so the caller's next poll genuinely starts after the
+ * client-side half of teardown has begun, matching what a real browser's own close sequence does.
+ */
+async function closeProxiedSocket(ws) {
+  return new Promise((resolve) => {
+    if (ws.readyState === WebSocket.CLOSED) {
+      resolve();
+      return;
+    }
+    ws.addEventListener("close", () => resolve(), { once: true });
+    ws.close();
+  });
+}
+
+/**
+ * `--check switch-sockets` (PROXY-01, `92-VALIDATION.md` C2): the socket to a ttyd port belongs to
+ * the SANDBOX SERVER process, never to any client (`92-RESEARCH.md` `## 3`) — so every count in
+ * this check is scoped to `built.server.child.pid`, on the OLD session's ttyd port, filtered to
+ * `-sTCP:ESTABLISHED` only (never the HTTP-forward leg, which closes every request and would read a
+ * near-constant regardless of the WS leak this check exists to catch). Sequence: open a real
+ * client-held proxied WS to session A, assert the PRE-CONDITION count reads exactly 1 (a 0 here
+ * means the instrument itself is blind — the single assertion that keeps this whole check from
+ * being a constant, `92-VALIDATION.md`'s Dead-Instrument Register), drive a REAL switch through the
+ * real route, close A's client-held socket (the exact `clientSocket.on('close')` trigger a browser's
+ * iframe navigation produces), then POLL A's port to zero bounded by {@link SOCKET_TEARDOWN_POLL_MS}
+ * — a MEASURED bound (plan 01's 5 real readings, max 14ms), never an asserted latency, and
+ * exhausting it is a FAILURE, never a retry. Finally opens a fresh proxied WS to session B and
+ * re-asserts exactly 1 ESTABLISHED row on B's port, proving the count MOVED to the new port rather
+ * than merely vanishing everywhere.
+ */
+async function checkSwitchSockets(built) {
+  const violations = [];
+  const serverPid = built.server?.child?.pid;
+  if (!serverPid) {
+    violations.push(
+      "switch-sockets: sandbox server pid unresolved — cannot scope the socket count to it",
+    );
+    return violations;
+  }
+
+  const socketA = await openProxiedSocket({
+    port: built.port,
+    idSegment: built.sessionA.id,
+    timeoutMs: PROXY_READ_TIMEOUT_MS,
+  });
+  console.log(
+    `switch-sockets: opened session A's client-held proxied socket — opened=${socketA.opened} closeCode=${socketA.closeCode}`,
+  );
+  if (!socketA.opened) {
+    violations.push(
+      `switch-sockets: session A's proxied WS never opened (closeCode=${socketA.closeCode}) — cannot proceed`,
+    );
+    return violations;
+  }
+
+  const preCount = await countEstablishedToPort(built.ttyd.a.port, serverPid);
+  console.log(
+    `switch-sockets: PRE count on port ${built.ttyd.a.port} (session A) owned by pid ${serverPid} = ${preCount.count} endpoints=${JSON.stringify(preCount.endpoints)}`,
+  );
+  if (preCount.count !== 1) {
+    violations.push(
+      `switch-sockets: PRE-CONDITION VIOLATED — expected exactly 1 ESTABLISHED row on port ${built.ttyd.a.port} owned by pid ${serverPid} before the switch, actual ${preCount.count}. A 0 reading here means the counting instrument is blind, not that nothing leaked.`,
+    );
+    await closeProxiedSocket(socketA.ws);
+    return violations;
+  }
+
+  const switchRes = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${built.cardId}/session`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: built.sessionB.id }),
+    },
+  );
+  console.log(
+    `switch-sockets: POST /api/cards/${built.cardId}/session sessionId=${built.sessionB.id} -> ${switchRes.status}`,
+  );
+  if (switchRes.status < 200 || switchRes.status >= 300) {
+    violations.push(
+      `switch-sockets: switch POST expected a 2xx status, actual ${switchRes.status}`,
+    );
+  }
+  const afterSwitch = await fetchFixtureCard(built);
+  console.log(
+    `switch-sockets: wire activeSession.id after switch = ${afterSwitch?.activeSession?.id} (expected ${built.sessionB.id})`,
+  );
+  if (afterSwitch?.activeSession?.id !== built.sessionB.id) {
+    violations.push(
+      `switch-sockets: wire activeSession.id expected ${built.sessionB.id} after the switch, actual ${afterSwitch?.activeSession?.id} — refusing to claim a socket result about a switch that never actually happened`,
+    );
+  }
+
+  await closeProxiedSocket(socketA.ws);
+  console.log(
+    `switch-sockets: closed session A's client-held socket — simulating the browser's iframe navigating away`,
+  );
+
+  const pollStart = Date.now();
+  let afterCount = await countEstablishedToPort(built.ttyd.a.port, serverPid);
+  while (
+    afterCount.count > 0 &&
+    Date.now() - pollStart < SOCKET_TEARDOWN_POLL_MS
+  ) {
+    await sleep(10);
+    afterCount = await countEstablishedToPort(built.ttyd.a.port, serverPid);
+  }
+  const elapsedMs = Date.now() - pollStart;
+  console.log(
+    `switch-sockets: poll-to-zero on port ${built.ttyd.a.port} (session A, OLD) — finalCount=${afterCount.count} elapsedMs=${elapsedMs} budget=${SOCKET_TEARDOWN_POLL_MS}ms`,
+  );
+  if (afterCount.count > 0) {
+    violations.push(
+      `switch-sockets: LEAK — port ${built.ttyd.a.port} (session A, the OLD session) still has ${afterCount.count} ESTABLISHED row(s) owned by pid ${serverPid} after ${elapsedMs}ms (budget ${SOCKET_TEARDOWN_POLL_MS}ms): ${JSON.stringify(afterCount.endpoints)}`,
+    );
+  }
+
+  const socketB = await openProxiedSocket({
+    port: built.port,
+    idSegment: built.sessionB.id,
+    timeoutMs: PROXY_READ_TIMEOUT_MS,
+  });
+  console.log(
+    `switch-sockets: opened session B's proxied socket — opened=${socketB.opened} closeCode=${socketB.closeCode}`,
+  );
+  if (!socketB.opened) {
+    violations.push(
+      `switch-sockets: session B's proxied WS never opened (closeCode=${socketB.closeCode})`,
+    );
+  } else {
+    const postCount = await countEstablishedToPort(
+      built.ttyd.b.port,
+      serverPid,
+    );
+    console.log(
+      `switch-sockets: POST count on port ${built.ttyd.b.port} (session B, NEW) owned by pid ${serverPid} = ${postCount.count} endpoints=${JSON.stringify(postCount.endpoints)}`,
+    );
+    if (postCount.count !== 1) {
+      violations.push(
+        `switch-sockets: POST-CONDITION expected exactly 1 ESTABLISHED row on port ${built.ttyd.b.port} owned by pid ${serverPid}, actual ${postCount.count} — the count must MOVE to the new session's port, not merely vanish`,
+      );
+    }
+    await closeProxiedSocket(socketB.ws);
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -2665,6 +2863,7 @@ const CHECKS = {
   "proxy-addressing": () =>
     withFixture("proxy-addressing", checkProxyAddressing),
   "orphan-sweep": () => withFixture("orphan-sweep", checkOrphanSweep),
+  "switch-sockets": () => withFixture("switch-sockets", checkSwitchSockets),
 };
 
 /**
