@@ -4,11 +4,13 @@
  * same category as check-invariants.mjs, migration-diff-v3.mjs, and redaction-capture-v3.mjs. The
  * ROADMAP forbids settling this phase's liveness criteria from store records alone ("a store
  * record alone would make every liveness criterion unfalsifiable, which is precisely the
- * dead-instrument failure v2.9 documented nine times"), so this harness stands up TWO REAL tmux
+ * dead-instrument failure v2.9 documented nine times"), so this harness stands up REAL tmux
  * sessions running a trivial long-lived shell loop (never `claude`, no worktrees, no repo
- * mutation) with TWO REAL ttyd processes against a sandboxed `HOME`, seeds one card owning both as
+ * mutation) with a REAL ttyd each against a sandboxed `HOME`, seeds one card owning them as
  * `Session` records, boots the production server against that sandbox, and exercises the real
- * hook route over loopback HTTP.
+ * hook route over loopback HTTP. Two fixture SHAPES exist: the two-session fixture every
+ * cross-session check needs, and the one-session fixture the N=1 parity leg needs — see
+ * {@link TWO_SESSION_FIXTURE} and {@link SINGLE_SESSION_FIXTURE}.
  *
  * SAFETY IS THIS FILE'S FIRST-ORDER CONCERN. `adoptAndSweep` (`ttyd.ts`) fingerprints ttyd by ARGV
  * SHAPE — `ttyd` + `tmux attach`, the `DISPATCH_TTYD_REVISION_5` retained key, or the
@@ -27,13 +29,15 @@
  * booting the sandbox server runs `reconcileSessions()`, which sweeps `dsp`-fingerprinted ttyd
  * processes MACHINE-WIDE via `adoptAndSweep` — not scoped by HOME. `assertNoLiveService()` is what
  * makes this acceptable: it refuses to run at all while the user's real service could have live
- * ttyd of its own to lose.
+ * ttyd of its own to lose. That refusal is FAIL-CLOSED BY DESIGN and has no override flag: a
+ * `--check` that cannot run while the user's service is up is a check pending a window, never a
+ * check to be talked past.
  *
  * SANDBOX SAFETY IS SCOPED TO STATE ON DISK PLUS THE `:4700` PROBE, NOT TO EVERY PROCESS ON THE
  * MACHINE. `assertSandboxSafe` enforces the database and the port; `assertNoLiveService` covers
  * the one machine-wide process hazard this harness introduces. Within that scope the guarantee is
  * absolute: every sandbox HOME lives under `os.tmpdir()` with a `dispatch-session-liveness-v3-`
- * basename, the sandbox port is asserted to never be 4700, and the real `~/.dispatch/board.db`'s
+ * basename, the running fixture's port is asserted to never be 4700, and the real `~/.dispatch/board.db`'s
  * mtime and size are recorded before this script does anything and again after every `--check` run
  * — a mismatch is a loud non-zero-exit failure, not a warning. This harness never writes to
  * `~/.dispatch/`.
@@ -62,6 +66,12 @@
  *                                                                   the marker-holding sibling is really
  *                                                                   dead — otherwise needs_input is a
  *                                                                   one-way latch nothing can clear
+ *   node scripts/session-liveness-v3.mjs --check single-session    the N=1 parity leg: marker
+ *                                                                   routing, flip-back, session-lost
+ *                                                                   detection and the unseen-activity
+ *                                                                   dot on a card owning EXACTLY ONE
+ *                                                                   session — the only mode that does
+ *                                                                   not seed a sibling
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -101,6 +111,16 @@ const DIST_ENTRY = join(REPO_ROOT, "dist", "server", "bootstrap", "index.js");
 const BUILD_SERVER_SCRIPT = "build:server";
 
 const SANDBOX_PORT = 47862;
+
+/**
+ * The single-session fixture's own sandbox port, deliberately distinct from {@link SANDBOX_PORT}.
+ * Two fixture shapes that never share a port cannot block or be mistaken for each other:
+ * {@link assertPreflightClean} refuses to start when the fixture's OWN port is already bound, so a
+ * two-session server a prior run leaked can never silently pass for this fixture's own server, nor
+ * stop this fixture from running.
+ */
+const SINGLE_SESSION_SANDBOX_PORT = 47863;
+
 const SANDBOX_PREFIX = "dispatch-session-liveness-v3-";
 
 /**
@@ -122,6 +142,16 @@ const DISPATCH_DIR_NAME = ".dispatch";
 const TMUX_PREFIX = `dsp91h-${process.pid}-`;
 
 /**
+ * The single-session fixture's own tmux namespace, distinct from {@link TMUX_PREFIX} for the same
+ * reason {@link SINGLE_SESSION_SANDBOX_PORT} is distinct from {@link SANDBOX_PORT}:
+ * {@link assertPreflightClean} and {@link tearDownFixture} both filter `tmux list-sessions` by the
+ * RUNNING fixture's own prefix, so a leak left by one fixture shape is never attributed to — or
+ * cleaned up as — the other's. Carried over verbatim from the scratch single-session script this
+ * mode replaces.
+ */
+const SINGLE_SESSION_TMUX_PREFIX = `dsp91sp-${process.pid}-`;
+
+/**
  * The exact re-adoption fingerprint key `spawnTtyd` (`ttyd.ts`) emits via `-t
  * DISPATCH_TTYD_REVISION_5=1` — without it, boot-time `adoptAndSweep` cannot mark this harness's
  * own ttyd as `compatible` and would sweep it as an unrecognized orphan instead of adopting it.
@@ -132,6 +162,40 @@ const TTYD_REVISION_RETAINED_KEY = "DISPATCH_TTYD_REVISION_5";
 const FAKE_LINEAR_API_KEY = "session-liveness-v3-harness-fake-key-never-real";
 
 const FIXTURE_CARD_ID = "shl-card";
+
+/**
+ * Which `built` field each session key publishes itself under, so {@link standUpFixture} can build
+ * a fixture from a key LIST while every check keeps reading the same `built.sessionA` /
+ * `built.sessionB` names it always read. A fixture whose `sessionKeys` omits `b` leaves
+ * `built.sessionB` null, which is the point: a check written against a sibling cannot silently run
+ * on a fixture that has none.
+ */
+const SESSION_FIELD_BY_KEY = { a: "sessionA", b: "sessionB" };
+
+const WORKSPACE_SUFFIX_BY_SESSION_KEY = { a: "SHL-1", b: "SHL-1-sibling" };
+
+/**
+ * A fixture PROFILE is the whole of what differs between this harness's two fixture shapes: which
+ * sandbox port it boots on, which tmux namespace it owns, and — the load-bearing one —
+ * `sessionKeys`, whose LENGTH IS the fixture's session count.
+ *
+ * `["a", "b"]` is what every check except `single-session` has always used. `["a"]` builds a card
+ * owning exactly ONE session record, which no two-session fixture can approximate rather than
+ * merely resemble: `redactCard` emits `sessionCount` only at >= 2, and every cross-session gate in
+ * the store has a sibling to bind against, so N=1 is a structurally different subject rather than
+ * the same subject with one participant idle.
+ */
+const TWO_SESSION_FIXTURE = {
+  port: SANDBOX_PORT,
+  tmuxPrefix: TMUX_PREFIX,
+  sessionKeys: ["a", "b"],
+};
+
+const SINGLE_SESSION_FIXTURE = {
+  port: SINGLE_SESSION_SANDBOX_PORT,
+  tmuxPrefix: SINGLE_SESSION_TMUX_PREFIX,
+  sessionKeys: ["a"],
+};
 
 const POLL_INTERVAL_MS = 100;
 const READY_TIMEOUT_MS = 30_000;
@@ -188,11 +252,14 @@ async function assertNoLiveService() {
  * `migration-diff-v3.mjs` precedent, verbatim four checks): port, real-HOME identity, tmpdir
  * containment, basename prefix. Throws (never silently degrades) if any check fails. PROCESS state
  * is deliberately outside this function's scope — {@link assertNoLiveService} covers that.
+ * @remarks `port` is the RUNNING fixture profile's own port rather than a module constant, so the
+ * never-4700 half of this guard covers every fixture shape this harness can build — a second
+ * fixture profile added later cannot acquire a port that no guard ever reads.
  */
-function assertSandboxSafe(home) {
-  if (SANDBOX_PORT === 4700) {
+function assertSandboxSafe(home, port) {
+  if (port === 4700) {
     throw new Error(
-      "SANDBOX_PORT must never equal 4700 — that is the user's live dispatch instance.",
+      `sandbox port must never equal 4700 — that is the user's live dispatch instance (got ${port}).`,
     );
   }
   if (home === homedir()) {
@@ -217,16 +284,16 @@ function assertSandboxSafe(home) {
  * hardcoded, obviously-fake Linear key — this harness seeds cards directly via `node:sqlite`, so it
  * never reads or needs a real key. No process is spawned by this call.
  */
-function makeSandboxHome(label) {
+function makeSandboxHome(label, port) {
   const home = join(tmpdir(), `${SANDBOX_PREFIX}${label}-${process.pid}`);
-  assertSandboxSafe(home);
+  assertSandboxSafe(home, port);
   const dispatchDir = join(home, DISPATCH_DIR_NAME);
   mkdirSync(dispatchDir, { recursive: true });
   writeFileSync(
     join(dispatchDir, "config.json"),
     JSON.stringify(
       {
-        port: SANDBOX_PORT,
+        port,
         workspaceRoot: join(home, "workspaces"),
         statusChannel: "auto",
         updateCheck: false,
@@ -506,22 +573,22 @@ function fmtStat(s) {
  * run's teardown must have failed silently for either to be true, and this run must not layer on
  * top of a leak rather than surface it.
  */
-async function assertPreflightClean() {
+async function assertPreflightClean(built) {
   const existing = (await tmuxListSessionNames()).filter((n) =>
-    n.startsWith(TMUX_PREFIX),
+    n.startsWith(built.tmuxPrefix),
   );
   if (existing.length > 0) {
     throw new Error(
-      `refusing to start — tmux sessions already present with prefix "${TMUX_PREFIX}": ${existing.join(", ")}`,
+      `refusing to start — tmux sessions already present with prefix "${built.tmuxPrefix}": ${existing.join(", ")}`,
     );
   }
-  if (await isPortListening(SANDBOX_PORT)) {
+  if (await isPortListening(built.port)) {
     throw new Error(
-      `refusing to start — something is already LISTENING on sandbox port ${SANDBOX_PORT}`,
+      `refusing to start — something is already LISTENING on sandbox port ${built.port}`,
     );
   }
   console.log(
-    `preflight: 0 tmux sessions with prefix "${TMUX_PREFIX}"; port ${SANDBOX_PORT} free`,
+    `preflight: 0 tmux sessions with prefix "${built.tmuxPrefix}"; port ${built.port} free`,
   );
 }
 
@@ -586,99 +653,107 @@ function assertBuilt() {
  * Stand up the fixture, mutating `built` incrementally as each real resource comes up so a
  * mid-standup failure still leaves {@link tearDownFixture} enough state to clean up whatever DID
  * start. Order: a warmup boot against the still-cardless sandbox home to create the sqlite schema
- * FIRST, then two real tmux sessions (verified via `tmux list-sessions`), then two real ttyd
- * processes matching the app's exact spawn argv (verified LISTENING via `lsof`), the two-session
- * fixture card seeded directly, then the real boot the checks run against.
+ * FIRST, then one real tmux session PER `built.sessionKeys` entry (verified via
+ * `tmux list-sessions`), then one real ttyd each matching the app's exact spawn argv (verified
+ * LISTENING via `lsof`), the fixture card seeded directly owning exactly those session records,
+ * then the real boot the checks run against. The FIRST key is always the active session, so a
+ * one-key profile yields a card whose sole session is also its active one.
  * @remarks The warmup boot MUST precede the ttyd spawns, not follow them — `main()`'s own boot
  * sequence runs `reconcileSessions()` unconditionally, and a warmup boot against a still-empty
  * sandbox (no fixture card exists yet) resolves an EMPTY `sessionsWithTmux()` candidates list, so
- * `adoptAndSweep` would spare nothing and sweep BOTH of this harness's own freshly-spawned,
+ * `adoptAndSweep` would spare nothing and sweep EVERY one of this harness's own freshly-spawned,
  * fingerprint-matched ttyd processes as unrecognized orphans before the fixture card seeding step
- * ever runs — empirically confirmed by this task's own `--check safety` proof run, corrected here.
+ * ever runs — empirically confirmed by Phase 91's own `--check safety` proof run, corrected here.
  */
 async function standUpFixture(built) {
   const warmup = bootServer(built.home);
-  await waitForReady(SANDBOX_PORT);
+  await waitForReady(built.port);
   await killAndWait(warmup.child);
 
-  built.tmux.a = `${TMUX_PREFIX}a`;
-  await tmuxNewSession(built.tmux.a, built.home);
-  built.tmux.b = `${TMUX_PREFIX}b`;
-  await tmuxNewSession(built.tmux.b, built.home);
-
+  for (const key of built.sessionKeys) {
+    built.tmux[key] = `${built.tmuxPrefix}${key}`;
+    await tmuxNewSession(built.tmux[key], built.home);
+  }
   const live = await tmuxListSessionNames();
-  if (!live.includes(built.tmux.a) || !live.includes(built.tmux.b)) {
+  const missing = built.sessionKeys
+    .map((key) => built.tmux[key])
+    .filter((name) => !live.includes(name));
+  if (missing.length > 0) {
     throw new Error(
-      `tmux sessions did not both come up: expected ${built.tmux.a} and ${built.tmux.b}, live=${JSON.stringify(live)}`,
+      `tmux sessions did not all come up: missing ${missing.join(", ")}, live=${JSON.stringify(live)}`,
     );
   }
-  console.log(`standup: tmux sessions live — ${built.tmux.a}, ${built.tmux.b}`);
-
-  built.ttyd.a = await spawnTtyd(built.tmux.a, built.cardId);
-  built.ttyd.b = await spawnTtyd(built.tmux.b, built.cardId);
-  await waitForPortListening(built.ttyd.a.port);
-  await waitForPortListening(built.ttyd.b.port);
   console.log(
-    `standup: ttyd ports LISTENING — a=${built.ttyd.a.port}, b=${built.ttyd.b.port}`,
+    `standup: tmux sessions live — ${built.sessionKeys.map((key) => built.tmux[key]).join(", ")}`,
+  );
+
+  for (const key of built.sessionKeys) {
+    built.ttyd[key] = await spawnTtyd(built.tmux[key], built.cardId);
+  }
+  for (const key of built.sessionKeys) {
+    await waitForPortListening(built.ttyd[key].port);
+  }
+  console.log(
+    `standup: ttyd ports LISTENING — ${built.sessionKeys.map((key) => `${key}=${built.ttyd[key].port}`).join(", ")}`,
   );
 
   const now = new Date().toISOString();
-  built.sessionA = { id: randomUUID(), token: randomBytes(32).toString("hex") };
-  built.sessionB = { id: randomUUID(), token: randomBytes(32).toString("hex") };
-
-  const sessionARecord = {
-    id: built.sessionA.id,
-    createdAt: now,
-    updatedAt: now,
-    tmuxSession: built.tmux.a,
-    ttydPort: built.ttyd.a.port,
-    hookToken: built.sessionA.token,
-    workspacePath: join(built.home, "workspaces", "SHL-1"),
-  };
-  const sessionBRecord = {
-    id: built.sessionB.id,
-    createdAt: now,
-    updatedAt: now,
-    tmuxSession: built.tmux.b,
-    ttydPort: built.ttyd.b.port,
-    hookToken: built.sessionB.token,
-    workspacePath: join(built.home, "workspaces", "SHL-1-sibling"),
-  };
+  const records = built.sessionKeys.map((key) => {
+    const handle = { id: randomUUID(), token: randomBytes(32).toString("hex") };
+    built[SESSION_FIELD_BY_KEY[key]] = handle;
+    return {
+      id: handle.id,
+      createdAt: now,
+      updatedAt: now,
+      tmuxSession: built.tmux[key],
+      ttydPort: built.ttyd[key].port,
+      hookToken: handle.token,
+      workspacePath: join(
+        built.home,
+        "workspaces",
+        WORKSPACE_SUFFIX_BY_SESSION_KEY[key],
+      ),
+    };
+  });
+  const [activeRecord] = records;
 
   const card = {
     id: built.cardId,
     issueId: `${built.cardId}-issue`,
     identifier: "SHL-1",
-    title: "session-liveness-v3 harness fixture card — two real sessions",
+    title: `session-liveness-v3 harness fixture card — ${records.length} real session${records.length === 1 ? "" : "s"}`,
     description: null,
     priority: 3,
     column: "in_progress",
     updatedAt: now,
-    sessions: [sessionARecord, sessionBRecord],
-    activeSessionId: sessionARecord.id,
-    tmuxSession: sessionARecord.tmuxSession,
-    ttydPort: sessionARecord.ttydPort,
-    hookToken: sessionARecord.hookToken,
-    workspacePath: sessionARecord.workspacePath,
+    sessions: records,
+    activeSessionId: activeRecord.id,
+    tmuxSession: activeRecord.tmuxSession,
+    ttydPort: activeRecord.ttydPort,
+    hookToken: activeRecord.hookToken,
+    workspacePath: activeRecord.workspacePath,
   };
   seedFixtureCard(built.home, card);
 
   built.server = bootServer(built.home);
-  await waitForReady(SANDBOX_PORT);
-  console.log(`standup: sandbox server ready on :${SANDBOX_PORT}`);
+  await waitForReady(built.port);
+  console.log(`standup: sandbox server ready on :${built.port}`);
 }
 
 /**
- * Unconditional teardown: kill the server, kill both ttyd (falling back to the `lsof`-resolved PID
- * for one that survives its own SIGTERM), kill both tmux sessions, remove the sandbox home — THEN
+ * Unconditional teardown: kill the server, kill every ttyd (falling back to the `lsof`-resolved PID
+ * for one that survives its own SIGTERM), kill every tmux session, remove the sandbox home — THEN
  * verify each of those actually happened, pushing a violation for anything still present rather
  * than assuming success. Runs against whatever fields `built` has populated, so a fixture that
  * failed partway through standup still gets torn down as far as it got.
+ * @remarks The leaked-tmux sweep filters on the RUNNING fixture's own prefix, never on a module
+ * constant: a fixture profile must never be able to report a sibling profile's leak as its own,
+ * nor stay silent about its own because it looked for the wrong prefix.
  */
 async function tearDownFixture(built, violations) {
   await killAndWait(built.server?.child);
 
-  for (const key of ["a", "b"]) {
+  for (const key of built.sessionKeys) {
     const t = built.ttyd[key];
     if (t?.child) {
       try {
@@ -689,7 +764,7 @@ async function tearDownFixture(built, violations) {
     }
   }
   await sleep(300);
-  for (const key of ["a", "b"]) {
+  for (const key of built.sessionKeys) {
     const t = built.ttyd[key];
     if (!t) continue;
     if (await isPortListening(t.port)) {
@@ -703,22 +778,23 @@ async function tearDownFixture(built, violations) {
     }
   }
 
-  if (built.tmux.a) await tmuxKillSession(built.tmux.a);
-  if (built.tmux.b) await tmuxKillSession(built.tmux.b);
+  for (const key of built.sessionKeys) {
+    if (built.tmux[key]) await tmuxKillSession(built.tmux[key]);
+  }
 
   if (built.home && existsSync(built.home)) {
     rmSync(built.home, { recursive: true, force: true });
   }
 
   const remaining = (await tmuxListSessionNames()).filter((n) =>
-    n.startsWith(TMUX_PREFIX),
+    n.startsWith(built.tmuxPrefix),
   );
   if (remaining.length > 0) {
     violations.push(
       `teardown: tmux sessions still present after kill-session: ${remaining.join(", ")}`,
     );
   }
-  for (const key of ["a", "b"]) {
+  for (const key of built.sessionKeys) {
     const t = built.ttyd[key];
     if (t && (await isPortListening(t.port))) {
       violations.push(
@@ -726,9 +802,9 @@ async function tearDownFixture(built, violations) {
       );
     }
   }
-  if (await isPortListening(SANDBOX_PORT)) {
+  if (await isPortListening(built.port)) {
     violations.push(
-      `teardown: sandbox port ${SANDBOX_PORT} still LISTENING after server kill`,
+      `teardown: sandbox port ${built.port} still LISTENING after server kill`,
     );
   }
   if (built.home && existsSync(built.home)) {
@@ -739,23 +815,30 @@ async function tearDownFixture(built, violations) {
 }
 
 /**
- * One complete fixture lifecycle: preflight, a fresh sandbox home under `label`, two real tmux
- * sessions, two real ttyd, `fn(built)`, then unconditional-and-verified teardown — regardless of
- * what `fn` returns or throws. Every check in {@link CHECKS} is built on this: `safety` and
- * `hook-attribution` call it exactly once; `liveness` (Task 1) and `reconcile` (Task 2) call it
- * more than once within a single `--check` invocation, because each needs a fixture that starts
- * from BOTH sessions live, independent of any prior direction/stage's own mutation — a rebuilt
- * fixture per kill direction for `liveness`, a live-restart stage plus a fresh
- * dead-session-before-restart stage for `reconcile`. {@link assertPreflightClean} is re-run at
- * the top of every call, not once per `--check` invocation, so a fixture rebuilt mid-check still
- * refuses to layer onto a leak the prior cycle's own teardown left behind.
+ * One complete fixture lifecycle: preflight, a fresh sandbox home under `label`, one real tmux
+ * session and one real ttyd per `profile.sessionKeys` entry, `fn(built)`, then
+ * unconditional-and-verified teardown — regardless of what `fn` returns or throws. Every check in
+ * {@link CHECKS} is built on this: `safety`, `hook-attribution` and `single-session` call it
+ * exactly once; `liveness` and `reconcile` call it more than once within a single `--check`
+ * invocation, because each needs a fixture that starts from BOTH sessions live, independent of any
+ * prior direction/stage's own mutation — a rebuilt fixture per kill direction for `liveness`, a
+ * live-restart stage plus a fresh dead-session-before-restart stage for `reconcile`.
+ * {@link assertPreflightClean} is re-run at the top of every call, not once per `--check`
+ * invocation, so a fixture rebuilt mid-check still refuses to layer onto a leak the prior cycle's
+ * own teardown left behind.
+ * @remarks `profile` defaults to {@link TWO_SESSION_FIXTURE} so every check that predates the
+ * profile split keeps the exact fixture it was written against; `single-session` is the only
+ * caller that passes {@link SINGLE_SESSION_FIXTURE}.
  */
-async function withFixture(label, fn) {
+async function withFixture(label, fn, profile = TWO_SESSION_FIXTURE) {
   const violations = [];
-  const home = makeSandboxHome(label);
+  const home = makeSandboxHome(label, profile.port);
   const built = {
     home,
     cardId: FIXTURE_CARD_ID,
+    port: profile.port,
+    tmuxPrefix: profile.tmuxPrefix,
+    sessionKeys: profile.sessionKeys,
     tmux: {},
     ttyd: {},
     server: null,
@@ -764,7 +847,7 @@ async function withFixture(label, fn) {
     dbPath: join(home, DISPATCH_DIR_NAME, "board.db"),
   };
   try {
-    await assertPreflightClean();
+    await assertPreflightClean(built);
     assertBuilt();
     await standUpFixture(built);
     violations.push(...(await fn(built)));
@@ -787,12 +870,12 @@ async function withFixture(label, fn) {
  * connection mid-poll) — resolves `undefined` rather than throwing, so a long poll loop degrades
  * to "not yet observed" instead of crashing the check.
  */
-async function fetchFixtureCard(cardId) {
+async function fetchFixtureCard(built) {
   try {
-    const res = await fetch(`http://127.0.0.1:${SANDBOX_PORT}/api/board`);
+    const res = await fetch(`http://127.0.0.1:${built.port}/api/board`);
     const body = await res.json();
     const cards = Array.isArray(body?.cards) ? body.cards : [];
-    return cards.find((c) => c.id === cardId);
+    return cards.find((c) => c.id === built.cardId);
   } catch {
     return undefined;
   }
@@ -808,7 +891,7 @@ async function fetchFixtureCard(cardId) {
 async function restartServer(built) {
   await killAndWait(built.server?.child);
   built.server = bootServer(built.home);
-  await waitForReady(SANDBOX_PORT);
+  await waitForReady(built.port);
 }
 
 /**
@@ -819,7 +902,7 @@ async function restartServer(built) {
 async function checkSafety(built) {
   const violations = [];
   const live = (await tmuxListSessionNames()).filter((n) =>
-    n.startsWith(TMUX_PREFIX),
+    n.startsWith(built.tmuxPrefix),
   );
   console.log(
     `safety: tmux sessions live with our prefix = ${JSON.stringify(live)}`,
@@ -860,8 +943,8 @@ function stopBodyWithReason(reason) {
 }
 
 /** POST `body` to the sandbox's `/api/hook/claude` route carrying `token`, returning the response status. */
-async function postHook(token, body) {
-  const res = await fetch(`http://127.0.0.1:${SANDBOX_PORT}/api/hook/claude`, {
+async function postHook(built, token, body) {
+  const res = await fetch(`http://127.0.0.1:${built.port}/api/hook/claude`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -879,8 +962,8 @@ async function postHook(token, body) {
  * `--check attention` proves. No message body is required: `applyPromptSubmit` binds only on the
  * event name plus the token-resolved session identity, never on payload text.
  */
-async function postPromptSubmit(token) {
-  const res = await fetch(`http://127.0.0.1:${SANDBOX_PORT}/api/hook/claude`, {
+async function postPromptSubmit(built, token) {
+  const res = await fetch(`http://127.0.0.1:${built.port}/api/hook/claude`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -921,6 +1004,7 @@ async function checkHookAttribution(built) {
   const reasonB = "reason-unique-to-session-B";
 
   const statusA = await postHook(
+    built,
     built.sessionA.token,
     stopBodyWithReason(reasonA),
   );
@@ -934,6 +1018,7 @@ async function checkHookAttribution(built) {
   }
 
   const statusB = await postHook(
+    built,
     built.sessionB.token,
     stopBodyWithReason(reasonB),
   );
@@ -948,6 +1033,7 @@ async function checkHookAttribution(built) {
 
   const unmintedToken = randomBytes(32).toString("hex");
   const statusUnminted = await postHook(
+    built,
     unmintedToken,
     stopBodyWithReason("reason-never-attributed"),
   );
@@ -1082,7 +1168,7 @@ async function checkLivenessDirection(kind) {
     let transitioned = false;
     const deadline = Date.now() + LIVENESS_POLL_TIMEOUT_MS;
     while (Date.now() < deadline) {
-      lastWireCard = await fetchFixtureCard(built.cardId);
+      lastWireCard = await fetchFixtureCard(built);
       if (lastWireCard?.sessionLost === true) sawSessionLostTrue = true;
       if (kind === "active") {
         transitioned =
@@ -1291,10 +1377,12 @@ async function checkReconcileStage1(built) {
   const reasonA = "reconcile-stage1-reason-A";
   const reasonB = "reconcile-stage1-reason-B";
   const statusA = await postHook(
+    built,
     built.sessionA.token,
     stopBodyWithReason(reasonA),
   );
   const statusB = await postHook(
+    built,
     built.sessionB.token,
     stopBodyWithReason(reasonB),
   );
@@ -1394,7 +1482,7 @@ async function checkReconcileStage2(built) {
     );
   }
 
-  const card = await fetchFixtureCard(built.cardId);
+  const card = await fetchFixtureCard(built);
   console.log(
     `reconcile stage2: wire sessionLost=${card?.sessionLost}, sessionCount=${card?.sessionCount}, activeSession.id=${card?.activeSession?.id}`,
   );
@@ -1479,6 +1567,7 @@ async function checkAttention(built) {
   );
 
   const statusStopB = await postHook(
+    built,
     built.sessionB.token,
     stopBodyWithReason(reasonB),
   );
@@ -1490,7 +1579,7 @@ async function checkAttention(built) {
       `step 1: POST Stop via session B returned ${statusStopB}, expected 204`,
     );
   }
-  let card = await fetchFixtureCard(built.cardId);
+  let card = await fetchFixtureCard(built);
   console.log(
     `attention: step 1 card.column = ${card?.column} (expected needs_input)`,
   );
@@ -1500,7 +1589,7 @@ async function checkAttention(built) {
     );
   }
 
-  const statusPromptA = await postPromptSubmit(built.sessionA.token);
+  const statusPromptA = await postPromptSubmit(built, built.sessionA.token);
   console.log(
     `attention: step 2 POST UserPromptSubmit via session A (active, working sibling replying) -> ${statusPromptA} (expected 204)`,
   );
@@ -1509,7 +1598,7 @@ async function checkAttention(built) {
       `step 2: POST UserPromptSubmit via session A returned ${statusPromptA}, expected 204`,
     );
   }
-  card = await fetchFixtureCard(built.cardId);
+  card = await fetchFixtureCard(built);
   console.log(
     `attention: step 2 card.column = ${card?.column} (expected still needs_input — B still holds its marker)`,
   );
@@ -1519,7 +1608,7 @@ async function checkAttention(built) {
     );
   }
 
-  const statusPromptB = await postPromptSubmit(built.sessionB.token);
+  const statusPromptB = await postPromptSubmit(built, built.sessionB.token);
   console.log(
     `attention: step 3 POST UserPromptSubmit via session B (its own reply, positive control) -> ${statusPromptB} (expected 204)`,
   );
@@ -1528,7 +1617,7 @@ async function checkAttention(built) {
       `step 3: POST UserPromptSubmit via session B returned ${statusPromptB}, expected 204`,
     );
   }
-  card = await fetchFixtureCard(built.cardId);
+  card = await fetchFixtureCard(built);
   console.log(
     `attention: step 3 card.column = ${card?.column} (expected in_progress)`,
   );
@@ -1632,6 +1721,7 @@ async function checkAttentionDeadSibling(built) {
   );
 
   const statusStopB = await postHook(
+    built,
     built.sessionB.token,
     stopBodyWithReason(reasonB),
   );
@@ -1643,7 +1733,7 @@ async function checkAttentionDeadSibling(built) {
       `step 1: POST Stop via session B returned ${statusStopB}, expected 204`,
     );
   }
-  let card = await fetchFixtureCard(built.cardId);
+  let card = await fetchFixtureCard(built);
   console.log(
     `attention-dead-sibling: step 1 card.column = ${card?.column} (expected needs_input)`,
   );
@@ -1671,7 +1761,7 @@ async function checkAttentionDeadSibling(built) {
       `step 2: session ${built.sessionB.id} cleared after only ${elapsedMs}ms — faster than the real 2000ms tick / 3-strike detector could produce (floor ${LIVENESS_MIN_ELAPSED_MS}ms)`,
     );
   }
-  card = await fetchFixtureCard(built.cardId);
+  card = await fetchFixtureCard(built);
   console.log(
     `attention-dead-sibling: step 2 wire sessionLost=${card?.sessionLost} (expected falsy — A is still live), column=${card?.column} (expected still needs_input)`,
   );
@@ -1686,7 +1776,7 @@ async function checkAttentionDeadSibling(built) {
     );
   }
 
-  const statusPromptA = await postPromptSubmit(built.sessionA.token);
+  const statusPromptA = await postPromptSubmit(built, built.sessionA.token);
   console.log(
     `attention-dead-sibling: step 3 POST UserPromptSubmit via session A (live, the only session that can still answer) -> ${statusPromptA} (expected 204)`,
   );
@@ -1695,7 +1785,7 @@ async function checkAttentionDeadSibling(built) {
       `step 3: POST UserPromptSubmit via session A returned ${statusPromptA}, expected 204`,
     );
   }
-  card = await fetchFixtureCard(built.cardId);
+  card = await fetchFixtureCard(built);
   console.log(
     `attention-dead-sibling: step 3 card.column = ${card?.column} (expected in_progress)`,
   );
@@ -1737,6 +1827,162 @@ async function checkAttentionDeadSibling(built) {
   return violations;
 }
 
+/**
+ * Single-session (N=1) parity proof, on a card owning EXACTLY ONE session record: marker routing,
+ * flip-back, session-lost detection, and the unseen-activity dot's precondition. Promoted verbatim
+ * in substance from the scratch script Phase 91 settled this leg with and never committed — the
+ * claim it made was unrepeatable by anyone, including its own verifier, which is the failure mode
+ * this mode exists to close. Only the duplicated scaffolding was dropped: it now runs inside this
+ * harness's own envelope ({@link assertNoLiveService}, {@link assertSandboxSafe}, the sandbox home,
+ * the compile-first {@link assertBuilt}) on {@link SINGLE_SESSION_FIXTURE}'s own port and tmux
+ * namespace.
+ *
+ * Every OTHER check here seeds two sessions, which is exactly why this leg needs its own fixture:
+ * at N=1 the cross-session gates have no sibling to bind against, so they are structurally
+ * unreachable rather than merely unexercised, and that is the shape almost every real dispatch
+ * ticket has.
+ *
+ * @remarks Step 1 asserts `sessionCount` is ABSENT from the wire, not that it equals 1:
+ * `redactCard` emits it only at `>= 2` so a single-session card renders no session-count suffix at
+ * all. That absence is the parity claim — an N=1 card must look exactly like a pre-entity card.
+ * @remarks Step 2's flip-back is the positive control that `flipBack` still moves an N=1 card:
+ * `checkAttention`'s cross-session gate (`s.id !== targetId`) can never fire here because the card
+ * owns one session, so a card that fails to flip back at N=1 is broken outright.
+ * @remarks Step 3 EXPECTS the wire's `sessionLost` to become true — the exact observation
+ * {@link checkLivenessDirection} records as a VIOLATION, because there a live sibling still
+ * answers. At N=1 every session the card owns is now dead, so the derived full loss is correct and
+ * its absence would be the bug. The {@link LIVENESS_MIN_ELAPSED_MS} floor is what keeps this from
+ * being satisfiable by anything other than the real 2000 ms-tick, 3-strike detector.
+ * @remarks Step 4 reads the PERSISTED card after killing the server rather than the wire, because
+ * `outputChangedAt` is a card-level field the Stop event in step 1 stamps and nothing in the
+ * session-lost path clears (`markSessionLost` clears the artifact fields, never this one) — the
+ * unseen-activity dot's precondition must survive the loss, or the dot could never be shown for a
+ * card whose session has since died.
+ */
+async function checkSingleSession(built) {
+  const violations = [];
+  const only = built.sessionA;
+  const reason = "single-session-parity-reason";
+  console.log(
+    `single-session: card ${built.cardId} owns exactly one session — ${only.id} on tmux ${built.tmux.a}, ttyd ${built.ttyd.a.port}`,
+  );
+
+  const statusStop = await postHook(
+    built,
+    only.token,
+    stopBodyWithReason(reason),
+  );
+  console.log(
+    `single-session: step 1 POST Stop/NEEDS_INPUT via the only session's own token -> ${statusStop} (expected 204)`,
+  );
+  if (statusStop !== 204) {
+    violations.push(`step 1: POST Stop returned ${statusStop}, expected 204`);
+  }
+  let wire = await fetchFixtureCard(built);
+  console.log(
+    `single-session: step 1 wire card.column = ${wire?.column} (expected needs_input)`,
+  );
+  if (wire?.column !== "needs_input") {
+    violations.push(
+      `step 1: card.column expected "needs_input", actual "${wire?.column}"`,
+    );
+  }
+  console.log(
+    `single-session: step 1 wire card.sessionCount = ${wire?.sessionCount} (expected absent at N=1)`,
+  );
+  if (wire?.sessionCount !== undefined) {
+    violations.push(
+      `step 1: card.sessionCount expected undefined at N=1 (redactCard emits it only at >= 2, so a single-session card must render no session-count suffix), actual ${wire?.sessionCount}`,
+    );
+  }
+
+  const statusPrompt = await postPromptSubmit(built, only.token);
+  console.log(
+    `single-session: step 2 POST UserPromptSubmit -> ${statusPrompt} (expected 204)`,
+  );
+  if (statusPrompt !== 204) {
+    violations.push(
+      `step 2: POST UserPromptSubmit returned ${statusPrompt}, expected 204`,
+    );
+  }
+  wire = await fetchFixtureCard(built);
+  console.log(
+    `single-session: step 2 wire card.column = ${wire?.column} (expected in_progress — the cross-session gate has no sibling to bind against at N=1)`,
+  );
+  if (wire?.column !== "in_progress") {
+    violations.push(
+      `step 2: card.column expected "in_progress" after flip-back, actual "${wire?.column}"`,
+    );
+  }
+
+  const killStart = Date.now();
+  await tmuxKillSession(built.tmux.a);
+  console.log(
+    `single-session: step 3 killed real tmux session ${built.tmux.a} — waiting for the real 3-strike detector`,
+  );
+  let sawLost = false;
+  const deadline = Date.now() + LIVENESS_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    wire = await fetchFixtureCard(built);
+    if (wire?.sessionLost === true) {
+      sawLost = true;
+      break;
+    }
+    await sleep(LIVENESS_POLL_INTERVAL_MS);
+  }
+  const elapsedMs = Date.now() - killStart;
+  console.log(
+    `single-session: step 3 wire sessionLost observed true = ${sawLost}, elapsedMs=${elapsedMs} (floor ${LIVENESS_MIN_ELAPSED_MS}ms)`,
+  );
+  if (!sawLost) {
+    violations.push(
+      `step 3: the real 3-strike detector did not derive sessionLost=true within ${LIVENESS_POLL_TIMEOUT_MS}ms — at N=1 every session the card owns is dead, so a card that never reads "Session lost" strands the user with no restart affordance`,
+    );
+  } else if (elapsedMs < LIVENESS_MIN_ELAPSED_MS) {
+    violations.push(
+      `step 3: sessionLost observed after only ${elapsedMs}ms — faster than the real 2000ms tick / 3-strike detector could produce (floor ${LIVENESS_MIN_ELAPSED_MS}ms); this did not come from the real detector`,
+    );
+  }
+
+  await killAndWait(built.server?.child);
+  const persisted = readCard(built.dbPath, built.cardId);
+  if (!persisted) {
+    violations.push(
+      `step 4: card ${built.cardId} missing from persisted board.db after kill`,
+    );
+    return violations;
+  }
+  console.log(
+    `single-session: step 4 persisted card.outputChangedAt = ${persisted.outputChangedAt} (expected a timestamp, stamped by step 1's Stop event)`,
+  );
+  if (persisted.outputChangedAt == null) {
+    violations.push(
+      `step 4: outputChangedAt expected a timestamp stamped by step 1's Stop event, actual ${persisted.outputChangedAt} — without it the unseen-activity dot has no precondition to render from`,
+    );
+  }
+
+  const record = persisted.sessions?.find((s) => s.id === only.id);
+  console.log(
+    `single-session: step 5 persisted session ${only.id} tmuxSession = ${JSON.stringify(record?.tmuxSession)} (expected absent); card.tmuxSession = ${JSON.stringify(persisted.tmuxSession)} (expected absent)`,
+  );
+  if (!record) {
+    violations.push(
+      `step 5: session ${only.id} missing from persisted sessions[]`,
+    );
+  } else if (record.tmuxSession !== undefined) {
+    violations.push(
+      `step 5: session ${only.id} persisted tmuxSession expected absent, actual ${JSON.stringify(record.tmuxSession)}`,
+    );
+  }
+  if (persisted.tmuxSession !== undefined) {
+    violations.push(
+      `step 5: card-level tmuxSession expected absent, actual ${JSON.stringify(persisted.tmuxSession)} — at N=1 the lost session IS the active one, so setActiveSession's flat mirror must clear with it or an older build reads a live session that is gone`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -1746,6 +1992,8 @@ const CHECKS = {
   attention: () => withFixture("attention", checkAttention),
   "attention-dead-sibling": () =>
     withFixture("attention-dead-sibling", checkAttentionDeadSibling),
+  "single-session": () =>
+    withFixture("single-session", checkSingleSession, SINGLE_SESSION_FIXTURE),
 };
 
 /**
