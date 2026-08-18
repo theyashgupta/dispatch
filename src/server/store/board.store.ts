@@ -102,10 +102,12 @@ export function compareDoneOrder(a: Card, b: Card): number {
  * session by `card.activeSessionId` and, when one resolves, FIELD-PICK exactly the six
  * `ActiveSessionWire` keys onto `wireCard.activeSession` — never spread the session object, so the
  * secret is omitted by construction and a future field added to `Session` cannot leak through this
- * path; (4) at two or more sessions, FIELD-PICK the same four `SessionSummary` keys per session
- * onto `wireCard.sessionSummaries`, sorted by `createdAt` ascending, following the identical
- * never-spread discipline as `activeSession`. Operates on the shallow copy only; never mutates the
- * source card's `sessions` array or any session object.
+ * path; (4) at two or more sessions, FIELD-PICK the `SessionSummary` keys per session onto
+ * `wireCard.sessionSummaries`, sorted by `createdAt` ascending, following the identical
+ * never-spread discipline as `activeSession` — this is the only place a non-active session's own
+ * `prs`/`previews`/`prsUnknown`/`previewsUnknown` become observable on the wire (`ARTIFACT-01`),
+ * since `Card`'s own four fields stay a mirror of the active session only. Operates on the shallow
+ * copy only; never mutates the source card's `sessions` array or any session object.
  * @see docs/ARCHITECTURE.md#session-projection-chokepoint
  */
 export function redactCard(card: Card): Card {
@@ -134,6 +136,10 @@ export function redactCard(card: Card): Card {
             ordinal: i + 1,
             lost: s.tmuxSession == null,
             cleanupBlocked: s.cleanupBlocked,
+            prs: s.prs,
+            prsUnknown: s.prsUnknown,
+            previews: s.previews,
+            previewsUnknown: s.previewsUnknown,
           }))
       : undefined;
   return wireCard;
@@ -1466,35 +1472,43 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Record the PR(s) detected for a card's branch this tick, ONLY if the card still names
-   * `session` as its tmux session. Mirrors setOutputChanged: a single-field enqueue, no
-   * column/other-field interaction, no activity event (the EventType union stays frozen).
-   * Collapses an empty result to `undefined` rather than `[]` so a deleted/merged-away-then-gone
-   * PR clears the field in the same write a fresh detection would use, satisfying the "cleared
-   * when a detection pass finds no PR" without a second mutator. The session guard runs INSIDE the
+   * Record the PR(s) detected for a session's branch this tick, ONLY if the card owns a session
+   * record named `session` (or, absent one, still flatly names it — the `sessionsWithTmux` synthetic
+   * pair). Writes {@link Session.prs} on the RESOLVED record always, and mirrors onto `card.prs`
+   * only when that record is the card's active session (`ARTIFACT-01`) — a probe result for a
+   * non-active sibling can therefore never clobber the active session's own badge. Collapses an
+   * empty result to `undefined` rather than `[]` so a deleted/merged-away-then-gone PR clears the
+   * field in the same write a fresh detection would use. The session guard runs INSIDE the
    * mutation queue (setTtydPortIfSession precedent) because a detection tick holds its result for
    * up to the 8s `gh` timeout: a Done-drag cleanup enqueued during that window must win, or this
-   * write would resurrect a stale badge on an already-torn-down card. No-op if the
-   * id is unknown.
+   * write would resurrect a stale badge on an already-torn-down session. No-op if the id is
+   * unknown or no session (record or flat mirror) resolves.
    * @see docs/ARCHITECTURE.md#single-writer-store
    */
   setPrsIfSession(id: string, session: string, prs: PrInfo[]): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card?.tmuxSession === session)
-        card.prs = prs.length > 0 ? prs : undefined;
+      if (!card) return [];
+      const value = prs.length > 0 ? prs : undefined;
+      const target = card.sessions?.find((s) => s.tmuxSession === session);
+      if (target) {
+        target.prs = value;
+        if (target.id === card.activeSessionId) card.prs = value;
+      } else if (card.tmuxSession === session) {
+        card.prs = value;
+      }
       return [];
     });
   }
 
   /**
-   * Record the dev-server preview(s) detected for a card's session this tick, ONLY if the card
-   * still names `session` as its tmux session — byte-for-byte the `setPrsIfSession` shape. The
-   * session guard runs INSIDE the mutation queue (setPrsIfSession/setTtydPortIfSession precedent):
-   * a Done-drag teardown enqueued during the detection window must win, or this write would
-   * resurrect a badge on an already-torn-down card. Collapses an empty result to `undefined`
-   * rather than `[]` so a died listener clears the field in the same write a fresh detection
-   * would use. No-op if the id is unknown.
+   * Record the dev-server preview(s) detected for a session's process tree this tick — byte-for-byte
+   * the `setPrsIfSession` shape, including the resolved-record-always / active-only-mirror split
+   * (`ARTIFACT-01`). The session guard runs INSIDE the mutation queue (setPrsIfSession/
+   * setTtydPortIfSession precedent): a Done-drag teardown enqueued during the detection window must
+   * win, or this write would resurrect a badge on an already-torn-down session. Collapses an empty
+   * result to `undefined` rather than `[]` so a died listener clears the field in the same write a
+   * fresh detection would use. No-op if the id is unknown or no session resolves.
    * @see docs/ARCHITECTURE.md#dev-server-preview-detection
    */
   setPreviewsIfSession(
@@ -1504,18 +1518,25 @@ class BoardStore extends EventEmitter {
   ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card?.tmuxSession === session)
-        card.previews = previews.length > 0 ? previews : undefined;
+      if (!card) return [];
+      const value = previews.length > 0 ? previews : undefined;
+      const target = card.sessions?.find((s) => s.tmuxSession === session);
+      if (target) {
+        target.previews = value;
+        if (target.id === card.activeSessionId) card.previews = value;
+      } else if (card.tmuxSession === session) {
+        card.previews = value;
+      }
       return [];
     });
   }
 
   /**
-   * Record (or clear, passing `null`) this tick's PR-probe failure category, ONLY if the card
-   * still names `session` as its tmux session — the `setPrsIfSession` precedent. The session guard
-   * runs INSIDE the mutation queue for the same reason: a Done-drag teardown enqueued during the
-   * detection window must win over a probe result that started before the drop. No-op if the id is
-   * unknown.
+   * Record (or clear, passing `null`) this tick's PR-probe failure category for a session — the
+   * `setPrsIfSession` precedent, including the resolved-record-always / active-only-mirror split
+   * (`ARTIFACT-01`). The session guard runs INSIDE the mutation queue for the same reason: a
+   * Done-drag teardown enqueued during the detection window must win over a probe result that
+   * started before the drop. No-op if the id is unknown or no session resolves.
    */
   setPrsUnknownIfSession(
     id: string,
@@ -1524,15 +1545,23 @@ class BoardStore extends EventEmitter {
   ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card?.tmuxSession === session) card.prsUnknown = unknown ?? undefined;
+      if (!card) return [];
+      const value = unknown ?? undefined;
+      const target = card.sessions?.find((s) => s.tmuxSession === session);
+      if (target) {
+        target.prsUnknown = value;
+        if (target.id === card.activeSessionId) card.prsUnknown = value;
+      } else if (card.tmuxSession === session) {
+        card.prsUnknown = value;
+      }
       return [];
     });
   }
 
   /**
-   * Record (or clear, passing `null`) this tick's preview-probe failure category, ONLY if the card
-   * still names `session` as its tmux session — byte-for-byte the `setPrsUnknownIfSession` shape.
-   * No-op if the id is unknown.
+   * Record (or clear, passing `null`) this tick's preview-probe failure category for a session —
+   * byte-for-byte the `setPrsUnknownIfSession` shape, including the resolved-record-always /
+   * active-only-mirror split (`ARTIFACT-01`). No-op if the id is unknown or no session resolves.
    */
   setPreviewsUnknownIfSession(
     id: string,
@@ -1541,8 +1570,15 @@ class BoardStore extends EventEmitter {
   ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card?.tmuxSession === session)
-        card.previewsUnknown = unknown ?? undefined;
+      if (!card) return [];
+      const value = unknown ?? undefined;
+      const target = card.sessions?.find((s) => s.tmuxSession === session);
+      if (target) {
+        target.previewsUnknown = value;
+        if (target.id === card.activeSessionId) card.previewsUnknown = value;
+      } else if (card.tmuxSession === session) {
+        card.previewsUnknown = value;
+      }
       return [];
     });
   }

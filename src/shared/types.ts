@@ -151,36 +151,43 @@ export interface Card {
   branch?: string;
   /**
    * Pull request(s) detected for this card's branch across every repo in `card.workspace.repos`
-   * (multi-repo workspaces can legitimately open more than one). Group-card-only by construction —
-   * member cards never carry this, since session/workspace fields live exclusively on the group
-   * card. NON-SECRET: rides `snapshot()` UNREDACTED like `hookRoutedAt`/`claudeSessionId`/
-   * `cleanupBlocked`. Absent (not `[]`) when no PR is open, cleared with the other session fields
-   * at Done cleanup and whenever a detection pass finds none for the branch.
+   * (multi-repo workspaces can legitimately open more than one). MIRROR of the ACTIVE session's own
+   * {@link Session.prs} only — the per-session record is the truth, this flat field is a
+   * projection of it (`ARTIFACT-01`), written only when `resolvedId === card.activeSessionId`.
+   * Group-card-only by construction — member cards never carry this, since session/workspace
+   * fields live exclusively on the group card. NON-SECRET: rides `snapshot()` UNREDACTED like
+   * `hookRoutedAt`/`claudeSessionId`/`cleanupBlocked`. Absent (not `[]`) when no PR is open,
+   * cleared with the other session fields at Done cleanup and whenever a detection pass finds none
+   * for the branch.
    */
   prs?: PrInfo[];
   /**
    * Set when the most recent PR-probe tick for this card's branch FAILED for at least one repo in
-   * `card.workspace.repos`, so `prs` could not be fully trusted this tick. NON-SECRET: rides
-   * `snapshot()` UNREDACTED like `prs`/`previews`/`hookRoutedAt`. Absent means the last check
-   * either succeeded with data or was confirmed genuinely empty — never overloads `undefined` to
-   * mean both "never checked" and "confirmed none". Set on the first failed check, cleared on the
-   * next success, and cleared by every session-teardown path that also clears `prs`.
+   * `card.workspace.repos`, so `prs` could not be fully trusted this tick. MIRROR of the ACTIVE
+   * session's own {@link Session.prsUnknown} only, same active-session gate as `prs` (`ARTIFACT-01`).
+   * NON-SECRET: rides `snapshot()` UNREDACTED like `prs`/`previews`/`hookRoutedAt`. Absent means the
+   * last check either succeeded with data or was confirmed genuinely empty — never overloads
+   * `undefined` to mean both "never checked" and "confirmed none". Set on the first failed check,
+   * cleared on the next success, and cleared by every session-teardown path that also clears `prs`.
    */
   prsUnknown?: ProbeUnknown;
   /**
    * Dev-server port(s) detected inside this card's session process tree, excluding the card's own
-   * `ttydPort`. Group-card-only by construction, same rationale as `prs`. NON-SECRET: rides
-   * `snapshot()` UNREDACTED. Absent (not `[]`) when nothing is listening, cleared with the other
-   * session fields at Done cleanup and whenever a detection pass finds no listener.
+   * `ttydPort`. MIRROR of the ACTIVE session's own {@link Session.previews} only, same active-session
+   * gate as `prs` (`ARTIFACT-01`). Group-card-only by construction, same rationale as `prs`.
+   * NON-SECRET: rides `snapshot()` UNREDACTED. Absent (not `[]`) when nothing is listening, cleared
+   * with the other session fields at Done cleanup and whenever a detection pass finds no listener.
    * @see docs/ARCHITECTURE.md#dev-server-preview-detection
    */
   previews?: PreviewInfo[];
   /**
    * Set when the most recent preview-probe tick for this card's session FAILED, so `previews`
-   * could not be fully trusted this tick. NON-SECRET: rides `snapshot()` UNREDACTED, same rationale
-   * as `prsUnknown`. Absent means the last check either succeeded with data or was confirmed
-   * genuinely empty. Set on the first failed check, cleared on the next success, and cleared by
-   * every session-teardown path that also clears `previews`.
+   * could not be fully trusted this tick. MIRROR of the ACTIVE session's own
+   * {@link Session.previewsUnknown} only, same active-session gate as `prs` (`ARTIFACT-01`).
+   * NON-SECRET: rides `snapshot()` UNREDACTED, same rationale as `prsUnknown`. Absent means the last
+   * check either succeeded with data or was confirmed genuinely empty. Set on the first failed
+   * check, cleared on the next success, and cleared by every session-teardown path that also
+   * clears `previews`.
    */
   previewsUnknown?: ProbeUnknown;
   /** tmux session name hosting the claude REPL. */
@@ -508,6 +515,33 @@ export interface Session {
    * why.
    */
   cleanupAttempt?: number;
+  /**
+   * Pull request(s) detected for THIS session's own branch, the per-session home of
+   * {@link Card.prs} — which is now a MIRROR of the active session's value only, written only when
+   * `resolvedId === card.activeSessionId`. Deliberately NOT one of the six flat fields
+   * `setActiveSession` projects onto `Card`, same reasoning as {@link Session.hookRoutedAt}:
+   * routing it through the shared patch would let an unrelated projection write on one session
+   * clobber a sibling's value (`ARTIFACT-01`).
+   */
+  prs?: PrInfo[];
+  /**
+   * THIS session's own PR-probe failure category, the per-session home of {@link Card.prsUnknown}.
+   * Deliberately NOT one of the six flat fields `setActiveSession` projects onto `Card`, same
+   * reasoning as {@link Session.hookRoutedAt} (`ARTIFACT-01`).
+   */
+  prsUnknown?: ProbeUnknown;
+  /**
+   * Dev-server preview(s) detected for THIS session's own process tree, the per-session home of
+   * {@link Card.previews}. Deliberately NOT one of the six flat fields `setActiveSession` projects
+   * onto `Card`, same reasoning as {@link Session.hookRoutedAt} (`ARTIFACT-01`).
+   */
+  previews?: PreviewInfo[];
+  /**
+   * THIS session's own preview-probe failure category, the per-session home of
+   * {@link Card.previewsUnknown}. Deliberately NOT one of the six flat fields `setActiveSession`
+   * projects onto `Card`, same reasoning as {@link Session.hookRoutedAt} (`ARTIFACT-01`).
+   */
+  previewsUnknown?: ProbeUnknown;
 }
 
 /**
@@ -553,6 +587,21 @@ export interface SessionSummary {
    * absent at N<=1, so a single-session ticket's wire shape carries this field nowhere at all.
    */
   cleanupBlocked?: { repo: string; count: number }[];
+  /**
+   * Mirrors {@link Session.prs} for THIS session (`ARTIFACT-01`). Absent when this session has no
+   * open PR — same absent-means-nothing-to-report idiom as `cleanupBlocked` above. This is what
+   * makes a non-active session's PRs observable on the wire at all: `Card.prs` only ever mirrors
+   * the active session, so at N>=2 a sibling's own PRs surface exclusively through this array.
+   */
+  prs?: PrInfo[];
+  /** Mirrors {@link Session.prsUnknown} for THIS session (`ARTIFACT-01`), same idiom as `prs`. */
+  prsUnknown?: ProbeUnknown;
+  /** Mirrors {@link Session.previews} for THIS session (`ARTIFACT-01`), same idiom as `prs`. */
+  previews?: PreviewInfo[];
+  /**
+   * Mirrors {@link Session.previewsUnknown} for THIS session (`ARTIFACT-01`), same idiom as `prs`.
+   */
+  previewsUnknown?: ProbeUnknown;
 }
 
 /**
