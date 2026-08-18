@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { Config, StartError } from "../../../shared/types.js";
-import { store } from "../../store/board.store.js";
+import { store, type ReservedSession } from "../../store/board.store.js";
 import { hasSession } from "../../adapters/tmux.js";
 import { registerHookToken } from "../domain/hook-tokens.js";
 import { loadPlaybooks } from "../domain/playbooks.js";
@@ -15,16 +15,32 @@ import {
 /** Milliseconds after which a transient reattach statusReason is cleared (shared with resume). */
 export const REATTACH_STATUS_CLEAR_MS = 5000;
 
-/** Map any thrown saga error to the structured StartError the card renders. Never leaks config. */
-function toStartError(err: unknown, stepName: string): StartError {
+/**
+ * Map any thrown saga error to the structured StartError the card renders. Never leaks config.
+ * @remarks `newSession` (Phase 94) rides every error this saga produces, not just
+ * `StartStepError`s, so Retry reproduces "start another session" intent regardless of which step
+ * failed.
+ */
+function toStartError(
+  err: unknown,
+  stepName: string,
+  newSession: boolean,
+): StartError {
+  const base = newSession ? { newSession: true } : {};
   if (err instanceof StartStepError) {
-    return { step: err.step, stderr: err.stderr, variant: err.variant };
+    return {
+      step: err.step,
+      stderr: err.stderr,
+      variant: err.variant,
+      ...base,
+    };
   }
   const e = err as Error & { stderr?: string };
   return {
     step: stepName,
     stderr: e.stderr ?? e.message ?? String(err),
     variant: "generic",
+    ...base,
   };
 }
 
@@ -53,16 +69,30 @@ function toStartError(err: unknown, stepName: string): StartError {
  * @remarks (Phase 91) The reattach branch registers the card's persisted token against
  * `card.activeSessionId` because this reattach always targets the card's ACTIVE session by
  * construction — it can never reattach onto a sibling.
+ * @remarks (Phase 94) `opts.newSession` gates this early-return: without the gate, a
+ * second-session request would be silently swallowed and reattach onto session 1 instead of
+ * starting a new one. When set, the naming source is derived ONCE via `store.reserveNewSession`
+ * (`sessionName`/`session`/`workspacePath` below) before the reattach check even runs, and the
+ * check's `hasSession` target carries the `=` exact-match prefix — copying `resume-session.ts:64`
+ * — because tmux 3.6a prefix-matches a longer sibling when the exact short name is absent; without
+ * it, a genuine FIRST start on a card whose only live session is a suffixed sibling would
+ * reattach onto the wrong session. The card-level `isStarting`/`beginStart` gate above (not a
+ * per-session key) is what actually serializes the reserve step: two concurrent new-session POSTs
+ * mint two DIFFERENT session ids, so a per-session key could never collide and would let both
+ * through, whereas the card gate makes the second request return early and COALESCE onto the
+ * session the first reserve already minted — one session, not an error.
  * @see docs/ARCHITECTURE.md#orchestration-saga
  */
 export async function startSession(
   cardId: string,
   extraDirection: string,
   config: Config,
-  opts?: { playbook?: string },
+  opts?: { playbook?: string; newSession?: boolean },
 ): Promise<void> {
   if (store.isStarting(cardId)) return;
   store.beginStart(cardId);
+  const wantsNewSession = opts?.newSession === true;
+  let reserved: ReservedSession | null = null;
   try {
     const card = store.getCard(cardId);
     if (!card) return;
@@ -74,13 +104,24 @@ export async function startSession(
       await store.setStartIntent(cardId, { playbook: opts.playbook });
     }
 
-    const session = "dsp-" + card.identifier;
-    const workspacePath = path.join(
-      config.workspaceRoot ?? "",
-      card.identifier,
-    );
+    let sessionName = card.identifier;
+    if (wantsNewSession) {
+      reserved = await store.reserveNewSession(cardId, card.identifier);
+      if (reserved == null) {
+        await store.setStartError(cardId, {
+          step: "reserving session",
+          stderr: "no existing session to start another from",
+          variant: "generic",
+          newSession: true,
+        });
+        return;
+      }
+      sessionName = reserved.sessionName;
+    }
+    const session = "dsp-" + sessionName;
+    const workspacePath = path.join(config.workspaceRoot ?? "", sessionName);
 
-    if (await hasSession(session)) {
+    if (reserved == null && (await hasSession(`=${session}`))) {
       if (card.hookToken && card.activeSessionId) {
         registerHookToken(card.hookToken, cardId, card.activeSessionId);
       }
@@ -109,6 +150,8 @@ export async function startSession(
     const ctx: SagaContext = {
       card,
       identifier: card.identifier,
+      sessionName,
+      sessionId: reserved?.sessionId,
       workspacePath: "",
       extraDirection,
       config,
@@ -131,9 +174,9 @@ export async function startSession(
         done.push(step);
       }
       currentStep = undefined;
-      await store.completeStart(cardId, undefined, {
+      await store.completeStart(cardId, reserved?.sessionId, {
         workspacePath: ctx.workspacePath,
-        branch: card.identifier,
+        branch: sessionName,
         tmuxSession: session,
       });
       if (card.workspace?.folder) {
@@ -156,9 +199,12 @@ export async function startSession(
       for (const step of [...done].reverse()) {
         await step.undo(ctx).catch(() => {});
       }
+      if (reserved != null) {
+        await store.rollbackReservedSession(cardId, reserved.sessionId);
+      }
       await store.setStartError(
         cardId,
-        toStartError(err, currentStep?.name ?? "starting"),
+        toStartError(err, currentStep?.name ?? "starting", wantsNewSession),
       );
     }
   } finally {

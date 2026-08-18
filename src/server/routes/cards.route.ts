@@ -193,6 +193,27 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
     return;
   }
 
+  const body = req.body as
+    | {
+        extraDirection?: unknown;
+        folder?: unknown;
+        repos?: unknown;
+        playbook?: unknown;
+        newSession?: unknown;
+      }
+    | undefined;
+  const newSession = body?.newSession === true;
+
+  if (
+    newSession &&
+    !card.sessions?.some((s) => s.id === card.activeSessionId)
+  ) {
+    res
+      .status(409)
+      .json({ error: "no existing session to start another from" });
+    return;
+  }
+
   const config = getOrchestrationConfig();
   if (!config) {
     res
@@ -201,14 +222,6 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
     return;
   }
 
-  const body = req.body as
-    | {
-        extraDirection?: unknown;
-        folder?: unknown;
-        repos?: unknown;
-        playbook?: unknown;
-      }
-    | undefined;
   const extraDirection =
     typeof body?.extraDirection === "string" ? body.extraDirection : "";
   const playbook =
@@ -264,7 +277,7 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
     return;
   }
 
-  void startSession(id, extraDirection, config, { playbook });
+  void startSession(id, extraDirection, config, { playbook, newSession });
   res.status(202).json({ started: true });
 });
 
