@@ -225,6 +225,22 @@ const PROXY_READ_TIMEOUT_MS = 10_000;
 const SUBPROTOCOL_PROBE_TIMEOUT_MS = 5_000;
 
 /**
+ * MEASURED, not asserted, budget for the wall-clock gap between a proxied client WS closing and
+ * `lsof -sTCP:ESTABLISHED` reporting the dispatch-server-to-ttyd upstream socket gone
+ * (`92-RESEARCH.md` `## 3` Open Question 2 — the teardown wiring is event-driven with no timer, but
+ * the wall-clock bound was explicitly left unmeasured until this constant was derived). Measured on
+ * this machine, 2026-08-18, against a real proxied WS opened with the `"tty"` sub-protocol and
+ * closed client-side, polling {@link countEstablishedToPort} every 10ms: five runs on the standing
+ * two-session fixture, each preceded by an assertion that the pre-close count reads exactly 1 (a 0
+ * reading there would mean the instrument itself is blind, per `92-VALIDATION.md`'s Dead-Instrument
+ * Register) — raw readings in ms: `[14, 11, 12, 13, 11]`, max 14ms. Set to 20x that max, floored at
+ * 2000ms since the raw max is itself in the tens-of-milliseconds range this file's own header
+ * predicted. Plan 92-05 consumes this as criterion 2's poll ceiling, where exhausting it is a
+ * FAILURE and never a retry — never shorten it without re-measuring on the machine the check runs on.
+ */
+const SOCKET_TEARDOWN_POLL_MS = 2000;
+
+/**
  * The liveness sub-check's own poll budget (WATCH-01/C2): the 3-strike detector is
  * `captureFailures >= 3` (`watcher.ts:146`) on a self-rescheduling 2000 ms tick
  * (`watcher.ts:321`), so three consecutive failures trip roughly 4-6s after a real kill, with
