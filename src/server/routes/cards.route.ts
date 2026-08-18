@@ -343,6 +343,38 @@ cardsRouter.post("/cards/:id/terminal", (req, res) => {
   res.status(202).json({ ensuring: true });
 });
 
+cardsRouter.post("/cards/:id/session", async (req, res) => {
+  const { id } = req.params;
+
+  const card = store.getCard(id);
+  if (!card) {
+    res.status(400).json({ error: `unknown card id: ${id}` });
+    return;
+  }
+  const groupError = groupedMemberError(card);
+  if (groupError != null) {
+    res.status(409).json({ error: groupError });
+    return;
+  }
+
+  const sessionId = (req.body as { sessionId?: unknown } | undefined)
+    ?.sessionId;
+  if (typeof sessionId !== "string" || sessionId === "") {
+    res.status(400).json({ error: "invalid sessionId" });
+    return;
+  }
+
+  if (!card.sessions?.some((s) => s.id === sessionId)) {
+    res
+      .status(400)
+      .json({ error: `session ${sessionId} does not resolve for this card` });
+    return;
+  }
+
+  await store.switchActiveSession(id, sessionId);
+  res.status(202).json({ switched: true });
+});
+
 cardsRouter.post("/cards/:id/open-editor", (req, res) => {
   const { id } = req.params;
 

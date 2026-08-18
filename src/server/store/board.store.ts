@@ -96,14 +96,16 @@ export function compareDoneOrder(a: Card, b: Card): number {
 /**
  * Strip a card's secrets before it leaves the process — the SINGLE sanctioned place a card loses
  * them. Every new read path (windowed `snapshot()`, and any future one) must call this rather than
- * duplicate the strip, so the redaction boundary can never drift. Three responsibilities:
+ * duplicate the strip, so the redaction boundary can never drift. Four responsibilities:
  * (1) remove the card's own secret field; (2) remove `sessions` outright — the full array is
  * server-side only and carries every session's own secret field; (3) resolve the ACTIVE
  * session by `card.activeSessionId` and, when one resolves, FIELD-PICK exactly the six
  * `ActiveSessionWire` keys onto `wireCard.activeSession` — never spread the session object, so the
  * secret is omitted by construction and a future field added to `Session` cannot leak through this
- * path. Operates on the shallow copy only; never mutates the source card's `sessions` array or any
- * session object.
+ * path; (4) at two or more sessions, FIELD-PICK the same three `SessionSummary` keys per session
+ * onto `wireCard.sessionSummaries`, sorted by `createdAt` ascending, following the identical
+ * never-spread discipline as `activeSession`. Operates on the shallow copy only; never mutates the
+ * source card's `sessions` array or any session object.
  * @see docs/ARCHITECTURE.md#session-projection-chokepoint
  */
 export function redactCard(card: Card): Card {
@@ -123,6 +125,16 @@ export function redactCard(card: Card): Card {
     : undefined;
   wireCard.sessionCount =
     (card.sessions?.length ?? 0) >= 2 ? card.sessions!.length : undefined;
+  wireCard.sessionSummaries =
+    (card.sessions?.length ?? 0) >= 2
+      ? [...card.sessions!]
+          .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+          .map((s, i) => ({
+            id: s.id,
+            ordinal: i + 1,
+            lost: s.tmuxSession == null,
+          }))
+      : undefined;
   return wireCard;
 }
 
@@ -1753,6 +1765,36 @@ class BoardStore extends EventEmitter {
             }),
           ]
         : [];
+    });
+  }
+
+  /**
+   * Move the active pointer to a sibling session the card already owns — a thin caller of the
+   * already-sanctioned promotion path, the same `setActiveSession(card, {}, id, true)` call shape
+   * `markSessionLost`'s sibling-promotion branch uses today. Refuses (named, logged, no mutation)
+   * when the card or the target session id does not resolve, so an unowned or stale id can never
+   * strand the active pointer. No new field is assigned directly — the projection chokepoint
+   * (`setActiveSession`) remains the only writer.
+   * @see docs/ARCHITECTURE.md#session-projection-chokepoint
+   */
+  switchActiveSession(cardId: string, sessionId: string): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(cardId);
+      if (!card) {
+        console.error(
+          `[store] switch target card ${cardId} does not resolve, refusing`,
+        );
+        return [];
+      }
+      const target = card.sessions?.find((s) => s.id === sessionId);
+      if (!target) {
+        console.error(
+          `[store] card ${cardId} — switch target ${sessionId} does not resolve, refusing`,
+        );
+        return [];
+      }
+      this.setActiveSession(card, {}, sessionId, true);
+      return [];
     });
   }
 

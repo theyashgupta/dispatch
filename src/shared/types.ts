@@ -268,6 +268,17 @@ export interface Card {
    */
   sessionCount?: number;
   /**
+   * Per-session digest for the detail panel's session switcher. NON-SECRET, same policy class as
+   * `sessionCount` — rides `snapshot()`/`redactCard` UNREDACTED, carries no credential and no
+   * pane content. ABSENT (never an empty or single-element array) when the card owns zero or one
+   * session record, matching the `prs?`/`previews?` absent-means-nothing-to-report idiom; an
+   * array of length 2 or more otherwise, one entry per session ordered by `ordinal`. Carries no
+   * per-entry `active` flag by design — see {@link SessionSummary}. Populated exclusively inside
+   * `redactCard`, immediately after `sessionCount`, following the identical field-pick discipline.
+   * @see docs/ARCHITECTURE.md#session-projection-chokepoint
+   */
+  sessionSummaries?: SessionSummary[];
+  /**
    * Set when the card's `dsp-<identifier>` tmux session is gone — by boot reconcile (session
    * absent from the live `list-sessions` set after a reboot) AND by the Plan-02 watcher's
    * runtime dead-session detector (3 consecutive failed captures). Cleared by completeStart on
@@ -453,6 +464,24 @@ export interface ActiveSessionWire {
   workspacePath?: string;
   /** Mirrors `Session.workspace`. */
   workspace?: { folder: string; repos: { path: string; base: string }[] };
+}
+
+/**
+ * Wire-only per-session digest for the detail panel's session switcher, built by the store's
+ * `redactCard` chokepoint via a field pick (never a spread) — the same discipline
+ * {@link ActiveSessionWire} already establishes, so a future `Session` field cannot silently
+ * widen this array to carry a secret. Deliberately carries no `active` flag: `Card.activeSessionId`
+ * is already the one field naming the active session, and a second field claiming the same fact
+ * could disagree under a race; the client compares `entry.id === card.activeSessionId` instead.
+ * @see docs/ARCHITECTURE.md#session-projection-chokepoint
+ */
+export interface SessionSummary {
+  /** Mirrors `Session.id`. */
+  id: string;
+  /** 1-indexed position among the card's sessions, sorted by `Session.createdAt` ascending. */
+  ordinal: number;
+  /** True when `Session.tmuxSession` is absent — this sibling's own terminal is dead. */
+  lost: boolean;
 }
 
 /**
