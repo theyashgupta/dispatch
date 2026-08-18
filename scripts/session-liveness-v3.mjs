@@ -94,6 +94,12 @@
  *                                                                   interleaving ever strands the
  *                                                                   active pointer or tears the wire
  *                                                                   projection
+ *   node scripts/session-liveness-v3.mjs --check cleanup-fixture   Phase 93 Wave 0: each fixture
+ *                                                                   session owns a REAL, git-
+ *                                                                   registered worktree in a real
+ *                                                                   throwaway repo under the sandbox
+ *                                                                   HOME, proven by `git worktree
+ *                                                                   list`, never by `existsSync`
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -109,12 +115,13 @@ import { spawn, execFile, execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir, homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -124,6 +131,31 @@ const execFileP = promisify(execFile);
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST_ENTRY = join(REPO_ROOT, "dist", "server", "bootstrap", "index.js");
+
+/**
+ * Production's own worktree adapter and path rule, loaded from `dist` (never re-derived) so
+ * {@link WORKTREE_FIXTURE} proves something about the shipped code path rather than about a
+ * hand-rolled `git worktree add` shell-out. Dynamically `import()`ed (see {@link loadGitAdapter} /
+ * {@link loadWorkspacePathsAdapter}) rather than a static top-level import: a static import
+ * resolves at module-parse time, before {@link assertBuilt} ever runs, so it could silently load a
+ * stale `dist` left over from an earlier commit — the exact staleness class {@link assertBuilt}'s
+ * own JSDoc says this harness must make structurally impossible.
+ */
+const DIST_GIT_ADAPTER = join(
+  REPO_ROOT,
+  "dist",
+  "server",
+  "adapters",
+  "git.js",
+);
+const DIST_WORKSPACE_PATHS = join(
+  REPO_ROOT,
+  "dist",
+  "server",
+  "services",
+  "domain",
+  "workspace-paths.js",
+);
 
 /**
  * The package script {@link assertBuilt} shells out to. Named here rather than spelled as a raw
@@ -220,6 +252,23 @@ const SINGLE_SESSION_FIXTURE = {
   port: SINGLE_SESSION_SANDBOX_PORT,
   tmuxPrefix: SINGLE_SESSION_TMUX_PREFIX,
   sessionKeys: ["a"],
+};
+
+const WORKTREE_SANDBOX_PORT = 47865;
+
+const WORKTREE_TMUX_PREFIX = `dsp93h-${process.pid}-`;
+
+/**
+ * The first fixture profile whose sessions own a REAL git worktree, registered in a real throwaway
+ * repo under the sandbox HOME (Phase 93, Wave 0). `worktrees: true` is the flag
+ * {@link standUpFixture} and {@link tearDownFixture} branch on, so every existing profile above —
+ * none of which sets it — keeps its current, worktree-free behaviour byte-for-byte.
+ */
+const WORKTREE_FIXTURE = {
+  port: WORKTREE_SANDBOX_PORT,
+  tmuxPrefix: WORKTREE_TMUX_PREFIX,
+  sessionKeys: ["a", "b"],
+  worktrees: true,
 };
 
 const POLL_INTERVAL_MS = 100;
@@ -336,6 +385,59 @@ function assertSandboxSafe(home, port) {
 }
 
 /**
+ * Resolve `target` to a real, symlink-free path even when it (or several levels of its parents)
+ * does not exist yet — a worktree path about to be created has nothing for `realpathSync` to
+ * resolve directly. Walks UP from `target` to the nearest ancestor that already exists (this
+ * always terminates: {@link makeSandboxHome} already created the sandbox HOME itself before any
+ * fixture path under it is asserted), `realpathSync`s that ancestor, then rejoins the non-existent
+ * suffix components onto the resolved result. A naive `path.resolve` fallback on a non-existent
+ * path is NOT enough on macOS: `os.tmpdir()` resolves through a `/private` symlink, so an
+ * as-yet-uncreated path built by joining the UNRESOLVED `tmpdir()` root would compare unequal to
+ * the resolved tmpdir root {@link assertUnderTmpdir} checks against — the exact trap 93-RESEARCH.md
+ * names for this harness.
+ */
+function realpathOrNearestExistingAncestor(target) {
+  let candidate = resolve(target);
+  const suffix = [];
+  while (!existsSync(candidate)) {
+    const parent = dirname(candidate);
+    if (parent === candidate) {
+      // reached the filesystem root without finding anything real — let the
+      // caller's tmpdir-prefix check fail loudly rather than loop forever.
+      break;
+    }
+    suffix.unshift(basename(candidate));
+    candidate = parent;
+  }
+  const real = realpathSync(candidate);
+  return suffix.length > 0 ? join(real, ...suffix) : real;
+}
+
+/**
+ * Fail-closed containment guard for the FIRST harness in this repo whose subject is DELETION
+ * (Phase 93): a fixture worktree, throwaway repo, or workspace directory that escapes the real
+ * `os.tmpdir()` would let a teardown bug destroy the user's actual repos, a materially worse
+ * failure than anything an earlier phase's harness could cause. `realpathSync` the real tmpdir root
+ * on every call rather than caching it — macOS resolves `/tmp`/`/var` through a `/private` symlink,
+ * so a raw string prefix compare is unreliable, and re-resolving is cheap. `target` is resolved via
+ * {@link realpathOrNearestExistingAncestor}, which handles both the already-exists case (matching
+ * how git records worktree paths, per {@link worktreeRegistered}'s own comment in `git.ts`) and the
+ * not-yet-created case (a worktree or workspace path about to be created) without falling back to
+ * an unresolved `path.resolve`. THROWS — never returns a boolean, never logs-and-continues —
+ * because a containment guard a caller could ignore is not a guard; every destructive call site in
+ * this file invokes it immediately before the operation it protects, not once at fixture setup.
+ */
+function assertUnderTmpdir(target, label) {
+  const realTmp = realpathSync(tmpdir());
+  const resolved = realpathOrNearestExistingAncestor(target);
+  if (resolved !== realTmp && !resolved.startsWith(realTmp + sep)) {
+    throw new Error(
+      `containment guard: refusing to touch ${label} (${target}) — resolved path ${resolved} is not under the real tmpdir ${realTmp}`,
+    );
+  }
+}
+
+/**
  * Compute, safety-check, and materialize a fresh sandbox `HOME` with a config carrying only a
  * hardcoded, obviously-fake Linear key — this harness seeds cards directly via `node:sqlite`, so it
  * never reads or needs a real key. No process is spawned by this call.
@@ -408,10 +510,16 @@ function killAndWait(child) {
  * @remarks The build precondition is re-asserted here through {@link assertBuilt} rather than by a
  * local `existsSync` copy, so the staleness half can never be enforced at only some of the places
  * that spawn `dist` — this is the function every boot in the file funnels through.
+ * @remarks Spawns `realpathSync(DIST_ENTRY)`, not the raw path (Phase 93 macOS trap): `dist`'s own
+ * `main()` guard compares `import.meta.url` against `pathToFileURL(process.argv[1])`, and
+ * `os.tmpdir()` resolves through a `/private` symlink on macOS, so a server booted from an
+ * unresolved tmpdir-rooted path would silently exit 0 with no output rather than start. Defensive
+ * here (`DIST_ENTRY` is inside the repo, not under tmpdir), but load-bearing for any check that ever
+ * boots from a tmpdir worktree.
  */
 function bootServer(home) {
   assertBuilt();
-  const child = spawn("node", [DIST_ENTRY], {
+  const child = spawn("node", [realpathSync(DIST_ENTRY)], {
     env: { ...process.env, HOME: home, NODE_ENV: "production" },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -741,6 +849,66 @@ function spawnOrphanTtyd(session, cardId) {
 }
 
 /**
+ * Memoized `dist/server/adapters/git.js` load, dynamically `import()`ed only after
+ * {@link assertBuilt} has run at least once in this process — see {@link DIST_GIT_ADAPTER}'s own
+ * JSDoc for why a static top-level import would be unsafe here.
+ */
+let gitAdapterModule = null;
+async function loadGitAdapter() {
+  if (gitAdapterModule === null) {
+    assertBuilt();
+    gitAdapterModule = await import(DIST_GIT_ADAPTER);
+  }
+  return gitAdapterModule;
+}
+
+/** Memoized `dist/server/services/domain/workspace-paths.js` load — same discipline as {@link loadGitAdapter}. */
+let workspacePathsModule = null;
+async function loadWorkspacePathsAdapter() {
+  if (workspacePathsModule === null) {
+    assertBuilt();
+    workspacePathsModule = await import(DIST_WORKSPACE_PATHS);
+  }
+  return workspacePathsModule;
+}
+
+/**
+ * Create the throwaway local git repo every {@link WORKTREE_FIXTURE} session's worktree is cut
+ * from — `git init` under the sandbox HOME (never a real project repo: Open Question 3 of
+ * 93-RESEARCH.md is explicit that a real project repo must never be the fixture's target), one
+ * committed `README.md` so a `baseRef` exists for `worktreeAddNewBranch`, and the repo's OWN
+ * default branch name resolved via `git symbolic-ref --short HEAD` rather than hardcoded — `main`
+ * vs `master` depends on the machine's git config, never on this file's assumption. `git config` is
+ * set LOCALLY only (never `--global`), because `--global` would mutate the user's real git identity.
+ */
+async function seedFixtureRepo(built) {
+  const repoPath = join(built.home, "repos", "alpha");
+  assertUnderTmpdir(repoPath, "fixture repo");
+  mkdirSync(repoPath, { recursive: true });
+  await execFileP("git", ["init"], { cwd: repoPath });
+  await execFileP("git", ["config", "user.email", "harness@localhost"], {
+    cwd: repoPath,
+  });
+  await execFileP(
+    "git",
+    ["config", "user.name", "session-liveness-v3 harness"],
+    { cwd: repoPath },
+  );
+  writeFileSync(join(repoPath, "README.md"), "fixture base\n");
+  await execFileP("git", ["add", "README.md"], { cwd: repoPath });
+  await execFileP("git", ["commit", "-m", "fixture base", "--no-gpg-sign"], {
+    cwd: repoPath,
+  });
+  const { stdout } = await execFileP(
+    "git",
+    ["symbolic-ref", "--short", "HEAD"],
+    { cwd: repoPath },
+  );
+  built.repoPath = repoPath;
+  built.repoBase = stdout.trim();
+}
+
+/**
  * Insert the fixture card row directly via `node:sqlite` (the `migration-diff-v3.mjs` seeding
  * idiom) and pin `meta.schemaVersion` to `SESSION_SCHEMA_VERSION` (1) so boot runs no entity
  * migration over this hand-built `sessions[]`/`activeSessionId` shape — a warmup boot against the
@@ -891,6 +1059,12 @@ function assertBuilt() {
  * exact id `spawnTtyd` bakes into the `-b` base path is the SAME id later persisted onto the
  * session record (PROXY-01) — spawning with one id and persisting another would leave the
  * persisted record's own proxy path pointing at a ttyd that never used it.
+ * @remarks When `built.worktrees` is set ({@link WORKTREE_FIXTURE}, Phase 93), a throwaway repo is
+ * seeded first ({@link seedFixtureRepo}) and each session record gets a REAL, git-registered
+ * worktree cut with production's own `worktreeAddNewBranch` before the fixture card is seeded, and
+ * carries both `workspacePath` and `workspace.repos` (the v3.0-migrated shape) rather than
+ * `workspacePath` alone. Every other profile leaves `built.worktrees` unset and takes none of this
+ * path, so their behaviour is unchanged.
  */
 async function standUpFixture(built) {
   const warmup = bootServer(built.home);
@@ -930,23 +1104,74 @@ async function standUpFixture(built) {
     `standup: ttyd ports LISTENING — ${built.sessionKeys.map((key) => `${key}=${built.ttyd[key].port}`).join(", ")}`,
   );
 
+  if (built.worktrees) {
+    await seedFixtureRepo(built);
+    console.log(
+      `standup: fixture repo ready — ${built.repoPath} (base ${built.repoBase})`,
+    );
+  }
+  const { worktreeAddNewBranch } = built.worktrees
+    ? await loadGitAdapter()
+    : {};
+  const { worktreePath } = built.worktrees
+    ? await loadWorkspacePathsAdapter()
+    : {};
+
   const now = new Date().toISOString();
-  const records = built.sessionKeys.map((key) => {
+  const records = [];
+  for (const key of built.sessionKeys) {
     const handle = handles[key];
-    return {
+    const workspacePath = join(
+      built.home,
+      "workspaces",
+      WORKSPACE_SUFFIX_BY_SESSION_KEY[key],
+    );
+    const record = {
       id: handle.id,
       createdAt: now,
       updatedAt: now,
       tmuxSession: built.tmux[key],
       ttydPort: built.ttyd[key].port,
       hookToken: handle.token,
-      workspacePath: join(
-        built.home,
-        "workspaces",
-        WORKSPACE_SUFFIX_BY_SESSION_KEY[key],
-      ),
+      workspacePath,
     };
-  });
+    if (built.worktrees) {
+      assertUnderTmpdir(workspacePath, `workspace path (session ${key})`);
+      mkdirSync(workspacePath, { recursive: true });
+      const wtPath = worktreePath(workspacePath, built.repoPath);
+      assertUnderTmpdir(wtPath, `worktree path (session ${key})`);
+      const branch = `dispatch/93-${key}`;
+      await worktreeAddNewBranch(
+        built.repoPath,
+        wtPath,
+        branch,
+        built.repoBase,
+      );
+      built.branches[key] = branch;
+      built.worktreePaths[key] = wtPath;
+      const trackedFileName = `session-${key}.txt`;
+      writeFileSync(
+        join(wtPath, trackedFileName),
+        `fixture worktree for session ${key}\n`,
+      );
+      await execFileP("git", ["add", trackedFileName], { cwd: wtPath });
+      await execFileP(
+        "git",
+        ["commit", "-m", `fixture session ${key}`, "--no-gpg-sign"],
+        { cwd: wtPath },
+      );
+      record.workspace = {
+        folder: join(built.home, "repos"),
+        repos: [{ path: built.repoPath, base: built.repoBase }],
+      };
+    }
+    records.push(record);
+  }
+  if (built.worktrees) {
+    console.log(
+      `standup: worktrees registered — ${built.sessionKeys.map((key) => `${key}=${built.worktreePaths[key]}`).join(", ")}`,
+    );
+  }
   const [activeRecord] = records;
 
   const card = {
@@ -964,6 +1189,7 @@ async function standUpFixture(built) {
     ttydPort: activeRecord.ttydPort,
     hookToken: activeRecord.hookToken,
     workspacePath: activeRecord.workspacePath,
+    workspace: activeRecord.workspace,
   };
   seedFixtureCard(built.home, card);
 
@@ -981,6 +1207,13 @@ async function standUpFixture(built) {
  * @remarks The leaked-tmux sweep filters on the RUNNING fixture's own prefix, never on a module
  * constant: a fixture profile must never be able to report a sibling profile's leak as its own,
  * nor stay silent about its own because it looked for the wrong prefix.
+ * @remarks When `built.worktrees` is set, each session's real worktree is removed via production's
+ * own `worktreeRemove` and the throwaway repo is deleted, BOTH before the blanket sandbox-home
+ * `rmSync` below — the blanket removal would otherwise silently paper over a `worktreeRemove`
+ * failure that left a stale git-admin registration, since the directory disappears either way.
+ * `assertUnderTmpdir` guards each removal and is allowed to throw uncaught here (unlike
+ * `worktreeRemove`'s own failure, which is caught and turned into a violation): a containment
+ * failure during teardown must halt hard, never degrade into a logged violation.
  */
 async function tearDownFixture(built, violations) {
   await killAndWait(built.server?.child);
@@ -1035,6 +1268,26 @@ async function tearDownFixture(built, violations) {
     if (built.orphan.tmuxName) await tmuxKillSession(built.orphan.tmuxName);
   }
 
+  if (built.worktrees) {
+    for (const key of built.sessionKeys) {
+      const wtPath = built.worktreePaths[key];
+      if (!wtPath || !existsSync(wtPath)) continue;
+      assertUnderTmpdir(wtPath, `worktree path (session ${key})`);
+      try {
+        const { worktreeRemove } = await loadGitAdapter();
+        await worktreeRemove(built.repoPath, wtPath);
+      } catch (err) {
+        violations.push(
+          `teardown: worktreeRemove failed for session ${key} (${wtPath}): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    if (built.repoPath && existsSync(built.repoPath)) {
+      assertUnderTmpdir(built.repoPath, "fixture repo");
+      rmSync(built.repoPath, { recursive: true, force: true });
+    }
+  }
+
   if (built.home && existsSync(built.home)) {
     rmSync(built.home, { recursive: true, force: true });
   }
@@ -1070,6 +1323,21 @@ async function tearDownFixture(built, violations) {
       `teardown: sandbox home ${built.home} still exists after rmSync`,
     );
   }
+  if (built.worktrees) {
+    for (const key of built.sessionKeys) {
+      const wtPath = built.worktreePaths[key];
+      if (wtPath && existsSync(wtPath)) {
+        violations.push(
+          `teardown: worktree path for session ${key} still exists after worktreeRemove: ${wtPath}`,
+        );
+      }
+    }
+    if (built.repoPath && existsSync(built.repoPath)) {
+      violations.push(
+        `teardown: fixture repo still exists after removal: ${built.repoPath}`,
+      );
+    }
+  }
 }
 
 /**
@@ -1097,12 +1365,17 @@ async function withFixture(label, fn, profile = TWO_SESSION_FIXTURE) {
     port: profile.port,
     tmuxPrefix: profile.tmuxPrefix,
     sessionKeys: profile.sessionKeys,
+    worktrees: profile.worktrees === true,
     tmux: {},
     ttyd: {},
     server: null,
     sessionA: null,
     sessionB: null,
     dbPath: join(home, DISPATCH_DIR_NAME, "board.db"),
+    repoPath: null,
+    repoBase: null,
+    branches: {},
+    worktreePaths: {},
   };
   try {
     await assertPreflightClean(built);
@@ -3127,6 +3400,112 @@ async function checkSwitchAtomicity(built) {
   return violations;
 }
 
+/**
+ * `--check cleanup-fixture` (Phase 93 Wave 0 deliverable): proves {@link WORKTREE_FIXTURE} really
+ * built REAL, git-registered worktrees — not directories a fixture merely happened to `mkdirSync` —
+ * so every later teardown check in this phase has something real to destroy. Registration is read
+ * from `git worktree list --porcelain`, the git command itself, never `existsSync`: a directory
+ * survives on disk regardless of whether `worktreeAddNewBranch` ever ran, which is exactly the
+ * dead-instrument hazard the Phase 93 Dead-Instrument Register names for this criterion (see the
+ * WRONG-SUBJECT break recorded in the SUMMARY). Every asserted path is also re-run through
+ * {@link assertUnderTmpdir} and printed, so a passing run's own output is readable containment
+ * evidence, not just an implicit property of the fixture profile.
+ */
+async function checkCleanupFixture(built) {
+  const violations = [];
+
+  const { stdout: listOut } = await execFileP(
+    "git",
+    ["worktree", "list", "--porcelain"],
+    { cwd: built.repoPath },
+  );
+  const registered = new Set();
+  for (const line of listOut.split("\n")) {
+    if (!line.startsWith("worktree ")) continue;
+    const p = line.slice("worktree ".length);
+    registered.add(existsSync(p) ? realpathSync(p) : p);
+  }
+
+  for (const key of built.sessionKeys) {
+    const wtPath = built.worktreePaths[key];
+    assertUnderTmpdir(wtPath, `worktree path (session ${key})`);
+    console.log(
+      `cleanup-fixture: worktree path (session ${key}) under tmpdir — ${wtPath}`,
+    );
+    const isRegistered =
+      existsSync(wtPath) && registered.has(realpathSync(wtPath));
+    if (!isRegistered) {
+      violations.push(
+        `cleanup-fixture: worktree for session ${key} is not registered in \`git worktree list\`: ${wtPath} (registered: ${[...registered].join(", ")})`,
+      );
+    }
+    const trackedFile = join(wtPath, `session-${key}.txt`);
+    if (!existsSync(trackedFile)) {
+      violations.push(
+        `cleanup-fixture: committed fixture file missing from worktree for session ${key}: ${trackedFile}`,
+      );
+    }
+  }
+
+  const { stdout: branchOut } = await execFileP("git", ["branch", "--list"], {
+    cwd: built.repoPath,
+  });
+  for (const key of built.sessionKeys) {
+    const branch = built.branches[key];
+    if (!branchOut.includes(branch)) {
+      violations.push(
+        `cleanup-fixture: branch for session ${key} not found in \`git branch --list\`: ${branch}`,
+      );
+    }
+  }
+
+  assertUnderTmpdir(built.repoPath, "fixture repo");
+  console.log(`cleanup-fixture: fixture repo under tmpdir — ${built.repoPath}`);
+
+  const persisted = readCard(built.dbPath, built.cardId);
+  for (const key of built.sessionKeys) {
+    const sessionId = built[SESSION_FIELD_BY_KEY[key]]?.id;
+    const record = persisted?.sessions?.find((s) => s.id === sessionId);
+    if (!record) {
+      violations.push(
+        `cleanup-fixture: persisted card is missing the session record for key ${key} (id ${sessionId})`,
+      );
+      continue;
+    }
+    if (!record.workspacePath) {
+      violations.push(
+        `cleanup-fixture: persisted session ${key} is missing workspacePath`,
+      );
+    }
+    const persistedRepoPath = record.workspace?.repos?.[0]?.path;
+    if (persistedRepoPath !== built.repoPath) {
+      violations.push(
+        `cleanup-fixture: persisted session ${key} workspace.repos[0].path (${persistedRepoPath}) !== built.repoPath (${built.repoPath})`,
+      );
+    }
+  }
+
+  const live = await tmuxListSessionNames();
+  for (const key of built.sessionKeys) {
+    if (!live.includes(built.tmux[key])) {
+      violations.push(
+        `cleanup-fixture: tmux session for key ${key} is not live: ${built.tmux[key]}`,
+      );
+    }
+    if (!(await isPortListening(built.ttyd[key].port))) {
+      violations.push(
+        `cleanup-fixture: ttyd port for key ${key} is not LISTENING: ${built.ttyd[key].port}`,
+      );
+    }
+  }
+
+  console.log(
+    `cleanup-fixture: registered worktrees=[${[...registered].join(", ")}] branches=[${built.sessionKeys.map((k) => built.branches[k]).join(", ")}] ttyd ports=[${built.sessionKeys.map((k) => built.ttyd[k].port).join(", ")}]`,
+  );
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -3144,6 +3523,8 @@ const CHECKS = {
   "switch-sockets": () => withFixture("switch-sockets", checkSwitchSockets),
   "switch-atomicity": () =>
     withFixture("switch-atomicity", checkSwitchAtomicity),
+  "cleanup-fixture": () =>
+    withFixture("cleanup-fixture", checkCleanupFixture, WORKTREE_FIXTURE),
 };
 
 /**
