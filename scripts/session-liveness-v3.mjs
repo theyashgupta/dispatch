@@ -13,8 +13,8 @@
  * {@link TWO_SESSION_FIXTURE} and {@link SINGLE_SESSION_FIXTURE}.
  *
  * SAFETY IS THIS FILE'S FIRST-ORDER CONCERN. `adoptAndSweep` (`ttyd.ts`) fingerprints ttyd by ARGV
- * SHAPE — `ttyd` + `tmux attach`, the `DISPATCH_TTYD_REVISION_5` retained key, or the
- * `-b /sessions/<cardId>/terminal` base path — and NEVER by tmux session name, so a harness ttyd
+ * SHAPE — `ttyd` + `tmux attach`, the `DISPATCH_TTYD_REVISION_6` retained key, or the
+ * `-b /sessions/<sessionId>/terminal` base path — and NEVER by tmux session name, so a harness ttyd
  * is fingerprint-indistinguishable from the user's live service's ttyd regardless of how
  * distinctly this harness names its own tmux sessions. {@link assertNoLiveService} is therefore
  * the ONLY real protection: it fails closed (throws, never degrades) whenever anything answers on
@@ -159,11 +159,14 @@ const SINGLE_SESSION_TMUX_PREFIX = `dsp91sp-${process.pid}-`;
 
 /**
  * The exact re-adoption fingerprint key `spawnTtyd` (`ttyd.ts`) emits via `-t
- * DISPATCH_TTYD_REVISION_5=1` — without it, boot-time `adoptAndSweep` cannot mark this harness's
+ * DISPATCH_TTYD_REVISION_6=1` — without it, boot-time `adoptAndSweep` cannot mark this harness's
  * own ttyd as `compatible` and would sweep it as an unrecognized orphan instead of adopting it.
+ * Bumped 5 -> 6 in lockstep with `ttyd.ts`'s own `TTYD_RUNTIME_REVISION` (PROXY-01): a harness
+ * still asserting `_5` would spawn a ttyd its OWN sandbox boot's `reconcileSessions()` sweeps as
+ * incompatible before any check ever runs against it.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
-const TTYD_REVISION_RETAINED_KEY = "DISPATCH_TTYD_REVISION_5";
+const TTYD_REVISION_RETAINED_KEY = "DISPATCH_TTYD_REVISION_6";
 
 const FAKE_LINEAR_API_KEY = "session-liveness-v3-harness-fake-key-never-real";
 
@@ -549,12 +552,13 @@ async function waitForPortListening(port, timeoutMs = LISTEN_POLL_TIMEOUT_MS) {
 
 /**
  * Spawn one real ttyd with the EXACT argv `spawnTtyd` (`ttyd.ts`) uses — including the
- * `-t DISPATCH_TTYD_REVISION_5=1` retained key, without which boot-time `adoptAndSweep` cannot mark
+ * `-t DISPATCH_TTYD_REVISION_6=1` retained key, without which boot-time `adoptAndSweep` cannot mark
  * it `compatible` for re-adoption — and resolve with its kernel-assigned port, parsed from stderr
- * the way the app's own `parsePort` does.
+ * the way the app's own `parsePort` does. `sessionId` (not `cardId`) is what the `-b` base-path
+ * carries, matching production's own session-keyed base path (PROXY-01).
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
-function spawnTtyd(session, cardId) {
+function spawnTtyd(session, sessionId) {
   return new Promise((resolve, reject) => {
     const child = spawn(
       "ttyd",
@@ -565,7 +569,7 @@ function spawnTtyd(session, cardId) {
         "-p",
         "0",
         "-b",
-        `/sessions/${cardId}/terminal`,
+        `/sessions/${sessionId}/terminal`,
         "-t",
         "disableLeaveAlert=true",
         "-t",
@@ -757,6 +761,10 @@ function assertBuilt() {
  * `adoptAndSweep` would spare nothing and sweep EVERY one of this harness's own freshly-spawned,
  * fingerprint-matched ttyd processes as unrecognized orphans before the fixture card seeding step
  * ever runs — empirically confirmed by Phase 91's own `--check safety` proof run, corrected here.
+ * @remarks Each session's `id` is minted (`randomUUID`) BEFORE its ttyd spawn, not after, so the
+ * exact id `spawnTtyd` bakes into the `-b` base path is the SAME id later persisted onto the
+ * session record (PROXY-01) — spawning with one id and persisting another would leave the
+ * persisted record's own proxy path pointing at a ttyd that never used it.
  */
 async function standUpFixture(built) {
   const warmup = bootServer(built.home);
@@ -780,8 +788,14 @@ async function standUpFixture(built) {
     `standup: tmux sessions live — ${built.sessionKeys.map((key) => built.tmux[key]).join(", ")}`,
   );
 
+  const handles = {};
   for (const key of built.sessionKeys) {
-    built.ttyd[key] = await spawnTtyd(built.tmux[key], built.cardId);
+    handles[key] = { id: randomUUID(), token: randomBytes(32).toString("hex") };
+    built[SESSION_FIELD_BY_KEY[key]] = handles[key];
+  }
+
+  for (const key of built.sessionKeys) {
+    built.ttyd[key] = await spawnTtyd(built.tmux[key], handles[key].id);
   }
   for (const key of built.sessionKeys) {
     await waitForPortListening(built.ttyd[key].port);
@@ -792,8 +806,7 @@ async function standUpFixture(built) {
 
   const now = new Date().toISOString();
   const records = built.sessionKeys.map((key) => {
-    const handle = { id: randomUUID(), token: randomBytes(32).toString("hex") };
-    built[SESSION_FIELD_BY_KEY[key]] = handle;
+    const handle = handles[key];
     return {
       id: handle.id,
       createdAt: now,
@@ -2184,10 +2197,11 @@ async function probeOneConnection(url, protocols) {
  * recorded finding instead of misattributed to a routing bug. The shipped client always offers
  * `"tty"` (`terminal-main.ts:252`), so this harness keeps offering it regardless of what this probe
  * finds — the probe is informational, not a basis for changing what {@link readPaneThroughProxy}
- * sends.
+ * sends. Addresses session A's OWN id (not `built.cardId`, which no longer resolves to any live
+ * port once the proxy is session-keyed, PROXY-01) so the probe genuinely connects.
  */
 async function probeSubprotocolAcceptance(built) {
-  const url = `ws://127.0.0.1:${built.port}/sessions/${built.cardId}/terminal/ws`;
+  const url = `ws://127.0.0.1:${built.port}/sessions/${built.sessionA.id}/terminal/ws`;
   const withTty = await probeOneConnection(url, ["tty"]);
   const withoutProto = await probeOneConnection(url, undefined);
   console.log(
@@ -2202,10 +2216,10 @@ async function probeSubprotocolAcceptance(built) {
  * `--check proxy-addressing` (PROXY-01, `92-VALIDATION.md` C1's foundation): write a unique marker
  * into session A's real pane, read it back through the reverse proxy speaking ttyd's actual wire
  * protocol, and fail when the socket never opened or the accumulated text never contains the
- * marker. This mode covers the ACTIVE session ONLY, against the URL shape that exists TODAY — the
- * segment is still `built.cardId`, not a session id. It does NOT close criterion 1's two-sibling
- * isolation claim; plan 02 re-keys the id segment and extends this to prove one session's proxy
- * path can never read a sibling's pane.
+ * marker. This mode covers the ACTIVE session ONLY, now against the session-keyed URL shape
+ * (`built.sessionA.id`, not `built.cardId`). It does NOT yet close criterion 1's two-sibling
+ * isolation claim on its own — the next commit extends this to prove one session's proxy path can
+ * never read a sibling's pane.
  * @remarks The marker embeds `built.port` and a random suffix so a stale pane left by an earlier,
  * imperfectly torn-down run can never satisfy a fresh run's expectation by accident.
  */
@@ -2221,7 +2235,7 @@ async function checkProxyAddressing(built) {
 
   const result = await readPaneThroughProxy({
     port: built.port,
-    idSegment: built.cardId,
+    idSegment: built.sessionA.id,
     expect: marker,
     timeoutMs: PROXY_READ_TIMEOUT_MS,
   });
@@ -2235,7 +2249,7 @@ async function checkProxyAddressing(built) {
 
   if (!result.opened) {
     violations.push(
-      `proxy-addressing: WS never opened against ws://127.0.0.1:${built.port}/sessions/${built.cardId}/terminal/ws ` +
+      `proxy-addressing: WS never opened against ws://127.0.0.1:${built.port}/sessions/${built.sessionA.id}/terminal/ws ` +
         `(closeCode=${result.closeCode}) — expected marker "${marker}"`,
     );
   } else if (!result.text.includes(marker)) {

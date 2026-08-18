@@ -55,7 +55,8 @@ export async function resumeSession(cardId: string): Promise<void> {
   store.beginStart(cardId);
   try {
     const card = store.getCard(cardId);
-    if (!card?.workspacePath) return;
+    if (!card?.workspacePath || !card.activeSessionId) return;
+    const sessionId = card.activeSessionId;
     await store.clearResumeError(cardId);
     const session = "dsp-" + card.identifier;
     const resumeArgs = card.claudeSessionId
@@ -71,7 +72,7 @@ export async function resumeSession(cardId: string): Promise<void> {
         () => void store.setStatusReason(cardId, null),
         REATTACH_STATUS_CLEAR_MS,
       );
-      await ensureTerminal(cardId, session);
+      await ensureTerminal(cardId, sessionId, session);
       return;
     }
 
@@ -82,9 +83,9 @@ export async function resumeSession(cardId: string): Promise<void> {
     if (runtime?.capable && runtime.statusChannel !== "pane") {
       const previousToken = card.hookToken;
       const token = newHookTokenValue();
-      const sessionId = await store.mintHookChannel(cardId, token);
-      if (sessionId !== undefined) {
-        registerHookToken(token, cardId, sessionId, previousToken);
+      const mintedSessionId = await store.mintHookChannel(cardId, token);
+      if (mintedSessionId !== undefined) {
+        registerHookToken(token, cardId, mintedSessionId, previousToken);
         await newSession(
           session,
           card.workspacePath,
@@ -118,7 +119,7 @@ export async function resumeSession(cardId: string): Promise<void> {
       () => void store.setStatusReason(cardId, null),
       REATTACH_STATUS_CLEAR_MS,
     );
-    await ensureTerminal(cardId, session);
+    await ensureTerminal(cardId, sessionId, session);
   } catch (err) {
     const card = store.getCard(cardId);
     if (card) await killSession(`=dsp-${card.identifier}`);

@@ -327,7 +327,7 @@ cardsRouter.post("/cards/:id/terminal", (req, res) => {
     return;
   }
 
-  if (!card.tmuxSession) {
+  if (!card.tmuxSession || !card.activeSessionId) {
     res.status(400).json({ error: "card has no live session" });
     return;
   }
@@ -339,7 +339,7 @@ cardsRouter.post("/cards/:id/terminal", (req, res) => {
     return;
   }
 
-  void ensureTerminal(card.id, card.tmuxSession);
+  void ensureTerminal(card.id, card.activeSessionId, card.tmuxSession);
   res.status(202).json({ ensuring: true });
 });
 

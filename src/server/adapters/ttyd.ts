@@ -5,7 +5,16 @@ import { promisify } from "node:util";
 import { store } from "../store/board.store.js";
 
 const execFileP = promisify(execFile);
-const TTYD_RUNTIME_REVISION = 5;
+/**
+ * Bumped 5 -> 6 alongside the `-b` base path moving from card-keyed to session-keyed (`PROXY-01`).
+ * A ttyd spawned by an earlier build carries a card-keyed `-b`, and adopting it would hand the app
+ * a live-looking pane the new session-keyed route cannot address. Old-revision processes fall out
+ * of `compatible`, are never re-adopted, and are therefore swept — a deliberate, one-time,
+ * user-visible reconnect on first boot after upgrade, never a silent adoption of an unaddressable
+ * pane. The re-adoption fingerprint has only NARROWED, per the rule below.
+ * @see docs/ARCHITECTURE.md#terminal-ttyd
+ */
+const TTYD_RUNTIME_REVISION = 6;
 const TTYD_RUNTIME_REVISION_KEY = "DISPATCH_TTYD_REVISION";
 
 /**
@@ -30,9 +39,11 @@ const escapeRegExp = (s: string): string =>
  * against ttyd 1.7.7. Such a process matched neither the `tmux`+`attach` arm nor the
  * current-revision arm, so it was never swept AND never adopted: it leaked across every restart
  * and upgrade, holding its port and serving its session from the retired patched index forever.
- * `-b /sessions/<cardId>/terminal` is early enough to always survive the rewrite and is specific
- * enough to be dispatch's own. This widens the SWEEP arm ONLY — `compatible` still demands the
- * exact current revision key, because a re-adoption fingerprint may only ever narrow.
+ * `-b /sessions/<sessionId>/terminal` is early enough to always survive the rewrite and is
+ * specific enough to be dispatch's own. This widens the SWEEP arm ONLY — `compatible` still
+ * demands the exact current revision key, because a re-adoption fingerprint may only ever narrow.
+ * The regex itself is agnostic to what the single opaque segment between `/sessions/` and
+ * `/terminal` names (a card id, formerly, or a session id, now), so it needs no code change here.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 const DSP_BASE_PATH_RE = /(?:^|\s)-b\s+\/sessions\/[^\s/]+\/terminal(?:\s|$)/;
@@ -99,14 +110,17 @@ const READY_POLL_CADENCE_MS = 100;
  *      in-flight entry on settle (success or failure).
  * Steps 1-3 run with NO await between the check and the in-flight `set`, so a second concurrent
  * call always sees the entry — the whole point of the single-flight guard.
- * `cardId` threads through to `spawnTtyd`'s `-b /sessions/<cardId>/terminal` base-path so the
- * card.id-keyed reverse proxy (PROXY-01) can route to this exact process.
+ * `sessionId` threads through to `spawnTtyd`'s `-b /sessions/<sessionId>/terminal` base-path so
+ * the session-keyed reverse proxy (PROXY-01) can route to this exact process.
  * @remarks TERM-01: writable + loopback-only ttyd, single-flight spawn (T-03-07), port parsed
  * from stderr `Listening on port: N`.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
-export function ensureTtyd(session: string, cardId: string): Promise<number> {
+export function ensureTtyd(
+  session: string,
+  sessionId: string,
+): Promise<number> {
   const existing = procs.get(session);
   if (existing) {
     if (existing.child === null) {
@@ -115,7 +129,7 @@ export function ensureTtyd(session: string, cardId: string): Promise<number> {
         if (procs.get(session) === existing) procs.delete(session);
         const pending = inFlight.get(session);
         if (pending) return pending;
-        return ensureTtyd(session, cardId);
+        return ensureTtyd(session, sessionId);
       });
     }
     if (existing.child.exitCode === null) return Promise.resolve(existing.port);
@@ -124,7 +138,7 @@ export function ensureTtyd(session: string, cardId: string): Promise<number> {
   const pending = inFlight.get(session);
   if (pending) return pending;
 
-  const promise = spawnTtyd(session, cardId).finally(() =>
+  const promise = spawnTtyd(session, sessionId).finally(() =>
     inFlight.delete(session),
   );
   inFlight.set(session, promise);
@@ -160,9 +174,9 @@ export function getLiveTtydPort(session: string): number | null {
 
 /**
  * Spawn a fresh ttyd, parse its port, confirm readiness, and track it. Rejects on failure. `-b
- * /sessions/<cardId>/terminal` scopes ttyd's own asset/WS routing to the card.id-keyed prefix the
- * reverse proxy forwards under (PROXY-01) — confirmed by a live spike (72-RESEARCH.md) to change
- * ttyd's server-side routing only, never the served bytes. ttyd stays loopback-bound (`-i
+ * /sessions/<sessionId>/terminal` scopes ttyd's own asset/WS routing to the session-keyed prefix
+ * the reverse proxy forwards under (PROXY-01) — confirmed by a live spike (72-RESEARCH.md) to
+ * change ttyd's server-side routing only, never the served bytes. ttyd stays loopback-bound (`-i
  * 127.0.0.1 -p 0` unchanged) — reachable only through the proxy.
  * @remarks This argv shape is fixed and unconditional — no environment variable selects an
  * alternate form. `disableLeaveAlert=true` and `TTYD_RUNTIME_REVISION_RETAINED_KEY=1` are the only
@@ -179,7 +193,7 @@ export function getLiveTtydPort(session: string): number | null {
  * leaves the environment the `claude` process itself sees untouched.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
-async function spawnTtyd(session: string, cardId: string): Promise<number> {
+async function spawnTtyd(session: string, sessionId: string): Promise<number> {
   const child = spawn(
     "ttyd",
     [
@@ -189,7 +203,7 @@ async function spawnTtyd(session: string, cardId: string): Promise<number> {
       "-p",
       "0",
       "-b",
-      `/sessions/${cardId}/terminal`,
+      `/sessions/${sessionId}/terminal`,
       "-t",
       "disableLeaveAlert=true",
       "-t",
@@ -425,7 +439,7 @@ export function killTtyd(session: string): void {
  *
  * Fingerprint (RESEARCH Probe 2/3): match iff basename(argv[0]) === "ttyd" AND the command has
  * argv "tmux" + "attach", OR Dispatch's exact current revision marker, OR Dispatch's
- * `-b /sessions/<cardId>/terminal` base path. The basename check excludes the backend's own
+ * `-b /sessions/<sessionId>/terminal` base path. The basename check excludes the backend's own
  * node/ps/shell commands that merely mention "ttyd" (Pitfall 1); a generic full-command-line
  * substring match would self-match the backend (Pitfall 2), so only exact fixed markers are
  * accepted. Own pid/ppid are skipped explicitly.

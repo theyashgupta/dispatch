@@ -8,14 +8,17 @@ import { hasSession } from "../../adapters/tmux.js";
  * security-sensitive stale-port suppression drift). ensureTtyd is single-flight, so a duplicate
  * concurrent call resolves the same spawn and simply re-records the port (idempotent). The port
  * is recorded only while the card still names `session` (the in-queue setTtydPortIfSession
- * conditional), so a concurrent session-lost write reliably suppresses a stale port. `cardId` is
- * threaded into `ensureTtyd` so ttyd spawns with the `-b /sessions/<cardId>/terminal` base-path
- * the reverse proxy routes to (PROXY-01) — already in scope here, no new lookup. SECURITY: no
- * ticket text, port, or secret is echoed in any response or log.
+ * conditional), so a concurrent session-lost write reliably suppresses a stale port. `cardId`
+ * keeps its two genuinely card-scoped uses below (`setTerminalError`, `setTtydPortIfSession`); the
+ * NEW `sessionId` threads separately, only into `ensureTtyd`, so ttyd spawns with the
+ * `-b /sessions/<sessionId>/terminal` base-path the session-keyed reverse proxy routes to
+ * (PROXY-01) — this is not the same id as `cardId`, and the two must never be conflated.
+ * SECURITY: no ticket text, port, or secret is echoed in any response or log.
  * @see docs/ARCHITECTURE.md#single-writer-store
  */
 export async function ensureTerminal(
   cardId: string,
+  sessionId: string,
   session: string,
 ): Promise<void> {
   try {
@@ -26,7 +29,7 @@ export async function ensureTerminal(
       });
       return;
     }
-    const port = await ensureTtyd(session, cardId);
+    const port = await ensureTtyd(session, sessionId);
     const recorded = await store.setTtydPortIfSession(cardId, session, port);
     if (!recorded) killTtyd(session);
   } catch (err) {

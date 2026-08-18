@@ -728,7 +728,7 @@ spec, are homed in [Column Transition Specification](#column-transition-specific
 manager (`adapters/ttyd.ts`) spawns, tracks, and reuses a writable, loopback-only ttyd attached to
 an existing `dsp-<identifier>` tmux session so the live `claude` REPL can be embedded in the
 detail-panel iframe (`TERM-01`). Its invocation is ONE fixed, unconditional shape — no environment
-variable selects an alternate form: `ttyd -W -i 127.0.0.1 -p 0 -b /sessions/<cardId>/terminal -t
+variable selects an alternate form: `ttyd -W -i 127.0.0.1 -p 0 -b /sessions/<sessionId>/terminal -t
 disableLeaveAlert=true -t DISPATCH_TTYD_REVISION_<revision>=1 tmux -u attach -t =<session>`. The two
 `-t` tokens are `disableLeaveAlert` and the inert retained-key revision token — there is no
 `-I <index>`, no `-t theme=`/`fontFamily`/`fontSize`: look, font, and every interaction pattern are
@@ -747,7 +747,7 @@ theme JSON), so it shows no `tmux attach` at all, and its revision marker is by 
 current one. It therefore matched NEITHER sweep arm and could never be adopted: it leaked across
 every restart and upgrade, holding its port and serving its session from the retired patched index
 indefinitely, while a second ttyd was spawned alongside it for the same card. Ownership must
-therefore never depend on trailing argv surviving. `-b /sessions/<cardId>/terminal` is early enough
+therefore never depend on trailing argv surviving. `-b /sessions/<sessionId>/terminal` is early enough
 to always survive the rewrite and specific enough to be dispatch's own, and is matched as a third
 SWEEP arm. Re-adoption (`compatible`) is unchanged and still demands the exact current revision
 key — a re-adoption fingerprint may only ever narrow.
@@ -907,9 +907,9 @@ invariant-dense files; its rules live here so a Phase 12/13 restructure — and 
 re-derivation below — can preserve them without reading the original body comments.
 
 **The ttyd iframe is a single, always-rendered, never-keyed element (`PANEL-03`).** For a live
-session the terminal region is exactly one `<iframe src="/sessions/${card.id}/terminal/">` (a
-relative path, resolved same-origin against the app's own origin via the reverse-proxy described in
-[Terminal (ttyd)](#terminal-ttyd)) rendered at a FIXED position in the JSX tree, and it must stay
+session the terminal region is exactly one `<iframe src="/sessions/${activeSession.id}/terminal/">`
+(a relative path, resolved same-origin against the app's own origin via the reverse-proxy described
+in [Terminal (ttyd)](#terminal-ttyd)) rendered at a FIXED position in the JSX tree, and it must stay
 identity-stable across four separate mutations:
 
 - **Conditional siblings render FIRST, at a stable index.** The expandable Details slot rides an
@@ -946,8 +946,8 @@ identity-stable across four separate mutations:
   `setPointerCapture` alone.** `setPointerCapture` only overrides hit-testing within the SAME
   top-level browsing context; an `<iframe>` is always a separate browsing context regardless of
   origin (the terminal iframe is same-origin as of Phase 72's reverse-proxy, `src` is a relative
-  `/sessions/${card.id}/terminal/` path — `@see` [Terminal (ttyd)](#terminal-ttyd) — but that does
-  not change the browsing-context boundary), and a
+  `/sessions/${activeSession.id}/terminal/` path — `@see` [Terminal (ttyd)](#terminal-ttyd) — but
+  that does not change the browsing-context boundary), and a
   live, 5/5-reproduced defect (headless and headed Chrome) showed `pointerup` never reaching
   `window` at all when the release happened to land over the iframe's rendered area — the drag
   would silently abandon mid-resize, leaving `document.body.style.cursor` stuck and the orphaned
@@ -2194,14 +2194,14 @@ real membership directly, independent of windowing` below for the full envelope 
    `new-session -d -s <name> -c <cwd> -x 200 -y 50 <argv>`; `capture-pane -p -J -t =<name>:`; exact-name
    `=` targeting; `load-buffer -b`/`paste-buffer -b -p -d`; separate `send-keys Enter`. Geometry `200×50`
    is load-bearing for readiness/marker parsing.
-6. **ttyd invocation + tracking.** `ttyd -W -i 127.0.0.1 -p 0 -b /sessions/<cardId>/terminal -t
+6. **ttyd invocation + tracking.** `ttyd -W -i 127.0.0.1 -p 0 -b /sessions/<sessionId>/terminal -t
 disableLeaveAlert=true -t DISPATCH_TTYD_REVISION_<revision>=1 tmux -u attach -t =<session>` (`-u` is
    mandatory — see `TERM-04`); port
    parsed from stderr `Listening on port: N`; loopback bind mandatory; orphan-sweep ownership proof
    (`basename(argv0)==="ttyd"` AND argv includes `tmux`+`attach`, OR the process title contains the
-   exact retained-key revision literal, OR it carries `-b /sessions/<cardId>/terminal` — the arm
+   exact retained-key revision literal, OR it carries `-b /sessions/<sessionId>/terminal` — the arm
    that survives ttyd's proctitle rewrite, `TERM-05`); exact-current retained-key revision marker required for
-   adoption/spare (the sole re-adoption fingerprint); iframe src `/sessions/${card.id}/terminal/`
+   adoption/spare (the sole re-adoption fingerprint); iframe src `/sessions/${activeSession.id}/terminal/`
    (same-origin, forwarded by the reverse-proxy — `@see` [Terminal (ttyd)](#terminal-ttyd)).
 7. **DISPATCH_STATUS marker protocol.** `parse.ts` `MARKER_RE` and the kickoff wording in `kickoff.ts` must
    stay byte-identical to each other (em-dash **U+2014**, the `NEEDS_INPUT`/`DONE` tokens, the

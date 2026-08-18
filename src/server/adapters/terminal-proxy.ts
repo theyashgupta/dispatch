@@ -25,17 +25,24 @@ function rejectUpgrade(socket: Duplex, status: string): void {
 }
 
 /**
- * Resolve a card.id to its currently-live loopback ttyd port, or `null` when the card is
- * unknown, has no session, or its ttyd is not currently tracked as alive. Both `httpForward`
- * and `terminalProxyUpgrade` call this fresh on every request/upgrade (PROXY-03) — never cached
- * here — so a mid-session ttyd respawn or boot re-adoption keeps reconnecting. `id` is used ONLY
- * as an exact-match equality key against the store's known card ids, never interpolated into a
- * shell command, file path, or regex (T-72-01).
+ * Resolve a session id to its currently-live loopback ttyd port, or `null` when the id is blank,
+ * names no session, or its ttyd is not currently tracked as alive. Both `httpForward` and
+ * `terminalProxyUpgrade` call this fresh on every request/upgrade (PROXY-03) — never cached here —
+ * so a mid-session ttyd respawn or boot re-adoption keeps reconnecting, and fixing this one
+ * function fixes both entry points by construction, since neither wraps its own resolution logic.
+ * Resolves against `store.sessionsWithTmux()` — the reverse-lookup primitive over the store's
+ * UNREDACTED internal card map — rather than a card's ACTIVE-session projection
+ * (`store.snapshot()` deletes `sessions` off every card, and the flat `tmuxSession` mirror only
+ * ever names the active session), so a non-active sibling resolves to its OWN tmux/ttyd instead of
+ * being unreachable no matter where the card's active pointer sits (criterion 1). `id` is used
+ * ONLY as an exact-match equality key against a known session id, never interpolated into a shell
+ * command, file path, or regex (T-72-01).
  */
 function resolveLiveTtydPort(id: string): number | null {
-  const card = store.snapshot().cards.find((c) => c.id === id);
-  if (!card?.tmuxSession) return null;
-  return getLiveTtydPort(card.tmuxSession);
+  if (id.trim().length === 0) return null;
+  const pair = store.sessionsWithTmux().find((p) => p.session.id === id);
+  if (!pair) return null;
+  return getLiveTtydPort(pair.session.tmuxSession);
 }
 
 /**
@@ -138,12 +145,12 @@ export function upgradeForward(
  * to for every `/sessions/*` upgrade — kept as one wrappable chokepoint so Phase 73's auth gate
  * has exactly one place to wrap (T-72-05). Resolves `:id` from the URL itself (no Express router
  * for raw upgrades), decoding it the same way Express decodes `req.params.id` on the HTTP route
- * (IN-01) so the same card.id maps to the same target on both entry points, and rejects with a
+ * (IN-01) so the same session id maps to the same target on both entry points, and rejects with a
  * minimal status line (IN-02) instead of a bare destroy when the id or its live port can't be
  * resolved, rather than falling back to any default target. The trailing separator is optional so
  * the set of URL shapes that yield an `:id` here stays identical to the set the HTTP route's
  * `/:id/terminal{/*rest}` matches — the two entry points must never disagree about which requests
- * carry a resolvable card id.
+ * carry a resolvable session id.
  */
 export function terminalProxyUpgrade(
   req: IncomingMessage,
