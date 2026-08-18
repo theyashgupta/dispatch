@@ -7015,9 +7015,7 @@ async function checkNamingConsistency(built) {
   const { status, body } = await startSecondSession(built, {
     newSession: true,
   });
-  console.log(
-    `naming-consistency: POST /start {newSession:true} -> ${status}`,
-  );
+  console.log(`naming-consistency: POST /start {newSession:true} -> ${status}`);
   if (status !== 202) {
     violations.push(
       `naming-consistency: POST /start returned ${status}, expected 202 (body=${JSON.stringify(body)})`,
@@ -7108,7 +7106,10 @@ async function checkNamingConsistency(built) {
     if (line.startsWith("worktree ")) {
       currentPath = line.slice("worktree ".length);
     } else if (line.startsWith("branch refs/heads/") && currentPath) {
-      worktreeBranches.set(currentPath, line.slice("branch refs/heads/".length));
+      worktreeBranches.set(
+        currentPath,
+        line.slice("branch refs/heads/".length),
+      );
     }
   }
   const resolvedExpectedWtPath = existsSync(expectedWtPath)
@@ -7195,6 +7196,136 @@ async function checkNamingConsistency(built) {
   return violations;
 }
 
+/**
+ * `--check reserve-coalesce` (Plan 94-06 Task 2, criterion C4, START-02): fires two REAL,
+ * concurrent `POST /start {newSession:true}` requests with no `await` between them and asserts
+ * they COALESCE onto exactly one new session — the card-level `isStarting`/`beginStart` gate is
+ * what serializes the reserve step; a per-session lock could never catch this because two
+ * concurrent requests mint two DIFFERENT session ids, so a per-session key can never collide.
+ * @remarks Every assertion here is measured against the outcome of a genuine race, not reasoned
+ * about — no `await` separates the two {@link startSecondSession} calls below, so both requests
+ * are in flight before either resolves (94-VALIDATION.md's C4 row).
+ */
+async function checkReserveCoalesce(built) {
+  const violations = [];
+
+  const session1Name = built.tmux.a;
+
+  const before = readCard(built.dbPath, built.cardId);
+  const ordinalBefore = before?.nextSessionOrdinal ?? 2;
+  console.log(
+    `reserve-coalesce: card.nextSessionOrdinal BEFORE = ${ordinalBefore}`,
+  );
+
+  const [result1, result2] = await Promise.all([
+    startSecondSession(built, { newSession: true }),
+    startSecondSession(built, { newSession: true }),
+  ]);
+  console.log(
+    `reserve-coalesce: POST 1 -> ${result1.status}, POST 2 -> ${result2.status}`,
+  );
+  [result1, result2].forEach((r, i) => {
+    if (r.status >= 400) {
+      violations.push(
+        `reserve-coalesce: POST ${i + 1} returned error status ${r.status} (body=${JSON.stringify(r.body)}) — the locked behaviour is coalescing, not refusal`,
+      );
+    }
+  });
+
+  const { card, timedOut } = await waitForSagaSettled(built, {
+    timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+  });
+  if (timedOut) {
+    violations.push(
+      `reserve-coalesce: saga did not settle within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (last observed card=${JSON.stringify(card)})`,
+    );
+    return violations;
+  }
+  if (card?.startError != null) {
+    violations.push(
+      `reserve-coalesce: saga recorded a startError: ${JSON.stringify(card.startError)}`,
+    );
+  }
+
+  const persisted = readCard(built.dbPath, built.cardId);
+  const persistedSessions = persisted?.sessions ?? [];
+  console.log(
+    `reserve-coalesce: persisted card.sessions after settle = ${JSON.stringify(persistedSessions.map((s) => ({ id: s.id, tmuxSession: s.tmuxSession, branch: s.branch })))}`,
+  );
+
+  // 1. Exactly ONE new session — the persisted card has exactly 2 session records, not 3.
+  if (persistedSessions.length !== 2) {
+    violations.push(
+      `reserve-coalesce: persisted card.sessions has ${persistedSessions.length} records, expected exactly 2 (one coalesced new session, not two)`,
+    );
+  }
+
+  // 2. card.nextSessionOrdinal advanced by exactly 1, not 2 — the reservation ledger.
+  const ordinalAfter = persisted?.nextSessionOrdinal ?? ordinalBefore;
+  console.log(
+    `reserve-coalesce: card.nextSessionOrdinal AFTER = ${ordinalAfter} (before=${ordinalBefore})`,
+  );
+  if (ordinalAfter - ordinalBefore !== 1) {
+    violations.push(
+      `reserve-coalesce: card.nextSessionOrdinal advanced by ${ordinalAfter - ordinalBefore}, expected exactly 1 (before=${ordinalBefore}, after=${ordinalAfter})`,
+    );
+  }
+
+  // 3. tmux list-sessions contains exactly ONE name matching dsp-<identifier>-<digits>.
+  const live = await tmuxListSessionNames();
+  const suffixRe = new RegExp(`^dsp-${built.identifier}-\\d+$`);
+  const suffixedMatches = live.filter((n) => suffixRe.test(n));
+  console.log(
+    `reserve-coalesce: tmux list-sessions = ${JSON.stringify(live)}; suffixed matches = ${JSON.stringify(suffixedMatches)}`,
+  );
+  if (suffixedMatches.length !== 1) {
+    violations.push(
+      `reserve-coalesce: tmux list-sessions has ${suffixedMatches.length} names matching dsp-${built.identifier}-<digits>, expected exactly 1 — found ${JSON.stringify(suffixedMatches)}`,
+    );
+  }
+
+  // 4. git branch --list has exactly one <identifier>-<digits> branch; exactly two SESSION
+  // worktrees (excluding the fixture repo's own primary working tree, which git refuses to
+  // "worktree remove" and which is not a session worktree to begin with).
+  const { stdout: branchOut } = await execFileP("git", ["branch", "--list"], {
+    cwd: built.repoPath,
+  });
+  const branchRe = new RegExp(`^${built.identifier}-\\d+$`);
+  const branchNames = branchOut
+    .split("\n")
+    .map((l) => l.replace(/^[*+ ]+/, "").trim())
+    .filter((l) => branchRe.test(l));
+  console.log(
+    `reserve-coalesce: git branch --list suffixed matches = ${JSON.stringify(branchNames)}`,
+  );
+  if (branchNames.length !== 1) {
+    violations.push(
+      `reserve-coalesce: \`git branch --list\` has ${branchNames.length} branches matching ${built.identifier}-<digits>, expected exactly 1 — found ${JSON.stringify(branchNames)}`,
+    );
+  }
+
+  const registered = await gitWorktreeListRegistered(built.repoPath);
+  const mainWorktree = realpathSync(built.repoPath);
+  const sessionWorktrees = [...registered].filter((p) => p !== mainWorktree);
+  console.log(
+    `reserve-coalesce: git worktree list --porcelain (session worktrees, excluding main) = ${JSON.stringify(sessionWorktrees)}`,
+  );
+  if (sessionWorktrees.length !== 2) {
+    violations.push(
+      `reserve-coalesce: \`git worktree list --porcelain\` has ${sessionWorktrees.length} session worktrees (excluding the primary working tree), expected exactly 2 — found ${JSON.stringify(sessionWorktrees)}`,
+    );
+  }
+
+  // 6. session 1's exact tmux name is still present.
+  if (!live.includes(session1Name)) {
+    violations.push(
+      `reserve-coalesce: session 1's EXACT tmux name ${session1Name} not found in list-sessions: ${JSON.stringify(live)}`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -7234,6 +7365,12 @@ const CHECKS = {
     withFixture(
       "naming-consistency",
       checkNamingConsistency,
+      SECOND_SESSION_FIXTURE,
+    ),
+  "reserve-coalesce": () =>
+    withFixture(
+      "reserve-coalesce",
+      checkReserveCoalesce,
       SECOND_SESSION_FIXTURE,
     ),
 };
