@@ -1561,64 +1561,97 @@ and is used ONLY by the post-install re-probe. The formerly built-but-unwired de
 
 ### Cleanup Lifecycle
 
-When a card reaches Done its isolated workspace (per-repo git worktrees + the ttyd/tmux session) is
-NOT torn down on arrival — arrival SCHEDULES teardown for a future time (`LIFE-02`), and the
-workspace, worktrees, and tmux/ttyd session stay alive and promptable until that time elapses. The
+When a card reaches Done, every session it owns has its own isolated workspace (per-repo git
+worktrees + the ttyd/tmux session) scheduled for teardown, not torn down on arrival — arrival
+SCHEDULES each session's own teardown for a future time (`LIFE-02`), and each session's workspace,
+worktrees, and tmux/ttyd session stay alive and promptable until its own schedule elapses. The
 teardown itself, once dispatched, is an async saga composed from EXISTING adapters over
-server-derived paths; it is scoped to `services/orchestration/cleanup.ts` (`cleanupWorkspace`) with
-cross-module touchpoints in the store (`recordCleanupWarning`/`finishCleanup`), the `/cleanup`
-route, and the `.tsx` cards/modal that offer it. Its home is written once here.
+server-derived paths, ADDRESSED AT EXACTLY ONE SESSION; it is scoped to
+`services/orchestration/cleanup.ts` (`cleanupWorkspace`) with cross-module touchpoints in the store
+(`recordCleanupWarning`/`finishCleanup`/`removeSessionRecord`), the `/cleanup` route, and the `.tsx`
+cards/modal that offer it. Its home is written once here.
+
+**Session-addressed teardown (`LIFE-01`).** `cleanupWorkspace(cardId, sessionId, opts)` resolves its
+target exactly once: an explicit `sessionId` naming a record in `card.sessions`, or `undefined`
+falling back to the card's active session — the legacy path for a card whose session lives only in
+the card's own flat fields, predating per-ticket workspaces. An explicit `sessionId` that does not
+resolve refuses immediately with NO mutation; it is never silently redirected to the active session.
+Every downstream read (`tmuxSession`, `workspacePath`, `workspace?.repos`, `isLegacyWorkspace`) goes
+through this ONE resolved record, never the card's flat active-session projection — a caller
+addressing session B on a two-session card cannot read or destroy session A's workspace by
+construction, not by a subsequent guard.
 
 **Done-card teardown saga, fire-and-forget and quiet (`LIFE-01`).** Cleanup has two callers — the
 `/cleanup` route (manual) and the automatic due-cleanup scheduler (`LIFE-03`) — both fire-and-forget
 and both share the same never-block, report-over-SSE contract; the scheduler has no route at all.
-Cleanup runs fire-and-forget off the `/cleanup` route AFTER the optimistic Done move and NEVER blocks
-the board; the route returns an immediate 202. The outcome reaches the UI ONLY over SSE: a clean run calls `finishCleanup` (a quiet
-state clear, no banner), a partial failure calls `recordCleanupWarning` which surfaces a MUTED,
-never-destructive card warning (mirroring the Start warning; UI-SPEC lock). Every path and session is
-derived from `card.*` + configured `repoPaths` — NOTHING from the request body (the route passes only
-the validated card id, `T-08b-01` EoP defense). Server-side guards are defense-in-depth (the client
-confirm alone is not a gate): the card MUST be in Done (a stray POST must never tear down a live
-in-progress session) and NO start saga may be in flight — cleanup racing a (re)start would delete
-worktrees the saga is creating, so `/start` 409s a Done card and cleanup 409s a starting one. The
-two callers also share ONE store-level in-flight guard (`isCleaningUp`/`beginCleanup`/`endCleanup`,
-mirroring `isStarting`) — the route 409s a card whose teardown is already dispatched, and the
-scheduler skips it — so a manual click can never race the automatic sweep's `worktreeRemove`/`fs.rm`
-steps for the same card. Done cards are parked with no Restart affordance; the cleanup offer owns
+The manual Clean up button is a CARD-LEVEL action that fans out sequentially (never `Promise.all`)
+over every session the card owns, resolved fresh from the card at dispatch time — each session's
+teardown is isolated in its own `try`/`catch`, so a session blocked by uncommitted work does not
+abort the siblings that already succeeded. Cleanup runs fire-and-forget off the `/cleanup` route
+AFTER the optimistic Done move and NEVER blocks the board; the route returns an immediate 202 before
+the fan-out settles. The outcome reaches the UI ONLY over SSE, per session: a clean run calls
+`finishCleanup` (a quiet state clear, no banner — see removal below), a partial failure calls
+`recordCleanupWarning` which surfaces a MUTED, never-destructive session-level warning (mirroring the
+Start warning; UI-SPEC lock). Every path is derived from the resolved session's own fields (or the
+card's legacy flat fields) + configured `repoPaths` — NOTHING from the request body, which no longer
+accepts a client-supplied `sessionId` at all (the route passes only the validated card id, `T-08b-01`
+EoP defense; the target session LIST is resolved server-side). Server-side guards are defense-in-depth
+(the client confirm alone is not a gate): the card MUST be in Done (a stray POST must never tear down
+a live in-progress session) and NO start saga may be in flight — cleanup racing a (re)start would
+delete worktrees the saga is creating, so `/start` 409s a Done card and cleanup 409s a starting one.
+The two callers also share ONE store-level in-flight guard (`isCleaningUp`/`beginCleanup`/`endCleanup`,
+mirroring `isStarting`), still CARD-SCOPED — it now brackets the WHOLE per-session fan-out rather than
+a single call, so the route 409s a card whose fan-out is already dispatched and the scheduler skips
+it, meaning a manual click can never race the automatic sweep's `worktreeRemove`/`fs.rm` steps for any
+session on the same card. Done cards are parked with no Restart affordance; the cleanup offer owns
 workspace reclamation there.
 
-**Deferred teardown schedule (`LIFE-02`).** `moveCardManual` is the sole writer of
-`card.cleanupDueAt`: it stamps a future epoch-ms due time only on a genuine Done arrival
-(`from !== "done"`) of a card that still holds a session or workspace, so a redundant done→done
-move (a retried `POST /cards/:id/move`) can never extend an already-set schedule. Leaving Done
-clears the field, as do `finishCleanup` and `recordCleanupWarning` (both terminal outcomes of a
-teardown that already ran). `cleanupDueAt` is NEVER read from a request body — it is written only
-from a server clock inside a store mutator, matching `LIFE-01`'s own `T-08b-01` server-derived
-posture. The due countdown rendered on a card is derived at render time from this field with no
-client timer (`format-cleanup-countdown.ts` mirrors `format-age.ts`'s pure render-time-clock-read
-idiom). A card with an outstanding `cleanupBlocked` refusal keeps its `cleanupDueAt` unless an
-automatic run cleared it before dispatching — the two fields CAN coexist on the manual-cleanup
-path, and the blocked notice always takes precedence over the countdown when both are present.
+**Deferred teardown schedule, per session (`LIFE-02`).** `moveCardManual` is the sole writer of
+cleanup schedules: on a genuine Done arrival (`from !== "done"`), it stamps a future epoch-ms
+`cleanupDueAt` on EVERY session still holding a `tmuxSession` or `workspacePath` — not only the
+active one — so a ticket with several live sessions gets several independent countdowns.
+`card.cleanupDueAt` mirrors the active session's own stamp (a literal read, not a derived
+nearest-due value across siblings), matching the Session/Card field split below. A redundant
+done→done move (a retried `POST /cards/:id/move`) can never extend an already-set schedule. Leaving
+Done clears EVERY session's `cleanupDueAt` and the card's mirror; `finishCleanup` and
+`recordCleanupWarning` clear the one session whose teardown just ran (terminal outcomes, not
+schedule survivors — a sibling's own still-pending schedule is untouched by either). `cleanupDueAt`
+is NEVER read from a request body — it is written only from a server clock inside a store mutator,
+matching `LIFE-01`'s own `T-08b-01` server-derived posture. The due countdown rendered on a card is
+derived at render time from this field with no client timer (`format-cleanup-countdown.ts` mirrors
+`format-age.ts`'s pure render-time-clock-read idiom). A session with an outstanding `cleanupBlocked`
+refusal keeps its own `cleanupDueAt` unless an automatic run cleared it before dispatching — the two
+fields CAN coexist on the manual-cleanup path, and the blocked notice always takes precedence over
+the countdown when both are present for that session.
 
-**Automatic due-cleanup runner (`LIFE-03`).** A services-tier, self-rescheduling `setTimeout` +
-`unref` loop (never `setInterval`) — `services/orchestration/cleanup-scheduler.ts#startCleanupScheduler`
-— starts immediately after `reconcileSessions()` at boot. Its first tick doubles as the boot sweep
-for any schedule that elapsed while the process was stopped, so no separate catch-up path exists.
-`cardsDueForCleanup` snapshots cards outside Done or with a start saga in flight OUT of the due list,
-but dispatch is sequential and each card's own turn is separated from the snapshot by real
-wall-clock time (a queue hop plus, for cards behind it, other cards' disk/subprocess-bound
-teardowns) — a legal Done → In Progress drag or a column-preserving Resume can make a snapshotted
-card live again before its turn arrives. The loop therefore re-validates with a FRESH store read
-immediately before the destructive `cleanupWorkspace` call: a card that left Done is abandoned
-silently (`moveCardManual` already cleared its schedule as part of that move), and a card that is
-still Done but has a start/resume saga in flight is abandoned for this tick with its schedule
-restored (`restoreCleanupDue`) so it is retried next tick rather than stranded with no schedule.
-Double-run is prevented in two layers: the due date is cleared BEFORE dispatch, and a store-level
-in-flight card-id set — shared with the manual `/cleanup` route (`LIFE-01`) — blocks re-entry
-against a still-running teardown, whether from a previous tick or a concurrent manual dispatch.
-Every automatic run is `force: false`, so the existing dirty-worktree preflight still refuses it
-(CLEAN-07); a blocked automatic run is terminal — surfaced via `cleanupBlocked`, never retried or
-backed off.
+**Automatic due-cleanup runner, one dispatch per session (`LIFE-03`).** A services-tier,
+self-rescheduling `setTimeout` + `unref` loop (never `setInterval`) —
+`services/orchestration/cleanup-scheduler.ts#startCleanupScheduler` — starts immediately after
+`reconcileSessions()` at boot. Its first tick doubles as the boot sweep for any schedule that
+elapsed while the process was stopped, so no separate catch-up path exists. `sessionsDueForCleanup`
+replaced the card-scoped `cardsDueForCleanup`: it snapshots ONE entry per due `(card, session)` pair
+— plus a synthetic `sessionId: undefined` entry for a legacy flat-mirror card carrying no session
+records — applying the card-scoped `column === "done"` / no-start-saga-in-flight guards once per
+card before yielding its due sessions. Dispatch stays sequential (never `Promise.all`) and each
+pair's own turn is separated from the snapshot by real wall-clock time (a queue hop plus, for pairs
+behind it, other sessions' disk/subprocess-bound teardowns) — a legal Done → In Progress drag or a
+column-preserving Resume can make a snapshotted card live again before its turn arrives. The loop
+therefore re-validates with a FRESH card AND session read immediately before the destructive
+`cleanupWorkspace` call: a card that left Done is abandoned silently (`moveCardManual` already
+cleared every session's schedule as part of that move), a card that is still Done but has a
+start/resume saga in flight is abandoned for this tick with its schedule restored
+(`restoreCleanupDue`) so it is retried next tick rather than stranded with no schedule, and a session
+that no longer exists on the card — already removed by a prior dispatch, manual or automatic — is
+skipped rather than dispatched against a stale id. Double-run is prevented in two layers: the due
+date is cleared BEFORE dispatch, and a store-level in-flight guard — still CARD-scoped, shared with
+the manual `/cleanup` route (`LIFE-01`) — blocks re-entry against a still-running fan-out for that
+card, whether from a previous tick or a concurrent manual dispatch. Every automatic run is
+`force: false`, so the existing dirty-worktree preflight still refuses it (CLEAN-07); a blocked
+automatic run is terminal for that session — surfaced via its own `cleanupBlocked` (mirrored to the
+card only when it is the active session), never retried or backed off. `DISPATCH_CLEANUP_TICK_MS`
+overrides the tick cadence (floored at 250ms) for instrumented runs; unset or non-finite it stays the
+production 60s default — the same env-gate idiom `cleanup.ts`'s own `DISPATCH_PERF_CLEANUP` already
+uses, inert by construction whenever the variable is absent.
 
 **Cleanup delay setting (`LIFE-04`).** The delay is whole days in `~/.dispatch/config.json` under
 `cleanupDelayDays`, default 7, `0` meaning immediate cleanup on Done. Two different validation
