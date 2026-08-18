@@ -2213,51 +2213,102 @@ async function probeSubprotocolAcceptance(built) {
 }
 
 /**
- * `--check proxy-addressing` (PROXY-01, `92-VALIDATION.md` C1's foundation): write a unique marker
- * into session A's real pane, read it back through the reverse proxy speaking ttyd's actual wire
- * protocol, and fail when the socket never opened or the accumulated text never contains the
- * marker. This mode covers the ACTIVE session ONLY, now against the session-keyed URL shape
- * (`built.sessionA.id`, not `built.cardId`). It does NOT yet close criterion 1's two-sibling
- * isolation claim on its own — the next commit extends this to prove one session's proxy path can
- * never read a sibling's pane.
- * @remarks The marker embeds `built.port` and a random suffix so a stale pane left by an earlier,
+ * `--check proxy-addressing` (PROXY-01, `92-VALIDATION.md` C1's actual isolation claim): write a
+ * DISTINCT marker into each of the two real tmux panes, then read each back through its OWN
+ * session-keyed proxy path (`built.sessionA.id` / `built.sessionB.id`) while BOTH sessions stay
+ * live and neither the active pointer nor either session's tmux/ttyd is torn down between the two
+ * reads — criterion 1 is about SIMULTANEOUS reachability, not sequential. Four assertions carry
+ * the actual claim: A's path yields A's marker and not B's, B's path yields B's marker and not A's.
+ * A fifth, weaker leg (`built.ttyd.a.port !== built.ttyd.b.port`) is recorded alongside but is
+ * explicitly NOT the criterion — `92-CONTEXT.md` rejects "the ports differ" as proof, since the two
+ * real ttyd backends are always on distinct kernel-assigned ports regardless of whether the
+ * addressing logic under test is even correct (see the harness's own "wrong-subject" break, which
+ * demonstrates this leg passing under a real routing regression).
+ * @remarks Each marker embeds `built.port` and a random suffix so a stale pane left by an earlier,
  * imperfectly torn-down run can never satisfy a fresh run's expectation by accident.
  */
 async function checkProxyAddressing(built) {
   const violations = [];
   await probeSubprotocolAcceptance(built);
 
-  const marker = `proxy-addressing-${built.port}-${randomBytes(4).toString("hex")}`;
-  await writePaneMarker(built.tmux.a, built.home, marker);
+  const markerA = `proxy-addressing-${built.port}-a-${randomBytes(4).toString("hex")}`;
+  const markerB = `proxy-addressing-${built.port}-b-${randomBytes(4).toString("hex")}`;
+  await writePaneMarker(built.tmux.a, built.home, markerA);
+  await writePaneMarker(built.tmux.b, built.home, markerB);
   console.log(
-    `proxy-addressing: wrote marker into pane ${built.tmux.a}: ${marker}`,
+    `proxy-addressing: wrote marker into pane ${built.tmux.a}: ${markerA}`,
+  );
+  console.log(
+    `proxy-addressing: wrote marker into pane ${built.tmux.b}: ${markerB}`,
   );
 
-  const result = await readPaneThroughProxy({
+  const resultA = await readPaneThroughProxy({
     port: built.port,
     idSegment: built.sessionA.id,
-    expect: marker,
+    expect: markerA,
     timeoutMs: PROXY_READ_TIMEOUT_MS,
   });
   console.log(
-    `proxy-addressing: read through proxy — opened=${result.opened} closeCode=${result.closeCode} ` +
-      `accumulatedChars=${result.text.length} containsMarker=${result.text.includes(marker)}`,
-  );
-  console.log(
-    `proxy-addressing: marker text read back through the proxy: ${marker}`,
+    `proxy-addressing: session A path (${built.sessionA.id}) — opened=${resultA.opened} ` +
+      `closeCode=${resultA.closeCode} accumulatedChars=${resultA.text.length} ` +
+      `containsA=${resultA.text.includes(markerA)} containsB=${resultA.text.includes(markerB)}`,
   );
 
-  if (!result.opened) {
+  const resultB = await readPaneThroughProxy({
+    port: built.port,
+    idSegment: built.sessionB.id,
+    expect: markerB,
+    timeoutMs: PROXY_READ_TIMEOUT_MS,
+  });
+  console.log(
+    `proxy-addressing: session B path (${built.sessionB.id}) — opened=${resultB.opened} ` +
+      `closeCode=${resultB.closeCode} accumulatedChars=${resultB.text.length} ` +
+      `containsA=${resultB.text.includes(markerA)} containsB=${resultB.text.includes(markerB)}`,
+  );
+
+  if (!resultA.opened) {
     violations.push(
-      `proxy-addressing: WS never opened against ws://127.0.0.1:${built.port}/sessions/${built.sessionA.id}/terminal/ws ` +
-        `(closeCode=${result.closeCode}) — expected marker "${marker}"`,
+      `proxy-addressing: session A's path never opened against ws://127.0.0.1:${built.port}/sessions/${built.sessionA.id}/terminal/ws ` +
+        `(closeCode=${resultA.closeCode}) — expected marker "${markerA}"`,
     );
-  } else if (!result.text.includes(marker)) {
-    violations.push(
-      `proxy-addressing: pane content read through the proxy did not contain marker "${marker}" — ` +
-        `accumulated ${result.text.length} chars: ${JSON.stringify(result.text.slice(-300))}`,
-    );
+  } else {
+    if (!resultA.text.includes(markerA)) {
+      violations.push(
+        `proxy-addressing: session A's path did not yield A's own marker "${markerA}" — ` +
+          `accumulated ${resultA.text.length} chars: ${JSON.stringify(resultA.text.slice(-300))}`,
+      );
+    }
+    if (resultA.text.includes(markerB)) {
+      violations.push(
+        `proxy-addressing: session A's path served session B's marker "${markerB}" — cross-served`,
+      );
+    }
   }
+
+  if (!resultB.opened) {
+    violations.push(
+      `proxy-addressing: session B's path never opened against ws://127.0.0.1:${built.port}/sessions/${built.sessionB.id}/terminal/ws ` +
+        `(closeCode=${resultB.closeCode}) — expected marker "${markerB}"`,
+    );
+  } else {
+    if (!resultB.text.includes(markerB)) {
+      violations.push(
+        `proxy-addressing: session B's path did not yield B's own marker "${markerB}" — ` +
+          `accumulated ${resultB.text.length} chars: ${JSON.stringify(resultB.text.slice(-300))}`,
+      );
+    }
+    if (resultB.text.includes(markerA)) {
+      violations.push(
+        `proxy-addressing: session B's path served session A's marker "${markerA}" — cross-served`,
+      );
+    }
+  }
+
+  const portsDiffer = built.ttyd.a.port !== built.ttyd.b.port;
+  console.log(
+    `proxy-addressing: corroborating (NOT the criterion) — resolved ttyd ports differ: ${portsDiffer} ` +
+      `(a=${built.ttyd.a.port}, b=${built.ttyd.b.port})`,
+  );
 
   return violations;
 }
