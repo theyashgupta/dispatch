@@ -100,6 +100,16 @@
  *                                                                   throwaway repo under the sandbox
  *                                                                   HOME, proven by `git worktree
  *                                                                   list`, never by `existsSync`
+ *   node scripts/session-liveness-v3.mjs --check cleanup-isolation Phase 93 criteria 1/5: cleaning
+ *                                                                   ONE session (via the real
+ *                                                                   scheduler) removes only ITS
+ *                                                                   worktree/workspace/tmux/ttyd —
+ *                                                                   the sibling proven ANSWERABLE
+ *                                                                   (a fresh prompt typed into its
+ *                                                                   real pane, read back through the
+ *                                                                   proxy), branches surviving, and
+ *                                                                   a cleaned session's ttyd never
+ *                                                                   re-adopted after a restart
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -284,6 +294,15 @@ const LISTEN_POLL_TIMEOUT_MS = 10_000;
  * promise immediately via the `close`/`error` listener and never waits out this ceiling.
  */
 const PROXY_READ_TIMEOUT_MS = 10_000;
+
+/**
+ * Bound for {@link checkCleanupIsolationScheduler}'s poll for the real cleanup scheduler to
+ * dispatch a past-due session's teardown, and for {@link checkCleanupIsolationFanout}'s poll for
+ * the manual fan-out route to remove every session on the card. Generous relative to the trivial
+ * throwaway repo's own git subprocess latency (worktree remove/prune on a one-file repo is
+ * sub-second) so a slow CI box never produces a false "the scheduler never fired" violation.
+ */
+const CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS = 20_000;
 
 /**
  * Bound for {@link probeSubprotocolAcceptance}'s two one-shot connection attempts (`92-RESEARCH.md`
@@ -1471,6 +1490,78 @@ function stopBodyWithReason(reason) {
     hook_event_name: "Stop",
     last_assistant_message: `⏺ DISPATCH_STATUS: NEEDS_INPUT — ${reason}`,
   };
+}
+
+/**
+ * POST `{ column }` to the real `/api/cards/:id/move` route — never a direct `store.moveCardManual`
+ * call — so the fixture card's transition to Done goes through the SAME guard chain (grouped-member
+ * refusal, the inbox/manual-move allowlists) a real drag would, and stamps `cleanupDueAt` on every
+ * eligible session exactly the way genuine Done arrival does.
+ */
+async function moveCard(built, column) {
+  const res = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${built.cardId}/move`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ column }),
+    },
+  );
+  await res.body?.cancel().catch(() => {});
+  return res.status;
+}
+
+/** POST `opts` to the real `/api/cards/:id/cleanup` route — the manual fan-out entry point. */
+async function postCleanup(built, opts) {
+  const res = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${built.cardId}/cleanup`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(opts),
+    },
+  );
+  await res.body?.cancel().catch(() => {});
+  return res.status;
+}
+
+/**
+ * `git -C <repoPath> worktree list --porcelain`, parsed into a `Set` of realpath-resolved
+ * registered worktree paths — registration reads, never `existsSync` (the C1 dead-instrument
+ * hazard {@link checkCleanupFixture}'s own header already names: a directory survives on disk
+ * regardless of whether it is still git-registered). A path that no longer exists on disk is kept
+ * unresolved in the set (there is nothing for `realpathSync` to resolve), which only matters for a
+ * caller checking a path that was never real to begin with.
+ */
+async function gitWorktreeListRegistered(repoPath) {
+  const { stdout } = await execFileP(
+    "git",
+    ["worktree", "list", "--porcelain"],
+    { cwd: repoPath },
+  );
+  const registered = new Set();
+  for (const line of stdout.split("\n")) {
+    if (!line.startsWith("worktree ")) continue;
+    const p = line.slice("worktree ".length);
+    registered.add(existsSync(p) ? realpathSync(p) : p);
+  }
+  return registered;
+}
+
+/**
+ * `true` iff any process's full command line (`ps -ax -o pid=,command=`) contains `needle` — used
+ * by the DELETE-BEFORE-KILL assertion to confirm no ttyd ANYWHERE on the machine still carries a
+ * cleaned session's id in its `-b /sessions/<id>/terminal` argv after a restart, independent of
+ * whether {@link isPortListening} still resolves a (possibly different, re-spawned) process on the
+ * same port.
+ */
+async function psScanContains(needle) {
+  try {
+    const { stdout } = await execFileP("ps", ["-ax", "-o", "pid=,command="]);
+    return stdout.split("\n").some((line) => line.includes(needle));
+  } catch {
+    return false;
+  }
 }
 
 /** POST `body` to the sandbox's `/api/hook/claude` route carrying `token`, returning the response status. */
@@ -3506,6 +3597,478 @@ async function checkCleanupFixture(built) {
   return violations;
 }
 
+/**
+ * `--check cleanup-isolation` stage 1 of 2 (Phase 93, criterion 5's fan-out breadth, a preliminary
+ * observation rather than the isolation claim itself): the manual `/cleanup` route fans out over
+ * EVERY session the card owns (`93-03`'s `runCleanupFanOut`), so on a CLEAN fixture where both
+ * sessions are due, both must be attempted and removed. This is NOT the discriminating check for
+ * criterion 1 — a manual click cleaning everything on the card is the documented, correct behaviour
+ * (`93-CONTEXT.md`'s "one mental model for cleaning up this ticket"), not a bug. It exists only to
+ * confirm the fan-out itself reaches every session before {@link checkCleanupIsolationScheduler}
+ * exercises the actual per-session isolation claim via the scheduler, which dispatches teardown to
+ * exactly the sessions that are due — never a blind "clean everything" sweep.
+ */
+async function checkCleanupIsolationFanout(built) {
+  const violations = [];
+
+  const moveStatus = await moveCard(built, "done");
+  console.log(
+    `cleanup-isolation (fan-out sanity): POST /move to done -> ${moveStatus} (expected 204)`,
+  );
+  if (moveStatus !== 204) {
+    violations.push(
+      `cleanup-isolation (fan-out sanity): POST /move to done returned ${moveStatus}, expected 204`,
+    );
+    return violations;
+  }
+
+  const cleanupStatus = await postCleanup(built, { force: false });
+  console.log(
+    `cleanup-isolation (fan-out sanity): POST /cleanup {force:false} -> ${cleanupStatus} (expected 202)`,
+  );
+  if (cleanupStatus !== 202) {
+    violations.push(
+      `cleanup-isolation (fan-out sanity): POST /cleanup returned ${cleanupStatus}, expected 202`,
+    );
+    return violations;
+  }
+
+  const deadline = Date.now() + CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS;
+  let finalCard;
+  let bothGone = false;
+  while (Date.now() < deadline) {
+    finalCard = readCard(built.dbPath, built.cardId);
+    const remaining = (finalCard?.sessions ?? []).map((s) => s.id);
+    bothGone =
+      !remaining.includes(built.sessionA.id) &&
+      !remaining.includes(built.sessionB.id);
+    if (bothGone) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `cleanup-isolation (fan-out sanity): both session records removed=${bothGone} — remaining: ${JSON.stringify((finalCard?.sessions ?? []).map((s) => s.id))}`,
+  );
+  if (!bothGone) {
+    violations.push(
+      `cleanup-isolation (fan-out sanity): the manual /cleanup fan-out did not remove BOTH session ` +
+        `records (A=${built.sessionA.id}, B=${built.sessionB.id}) within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+    );
+  }
+  return violations;
+}
+
+/**
+ * `--check cleanup-isolation` stage 2 of 2 — the actual criterion 1 / criterion 5 claim, driven
+ * through the REAL scheduler (`sessionsDueForCleanup` / `runDueCleanups`), never a bespoke
+ * single-session entry point: session A stays active throughout, session B is the ONLY session
+ * seeded past-due, so a card-flat read (which mirrors the ACTIVE session, i.e. A) would tear down
+ * the WRONG session — exactly the failure this check exists to catch. Steps below are numbered
+ * against `93-05-PLAN.md`'s own sequence.
+ * @remarks NEW-14 ordering (criterion 5) is proven BY CONSEQUENCE, not by observing an in-process
+ * call order the harness cannot see from outside: DELETE-BEFORE-KILL is proven via a
+ * restart-and-adoption scan (a tracked entry deleted AFTER its kill would let `adoptAndSweep`
+ * re-adopt or a fresh ttyd respawn under B's old session id; deleted BEFORE, as production does,
+ * means nothing on the machine still answers to B's id, while A — untouched — is RE-ADOPTED with
+ * the SAME pid). PRUNE-LAST scoping is proven via A's own registration surviving B's prune in the
+ * SAME shared repo. Moving the prune earlier WITHIN `cleanupWorkspace` is END-STATE EQUIVALENT on
+ * this clean teardown (no rejected `worktreeRemove`, no stale git-admin entry to leave behind), so
+ * no break can be constructed for that specific reorder from outside the process — recorded
+ * honestly in the SUMMARY rather than claimed as proven, the same way `92-VERDICT.md` recorded C7's
+ * absence of a break-proof.
+ */
+async function checkCleanupIsolationScheduler(built) {
+  const violations = [];
+  const aWt = built.worktreePaths.a;
+  const bWt = built.worktreePaths.b;
+
+  // 1. BASELINE — asserted, not assumed. Every later claim is a DIFFERENCE from this.
+  let registered = await gitWorktreeListRegistered(built.repoPath);
+  const aRegisteredBefore =
+    existsSync(aWt) && registered.has(realpathSync(aWt));
+  const bRegisteredBefore =
+    existsSync(bWt) && registered.has(realpathSync(bWt));
+  const liveBefore = await tmuxListSessionNames();
+  const aTmuxBefore = liveBefore.includes(built.tmux.a);
+  const bTmuxBefore = liveBefore.includes(built.tmux.b);
+  const aListenBefore = await isPortListening(built.ttyd.a.port);
+  const bListenBefore = await isPortListening(built.ttyd.b.port);
+  const { stdout: branchOutBefore } = await execFileP(
+    "git",
+    ["branch", "--list"],
+    { cwd: built.repoPath },
+  );
+  const aBranchBefore = branchOutBefore.includes(built.branches.a);
+  const bBranchBefore = branchOutBefore.includes(built.branches.b);
+  const aPidBefore = (await pidsListeningOnPort(built.ttyd.a.port))[0];
+  const bPidBefore = (await pidsListeningOnPort(built.ttyd.b.port))[0];
+  console.log(
+    `cleanup-isolation: BASELINE A — registered=${aRegisteredBefore} tmux=${aTmuxBefore} ` +
+      `ttyd(${built.ttyd.a.port})=${aListenBefore} pid=${aPidBefore} branch(${built.branches.a})=${aBranchBefore}`,
+  );
+  console.log(
+    `cleanup-isolation: BASELINE B — registered=${bRegisteredBefore} tmux=${bTmuxBefore} ` +
+      `ttyd(${built.ttyd.b.port})=${bListenBefore} pid=${bPidBefore} branch(${built.branches.b})=${bBranchBefore}`,
+  );
+  if (
+    !aRegisteredBefore ||
+    !bRegisteredBefore ||
+    !aTmuxBefore ||
+    !bTmuxBefore ||
+    !aListenBefore ||
+    !bListenBefore ||
+    !aBranchBefore ||
+    !bBranchBefore ||
+    aPidBefore == null ||
+    bPidBefore == null
+  ) {
+    violations.push(
+      `cleanup-isolation: BASELINE could not be established — a baseline that cannot be established ` +
+        `is a hard violation, since every claim below is a difference from it (A: registered=${aRegisteredBefore} ` +
+        `tmux=${aTmuxBefore} ttyd=${aListenBefore} branch=${aBranchBefore} pid=${aPidBefore}; B: ` +
+        `registered=${bRegisteredBefore} tmux=${bTmuxBefore} ttyd=${bListenBefore} branch=${bBranchBefore} pid=${bPidBefore})`,
+    );
+    return violations;
+  }
+
+  // 2. Prove B answerable BEFORE the teardown — the precondition that keeps step 6 from being vacuous.
+  const preMarkerB = `cleanup-isolation-pre-b-${built.port}-${randomBytes(4).toString("hex")}`;
+  await writePaneMarker(built.tmux.b, built.home, preMarkerB);
+  const preReadB = await readPaneThroughProxy({
+    port: built.port,
+    idSegment: built.sessionB.id,
+    expect: preMarkerB,
+    timeoutMs: PROXY_READ_TIMEOUT_MS,
+  });
+  console.log(
+    `cleanup-isolation: PRECONDITION — B answerable before teardown: opened=${preReadB.opened} ` +
+      `containsMarker=${preReadB.text.includes(preMarkerB)}`,
+  );
+  if (!preReadB.opened || !preReadB.text.includes(preMarkerB)) {
+    violations.push(
+      `cleanup-isolation: PRECONDITION FAILED — session B was not answerable before its own teardown ` +
+        `(opened=${preReadB.opened}, marker "${preMarkerB}" found=${preReadB.text.includes(preMarkerB)}) — ` +
+        `a B that was never answerable cannot demonstrate it stayed so, so the claim below would be vacuous`,
+    );
+    return violations;
+  }
+
+  // 3. Move to Done through the real board, then seed ONLY B's cleanupDueAt past-due and drive the
+  //    real scheduler — never a bespoke single-session entry point.
+  const moveStatus = await moveCard(built, "done");
+  console.log(
+    `cleanup-isolation: POST /move to done -> ${moveStatus} (expected 204)`,
+  );
+  if (moveStatus !== 204) {
+    violations.push(
+      `cleanup-isolation: POST /move to done returned ${moveStatus}, expected 204`,
+    );
+    return violations;
+  }
+  await killAndWait(built.server?.child);
+  const cardAtDone = readCard(built.dbPath, built.cardId);
+  if (!cardAtDone || cardAtDone.column !== "done") {
+    violations.push(
+      `cleanup-isolation: persisted card is not column=done after the move (actual: ${cardAtDone?.column})`,
+    );
+    return violations;
+  }
+  const aRecordAtDone = cardAtDone.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  const bRecordAtDone = cardAtDone.sessions?.find(
+    (s) => s.id === built.sessionB.id,
+  );
+  if (!aRecordAtDone || !bRecordAtDone) {
+    violations.push(
+      `cleanup-isolation: persisted card is missing a session record right after Done arrival ` +
+        `(a=${!!aRecordAtDone} b=${!!bRecordAtDone})`,
+    );
+    return violations;
+  }
+  bRecordAtDone.cleanupDueAt = Date.now() - 5_000;
+  console.log(
+    `cleanup-isolation: seeded ONLY session B's cleanupDueAt in the past (${bRecordAtDone.cleanupDueAt}); ` +
+      `A's own Done-arrival stamp (${aRecordAtDone.cleanupDueAt}) is left untouched, days in the future, so A is never due`,
+  );
+  seedFixtureCard(built.home, cardAtDone);
+
+  const priorTickEnv = process.env.DISPATCH_CLEANUP_TICK_MS;
+  process.env.DISPATCH_CLEANUP_TICK_MS = "500";
+  try {
+    built.server = bootServer(built.home);
+    await waitForReady(built.port);
+  } finally {
+    if (priorTickEnv === undefined) delete process.env.DISPATCH_CLEANUP_TICK_MS;
+    else process.env.DISPATCH_CLEANUP_TICK_MS = priorTickEnv;
+  }
+  console.log(
+    `cleanup-isolation: sandbox server restarted with DISPATCH_CLEANUP_TICK_MS=500 — the scheduler's ` +
+      `own boot-time tick should pick up session B within a few ticks`,
+  );
+
+  const settleDeadline = Date.now() + CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS;
+  let settledCard;
+  let bGone = false;
+  while (Date.now() < settleDeadline) {
+    settledCard = readCard(built.dbPath, built.cardId);
+    bGone =
+      settledCard != null &&
+      !(settledCard.sessions ?? []).some((s) => s.id === built.sessionB.id);
+    if (bGone) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `cleanup-isolation: scheduler settle — B's session record gone=${bGone} within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+  );
+  if (!bGone) {
+    violations.push(
+      `cleanup-isolation: session B was not torn down by the real scheduler within ` +
+        `${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms of its cleanupDueAt going past-due — ` +
+        `sessionsDueForCleanup/runDueCleanups never dispatched it`,
+    );
+    return violations;
+  }
+
+  // 4. A-SIDE (the survivor).
+  registered = await gitWorktreeListRegistered(built.repoPath);
+  const aRegisteredAfter = existsSync(aWt) && registered.has(realpathSync(aWt));
+  const aDirAfter = existsSync(aWt);
+  const liveAfter = await tmuxListSessionNames();
+  const aTmuxAfter = liveAfter.includes(built.tmux.a);
+  const aListenAfter = await isPortListening(built.ttyd.a.port);
+  console.log(
+    `cleanup-isolation: A-SIDE (survivor) — registered=${aRegisteredAfter} dir=${aDirAfter} ` +
+      `tmux=${aTmuxAfter} ttyd(${built.ttyd.a.port})=${aListenAfter}`,
+  );
+  if (!aRegisteredAfter) {
+    violations.push(
+      `cleanup-isolation: A-SIDE VIOLATED — A's worktree ${aWt} is no longer registered in ` +
+        `\`git worktree list\` after cleaning B — the sibling's worktree was destroyed`,
+    );
+  }
+  if (!aDirAfter) {
+    violations.push(
+      `cleanup-isolation: A-SIDE VIOLATED — A's worktree directory ${aWt} no longer exists on disk after cleaning B`,
+    );
+  }
+  if (!aTmuxAfter) {
+    violations.push(
+      `cleanup-isolation: A-SIDE VIOLATED — A's tmux session ${built.tmux.a} is no longer live after cleaning B`,
+    );
+  }
+  if (!aListenAfter) {
+    violations.push(
+      `cleanup-isolation: A-SIDE VIOLATED — A's ttyd port ${built.ttyd.a.port} is no longer LISTENING after cleaning B`,
+    );
+  }
+
+  // 5. B-SIDE (the target).
+  const bRegisteredAfter = existsSync(bWt) && registered.has(realpathSync(bWt));
+  const bDirAfter = existsSync(bWt);
+  const bTmuxAfter = liveAfter.includes(built.tmux.b);
+  const bListenAfter = await isPortListening(built.ttyd.b.port);
+  const bPidGone =
+    bPidBefore != null
+      ? await waitForPidGone(bPidBefore, KILL_TIMEOUT_MS)
+      : true;
+  console.log(
+    `cleanup-isolation: B-SIDE (target) — registered=${bRegisteredAfter} dir=${bDirAfter} ` +
+      `tmux=${bTmuxAfter} ttyd(${built.ttyd.b.port})=${bListenAfter} pidGone=${bPidGone}`,
+  );
+  if (bRegisteredAfter) {
+    violations.push(
+      `cleanup-isolation: B-SIDE VIOLATED — B's worktree ${bWt} is still registered in ` +
+        `\`git worktree list\` after its own teardown`,
+    );
+  }
+  if (bDirAfter) {
+    violations.push(
+      `cleanup-isolation: B-SIDE VIOLATED — B's worktree directory ${bWt} still exists on disk after its own teardown`,
+    );
+  }
+  if (bTmuxAfter) {
+    violations.push(
+      `cleanup-isolation: B-SIDE VIOLATED — B's tmux session ${built.tmux.b} is still live after its own teardown`,
+    );
+  }
+  if (bListenAfter) {
+    violations.push(
+      `cleanup-isolation: B-SIDE VIOLATED — B's ttyd port ${built.ttyd.b.port} is still LISTENING after its own teardown`,
+    );
+  }
+  if (!bPidGone) {
+    violations.push(
+      `cleanup-isolation: B-SIDE VIOLATED — B's ttyd pid ${bPidBefore} did not exit within ${KILL_TIMEOUT_MS}ms of its own teardown`,
+    );
+  }
+
+  // 6. ANSWERABILITY — the criterion's named bar, not merely "still present".
+  const postMarkerA = `cleanup-isolation-post-a-${built.port}-${randomBytes(4).toString("hex")}`;
+  await writePaneMarker(built.tmux.a, built.home, postMarkerA);
+  const postReadA = await readPaneThroughProxy({
+    port: built.port,
+    idSegment: built.sessionA.id,
+    expect: postMarkerA,
+    timeoutMs: PROXY_READ_TIMEOUT_MS,
+  });
+  console.log(
+    `cleanup-isolation: ANSWERABILITY — A after B's teardown: opened=${postReadA.opened} ` +
+      `containsNewToken=${postReadA.text.includes(postMarkerA)} containsBsToken=${postReadA.text.includes(preMarkerB)}`,
+  );
+  if (!postReadA.opened || !postReadA.text.includes(postMarkerA)) {
+    violations.push(
+      `cleanup-isolation: ANSWERABILITY VIOLATED — A did not answer a fresh prompt typed into its real ` +
+        `pane after B's teardown (opened=${postReadA.opened}, token "${postMarkerA}" found=${postReadA.text.includes(postMarkerA)})`,
+    );
+  }
+  if (postReadA.text.includes(preMarkerB)) {
+    violations.push(
+      `cleanup-isolation: ANSWERABILITY VIOLATED — A's own proxy path served B's earlier token ` +
+        `"${preMarkerB}" — a pane read returning the wrong session's content is a routing failure wearing a success`,
+    );
+  }
+
+  // 7. BRANCHES (criterion 5, first half).
+  const { stdout: branchOutAfter } = await execFileP(
+    "git",
+    ["branch", "--list"],
+    { cwd: built.repoPath },
+  );
+  console.log(
+    `cleanup-isolation: BRANCHES after teardown — ${branchOutAfter
+      .trim()
+      .split("\n")
+      .map((l) => l.trim())
+      .join(" | ")}`,
+  );
+  if (!branchOutAfter.includes(built.branches.a)) {
+    violations.push(
+      `cleanup-isolation: BRANCH VIOLATED — A's branch ${built.branches.a} missing from \`git branch --list\` after B's teardown`,
+    );
+  }
+  if (!branchOutAfter.includes(built.branches.b)) {
+    violations.push(
+      `cleanup-isolation: BRANCH VIOLATED — B's branch ${built.branches.b} missing from \`git branch --list\` after ` +
+        `its own teardown — branches must survive every cleanup path`,
+    );
+  }
+
+  // 8. Persisted store read.
+  const finalCard = readCard(built.dbPath, built.cardId);
+  const bStillPresent = finalCard?.sessions?.some(
+    (s) => s.id === built.sessionB.id,
+  );
+  const aFinal = finalCard?.sessions?.find((s) => s.id === built.sessionA.id);
+  console.log(
+    `cleanup-isolation: STORE — sessions=${JSON.stringify((finalCard?.sessions ?? []).map((s) => s.id))} ` +
+      `activeSessionId=${finalCard?.activeSessionId}`,
+  );
+  if (bStillPresent) {
+    violations.push(
+      `cleanup-isolation: STORE VIOLATED — B's session record is still present in sessions[] after a successful teardown`,
+    );
+  }
+  if (finalCard?.activeSessionId !== built.sessionA.id) {
+    violations.push(
+      `cleanup-isolation: STORE VIOLATED — activeSessionId expected ${built.sessionA.id} (A), actual ${finalCard?.activeSessionId}`,
+    );
+  }
+  if (aFinal) {
+    if (finalCard.tmuxSession !== aFinal.tmuxSession) {
+      violations.push(
+        `cleanup-isolation: STORE VIOLATED — card-level tmuxSession (${finalCard.tmuxSession}) does not mirror A's own record (${aFinal.tmuxSession})`,
+      );
+    }
+    if (finalCard.workspacePath !== aFinal.workspacePath) {
+      violations.push(
+        `cleanup-isolation: STORE VIOLATED — card-level workspacePath (${finalCard.workspacePath}) does not mirror A's own record (${aFinal.workspacePath})`,
+      );
+    }
+    if (finalCard.ttydPort !== aFinal.ttydPort) {
+      violations.push(
+        `cleanup-isolation: STORE VIOLATED — card-level ttydPort (${finalCard.ttydPort}) does not mirror A's own record (${aFinal.ttydPort})`,
+      );
+    }
+  } else {
+    violations.push(
+      `cleanup-isolation: STORE VIOLATED — A's own session record is missing from the persisted card entirely`,
+    );
+  }
+
+  // NEW-14 ordering by CONSEQUENCE (criterion 5, second half) — see this function's own @remarks.
+  const aPidBeforeRestart = (await pidsListeningOnPort(built.ttyd.a.port))[0];
+  await restartServer(built);
+  await sleep(1_000); // let reconcileSessions()/adoptAndSweep settle post-boot
+  const bListeningAfterRestart = await isPortListening(built.ttyd.b.port);
+  const bArgvAfterRestart = await psScanContains(
+    `/sessions/${built.sessionB.id}/terminal`,
+  );
+  const aPidAfterRestart = (await pidsListeningOnPort(built.ttyd.a.port))[0];
+  console.log(
+    `cleanup-isolation: DELETE-BEFORE-KILL — after restart, B port ${built.ttyd.b.port} listening=${bListeningAfterRestart}, ` +
+      `any ttyd argv carrying B's session id=${bArgvAfterRestart}, A pid before=${aPidBeforeRestart} after=${aPidAfterRestart}`,
+  );
+  if (bListeningAfterRestart) {
+    violations.push(
+      `cleanup-isolation: DELETE-BEFORE-KILL VIOLATED — B's ttyd port ${built.ttyd.b.port} is LISTENING ` +
+        `again after a restart — a cleaned session's ttyd must never be re-adopted or respawned`,
+    );
+  }
+  if (bArgvAfterRestart) {
+    violations.push(
+      `cleanup-isolation: DELETE-BEFORE-KILL VIOLATED — a ttyd process carrying B's session id ` +
+        `(${built.sessionB.id}) in its argv exists after a restart`,
+    );
+  }
+  if (aPidBeforeRestart == null || aPidAfterRestart !== aPidBeforeRestart) {
+    violations.push(
+      `cleanup-isolation: DELETE-BEFORE-KILL — A's ttyd pid changed across the restart (before=${aPidBeforeRestart}, ` +
+        `after=${aPidAfterRestart}) — expected RE-ADOPTION with the SAME pid, the same behaviour --check orphan-sweep already establishes for a spared session`,
+    );
+  }
+
+  const registeredAfterRestart = await gitWorktreeListRegistered(
+    built.repoPath,
+  );
+  const aRegisteredAfterRestart =
+    existsSync(aWt) && registeredAfterRestart.has(realpathSync(aWt));
+  console.log(
+    `cleanup-isolation: PRUNE-LAST scoping — A's registration in the shared repo survives B's prune=${aRegisteredAfterRestart}`,
+  );
+  if (!aRegisteredAfterRestart) {
+    violations.push(
+      `cleanup-isolation: PRUNE-LAST VIOLATED — A's registration in the shared repo ${built.repoPath} did not survive B's teardown/prune`,
+    );
+  }
+
+  return violations;
+}
+
+/**
+ * `--check cleanup-isolation` (Phase 93 criteria 1 and 5): two independent fixture cycles, exactly
+ * the shape {@link checkReconcile} already established for a multi-stage check within one
+ * invocation. Stage 1 ({@link checkCleanupIsolationFanout}) is a preliminary sanity leg proving the
+ * manual fan-out reaches every session on a clean, fully-due card. Stage 2
+ * ({@link checkCleanupIsolationScheduler}) is the actual isolation claim, run against a FRESH
+ * fixture so stage 1's full teardown of both sessions cannot contaminate it: only session B is
+ * seeded due, dispatched by the real scheduler, and the sibling's answerability, worktree
+ * registration, branch survival and NEW-14-by-consequence ordering are all asserted there.
+ */
+async function checkCleanupIsolation() {
+  return [
+    ...(await withFixture(
+      "cleanup-isolation-fanout",
+      checkCleanupIsolationFanout,
+      WORKTREE_FIXTURE,
+    )),
+    ...(await withFixture(
+      "cleanup-isolation",
+      checkCleanupIsolationScheduler,
+      WORKTREE_FIXTURE,
+    )),
+  ];
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -3525,6 +4088,7 @@ const CHECKS = {
     withFixture("switch-atomicity", checkSwitchAtomicity),
   "cleanup-fixture": () =>
     withFixture("cleanup-fixture", checkCleanupFixture, WORKTREE_FIXTURE),
+  "cleanup-isolation": checkCleanupIsolation,
 };
 
 /**
