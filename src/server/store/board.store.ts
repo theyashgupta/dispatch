@@ -318,6 +318,16 @@ function migrateCardsToSessionEntity(cards: Card[]): number {
   return migrated;
 }
 
+/**
+ * Result of a successful `reserveNewSession` mint. Server-local — never reaches the wire, so it
+ * does not belong beside the shared wire/persisted shapes in `src/shared/types.ts`.
+ */
+export interface ReservedSession {
+  sessionId: string;
+  ordinal: number;
+  sessionName: string;
+}
+
 class BoardStore extends EventEmitter {
   /** The sole mutable truth. */
   private readonly cards = new Map<string, Card>();
@@ -1628,18 +1638,46 @@ class BoardStore extends EventEmitter {
    * Idempotent reattach to a live `dsp-<id>` session ("already running"): copy the session
    * fields, promote the card to In Progress, surface a transient reattach status, and clear any
    * provisioning step / start error. No-op if the id is unknown.
+   * @remarks `sessionId` (Phase 94), same resolve-or-refuse shape as `completeStart` — explicit
+   * `undefined` means "the card's own active session", matching every pre-Phase-94 call site's
+   * exact prior behaviour. `promoteTarget` is `false` in every case here: a reattach targets a
+   * session that is ALREADY the active one by construction (the tmux session it reattaches to was
+   * created by a prior start of THIS card's active session), so promoting would be a no-op that
+   * obscures that invariant rather than expressing a real state change.
+   * @remarks `card.branch` is written only when the resolved session IS the active one — the same
+   * gate `completeStart` applies, so a non-active session's reattach can never corrupt the ACTIVE
+   * session's branch mirror `artifact-detect.ts` still reads. At N=1 the gated and unconditional
+   * forms are byte-identical.
    */
-  attachExistingSession(id: string, s: SessionFields): Promise<void> {
+  attachExistingSession(
+    id: string,
+    sessionId: string | undefined,
+    s: SessionFields,
+  ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card) return [];
+      const resolvedId = sessionId ?? card.activeSessionId;
+      const target = card.sessions?.find((sess) => sess.id === resolvedId);
+      if (sessionId !== undefined && !target) {
+        console.error(
+          `[store] card ${id} — attach target ${sessionId} does not resolve, refusing`,
+        );
+        return [];
+      }
       const prev = card.column;
-      this.setActiveSession(card, {
-        workspacePath: s.workspacePath,
-        tmuxSession: s.tmuxSession,
-        ttydPort: s.ttydPort,
-      });
-      card.branch = s.branch;
+      this.setActiveSession(
+        card,
+        {
+          workspacePath: s.workspacePath,
+          tmuxSession: s.tmuxSession,
+          ttydPort: s.ttydPort,
+          branch: s.branch,
+        },
+        sessionId,
+        false,
+      );
+      if (card.activeSessionId === resolvedId) card.branch = s.branch;
       card.column = "in_progress";
       this.mirrorMemberColumn(card, "in_progress");
       card.statusReason = "Already running — reattached";
@@ -1829,6 +1867,97 @@ class BoardStore extends EventEmitter {
         return [];
       }
       this.setActiveSession(card, {}, sessionId, true);
+      return [];
+    });
+  }
+
+  /**
+   * Reserve a new sibling session record for a card that already owns an active session — the
+   * mint-before-the-saga-runs step `94-CONTEXT.md` locks (`D-MINT`). Mints via
+   * `setActiveSession`'s `mintSibling` capability, the sanctioned `NEW-21` chokepoint, so this
+   * method never touches `card.sessions` directly. Does NOT promote the minted record to active —
+   * a reserved session becomes active only on saga SUCCESS, inside `completeStart`
+   * (`D-NOPROMOTE-ON-RESERVE`).
+   * @remarks Refuses (named, logged, `null`, no mutation) when the card is unknown OR owns no
+   * active session at all: there is nothing to "start ANOTHER session" from. This is the
+   * server-side re-validation of the client's intent flag — the flag is never trusted to imply a
+   * target.
+   * @remarks `card.nextSessionOrdinal` advances BEFORE the mint can fail, so the counter has
+   * already moved even if a later saga step fails and the reservation is rolled back — a retry
+   * reserves a FRESH ordinal rather than colliding with the failed attempt's surviving branch
+   * (`D-ROLLBACK`). The counter never decrements anywhere in the codebase.
+   * @see docs/ARCHITECTURE.md#session-projection-chokepoint
+   */
+  reserveNewSession(
+    cardId: string,
+    identifier: string,
+  ): Promise<ReservedSession | null> {
+    let reserved: ReservedSession | null = null;
+    return this.enqueue(() => {
+      const card = this.cards.get(cardId);
+      if (!card) {
+        console.error(
+          `[store] reserveNewSession target card ${cardId} does not resolve, refusing`,
+        );
+        return [];
+      }
+      if (
+        card.activeSessionId == null ||
+        !card.sessions?.some((s) => s.id === card.activeSessionId)
+      ) {
+        console.error(
+          `[store] card ${cardId} — reserveNewSession requires an existing active session, refusing`,
+        );
+        return [];
+      }
+      const ordinal = card.nextSessionOrdinal ?? 2;
+      card.nextSessionOrdinal = ordinal + 1;
+      const sessionName = `${identifier}-${ordinal}`;
+      const sessionId = this.setActiveSession(
+        card,
+        { branch: sessionName },
+        undefined,
+        false,
+        true,
+      );
+      if (sessionId === undefined) return [];
+      reserved = { sessionId, ordinal, sessionName };
+      return [];
+    }).then(() => reserved);
+  }
+
+  /**
+   * Roll a reservation back to nothing when the second-session saga fails (`D-ROLLBACK`): the
+   * card returns to exactly its prior session set, no zombie `failed` record left in `sessions`.
+   * Thin wrapper over `removeSessionRecord`, the exact splice-and-repair shape Phase 93 proved for
+   * `finishCleanup`.
+   * @remarks Refuses (named, logged, no mutation) when the card or the explicit `sessionId` does
+   * not resolve — `switchActiveSession`'s refusal shape, never falling back to the active session
+   * for an explicit target.
+   * @remarks `removeSessionRecord`'s promotion branch is a structural no-op here, not a disabled
+   * one: a reserved session is never promoted to active before its saga succeeds
+   * (`reserveNewSession`'s `mintSibling` call above never sets `card.activeSessionId`), so
+   * `wasActive` is always `false` for the record this method removes.
+   * @remarks `card.nextSessionOrdinal` is deliberately NOT rewound here — a retry reserves a
+   * fresh ordinal rather than colliding with the failed attempt's surviving branch.
+   */
+  rollbackReservedSession(cardId: string, sessionId: string): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(cardId);
+      if (!card) {
+        console.error(
+          `[store] rollbackReservedSession target card ${cardId} does not resolve, refusing`,
+        );
+        return [];
+      }
+      const target = card.sessions?.find((s) => s.id === sessionId);
+      if (!target) {
+        console.error(
+          `[store] card ${cardId} — rollback target ${sessionId} does not resolve, refusing`,
+        );
+        return [];
+      }
+      this.removeSessionRecord(card, sessionId);
       return [];
     });
   }
@@ -2255,18 +2384,47 @@ class BoardStore extends EventEmitter {
    * Successful start: copy the session fields, promote the card to In Progress, and clear the
    * provisioning step, start error, start warning, and the session-lost flag (so a restart returns
    * the card to its normal running appearance). No-op if the id is unknown.
+   * @remarks `sessionId` (Phase 94) addresses the session the saga was reserved for — explicit
+   * `undefined` means "mint or use the card's own active session", matching every pre-Phase-94
+   * call site's exact prior behaviour. When an explicit id IS given, the single
+   * `setActiveSession(..., sessionId, true)` call patches AND promotes the reserved session to
+   * active in the SAME synchronous step (`D-NOPROMOTE-ON-RESERVE`'s promotion-on-success moment) —
+   * a patch-then-promote two-call sequence would re-introduce exactly the interleaving hazard
+   * `promoteTarget`'s own JSDoc says it exists to prevent.
+   * @remarks `card.branch` is written only when the resolved session IS the active one (evaluated
+   * AFTER `setActiveSession`, so promotion has already landed): at N=1 the gated and unconditional
+   * forms are byte-identical, while at N>=2 the ungated form would let a non-active session's
+   * completion overwrite the ACTIVE session's branch mirror `artifact-detect.ts` still reads.
    */
-  completeStart(id: string, s: SessionFields): Promise<void> {
+  completeStart(
+    id: string,
+    sessionId: string | undefined,
+    s: SessionFields,
+  ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card) return [];
+      const resolvedId = sessionId ?? card.activeSessionId;
+      const target = card.sessions?.find((sess) => sess.id === resolvedId);
+      if (sessionId !== undefined && !target) {
+        console.error(
+          `[store] card ${id} — complete-start target ${sessionId} does not resolve, refusing`,
+        );
+        return [];
+      }
       const prev = card.column;
-      this.setActiveSession(card, {
-        workspacePath: s.workspacePath,
-        tmuxSession: s.tmuxSession,
-        ttydPort: s.ttydPort,
-      });
-      card.branch = s.branch;
+      this.setActiveSession(
+        card,
+        {
+          workspacePath: s.workspacePath,
+          tmuxSession: s.tmuxSession,
+          ttydPort: s.ttydPort,
+          branch: s.branch,
+        },
+        sessionId,
+        sessionId !== undefined,
+      );
+      if (card.activeSessionId === resolvedId) card.branch = s.branch;
       card.column = "in_progress";
       this.mirrorMemberColumn(card, "in_progress");
       card.provisioningStep = null;

@@ -84,7 +84,7 @@ export async function startSession(
       if (card.hookToken && card.activeSessionId) {
         registerHookToken(card.hookToken, cardId, card.activeSessionId);
       }
-      await store.attachExistingSession(cardId, {
+      await store.attachExistingSession(cardId, card.activeSessionId, {
         workspacePath,
         branch: card.identifier,
         tmuxSession: session,
@@ -131,7 +131,7 @@ export async function startSession(
         done.push(step);
       }
       currentStep = undefined;
-      await store.completeStart(cardId, {
+      await store.completeStart(cardId, undefined, {
         workspacePath: ctx.workspacePath,
         branch: card.identifier,
         tmuxSession: session,
