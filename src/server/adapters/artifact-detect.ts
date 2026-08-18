@@ -1,5 +1,5 @@
 import net from "node:net";
-import type { Card, PreviewInfo } from "../../shared/types.js";
+import type { Card, PreviewInfo, Session } from "../../shared/types.js";
 import { listPrsForBranch, type PrProbeResult } from "./gh.js";
 import { panePidsBySession } from "./tmux.js";
 import { listeningPortsBySession, type DiscoveredPort } from "./dev-server.js";
@@ -55,27 +55,35 @@ const PROBE_FAILURE_CEILING = 3;
  */
 const PR_RETRY_MAX_MS = 60_000;
 
-/** Consecutive PR-probe tool-failure count per card id, pruned every tick to live sessions. */
+/**
+ * Consecutive PR-probe tool-failure count per SESSION id (`ARTIFACT-01`), pruned every tick to
+ * live sessions. Keyed per session rather than per card so a failing sibling's streak can never
+ * consume the budget of another live session the same card owns.
+ */
 const prFailureCounts = new Map<string, number>();
 
 /**
- * Earliest epoch ms at which a card's PR fan-out may run again, set only after a tick in which no
- * repo answered. Pruned every tick to live sessions, like the counter maps.
+ * Earliest epoch ms at which a session's own PR fan-out may run again, set only after a tick in
+ * which no repo answered. Pruned every tick to live sessions, like the counter maps. Keyed per
+ * session id, same reasoning as `prFailureCounts`.
  */
 const prRetryNotBefore = new Map<string, number>();
 
-/** Consecutive preview-probe tool-failure count per card id, pruned every tick to live sessions. */
+/**
+ * Consecutive preview-probe tool-failure count per SESSION id (`ARTIFACT-01`), pruned every tick
+ * to live sessions, same reasoning as `prFailureCounts`.
+ */
 const previewFailureCounts = new Map<string, number>();
 
 let artifactDetectInFlight: Promise<void> | null = null;
 
 /**
- * Every live-session card ELIGIBLE for this tick's PR / dev-server probe fan-out — every column
- * `cardsWithSession()` returns except Done.
+ * Every live-session PAIR ELIGIBLE for this tick's PR / dev-server probe fan-out — every column
+ * `sessionsWithTmux()` returns except Done.
  *
  * @remarks
  * Phase 81 keeps a Done card's tmux session alive for days awaiting deferred cleanup, so
- * `cardsWithSession()` alone is no longer naturally bounded by "how many agents are actively
+ * `sessionsWithTmux()` alone is no longer naturally bounded by "how many agents are actively
  * working" — it grows with the retained-Done population instead (SIG-02/03 x CLEAN-01 x
  * SCALE-01: measured at 60 concurrent `gh pr list` subprocess spawns per ~10s tick for 60
  * awaiting-cleanup cards, with zero cap). Done is a parked column: it has no Restart affordance,
@@ -89,10 +97,18 @@ let artifactDetectInFlight: Promise<void> | null = null;
  * one. Every OTHER live column (To Do never carries a `tmuxSession` so is never in the input set;
  * in_progress / needs_input / agent_done) keeps probing exactly as before — SIG-02/03/04 and the
  * unknown-vs-confirmed-negative distinction are unchanged for those columns.
+ * @remarks (`ARTIFACT-01`) The probed UNIT is now a SESSION, not a card: `sessionsWithTmux()`
+ * yields one pair per live session a card owns, so a card with two live siblings is probed twice
+ * this tick (once per branch) and a card with none is probed zero times — the same unit shift
+ * `reconcile.ts`/`watcher.ts` already made in Phase 91, documented here rather than silently
+ * changing what this function's name counts.
  * @see docs/ARCHITECTURE.md#dev-server-preview-detection
  */
-function probedCards(): Card[] {
-  return store.cardsWithSession().filter((card) => card.column !== "done");
+function probedSessions(): {
+  card: Card;
+  session: Session & { tmuxSession: string };
+}[] {
+  return store.sessionsWithTmux().filter(({ card }) => card.column !== "done");
 }
 
 function connectOnce(
@@ -145,8 +161,8 @@ async function confirmReachable(
 }
 
 /**
- * Fan out the combined per-card artifact detection (PR lookup + dev-server preview scan) across
- * every PROBED live-session card (see {@link probedCards} — every live column except Done),
+ * Fan out the combined per-session artifact detection (PR lookup + dev-server preview scan) across
+ * every PROBED live session (see {@link probedSessions} — every live column except Done),
  * driven by this module's own self-rescheduling ~10s loop.
  *
  * @remarks
@@ -176,37 +192,48 @@ async function detectCardArtifacts(backendPort: number): Promise<void> {
  * `ok: false` entry sets `prsUnknown` to the first failing repo's category and advances
  * `prFailureCounts` (`RESIL-02`) — reset to zero on a tick where every repo answers. Data a repo
  * returned `ok: true` in THIS tick is never discarded, whatever the counter says: it is freshly
- * fetched, not stale, so a card with one succeeding and one permanently-failing repo keeps showing
- * the succeeding repo's PRs alongside the unknown badge indefinitely. The ceiling therefore only
- * governs the case it was written for — NO repo answered — where `holdLastKnownPrs` suppresses the
- * write entirely below `PROBE_FAILURE_CEILING` (last-known-good survives a blip) and lets the
- * empty `finalPrs` through at or above it, so a totally dead probe cannot leave a stale PR on the
- * board forever. Both the `prs` and `prsUnknown` writes carry their own write-skip diff so an
- * unchanged tick never rebroadcasts. A tick where no repo answered also arms `prRetryNotBefore`
- * (see `PR_RETRY_MAX_MS`), which skips the whole PR block on later ticks until the backoff expires
- * — `prsUnknown` is deliberately left standing while skipping, since nothing has been re-checked.
+ * fetched, not stale, so a session with one succeeding and one permanently-failing repo keeps
+ * showing the succeeding repo's PRs alongside the unknown badge indefinitely. The ceiling
+ * therefore only governs the case it was written for — NO repo answered — where `holdLastKnownPrs`
+ * suppresses the write entirely below `PROBE_FAILURE_CEILING` (last-known-good survives a blip)
+ * and lets the empty `finalPrs` through at or above it, so a totally dead probe cannot leave a
+ * stale PR on the board forever. Both the `prs` and `prsUnknown` writes carry their own
+ * write-skip diff so an unchanged tick never rebroadcasts. A tick where no repo answered also arms
+ * `prRetryNotBefore` (see `PR_RETRY_MAX_MS`), which skips the whole PR block on later ticks until
+ * the backoff expires — `prsUnknown` is deliberately left standing while skipping, since nothing
+ * has been re-checked.
  *
- * Preview exclusion (F-09) is a `Set<number>` built ONCE per tick — `backendPort` plus every live
- * card's `ttydPort` — rather than checking only the current card's own field, so a stale, freed
- * ttyd port picked up moments later by a DIFFERENT card's real dev server can no longer leak into
- * that card's previews. A discovered candidate that survives the exclusion set still needs a
- * `confirmReachable` pass (F-07) before it becomes a `PreviewInfo`; a discovered-but-unreachable
+ * Preview exclusion (F-09) is a `Set<number>` built ONCE per tick — `backendPort` plus EVERY live
+ * session's `ttydPort`, across every card, not only a probed one's own field — so a stale, freed
+ * ttyd port picked up moments later by a DIFFERENT session's real dev server can no longer leak
+ * into that session's previews. A discovered candidate that survives the exclusion set still needs
+ * a `confirmReachable` pass (F-07) before it becomes a `PreviewInfo`; a discovered-but-unreachable
  * port is a SUCCESSFUL tick that found zero confirmed previews (the `[]` case) and resets
  * `previewFailureCounts` (`RESIL-02`) — only a `null` return from
  * `panePidsBySession`/`listeningPortsBySession` is a genuine tool failure, which advances the
- * counter for every live-session card, latches `previewsUnknown` on the first failure, and forces
+ * counter for every live session, latches `previewsUnknown` on the first failure, and forces
  * `previews` to `[]` once the ceiling is reached.
  *
  * An idle board short-circuits before any subprocess runs: with no PROBED live session (all-Done or
  * genuinely empty) there is nothing to attribute a port to, yet the tick would still spawn
  * `tmux list-panes -a` every 10s forever and — with no tmux server at all — walk the entire
- * tool-failure branch against zero cards. The three bookkeeping maps are cleared rather than left
- * alone, because the per-tick prune at the bottom is the only thing that normally evicts a
- * torn-down card's streak and this return skips it.
+ * tool-failure branch against zero sessions. The three bookkeeping maps are cleared rather than
+ * left alone, because the per-tick prune at the bottom is the only thing that normally evicts a
+ * torn-down session's streak and this return skips it.
+ * @remarks (`ARTIFACT-01`) The unit throughout this function is a SESSION, not a card: the fan-out
+ * iterates `probedSessions()` pairs, reads each pair's OWN `session.branch`/`session.workspace`
+ * (never `card.branch`, which is only the ACTIVE session's projection), and keys all three
+ * bookkeeping maps by the session's own id rather than `card.id` — so a card with two live
+ * siblings is probed twice, each against its own branch, and a failing sibling's retry backoff can
+ * never consume the other session's `PROBE_FAILURE_CEILING` budget. `store.setPrsIfSession` and its
+ * three siblings still take the tmux session NAME as their addressing argument (unchanged by this
+ * plan) and resolve the record themselves; they write the session's own field always and mirror
+ * onto the card only when that session is the active one, so a non-active sibling's PRs land on
+ * its own record and never corrupt the active session's badge.
  */
 async function runArtifactDetection(backendPort: number): Promise<void> {
-  const cards = probedCards();
-  if (cards.length === 0) {
+  const probed = probedSessions();
+  if (probed.length === 0) {
     prFailureCounts.clear();
     prRetryNotBefore.clear();
     previewFailureCounts.clear();
@@ -214,15 +241,15 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
   }
 
   const excludedPorts = new Set<number>([backendPort]);
-  for (const card of cards) {
-    if (card.ttydPort != null) excludedPorts.add(card.ttydPort);
+  for (const { session: rec } of store.sessionsWithTmux()) {
+    if (rec.ttydPort != null) excludedPorts.add(rec.ttydPort);
   }
 
   const panePids = await panePidsBySession();
   let portsBySession: Map<string, DiscoveredPort[]> | null = null;
   if (panePids != null) {
     const sessionNames = new Set(
-      cards.map((c) => c.tmuxSession).filter((s): s is string => s != null),
+      probed.map(({ session }) => session.tmuxSession),
     );
     const narrowed = new Map(
       [...panePids].filter(([session]) => sessionNames.has(session)),
@@ -231,16 +258,16 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
   }
 
   await Promise.all(
-    cards.map(async (card) => {
-      const session = card.tmuxSession as string;
+    probed.map(async ({ card, session: rec }) => {
+      const session = rec.tmuxSession;
 
       if (
-        card.branch != null &&
-        card.workspace != null &&
-        Date.now() >= (prRetryNotBefore.get(card.id) ?? 0)
+        rec.branch != null &&
+        rec.workspace != null &&
+        Date.now() >= (prRetryNotBefore.get(rec.id) ?? 0)
       ) {
-        const branch = card.branch;
-        const repos = card.workspace.repos;
+        const branch = rec.branch;
+        const repos = rec.workspace.repos;
         const results = await Promise.all(
           repos.map((repo) => listPrsForBranch(repo.path, branch)),
         );
@@ -254,10 +281,10 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
         let holdLastKnownPrs = false;
 
         if (failed.length > 0) {
-          const count = (prFailureCounts.get(card.id) ?? 0) + 1;
-          prFailureCounts.set(card.id, count);
+          const count = (prFailureCounts.get(rec.id) ?? 0) + 1;
+          prFailureCounts.set(rec.id, count);
           const category = failed[0].category;
-          if (card.prsUnknown?.category !== category) {
+          if (rec.prsUnknown?.category !== category) {
             await store.setPrsUnknownIfSession(card.id, session, {
               category,
             });
@@ -266,7 +293,7 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
             answered.length === 0 && count < PROBE_FAILURE_CEILING;
           if (answered.length === 0) {
             prRetryNotBefore.set(
-              card.id,
+              rec.id,
               Date.now() +
                 Math.min(
                   ARTIFACT_DETECT_INTERVAL_MS * 2 ** count,
@@ -274,43 +301,43 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
                 ),
             );
           } else {
-            prRetryNotBefore.delete(card.id);
+            prRetryNotBefore.delete(rec.id);
           }
         } else {
-          prFailureCounts.delete(card.id);
-          prRetryNotBefore.delete(card.id);
-          if (card.prsUnknown != null) {
+          prFailureCounts.delete(rec.id);
+          prRetryNotBefore.delete(rec.id);
+          if (rec.prsUnknown != null) {
             await store.setPrsUnknownIfSession(card.id, session, null);
           }
         }
 
         if (
           !holdLastKnownPrs &&
-          JSON.stringify(card.prs ?? []) !== JSON.stringify(finalPrs)
+          JSON.stringify(rec.prs ?? []) !== JSON.stringify(finalPrs)
         ) {
           await store.setPrsIfSession(card.id, session, finalPrs);
         }
       }
 
       if (portsBySession == null) {
-        const count = (previewFailureCounts.get(card.id) ?? 0) + 1;
-        previewFailureCounts.set(card.id, count);
-        if (card.previewsUnknown?.category !== "detection unavailable") {
+        const count = (previewFailureCounts.get(rec.id) ?? 0) + 1;
+        previewFailureCounts.set(rec.id, count);
+        if (rec.previewsUnknown?.category !== "detection unavailable") {
           await store.setPreviewsUnknownIfSession(card.id, session, {
             category: "detection unavailable",
           });
         }
         if (
           count >= PROBE_FAILURE_CEILING &&
-          JSON.stringify(card.previews ?? []) !== "[]"
+          JSON.stringify(rec.previews ?? []) !== "[]"
         ) {
           await store.setPreviewsIfSession(card.id, session, []);
         }
         return;
       }
 
-      previewFailureCounts.delete(card.id);
-      if (card.previewsUnknown != null) {
+      previewFailureCounts.delete(rec.id);
+      if (rec.previewsUnknown != null) {
         await store.setPreviewsUnknownIfSession(card.id, session, null);
       }
 
@@ -324,12 +351,12 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
       const next: PreviewInfo[] = candidates
         .filter((_candidate, i) => reachable[i])
         .map(({ port }) => ({ port, url: `http://localhost:${port}` }));
-      if (JSON.stringify(card.previews ?? []) === JSON.stringify(next)) return;
+      if (JSON.stringify(rec.previews ?? []) === JSON.stringify(next)) return;
       await store.setPreviewsIfSession(card.id, session, next);
     }),
   );
 
-  const liveIds = new Set(probedCards().map((c) => c.id));
+  const liveIds = new Set(probedSessions().map(({ session }) => session.id));
   for (const id of prFailureCounts.keys()) {
     if (!liveIds.has(id)) prFailureCounts.delete(id);
   }
