@@ -2457,9 +2457,11 @@ async function checkProxyAddressing(built) {
 /**
  * `--check orphan-sweep` (`TERM-05`, criterion 6): the sweep fingerprint is proven, not read from
  * the source. Plants a REAL ttyd carrying the pre-92 fingerprint ({@link spawnOrphanTtyd} — old
- * revision key, card-keyed base path) alongside the fixture's own two current-revision ttyd, then
- * restarts the sandbox server (which runs `reconcileSessions()`/`adoptAndSweep` unconditionally at
- * boot, T-92-10) and asserts BOTH directions in the SAME run:
+ * revision key, card-keyed base path), registers it as a THIRD persisted session record on the
+ * fixture card (so its fate genuinely runs through `adoptAndSweep`'s `compatible` check rather than
+ * the raw ps-scan fingerprint alone — see the in-body remark), then restarts the sandbox server
+ * (which runs `reconcileSessions()`/`adoptAndSweep` unconditionally at boot, T-92-10) and asserts
+ * BOTH directions in the SAME run:
  *   - SWEEP: the planted orphan's pid is gone after the restart.
  *   - SPARE: the fixture's own two ttyd — current revision, session-keyed base path, still attached
  *     to live fixture tmux sessions — keep the SAME lsof-resolved pid across the restart (re-adopted,
@@ -2488,18 +2490,68 @@ async function checkOrphanSweep(built) {
 
   const orphanPid = orphan.child.pid;
   const orphanAliveBefore = await isPortListening(orphan.port);
+  const orphanPidAliveBefore = orphanPid != null && pidAlive(orphanPid);
   console.log(
     `orphan-sweep: planted orphan pid=${orphanPid} port=${orphan.port} tmux=${orphanTmuxName} ` +
-      `fingerprint=pre-92 (DISPATCH_TTYD_REVISION_5, card-keyed -b) listening=${orphanAliveBefore}`,
+      `fingerprint=pre-92 (DISPATCH_TTYD_REVISION_5, card-keyed -b) listening=${orphanAliveBefore} ` +
+      `pidAlive=${orphanPidAliveBefore}`,
   );
-  if (orphanPid == null || !orphanAliveBefore) {
+  /**
+   * Both the PORT and the exact PID identity are checked before the restart — not the port alone.
+   * A check that only confirmed "something is listening on the orphan's port" could be pointed at
+   * a pid that was never actually the spawned orphan (the wrong-subject break `92-03-PLAN.md`
+   * names) and would still vacuously report success once that unrelated pid happened to already be
+   * gone. Requiring `pidAlive(orphanPid)` to hold for the SAME pid this check later waits on is
+   * what turns a swapped subject into a setup violation instead of a silent false pass.
+   */
+  if (orphanPid == null || !orphanAliveBefore || !orphanPidAliveBefore) {
     violations.push(
-      `orphan-sweep: setup failure — planted orphan (pid=${orphanPid}) is not alive/LISTENING on ` +
-        `port ${orphan.port} before the restart; this is a harness setup violation, not the sweep ` +
-        `under test`,
+      `orphan-sweep: setup failure — planted orphan (pid=${orphanPid}) is not alive (port ` +
+        `listening=${orphanAliveBefore}, pid alive=${orphanPidAliveBefore}) before the restart; ` +
+        `this is a harness setup violation, not the sweep under test`,
     );
     return violations;
   }
+
+  /**
+   * `adoptAndSweep`'s `candidates` array (`reconcile.ts`) is built ONLY from
+   * `store.sessionsWithTmux()` — a session record whose `tmuxSession` is live AND whose
+   * `ttydPort` is set. A stray ttyd with no matching session record is never a candidate for
+   * RE-ADOPTION at all — it is unconditionally swept via the raw `ps`-scan fingerprint regardless
+   * of its OWN revision key, which would make the sweep-direction assertion below true no matter
+   * whether the revision fingerprint narrows correctly (a dead instrument for criterion 6's actual
+   * claim). Persisting the orphan as a THIRD session record on the fixture card — pointing at its
+   * real tmux name and real port — is what makes its fate depend on `compatible`, the same way a
+   * genuine pre-92 ttyd's fate would at a real upgrade boot.
+   */
+  const cardBeforePlant = readCard(built.dbPath, built.cardId);
+  if (!cardBeforePlant) {
+    violations.push(
+      `orphan-sweep: setup failure — could not read the persisted fixture card ${built.cardId} ` +
+        `before registering the planted orphan as a session candidate`,
+    );
+    return violations;
+  }
+  const orphanSessionId = randomUUID();
+  const plantedAt = new Date().toISOString();
+  cardBeforePlant.sessions = [
+    ...cardBeforePlant.sessions,
+    {
+      id: orphanSessionId,
+      createdAt: plantedAt,
+      updatedAt: plantedAt,
+      tmuxSession: orphanTmuxName,
+      ttydPort: orphan.port,
+      hookToken: randomBytes(32).toString("hex"),
+      workspacePath: join(built.home, "workspaces", "SHL-1-orphan"),
+    },
+  ];
+  seedFixtureCard(built.home, cardBeforePlant);
+  console.log(
+    `orphan-sweep: registered orphan as a THIRD persisted session ${orphanSessionId} — ` +
+      `tmuxSession=${orphanTmuxName} ttydPort=${orphan.port}, so its fate now depends on ` +
+      `\`compatible\`, not just the raw ps-scan fingerprint`,
+  );
 
   const pidBeforeA = (await pidsListeningOnPort(built.ttyd.a.port))[0];
   const pidBeforeB = (await pidsListeningOnPort(built.ttyd.b.port))[0];
@@ -2509,10 +2561,11 @@ async function checkOrphanSweep(built) {
   );
   if (pidBeforeA == null || pidBeforeB == null) {
     violations.push(
-      `orphan-sweep: could not resolve a pre-restart lsof PID for both fixture ttyd ports — cannot ` +
-        `prove the spare direction`,
+      `orphan-sweep: SPARE DIRECTION FAILED — could not resolve a pre-restart lsof PID for both ` +
+        `fixture ttyd ports (a=${pidBeforeA}, b=${pidBeforeB}) — the fixture's own ttyd are not both ` +
+        `alive going into the restart, so the spare direction cannot be proven this run; the sweep ` +
+        `direction is still exercised below on the planted orphan regardless`,
     );
-    return violations;
   }
 
   await restartServer(built);
@@ -2541,14 +2594,14 @@ async function checkOrphanSweep(built) {
     `orphan-sweep: after restart — fixture A port ${built.ttyd.a.port} pid=${pidAfterA}, ` +
       `fixture B port ${built.ttyd.b.port} pid=${pidAfterB}`,
   );
-  if (pidAfterA !== pidBeforeA) {
+  if (pidBeforeA != null && pidAfterA !== pidBeforeA) {
     violations.push(
       `orphan-sweep: SPARE DIRECTION FAILED — fixture session A's port ${built.ttyd.a.port} lsof ` +
         `PID changed across restart — before=${pidBeforeA} after=${pidAfterA} (a spared ttyd must ` +
         `be RE-ADOPTED, not respawned, and definitely not swept)`,
     );
   }
-  if (pidAfterB !== pidBeforeB) {
+  if (pidBeforeB != null && pidAfterB !== pidBeforeB) {
     violations.push(
       `orphan-sweep: SPARE DIRECTION FAILED — fixture session B's port ${built.ttyd.b.port} lsof ` +
         `PID changed across restart — before=${pidBeforeB} after=${pidAfterB} (a spared ttyd must ` +
