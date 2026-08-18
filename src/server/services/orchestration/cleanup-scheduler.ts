@@ -34,11 +34,11 @@ async function runDueCleanups(): Promise<void> {
     if (store.isCleaningUp(snapshot.id)) continue;
     store.beginCleanup(snapshot.id);
     try {
-      await store.clearCleanupDue(snapshot.id);
+      await store.clearCleanupDue(snapshot.id, undefined);
       const fresh = store.getCard(snapshot.id);
       if (!fresh || fresh.column !== "done") continue;
       if (store.isStarting(snapshot.id)) {
-        await store.restoreCleanupDue(snapshot.id, now);
+        await store.restoreCleanupDue(snapshot.id, undefined, now);
         continue;
       }
       await cleanupWorkspace(snapshot.id, { force: false });

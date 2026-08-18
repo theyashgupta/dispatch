@@ -2285,25 +2285,58 @@ class BoardStore extends EventEmitter {
    * other session fields. Column untouched. No-op if the id is
    * unknown. Bumps `cleanupAttempt` — this is one of the four terminal cleanup branches. Clears
    * `cleanupDueAt` (`LIFE-02`): the teardown already ran on this branch, so the schedule is spent.
+   * @remarks Session-aware (`sessionId`, same resolution/refusal shape as
+   * {@link recordCleanupBlocked}) but deliberately NON-removing: this branch means the teardown did
+   * not fully complete (worktrees may remain), so the session still exists as a thing the user can
+   * act on, and its warning needs a per-session home to live in. Removal is the SUCCESS path's
+   * outcome only (`finishCleanup`) — this method leaves the target's record present in the
+   * lost-but-present shape `markSessionLost` already established. The card-level mirrors
+   * (`cleanupWarning`, `terminalError`, `prs`/`previews`, `cleanupDueAt`) are written only when the
+   * resolved session is the card's active one; `cleanupAttempt` is bumped on both the resolved
+   * session and, ungated, on the card.
    */
-  recordCleanupWarning(id: string, warning: string): Promise<void> {
+  recordCleanupWarning(
+    id: string,
+    sessionId: string | undefined,
+    warning: string,
+  ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card) return [];
-      card.cleanupWarning = warning;
-      this.setActiveSession(card, {
-        tmuxSession: undefined,
-        ttydPort: undefined,
-        claudeSessionId: undefined,
-      });
-      card.terminalError = null;
-      this.clearHookToken(card);
-      card.prs = undefined;
-      card.prsUnknown = undefined;
-      card.previews = undefined;
-      card.previewsUnknown = undefined;
+      const resolvedId = sessionId ?? card.activeSessionId;
+      const target = card.sessions?.find((s) => s.id === resolvedId);
+      if (sessionId !== undefined && !target) {
+        console.error(
+          `[store] card ${id} — record-cleanup-warning target ${sessionId} does not resolve, refusing`,
+        );
+        return [];
+      }
+      const wasActive = resolvedId === card.activeSessionId;
+      this.setActiveSession(
+        card,
+        {
+          tmuxSession: undefined,
+          ttydPort: undefined,
+          claudeSessionId: undefined,
+        },
+        resolvedId,
+      );
+      this.clearHookToken(card, resolvedId);
+      if (target) {
+        target.cleanupWarning = warning;
+        target.cleanupDueAt = undefined;
+        target.cleanupAttempt = (target.cleanupAttempt ?? 0) + 1;
+      }
       card.cleanupAttempt = (card.cleanupAttempt ?? 0) + 1;
-      card.cleanupDueAt = undefined;
+      if (wasActive) {
+        card.cleanupWarning = warning;
+        card.terminalError = null;
+        card.prs = undefined;
+        card.prsUnknown = undefined;
+        card.previews = undefined;
+        card.previewsUnknown = undefined;
+        card.cleanupDueAt = undefined;
+      }
       return [
         this.event("cleanup", {
           cardId: id,
@@ -2328,32 +2361,112 @@ class BoardStore extends EventEmitter {
    * cleanup branches. Also clears `cleanupDueAt` (`LIFE-02`) — without this a cleaned card would
    * keep rendering a countdown, breaking the "absence of the countdown IS the cleaned state"
    * contract. No-op if the id is unknown.
+   * @remarks Session-aware (`sessionId`, same resolution/refusal shape as
+   * {@link recordCleanupBlocked}) AND removing — this is the SUCCESS path, the only cleanup branch
+   * that removes a record. `wasActive` is captured BEFORE {@link removeSessionRecord} runs, so the
+   * card-level mirrors are written against the pointer as it stood at entry, not after removal has
+   * possibly repointed it. `removeSessionRecord` is called LAST, once every other field on the
+   * target and the card has already settled, so the splice and pointer repair operate on the fully
+   * updated record.
    */
-  finishCleanup(id: string): Promise<void> {
+  finishCleanup(id: string, sessionId: string | undefined): Promise<void> {
     return this.enqueue(() => {
       const c = this.cards.get(id);
       if (!c) return [];
-      this.setActiveSession(c, {
-        tmuxSession: undefined,
-        ttydPort: undefined,
-        workspacePath: undefined,
-        claudeSessionId: undefined,
-      });
-      c.sessionLost = false;
-      c.terminalError = null;
-      c.cleanupWarning = undefined;
-      c.cleanupBlocked = undefined;
-      this.clearHookToken(c);
-      c.prs = undefined;
-      c.prsUnknown = undefined;
-      c.previews = undefined;
-      c.previewsUnknown = undefined;
+      const resolvedId = sessionId ?? c.activeSessionId;
+      const target = c.sessions?.find((s) => s.id === resolvedId);
+      if (sessionId !== undefined && !target) {
+        console.error(
+          `[store] card ${id} — finish-cleanup target ${sessionId} does not resolve, refusing`,
+        );
+        return [];
+      }
+      const wasActive = resolvedId === c.activeSessionId;
+      this.setActiveSession(
+        c,
+        {
+          tmuxSession: undefined,
+          ttydPort: undefined,
+          workspacePath: undefined,
+          claudeSessionId: undefined,
+        },
+        resolvedId,
+      );
+      this.clearHookToken(c, resolvedId);
+      if (target) {
+        target.cleanupWarning = undefined;
+        target.cleanupBlocked = undefined;
+        target.cleanupDueAt = undefined;
+        target.cleanupAttempt = (target.cleanupAttempt ?? 0) + 1;
+      }
       c.cleanupAttempt = (c.cleanupAttempt ?? 0) + 1;
-      c.cleanupDueAt = undefined;
+      if (wasActive) {
+        c.sessionLost = false;
+        c.terminalError = null;
+        c.cleanupWarning = undefined;
+        c.cleanupBlocked = undefined;
+        c.cleanupDueAt = undefined;
+        c.prs = undefined;
+        c.prsUnknown = undefined;
+        c.previews = undefined;
+        c.previewsUnknown = undefined;
+      }
+      this.removeSessionRecord(c, resolvedId);
       return [
         this.event("cleanup", { cardId: id, fromCol: "done", toCol: "done" }),
       ];
     });
+  }
+
+  /**
+   * Splice a fully-cleaned session's record out of `card.sessions` and repair the active pointer in
+   * the SAME synchronous mutator as the caller — the third sanctioned writer of the NEW-21 fenced
+   * set, but of the two entity fields (`sessions`, `activeSessionId`, `scripts/check-invariants.mjs`'s
+   * `ENTITY_FIELDS`) ONLY. It writes no projection field itself: every projection write it needs is delegated to
+   * {@link setActiveSession}, so the six-field mirror keeps its single owner. `finishCleanup` is the
+   * only caller — a warned teardown (`recordCleanupWarning`) did not fully complete, so its record
+   * stays present per `markSessionLost`'s clear-in-place precedent; only a SUCCESSFUL teardown
+   * removes the record, which is what keeps `sessionCount`/`sessionSummaries` absent-at-N<=1 correct
+   * for a fully-cleaned card.
+   * @remarks No-op (no mutation) when no record resolves for `sessionId ?? card.activeSessionId` —
+   * a card holding only flat legacy fields has no record to remove and keeps behaving as it does
+   * today.
+   * @remarks Non-active removal is a plain splice: if the removed record was not the active one,
+   * the pointer already names something else and is left untouched.
+   * @remarks Active removal promotes a remaining sibling in the SAME mutation, preferring a LIVE one
+   * (`tmuxSession != null`) — `markSessionLost`'s own tie-break (`updatedAt` descending, then `id`
+   * ascending) reused verbatim, not re-derived. UNLIKE `markSessionLost`, this method falls back to
+   * a DEAD remaining sibling when no live one exists: `markSessionLost` never removes a record, so
+   * it can safely leave the pointer where it is on an unplanned death, but this method has just
+   * REMOVED the pointed-at record — leaving records present with no active pointer would be exactly
+   * the "N sessions and no active one" state `--check switch-atomicity` already forbids and
+   * `docs/ARCHITECTURE.md`'s session-projection-chokepoint section says a card must never be
+   * observed in. The pointer is cleared to `undefined` ONLY when no record remains at all, then
+   * re-projected through `setActiveSession(card, {})` — relying on the precondition that the flat
+   * session fields were already cleared by the caller (`finishCleanup`'s `setActiveSession` call
+   * above), so the re-derivation's own refusing-to-project branch is not taken.
+   * @see docs/ARCHITECTURE.md#session-projection-chokepoint
+   */
+  private removeSessionRecord(card: Card, sessionId: string | undefined): void {
+    const resolvedId = sessionId ?? card.activeSessionId;
+    const target = card.sessions?.find((s) => s.id === resolvedId);
+    if (!target) return;
+    const wasActive = resolvedId === card.activeSessionId;
+    card.sessions = (card.sessions ?? []).filter((s) => s.id !== resolvedId);
+    if (!wasActive) return;
+    const byRecency = (a: Session, b: Session): number =>
+      a.updatedAt === b.updatedAt
+        ? a.id.localeCompare(b.id)
+        : b.updatedAt.localeCompare(a.updatedAt);
+    const live = card.sessions.filter((s) => s.tmuxSession != null);
+    const promoted =
+      live.sort(byRecency)[0] ?? [...card.sessions].sort(byRecency)[0];
+    if (promoted) {
+      this.setActiveSession(card, {}, promoted.id, true);
+    } else {
+      card.activeSessionId = undefined;
+      this.setActiveSession(card, {});
+    }
   }
 
   /**
@@ -2363,28 +2476,64 @@ class BoardStore extends EventEmitter {
    * destructive step — the tmux session, ttyd, hookToken, and worktrees all stay alive so the card
    * remains fully usable while the block is surfaced. Bumps `cleanupAttempt` — this is one of the
    * four terminal cleanup branches. No-op if the id is unknown.
+   * @remarks `sessionId` is a REQUIRED (never optional-trailing) parameter that accepts
+   * `undefined`, resolved against `card.activeSessionId` with the exact
+   * {@link BoardStore.clearHookToken} gate: an EXPLICIT id that does not resolve refuses (named,
+   * logged, no mutation) rather than silently falling back to the active session. The per-session
+   * `cleanupBlocked` is written on the resolved target whenever one resolves; the card-level mirror
+   * is written only when the resolved id is the card's active session — a card with no session
+   * records at all resolves both sides of that comparison to `undefined`, so the legacy card-only
+   * shape still gets its mirror written, unchanged from today. `cleanupAttempt` is the one
+   * deliberate exception: its card write is NOT gated (see {@link Card.cleanupAttempt}), and it is
+   * also bumped on the resolved session's own counter.
    */
   recordCleanupBlocked(
     id: string,
+    sessionId: string | undefined,
     blocked: { repo: string; count: number }[],
   ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) {
-        card.cleanupBlocked = blocked;
-        card.cleanupAttempt = (card.cleanupAttempt ?? 0) + 1;
+      if (!card) return [];
+      const resolvedId = sessionId ?? card.activeSessionId;
+      const target = card.sessions?.find((s) => s.id === resolvedId);
+      if (sessionId !== undefined && !target) {
+        console.error(
+          `[store] card ${id} — cleanup-blocked target ${sessionId} does not resolve, refusing`,
+        );
+        return [];
       }
+      if (target) {
+        target.cleanupBlocked = blocked;
+        target.cleanupAttempt = (target.cleanupAttempt ?? 0) + 1;
+      }
+      if (resolvedId === card.activeSessionId) card.cleanupBlocked = blocked;
+      card.cleanupAttempt = (card.cleanupAttempt ?? 0) + 1;
       return [];
     });
   }
 
-  /** Clear a prior cleanup refusal (PRE-01) at the start of a fresh attempt. No-op if id unknown. */
-  clearCleanupBlocked(id: string): Promise<void> {
+  /**
+   * Clear a prior cleanup refusal (PRE-01) at the start of a fresh attempt. No-op if id unknown.
+   * @remarks Same `sessionId` resolution and refusal shape as {@link recordCleanupBlocked}.
+   */
+  clearCleanupBlocked(
+    id: string,
+    sessionId: string | undefined,
+  ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) {
-        card.cleanupBlocked = undefined;
+      if (!card) return [];
+      const resolvedId = sessionId ?? card.activeSessionId;
+      const target = card.sessions?.find((s) => s.id === resolvedId);
+      if (sessionId !== undefined && !target) {
+        console.error(
+          `[store] card ${id} — clear-cleanup-blocked target ${sessionId} does not resolve, refusing`,
+        );
+        return [];
       }
+      if (target) target.cleanupBlocked = undefined;
+      if (resolvedId === card.activeSessionId) card.cleanupBlocked = undefined;
       return [];
     });
   }
@@ -2393,13 +2542,22 @@ class BoardStore extends EventEmitter {
    * Clear a card's pending automatic-cleanup schedule. Called BEFORE `cleanupWorkspace` dispatches
    * — `LIFE-03`'s first double-run guard, so a second tick can no longer see the card as due. No-op
    * if the id is unknown or the schedule is already cleared.
+   * @remarks Same `sessionId` resolution and refusal shape as {@link recordCleanupBlocked}.
    */
-  clearCleanupDue(id: string): Promise<void> {
+  clearCleanupDue(id: string, sessionId: string | undefined): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) {
-        card.cleanupDueAt = undefined;
+      if (!card) return [];
+      const resolvedId = sessionId ?? card.activeSessionId;
+      const target = card.sessions?.find((s) => s.id === resolvedId);
+      if (sessionId !== undefined && !target) {
+        console.error(
+          `[store] card ${id} — clear-cleanup-due target ${sessionId} does not resolve, refusing`,
+        );
+        return [];
       }
+      if (target) target.cleanupDueAt = undefined;
+      if (resolvedId === card.activeSessionId) card.cleanupDueAt = undefined;
       return [];
     });
   }
@@ -2414,13 +2572,28 @@ class BoardStore extends EventEmitter {
    * schedule this same abandon path cleared moments earlier, so a card that is still Done never ends
    * up with no schedule and no automatic way back to one. No-op if the id is unknown or the card has
    * left Done in the meantime (a card outside Done carries no schedule by design, `LIFE-02`).
+   * @remarks Same `sessionId` resolution and refusal shape as {@link recordCleanupBlocked}, checked
+   * AFTER the existing `column === "done"` guard so a card that already left Done still no-ops
+   * exactly as before regardless of what `sessionId` names.
    */
-  restoreCleanupDue(id: string, dueAt: number): Promise<void> {
+  restoreCleanupDue(
+    id: string,
+    sessionId: string | undefined,
+    dueAt: number,
+  ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card && card.column === "done") {
-        card.cleanupDueAt = dueAt;
+      if (!card || card.column !== "done") return [];
+      const resolvedId = sessionId ?? card.activeSessionId;
+      const target = card.sessions?.find((s) => s.id === resolvedId);
+      if (sessionId !== undefined && !target) {
+        console.error(
+          `[store] card ${id} — restore-cleanup-due target ${sessionId} does not resolve, refusing`,
+        );
+        return [];
       }
+      if (target) target.cleanupDueAt = dueAt;
+      if (resolvedId === card.activeSessionId) card.cleanupDueAt = dueAt;
       return [];
     });
   }
@@ -2431,14 +2604,31 @@ class BoardStore extends EventEmitter {
    * the non-orphan preflight-error path tore nothing down — the live tmux session, ttyd, and
    * hookToken MUST survive so the terminal stays usable. Bumps `cleanupAttempt` — this is one of the
    * four terminal cleanup branches. No-op if the id is unknown.
+   * @remarks Same `sessionId` resolution and refusal shape as {@link recordCleanupBlocked};
+   * `cleanupAttempt`'s card write is the same deliberately ungated exception.
    */
-  noteCleanupWarning(id: string, message: string): Promise<void> {
+  noteCleanupWarning(
+    id: string,
+    sessionId: string | undefined,
+    message: string,
+  ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) {
-        card.cleanupWarning = message;
-        card.cleanupAttempt = (card.cleanupAttempt ?? 0) + 1;
+      if (!card) return [];
+      const resolvedId = sessionId ?? card.activeSessionId;
+      const target = card.sessions?.find((s) => s.id === resolvedId);
+      if (sessionId !== undefined && !target) {
+        console.error(
+          `[store] card ${id} — note-cleanup-warning target ${sessionId} does not resolve, refusing`,
+        );
+        return [];
       }
+      if (target) {
+        target.cleanupWarning = message;
+        target.cleanupAttempt = (target.cleanupAttempt ?? 0) + 1;
+      }
+      if (resolvedId === card.activeSessionId) card.cleanupWarning = message;
+      card.cleanupAttempt = (card.cleanupAttempt ?? 0) + 1;
       return [];
     });
   }

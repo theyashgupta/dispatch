@@ -163,10 +163,22 @@ Exactly one method may assign the six flat fields: `BoardStore#setActiveSession`
 in `src/` is a defect. `scripts/check-invariants.mjs` polices this repo-wide, and it fences the two
 entity fields `sessions` and `activeSessionId` on the same footing — fencing only the six would
 police the derived projection while leaving the pairing that IS this invariant open to any future
-writer. There are exactly TWO declared writers, each allowed a named subset: `setActiveSession`
-(all eight fields) and the boot-time `migrateCardsToSessionEntity` (the two entity fields only,
-which is what makes its own "never writes any flat field" contract enforced rather than merely
-stated). The check runs on the TypeScript parser, not a line scan, because a mutation has more
+writer. There are exactly THREE declared writers, each allowed a named subset: `setActiveSession`
+(all eight fields), the boot-time `migrateCardsToSessionEntity` (the two entity fields only, which
+is what makes its own "never writes any flat field" contract enforced rather than merely stated),
+and `removeSessionRecord` (Phase 93, the two entity fields only). `removeSessionRecord` owns
+splicing a fully-cleaned session's record out of `card.sessions` and repairing the active pointer
+in the same synchronous mutator as its caller (`finishCleanup`); it writes no projection field
+itself, delegating every projection write it needs to `setActiveSession` — so the six-field
+mirror's single owner is unchanged even though a second write site now touches the entity pair.
+Promotion on removal prefers a live remaining sibling (`tmuxSession != null`, `markSessionLost`'s
+own tie-break reused verbatim: `updatedAt` descending then `id` ascending), falling back to a dead
+remaining sibling when none is live — a deliberate divergence from `markSessionLost`, which never
+removes a record and so can safely leave the pointer in place on an unplanned death.
+`removeSessionRecord` has just removed the pointed-at record, so leaving records present with no
+active pointer would be exactly the "N sessions and no active one" state `--check switch-atomicity`
+already forbids and this section says a card must never be observed in; the pointer is cleared to
+`undefined` only when no record remains at all. The check runs on the TypeScript parser, not a line scan, because a mutation has more
 surface forms than a regex can enumerate — `Object.assign(card, { … })`, computed member access,
 destructuring assignment and a line break before the `=` were all invisible to the scan that
 preceded it. The flat

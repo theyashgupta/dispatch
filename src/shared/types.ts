@@ -304,7 +304,12 @@ export interface Card {
   startWarning?: string | null;
   /** ISO timestamp of the last observed ⏺-view divergence for a live session (ATTN-02 unseen-activity dot). */
   outputChangedAt?: string;
-  /** Non-fatal Done-cleanup failure surfaced like startWarning; absent in the quiet/success state (LIFE-01). */
+  /**
+   * Non-fatal Done-cleanup failure surfaced like startWarning; absent in the quiet/success state
+   * (LIFE-01). MIRROR of {@link Session.cleanupWarning} for the ACTIVE session only, written by
+   * the same `resolvedId === card.activeSessionId` gate {@link BoardStore.clearHookToken} already
+   * uses — the per-session record is the truth, this flat field is a projection of it.
+   */
   cleanupWarning?: string;
   /**
    * Per-repo uncommitted-work refusal recorded when a non-forced Done cleanup preflight finds a
@@ -312,7 +317,9 @@ export interface Card {
    * Present = cleanup was refused with the tmux session, ttyd, and worktrees ALL still alive
    * (PRE-02); absent = not blocked. NON-SECRET (repo basenames + integer counts only) and rides
    * `snapshot()` UNREDACTED (like `hookRoutedAt`/`claudeSessionId`, unlike `hookToken`). Cleared at
-   * the start of every fresh cleanup attempt and by finishCleanup.
+   * the start of every fresh cleanup attempt and by finishCleanup. MIRROR of
+   * {@link Session.cleanupBlocked} for the ACTIVE session only — same active-session gate as
+   * `cleanupWarning` above.
    */
   cleanupBlocked?: { repo: string; count: number }[];
   /**
@@ -324,7 +331,12 @@ export interface Card {
    * identical failure leaves `cleanupWarning`'s STRING unchanged, and `clearCleanupBlocked` at
    * cleanup entry flips `cleanupBlocked` off almost immediately on the force path — so neither field
    * can drive a reliable busy-state reset, but this counter can. NON-SECRET: rides `snapshot()`
-   * UNREDACTED like `hookRoutedAt`/`cleanupBlocked` (only `hookToken` is redacted).
+   * UNREDACTED like `hookRoutedAt`/`cleanupBlocked` (only `hookToken` is redacted). Mirrors
+   * {@link Session.cleanupAttempt}, but — UNLIKE `cleanupWarning`/`cleanupBlocked`/`cleanupDueAt`
+   * — this mirror is deliberately UNGATED: it is bumped on the card regardless of which session
+   * resolved, because it drives `CleanupModal`'s busy-state reset and gating it would leave the
+   * modal spinning forever when a fan-out resolves a non-active session. At N=1 the resolved
+   * session is always the active one, so the gated and ungated forms are byte-identical.
    */
   cleanupAttempt?: number;
   /**
@@ -332,7 +344,9 @@ export interface Card {
    * arrival (`from !== "done"`) of a card that still holds a session or workspace; cleared on a
    * manual move back out of Done, by `finishCleanup`, by `recordCleanupWarning`, and by the
    * automatic scheduler before it dispatches a teardown. Absent on a card with no pending
-   * schedule (never scheduled, already cleaned, or already cleared before a dispatch).
+   * schedule (never scheduled, already cleaned, or already cleared before a dispatch). MIRROR of
+   * {@link Session.cleanupDueAt} for the ACTIVE session only — same active-session gate as
+   * `cleanupWarning` above.
    * @see docs/ARCHITECTURE.md#cleanup-lifecycle
    */
   cleanupDueAt?: number;
@@ -443,6 +457,38 @@ export interface Session {
    * sibling's on any unrelated projection write.
    */
   lastMarker?: string;
+  /**
+   * Epoch-ms deferred-teardown schedule for THIS session, the per-session home of
+   * {@link Card.cleanupDueAt} — which is now a MIRROR of the active session's value only, written
+   * only when `resolvedId === card.activeSessionId`. Deliberately NOT one of the six flat fields
+   * `setActiveSession` projects onto `Card`, same reasoning as {@link Session.hookRoutedAt}:
+   * routing it through the patch would let one session's due time clobber a sibling's on any
+   * unrelated projection write.
+   * @see docs/ARCHITECTURE.md#cleanup-lifecycle
+   */
+  cleanupDueAt?: number;
+  /**
+   * Non-fatal Done-cleanup failure for THIS session, the per-session home of
+   * {@link Card.cleanupWarning} — which is now a MIRROR of the active session's value only.
+   * Deliberately NOT one of the six flat fields `setActiveSession` projects onto `Card`, same
+   * reasoning as {@link Session.hookRoutedAt}.
+   */
+  cleanupWarning?: string;
+  /**
+   * Per-repo uncommitted-work refusal for THIS session, the per-session home of
+   * {@link Card.cleanupBlocked} — which is now a MIRROR of the active session's value only.
+   * Deliberately NOT one of the six flat fields `setActiveSession` projects onto `Card`, same
+   * reasoning as {@link Session.hookRoutedAt}.
+   */
+  cleanupBlocked?: { repo: string; count: number }[];
+  /**
+   * Monotonic per-session cleanup-attempt counter, the per-session home of
+   * {@link Card.cleanupAttempt}. Deliberately NOT one of the six flat fields `setActiveSession`
+   * projects onto `Card`, same reasoning as {@link Session.hookRoutedAt}. UNLIKE the other three
+   * cleanup fields, its card mirror is deliberately UNGATED — see {@link Card.cleanupAttempt} for
+   * why.
+   */
+  cleanupAttempt?: number;
 }
 
 /**

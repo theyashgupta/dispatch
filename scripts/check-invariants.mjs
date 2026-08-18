@@ -122,13 +122,16 @@ const SESSION_FIELDS = [...PROJECTION_FIELDS, ...ENTITY_FIELDS];
  * than a blind spot: each entry is greppable by name, and each carries its own missing-subject
  * sentinel (see {@link checkSessionProjectionChokepoint}) so a rename or deletion FAILS instead of
  * silently widening the exemption to nothing.
- * @remarks `migrateCardsToSessionEntity` is deliberately allowed ONLY {@link ENTITY_FIELDS}. Its
- * own contract says it "never writes any flat field"; granting it the projection fields too would
- * turn a documented promise into an unenforced one.
+ * @remarks `migrateCardsToSessionEntity` and `removeSessionRecord` are each deliberately allowed
+ * ONLY {@link ENTITY_FIELDS}. Both contracts say "never writes any projection field"; granting
+ * either the six projection fields too would turn a documented promise into an unenforced one.
+ * `removeSessionRecord` (Phase 93) owns cleaned-session removal and active-pointer repair,
+ * delegating every projection write it needs back to `setActiveSession`.
  */
 const SANCTIONED_WRITERS = [
   { name: "setActiveSession", fields: SESSION_FIELDS },
   { name: "migrateCardsToSessionEntity", fields: ENTITY_FIELDS },
+  { name: "removeSessionRecord", fields: ENTITY_FIELDS },
 ];
 
 /**

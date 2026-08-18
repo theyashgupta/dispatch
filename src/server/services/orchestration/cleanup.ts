@@ -73,7 +73,7 @@ export async function cleanupWorkspace(
   const repoPaths = card.workspace?.repos.map((r) => r.path) ?? [];
   const isLegacyWorkspace = Boolean(workspacePath) && !card.workspace;
 
-  await store.clearCleanupBlocked(cardId);
+  await store.clearCleanupBlocked(cardId, undefined);
 
   const preflightT0 = perfCleanup ? performance.now() : 0;
   if (!opts.force && workspacePath) {
@@ -104,12 +104,13 @@ export async function cleanupWorkspace(
       }
     });
     if (blocked.length > 0) {
-      await store.recordCleanupBlocked(cardId, blocked);
+      await store.recordCleanupBlocked(cardId, undefined, blocked);
       return;
     }
     if (nonOrphanError) {
       await store.noteCleanupWarning(
         cardId,
+        undefined,
         "Cleanup preflight failed — a worktree could not be checked.",
       );
       return;
@@ -183,14 +184,16 @@ export async function cleanupWorkspace(
   if (failures.length > 0) {
     await store.recordCleanupWarning(
       cardId,
+      undefined,
       "Cleanup incomplete — some worktrees may remain.",
     );
   } else if (isLegacyWorkspace) {
     await store.recordCleanupWarning(
       cardId,
+      undefined,
       "Cleanup kept worktree registrations — this ticket predates per-ticket workspaces.",
     );
   } else {
-    await store.finishCleanup(cardId);
+    await store.finishCleanup(cardId, undefined);
   }
 }
