@@ -245,13 +245,19 @@ export function App() {
   }, [cleanupCardId]);
 
   const cleanupBlocked = cleanupCard?.cleanupBlocked;
-  const cleanupResolved =
-    cleanupAttempted &&
+  const cleanupSummaries = cleanupCard?.sessionSummaries;
+  const cleanupSettled =
     cleanupCard != null &&
-    (cleanupBlocked == null || cleanupBlocked.length === 0) &&
-    ((!cleanupCard.tmuxSession && !cleanupCard.workspacePath) ||
-      (cleanupCard.cleanupWarning != null &&
-        cleanupCard.cleanupWarning.trim() !== ""));
+    (cleanupSummaries == null
+      ? (cleanupBlocked == null || cleanupBlocked.length === 0) &&
+        ((!cleanupCard.tmuxSession && !cleanupCard.workspacePath) ||
+          (cleanupCard.cleanupWarning != null &&
+            cleanupCard.cleanupWarning.trim() !== ""))
+      : cleanupSummaries.every((s) => (s.cleanupBlocked?.length ?? 0) === 0) &&
+        ((!cleanupCard.tmuxSession && !cleanupCard.workspacePath) ||
+          (cleanupCard.cleanupWarning != null &&
+            cleanupCard.cleanupWarning.trim() !== "")));
+  const cleanupResolved = cleanupAttempted && cleanupSettled;
   useEffect(() => {
     if (cleanupResolved) setCleanupCardId(null);
   }, [cleanupResolved]);

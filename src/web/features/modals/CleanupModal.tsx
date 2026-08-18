@@ -18,7 +18,22 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
   const attemptRef = useRef<number | undefined>(undefined);
 
   const blocked = card.cleanupBlocked;
-  const isBlocked = blocked != null && blocked.length > 0;
+  const summaries = card.sessionSummaries;
+  const isBlocked =
+    summaries == null
+      ? blocked != null && blocked.length > 0
+      : summaries.some((s) => (s.cleanupBlocked?.length ?? 0) > 0);
+  const blockedEntries =
+    summaries == null
+      ? []
+      : summaries.flatMap((s) =>
+          (s.cleanupBlocked ?? []).map((entry) => ({
+            key: `${s.id}:${entry.repo}`,
+            ordinal: s.ordinal,
+            repo: entry.repo,
+            count: entry.count,
+          })),
+        );
 
   useEffect(() => {
     if (pending && card.cleanupAttempt !== attemptRef.current)
@@ -67,13 +82,21 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
             >
               Uncommitted work would be lost
             </div>
-            {blocked.map((entry) => (
-              <div key={entry.repo} style={{ color: "var(--text)" }}>
-                {`${entry.repo}: ${entry.count} uncommitted file${
-                  entry.count === 1 ? "" : "s"
-                }`}
-              </div>
-            ))}
+            {summaries == null
+              ? blocked?.map((entry) => (
+                  <div key={entry.repo} style={{ color: "var(--text)" }}>
+                    {`${entry.repo}: ${entry.count} uncommitted file${
+                      entry.count === 1 ? "" : "s"
+                    }`}
+                  </div>
+                ))
+              : blockedEntries.map((entry) => (
+                  <div key={entry.key} style={{ color: "var(--text)" }}>
+                    {`Session ${entry.ordinal} — ${entry.repo}: ${
+                      entry.count
+                    } uncommitted file${entry.count === 1 ? "" : "s"}`}
+                  </div>
+                ))}
           </div>
         ) : (
           <div
@@ -84,8 +107,9 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
               color: "var(--text)",
             }}
           >
-            Clean up workspace? Kills the session and removes worktrees;
-            branches are kept.
+            {summaries == null
+              ? "Clean up workspace? Kills the session and removes worktrees; branches are kept."
+              : `Clean up all ${summaries.length} sessions? Kills each session and removes its worktrees; branches are kept.`}
           </div>
         )}
         {confirmError && (
