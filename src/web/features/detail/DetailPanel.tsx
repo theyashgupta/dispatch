@@ -5,6 +5,7 @@ import type {
   Card as CardModel,
 } from "../../../shared/types.js";
 import { ensureTerminal } from "../../lib/api.js";
+import type { StartRequest } from "../../lib/start-request.js";
 import { stampLastOpened } from "../../hooks/useUnseenActivity.js";
 import { CAROUSEL_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
 import {
@@ -23,6 +24,7 @@ import { UnknownProbeRow } from "./UnknownProbeRow.js";
 import { ReferenceBlocks } from "./ReferenceBlocks.js";
 import { SessionLostSection } from "./SessionLostSection.js";
 import { SessionSwitcher } from "./SessionSwitcher.js";
+import { StartAnotherSessionButton } from "./StartAnotherSessionButton.js";
 import { TerminalRegion } from "./TerminalRegion.js";
 
 const PANEL_MIN_WIDTH_PX = 360;
@@ -44,7 +46,7 @@ interface DetailPanelProps {
   members?: CardModel[];
   membersActionable: boolean;
   onClose: () => void;
-  onStartRequest?: (id: string) => void;
+  onStartRequest?: (req: string | StartRequest) => void;
   onCleanupRequest?: (id: string) => void;
   docked?: boolean;
 }
@@ -324,6 +326,12 @@ export function DetailPanel({
 
   const c = shown;
 
+  const showStartAnother =
+    c != null &&
+    c.column !== "done" &&
+    c.groupId == null &&
+    c.workspacePath != null;
+
   const hasLiveSession = !!(c?.tmuxSession && !c.sessionLost);
   const activeSessionLost = c?.activeSession != null && !c.tmuxSession;
 
@@ -491,17 +499,27 @@ export function DetailPanel({
               onCleanupRequest={onCleanupRequest}
             />
 
-            {c?.sessionSummaries != null && (
+            {(c?.sessionSummaries != null || showStartAnother) && (
               <div
                 style={{
                   display: "flex",
                   alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "var(--space-sm)",
                   padding: "var(--space-sm) var(--space-lg)",
                   paddingLeft: "var(--space-xl)",
                   borderBottom: "1px solid var(--border)",
                 }}
               >
-                <SessionSwitcher card={c} />
+                {c?.sessionSummaries != null && <SessionSwitcher card={c} />}
+                {showStartAnother && c != null && (
+                  <StartAnotherSessionButton
+                    card={c}
+                    onStartRequest={onStartRequest}
+                    docked={docked}
+                    takeover={takeover}
+                  />
+                )}
               </div>
             )}
 

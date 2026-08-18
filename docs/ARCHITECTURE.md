@@ -29,6 +29,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [In Review Lifecycle](#in-review-lifecycle)
   - [Terminal ttyd](#terminal-ttyd)
   - [Panel Iframe Identity](#panel-iframe-identity)
+  - [Second Session Affordance](#second-session-affordance)
   - [Tmux Invocations](#tmux-invocations)
   - [Orchestration Saga](#orchestration-saga)
   - [Exec Chokepoint](#exec-chokepoint)
@@ -1182,6 +1183,48 @@ the module cache, and retries a single time before rethrowing to the fire-and-fo
 around the terminal — the `<iframe>`'s identity, mount lifecycle, and sizing; `NEW-20` covers the
 terminal client itself (`src/web/terminal-main.ts`, `src/web/terminal.html`), which this phase may
 not touch.
+
+### Second Session Affordance
+
+`StartAnotherSessionButton` (`web/features/detail/StartAnotherSessionButton.tsx`) renders "Start
+another session" inside the panel's session row, alongside `SessionSwitcher`. `src/web/**/*.tsx`
+forbids all comments, including JSDoc, so this section is the component's only home for the
+rationale behind its five deliberate choices.
+
+**Panel, not card face.** Decision D-B (`94-CONTEXT.md`) put session switching in the panel to
+protect the board's scanning density; session creation spends that same budget rather than opening
+a second one on the card face.
+
+**The session row's render gate is an OR, not the switcher's own `sessionSummaries != null`.**
+`sessionSummaries` is absent at N=1 (`91-UI-SPEC.md`'s absent-means-nothing-to-report idiom) —
+exactly the moment a person needs to create session 2. The row now renders when EITHER the
+switcher has something to show OR the button has a reason to exist, so the affordance is reachable
+at N=1 without the switcher's own gate widening.
+
+**The presence gate has three conditions and deliberately no liveness condition.** `column !==
+"done"`, `groupId == null`, `workspacePath != null` — nothing about `hasLiveSession` or
+`sessionLost`. Starting a second session from a card whose only session died is a legitimate
+recovery path, so the button stays reachable next to `SessionLostSection`'s Resume rather than
+disappearing with the dead session.
+
+**The disable is card-scoped on `card.provisioningStep`, not session-scoped**, even though every
+other start in this phase is per-session. `git worktree add` mutates the shared parent repo's
+`.git` metadata, so an unrelated sibling's restart saga touches state this card's own "start
+another" saga also depends on — a card-scoped disable is the correct scope for that shared
+resource, and this button also disables while a sibling's own saga is mid-flight.
+
+**The in-flight indication is a label swap (`"Start another session"` → `"Starting…"`), never the
+`Button` primitive's `Spinner` prop.** This follows `PanelHeader`'s Sync Linear button exactly and
+the standing "no spinner on board interactions" rule — the label change and the `disabled` state
+together are the entire in-flight signal.
+
+**Accepted `KEEP-02` deviation.** This row is the one thing Phase 94 adds to the N=1 panel. Row
+height is 48px whenever the button is present (`8px` padding + the `Button` primitive's own 32px
+height + `8px` padding), 4px taller than Phase 92's 44px switcher-only row (`8 + 28 + 8`) — a
+32px `Button` is taller than the 28px `SessionSwitcher` container, and `alignItems: "center"`
+centers the shorter one inside the taller row wherever both are present. The button-absent case
+(Done column with `sessionSummaries` still present, pre-cleanup) keeps Phase 92's original 44px
+figure unchanged.
 
 ### Tmux Invocations
 
