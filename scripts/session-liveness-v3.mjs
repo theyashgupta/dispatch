@@ -6976,6 +6976,225 @@ async function checkSecondSessionIsolation(built) {
   return violations;
 }
 
+/**
+ * `--check naming-consistency` (Plan 94-06 Task 1, criterion C2, START-01): drives the REAL start
+ * saga end to end and proves the tmux session name, the branch and the per-repo worktree
+ * directory ALL reduce to session 2's persisted `branch` field — never merely that the three
+ * public artifacts look right while some other internal derivation (`steps.ts`) could silently
+ * diverge from it.
+ * @remarks Every derived value is computed from `token` (session 2's persisted `branch` — the
+ * value `steps.ts` passes straight to git with no further transformation) or from the sandbox's
+ * own `config.json`, never read back from the SAME record being validated — a
+ * `record.x === record.x` comparison would prove nothing (94-VALIDATION.md's standing rule).
+ */
+async function checkNamingConsistency(built) {
+  const violations = [];
+
+  const session1Name = built.tmux.a;
+
+  writeFileSync(
+    join(built.session1WorktreePath, "session-a.txt"),
+    "uncommitted naming-consistency check edit\n",
+    { flag: "a" },
+  );
+
+  const beforeHead = (
+    await execFileP("git", ["rev-parse", "HEAD"], {
+      cwd: built.session1WorktreePath,
+    })
+  ).stdout.trim();
+  const beforePorcelain = (
+    await execFileP("git", ["status", "--porcelain"], {
+      cwd: built.session1WorktreePath,
+    })
+  ).stdout;
+  console.log(
+    `naming-consistency: session 1 BEFORE — HEAD=${beforeHead} porcelain=${JSON.stringify(beforePorcelain)}`,
+  );
+
+  const { status, body } = await startSecondSession(built, {
+    newSession: true,
+  });
+  console.log(
+    `naming-consistency: POST /start {newSession:true} -> ${status}`,
+  );
+  if (status !== 202) {
+    violations.push(
+      `naming-consistency: POST /start returned ${status}, expected 202 (body=${JSON.stringify(body)})`,
+    );
+    return violations;
+  }
+
+  const { card: liveCard, timedOut } = await waitForSagaSettled(built, {
+    timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+  });
+  if (timedOut) {
+    violations.push(
+      `naming-consistency: saga did not settle within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (last observed card=${JSON.stringify(liveCard)})`,
+    );
+    return violations;
+  }
+  if (liveCard?.startError != null) {
+    violations.push(
+      `naming-consistency: saga recorded a startError instead of a second session: ${JSON.stringify(liveCard.startError)}`,
+    );
+    return violations;
+  }
+
+  const persisted = readCard(built.dbPath, built.cardId);
+  const persistedSessions = persisted?.sessions ?? [];
+  if (persistedSessions.length !== 2) {
+    violations.push(
+      `naming-consistency: persisted card.sessions has ${persistedSessions.length} records, expected 2`,
+    );
+    return violations;
+  }
+  const session1Record = persistedSessions.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  const session2Record = persistedSessions.find(
+    (s) => s.id !== built.sessionA.id,
+  );
+  if (!session1Record || !session2Record) {
+    violations.push(
+      `naming-consistency: could not resolve session 1 (${built.sessionA.id}) among persisted records ${JSON.stringify(persistedSessions.map((s) => s.id))}`,
+    );
+    return violations;
+  }
+
+  // The single suffix token: session 2's persisted `branch`.
+  const token = session2Record.branch;
+  const ordinal = (persisted?.nextSessionOrdinal ?? 3) - 1;
+  console.log(
+    `naming-consistency: derived token (session 2's persisted branch) = "${token}", ordinal = ${ordinal}`,
+  );
+
+  // 2. tmux name, derived from token — never compared against session2Record's own field twice.
+  const expectedTmux = `dsp-${token}`;
+  if (session2Record.tmuxSession !== expectedTmux) {
+    violations.push(
+      `naming-consistency: session 2 tmuxSession expected "${expectedTmux}" (derived from token "${token}"), got "${session2Record.tmuxSession}"`,
+    );
+  }
+
+  // 3. workspacePath, derived from the sandbox's OWN config.json workspaceRoot + token.
+  const config = JSON.parse(
+    readFileSync(join(built.home, DISPATCH_DIR_NAME, "config.json"), "utf8"),
+  );
+  const expectedWorkspacePath = join(config.workspaceRoot, token);
+  if (session2Record.workspacePath !== expectedWorkspacePath) {
+    violations.push(
+      `naming-consistency: session 2 workspacePath expected "${expectedWorkspacePath}" (config.workspaceRoot + token), got "${session2Record.workspacePath}"`,
+    );
+  }
+
+  // 4. the per-repo worktree directory on disk, derived from production's own worktreePath(), and
+  // the branch `git worktree list --porcelain` reports it attached to.
+  const { worktreePath } = await loadWorkspacePathsAdapter();
+  const expectedWtPath = worktreePath(expectedWorkspacePath, built.repoPath);
+  if (!existsSync(expectedWtPath)) {
+    violations.push(
+      `naming-consistency: session 2 worktree directory missing on disk: ${expectedWtPath}`,
+    );
+  }
+  const { stdout: porcelain } = await execFileP(
+    "git",
+    ["worktree", "list", "--porcelain"],
+    { cwd: built.repoPath },
+  );
+  const worktreeBranches = new Map();
+  let currentPath;
+  for (const line of porcelain.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      currentPath = line.slice("worktree ".length);
+    } else if (line.startsWith("branch refs/heads/") && currentPath) {
+      worktreeBranches.set(currentPath, line.slice("branch refs/heads/".length));
+    }
+  }
+  const resolvedExpectedWtPath = existsSync(expectedWtPath)
+    ? realpathSync(expectedWtPath)
+    : expectedWtPath;
+  const registeredEntry = [...worktreeBranches.entries()].find(
+    ([p]) => (existsSync(p) ? realpathSync(p) : p) === resolvedExpectedWtPath,
+  );
+  console.log(
+    `naming-consistency: git worktree list --porcelain (path -> branch) = ${JSON.stringify([...worktreeBranches.entries()])}`,
+  );
+  if (registeredEntry?.[1] !== token) {
+    violations.push(
+      `naming-consistency: \`git worktree list --porcelain\` reports branch "${registeredEntry?.[1]}" for ${expectedWtPath}, expected "${token}"`,
+    );
+  }
+
+  // 5. token derived from the monotonic ordinal, not from sessions.length.
+  const expectedToken = `${built.identifier}-${ordinal}`;
+  if (token !== expectedToken) {
+    violations.push(
+      `naming-consistency: token "${token}" does not equal "\${identifier}-\${ordinal}" = "${expectedToken}" (card.nextSessionOrdinal=${persisted?.nextSessionOrdinal})`,
+    );
+  }
+
+  // 6. session 1's three names are UNCHANGED and carry NO suffix — KEEP-02's parity break.
+  const expectedSession1Tmux = `dsp-${built.identifier}`;
+  const expectedSession1Workspace = join(
+    config.workspaceRoot,
+    built.identifier,
+  );
+  if (session1Record.tmuxSession !== expectedSession1Tmux) {
+    violations.push(
+      `naming-consistency: session 1 tmuxSession expected "${expectedSession1Tmux}" (unchanged), got "${session1Record.tmuxSession}"`,
+    );
+  }
+  if (session1Record.branch !== built.identifier) {
+    violations.push(
+      `naming-consistency: session 1 branch expected "${built.identifier}" (unchanged), got "${session1Record.branch}"`,
+    );
+  }
+  if (session1Record.workspacePath !== expectedSession1Workspace) {
+    violations.push(
+      `naming-consistency: session 1 workspacePath expected "${expectedSession1Workspace}" (unchanged), got "${session1Record.workspacePath}"`,
+    );
+  }
+  console.log(
+    `naming-consistency: session 1 names — tmuxSession=${session1Record.tmuxSession} branch=${session1Record.branch} workspacePath=${session1Record.workspacePath}`,
+  );
+  console.log(
+    `naming-consistency: session 2 names — tmuxSession=${session2Record.tmuxSession} branch=${session2Record.branch} workspacePath=${session2Record.workspacePath}`,
+  );
+
+  // 7. session 1's HEAD and porcelain status are byte-identical — starting the second never
+  // mutates the first.
+  const afterHead = (
+    await execFileP("git", ["rev-parse", "HEAD"], {
+      cwd: built.session1WorktreePath,
+    })
+  ).stdout.trim();
+  const afterPorcelain = (
+    await execFileP("git", ["status", "--porcelain"], {
+      cwd: built.session1WorktreePath,
+    })
+  ).stdout;
+  console.log(
+    `naming-consistency: session 1 AFTER — HEAD=${afterHead} porcelain=${JSON.stringify(afterPorcelain)}`,
+  );
+  if (afterHead !== beforeHead) {
+    violations.push(
+      `naming-consistency: session 1's HEAD changed — before=${beforeHead} after=${afterHead}`,
+    );
+  }
+  if (afterPorcelain !== beforePorcelain) {
+    violations.push(
+      `naming-consistency: session 1's \`git status --porcelain\` changed — before=${JSON.stringify(beforePorcelain)} after=${JSON.stringify(afterPorcelain)}`,
+    );
+  }
+
+  console.log(
+    `naming-consistency: session 1 tmux name (unchanged throughout) = ${session1Name}`,
+  );
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -7009,6 +7228,12 @@ const CHECKS = {
     withFixture(
       "second-session-isolation",
       checkSecondSessionIsolation,
+      SECOND_SESSION_FIXTURE,
+    ),
+  "naming-consistency": () =>
+    withFixture(
+      "naming-consistency",
+      checkNamingConsistency,
       SECOND_SESSION_FIXTURE,
     ),
 };
