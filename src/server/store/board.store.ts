@@ -551,6 +551,18 @@ class BoardStore extends EventEmitter {
    * still mirrors the just-cleared session. `promoteTarget` is meaningless without an explicit
    * `targetSessionId`; passing it `true` with no target is a caller bug and hits the same
    * `console.error`-and-refuse branch.
+   * @remarks `mintSibling` (Phase 94) mints a NEW session record for a card that already has an
+   * active one — the capability the pre-existing mint-on-absent branch cannot provide, since that
+   * branch fires only when `card.activeSessionId` resolves to nothing at all (a card's very first
+   * session). `mintSibling` mints unconditionally, bypassing that guard, and deliberately OMITS
+   * the `card.activeSessionId = active.id` assignment the original mint branch always makes —
+   * mint without promote, the mirror image of `promoteTarget`'s promote without mint. A reserved
+   * session must not become the active one until its saga succeeds; promotion happens later, via
+   * a separate `promoteTarget` call once the saga completes. `mintSibling` requires
+   * `targetSessionId` to be omitted — minting AND addressing an explicit target in the same call
+   * is a caller bug, refused the same way the other two guards above refuse. The method's return
+   * value (the resolved or minted record's id, `undefined` on any refusal branch) exists so a
+   * mint-only caller like `reserveNewSession` can learn the id it just minted.
    * @see docs/ARCHITECTURE.md#session-projection-chokepoint
    */
   private setActiveSession(
@@ -558,18 +570,31 @@ class BoardStore extends EventEmitter {
     patch: Partial<Omit<Session, "id" | "createdAt" | "updatedAt">>,
     targetSessionId?: string,
     promoteTarget = false,
-  ): void {
+    mintSibling = false,
+  ): string | undefined {
     if (promoteTarget && targetSessionId === undefined) {
       console.error(
         `[store] card ${card.id} — promoteTarget requires an explicit targetSessionId, refusing to project`,
       );
-      return;
+      return undefined;
+    }
+    if (mintSibling && targetSessionId !== undefined) {
+      console.error(
+        `[store] card ${card.id} — mintSibling requires targetSessionId to be omitted, refusing to project`,
+      );
+      return undefined;
     }
     const resolvedId = targetSessionId ?? card.activeSessionId;
     let active = card.sessions?.find((s) => s.id === resolvedId);
     const patchHasValue = Object.values(patch).some((v) => v !== undefined);
     let minted = false;
-    if (!active && targetSessionId === undefined && patchHasValue) {
+    if (mintSibling) {
+      const now = new Date().toISOString();
+      active = { id: randomUUID(), createdAt: now, updatedAt: now };
+      card.sessions = card.sessions ?? [];
+      card.sessions.push(active);
+      minted = true;
+    } else if (!active && targetSessionId === undefined && patchHasValue) {
       const now = new Date().toISOString();
       active = { id: randomUUID(), createdAt: now, updatedAt: now };
       card.sessions = card.sessions ?? [];
@@ -595,7 +620,7 @@ class BoardStore extends EventEmitter {
       console.error(
         `[store] card ${card.id} — no session resolves for ${targetSessionId !== undefined ? `explicit target ${targetSessionId}` : "the active pointer, but flat session fields are set"} — refusing to project`,
       );
-      return;
+      return undefined;
     }
     const mirrored = card.sessions?.find((s) => s.id === card.activeSessionId);
     card.tmuxSession = mirrored?.tmuxSession;
@@ -604,6 +629,7 @@ class BoardStore extends EventEmitter {
     card.claudeSessionId = mirrored?.claudeSessionId;
     card.workspacePath = mirrored?.workspacePath;
     card.workspace = mirrored?.workspace;
+    return active?.id;
   }
 
   /**

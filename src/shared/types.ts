@@ -147,7 +147,7 @@ export interface Card {
   workspacePath?: string;
   /** Chosen workspace snapshot at start — absolute repo paths so resume/restart/cleanup never re-read the folder registry. */
   workspace?: { folder: string; repos: { path: string; base: string }[] };
-  /** Branch name used for the ticket's worktrees. */
+  /** Branch name used for the ticket's worktrees. Mirrors the ACTIVE session's own `branch`. */
   branch?: string;
   /**
    * Pull request(s) detected for this card's branch across every repo in `card.workspace.repos`
@@ -237,6 +237,16 @@ export interface Card {
    * @see docs/ARCHITECTURE.md#session-projection-chokepoint
    */
   activeSessionId?: string;
+  /**
+   * Monotonic per-card counter naming the NEXT session's suffix (`-2`, `-3`, ...). Issued values
+   * are never reused and the counter NEVER decrements, because branches are never deleted by any
+   * path (`docs/ARCHITECTURE.md:1656`), so a `sessions.length + 1` derivation would
+   * collide with a dead sibling's surviving branch and `steps.ts` responds to an existing branch
+   * by ATTACHING to it rather than creating it. Absent on every pre-Phase-94 board; consumers read
+   * it as `card.nextSessionOrdinal ?? 2`, so the first-ever "start another" on an existing board
+   * mints ordinal 2.
+   */
+  nextSessionOrdinal?: number;
   /**
    * Wire-only projection of the session named by `activeSessionId`, populated exclusively by the
    * store's `redactCard` chokepoint and absent from the persisted row. It mirrors the same session
@@ -441,6 +451,15 @@ export interface Session {
   /** Chosen workspace snapshot at start — absolute repo paths. Mirrored onto `Card.workspace` while active. */
   workspace?: { folder: string; repos: { path: string; base: string }[] };
   /**
+   * Branch name used for THIS session's worktrees, the per-session home of {@link Card.branch} —
+   * which is now a MIRROR of the ACTIVE session's value only, written only when
+   * `resolvedId === card.activeSessionId`. Deliberately NOT one of the six flat fields
+   * `setActiveSession` projects onto `Card`, same reasoning as {@link Session.hookRoutedAt}:
+   * routing it through the shared patch would let an unrelated projection write on one session
+   * clobber a sibling's branch.
+   */
+  branch?: string;
+  /**
    * ISO timestamp of THIS session's first authenticated hook event, same shape and NON-SECRET
    * policy class as {@link Card.hookRoutedAt}. Deliberately NOT one of the six flat fields
    * `setActiveSession` projects onto `Card` — routing it through that method's patch would let the
@@ -558,6 +577,13 @@ export interface StartError {
   stderr: string;
   /** Selects the UI-SPEC copy variant for the error. */
   variant?: "config" | "branch-conflict" | "repl-timeout" | "generic";
+  /**
+   * Set when the attempt that failed carried "start another session" intent, so Retry reproduces
+   * that intent instead of silently reattaching to the card's existing (session 1) attempt. A
+   * widening of this ONE existing error channel — not a second error field; no second
+   * `StartError`-typed field exists on `Card` or `Session`.
+   */
+  newSession?: boolean;
 }
 
 /**
