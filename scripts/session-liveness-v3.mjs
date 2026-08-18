@@ -110,6 +110,18 @@
  *                                                                   proxy), branches surviving, and
  *                                                                   a cleaned session's ttyd never
  *                                                                   re-adopted after a restart
+ *   node scripts/session-liveness-v3.mjs --check cleanup-refusal   Phase 93 criterion 3: BOTH
+ *                                                                   directions of the dirty-worktree
+ *                                                                   refusal in one fixture pair — a
+ *                                                                   dirty sibling never blocks a
+ *                                                                   clean session's teardown, a clean
+ *                                                                   sibling never causes a dirty
+ *                                                                   session's teardown, the refusal
+ *                                                                   names its session and repo on the
+ *                                                                   record and the wire, and a single
+ *                                                                   fan-out click proves the partial
+ *                                                                   outcome (one torn down, one
+ *                                                                   blocked) coexist
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -4069,6 +4081,582 @@ async function checkCleanupIsolation() {
   ];
 }
 
+/**
+ * Write an uncommitted modification into the fixture's own already-committed tracked file
+ * (`session-<key>.txt`, seeded by {@link standUpFixture}) so the session's worktree is genuinely
+ * dirty under `git status --porcelain` — a modified TRACKED file, never a new untracked one, so the
+ * dirtiness is unambiguous "uncommitted work", the exact subject the criterion protects.
+ */
+function dirtyWorktree(built, key) {
+  const wtPath = built.worktreePaths[key];
+  writeFileSync(
+    join(wtPath, `session-${key}.txt`),
+    "uncommitted change from cleanup-refusal check\n",
+    { flag: "a" },
+  );
+}
+
+/**
+ * `git -C <worktreePath> status --porcelain` line count — the exact read `worktreeStatus`
+ * (`git.ts`) itself performs, so a fixture's own dirty/clean precondition is asserted through the
+ * mechanism `cleanupWorkspace`'s preflight consults, never a proxy for it.
+ */
+async function porcelainLineCount(worktreePath) {
+  const { stdout } = await execFileP("git", ["status", "--porcelain"], {
+    cwd: worktreePath,
+  });
+  return stdout.split("\n").filter((l) => l.trim() !== "").length;
+}
+
+/**
+ * `--check cleanup-refusal` direction 1 of 2 (Phase 93 criterion 3, T-93-23): a dirty sibling must
+ * NOT block a clean session's teardown. Session A is made dirty and left alone (never seeded due);
+ * session B is left clean and is the ONLY session seeded past-due, dispatched by the real scheduler
+ * exactly the way {@link checkCleanupIsolationScheduler} drives criterion 1 — a misaddressed
+ * preflight that lets A's own dirtiness leak into B's check is precisely what this direction exists
+ * to catch. Stashes `{ bTornDown, bRefused }` onto `outcome` so the combining check
+ * ({@link checkCleanupRefusal}) can assert the cross-direction "exactly one torn down, exactly one
+ * refused" claim after both directions have each run in their own fresh fixture.
+ */
+async function checkCleanupRefusalDirection1(built, outcome) {
+  const violations = [];
+  const aWt = built.worktreePaths.a;
+  const bWt = built.worktreePaths.b;
+
+  dirtyWorktree(built, "a");
+  const aDirtyCount = await porcelainLineCount(aWt);
+  const bDirtyCount = await porcelainLineCount(bWt);
+  console.log(
+    `cleanup-refusal: direction 1 PRECONDITION — A porcelain lines=${aDirtyCount} (expect >0), B porcelain lines=${bDirtyCount} (expect 0)`,
+  );
+  if (aDirtyCount === 0 || bDirtyCount !== 0) {
+    violations.push(
+      `cleanup-refusal: direction 1 PRECONDITION FAILED — A must be dirty (got ${aDirtyCount}) and B must be clean (got ${bDirtyCount}) before anything destructive runs`,
+    );
+    return violations;
+  }
+
+  const moveStatus = await moveCard(built, "done");
+  console.log(
+    `cleanup-refusal: direction 1 — POST /move to done -> ${moveStatus} (expected 204)`,
+  );
+  if (moveStatus !== 204) {
+    violations.push(
+      `cleanup-refusal: direction 1 — POST /move to done returned ${moveStatus}, expected 204`,
+    );
+    return violations;
+  }
+  await killAndWait(built.server?.child);
+  const cardAtDone = readCard(built.dbPath, built.cardId);
+  const aRecordAtDone = cardAtDone?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  const bRecordAtDone = cardAtDone?.sessions?.find(
+    (s) => s.id === built.sessionB.id,
+  );
+  if (
+    !cardAtDone ||
+    cardAtDone.column !== "done" ||
+    !aRecordAtDone ||
+    !bRecordAtDone
+  ) {
+    violations.push(
+      `cleanup-refusal: direction 1 — persisted card missing at Done arrival (column=${cardAtDone?.column}, a=${!!aRecordAtDone}, b=${!!bRecordAtDone})`,
+    );
+    return violations;
+  }
+  bRecordAtDone.cleanupDueAt = Date.now() - 5_000;
+  seedFixtureCard(built.home, cardAtDone);
+  console.log(
+    `cleanup-refusal: direction 1 — seeded ONLY B's (clean) cleanupDueAt past-due; A's (dirty) is left untouched, never due`,
+  );
+
+  const priorTickEnv = process.env.DISPATCH_CLEANUP_TICK_MS;
+  process.env.DISPATCH_CLEANUP_TICK_MS = "500";
+  try {
+    built.server = bootServer(built.home);
+    await waitForReady(built.port);
+  } finally {
+    if (priorTickEnv === undefined) delete process.env.DISPATCH_CLEANUP_TICK_MS;
+    else process.env.DISPATCH_CLEANUP_TICK_MS = priorTickEnv;
+  }
+
+  const deadline = Date.now() + CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS;
+  let settledCard;
+  let bGone = false;
+  while (Date.now() < deadline) {
+    settledCard = readCard(built.dbPath, built.cardId);
+    bGone =
+      settledCard != null &&
+      !(settledCard.sessions ?? []).some((s) => s.id === built.sessionB.id);
+    if (bGone) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `cleanup-refusal: direction 1 — scheduler settle: B gone=${bGone} within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+  );
+  outcome.bTornDown = bGone;
+  if (!bGone) {
+    violations.push(
+      `cleanup-refusal: direction 1 — session B (clean) was not torn down by the real scheduler within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms — a dirty sibling must never block a clean session's teardown`,
+    );
+  }
+
+  const registered = await gitWorktreeListRegistered(built.repoPath);
+  const bRegisteredAfter = existsSync(bWt) && registered.has(realpathSync(bWt));
+  const bDirAfter = existsSync(bWt);
+  const liveAfter = await tmuxListSessionNames();
+  const bTmuxAfter = liveAfter.includes(built.tmux.b);
+  const bListenAfter = await isPortListening(built.ttyd.b.port);
+  console.log(
+    `cleanup-refusal: direction 1 — B-SIDE (clean target) registered=${bRegisteredAfter} dir=${bDirAfter} tmux=${bTmuxAfter} ttyd=${bListenAfter}`,
+  );
+  if (bRegisteredAfter || bDirAfter || bTmuxAfter || bListenAfter) {
+    violations.push(
+      `cleanup-refusal: direction 1 — B-SIDE VIOLATED, B should have been fully torn down (registered=${bRegisteredAfter} dir=${bDirAfter} tmux=${bTmuxAfter} ttyd=${bListenAfter})`,
+    );
+  }
+  const bFinalRecord = settledCard?.sessions?.find(
+    (s) => s.id === built.sessionB.id,
+  );
+  outcome.bRefused = Boolean(bFinalRecord?.cleanupBlocked?.length);
+  if (bFinalRecord) {
+    violations.push(
+      `cleanup-refusal: direction 1 — B-SIDE VIOLATED, B's session record is still present after a successful teardown`,
+    );
+  }
+  if (outcome.bRefused) {
+    violations.push(
+      `cleanup-refusal: direction 1 — B was refused (cleanupBlocked=${JSON.stringify(bFinalRecord?.cleanupBlocked)}) despite being clean — a dirty sibling must never block a clean session's teardown`,
+    );
+  }
+  if (settledCard?.cleanupBlocked?.length) {
+    violations.push(
+      `cleanup-refusal: direction 1 — card-level cleanupBlocked is set (${JSON.stringify(settledCard.cleanupBlocked)}) though nothing should have been refused`,
+    );
+  }
+
+  const aRegisteredAfter = existsSync(aWt) && registered.has(realpathSync(aWt));
+  const aDirAfter = existsSync(aWt);
+  const aTmuxAfter = liveAfter.includes(built.tmux.a);
+  const aListenAfter = await isPortListening(built.ttyd.a.port);
+  const aDirtyAfter = existsSync(aWt) ? await porcelainLineCount(aWt) : 0;
+  const aFinalRecord = settledCard?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  console.log(
+    `cleanup-refusal: direction 1 — A-SIDE (dirty sibling, untouched) registered=${aRegisteredAfter} dir=${aDirAfter} tmux=${aTmuxAfter} ttyd=${aListenAfter} porcelainLines=${aDirtyAfter} recordPresent=${!!aFinalRecord}`,
+  );
+  if (
+    !aRegisteredAfter ||
+    !aDirAfter ||
+    !aTmuxAfter ||
+    !aListenAfter ||
+    aDirtyAfter === 0 ||
+    !aFinalRecord
+  ) {
+    violations.push(
+      `cleanup-refusal: direction 1 — A-SIDE VIOLATED, the dirty sibling was touched by cleaning B (registered=${aRegisteredAfter} dir=${aDirAfter} tmux=${aTmuxAfter} ttyd=${aListenAfter} porcelainLines=${aDirtyAfter} recordPresent=${!!aFinalRecord})`,
+    );
+  }
+
+  return violations;
+}
+
+/**
+ * `--check cleanup-refusal` direction 2 of 2 (Phase 93 criterion 3, T-93-22): a clean sibling must
+ * NOT cause a dirty session to be torn down. Runs in a FRESH fixture cycle — never direction 1's
+ * already-mutated one — so session A starts dirty again and is the ONLY session seeded past-due;
+ * session B stays clean and untouched. Proves the zero-teardown `recordCleanupBlocked` contract on
+ * disk (not just in the store) AND that the refusal names its subject — the resolved session's own
+ * `cleanupBlocked` and the wire's `sessionSummaries[].cleanupBlocked` at that session's own
+ * `ordinal`.
+ */
+async function checkCleanupRefusalDirection2(built, outcome) {
+  const violations = [];
+  const aWt = built.worktreePaths.a;
+  const bWt = built.worktreePaths.b;
+
+  dirtyWorktree(built, "a");
+  const aDirtyCountBefore = await porcelainLineCount(aWt);
+  const bDirtyCount = await porcelainLineCount(bWt);
+  console.log(
+    `cleanup-refusal: direction 2 PRECONDITION — A porcelain lines=${aDirtyCountBefore} (expect >0), B porcelain lines=${bDirtyCount} (expect 0)`,
+  );
+  if (aDirtyCountBefore === 0 || bDirtyCount !== 0) {
+    violations.push(
+      `cleanup-refusal: direction 2 PRECONDITION FAILED — A must be dirty (got ${aDirtyCountBefore}) and B must be clean (got ${bDirtyCount}) before anything destructive runs`,
+    );
+    return violations;
+  }
+
+  const moveStatus = await moveCard(built, "done");
+  console.log(
+    `cleanup-refusal: direction 2 — POST /move to done -> ${moveStatus} (expected 204)`,
+  );
+  if (moveStatus !== 204) {
+    violations.push(
+      `cleanup-refusal: direction 2 — POST /move to done returned ${moveStatus}, expected 204`,
+    );
+    return violations;
+  }
+  await killAndWait(built.server?.child);
+  const cardAtDone = readCard(built.dbPath, built.cardId);
+  const aRecordAtDone = cardAtDone?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  const bRecordAtDone = cardAtDone?.sessions?.find(
+    (s) => s.id === built.sessionB.id,
+  );
+  if (
+    !cardAtDone ||
+    cardAtDone.column !== "done" ||
+    !aRecordAtDone ||
+    !bRecordAtDone
+  ) {
+    violations.push(
+      `cleanup-refusal: direction 2 — persisted card missing at Done arrival (column=${cardAtDone?.column}, a=${!!aRecordAtDone}, b=${!!bRecordAtDone})`,
+    );
+    return violations;
+  }
+  aRecordAtDone.cleanupDueAt = Date.now() - 5_000;
+  seedFixtureCard(built.home, cardAtDone);
+  console.log(
+    `cleanup-refusal: direction 2 — seeded ONLY A's (dirty) cleanupDueAt past-due; B's (clean) is left untouched, never due`,
+  );
+
+  const priorTickEnv = process.env.DISPATCH_CLEANUP_TICK_MS;
+  process.env.DISPATCH_CLEANUP_TICK_MS = "500";
+  try {
+    built.server = bootServer(built.home);
+    await waitForReady(built.port);
+  } finally {
+    if (priorTickEnv === undefined) delete process.env.DISPATCH_CLEANUP_TICK_MS;
+    else process.env.DISPATCH_CLEANUP_TICK_MS = priorTickEnv;
+  }
+
+  const deadline = Date.now() + CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS;
+  let settledCard;
+  let aBlocked = false;
+  while (Date.now() < deadline) {
+    settledCard = readCard(built.dbPath, built.cardId);
+    const aRecord = settledCard?.sessions?.find(
+      (s) => s.id === built.sessionA.id,
+    );
+    aBlocked = Boolean(aRecord?.cleanupBlocked?.length);
+    if (aBlocked) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `cleanup-refusal: direction 2 — scheduler settle: A refused=${aBlocked} within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+  );
+  outcome.aRefused = aBlocked;
+  if (!aBlocked) {
+    violations.push(
+      `cleanup-refusal: direction 2 — session A (dirty) was NOT refused by the real scheduler within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms — a dirty session must never be torn down`,
+    );
+  }
+
+  const registered = await gitWorktreeListRegistered(built.repoPath);
+  const aRegisteredAfter = existsSync(aWt) && registered.has(realpathSync(aWt));
+  const aDirAfter = existsSync(aWt);
+  const liveAfter = await tmuxListSessionNames();
+  const aTmuxAfter = liveAfter.includes(built.tmux.a);
+  const aListenAfter = await isPortListening(built.ttyd.a.port);
+  const aDirtyCountAfter = existsSync(aWt) ? await porcelainLineCount(aWt) : 0;
+  const aFinalRecord = settledCard?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  outcome.aTornDown = !aFinalRecord;
+  console.log(
+    `cleanup-refusal: direction 2 — A-SIDE (dirty target) registered=${aRegisteredAfter} dir=${aDirAfter} tmux=${aTmuxAfter} ttyd=${aListenAfter} porcelainLines=${aDirtyCountAfter} recordPresent=${!!aFinalRecord}`,
+  );
+  if (
+    !aRegisteredAfter ||
+    !aDirAfter ||
+    !aTmuxAfter ||
+    !aListenAfter ||
+    !aFinalRecord
+  ) {
+    violations.push(
+      `cleanup-refusal: direction 2 — A-SIDE VIOLATED, the dirty target was torn down instead of refused (registered=${aRegisteredAfter} dir=${aDirAfter} tmux=${aTmuxAfter} ttyd=${aListenAfter} recordPresent=${!!aFinalRecord})`,
+    );
+  }
+  if (aDirtyCountAfter !== aDirtyCountBefore) {
+    violations.push(
+      `cleanup-refusal: direction 2 — A-SIDE VIOLATED, A's uncommitted change count changed from ${aDirtyCountBefore} to ${aDirtyCountAfter} — a refused worktree must be left exactly as it was`,
+    );
+  }
+
+  const expectedRepo = basename(built.repoPath);
+  const blockedEntry = aFinalRecord?.cleanupBlocked?.find(
+    (b) => b.repo === expectedRepo,
+  );
+  console.log(
+    `cleanup-refusal: direction 2 — REFUSAL naming (record) — cleanupBlocked=${JSON.stringify(aFinalRecord?.cleanupBlocked)}, expected repo=${expectedRepo} count=${aDirtyCountBefore}`,
+  );
+  if (!blockedEntry || blockedEntry.count !== aDirtyCountBefore) {
+    violations.push(
+      `cleanup-refusal: direction 2 — REFUSAL VIOLATED on the session record: expected cleanupBlocked to name repo "${expectedRepo}" with count ${aDirtyCountBefore}, got ${JSON.stringify(aFinalRecord?.cleanupBlocked)}`,
+    );
+  }
+
+  const wireCard = await fetchFixtureCard(built);
+  const wireSummary = wireCard?.sessionSummaries?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  console.log(
+    `cleanup-refusal: direction 2 — REFUSAL naming (wire) — sessionSummaries entry for A: ${JSON.stringify(wireSummary)}`,
+  );
+  const wireEntry = wireSummary?.cleanupBlocked?.find(
+    (b) => b.repo === expectedRepo,
+  );
+  if (
+    !wireSummary ||
+    wireSummary.ordinal == null ||
+    !wireEntry ||
+    wireEntry.count !== aDirtyCountBefore
+  ) {
+    violations.push(
+      `cleanup-refusal: direction 2 — REFUSAL VIOLATED on the wire: GET /api/board's sessionSummaries entry for A (ordinal=${wireSummary?.ordinal}) is missing a cleanupBlocked entry naming repo "${expectedRepo}" with count ${aDirtyCountBefore}, got ${JSON.stringify(wireSummary)}`,
+    );
+  }
+
+  const bRegisteredAfter = existsSync(bWt) && registered.has(realpathSync(bWt));
+  const bDirAfter = existsSync(bWt);
+  const bTmuxAfter = liveAfter.includes(built.tmux.b);
+  const bListenAfter = await isPortListening(built.ttyd.b.port);
+  const bFinalRecord = settledCard?.sessions?.find(
+    (s) => s.id === built.sessionB.id,
+  );
+  console.log(
+    `cleanup-refusal: direction 2 — B-SIDE (clean sibling, untouched) registered=${bRegisteredAfter} dir=${bDirAfter} tmux=${bTmuxAfter} ttyd=${bListenAfter} recordPresent=${!!bFinalRecord} cleanupBlocked=${JSON.stringify(bFinalRecord?.cleanupBlocked)}`,
+  );
+  if (
+    !bRegisteredAfter ||
+    !bDirAfter ||
+    !bTmuxAfter ||
+    !bListenAfter ||
+    !bFinalRecord ||
+    bFinalRecord.cleanupBlocked?.length
+  ) {
+    violations.push(
+      `cleanup-refusal: direction 2 — B-SIDE VIOLATED, the clean sibling was touched while cleaning dirty A (registered=${bRegisteredAfter} dir=${bDirAfter} tmux=${bTmuxAfter} ttyd=${bListenAfter} recordPresent=${!!bFinalRecord} cleanupBlocked=${JSON.stringify(bFinalRecord?.cleanupBlocked)})`,
+    );
+  }
+
+  return violations;
+}
+
+/**
+ * `--check cleanup-refusal` fan-out partial-failure case (Phase 93 criterion 3, T-93-25): the
+ * user's decision that the manual Clean up button tears down EVERY session on a card means a
+ * single click on a card with one dirty and one clean session must tear down the clean one and
+ * refuse the dirty one IN THE SAME CLICK, without the refusal aborting the sibling that already
+ * succeeded. Fresh fixture: A dirty, B clean, ONE `POST /cleanup {force:false}` (never the
+ * scheduler) fires the fan-out `runCleanupFanOut` (93-04) drives sequentially with a per-session
+ * try/catch — the reason a blocked/warned outcome is a terminal RETURN inside `cleanupWorkspace`
+ * rather than a throw.
+ */
+async function checkCleanupRefusalFanout(built) {
+  const violations = [];
+  const aWt = built.worktreePaths.a;
+  const bWt = built.worktreePaths.b;
+
+  dirtyWorktree(built, "a");
+  const aDirtyCountBefore = await porcelainLineCount(aWt);
+  const bDirtyCount = await porcelainLineCount(bWt);
+  console.log(
+    `cleanup-refusal: fan-out PRECONDITION — A porcelain lines=${aDirtyCountBefore} (expect >0), B porcelain lines=${bDirtyCount} (expect 0)`,
+  );
+  if (aDirtyCountBefore === 0 || bDirtyCount !== 0) {
+    violations.push(
+      `cleanup-refusal: fan-out PRECONDITION FAILED — A must be dirty (got ${aDirtyCountBefore}) and B must be clean (got ${bDirtyCount}) before anything destructive runs`,
+    );
+    return violations;
+  }
+
+  const moveStatus = await moveCard(built, "done");
+  console.log(
+    `cleanup-refusal: fan-out — POST /move to done -> ${moveStatus} (expected 204)`,
+  );
+  if (moveStatus !== 204) {
+    violations.push(
+      `cleanup-refusal: fan-out — POST /move to done returned ${moveStatus}, expected 204`,
+    );
+    return violations;
+  }
+
+  const cleanupStatus = await postCleanup(built, { force: false });
+  console.log(
+    `cleanup-refusal: fan-out — ONE POST /cleanup {force:false} -> ${cleanupStatus} (expected 202)`,
+  );
+  if (cleanupStatus !== 202) {
+    violations.push(
+      `cleanup-refusal: fan-out — POST /cleanup returned ${cleanupStatus}, expected 202`,
+    );
+    return violations;
+  }
+
+  const deadline = Date.now() + CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS;
+  let settledCard;
+  let settled = false;
+  while (Date.now() < deadline) {
+    settledCard = readCard(built.dbPath, built.cardId);
+    const bPresent = (settledCard?.sessions ?? []).some(
+      (s) => s.id === built.sessionB.id,
+    );
+    const aRecord = settledCard?.sessions?.find(
+      (s) => s.id === built.sessionA.id,
+    );
+    settled = !bPresent && Boolean(aRecord?.cleanupBlocked?.length);
+    if (settled) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `cleanup-refusal: fan-out — settle: B gone AND A refused = ${settled} within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+  );
+  if (!settled) {
+    violations.push(
+      `cleanup-refusal: fan-out — the single-click fan-out did not settle into "B torn down, A refused" within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms — final sessions=${JSON.stringify(
+        (settledCard?.sessions ?? []).map((s) => ({
+          id: s.id,
+          cleanupBlocked: s.cleanupBlocked,
+        })),
+      )}`,
+    );
+  }
+
+  const registered = await gitWorktreeListRegistered(built.repoPath);
+  const bRegisteredAfter = existsSync(bWt) && registered.has(realpathSync(bWt));
+  const bDirAfter = existsSync(bWt);
+  const liveAfter = await tmuxListSessionNames();
+  const bTmuxAfter = liveAfter.includes(built.tmux.b);
+  const bListenAfter = await isPortListening(built.ttyd.b.port);
+  const bFinalRecord = settledCard?.sessions?.find(
+    (s) => s.id === built.sessionB.id,
+  );
+  console.log(
+    `cleanup-refusal: fan-out — B (clean) settled state: registered=${bRegisteredAfter} dir=${bDirAfter} tmux=${bTmuxAfter} ttyd=${bListenAfter} recordPresent=${!!bFinalRecord}`,
+  );
+  if (
+    bRegisteredAfter ||
+    bDirAfter ||
+    bTmuxAfter ||
+    bListenAfter ||
+    bFinalRecord
+  ) {
+    violations.push(
+      `cleanup-refusal: fan-out — B was not fully torn down by the fan-out (registered=${bRegisteredAfter} dir=${bDirAfter} tmux=${bTmuxAfter} ttyd=${bListenAfter} recordPresent=${!!bFinalRecord})`,
+    );
+  }
+
+  const aRegisteredAfter = existsSync(aWt) && registered.has(realpathSync(aWt));
+  const aDirAfter = existsSync(aWt);
+  const aTmuxAfter = liveAfter.includes(built.tmux.a);
+  const aListenAfter = await isPortListening(built.ttyd.a.port);
+  const aFinalRecord = settledCard?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  const expectedRepo = basename(built.repoPath);
+  const aBlockedEntry = aFinalRecord?.cleanupBlocked?.find(
+    (b) => b.repo === expectedRepo,
+  );
+  console.log(
+    `cleanup-refusal: fan-out — A (dirty) settled state: registered=${aRegisteredAfter} dir=${aDirAfter} tmux=${aTmuxAfter} ttyd=${aListenAfter} recordPresent=${!!aFinalRecord} cleanupBlocked=${JSON.stringify(aFinalRecord?.cleanupBlocked)}`,
+  );
+  if (
+    !aRegisteredAfter ||
+    !aDirAfter ||
+    !aTmuxAfter ||
+    !aListenAfter ||
+    !aFinalRecord ||
+    !aBlockedEntry
+  ) {
+    violations.push(
+      `cleanup-refusal: fan-out — A-SIDE VIOLATED, the dirty session must stay fully alive and blocked, naming its own repo (registered=${aRegisteredAfter} dir=${aDirAfter} tmux=${aTmuxAfter} ttyd=${aListenAfter} recordPresent=${!!aFinalRecord} cleanupBlocked=${JSON.stringify(aFinalRecord?.cleanupBlocked)})`,
+    );
+  }
+
+  console.log(
+    `cleanup-refusal: fan-out — settled side by side: B={torn down=${!bFinalRecord}} A={alive=${!!aFinalRecord}, blocked=${JSON.stringify(aFinalRecord?.cleanupBlocked)}}`,
+  );
+
+  if (settledCard?.activeSessionId !== built.sessionA.id) {
+    violations.push(
+      `cleanup-refusal: fan-out — card.activeSessionId (${settledCard?.activeSessionId}) does not resolve to A's present record after the fan-out`,
+    );
+  }
+
+  const wireCard = await fetchFixtureCard(built);
+  console.log(
+    `cleanup-refusal: fan-out — wire N=1 shape: sessionSummaries=${JSON.stringify(wireCard?.sessionSummaries)} card.cleanupBlocked=${JSON.stringify(wireCard?.cleanupBlocked)}`,
+  );
+  if (wireCard?.sessionSummaries !== undefined) {
+    violations.push(
+      `cleanup-refusal: fan-out — wire VIOLATED, sessionSummaries should be ABSENT once only one session remains (N=1), got ${JSON.stringify(wireCard.sessionSummaries)}`,
+    );
+  }
+  const cardWireBlockedEntry = wireCard?.cleanupBlocked?.find(
+    (b) => b.repo === expectedRepo,
+  );
+  if (!cardWireBlockedEntry) {
+    violations.push(
+      `cleanup-refusal: fan-out — wire VIOLATED, card-level cleanupBlocked (the active-session mirror) should carry A's refusal naming repo "${expectedRepo}", got ${JSON.stringify(wireCard?.cleanupBlocked)}`,
+    );
+  }
+
+  return violations;
+}
+
+/**
+ * `--check cleanup-refusal` (Phase 93 criterion 3): three independent fixture cycles — the two
+ * cross-contamination directions plus the fan-out partial-failure case the user's "clean up tears
+ * down every session" decision created — combined into one `--check` invocation, matching the shape
+ * {@link checkCleanupIsolation} already established. The two directions run in SEPARATE fresh
+ * fixtures (direction 2 must not inherit direction 1's own mutated state); their outcomes are
+ * combined into the single cross-direction assertion that makes the pair a criterion rather than two
+ * half-checks — "across both directions, exactly one session was torn down and exactly one was
+ * refused" — which no single direction's own violations list can express on its own.
+ */
+async function checkCleanupRefusal() {
+  const outcome1 = {};
+  const violations1 = await withFixture(
+    "cleanup-refusal-direction1",
+    (built) => checkCleanupRefusalDirection1(built, outcome1),
+    WORKTREE_FIXTURE,
+  );
+  const outcome2 = {};
+  const violations2 = await withFixture(
+    "cleanup-refusal-direction2",
+    (built) => checkCleanupRefusalDirection2(built, outcome2),
+    WORKTREE_FIXTURE,
+  );
+
+  const tornDownCount =
+    (outcome1.bTornDown ? 1 : 0) + (outcome2.aTornDown ? 1 : 0);
+  const refusedCount =
+    (outcome1.bRefused ? 1 : 0) + (outcome2.aRefused ? 1 : 0);
+  console.log(
+    `cleanup-refusal: CROSS-DIRECTION — direction1(B) tornDown=${outcome1.bTornDown} refused=${outcome1.bRefused}; direction2(A) tornDown=${outcome2.aTornDown} refused=${outcome2.aRefused}; totals tornDown=${tornDownCount} refused=${refusedCount}`,
+  );
+  const crossViolations = [];
+  if (tornDownCount !== 1 || refusedCount !== 1) {
+    crossViolations.push(
+      `cleanup-refusal: CROSS-DIRECTION VIOLATED — expected exactly one session torn down and exactly one refused across both directions, got tornDown=${tornDownCount} refused=${refusedCount}`,
+    );
+  }
+
+  const outcome3 = {};
+  const violations3 = await withFixture(
+    "cleanup-refusal-fanout",
+    (built) => checkCleanupRefusalFanout(built, outcome3),
+    WORKTREE_FIXTURE,
+  );
+
+  return [...violations1, ...violations2, ...crossViolations, ...violations3];
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -4089,6 +4677,7 @@ const CHECKS = {
   "cleanup-fixture": () =>
     withFixture("cleanup-fixture", checkCleanupFixture, WORKTREE_FIXTURE),
   "cleanup-isolation": checkCleanupIsolation,
+  "cleanup-refusal": checkCleanupRefusal,
 };
 
 /**
