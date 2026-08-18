@@ -135,6 +135,20 @@
  *                                                                   double-dispatch guards, and the
  *                                                                   isStarting leg's honest
  *                                                                   NOT-DRIVABLE finding
+ *   node scripts/session-liveness-v3.mjs --check cleanup-schedule-restart
+ *                                                                   Phase 93 criterion 2: a genuine
+ *                                                                   Done arrival stamps EVERY
+ *                                                                   session, then two sessions
+ *                                                                   seeded with DIFFERENT due times
+ *                                                                   are carried across a REAL
+ *                                                                   backend restart between the
+ *                                                                   schedule and the earlier due
+ *                                                                   time — the early one fires, the
+ *                                                                   later one and its own schedule
+ *                                                                   survive untouched and are proven
+ *                                                                   live by firing it too, with a
+ *                                                                   permanent guard against the
+ *                                                                   same-due-time dead instrument
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -5828,6 +5842,386 @@ async function checkCleanupBranches() {
   return violations;
 }
 
+/**
+ * Timing budget for {@link checkCleanupScheduleRestartFalsifiability} (Phase 93 criterion 2, the
+ * FIRST entry in 93-VALIDATION.md's own Dead-Instrument Register). `EARLY_DUE_MS` must be generous
+ * enough that seeding, the first boot ("the schedule"), and the restart that happens BEFORE the due
+ * time all still complete before it elapses — the restart is the whole point of this check, not a
+ * rounding error to race against. `LATE_DUE_MS` must be far enough beyond the entire observation
+ * window (seed -> boot -> restart -> settle-poll for A) that a correct per-session scheduler
+ * genuinely cannot reach it — this check asserts the observed elapsed time is still shorter than
+ * `LATE_DUE_MS`, so "B was untouched" is never an artifact of the check finishing early.
+ * `DUE_TIME_MIN_SEPARATION_MS` is the permanent guard against the register's own named hazard: a
+ * fixture that seeds the two due times equal — or merely close together — cannot distinguish real
+ * per-session scheduling from the old per-card scheduler that happens to see one session, so the
+ * check refuses outright rather than silently passing on a non-discriminating fixture.
+ */
+const EARLY_DUE_MS = 15_000;
+const LATE_DUE_MS = 300_000;
+const DUE_TIME_MIN_SEPARATION_MS = 60_000;
+
+/**
+ * Settle margin {@link checkCleanupScheduleRestartFalsifiability} adds on top of a due timestamp
+ * before giving up on the real scheduler having dispatched it — generous relative to the 500ms tick
+ * this check runs the sandbox server with, and relative to the throwaway repo's own sub-second git
+ * subprocess latency (matches {@link CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}'s own reasoning).
+ */
+const SCHEDULE_RESTART_SETTLE_MARGIN_MS = 20_000;
+
+/**
+ * `--check cleanup-schedule-restart` PART A (the product path, Phase 93 criterion 2): a genuine
+ * Done arrival, through the real `/api/cards/:id/move` route, must stamp `cleanupDueAt` on EVERY
+ * eligible session the ticket owns — never only the active one — and the card's own flat
+ * `cleanupDueAt` mirror must equal the active session's own stamp. This is required alongside PART
+ * B's falsifiability path (93-VALIDATION.md's Interfaces note): PART B seeds two DIFFERENT due
+ * times directly, which is what makes the per-session claim falsifiable, but only PART A proves a
+ * REAL Done arrival is what produces per-session schedules in the first place.
+ */
+async function checkCleanupScheduleRestartProductPath(built) {
+  const violations = [];
+  const moveStatus = await moveCard(built, "done");
+  console.log(
+    `cleanup-schedule-restart: PART A — POST /move to done -> ${moveStatus} (expected 204)`,
+  );
+  if (moveStatus !== 204) {
+    violations.push(
+      `cleanup-schedule-restart: PART A VIOLATED — POST /move to done returned ${moveStatus}, expected 204`,
+    );
+    return violations;
+  }
+  const card = readCard(built.dbPath, built.cardId);
+  const aRecord = card?.sessions?.find((s) => s.id === built.sessionA.id);
+  const bRecord = card?.sessions?.find((s) => s.id === built.sessionB.id);
+  const activeRecord = card?.sessions?.find(
+    (s) => s.id === card.activeSessionId,
+  );
+  console.log(
+    `cleanup-schedule-restart: PART A — A.cleanupDueAt=${aRecord?.cleanupDueAt} ` +
+      `B.cleanupDueAt=${bRecord?.cleanupDueAt} card.cleanupDueAt=${card?.cleanupDueAt} ` +
+      `card.activeSessionId=${card?.activeSessionId}`,
+  );
+  if (aRecord?.cleanupDueAt == null) {
+    violations.push(
+      `cleanup-schedule-restart: PART A VIOLATED — session A carries no cleanupDueAt after a real Done arrival`,
+    );
+  }
+  if (bRecord?.cleanupDueAt == null) {
+    violations.push(
+      `cleanup-schedule-restart: PART A VIOLATED — session B carries no cleanupDueAt after a real Done ` +
+        `arrival — a Done arrival that schedules only the active session would pass this check without B stamped`,
+    );
+  }
+  if (card?.cleanupDueAt !== activeRecord?.cleanupDueAt) {
+    violations.push(
+      `cleanup-schedule-restart: PART A VIOLATED — card.cleanupDueAt (${card?.cleanupDueAt}) does not mirror ` +
+        `the active session's own cleanupDueAt (${activeRecord?.cleanupDueAt})`,
+    );
+  }
+  return violations;
+}
+
+/**
+ * `--check cleanup-schedule-restart` PART B (the falsifiability path, Phase 93 criterion 2): seeds
+ * session A and session B with two DIFFERENT due times directly into the sandbox `board.db`, with
+ * the card already `column: "done"` — never through a real Done arrival, which (PART A) stamps both
+ * at the SAME instant and therefore cannot discriminate a per-session scheduler from the old
+ * per-card one. Boots the sandbox server (the SCHEDULE), then RESTARTS it before A's due time
+ * arrives to prove the schedule survives a real process replacement rather than merely a persisted
+ * row on disk. Only after the restart does A's due time elapse; asserts A fires while B — due
+ * minutes later — is left completely untouched, its own seeded `cleanupDueAt` read back unchanged.
+ * Finally rewrites B's `cleanupDueAt` to a past value and restarts once more, proving B's schedule
+ * is genuinely LIVE rather than merely surviving with no way to ever fire.
+ */
+async function checkCleanupScheduleRestartFalsifiability(built) {
+  const violations = [];
+  const aWt = built.worktreePaths.a;
+  const bWt = built.worktreePaths.b;
+
+  // 1. Seed both sessions' due times directly, with the card already column=done.
+  await killAndWait(built.server?.child);
+  const cardBefore = readCard(built.dbPath, built.cardId);
+  const aRecordBefore = cardBefore?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  const bRecordBefore = cardBefore?.sessions?.find(
+    (s) => s.id === built.sessionB.id,
+  );
+  if (!cardBefore || !aRecordBefore || !bRecordBefore) {
+    violations.push(
+      `cleanup-schedule-restart: PART B VIOLATED — could not read back both session records before seeding ` +
+        `(card=${!!cardBefore} a=${!!aRecordBefore} b=${!!bRecordBefore})`,
+    );
+    return violations;
+  }
+  cardBefore.column = "done";
+  const scheduleStart = Date.now();
+  const earlyDueAt = scheduleStart + EARLY_DUE_MS;
+  const lateDueAt = scheduleStart + LATE_DUE_MS;
+  aRecordBefore.cleanupDueAt = earlyDueAt;
+  bRecordBefore.cleanupDueAt = lateDueAt;
+  cardBefore.cleanupDueAt = earlyDueAt;
+
+  // 2. THE PERMANENT GUARD (93-VALIDATION.md Dead-Instrument Register, row 1) — a hard,
+  //    unconditional refusal, not a soft warning: the SAME-DUE-TIME break-proof (Task 2) demonstrates
+  //    exactly what would silently pass without it.
+  const separationMs = Math.abs(lateDueAt - earlyDueAt);
+  console.log(
+    `cleanup-schedule-restart: PART B — seeded due times A=${earlyDueAt} B=${lateDueAt} ` +
+      `(separation=${separationMs}ms, minimum required=${DUE_TIME_MIN_SEPARATION_MS}ms)`,
+  );
+  if (separationMs < DUE_TIME_MIN_SEPARATION_MS) {
+    violations.push(
+      `cleanup-schedule-restart: DEAD-INSTRUMENT GUARD VIOLATED — seeded due times A=${earlyDueAt} and ` +
+        `B=${lateDueAt} differ by only ${separationMs}ms (minimum ${DUE_TIME_MIN_SEPARATION_MS}ms) — a ` +
+        `fixture this close to equal cannot distinguish real per-session scheduling from the old per-card ` +
+        `scheduler that happens to see one session (93-VALIDATION.md Dead-Instrument Register, row 1)`,
+    );
+    return violations;
+  }
+
+  seedFixtureCard(built.home, cardBefore);
+
+  const priorTickEnv = process.env.DISPATCH_CLEANUP_TICK_MS;
+  process.env.DISPATCH_CLEANUP_TICK_MS = "500";
+  try {
+    // 3. Boot the sandbox server with the fast tick — THE SCHEDULE moment. Record its pid.
+    built.server = bootServer(built.home);
+    await waitForReady(built.port);
+    const pidBeforeRestart = built.server.child.pid;
+    console.log(
+      `cleanup-schedule-restart: PART B — sandbox server booted (SCHEDULE) pid=${pidBeforeRestart}, ` +
+        `${EARLY_DUE_MS}ms until A is due`,
+    );
+
+    // 4. RESTART BETWEEN SCHEDULE AND DUE — the part the criterion is actually about.
+    if (Date.now() >= earlyDueAt) {
+      violations.push(
+        `cleanup-schedule-restart: PART B VIOLATED — A's due time already elapsed before the restart could ` +
+          `even be attempted (now=${Date.now()}, due=${earlyDueAt}) — EARLY_DUE_MS is too small on this machine`,
+      );
+      return violations;
+    }
+    await restartServer(built);
+    const pidAfterRestart = built.server.child.pid;
+    console.log(
+      `cleanup-schedule-restart: PART B — RESTART complete — pid before=${pidBeforeRestart} after=${pidAfterRestart}`,
+    );
+    if (pidAfterRestart == null || pidAfterRestart === pidBeforeRestart) {
+      violations.push(
+        `cleanup-schedule-restart: RESTART VIOLATED — pid before (${pidBeforeRestart}) and after ` +
+          `(${pidAfterRestart}) are the same — a "restart" that did not replace the process proves nothing`,
+      );
+      return violations;
+    }
+    if (Date.now() >= earlyDueAt) {
+      violations.push(
+        `cleanup-schedule-restart: PART B VIOLATED — A's due time elapsed DURING the restart itself ` +
+          `(now=${Date.now()}, due=${earlyDueAt}) — the restart did not happen between schedule and due, ` +
+          `so this run cannot prove the criterion; widen EARLY_DUE_MS`,
+      );
+      return violations;
+    }
+
+    // 5. Poll for A's teardown, bounded by A's own due time plus a generous settle margin.
+    const settleDeadline = earlyDueAt + SCHEDULE_RESTART_SETTLE_MARGIN_MS;
+    let settledCard;
+    let aGone = false;
+    while (Date.now() < settleDeadline) {
+      settledCard = readCard(built.dbPath, built.cardId);
+      aGone =
+        settledCard != null &&
+        !(settledCard.sessions ?? []).some((s) => s.id === built.sessionA.id);
+      if (aGone) break;
+      await sleep(POLL_INTERVAL_MS);
+    }
+    const elapsedMs = Date.now() - scheduleStart;
+    console.log(
+      `cleanup-schedule-restart: PART B — A gone=${aGone}, elapsed since schedule=${elapsedMs}ms ` +
+        `(LATE_DUE_MS=${LATE_DUE_MS}ms)`,
+    );
+    if (!aGone) {
+      violations.push(
+        `cleanup-schedule-restart: PART B VIOLATED — session A (due at ${earlyDueAt}) was not torn down by ` +
+          `${settleDeadline} (now=${Date.now()}) — a schedule that does not survive a real restart between ` +
+          `schedule and due is exactly what this check exists to catch`,
+      );
+      return violations;
+    }
+
+    // 6. THE ELAPSED-TIME ASSERTION — "B was untouched" must not be an artifact of this check
+    //    finishing early relative to B's own due time.
+    if (elapsedMs >= LATE_DUE_MS) {
+      violations.push(
+        `cleanup-schedule-restart: PART B VIOLATED — the observation window (${elapsedMs}ms) already reached ` +
+          `LATE_DUE_MS (${LATE_DUE_MS}ms) — "B was untouched" would be meaningless if B's own due time could ` +
+          `already have elapsed`,
+      );
+      return violations;
+    }
+
+    // 7. A-SIDE — torn down.
+    const registered = await gitWorktreeListRegistered(built.repoPath);
+    const aRegisteredAfter =
+      existsSync(aWt) && registered.has(realpathSync(aWt));
+    const aDirAfter = existsSync(aWt);
+    const liveAfter = await tmuxListSessionNames();
+    const aTmuxAfter = liveAfter.includes(built.tmux.a);
+    const aListenAfter = await isPortListening(built.ttyd.a.port);
+    console.log(
+      `cleanup-schedule-restart: A-SIDE (torn down) — registered=${aRegisteredAfter} dir=${aDirAfter} ` +
+        `tmux=${aTmuxAfter} ttyd(${built.ttyd.a.port})=${aListenAfter}`,
+    );
+    if (aRegisteredAfter) {
+      violations.push(
+        `cleanup-schedule-restart: A-SIDE VIOLATED — A's worktree ${aWt} is still registered in ` +
+          `\`git worktree list\` after its own due time`,
+      );
+    }
+    if (aDirAfter) {
+      violations.push(
+        `cleanup-schedule-restart: A-SIDE VIOLATED — A's worktree directory ${aWt} still exists on disk`,
+      );
+    }
+    if (aTmuxAfter) {
+      violations.push(
+        `cleanup-schedule-restart: A-SIDE VIOLATED — A's tmux session ${built.tmux.a} is still live`,
+      );
+    }
+    if (aListenAfter) {
+      violations.push(
+        `cleanup-schedule-restart: A-SIDE VIOLATED — A's ttyd port ${built.ttyd.a.port} is still LISTENING`,
+      );
+    }
+
+    // 8. B-SIDE — entirely untouched, its schedule intact.
+    const bRegisteredAfter =
+      existsSync(bWt) && registered.has(realpathSync(bWt));
+    const bDirAfter = existsSync(bWt);
+    const bTmuxAfter = liveAfter.includes(built.tmux.b);
+    const bListenAfter = await isPortListening(built.ttyd.b.port);
+    const bRecordAfter = settledCard?.sessions?.find(
+      (s) => s.id === built.sessionB.id,
+    );
+    console.log(
+      `cleanup-schedule-restart: B-SIDE (untouched) — registered=${bRegisteredAfter} dir=${bDirAfter} ` +
+        `tmux=${bTmuxAfter} ttyd(${built.ttyd.b.port})=${bListenAfter} cleanupDueAt=${bRecordAfter?.cleanupDueAt} ` +
+        `(seeded=${lateDueAt})`,
+    );
+    if (!bRegisteredAfter) {
+      violations.push(
+        `cleanup-schedule-restart: B-SIDE VIOLATED — B's worktree ${bWt} is no longer registered in ` +
+          `\`git worktree list\` after cleaning A — the later session was torn down early`,
+      );
+    }
+    if (!bDirAfter) {
+      violations.push(
+        `cleanup-schedule-restart: B-SIDE VIOLATED — B's worktree directory ${bWt} no longer exists on disk`,
+      );
+    }
+    if (!bTmuxAfter) {
+      violations.push(
+        `cleanup-schedule-restart: B-SIDE VIOLATED — B's tmux session ${built.tmux.b} is no longer live`,
+      );
+    }
+    if (!bListenAfter) {
+      violations.push(
+        `cleanup-schedule-restart: B-SIDE VIOLATED — B's ttyd port ${built.ttyd.b.port} is no longer LISTENING`,
+      );
+    }
+    if (!bRecordAfter) {
+      violations.push(
+        `cleanup-schedule-restart: B-SIDE VIOLATED — B's session record is missing entirely after cleaning A`,
+      );
+    } else if (bRecordAfter.cleanupDueAt !== lateDueAt) {
+      violations.push(
+        `cleanup-schedule-restart: B-SIDE VIOLATED — B's cleanupDueAt changed from the seeded ${lateDueAt} to ` +
+          `${bRecordAfter.cleanupDueAt} — a schedule must not be cleared, re-minted, or advanced by cleaning ` +
+          `a sibling`,
+      );
+    }
+    if (violations.length > 0) return violations;
+
+    // 9. B's schedule is LIVE, not merely surviving: rewrite it to a past value and prove it fires on
+    //    a subsequent tick, through one more real restart.
+    const cardForBSweep = readCard(built.dbPath, built.cardId);
+    const bRecordForSweep = cardForBSweep?.sessions?.find(
+      (s) => s.id === built.sessionB.id,
+    );
+    if (!cardForBSweep || !bRecordForSweep) {
+      violations.push(
+        `cleanup-schedule-restart: PART B VIOLATED — could not read back B's record before the final sweep`,
+      );
+      return violations;
+    }
+    const bPastDueAt = Date.now() - 5_000;
+    bRecordForSweep.cleanupDueAt = bPastDueAt;
+    cardForBSweep.cleanupDueAt = bPastDueAt;
+    await killAndWait(built.server.child);
+    seedFixtureCard(built.home, cardForBSweep);
+    console.log(
+      `cleanup-schedule-restart: PART B — B's cleanupDueAt adversarially rewritten to a past value ` +
+        `(${bPastDueAt}), restarting once more to prove the schedule fires`,
+    );
+    built.server = bootServer(built.home);
+    await waitForReady(built.port);
+
+    const finalDeadline = Date.now() + SCHEDULE_RESTART_SETTLE_MARGIN_MS;
+    let bGone = false;
+    while (Date.now() < finalDeadline) {
+      const finalCard = readCard(built.dbPath, built.cardId);
+      bGone =
+        finalCard != null &&
+        !(finalCard.sessions ?? []).some((s) => s.id === built.sessionB.id);
+      if (bGone) break;
+      await sleep(POLL_INTERVAL_MS);
+    }
+    console.log(
+      `cleanup-schedule-restart: PART B — B's own eventual teardown — gone=${bGone} within ` +
+        `${SCHEDULE_RESTART_SETTLE_MARGIN_MS}ms of the final restart`,
+    );
+    if (!bGone) {
+      violations.push(
+        `cleanup-schedule-restart: PART B VIOLATED — B was never torn down on its own due time — a schedule ` +
+          `that survives a restart but never fires is not a schedule`,
+      );
+    }
+  } finally {
+    if (priorTickEnv === undefined) delete process.env.DISPATCH_CLEANUP_TICK_MS;
+    else process.env.DISPATCH_CLEANUP_TICK_MS = priorTickEnv;
+  }
+
+  return violations;
+}
+
+/**
+ * `--check cleanup-schedule-restart` (Phase 93 criterion 2): PART A proves a genuine Done arrival
+ * stamps `cleanupDueAt` on EVERY session a ticket owns, in a fresh fixture cycle. PART B, in ANOTHER
+ * fresh fixture cycle, seeds two sessions with genuinely DIFFERENT due times directly into the
+ * sandbox `board.db`, restarts the real backend BETWEEN the schedule and the earlier due time, and
+ * proves the earlier session fires while the later one — and its own schedule — survive untouched,
+ * then proves that surviving schedule is genuinely live by adversarially firing it through one more
+ * restart. Both facts are required in the same run: neither alone settles criterion 2
+ * (93-VALIDATION.md's own Interfaces note).
+ */
+async function checkCleanupScheduleRestart() {
+  const violations = [];
+  violations.push(
+    ...(await withFixture(
+      "cleanup-schedule-restart-product-path",
+      checkCleanupScheduleRestartProductPath,
+      WORKTREE_FIXTURE,
+    )),
+  );
+  violations.push(
+    ...(await withFixture(
+      "cleanup-schedule-restart-falsifiability",
+      checkCleanupScheduleRestartFalsifiability,
+      WORKTREE_FIXTURE,
+    )),
+  );
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -5850,6 +6244,7 @@ const CHECKS = {
   "cleanup-isolation": checkCleanupIsolation,
   "cleanup-refusal": checkCleanupRefusal,
   "cleanup-branches": checkCleanupBranches,
+  "cleanup-schedule-restart": checkCleanupScheduleRestart,
 };
 
 /**
