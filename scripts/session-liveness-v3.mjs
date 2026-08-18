@@ -78,6 +78,11 @@
  *                                                                   proxy returns the pane's own
  *                                                                   marker text — plan 02 extends this
  *                                                                   to the two-sibling isolation claim
+ *   node scripts/session-liveness-v3.mjs --check orphan-sweep      TERM-05/C6: a REAL ttyd carrying
+ *                                                                   the pre-92 fingerprint is swept on
+ *                                                                   the next boot, while the fixture's
+ *                                                                   own two current-revision ttyd are
+ *                                                                   spared and still serve pane content
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -550,6 +555,49 @@ async function waitForPortListening(port, timeoutMs = LISTEN_POLL_TIMEOUT_MS) {
   );
 }
 
+/** True while `pid` still answers a signal-0 existence probe (ESRCH means it is gone). */
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Poll {@link pidAlive} until `pid` is gone or `timeoutMs` elapses. A timeout resolves `false` —
+ * the caller decides whether that is a violation, this primitive only measures.
+ */
+async function waitForPidGone(pid, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!pidAlive(pid)) return true;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return false;
+}
+
+/**
+ * Full `ps -p <pid> -o pid=,command=` line for a diagnostic — the exact surviving-process evidence
+ * a sweep-direction violation must name, not just its bare pid. A pid `ps` can no longer find by
+ * the time this reads it is itself informative (a lost race with the sweep), so that case reports a
+ * placeholder rather than throwing.
+ */
+async function psLineFor(pid) {
+  try {
+    const { stdout } = await execFileP("ps", [
+      "-p",
+      String(pid),
+      "-o",
+      "pid=,command=",
+    ]);
+    return stdout.trim() || `(pid ${pid} not found by ps)`;
+  } catch {
+    return `(pid ${pid} not found by ps)`;
+  }
+}
+
 /**
  * Spawn one real ttyd with the EXACT argv `spawnTtyd` (`ttyd.ts`) uses — including the
  * `-t DISPATCH_TTYD_REVISION_6=1` retained key, without which boot-time `adoptAndSweep` cannot mark
@@ -609,6 +657,73 @@ function spawnTtyd(session, sessionId) {
       clearTimeout(timer);
       reject(
         new Error(`ttyd exited early (code ${code}) for ${session}: ${buf}`),
+      );
+    });
+  });
+}
+
+/**
+ * Spawn one REAL ttyd carrying the PRE-92 fingerprint on purpose: the retained key literal
+ * `DISPATCH_TTYD_REVISION_5=1` (one revision behind {@link TTYD_REVISION_RETAINED_KEY}) and a
+ * CARD-keyed `-b` base path (`/sessions/<cardId>/terminal`, the shape every ttyd carried before
+ * PROXY-01 moved the base path to a session id). Deliberately NOT a call to {@link spawnTtyd} with
+ * an older argument — the whole point of `--check orphan-sweep` is a process the CURRENT build
+ * must classify as incompatible, so the old argv shape is spelled out here, standalone, rather than
+ * threaded through the harness's own re-keyed spawn path.
+ */
+function spawnOrphanTtyd(session, cardId) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "ttyd",
+      [
+        "-W",
+        "-i",
+        "127.0.0.1",
+        "-p",
+        "0",
+        "-b",
+        `/sessions/${cardId}/terminal`,
+        "-t",
+        "disableLeaveAlert=true",
+        "-t",
+        "DISPATCH_TTYD_REVISION_5=1",
+        "tmux",
+        "-u",
+        "attach",
+        "-t",
+        `=${session}`,
+      ],
+      { detached: true, stdio: ["ignore", "ignore", "pipe"] },
+    );
+    let buf = "";
+    const timer = setTimeout(() => {
+      reject(
+        new Error(
+          `orphan ttyd port not reported within ${PORT_PARSE_TIMEOUT_MS}ms for ${session}`,
+        ),
+      );
+    }, PORT_PARSE_TIMEOUT_MS);
+    const onData = (d) => {
+      buf += d.toString();
+      const m = buf.match(/Listening on port:\s*(\d+)/);
+      if (m) {
+        clearTimeout(timer);
+        child.stderr?.off("data", onData);
+        child.unref();
+        resolve({ child, port: Number(m[1]) });
+      }
+    };
+    child.stderr?.on("data", onData);
+    child.once("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      reject(
+        new Error(
+          `orphan ttyd exited early (code ${code}) for ${session}: ${buf}`,
+        ),
       );
     });
   });
@@ -888,6 +1003,27 @@ async function tearDownFixture(built, violations) {
     if (built.tmux[key]) await tmuxKillSession(built.tmux[key]);
   }
 
+  if (built.orphan) {
+    if (built.orphan.child) {
+      try {
+        built.orphan.child.kill("SIGTERM");
+      } catch {
+        // already gone
+      }
+    }
+    await sleep(300);
+    if (await isPortListening(built.orphan.port)) {
+      for (const pid of await pidsListeningOnPort(built.orphan.port)) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // already gone
+        }
+      }
+    }
+    if (built.orphan.tmuxName) await tmuxKillSession(built.orphan.tmuxName);
+  }
+
   if (built.home && existsSync(built.home)) {
     rmSync(built.home, { recursive: true, force: true });
   }
@@ -907,6 +1043,11 @@ async function tearDownFixture(built, violations) {
         `teardown: ttyd port ${t.port} (session ${key}) still LISTENING after kill`,
       );
     }
+  }
+  if (built.orphan && (await isPortListening(built.orphan.port))) {
+    violations.push(
+      `teardown: planted orphan ttyd port ${built.orphan.port} still LISTENING after kill`,
+    );
   }
   if (await isPortListening(built.port)) {
     violations.push(
@@ -2313,6 +2454,150 @@ async function checkProxyAddressing(built) {
   return violations;
 }
 
+/**
+ * `--check orphan-sweep` (`TERM-05`, criterion 6): the sweep fingerprint is proven, not read from
+ * the source. Plants a REAL ttyd carrying the pre-92 fingerprint ({@link spawnOrphanTtyd} — old
+ * revision key, card-keyed base path) alongside the fixture's own two current-revision ttyd, then
+ * restarts the sandbox server (which runs `reconcileSessions()`/`adoptAndSweep` unconditionally at
+ * boot, T-92-10) and asserts BOTH directions in the SAME run:
+ *   - SWEEP: the planted orphan's pid is gone after the restart.
+ *   - SPARE: the fixture's own two ttyd — current revision, session-keyed base path, still attached
+ *     to live fixture tmux sessions — keep the SAME lsof-resolved pid across the restart (re-adopted,
+ *     not respawned, and certainly not swept) and still serve their own pane content through the
+ *     proxy.
+ * A check that only proved one direction would pass a build that sweeps indiscriminately (the spare
+ * direction stays silent) or a build that sweeps nothing at all (the sweep direction stays silent) —
+ * `92-03-PLAN.md`'s three named breaks exercise exactly these blind spots.
+ * @remarks The planted orphan's tmux session and ttyd are registered onto `built.orphan` so
+ * {@link tearDownFixture} reaps them the same way it reaps the fixture's own two sessions, even when
+ * this function throws or returns early on a setup violation — a failed run must never leave a
+ * stray ttyd behind.
+ */
+async function checkOrphanSweep(built) {
+  const violations = [];
+
+  const orphanTmuxName = `${built.tmuxPrefix}orphan`;
+  await tmuxNewSession(orphanTmuxName, built.home);
+  const orphan = await spawnOrphanTtyd(orphanTmuxName, built.cardId);
+  built.orphan = {
+    tmuxName: orphanTmuxName,
+    child: orphan.child,
+    port: orphan.port,
+  };
+  await waitForPortListening(orphan.port);
+
+  const orphanPid = orphan.child.pid;
+  const orphanAliveBefore = await isPortListening(orphan.port);
+  console.log(
+    `orphan-sweep: planted orphan pid=${orphanPid} port=${orphan.port} tmux=${orphanTmuxName} ` +
+      `fingerprint=pre-92 (DISPATCH_TTYD_REVISION_5, card-keyed -b) listening=${orphanAliveBefore}`,
+  );
+  if (orphanPid == null || !orphanAliveBefore) {
+    violations.push(
+      `orphan-sweep: setup failure — planted orphan (pid=${orphanPid}) is not alive/LISTENING on ` +
+        `port ${orphan.port} before the restart; this is a harness setup violation, not the sweep ` +
+        `under test`,
+    );
+    return violations;
+  }
+
+  const pidBeforeA = (await pidsListeningOnPort(built.ttyd.a.port))[0];
+  const pidBeforeB = (await pidsListeningOnPort(built.ttyd.b.port))[0];
+  console.log(
+    `orphan-sweep: before restart — fixture A port ${built.ttyd.a.port} pid=${pidBeforeA}, ` +
+      `fixture B port ${built.ttyd.b.port} pid=${pidBeforeB}`,
+  );
+  if (pidBeforeA == null || pidBeforeB == null) {
+    violations.push(
+      `orphan-sweep: could not resolve a pre-restart lsof PID for both fixture ttyd ports — cannot ` +
+        `prove the spare direction`,
+    );
+    return violations;
+  }
+
+  await restartServer(built);
+
+  const sweptWithinTimeout = await waitForPidGone(
+    orphanPid,
+    LISTEN_POLL_TIMEOUT_MS,
+  );
+  if (!sweptWithinTimeout) {
+    const line = await psLineFor(orphanPid);
+    violations.push(
+      `orphan-sweep: SWEEP DIRECTION FAILED — planted orphan pid ${orphanPid} still alive ` +
+        `${LISTEN_POLL_TIMEOUT_MS}ms after the boot restart, expected swept as incompatible ` +
+        `(pre-92 fingerprint): ${line}`,
+    );
+  } else {
+    console.log(
+      `orphan-sweep: SWEEP DIRECTION — planted orphan pid ${orphanPid} confirmed gone after the ` +
+        `restart's reconcileSessions()`,
+    );
+  }
+
+  const pidAfterA = (await pidsListeningOnPort(built.ttyd.a.port))[0];
+  const pidAfterB = (await pidsListeningOnPort(built.ttyd.b.port))[0];
+  console.log(
+    `orphan-sweep: after restart — fixture A port ${built.ttyd.a.port} pid=${pidAfterA}, ` +
+      `fixture B port ${built.ttyd.b.port} pid=${pidAfterB}`,
+  );
+  if (pidAfterA !== pidBeforeA) {
+    violations.push(
+      `orphan-sweep: SPARE DIRECTION FAILED — fixture session A's port ${built.ttyd.a.port} lsof ` +
+        `PID changed across restart — before=${pidBeforeA} after=${pidAfterA} (a spared ttyd must ` +
+        `be RE-ADOPTED, not respawned, and definitely not swept)`,
+    );
+  }
+  if (pidAfterB !== pidBeforeB) {
+    violations.push(
+      `orphan-sweep: SPARE DIRECTION FAILED — fixture session B's port ${built.ttyd.b.port} lsof ` +
+        `PID changed across restart — before=${pidBeforeB} after=${pidAfterB} (a spared ttyd must ` +
+        `be RE-ADOPTED, not respawned, and definitely not swept)`,
+    );
+  }
+
+  const markerA = `orphan-sweep-${built.port}-a-${randomBytes(4).toString("hex")}`;
+  const markerB = `orphan-sweep-${built.port}-b-${randomBytes(4).toString("hex")}`;
+  await writePaneMarker(built.tmux.a, built.home, markerA);
+  await writePaneMarker(built.tmux.b, built.home, markerB);
+
+  const resultA = await readPaneThroughProxy({
+    port: built.port,
+    idSegment: built.sessionA.id,
+    expect: markerA,
+    timeoutMs: PROXY_READ_TIMEOUT_MS,
+  });
+  console.log(
+    `orphan-sweep: spare direction content read — session A (${built.sessionA.id}) ` +
+      `opened=${resultA.opened} containsOwn=${resultA.text.includes(markerA)}`,
+  );
+  if (!resultA.opened || !resultA.text.includes(markerA)) {
+    violations.push(
+      `orphan-sweep: SPARE DIRECTION FAILED — session A's proxy path did not yield its own marker ` +
+        `"${markerA}" after the restart (opened=${resultA.opened}, closeCode=${resultA.closeCode})`,
+    );
+  }
+
+  const resultB = await readPaneThroughProxy({
+    port: built.port,
+    idSegment: built.sessionB.id,
+    expect: markerB,
+    timeoutMs: PROXY_READ_TIMEOUT_MS,
+  });
+  console.log(
+    `orphan-sweep: spare direction content read — session B (${built.sessionB.id}) ` +
+      `opened=${resultB.opened} containsOwn=${resultB.text.includes(markerB)}`,
+  );
+  if (!resultB.opened || !resultB.text.includes(markerB)) {
+    violations.push(
+      `orphan-sweep: SPARE DIRECTION FAILED — session B's proxy path did not yield its own marker ` +
+        `"${markerB}" after the restart (opened=${resultB.opened}, closeCode=${resultB.closeCode})`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -2326,6 +2611,7 @@ const CHECKS = {
     withFixture("single-session", checkSingleSession, SINGLE_SESSION_FIXTURE),
   "proxy-addressing": () =>
     withFixture("proxy-addressing", checkProxyAddressing),
+  "orphan-sweep": () => withFixture("orphan-sweep", checkOrphanSweep),
 };
 
 /**
