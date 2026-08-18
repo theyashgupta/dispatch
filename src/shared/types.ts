@@ -528,6 +528,12 @@ export interface SessionSummary {
   ordinal: number;
   /** True when `Session.tmuxSession` is absent — this sibling's own terminal is dead. */
   lost: boolean;
+  /**
+   * Mirrors {@link Session.cleanupBlocked} for THIS session. Absent when this session is not
+   * blocked — same absent-means-nothing-to-report idiom as `sessionSummaries` itself, which is
+   * absent at N<=1, so a single-session ticket's wire shape carries this field nowhere at all.
+   */
+  cleanupBlocked?: { repo: string; count: number }[];
 }
 
 /**

@@ -443,13 +443,42 @@ cardsRouter.post("/cards/:id/cleanup", (req, res) => {
 
   const force = (req.body as { force?: unknown } | undefined)?.force === true;
   store.beginCleanup(id);
-  void cleanupWorkspace(id, undefined, { force })
-    .catch((err) => {
-      console.error(`[cleanup] failed for card ${id}:`, (err as Error).message);
-    })
-    .finally(() => store.endCleanup(id));
+  void runCleanupFanOut(id, force).finally(() => store.endCleanup(id));
   res.status(202).json({ cleaning: true });
 });
+
+/**
+ * Fans a single manual `/cleanup` click out over EVERY session the card owns (USER DECISION,
+ * `93-CONTEXT.md`): one mental model for "clean up this ticket", matching what reaching Done
+ * already schedules. Deliberately sequential (never `Promise.all`) with a per-session `try/catch`
+ * so a throw from one session's teardown cannot abort siblings that already succeeded — the
+ * blocked and warned outcomes are recorded terminal branches inside `cleanupWorkspace` that return
+ * normally, not throws, so partial success falls out of the loop naturally. The card and its
+ * session list are re-read fresh on every iteration because the card can leave Done mid-fan-out
+ * and a session can already have been removed by the scheduler's own concurrent tick. The
+ * in-flight guard (`beginCleanup`/`endCleanup`) stays card-scoped for the WHOLE fan-out by locked
+ * decision, so it is begun/ended once by the caller, not per iteration.
+ */
+async function runCleanupFanOut(id: string, force: boolean): Promise<void> {
+  const card = store.getCard(id);
+  const sessionIds = (card?.sessions ?? []).map((s) => s.id);
+  const targets: (string | undefined)[] =
+    sessionIds.length > 0 ? sessionIds : [undefined];
+  for (const sid of targets) {
+    const fresh = store.getCard(id);
+    if (!fresh || fresh.column !== "done") break;
+    if (sid !== undefined && !fresh.sessions?.some((s) => s.id === sid))
+      continue;
+    try {
+      await cleanupWorkspace(id, sid, { force });
+    } catch (err) {
+      console.error(
+        `[cleanup] failed for card ${id}, session ${sid ?? "(active)"}:`,
+        (err as Error).message,
+      );
+    }
+  }
+}
 
 /**
  * Server-side re-validation for a `POST /cards/group` member id: the client's `GroupStartModal`

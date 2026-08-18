@@ -102,7 +102,7 @@ export function compareDoneOrder(a: Card, b: Card): number {
  * session by `card.activeSessionId` and, when one resolves, FIELD-PICK exactly the six
  * `ActiveSessionWire` keys onto `wireCard.activeSession` — never spread the session object, so the
  * secret is omitted by construction and a future field added to `Session` cannot leak through this
- * path; (4) at two or more sessions, FIELD-PICK the same three `SessionSummary` keys per session
+ * path; (4) at two or more sessions, FIELD-PICK the same four `SessionSummary` keys per session
  * onto `wireCard.sessionSummaries`, sorted by `createdAt` ascending, following the identical
  * never-spread discipline as `activeSession`. Operates on the shallow copy only; never mutates the
  * source card's `sessions` array or any session object.
@@ -133,6 +133,7 @@ export function redactCard(card: Card): Card {
             id: s.id,
             ordinal: i + 1,
             lost: s.tmuxSession == null,
+            cleanupBlocked: s.cleanupBlocked,
           }))
       : undefined;
   return wireCard;
