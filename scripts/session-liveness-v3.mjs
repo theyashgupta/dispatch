@@ -359,6 +359,15 @@ const SECOND_SESSION_FIXTURE = {
  */
 const SECOND_SESSION_SAGA_TIMEOUT_MS = 20_000;
 
+/**
+ * Ceiling for {@link checkSecondStartRollbackDirection2}'s wait on a forced restart failure.
+ * Deliberately longer than `steps.ts`'s own `READINESS_TIMEOUT_MS` (30s): once the prefix-match
+ * silent-success trap (this direction's own doc comment) rules out every faster failure path, the
+ * only remaining route to `startClaude.undo` is `awaitReplReady`'s own hardcoded 30s deadline, so
+ * this ceiling must comfortably outlive it rather than race it.
+ */
+const RESTART_REPL_TIMEOUT_SETTLE_MS = 35_000;
+
 const POLL_INTERVAL_MS = 100;
 const READY_TIMEOUT_MS = 30_000;
 const KILL_TIMEOUT_MS = 5_000;
@@ -1095,6 +1104,44 @@ function writeStubClaudeBinary(home) {
       "esac\n" +
       "echo 'bypass permissions on (shift+tab to cycle)'\n" +
       "while true; do sleep 3600; done\n",
+    { mode: 0o755 },
+  );
+  return binDir;
+}
+
+/**
+ * Overwrite the stub `claude` binary IN PLACE (same path {@link writeStubClaudeBinary} planted, so
+ * no `PATH` change is needed) with a variant that EXITS IMMEDIATELY instead of blocking forever.
+ * Used by {@link checkSecondStartRollbackDirection2} as the forced-failure vehicle: tmux's default
+ * `remain-on-exit off` destroys a session the instant its sole pane's process exits, so the
+ * session `startClaude.run` just created dies within tens of milliseconds of being created —
+ * driven entirely by the product's own internal timing, before `awaitReplReady`'s own poll can
+ * ever read its genuine exact-match pane. Live-verified (94-07-SUMMARY.md Deviations): once the
+ * exact match is absent, EVERY `-t`-targeted tmux command this codebase's `steps.ts` issues with a
+ * bare (non-`=`) target — `capturePane`, and (confirmed by direct reproduction) `paste-buffer` and
+ * `send-keys` too — silently PREFIX-MATCHES onto the live suffixed sibling and reports SUCCESS
+ * rather than throwing; none of `sendKickoff`'s own tmux calls can therefore ever surface this
+ * absence as an exception. The only step immune to that silent-success trap is
+ * `awaitReplReady`'s own hardcoded 30s `READINESS_TIMEOUT_MS` wall-clock deadline, which fires
+ * regardless of what `capturePane` returns and throws a genuine `StartStepError("starting claude",
+ * ..., "repl-timeout")` — the deterministic (if slow) route to `startClaude.undo` this direction
+ * relies on. An already-running session (e.g. session 2 from an earlier `newSession` call under
+ * the ORIGINAL stub) is unaffected: its process already exec'd the old script's bytes into memory
+ * before this overwrite.
+ */
+function writeExitingStubClaudeBinary(home) {
+  const binDir = join(home, "bin");
+  const claudePath = join(binDir, "claude");
+  writeFileSync(
+    claudePath,
+    "#!/bin/sh\n" +
+      'case " $* " in\n' +
+      '  *" --version "*)\n' +
+      '    echo "1.0.0 (Claude Code)"\n' +
+      "    exit 0\n" +
+      "    ;;\n" +
+      "esac\n" +
+      "exit 0\n",
     { mode: 0o755 },
   );
   return binDir;
@@ -7326,6 +7373,659 @@ async function checkReserveCoalesce(built) {
   return violations;
 }
 
+/**
+ * Count field declarations of type `StartError` inside one top-level `export interface <name> {
+ * ... }` block of `source`, by brace-depth scanning from the interface's own opening brace to its
+ * matching close — never a whole-file `grep`, so a `StartError` mention inside another interface
+ * or a JSDoc comment can never inflate the count for `name`.
+ */
+function countStartErrorFieldsInInterface(source, name) {
+  const openMarker = `export interface ${name} {`;
+  const markerStart = source.indexOf(openMarker);
+  if (markerStart === -1) {
+    throw new Error(
+      `countStartErrorFieldsInInterface: "${openMarker}" not found in types.ts`,
+    );
+  }
+  let depth = 1;
+  let i = markerStart + openMarker.length;
+  for (; i < source.length && depth > 0; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}") depth--;
+  }
+  const body = source.slice(markerStart + openMarker.length, i - 1);
+  return (body.match(/:\s*StartError\b/g) ?? []).length;
+}
+
+/**
+ * The wire-shape assertion shared by both directions (C3's own "no second `startError`-shaped
+ * field entered `Card` or `Session`"): reads `src/shared/types.ts` fresh off disk and counts
+ * `StartError`-typed fields per interface, rather than grepping for the substring "error" (which
+ * would also match `TerminalError`, `resumeError`, etc.) or comparing against a hardcoded count
+ * with no attribution to WHICH field. `StartError.newSession` (Phase 94) is a widening of the one
+ * existing `Card.startError` channel, not a second channel — stated explicitly here rather than
+ * merely assumed.
+ */
+function checkStartErrorWireShape(label) {
+  const violations = [];
+  const source = readFileSync(
+    join(REPO_ROOT, "src", "shared", "types.ts"),
+    "utf8",
+  );
+  const cardCount = countStartErrorFieldsInInterface(source, "Card");
+  const sessionCount = countStartErrorFieldsInInterface(source, "Session");
+  console.log(
+    `second-start-rollback (${label}): StartError-typed fields — Card=${cardCount} Session=${sessionCount}`,
+  );
+  if (cardCount !== 1) {
+    violations.push(
+      `second-start-rollback (${label}): expected exactly 1 StartError-typed field on Card, found ${cardCount}`,
+    );
+  }
+  if (sessionCount !== 0) {
+    violations.push(
+      `second-start-rollback (${label}): expected 0 StartError-typed fields on Session, found ${sessionCount} — StartError.newSession is a widening of the ONE existing channel on Card, never a second channel`,
+    );
+  }
+  return violations;
+}
+
+/**
+ * Direction 1 (Plan 94-07 Task 1/2, criterion C3, START-02): a failing SECOND start must not
+ * disturb session 1. Forces the cheapest reproducible failure — a branch-name collision — by
+ * planting a scratch worktree attached to the branch the saga's own reservation will pick
+ * (`<identifier>-2`, session 1 being the only existing session), so `createWorktrees`'
+ * `worktreeAddExistingBranch` hits `is already used by worktree at` and throws the PRE-EXISTING
+ * `"branch-conflict"` variant (no new variant added by this phase). The collision fires in
+ * `createWorktrees`, BEFORE `startClaude` ever runs — `ctx.tmuxSessionCreated` stays `false`, so
+ * `startClaude.undo`'s kill is never even attempted here. That is precisely why this direction
+ * proves Break A (the zombie-record rollback) and NOT Break B (the tmux prefix-kill) — see
+ * {@link checkSecondStartRollbackDirection2} for the direction that reaches `startClaude.undo`.
+ */
+async function checkSecondStartRollbackDirection1(built) {
+  const violations = [];
+  const session1Name = built.tmux.a;
+
+  const { worktreeAddNewBranch, worktreeRemove } = await loadGitAdapter();
+  const collisionBranch = `${built.identifier}-2`;
+  const collisionWtPath = join(built.home, "scratch-collision");
+  assertUnderTmpdir(collisionWtPath, "direction 1 scratch collision worktree");
+  await worktreeAddNewBranch(
+    built.repoPath,
+    collisionWtPath,
+    collisionBranch,
+    built.repoBase,
+  );
+  console.log(
+    `second-start-rollback (d1): planted collision — branch "${collisionBranch}" attached at ${collisionWtPath}`,
+  );
+
+  const before = readCard(built.dbPath, built.cardId);
+  const ordinalBefore = before?.nextSessionOrdinal ?? 2;
+
+  const { status, body } = await startSecondSession(built, {
+    newSession: true,
+  });
+  console.log(
+    `second-start-rollback (d1): POST /start {newSession:true} -> ${status}`,
+  );
+  if (status !== 202) {
+    violations.push(
+      `second-start-rollback (d1): POST /start returned ${status}, expected 202 (body=${JSON.stringify(body)})`,
+    );
+    return violations;
+  }
+
+  const { card, timedOut } = await waitForSagaSettled(built, {
+    timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+  });
+  if (timedOut) {
+    violations.push(
+      `second-start-rollback (d1): saga did not settle within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (last observed card=${JSON.stringify(card)})`,
+    );
+    return violations;
+  }
+
+  // 1. the pre-existing branch-conflict variant, carrying newSession:true.
+  console.log(
+    `second-start-rollback (d1): startError = ${JSON.stringify(card?.startError)}`,
+  );
+  if (card?.startError?.variant !== "branch-conflict") {
+    violations.push(
+      `second-start-rollback (d1): startError.variant expected "branch-conflict", got ${JSON.stringify(card?.startError)}`,
+    );
+  }
+  if (card?.startError?.newSession !== true) {
+    violations.push(
+      `second-start-rollback (d1): startError.newSession expected true, got ${JSON.stringify(card?.startError?.newSession)}`,
+    );
+  }
+
+  // 2. exactly ONE session record — the reservation was removed entirely, no `failed` tombstone.
+  const persistedAfterFail = readCard(built.dbPath, built.cardId);
+  const sessionsAfterFail = persistedAfterFail?.sessions ?? [];
+  console.log(
+    `second-start-rollback (d1): persisted card.sessions after the failed second start = ${JSON.stringify(sessionsAfterFail.map((s) => ({ id: s.id, tmuxSession: s.tmuxSession })))}`,
+  );
+  if (sessionsAfterFail.length !== 1) {
+    violations.push(
+      `second-start-rollback (d1): persisted card.sessions has ${sessionsAfterFail.length} records after the failed second start, expected exactly 1 (the reservation must be removed entirely)`,
+    );
+  }
+
+  // 3. session 1's EXACT tmux name survives.
+  const liveAfterFail = await tmuxListSessionNames();
+  console.log(
+    `second-start-rollback (d1): tmux list-sessions after the failed second start = ${JSON.stringify(liveAfterFail)}`,
+  );
+  if (!liveAfterFail.includes(session1Name)) {
+    violations.push(
+      `second-start-rollback (d1): session 1's EXACT tmux name ${session1Name} not found in list-sessions: ${JSON.stringify(liveAfterFail)}`,
+    );
+  }
+
+  // 4. session 1's terminal still ANSWERS — a surviving name is not a surviving session.
+  const marker1 = `d1-post-fail-${randomBytes(4).toString("hex")}`;
+  await writePaneMarker(session1Name, built.home, marker1);
+  const read1 = await readPaneThroughProxy({
+    port: built.port,
+    idSegment: built.sessionA.id,
+    expect: marker1,
+    timeoutMs: PROXY_READ_TIMEOUT_MS,
+  });
+  console.log(
+    `second-start-rollback (d1): session 1 answerable after the failed second start — found=${read1.text.includes(marker1)}`,
+  );
+  if (!read1.text.includes(marker1)) {
+    violations.push(
+      `second-start-rollback (d1): session 1 did not echo marker "${marker1}" through the proxy after the failed second start`,
+    );
+  }
+
+  // 5. card.nextSessionOrdinal ADVANCED despite the failure — the consumed ordinal is not
+  // reclaimed.
+  const ordinalAfter = persistedAfterFail?.nextSessionOrdinal ?? ordinalBefore;
+  console.log(
+    `second-start-rollback (d1): card.nextSessionOrdinal before=${ordinalBefore} after=${ordinalAfter}`,
+  );
+  if (ordinalAfter !== ordinalBefore + 1) {
+    violations.push(
+      `second-start-rollback (d1): card.nextSessionOrdinal expected to advance by exactly 1 despite the failure (before=${ordinalBefore}), got ${ordinalAfter}`,
+    );
+  }
+
+  // 6. no leaked artifacts: only session 1's own worktree plus the deliberately-planted scratch
+  // one, and no NEW worktree from the failed saga.
+  const registered = await gitWorktreeListRegistered(built.repoPath);
+  const mainWorktree = realpathSync(built.repoPath);
+  const session1Wt = existsSync(built.session1WorktreePath)
+    ? realpathSync(built.session1WorktreePath)
+    : built.session1WorktreePath;
+  const scratchWt = existsSync(collisionWtPath)
+    ? realpathSync(collisionWtPath)
+    : collisionWtPath;
+  const nonMain = [...registered].filter((p) => p !== mainWorktree);
+  console.log(
+    `second-start-rollback (d1): git worktree list --porcelain (excluding main) = ${JSON.stringify(nonMain)}`,
+  );
+  const unexpected = nonMain.filter((p) => p !== session1Wt && p !== scratchWt);
+  if (unexpected.length > 0) {
+    violations.push(
+      `second-start-rollback (d1): unexpected worktree(s) leaked by the failed saga: ${JSON.stringify(unexpected)}`,
+    );
+  }
+  if (!registered.has(session1Wt)) {
+    violations.push(
+      `second-start-rollback (d1): session 1's own worktree went missing: ${built.session1WorktreePath}`,
+    );
+  }
+  if (!registered.has(scratchWt)) {
+    violations.push(
+      `second-start-rollback (d1): the deliberately-planted scratch worktree went missing: ${collisionWtPath}`,
+    );
+  }
+
+  // 7. Retry reproduces the intent: after removing the planted collision, POST again with
+  // newSession:true and assert it now succeeds on a FRESH ordinal (`<identifier>-3`) — the
+  // consumed-but-failed `<identifier>-2` ordinal is never reclaimed.
+  await worktreeRemove(built.repoPath, collisionWtPath);
+  console.log(
+    `second-start-rollback (d1): removed the planted collision worktree ${collisionWtPath}`,
+  );
+
+  const { status: retryStatus, body: retryBody } = await startSecondSession(
+    built,
+    { newSession: true },
+  );
+  console.log(
+    `second-start-rollback (d1): retry POST /start {newSession:true} -> ${retryStatus}`,
+  );
+  if (retryStatus !== 202) {
+    violations.push(
+      `second-start-rollback (d1): retry POST /start returned ${retryStatus}, expected 202 (body=${JSON.stringify(retryBody)})`,
+    );
+    return violations;
+  }
+
+  const { card: retryCard, timedOut: retryTimedOut } = await waitForSagaSettled(
+    built,
+    { timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS },
+  );
+  if (retryTimedOut) {
+    violations.push(
+      `second-start-rollback (d1): retry saga did not settle within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (last observed card=${JSON.stringify(retryCard)})`,
+    );
+    return violations;
+  }
+  if (retryCard?.startError != null) {
+    violations.push(
+      `second-start-rollback (d1): retry recorded a startError instead of succeeding: ${JSON.stringify(retryCard.startError)}`,
+    );
+    return violations;
+  }
+
+  const retryPersisted = readCard(built.dbPath, built.cardId);
+  const retrySessions = retryPersisted?.sessions ?? [];
+  console.log(
+    `second-start-rollback (d1): persisted card.sessions after retry = ${JSON.stringify(retrySessions.map((s) => ({ id: s.id, tmuxSession: s.tmuxSession, branch: s.branch })))}`,
+  );
+  if (retrySessions.length !== 2) {
+    violations.push(
+      `second-start-rollback (d1): retry left ${retrySessions.length} session records, expected exactly 2`,
+    );
+  }
+  const expectedRetryTmux = `dsp-${built.identifier}-3`;
+  const retryLive = await tmuxListSessionNames();
+  console.log(
+    `second-start-rollback (d1): tmux list-sessions after retry = ${JSON.stringify(retryLive)}`,
+  );
+  if (!retryLive.includes(expectedRetryTmux)) {
+    violations.push(
+      `second-start-rollback (d1): retry's session expected EXACT tmux name ${expectedRetryTmux} (ordinal 3 — ordinal 2's failed attempt must not be reclaimed), not found in list-sessions: ${JSON.stringify(retryLive)}`,
+    );
+  }
+  if (!retryLive.includes(session1Name)) {
+    violations.push(
+      `second-start-rollback (d1): session 1's EXACT tmux name ${session1Name} not found in list-sessions after the retry: ${JSON.stringify(retryLive)}`,
+    );
+  }
+
+  // 8. wire shape: exactly one StartError-typed field on Card, none on Session.
+  violations.push(...checkStartErrorWireShape("d1"));
+
+  return violations;
+}
+
+/** POST `/api/cards/:id/session {sessionId}` — the real session-switch route. */
+async function switchActiveSession(built, sessionId) {
+  const res = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${built.cardId}/session`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+    },
+  );
+  return res.status;
+}
+
+/** POST `/api/cards/:id/terminal` — the real ensure-ttyd-for-the-active-session route. */
+async function ensureTerminalRoute(built) {
+  const res = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${built.cardId}/terminal`,
+    { method: "POST" },
+  );
+  return res.status;
+}
+
+/**
+ * Poll {@link readPaneThroughProxy} until the WS upgrade actually opens (`resolveLiveTtydPort`
+ * resolves once `ensureTtyd`'s spawn has landed), never a fixed sleep — `ensureTerminalRoute` above
+ * returns 202 the instant the route is accepted, well before the ttyd child is actually listening.
+ */
+async function waitForProxyReady(built, idSegment, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let last = { opened: false, text: "", closeCode: null };
+  while (Date.now() < deadline) {
+    last = await readPaneThroughProxy({
+      port: built.port,
+      idSegment,
+      expect: undefined,
+      timeoutMs: 1000,
+    });
+    if (last.opened) return last;
+    await sleep(200);
+  }
+  return last;
+}
+
+/**
+ * Bring one session's real terminal up exactly as the UI does when a user opens its panel:
+ * switch the card's active pointer to it, POST the ensure-terminal route, then poll the proxy
+ * until the WS upgrade actually opens. Session 2's ttyd is never spawned by the start saga itself
+ * ({@link ensureTerminal} in product code is reached only via this route or Resume), so this must
+ * run before any pre-restart answerability baseline is meaningful.
+ */
+async function ensureSessionTerminalReady(built, sessionId) {
+  const switchStatus = await switchActiveSession(built, sessionId);
+  if (switchStatus !== 202) {
+    return { ok: false, reason: `switch active session -> ${switchStatus}` };
+  }
+  const ensureStatus = await ensureTerminalRoute(built);
+  if (ensureStatus !== 202) {
+    return { ok: false, reason: `POST /terminal -> ${ensureStatus}` };
+  }
+  const ready = await waitForProxyReady(
+    built,
+    sessionId,
+    PROXY_READ_TIMEOUT_MS,
+  );
+  if (!ready.opened) {
+    return {
+      ok: false,
+      reason: `proxy WS never opened for session ${sessionId} within ${PROXY_READ_TIMEOUT_MS}ms`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Poll {@link fetchFixtureCard} until a RESTART's saga has settled on a FAILURE specifically
+ * (`provisioningStep` null AND `startError != null`) — deliberately NOT {@link waitForSagaSettled},
+ * whose `(card.sessionCount ?? 1) >= 2` half of its OR would already read true from session 2's
+ * PRIOR successful creation before this restart's saga has even been scheduled by the event loop,
+ * making that helper settle vacuously fast on this direction's own fixture shape.
+ */
+async function waitForRestartFailureSettled(built, { timeoutMs }) {
+  const deadline = Date.now() + timeoutMs;
+  let card;
+  while (Date.now() < deadline) {
+    card = await fetchFixtureCard(built);
+    if (
+      card != null &&
+      card.provisioningStep == null &&
+      card.startError != null
+    ) {
+      return { card, timedOut: false };
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return { card, timedOut: true };
+}
+
+/**
+ * Direction 2 (Plan 94-07 Task 1/2, criterion C3, START-02): a failing FIRST-session ROLLBACK
+ * must not kill the suffixed sibling — this is the direction with no precedent anywhere in this
+ * repo, and the reason the check exists (94-VALIDATION.md C3, `steps.ts:387`).
+ * @remarks The forced failure is {@link writeExitingStubClaudeBinary}, and the wait after it is
+ * deliberately generous (`RESTART_REPL_TIMEOUT_SETTLE_MS`, comfortably past `steps.ts`'s own 30s
+ * `READINESS_TIMEOUT_MS`) rather than fast, because of a live-verified finding this direction's
+ * first two drafts ran into: once session 1's exact tmux name is absent while the suffixed sibling
+ * is alive, EVERY bare (non-`=`) `-t`-targeted tmux command `steps.ts` issues — not just
+ * `has-session`/`kill-session` (94-RESEARCH.md Pitfall 1) but also `capturePane`, and (confirmed by
+ * direct reproduction against this machine's tmux 3.6a) `paste-buffer` and `send-keys` — silently
+ * PREFIX-MATCHES onto the sibling and reports SUCCESS rather than throwing. That means
+ * `sendKickoff`'s own tmux calls can never surface the absence as an exception: a kill timed to
+ * land mid-`sendKickoff` (this direction's first two drafts, racing `tmux list-sessions` detection
+ * and a short-sleep exiting stub respectively) either loses the race entirely or produces a saga
+ * that silently "succeeds" by misdelivering session 1's kickoff into session 2's pane — never
+ * reaching `startClaude.undo` at all. The ONE step immune to this silent-success trap is
+ * `awaitReplReady`'s own hardcoded wall-clock deadline, which fires regardless of what
+ * `capturePane` returns; killing the session as early as possible (this stub exits immediately
+ * on launch) maximizes the absence window across that whole 30s poll, so it reliably exhausts the
+ * deadline and throws a genuine `StartStepError("starting claude", ..., "repl-timeout")` —
+ * `currentStep` is `startClaude` itself at that point, so its `undo` runs directly. Full account,
+ * including the independent finding that the real background 3-strike detector
+ * (`markers/watcher.ts`) promotes session 2 to active during this wait (harmless to this check's
+ * own assertions, which never read `activeSessionId`/`sessionLost`), in 94-07-SUMMARY.md
+ * Deviations. Direction 1's branch-collision vehicle fails BEFORE `startClaude` runs —
+ * `ctx.tmuxSessionCreated` stays `false` and no kill is even attempted — so it structurally cannot
+ * exercise this defect; that is why this direction needs its own vehicle.
+ */
+async function checkSecondStartRollbackDirection2(built) {
+  const violations = [];
+  const session1Name = built.tmux.a;
+  const session2Name = `dsp-${built.identifier}-2`;
+
+  const { status, body } = await startSecondSession(built, {
+    newSession: true,
+  });
+  console.log(
+    `second-start-rollback (d2): POST /start {newSession:true} (session 2 setup) -> ${status}`,
+  );
+  if (status !== 202) {
+    violations.push(
+      `second-start-rollback (d2): session 2 setup POST /start returned ${status}, expected 202 (body=${JSON.stringify(body)})`,
+    );
+    return violations;
+  }
+  const { card, timedOut } = await waitForSagaSettled(built, {
+    timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+  });
+  if (timedOut) {
+    violations.push(
+      `second-start-rollback (d2): session 2 setup saga did not settle within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (last observed card=${JSON.stringify(card)})`,
+    );
+    return violations;
+  }
+  if (card?.startError != null) {
+    violations.push(
+      `second-start-rollback (d2): session 2 setup recorded a startError: ${JSON.stringify(card.startError)}`,
+    );
+    return violations;
+  }
+  const session2Id = (card?.sessionSummaries ?? [])
+    .map((s) => s.id)
+    .find((id) => id !== built.sessionA.id);
+  if (!session2Id) {
+    violations.push(
+      `second-start-rollback (d2): could not resolve session 2's id from sessionSummaries=${JSON.stringify(card?.sessionSummaries)}`,
+    );
+    return violations;
+  }
+  console.log(
+    `second-start-rollback (d2): session 1 = ${session1Name} (${built.sessionA.id}), session 2 = ${session2Name} (${session2Id})`,
+  );
+
+  const liveSetup = await tmuxListSessionNames();
+  if (!liveSetup.includes(session2Name)) {
+    violations.push(
+      `second-start-rollback (d2): session 2's EXACT tmux name ${session2Name} not found right after creation: ${JSON.stringify(liveSetup)}`,
+    );
+    return violations;
+  }
+
+  const readyResult = await ensureSessionTerminalReady(built, session2Id);
+  if (!readyResult.ok) {
+    violations.push(
+      `second-start-rollback (d2): could not bring session 2's terminal up before the forced failure — ${readyResult.reason}`,
+    );
+    return violations;
+  }
+  const markerBefore = `d2-pre-fail-${randomBytes(4).toString("hex")}`;
+  await writePaneMarker(session2Name, built.home, markerBefore);
+  const readBefore = await readPaneThroughProxy({
+    port: built.port,
+    idSegment: session2Id,
+    expect: markerBefore,
+    timeoutMs: PROXY_READ_TIMEOUT_MS,
+  });
+  console.log(
+    `second-start-rollback (d2): session 2 answerable BEFORE session 1's restart — found=${readBefore.text.includes(markerBefore)}`,
+  );
+  if (!readBefore.text.includes(markerBefore)) {
+    violations.push(
+      `second-start-rollback (d2): session 2 did not echo marker "${markerBefore}" through the proxy BEFORE session 1's restart — the fixture itself is not answerable, so no later claim about it is meaningful`,
+    );
+    return violations;
+  }
+
+  // Refocus session 1 (not load-bearing — a plain restart always targets card.identifier
+  // regardless of the active pointer — but mirrors the realistic flow of restarting what you're
+  // looking at).
+  await switchActiveSession(built, built.sessionA.id);
+
+  await tmuxKillSessionExact(session1Name);
+  console.log(
+    `second-start-rollback (d2): killed session 1's tmux session ${session1Name} to force a real restart (not a reattach)`,
+  );
+
+  // THE FORCED-FAILURE VEHICLE: swap the stub `claude` in place for a variant that exits
+  // IMMEDIATELY. `startClaude.run` recreates session 1's tmux session (ctx.tmuxSessionCreated
+  // becomes true), the exiting stub then terminates it within tens of milliseconds (tmux's
+  // default remain-on-exit=off), maximizing the window in which the exact name is absent across
+  // the whole 30s readiness poll. See this function's own doc comment for why only
+  // `awaitReplReady`'s hardcoded deadline — not any of `sendKickoff`'s own tmux calls — can turn
+  // that absence into a genuine thrown failure.
+  writeExitingStubClaudeBinary(built.home);
+  console.log(
+    `second-start-rollback (d2): swapped the stub claude for an exit-immediately variant`,
+  );
+
+  const { status: restartStatus, body: restartBody } = await startSecondSession(
+    built,
+    { newSession: false },
+  );
+  console.log(
+    `second-start-rollback (d2): restart POST /start {newSession:false} -> ${restartStatus}`,
+  );
+  if (restartStatus !== 202) {
+    violations.push(
+      `second-start-rollback (d2): restart POST /start returned ${restartStatus}, expected 202 (body=${JSON.stringify(restartBody)})`,
+    );
+    return violations;
+  }
+
+  console.log(
+    `second-start-rollback (d2): waiting up to ${RESTART_REPL_TIMEOUT_SETTLE_MS}ms for awaitReplReady's own 30s deadline to fire and the saga to compensate…`,
+  );
+  const { card: afterCard, timedOut: afterTimedOut } =
+    await waitForRestartFailureSettled(built, {
+      timeoutMs: RESTART_REPL_TIMEOUT_SETTLE_MS,
+    });
+  if (afterTimedOut) {
+    violations.push(
+      `second-start-rollback (d2): restart saga did not settle on a failure within ${RESTART_REPL_TIMEOUT_SETTLE_MS}ms (last observed card=${JSON.stringify(afterCard)})`,
+    );
+    return violations;
+  }
+
+  // 1. the restart failed with a startError carrying no newSession field.
+  console.log(
+    `second-start-rollback (d2): restart startError = ${JSON.stringify(afterCard?.startError)}`,
+  );
+  if (afterCard?.startError == null) {
+    violations.push(
+      `second-start-rollback (d2): expected the restart to fail with a startError (forced failure), got none — card=${JSON.stringify(afterCard)}`,
+    );
+    return violations;
+  }
+  if ("newSession" in afterCard.startError) {
+    violations.push(
+      `second-start-rollback (d2): restart's startError carries a "newSession" field (${JSON.stringify(afterCard.startError.newSession)}) — a plain restart is not a "start another session" attempt`,
+    );
+  }
+
+  // 2. THE PREFIX-KILL GUARD: session 2's EXACT tmux name must survive session 1's rolled-back
+  // restart, by exact-string comparison — never a count, never startsWith.
+  const liveAfter = await tmuxListSessionNames();
+  console.log(
+    `second-start-rollback (d2): tmux list-sessions after the rolled-back restart = ${JSON.stringify(liveAfter)}`,
+  );
+  if (!liveAfter.includes(session2Name)) {
+    violations.push(
+      `second-start-rollback (d2): session 2's EXACT tmux name ${session2Name} MISSING after session 1's rolled-back restart — the tmux 3.6a prefix-match trap: an unprefixed kill-session target absent its own exact match resolves onto the longer sibling instead. live=${JSON.stringify(liveAfter)}`,
+    );
+  }
+
+  const markerAfter = `d2-post-fail-${randomBytes(4).toString("hex")}`;
+  await writePaneMarker(session2Name, built.home, markerAfter);
+  const readAfter = await readPaneThroughProxy({
+    port: built.port,
+    idSegment: session2Id,
+    expect: markerAfter,
+    timeoutMs: PROXY_READ_TIMEOUT_MS,
+  });
+  console.log(
+    `second-start-rollback (d2): session 2 answerable AFTER the rolled-back restart — found=${readAfter.text.includes(markerAfter)}`,
+  );
+  if (!readAfter.text.includes(markerAfter)) {
+    violations.push(
+      `second-start-rollback (d2): session 2 did not echo marker "${markerAfter}" through the proxy after session 1's rolled-back restart — its tmux name surviving is not the same as the session still ANSWERING`,
+    );
+  }
+
+  // 3. the card still holds session 2's record with its own tmuxSession/branch/workspacePath
+  // intact.
+  const persisted = readCard(built.dbPath, built.cardId);
+  const persistedSessions = persisted?.sessions ?? [];
+  console.log(
+    `second-start-rollback (d2): persisted card.sessions after the rolled-back restart = ${JSON.stringify(persistedSessions.map((s) => ({ id: s.id, tmuxSession: s.tmuxSession, branch: s.branch, workspacePath: s.workspacePath })))}`,
+  );
+  if (persistedSessions.length !== 2) {
+    violations.push(
+      `second-start-rollback (d2): persisted card.sessions has ${persistedSessions.length} records, expected 2 (session 1's failed restart must not add or remove a record)`,
+    );
+  }
+  const session2Record = persistedSessions.find((s) => s.id === session2Id);
+  if (!session2Record) {
+    violations.push(
+      `second-start-rollback (d2): session 2's own record (${session2Id}) is missing from persisted sessions after session 1's rolled-back restart`,
+    );
+  } else {
+    if (session2Record.tmuxSession !== session2Name) {
+      violations.push(
+        `second-start-rollback (d2): session 2's persisted tmuxSession expected "${session2Name}", got "${session2Record.tmuxSession}"`,
+      );
+    }
+    if (session2Record.branch !== `${built.identifier}-2`) {
+      violations.push(
+        `second-start-rollback (d2): session 2's persisted branch expected "${built.identifier}-2", got "${session2Record.branch}"`,
+      );
+    }
+    const expectedSession2Workspace = join(
+      built.home,
+      "workspaces",
+      `${built.identifier}-2`,
+    );
+    if (session2Record.workspacePath !== expectedSession2Workspace) {
+      violations.push(
+        `second-start-rollback (d2): session 2's persisted workspacePath expected "${expectedSession2Workspace}", got "${session2Record.workspacePath}"`,
+      );
+    }
+  }
+
+  violations.push(...checkStartErrorWireShape("d2"));
+
+  return violations;
+}
+
+/**
+ * `--check second-start-rollback` (Plan 94-07, criterion C3, START-02): both directions the
+ * criterion names, each its own fresh {@link SECOND_SESSION_FIXTURE} instance — a failing SECOND
+ * start must not disturb session 1 (Direction 1, proves Break A: removing the rollback call),
+ * and a failing FIRST-session rollback must not kill the suffixed sibling (Direction 2, proves
+ * Break B: the tmux prefix-kill, this phase's headline defect).
+ */
+async function checkSecondStartRollback() {
+  const violations = [];
+  violations.push(
+    ...(await withFixture(
+      "second-start-rollback-d1",
+      checkSecondStartRollbackDirection1,
+      SECOND_SESSION_FIXTURE,
+    )),
+  );
+  violations.push(
+    ...(await withFixture(
+      "second-start-rollback-d2",
+      checkSecondStartRollbackDirection2,
+      SECOND_SESSION_FIXTURE,
+    )),
+  );
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -7373,6 +8073,7 @@ const CHECKS = {
       checkReserveCoalesce,
       SECOND_SESSION_FIXTURE,
     ),
+  "second-start-rollback": checkSecondStartRollback,
 };
 
 /**
