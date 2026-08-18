@@ -5931,6 +5931,15 @@ async function checkCleanupScheduleRestartProductPath(built) {
  * minutes later — is left completely untouched, its own seeded `cleanupDueAt` read back unchanged.
  * Finally rewrites B's `cleanupDueAt` to a past value and restarts once more, proving B's schedule
  * is genuinely LIVE rather than merely surviving with no way to ever fire.
+ * @remarks B, not A, is seeded as `card.activeSessionId` — deliberately, this is the shape that
+ * actually discriminates a per-session scheduler from a regressed per-card one. `moveCardManual`
+ * mirrors `card.cleanupDueAt` from the ACTIVE session alone, so a per-card scheduler that reads only
+ * `card.cleanupDueAt` sees B's (late) due time no matter what. If the EARLY due session were also
+ * the active one (the naive fixture shape), a per-card regression would coincidentally tear down the
+ * right session anyway — a non-discriminating fixture the same shape as this phase's own named
+ * hazard. Making A the due-but-NOT-active sibling means a per-card scheduler can only ever see B's
+ * late mirror and therefore leaves A wrongly stranded forever; only a real per-session scan ever
+ * reads A's own record and fires it on time.
  */
 async function checkCleanupScheduleRestartFalsifiability(built) {
   const violations = [];
@@ -5957,9 +5966,19 @@ async function checkCleanupScheduleRestartFalsifiability(built) {
   const scheduleStart = Date.now();
   const earlyDueAt = scheduleStart + EARLY_DUE_MS;
   const lateDueAt = scheduleStart + LATE_DUE_MS;
+  // B is the ACTIVE session (due LATE); A is its non-active SIBLING (due EARLY) — see this
+  // function's own @remarks for why this assignment, not the reverse, is the discriminating shape.
+  // The flat mirror fields are re-pointed at B too, matching what a real setActiveSession call would
+  // produce, so the seeded card is a faithful shape rather than one with a stale active projection.
+  cardBefore.activeSessionId = built.sessionB.id;
+  cardBefore.tmuxSession = bRecordBefore.tmuxSession;
+  cardBefore.ttydPort = bRecordBefore.ttydPort;
+  cardBefore.hookToken = bRecordBefore.hookToken;
+  cardBefore.workspacePath = bRecordBefore.workspacePath;
+  cardBefore.workspace = bRecordBefore.workspace;
   aRecordBefore.cleanupDueAt = earlyDueAt;
   bRecordBefore.cleanupDueAt = lateDueAt;
-  cardBefore.cleanupDueAt = earlyDueAt;
+  cardBefore.cleanupDueAt = lateDueAt;
 
   // 2. THE PERMANENT GUARD (93-VALIDATION.md Dead-Instrument Register, row 1) — a hard,
   //    unconditional refusal, not a soft warning: the SAME-DUE-TIME break-proof (Task 2) demonstrates
