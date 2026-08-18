@@ -7936,23 +7936,28 @@ async function checkSecondStartRollbackDirection2(built) {
     violations.push(
       `second-start-rollback (d2): session 2's EXACT tmux name ${session2Name} MISSING after session 1's rolled-back restart — the tmux 3.6a prefix-match trap: an unprefixed kill-session target absent its own exact match resolves onto the longer sibling instead. live=${JSON.stringify(liveAfter)}`,
     );
-  }
-
-  const markerAfter = `d2-post-fail-${randomBytes(4).toString("hex")}`;
-  await writePaneMarker(session2Name, built.home, markerAfter);
-  const readAfter = await readPaneThroughProxy({
-    port: built.port,
-    idSegment: session2Id,
-    expect: markerAfter,
-    timeoutMs: PROXY_READ_TIMEOUT_MS,
-  });
-  console.log(
-    `second-start-rollback (d2): session 2 answerable AFTER the rolled-back restart — found=${readAfter.text.includes(markerAfter)}`,
-  );
-  if (!readAfter.text.includes(markerAfter)) {
-    violations.push(
-      `second-start-rollback (d2): session 2 did not echo marker "${markerAfter}" through the proxy after session 1's rolled-back restart — its tmux name surviving is not the same as the session still ANSWERING`,
+  } else {
+    // Only attempt the answerability round trip when the tmux name itself is confirmed present —
+    // sending keys to an already-vanished session throws (and, if it was the tmux server's LAST
+    // session, tears the whole server down), which would surface as an opaque "run failed"
+    // exception instead of the clean, named violation above. The name-missing case is already a
+    // strictly stronger finding on its own; there is nothing left to answer.
+    const markerAfter = `d2-post-fail-${randomBytes(4).toString("hex")}`;
+    await writePaneMarker(session2Name, built.home, markerAfter);
+    const readAfter = await readPaneThroughProxy({
+      port: built.port,
+      idSegment: session2Id,
+      expect: markerAfter,
+      timeoutMs: PROXY_READ_TIMEOUT_MS,
+    });
+    console.log(
+      `second-start-rollback (d2): session 2 answerable AFTER the rolled-back restart — found=${readAfter.text.includes(markerAfter)}`,
     );
+    if (!readAfter.text.includes(markerAfter)) {
+      violations.push(
+        `second-start-rollback (d2): session 2 did not echo marker "${markerAfter}" through the proxy after session 1's rolled-back restart — its tmux name surviving is not the same as the session still ANSWERING`,
+      );
+    }
   }
 
   // 3. the card still holds session 2's record with its own tmuxSession/branch/workspacePath
