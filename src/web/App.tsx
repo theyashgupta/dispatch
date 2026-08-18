@@ -230,7 +230,9 @@ export function App() {
     const card = board?.cards.find((c) => c.id === id);
     if (card == null) return;
     if (card.groupId != null) return;
-    if (card.column !== "todo" && card.sessionLost !== true) return;
+    const wantsNewSession = typeof req !== "string" && req.newSession === true;
+    if (!wantsNewSession && card.column !== "todo" && card.sessionLost !== true)
+      return;
     setStartRequest(typeof req === "string" ? { cardId: req } : req);
   };
 
@@ -435,8 +437,9 @@ export function App() {
       />
       {startCard && startRequest && (
         <StartModal
-          key={startRequest.cardId}
+          key={`${startRequest.cardId}:${startRequest.newSession === true ? "new" : "start"}`}
           card={startCard}
+          newSession={startRequest.newSession === true}
           onClose={() => setStartRequest(null)}
           onEditPlaybooks={() => {
             setSettingsInitialTab("playbooks");

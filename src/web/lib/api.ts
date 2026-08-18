@@ -54,6 +54,10 @@ export type StartResult =
  * function applies no default. The bare Restart caller omits it, and
  * `JSON.stringify` drops the resulting `undefined` key so absence reaches the
  * server as the reuse-persisted-intent signal.
+ *
+ * `newSession` carries the "start another session" intent (`UI-04`) through to the body's
+ * `newSession` field, included only when `true` so the field is omitted entirely — and the N=1
+ * request body stays byte-identical to before this parameter existed — for every other caller.
  */
 export async function startCard(
   id: string,
@@ -61,11 +65,22 @@ export async function startCard(
   folder?: string,
   repos?: { path: string; base: string }[],
   playbook?: string,
+  newSession?: boolean,
 ): Promise<StartResult> {
   const body =
     folder !== undefined || repos !== undefined
-      ? { extraDirection, folder, repos, playbook }
-      : { extraDirection, playbook };
+      ? {
+          extraDirection,
+          folder,
+          repos,
+          playbook,
+          newSession: newSession === true ? true : undefined,
+        }
+      : {
+          extraDirection,
+          playbook,
+          newSession: newSession === true ? true : undefined,
+        };
   const res = await fetch(`/api/cards/${encodeURIComponent(id)}/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

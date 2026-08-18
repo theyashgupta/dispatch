@@ -490,7 +490,14 @@ export function CardView({
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  startCard(card.id, card.extraDirection ?? "").catch((err) => {
+                  startCard(
+                    card.id,
+                    card.extraDirection ?? "",
+                    undefined,
+                    undefined,
+                    undefined,
+                    card.startError?.newSession === true,
+                  ).catch((err) => {
                     console.error("retry startCard failed", err);
                   });
                 }}

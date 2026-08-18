@@ -24,6 +24,7 @@ import { WorkspaceAdd } from "../workspaces/index.js";
 
 interface StartModalProps {
   card: CardModel;
+  newSession?: boolean;
   onClose: () => void;
   onEditPlaybooks: () => void;
 }
@@ -1127,6 +1128,7 @@ function PlaybookPickerSection({
 
 export function StartModal({
   card,
+  newSession,
   onClose,
   onEditPlaybooks,
 }: StartModalProps) {
@@ -1171,6 +1173,7 @@ export function StartModal({
         selectedFolder ?? undefined,
         chosen,
         playbookArg,
+        newSession === true,
       );
       if (result.ok) {
         modalRef.current?.requestClose();
