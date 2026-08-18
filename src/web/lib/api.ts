@@ -539,6 +539,27 @@ export async function ensureTerminal(id: string): Promise<void> {
   }
 }
 
+/**
+ * Move a card's active pointer to a sibling session: POST /api/cards/:id/session.
+ * Fire-and-forget — the store's single-writer switch runs server-side (202 Accepted) and the SSE
+ * snapshot carries the outcome, so there is no response body to parse. Resolves on 2xx; throws on
+ * any non-2xx so the caller can log (mirrors ensureTerminal). The switcher's optimistic highlight
+ * is local client state, reconciled by the next broadcast — this call does not drive that state.
+ */
+export async function switchSession(
+  cardId: string,
+  sessionId: string,
+): Promise<void> {
+  const res = await fetch(`/api/cards/${encodeURIComponent(cardId)}/session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId }),
+  });
+  if (!res.ok) {
+    throw new Error(`switchSession failed: ${res.status} ${res.statusText}`);
+  }
+}
+
 /** Discriminated result of a resume request; carries the reject status. */
 export type ResumeResult = { ok: true } | { ok: false; status: number | null };
 

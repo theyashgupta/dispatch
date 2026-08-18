@@ -22,6 +22,7 @@ import { PreviewRow } from "./PreviewRow.js";
 import { UnknownProbeRow } from "./UnknownProbeRow.js";
 import { ReferenceBlocks } from "./ReferenceBlocks.js";
 import { SessionLostSection } from "./SessionLostSection.js";
+import { SessionSwitcher } from "./SessionSwitcher.js";
 import { TerminalRegion } from "./TerminalRegion.js";
 
 const PANEL_MIN_WIDTH_PX = 360;
@@ -324,6 +325,7 @@ export function DetailPanel({
   const c = shown;
 
   const hasLiveSession = !!(c?.tmuxSession && !c.sessionLost);
+  const activeSessionLost = c?.activeSession != null && !c.tmuxSession;
 
   if (!hasLiveSession && (fullscreen || detailsExpanded)) {
     setFullscreen(false);
@@ -489,6 +491,20 @@ export function DetailPanel({
               onCleanupRequest={onCleanupRequest}
             />
 
+            {c?.sessionSummaries != null && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  padding: "var(--space-sm) var(--space-lg)",
+                  paddingLeft: "var(--space-xl)",
+                  borderBottom: "1px solid var(--border)",
+                }}
+              >
+                <SessionSwitcher card={c} />
+              </div>
+            )}
+
             <div
               style={{
                 flex: "1 1 auto",
@@ -644,7 +660,7 @@ export function DetailPanel({
                     <TerminalRegion card={c} />
                   )}
 
-                  {c?.sessionLost === true && (
+                  {activeSessionLost && (
                     <SessionLostSection
                       card={c}
                       onStartRequest={onStartRequest}
