@@ -656,9 +656,7 @@ export function DetailPanel({
                       </div>
                     )}
 
-                  {c?.tmuxSession && !c.sessionLost && (
-                    <TerminalRegion card={c} />
-                  )}
+                  {hasLiveSession && c && <TerminalRegion card={c} />}
 
                   {activeSessionLost && (
                     <SessionLostSection
