@@ -67,6 +67,20 @@ const PASTE_SETTLE_MS = 500;
 export interface SagaContext {
   card: Card;
   identifier: string;
+  /**
+   * The single naming token for this saga run: `card.identifier` for a card's first session, or
+   * `` `${card.identifier}-${ordinal}` `` for session N. `identifier` beside it stays the BARE
+   * ticket id because `IDENTIFIER_RE` validates that field and rejects a second hyphen-digit
+   * group. The tmux session name, the branch name and the worktree directory are all functions of
+   * `sessionName` and of nothing else, so they cannot disagree.
+   */
+  sessionName: string;
+  /**
+   * The reserved session's id; `undefined` for a card's first session. Not read by any step in
+   * this plan — it exists so the runner can address `completeStart`/`rollbackReservedSession`
+   * from one place, and so a later plan's retry/coalesce work has a home on `ctx`.
+   */
+  sessionId: string | undefined;
   /** Set by Step 1; consumed by later steps and by the runner's completeStart. */
   workspacePath: string;
   extraDirection: string;
@@ -142,7 +156,7 @@ const prepareWorkspace: SagaStep = {
         "config",
       );
     }
-    const workspacePath = path.join(workspaceRoot, ctx.identifier);
+    const workspacePath = path.join(workspaceRoot, ctx.sessionName);
     const resolvedRoot = path.resolve(workspaceRoot);
     if (!path.resolve(workspacePath).startsWith(resolvedRoot + path.sep)) {
       throw new StartStepError(
@@ -215,19 +229,19 @@ const createWorktrees: SagaStep = {
         baseRef = base;
       }
 
-      if (await branchExists(repoPath, ctx.identifier)) {
+      if (await branchExists(repoPath, ctx.sessionName)) {
         try {
           await worktreeAddExistingBranch(
             repoPath,
             worktreePath,
-            ctx.identifier,
+            ctx.sessionName,
           );
         } catch (err) {
           const raw = stderrOf(err);
           if (raw.includes("is already used by worktree at")) {
             throw new StartStepError(
               "creating worktrees",
-              `Branch ${ctx.identifier} is attached to another worktree.\n${raw}`,
+              `Branch ${ctx.sessionName} is attached to another worktree.\n${raw}`,
               "branch-conflict",
             );
           }
@@ -239,7 +253,7 @@ const createWorktrees: SagaStep = {
           await worktreeAddNewBranch(
             repoPath,
             worktreePath,
-            ctx.identifier,
+            ctx.sessionName,
             baseRef,
           );
         } catch (err) {
@@ -250,7 +264,7 @@ const createWorktrees: SagaStep = {
           );
         }
         ctx.createdWorktrees.push({ repoPath, worktreePath });
-        ctx.createdBranches.push({ repoPath, branch: ctx.identifier });
+        ctx.createdBranches.push({ repoPath, branch: ctx.sessionName });
       }
     }
   },
@@ -314,13 +328,19 @@ export async function awaitReplReady(session: string): Promise<void> {
  * `mintHookChannel` reports no session — an unknown card id, or an active pointer naming no
  * record (`WR-03`) — registration is skipped and the launch falls through to the hook-silent
  * branch, the existing safe degradation for a card the store cannot resolve.
+ * @remarks (Phase 94) tmux resolves a `-t` target by PREFIX when no exact match exists, so once a
+ * suffixed sibling can coexist with the bare session (`dsp-PROJ-123-2` beside `dsp-PROJ-123`),
+ * every `has-session`/`kill-session` target built from a name that can be a prefix of a sibling's
+ * must use the `=` exact-match form — live-reproduced on tmux 3.6a, not theoretical. `undo`
+ * below applies it. `send-keys`/`capture-pane` must NOT: the `=` form reports "can't find pane"
+ * for those subcommands on this tmux version, so the plain session name stays in use for them.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 const startClaude: SagaStep = {
   name: "starting claude",
   statusText: "Starting Claude…",
   async run(ctx) {
-    const session = "dsp-" + ctx.identifier;
+    const session = "dsp-" + ctx.sessionName;
     await preSeedTrust(ctx.workspacePath);
     await store.resetClaudeSessionId(ctx.card.id);
 
@@ -364,7 +384,7 @@ const startClaude: SagaStep = {
   },
   async undo(ctx) {
     if (ctx.tmuxSessionCreated) {
-      await killSession("dsp-" + ctx.identifier).catch(() => {});
+      await killSession(`=dsp-${ctx.sessionName}`).catch(() => {});
     }
   },
 };
@@ -373,7 +393,7 @@ const sendKickoff: SagaStep = {
   name: "sending kickoff",
   statusText: "Sending kickoff…",
   async run(ctx) {
-    const session = "dsp-" + ctx.identifier;
+    const session = "dsp-" + ctx.sessionName;
     const repoNames = (ctx.card.workspace?.repos ?? []).map((r) =>
       path.basename(r.path),
     );
@@ -387,7 +407,7 @@ const sendKickoff: SagaStep = {
     });
     const tmpFile = path.join(
       os.tmpdir(),
-      `dsp-kickoff-${ctx.identifier}-${Date.now()}.txt`,
+      `dsp-kickoff-${ctx.sessionName}-${Date.now()}.txt`,
     );
     await fsp.writeFile(tmpFile, kickoff, "utf8");
     try {
