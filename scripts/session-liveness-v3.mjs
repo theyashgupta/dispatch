@@ -72,6 +72,12 @@
  *                                                                   dot on a card owning EXACTLY ONE
  *                                                                   session — the only mode that does
  *                                                                   not seed a sibling
+ *   node scripts/session-liveness-v3.mjs --check proxy-addressing  PROXY-01/C1 (partial, active
+ *                                                                   session only): a real ttyd wire-
+ *                                                                   protocol read through the reverse
+ *                                                                   proxy returns the pane's own
+ *                                                                   marker text — plan 02 extends this
+ *                                                                   to the two-sibling isolation claim
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -202,6 +208,21 @@ const READY_TIMEOUT_MS = 30_000;
 const KILL_TIMEOUT_MS = 5_000;
 const PORT_PARSE_TIMEOUT_MS = 10_000;
 const LISTEN_POLL_TIMEOUT_MS = 10_000;
+
+/**
+ * Bound for {@link readPaneThroughProxy}'s wait for the marker to appear in the accumulated pane
+ * text. Generous relative to a loopback WS round trip so a slow CI box never produces a false
+ * content violation; a genuine routing break (connection refused, upgrade rejected) resolves the
+ * promise immediately via the `close`/`error` listener and never waits out this ceiling.
+ */
+const PROXY_READ_TIMEOUT_MS = 10_000;
+
+/**
+ * Bound for {@link probeSubprotocolAcceptance}'s two one-shot connection attempts (`92-RESEARCH.md`
+ * assumption A2). Short relative to {@link PROXY_READ_TIMEOUT_MS} because this probe only needs to
+ * observe whether the WS upgrade itself completes, never a pane read.
+ */
+const SUBPROTOCOL_PROBE_TIMEOUT_MS = 5_000;
 
 /**
  * The liveness sub-check's own poll budget (WATCH-01/C2): the 3-strike detector is
@@ -414,6 +435,27 @@ async function tmuxKillSession(name) {
   }
 }
 
+/**
+ * Write distinguishable text into a real tmux pane via the two-step literal-then-Enter form the
+ * project's own kickoff-prompt delivery already relies on (`92-RESEARCH.md` `## 6`): a literal
+ * `send-keys -l` carrying the text, then a SEPARATE bare `Enter` key. Combining the two into one
+ * `send-keys` call can fire on partial text; this harness never does that for a real `claude`
+ * prompt and must not do it here either. `home` is accepted for interface symmetry with
+ * {@link tmuxNewSession} (the session already exists by the time a marker is written, so no `-c`
+ * working-directory flag applies here).
+ */
+async function writePaneMarker(tmuxName, home, text) {
+  await execFileP("tmux", [
+    "send-keys",
+    "-t",
+    tmuxName,
+    "-l",
+    "--",
+    `echo ${text}`,
+  ]);
+  await execFileP("tmux", ["send-keys", "-t", tmuxName, "Enter"]);
+}
+
 /** `lsof -nP -iTCP:<port> -sTCP:LISTEN` existence check, tolerant of lsof's non-zero exit on no match. */
 async function isPortListening(port) {
   try {
@@ -440,6 +482,41 @@ async function pidsListeningOnPort(port) {
     return pids;
   } catch {
     return [];
+  }
+}
+
+/**
+ * Count `ESTABLISHED` TCP connections to `port` owned by `pid`, plus the parsed local
+ * (dispatch-side) socket endpoints — the primitive `92-RESEARCH.md` `## 3` establishes as the ONLY
+ * sound way to observe the dispatch-server-to-ttyd leg: that socket is held by the SANDBOX SERVER
+ * process (`net.connect` inside `upgradeForward`), never by any client, so scoping to `pid` is what
+ * keeps this from reading a constant regardless of behaviour (the dead-instrument hazard `92-
+ * VALIDATION.md`'s register names first). `-sTCP:ESTABLISHED` is the connected-side counterpart to
+ * {@link isPortListening}'s `-sTCP:LISTEN`, same tool and the same `-Fpn` parse shape as
+ * {@link pidsListeningOnPort}, tolerant of lsof's non-zero exit on no match the same way.
+ */
+async function countEstablishedToPort(port, pid) {
+  try {
+    const { stdout } = await execFileP("lsof", [
+      "-nP",
+      `-iTCP:${port}`,
+      "-sTCP:ESTABLISHED",
+      "-Fpn",
+    ]);
+    let currentPid = null;
+    let count = 0;
+    const endpoints = [];
+    for (const line of stdout.split("\n")) {
+      if (line.startsWith("p")) {
+        currentPid = Number(line.slice(1));
+      } else if (line.startsWith("n") && currentPid === pid) {
+        count += 1;
+        endpoints.push(line.slice(1));
+      }
+    }
+    return { count, endpoints };
+  } catch {
+    return { count: 0, endpoints: [] };
   }
 }
 
@@ -1983,6 +2060,178 @@ async function checkSingleSession(built) {
   return violations;
 }
 
+/**
+ * Speak ttyd's actual wire protocol over the reverse-proxy WS upgrade path and accumulate the pane
+ * bytes it streams back — the only way to prove `resolveLiveTtydPort`'s per-session routing reaches
+ * a REAL pane, since a bare GET through the proxy serves dispatch's own static bundle and never
+ * touches ttyd (`92-RESEARCH.md` `## 6`). Protocol read directly from `src/web/terminal-main.ts`
+ * (read-only reference; `NEW-20` fences editing that file, not reading it): the `"tty"` sub-protocol,
+ * an un-prefixed JSON handshake, and server frames prefixed `0x30` (OUTPUT, pty bytes follow) or
+ * `0x31` (TITLE, ignored).
+ *
+ * Deliberately reports observation only, never a pass/fail verdict: resolving `{ text, opened,
+ * closeCode }` in every outcome (marker found, timeout, or the socket itself closing/erroring) is
+ * what lets the CALLING check distinguish "never connected" from "connected but read the wrong
+ * content" — collapsing those into a boolean here would erase exactly the distinction Task 2's two
+ * proof-of-failure breaks depend on.
+ */
+async function readPaneThroughProxy({ port, idSegment, expect, timeoutMs }) {
+  return new Promise((resolve) => {
+    let opened = false;
+    let closeCode = null;
+    let text = "";
+    let settled = false;
+    const url = `ws://127.0.0.1:${port}/sessions/${idSegment}/terminal/ws`;
+    const ws = new WebSocket(url, ["tty"]);
+    ws.binaryType = "arraybuffer";
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        ws.close();
+      } catch {
+        // already closing/closed
+      }
+      resolve({ text, opened, closeCode });
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    ws.addEventListener("open", () => {
+      opened = true;
+      ws.send(JSON.stringify({ AuthToken: "", columns: 120, rows: 40 }));
+    });
+    ws.addEventListener("message", (event) => {
+      const buf = Buffer.from(event.data);
+      if (buf.length === 0) return;
+      const prefix = buf[0];
+      if (prefix === 0x31) return;
+      if (prefix === 0x30) {
+        text += buf.subarray(1).toString("utf8");
+        if (expect && text.includes(expect)) finish();
+      }
+    });
+    ws.addEventListener("close", (event) => {
+      closeCode = event.code;
+      finish();
+    });
+    ws.addEventListener("error", finish);
+  });
+}
+
+/**
+ * Open one WS against `url`, offering `protocols` verbatim (`undefined` = offer none), and report
+ * whether the upgrade completed. Used only by {@link probeSubprotocolAcceptance} to settle
+ * `92-RESEARCH.md` assumption A2 — never wired into a pass/fail check, since which subprotocol
+ * shape a given ttyd build accepts is a finding to record, not a correctness claim this harness
+ * asserts.
+ */
+async function probeOneConnection(url, protocols) {
+  return new Promise((resolve) => {
+    let opened = false;
+    let protocol = null;
+    let closeCode = null;
+    let settled = false;
+    const ws =
+      protocols === undefined
+        ? new WebSocket(url)
+        : new WebSocket(url, protocols);
+    ws.binaryType = "arraybuffer";
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        ws.close();
+      } catch {
+        // already closing/closed
+      }
+      resolve({ opened, protocol, closeCode });
+    };
+    const timer = setTimeout(finish, SUBPROTOCOL_PROBE_TIMEOUT_MS);
+    ws.addEventListener("open", () => {
+      opened = true;
+      protocol = ws.protocol;
+      finish();
+    });
+    ws.addEventListener("close", (event) => {
+      closeCode = event.code;
+      finish();
+    });
+    ws.addEventListener("error", finish);
+  });
+}
+
+/**
+ * Settle `92-RESEARCH.md` assumption A2 by live connection attempt rather than by assumption:
+ * one WS opened WITH the `"tty"` sub-protocol, one WITHOUT, both against the same URL. Logs which
+ * shape(s) this installed ttyd 1.7.7 accepts so a future connection failure is diagnosed against a
+ * recorded finding instead of misattributed to a routing bug. The shipped client always offers
+ * `"tty"` (`terminal-main.ts:252`), so this harness keeps offering it regardless of what this probe
+ * finds — the probe is informational, not a basis for changing what {@link readPaneThroughProxy}
+ * sends.
+ */
+async function probeSubprotocolAcceptance(built) {
+  const url = `ws://127.0.0.1:${built.port}/sessions/${built.cardId}/terminal/ws`;
+  const withTty = await probeOneConnection(url, ["tty"]);
+  const withoutProto = await probeOneConnection(url, undefined);
+  console.log(
+    `proxy-addressing: A2 subprotocol finding — WITH "tty": opened=${withTty.opened} ` +
+      `negotiatedProtocol=${JSON.stringify(withTty.protocol)} closeCode=${withTty.closeCode}; ` +
+      `WITHOUT: opened=${withoutProto.opened} negotiatedProtocol=${JSON.stringify(withoutProto.protocol)} ` +
+      `closeCode=${withoutProto.closeCode}`,
+  );
+}
+
+/**
+ * `--check proxy-addressing` (PROXY-01, `92-VALIDATION.md` C1's foundation): write a unique marker
+ * into session A's real pane, read it back through the reverse proxy speaking ttyd's actual wire
+ * protocol, and fail when the socket never opened or the accumulated text never contains the
+ * marker. This mode covers the ACTIVE session ONLY, against the URL shape that exists TODAY — the
+ * segment is still `built.cardId`, not a session id. It does NOT close criterion 1's two-sibling
+ * isolation claim; plan 02 re-keys the id segment and extends this to prove one session's proxy
+ * path can never read a sibling's pane.
+ * @remarks The marker embeds `built.port` and a random suffix so a stale pane left by an earlier,
+ * imperfectly torn-down run can never satisfy a fresh run's expectation by accident.
+ */
+async function checkProxyAddressing(built) {
+  const violations = [];
+  await probeSubprotocolAcceptance(built);
+
+  const marker = `proxy-addressing-${built.port}-${randomBytes(4).toString("hex")}`;
+  await writePaneMarker(built.tmux.a, built.home, marker);
+  console.log(
+    `proxy-addressing: wrote marker into pane ${built.tmux.a}: ${marker}`,
+  );
+
+  const result = await readPaneThroughProxy({
+    port: built.port,
+    idSegment: built.cardId,
+    expect: marker,
+    timeoutMs: PROXY_READ_TIMEOUT_MS,
+  });
+  console.log(
+    `proxy-addressing: read through proxy — opened=${result.opened} closeCode=${result.closeCode} ` +
+      `accumulatedChars=${result.text.length} containsMarker=${result.text.includes(marker)}`,
+  );
+  console.log(
+    `proxy-addressing: marker text read back through the proxy: ${marker}`,
+  );
+
+  if (!result.opened) {
+    violations.push(
+      `proxy-addressing: WS never opened against ws://127.0.0.1:${built.port}/sessions/${built.cardId}/terminal/ws ` +
+        `(closeCode=${result.closeCode}) — expected marker "${marker}"`,
+    );
+  } else if (!result.text.includes(marker)) {
+    violations.push(
+      `proxy-addressing: pane content read through the proxy did not contain marker "${marker}" — ` +
+        `accumulated ${result.text.length} chars: ${JSON.stringify(result.text.slice(-300))}`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -1994,6 +2243,8 @@ const CHECKS = {
     withFixture("attention-dead-sibling", checkAttentionDeadSibling),
   "single-session": () =>
     withFixture("single-session", checkSingleSession, SINGLE_SESSION_FIXTURE),
+  "proxy-addressing": () =>
+    withFixture("proxy-addressing", checkProxyAddressing),
 };
 
 /**
