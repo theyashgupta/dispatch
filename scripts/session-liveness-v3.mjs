@@ -1728,6 +1728,15 @@ async function tearDownRealSagaFixture(built, violations) {
     }
   }
 
+  // Any OTHER ttyd this fixture's own sessions caused the REAL product to spawn (e.g. via
+  // `POST /api/cards/:id/terminal` for a saga-created sibling, tracked in
+  // `built.ensuredTerminalSessionIds`) — never tracked in `built.ttyd`, spawned detached, and NOT
+  // reaped by the sandbox server's own exit above. Matched by session id, not by tmux name: a
+  // running ttyd's own proctitle drops everything from its tmux-attach target onward.
+  for (const sessionId of built.ensuredTerminalSessionIds ?? []) {
+    await killProcessesMatching(sessionId);
+  }
+
   const liveNames = (await tmuxListSessionNames()).filter((n) =>
     n.startsWith(`dsp-${built.identifier}`),
   );
@@ -1834,6 +1843,7 @@ async function withFixture(label, fn, profile = TWO_SESSION_FIXTURE) {
     repoBase: null,
     branches: {},
     worktreePaths: {},
+    ensuredTerminalSessionIds: [],
   };
   try {
     await assertPreflightClean(built);
@@ -2041,6 +2051,48 @@ async function psScanContains(needle) {
     return stdout.split("\n").some((line) => line.includes(needle));
   } catch {
     return false;
+  }
+}
+
+/**
+ * SIGTERM (then SIGKILL after a settle window) every process whose full command line contains
+ * `needle` — the general-purpose sibling of {@link psScanContains}'s read-only probe. Required
+ * because a session brought up via the REAL `/api/cards/:id/terminal` route (not this harness's
+ * own {@link spawnTtyd}) spawns a ttyd this fixture never recorded a handle for: `ensureTtyd`
+ * launches it `{ detached: true }` (`ttyd.ts`, deliberate — a ttyd must outlive a backend reload)
+ * and the sandbox server's own process exit does not reap it. `needle` must be a SESSION ID (the
+ * `-b /sessions/<id>/terminal` flag), never the tmux session name: once running, ttyd rewrites its
+ * own process title and `ps` reports its argv truncated from the tmux-attach target onward (the
+ * SAME pre-2.7.0 ttyd proctitle behavior this codebase has hit before), so a tmux-name substring
+ * silently matches nothing — live-caught leaking a real ttyd process past this check's own run
+ * (94-07-SUMMARY.md Deviations).
+ */
+async function killProcessesMatching(needle) {
+  let pids;
+  try {
+    const { stdout } = await execFileP("ps", ["-ax", "-o", "pid=,command="]);
+    pids = stdout
+      .split("\n")
+      .filter((line) => line.includes(needle))
+      .map((line) => Number(line.trim().split(/\s+/)[0]))
+      .filter((pid) => Number.isInteger(pid));
+  } catch {
+    return;
+  }
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // already gone
+    }
+  }
+  if (pids.length > 0) await sleep(300);
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // already gone
+    }
   }
 }
 
@@ -7705,6 +7757,12 @@ async function waitForProxyReady(built, idSegment, timeoutMs) {
  * until the WS upgrade actually opens. Session 2's ttyd is never spawned by the start saga itself
  * ({@link ensureTerminal} in product code is reached only via this route or Resume), so this must
  * run before any pre-restart answerability baseline is meaningful.
+ * @remarks Records `sessionId` onto `built.ensuredTerminalSessionIds` the instant the ensure-route
+ * accepts (202), not only on full success below — `ensureTtyd` may have already spawned the real
+ * ttyd process even if this function's own WS-open poll times out, and `ps`'s view of a running
+ * ttyd's argv drops everything from its tmux-attach target onward (proctitle rewrite; the SAME
+ * pre-2.7.0 ttyd behavior this codebase has hit before), so teardown cannot discover it by tmux
+ * name — only by the session id still visible in its `-b /sessions/<id>/terminal` flag.
  */
 async function ensureSessionTerminalReady(built, sessionId) {
   const switchStatus = await switchActiveSession(built, sessionId);
@@ -7715,6 +7773,7 @@ async function ensureSessionTerminalReady(built, sessionId) {
   if (ensureStatus !== 202) {
     return { ok: false, reason: `POST /terminal -> ${ensureStatus}` };
   }
+  built.ensuredTerminalSessionIds.push(sessionId);
   const ready = await waitForProxyReady(
     built,
     sessionId,
