@@ -29,10 +29,9 @@ import { ActivityDrawer } from "./features/activity/index.js";
 import {
   StartModal,
   CleanupModal,
-  SettingsModal,
   CreateTicketModal,
-  type SettingsTab,
 } from "./features/modals/index.js";
+import { SettingsScreen, type SettingsTab } from "./features/settings/index.js";
 import { FirstRunSetup } from "./features/setup/index.js";
 import { UpdateBanner } from "./features/update/index.js";
 import { cleanupCard as cleanupCardApi, getCard, getSetup } from "./lib/api.js";
@@ -116,20 +115,36 @@ export function App() {
   });
 
   const [activityOpen, setActivityOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<"board" | "orca">(() => {
+  const [viewMode, setViewMode] = useState<"board" | "workspace">(() => {
     try {
-      return localStorage.getItem("dsp.view") === "orca" ? "orca" : "board";
+      const stored = localStorage.getItem("dsp.view");
+      return stored === "workspace" || stored === "orca"
+        ? "workspace"
+        : "board";
     } catch {
       return "board";
     }
   });
   const [inboxOpen, setInboxOpen] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("dsp.sound") !== "off";
+    } catch {
+      return true;
+    }
+  });
 
   useEffect(() => {
     try {
       localStorage.setItem("dsp.view", viewMode);
     } catch {}
   }, [viewMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("dsp.sound", soundEnabled ? "on" : "off");
+    } catch {}
+  }, [soundEnabled]);
 
   const lastOpened = useLastOpened();
   const newestTs = feed.events[0]?.ts;
@@ -206,14 +221,14 @@ export function App() {
   }
 
   useEffect(() => {
-    if (viewMode !== "orca" || selectedCard != null || board == null) {
+    if (viewMode !== "workspace" || selectedCard != null || board == null) {
       return;
     }
     const id = mostRecentCardId(lastOpened, board.cards);
     if (id != null) setSelectedCardId(id);
   }, [viewMode, selectedCard, board, lastOpened]);
 
-  useTransitionNotifications(board, connection, selectCard);
+  useTransitionNotifications(board, connection, selectCard, soundEnabled);
 
   const cardIdentifiers: Record<string, string> = {};
   for (const card of board?.cards ?? []) {
@@ -361,13 +376,13 @@ export function App() {
             viewMode={viewMode}
             onSelectViewMode={(mode) => {
               setViewMode(mode);
-              if (mode === "orca") setInboxOpen(false);
+              if (mode === "workspace") setInboxOpen(false);
             }}
           />
         </>
       }
       content={
-        viewMode === "orca" ? (
+        viewMode === "workspace" ? (
           <OrcaView
             board={board}
             selectedCardId={selectedCard ? selectedCardId : null}
@@ -418,7 +433,7 @@ export function App() {
           }}
           onStartRequest={requestStart}
           onCleanupRequest={setCleanupCardId}
-          docked={viewMode === "orca"}
+          docked={viewMode === "workspace"}
         />
       }
     >
@@ -442,6 +457,7 @@ export function App() {
           newSession={startRequest.newSession === true}
           onClose={() => setStartRequest(null)}
           onEditPlaybooks={() => {
+            setStartRequest(null);
             setSettingsInitialTab("playbooks");
             setSettingsOpen(true);
           }}
@@ -462,9 +478,11 @@ export function App() {
         />
       )}
       {settingsOpen && (
-        <SettingsModal
+        <SettingsScreen
           initialTab={settingsInitialTab}
           tunnelState={tunnelState}
+          soundEnabled={soundEnabled}
+          onToggleSound={setSoundEnabled}
           onClose={() => {
             setSettingsOpen(false);
             setSettingsInitialTab("filters");

@@ -8,6 +8,7 @@ import type {
   StatusChannel,
 } from "../../shared/types.js";
 import {
+  DEFAULT_CLAUDE_ARGS,
   DEFAULT_CLEANUP_DELAY_DAYS,
   DEFAULT_FILTERS,
 } from "../../shared/types.js";
@@ -42,6 +43,9 @@ const CONFIG_TEMPLATE = {
   "// cleanupDelayDays":
     "Days a finished card keeps its workspace before automatic cleanup. 0 = clean up immediately on Done. Default 7, max 90.",
   cleanupDelayDays: DEFAULT_CLEANUP_DELAY_DAYS,
+  "// claudeArgs":
+    "Extra CLI arguments passed to `claude` every time a session starts, resumes, or restarts. Leave empty for Claude's normal permission prompts.",
+  claudeArgs: DEFAULT_CLAUDE_ARGS,
 };
 
 /**
@@ -90,6 +94,19 @@ function readCleanupDelayDays(parsed: Record<string, unknown>): number {
     return value;
   }
   return DEFAULT_CLEANUP_DELAY_DAYS;
+}
+
+/**
+ * Read the `claudeArgs` preference: a plain string preference, absent or any non-string value
+ * resolves to {@link DEFAULT_CLAUDE_ARGS}. Unlike {@link readCleanupDelayDays} there is no range
+ * to reject — any string is a valid argv source once tokenized — so a present string is always
+ * honored as-is, including an explicit `""` (no extra arguments), same posture as
+ * {@link readLastUsedPlaybook} / {@link readUpdateCheck}.
+ */
+function readClaudeArgs(parsed: Record<string, unknown>): string {
+  return typeof parsed.claudeArgs === "string"
+    ? parsed.claudeArgs
+    : DEFAULT_CLAUDE_ARGS;
 }
 
 /**
@@ -308,6 +325,7 @@ export function loadConfig(): Config {
     sources: { linear: { apiKey: rawKey, filters: readNestedFilters(parsed) } },
     lastUsedPlaybook: readLastUsedPlaybook(parsed),
     cleanupDelayDays: readCleanupDelayDays(parsed),
+    claudeArgs: readClaudeArgs(parsed),
   };
 
   const hasKey = config.linearApiKey.length > 0;

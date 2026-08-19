@@ -743,6 +743,15 @@ disallowed on some webviews) — a cosmetic notification must never crash the bo
 notification focuses the window and opens that card's DetailPanel; the title uses the
 human-readable column label and the card identifier, never the raw column key.
 
+The same transition batch also drives the gentle chime (`web/lib/chime.ts#playChime`, synthesized
+via Web Audio oscillators — no bundled audio asset): gated independently of the Notification
+permission by `soundEnabled` (Settings ▸ Notifications, a per-browser `localStorage` preference —
+`dsp.sound` — lifted into `App.tsx` state and threaded into the hook as a parameter, never into
+`~/.dispatch/config.json`, since it is a per-device preference, not shared server config). It plays
+at most ONCE per effect run regardless of how many cards transition in that snapshot, so a burst of
+simultaneous arrivals stays one ding rather than an overlapping barrage; each transitioned card
+still gets its own desktop Notification independently.
+
 The related unseen-activity dot (the SAME attention surface, a different trigger) is homed in
 [Watcher Discriminator](#watcher-discriminator) — `@see` that section for the dot's
 seed-on-first-observation baseline and why it deliberately carries NO flip-back debounce.
@@ -1488,6 +1497,24 @@ card shows — that captured stderr IS the card's error payload (`ORCH-04`). `se
 the card's `column` untouched so the user can Retry, and never logs the stderr contents. Ticket
 text never reaches a command line during any of this: it is written to a kickoff temp file and
 loaded into a per-session tmux buffer (Step 4), never passed as an argv element or shell string.
+
+**Claude launch arguments (Settings ▸ Models).** The "starting claude" step's argv is not
+hardcoded: it is `[claudePath, ...(hook flags), ...parseClaudeArgs(config.claudeArgs)]`, where
+`config.claudeArgs` is a free-text string persisted at `~/.dispatch/config.json`'s top-level
+`claudeArgs` key (default `--dangerously-skip-permissions` — Dispatch's original hardcoded
+behavior, so an un-migrated config is unchanged). `services/domain/claude-args.ts#parseClaudeArgs`
+tokenizes the string on whitespace, honoring single/double-quoted segments so a flag value
+containing spaces survives as one token; no shell is ever involved (`tmux new-session` execs the
+argv array directly), so this is quote-aware tokenizing only, never shell interpretation — no
+globbing, no `$VAR` expansion, no chaining. Both session-start (`services/orchestration/steps.ts`)
+and Resume/Restart (`services/orchestration/resume-session.ts`) read the same
+`getOrchestrationConfig()?.claudeArgs`, so a change in Settings applies to the very next
+start/resume/restart with no backend restart. `PUT /config/claude-args` accepts any string up to
+4000 characters — including empty, which means no extra arguments (Claude's normal permission
+prompts) rather than falling back to the default; the boot loader tolerates the same range with no
+upper bound to reject, matching `lastUsedPlaybook`'s tolerant-string posture rather than
+`cleanupDelayDays`'s reject-on-invalid one, because any string is a valid argv source once
+tokenized.
 
 ### Exec Chokepoint
 
@@ -2483,7 +2510,7 @@ component consumes both tokens, `tokens.css` defines both cascade steps for each
 deliberately file-scoped (`checkStripCascades`) rather than a `RETIRED_PATTERNS` entry, because the
 retired literal is a legitimate value in eight other files (`SearchBox.tsx`, `UpdateBanner.tsx`,
 `MoveToPicker.tsx`, `FirstRunSetup.tsx`, `CleanupModal.tsx`, `ActivityDrawer.tsx`, `Button.tsx`,
-`OrcaSection.tsx`) and a global substring scan would false-positive on all of them. Mirroring
+`OrcaGroupSection.tsx`) and a global substring scan would false-positive on all of them. Mirroring
 `NEW-17`'s own resolution: `src/web/**/*.tsx` carries zero comments under this repo's comment
 standard (`docs/standards/comments.md` rule 2's tsx carve-out), so this section — not a JSDoc
 pointer on any `.tsx` file — is the durable home the invariant-audit gate reads for `NEW-18`.
@@ -2926,7 +2953,7 @@ mechanically-checkable question; none of them read prose for truth.
   pointers and backtick-quoted source-file citations in this doc that no longer resolve, and
   (2) internal planning-process vocabulary (`this phase`, `Plan NN-NN`, `Phase <number>`,
   `phase-smoke-tester`, `ROADMAP`, `.planning/`) leaking into shipped `src/` — the shape of bug
-  that once shipped a "pre-this-phase" reference in `SettingsModal.tsx`'s user-facing copy. See
+  that once shipped a "pre-this-phase" reference in `SettingsScreen.tsx`'s user-facing copy. See
   the script's own header JSDoc for the full scope, its JSDoc-citation carve-out, and what it
   deliberately does not attempt (behavioral claims — no grep proves a paragraph's claim about
   what the code does is still true).

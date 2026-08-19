@@ -3,30 +3,52 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type Dispatch,
-  type RefObject,
+  type Ref,
   type SetStateAction,
 } from "react";
-import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
-import type {
-  FilterCapabilities,
-  FilterOption,
-  Playbook,
-  SourceFilters,
-  TunnelState,
+import {
+  ArrowLeft,
+  Bell,
+  Bot,
+  ClipboardList,
+  Copy,
+  Filter,
+  FolderGit2,
+  Globe,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Trash2,
+  type LucideIcon,
+} from "lucide-react";
+import {
+  DEFAULT_CLAUDE_ARGS,
+  type FilterCapabilities,
+  type FilterOption,
+  type Playbook,
+  type SourceFilters,
+  type TunnelState,
 } from "../../../shared/types.js";
 import {
+  addWorkspaceFolder,
   deletePlaybook,
   disableRemote,
   enableRemote,
   getCleanupDelay,
+  getClaudeArgs,
   getLinearFilters,
   getLinearOptions,
   getPlaybooks,
+  getWorkspaceFolders,
   previewLinearFilters,
+  removeWorkspaceFolder,
   saveCleanupDelay,
+  saveClaudeArgs,
   saveLinearFilters,
 } from "../../lib/api.js";
+import { playChime } from "../../lib/chime.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";
@@ -34,46 +56,18 @@ import { IconButton } from "../../primitives/IconButton.js";
 import { Modal, type ModalControl } from "../../primitives/Modal.js";
 import { Notice } from "../../primitives/Notice.js";
 import { QrCode } from "../../primitives/QrCode.js";
-import { MultiSelect } from "./MultiSelect.js";
+import { MultiSelect } from "../modals/index.js";
+import { WorkspaceAdd } from "../workspaces/index.js";
 import { PlaybookEditorModal } from "./PlaybookEditorModal.js";
 
-export type SettingsTab = "filters" | "playbooks" | "remote" | "cleanup";
-
-interface SettingsTabButtonProps {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}
-
-function SettingsTabButton({ label, active, onClick }: SettingsTabButtonProps) {
-  const [focused, setFocused] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      onFocus={(e) => setFocused(e.currentTarget.matches(":focus-visible"))}
-      onBlur={() => setFocused(false)}
-      style={{
-        padding: "0 0 var(--space-sm)",
-        background: "transparent",
-        border: "none",
-        borderBottom: active
-          ? "2px solid var(--accent)"
-          : "2px solid transparent",
-        color: active ? "var(--text)" : "var(--text-muted)",
-        fontFamily: "var(--font-ui)",
-        fontSize: "var(--font-label)",
-        fontWeight: "var(--weight-semibold)",
-        lineHeight: "var(--line-label)",
-        cursor: "pointer",
-        outline: "none",
-        ...focusRing(focused),
-      }}
-    >
-      {label}
-    </button>
-  );
-}
+export type SettingsTab =
+  | "filters"
+  | "models"
+  | "workspaces"
+  | "playbooks"
+  | "remote"
+  | "notifications"
+  | "cleanup";
 
 interface PlaybookListRowProps {
   playbook: Playbook;
@@ -272,7 +266,7 @@ interface FiltersTab {
   handleSave: () => Promise<void>;
 }
 
-function useFiltersTab(modalRef: RefObject<ModalControl | null>): FiltersTab {
+function useFiltersTab(onSaved: () => void): FiltersTab {
   const [draft, setDraft] = useState<SourceFilters | null>(null);
   const [capabilities, setCapabilities] = useState<FilterCapabilities | null>(
     null,
@@ -365,7 +359,7 @@ function useFiltersTab(modalRef: RefObject<ModalControl | null>): FiltersTab {
     try {
       const result = await saveLinearFilters(draft);
       if (result.ok) {
-        modalRef.current?.requestClose();
+        onSaved();
         return;
       }
       setSaveError(true);
@@ -395,13 +389,9 @@ function useFiltersTab(modalRef: RefObject<ModalControl | null>): FiltersTab {
 
 interface FiltersTabSectionProps {
   filters: FiltersTab;
-  firstTriggerRef: RefObject<HTMLButtonElement | null>;
 }
 
-function FiltersTabSection({
-  filters,
-  firstTriggerRef,
-}: FiltersTabSectionProps) {
+function FiltersTabSection({ filters }: FiltersTabSectionProps) {
   const {
     draft,
     setDraft,
@@ -426,8 +416,6 @@ function FiltersTabSection({
           ? "Matches 250+ tickets"
           : `Matches ${preview.count} ${preview.count === 1 ? "ticket" : "tickets"}`;
 
-  const firstMultiDim = capabilities?.dimensions.find((d) => d !== "cycle");
-
   return (
     <>
       {loadError && (
@@ -449,7 +437,7 @@ function FiltersTabSection({
             display: "flex",
             flexDirection: "column",
             gap: "var(--space-lg)",
-            flex: "0 1 auto",
+            flex: "1 1 auto",
             minHeight: 0,
             overflowY: "auto",
           }}
@@ -536,9 +524,6 @@ function FiltersTabSection({
                   loading={optLoading[dim]}
                   loadError={optError[dim]}
                   emptyText={MULTI_COPY[dim].emptyText}
-                  triggerRef={
-                    dim === firstMultiDim ? firstTriggerRef : undefined
-                  }
                   onChange={(next) =>
                     setDraft((prev) => (prev ? { ...prev, [dim]: next } : prev))
                   }
@@ -1081,6 +1066,113 @@ function RemoteTabSection({ tunnelState, remoteTab }: RemoteTabSectionProps) {
   );
 }
 
+type DesktopPermission = "granted" | "denied" | "default" | "unsupported";
+
+function useDesktopPermission(): {
+  status: DesktopPermission;
+  request: () => void;
+} {
+  const [status, setStatus] = useState<DesktopPermission>(() =>
+    "Notification" in window ? Notification.permission : "unsupported",
+  );
+
+  const request = useCallback(() => {
+    if (!("Notification" in window)) return;
+    void Notification.requestPermission().then((result) => {
+      setStatus(result);
+    });
+  }, []);
+
+  return { status, request };
+}
+
+interface NotificationsTabSectionProps {
+  soundEnabled: boolean;
+  onToggleSound: (enabled: boolean) => void;
+}
+
+function NotificationsTabSection({
+  soundEnabled,
+  onToggleSound,
+}: NotificationsTabSectionProps) {
+  const { status, request } = useDesktopPermission();
+  const [soundFocus, setSoundFocus] = useState(false);
+
+  return (
+    <div style={remoteSectionStyle}>
+      <div style={remoteFieldBlockStyle}>
+        <Field>Desktop notifications</Field>
+        {status === "granted" && (
+          <RemoteStatusRow
+            color="var(--status-ok)"
+            text="Enabled — you'll get a system notification when a card needs your input or an agent finishes."
+          />
+        )}
+        {status === "denied" && (
+          <RemoteStatusRow
+            color="var(--status-down)"
+            text="Blocked — enable notifications for this site in your browser settings."
+          />
+        )}
+        {status === "unsupported" && (
+          <span style={remoteHelperTextStyle}>
+            Not supported in this browser.
+          </span>
+        )}
+        {status === "default" && (
+          <>
+            <span style={remoteBodyTextStyle}>
+              Get a system notification when a card needs your input or an agent
+              finishes.
+            </span>
+            <div>
+              <Button variant="secondary" onClick={request}>
+                Enable notifications
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div style={remoteFieldBlockStyle}>
+        <Field>Sound</Field>
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--space-sm)",
+            cursor: "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={soundEnabled}
+            onChange={() => onToggleSound(!soundEnabled)}
+            onFocus={(e) =>
+              setSoundFocus(e.currentTarget.matches(":focus-visible"))
+            }
+            onBlur={() => setSoundFocus(false)}
+            style={{
+              accentColor: "var(--accent)",
+              borderRadius: "var(--radius)",
+              ...focusRing(soundFocus),
+              flex: "0 0 auto",
+            }}
+          />
+          <span style={remoteBodyTextStyle}>
+            Play a gentle chime for the same moments
+          </span>
+        </label>
+        <div>
+          <Button variant="secondary" onClick={() => playChime()}>
+            Test sound
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface CleanupTab {
   draftDays: string;
   setDraftDays: Dispatch<SetStateAction<string>>;
@@ -1091,7 +1183,7 @@ interface CleanupTab {
   handleSave: () => Promise<void>;
 }
 
-function useCleanupTab(modalRef: RefObject<ModalControl | null>): CleanupTab {
+function useCleanupTab(onSaved: () => void): CleanupTab {
   const [draftDays, setDraftDays] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -1130,7 +1222,7 @@ function useCleanupTab(modalRef: RefObject<ModalControl | null>): CleanupTab {
     try {
       const result = await saveCleanupDelay(parsedDays);
       if (result.ok) {
-        modalRef.current?.requestClose();
+        onSaved();
         return;
       }
       setSaveError(true);
@@ -1181,7 +1273,6 @@ function CleanupTabSection({ cleanupTab }: CleanupTabSectionProps) {
           display: "flex",
           flexDirection: "column",
           gap: "var(--space-sm)",
-          padding: "var(--space-lg) 0",
         }}
       >
         <Field>Cleanup delay (days)</Field>
@@ -1243,149 +1334,721 @@ function CleanupTabSection({ cleanupTab }: CleanupTabSectionProps) {
   );
 }
 
-interface SettingsModalProps {
-  onClose: () => void;
-  initialTab?: SettingsTab;
-  tunnelState: TunnelState;
+interface ModelsTab {
+  draftArgs: string;
+  setDraftArgs: Dispatch<SetStateAction<string>>;
+  loaded: boolean;
+  saving: boolean;
+  saveError: boolean;
+  loadError: boolean;
+  handleSave: () => Promise<void>;
 }
 
-export function SettingsModal({
-  onClose,
-  initialTab = "filters",
-  tunnelState,
-}: SettingsModalProps) {
-  const modalRef = useRef<ModalControl>(null);
-  const firstTriggerRef = useRef<HTMLButtonElement>(null);
-  const [tab, setTab] = useState<SettingsTab>(initialTab);
+function useModelsTab(onSaved: () => void): ModelsTab {
+  const [draftArgs, setDraftArgs] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
-  const filters = useFiltersTab(modalRef);
-  const playbooksTab = usePlaybooksTab(tab === "playbooks");
-  const remoteTab = useRemoteTab();
-  const cleanupTab = useCleanupTab(modalRef);
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const { claudeArgs } = await getClaudeArgs();
+        if (!active) return;
+        setDraftArgs(claudeArgs);
+        setLoaded(true);
+      } catch (err) {
+        console.error("getClaudeArgs failed", err);
+        if (!active) return;
+        setLoadError(true);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleSave() {
+    if (saving || !loaded) return;
+    setSaving(true);
+    setSaveError(false);
+    try {
+      const result = await saveClaudeArgs(draftArgs);
+      if (result.ok) {
+        onSaved();
+        return;
+      }
+      setSaveError(true);
+    } catch (err) {
+      console.error("saveClaudeArgs failed", err);
+      setSaveError(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return {
+    draftArgs,
+    setDraftArgs,
+    loaded,
+    saving,
+    saveError,
+    loadError,
+    handleSave,
+  };
+}
+
+interface ResetLinkProps {
+  onClick: () => void;
+}
+
+function ResetLink({ onClick }: ResetLinkProps) {
+  const [hover, setHover] = useState(false);
+  const [focus, setFocus] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onFocus={(e) => setFocus(e.currentTarget.matches(":focus-visible"))}
+      onBlur={() => setFocus(false)}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "var(--space-xs)",
+        padding: 0,
+        background: "transparent",
+        border: "none",
+        color: hover || focus ? "var(--text)" : "var(--text-muted)",
+        fontFamily: "var(--font-ui)",
+        fontSize: "var(--font-label)",
+        lineHeight: "var(--line-label)",
+        cursor: "pointer",
+        ...focusRing(focus),
+      }}
+    >
+      <RotateCcw size={12} strokeWidth={2} aria-hidden="true" />
+      Reset to default
+    </button>
+  );
+}
+
+interface ModelsTabSectionProps {
+  modelsTab: ModelsTab;
+}
+
+function ModelsTabSection({ modelsTab }: ModelsTabSectionProps) {
+  const { draftArgs, setDraftArgs, saveError, loadError } = modelsTab;
+  const [focused, setFocused] = useState(false);
 
   return (
-    <Modal
-      ariaLabel="Settings"
-      onClose={onClose}
-      controlRef={modalRef}
-      initialFocusRef={firstTriggerRef}
-      dialogStyle={
-        tab === "playbooks"
-          ? { width: "560px", maxHeight: "80vh" }
-          : { maxHeight: "80vh" }
-      }
-    >
-      <Modal.Header>Settings</Modal.Header>
-      <Modal.Body>
+    <>
+      {loadError && (
+        <span
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-body)",
+            lineHeight: "var(--line-body)",
+            color: "var(--text-muted)",
+          }}
+        >
+          Couldn't load Claude's launch arguments — reopen settings to retry.
+        </span>
+      )}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--space-lg)",
+          padding: "var(--space-lg)",
+          background: "var(--surface-card)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius)",
+        }}
+      >
         <div
           style={{
             display: "flex",
-            gap: "var(--space-lg)",
-            borderBottom: "1px solid var(--border)",
-            flex: "0 0 auto",
+            alignItems: "center",
+            gap: "var(--space-sm)",
           }}
         >
-          <SettingsTabButton
-            label="Sync filters"
-            active={tab === "filters"}
-            onClick={() => setTab("filters")}
-          />
-          <SettingsTabButton
-            label="Playbooks"
-            active={tab === "playbooks"}
-            onClick={() => setTab("playbooks")}
-          />
-          <SettingsTabButton
-            label="Remote"
-            active={tab === "remote"}
-            onClick={() => setTab("remote")}
-          />
-          <SettingsTabButton
-            label="Cleanup"
-            active={tab === "cleanup"}
-            onClick={() => setTab("cleanup")}
-          />
+          <Bot size={16} strokeWidth={2} aria-hidden="true" />
+          <span
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: "var(--font-heading)",
+              fontWeight: "var(--weight-semibold)",
+              lineHeight: "var(--line-heading)",
+              color: "var(--text)",
+            }}
+          >
+            Claude
+          </span>
         </div>
 
-        {tab === "filters" && (
-          <SettingsModal.FiltersTab
-            filters={filters}
-            firstTriggerRef={firstTriggerRef}
-          />
-        )}
-
-        {tab === "playbooks" && (
-          <SettingsModal.PlaybooksTab playbooksTab={playbooksTab} />
-        )}
-
-        {tab === "remote" && (
-          <SettingsModal.RemoteTab
-            tunnelState={tunnelState}
-            remoteTab={remoteTab}
-          />
-        )}
-
-        {tab === "cleanup" && (
-          <SettingsModal.CleanupTab cleanupTab={cleanupTab} />
-        )}
-
-        {playbooksTab.editorState && (
-          <PlaybookEditorModal
-            mode={playbooksTab.editorState.mode}
-            playbook={playbooksTab.editorState.playbook}
-            existingNames={(playbooksTab.playbooks ?? [])
-              .filter(
-                (p) => p.slug !== playbooksTab.editorState?.playbook?.slug,
-              )
-              .map((p) => p.name)}
-            onSaved={() => {
-              playbooksTab.closeEditor();
-              void playbooksTab.reload();
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-xs)",
+          }}
+        >
+          <Field>Command</Field>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--font-body)",
+              lineHeight: "var(--line-body)",
+              color: "var(--text-muted)",
             }}
-            onClose={playbooksTab.closeEditor}
-          />
-        )}
+          >
+            claude
+          </span>
+        </div>
 
-        {playbooksTab.deleteTarget && (
-          <PlaybookDeleteConfirm
-            playbook={playbooksTab.deleteTarget}
-            onClose={playbooksTab.closeDelete}
-            onDeleted={() => {
-              playbooksTab.closeDelete();
-              void playbooksTab.reload();
-            }}
-          />
-        )}
-      </Modal.Body>
-      <Modal.Actions>
-        {tab === "filters" ? (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-xs)",
+          }}
+        >
           <div
             style={{
               display: "flex",
-              justifyContent: "flex-end",
-              flex: "0 0 auto",
+              alignItems: "center",
+              justifyContent: "space-between",
             }}
           >
+            <Field>Arguments</Field>
+            <ResetLink onClick={() => setDraftArgs(DEFAULT_CLAUDE_ARGS)} />
+          </div>
+          <input
+            type="text"
+            value={draftArgs}
+            onChange={(e) => setDraftArgs(e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            spellCheck={false}
+            aria-label="Claude launch arguments"
+            placeholder={DEFAULT_CLAUDE_ARGS}
+            style={{
+              height: "32px",
+              width: "100%",
+              padding: "0 var(--space-sm)",
+              background: "var(--surface-column)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              color: "var(--text)",
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--font-body)",
+              lineHeight: "var(--line-body)",
+              ...focusRing(focused),
+            }}
+          />
+          <span
+            style={{
+              fontSize: "var(--font-label)",
+              lineHeight: "var(--line-label)",
+              color: "var(--text-muted)",
+            }}
+          >
+            Passed to <code>claude</code> every time a session starts, resumes,
+            or restarts. Clear this to get Claude's normal permission prompts
+            instead of skipping them.
+          </span>
+        </div>
+
+        {saveError && (
+          <Notice
+            tone="destructive"
+            label="Couldn't save Claude's arguments — try again."
+          />
+        )}
+      </div>
+    </>
+  );
+}
+
+interface WorkspacesTab {
+  folders: string[];
+  loading: boolean;
+  loadError: boolean;
+  addFolder: (path: string) => Promise<string | null>;
+  removeFolder: (path: string) => void;
+}
+
+function useWorkspacesTab(): WorkspacesTab {
+  const [folders, setFolders] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const { folders: fs } = await getWorkspaceFolders();
+        if (!active) return;
+        setFolders(fs);
+      } catch (err) {
+        console.error("getWorkspaceFolders failed", err);
+        if (!active) return;
+        setLoadError(true);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const addFolder = useCallback(
+    async (path: string): Promise<string | null> => {
+      try {
+        const result = await addWorkspaceFolder(path);
+        if (!result.ok) return result.error;
+        setFolders((prev) => (prev.includes(path) ? prev : [...prev, path]));
+        return null;
+      } catch (err) {
+        console.error("addWorkspaceFolder failed", err);
+        return "Couldn't reach the server. Try again.";
+      }
+    },
+    [],
+  );
+
+  const removeFolder = useCallback((path: string) => {
+    removeWorkspaceFolder(path).catch((err) => {
+      console.error("removeWorkspaceFolder failed", err);
+    });
+    setFolders((prev) => prev.filter((f) => f !== path));
+  }, []);
+
+  return { folders, loading, loadError, addFolder, removeFolder };
+}
+
+interface WorkspaceRowProps {
+  path: string;
+  onRemove: () => void;
+}
+
+function WorkspaceRow({ path, onRemove }: WorkspaceRowProps) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--space-sm)",
+        padding: "var(--space-sm)",
+        borderRadius: "var(--radius)",
+        background: hover ? "var(--surface-card-hover)" : "transparent",
+      }}
+    >
+      <FolderGit2
+        size={14}
+        strokeWidth={2}
+        aria-hidden="true"
+        style={{ color: "var(--text-muted)", flex: "0 0 auto" }}
+      />
+      <span
+        style={{
+          flex: "1 1 auto",
+          minWidth: 0,
+          fontFamily: "var(--font-mono)",
+          fontSize: "var(--font-label)",
+          fontWeight: "var(--weight-semibold)",
+          lineHeight: "var(--line-label)",
+          color: "var(--text)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {path}
+      </span>
+      <IconButton aria-label={`Remove workspace ${path}`} onClick={onRemove}>
+        <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+      </IconButton>
+    </div>
+  );
+}
+
+interface WorkspacesTabSectionProps {
+  workspacesTab: WorkspacesTab;
+}
+
+function WorkspacesTabSection({ workspacesTab }: WorkspacesTabSectionProps) {
+  const { folders, loading, loadError, addFolder, removeFolder } =
+    workspacesTab;
+
+  return (
+    <div
+      className="scroll-stable-y"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-lg)",
+        flex: "1 1 auto",
+        minHeight: 0,
+        overflowY: "auto",
+      }}
+    >
+      <WorkspaceAdd
+        onAdd={addFolder}
+        hint="Add a folder that contains the git repos you start tickets in."
+      />
+
+      {loading && (
+        <span
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            lineHeight: "var(--line-label)",
+            color: "var(--text-muted)",
+          }}
+        >
+          Loading…
+        </span>
+      )}
+
+      {!loading && loadError && (
+        <Notice
+          tone="destructive"
+          label="Couldn't load workspaces — reopen settings to retry."
+        />
+      )}
+
+      {!loading && !loadError && folders.length === 0 && (
+        <Notice tone="muted" label="No workspaces yet">
+          Add a folder above to start tickets in it.
+        </Notice>
+      )}
+
+      {!loading && !loadError && folders.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {folders.map((f) => (
+            <WorkspaceRow key={f} path={f} onRemove={() => removeFolder(f)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface SettingsSection {
+  id: SettingsTab;
+  label: string;
+  icon: LucideIcon;
+}
+
+const SETTINGS_SECTIONS: SettingsSection[] = [
+  { id: "filters", label: "Sync filters", icon: Filter },
+  { id: "models", label: "Models", icon: Bot },
+  { id: "workspaces", label: "Workspaces", icon: FolderGit2 },
+  { id: "playbooks", label: "Playbooks", icon: ClipboardList },
+  { id: "remote", label: "Remote", icon: Globe },
+  { id: "notifications", label: "Notifications", icon: Bell },
+  { id: "cleanup", label: "Cleanup", icon: Trash2 },
+];
+
+const overlayStyle: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 18,
+  display: "flex",
+  background: "var(--bg)",
+  transition: "opacity 150ms ease-out",
+};
+
+const sidebarStyle: CSSProperties = {
+  flex: "0 0 auto",
+  width: "var(--orca-nav-width)",
+  maxWidth: "80vw",
+  display: "flex",
+  flexDirection: "column",
+  gap: "var(--space-lg)",
+  padding: "var(--space-lg)",
+  background: "var(--surface-column)",
+  borderRight: "1px solid var(--border)",
+  overflowY: "auto",
+};
+
+const navListStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "2px",
+};
+
+const contentColumnStyle: CSSProperties = {
+  flex: "1 1 auto",
+  minWidth: 0,
+  display: "flex",
+  flexDirection: "column",
+  minHeight: 0,
+};
+
+const contentHeaderStyle: CSSProperties = {
+  flex: "0 0 auto",
+  padding: "var(--space-xl) var(--space-2xl) var(--space-lg)",
+  borderBottom: "1px solid var(--border)",
+};
+
+const contentHeadingStyle: CSSProperties = {
+  margin: 0,
+  fontFamily: "var(--font-ui)",
+  fontSize: "var(--font-display)",
+  fontWeight: "var(--weight-semibold)",
+  lineHeight: "var(--line-display)",
+  color: "var(--text)",
+};
+
+const contentBodyStyle: CSSProperties = {
+  flex: "1 1 auto",
+  minHeight: 0,
+  display: "flex",
+  flexDirection: "column",
+  gap: "var(--space-lg)",
+  padding: "var(--space-xl) var(--space-2xl)",
+  maxWidth: "640px",
+  width: "100%",
+};
+
+const footerStyle: CSSProperties = {
+  flex: "0 0 auto",
+  display: "flex",
+  justifyContent: "flex-end",
+  padding: "var(--space-lg) var(--space-2xl)",
+  borderTop: "1px solid var(--border)",
+};
+
+const navButtonBaseStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--space-sm)",
+  width: "100%",
+  padding: "var(--space-sm)",
+  border: "none",
+  borderRadius: "var(--radius)",
+  fontFamily: "var(--font-ui)",
+  fontSize: "var(--font-label)",
+  fontWeight: "var(--weight-semibold)",
+  lineHeight: "var(--line-label)",
+  textAlign: "left",
+  cursor: "pointer",
+  outline: "none",
+};
+
+interface BackToAppButtonProps {
+  onClick: () => void;
+  ref?: Ref<HTMLButtonElement>;
+}
+
+function BackToAppButton({ onClick, ref }: BackToAppButtonProps) {
+  const [hover, setHover] = useState(false);
+  const [focused, setFocused] = useState(false);
+  return (
+    <button
+      ref={ref}
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onFocus={(e) => setFocused(e.currentTarget.matches(":focus-visible"))}
+      onBlur={() => setFocused(false)}
+      style={{
+        ...navButtonBaseStyle,
+        background: hover ? "var(--surface-card-hover)" : "transparent",
+        color: "var(--text-muted)",
+        ...focusRing(focused),
+      }}
+    >
+      <ArrowLeft size={14} strokeWidth={2} aria-hidden="true" />
+      Back to app
+    </button>
+  );
+}
+
+interface SettingsNavItemProps {
+  icon: LucideIcon;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}
+
+function SettingsNavItem({
+  icon: Icon,
+  label,
+  active,
+  onClick,
+}: SettingsNavItemProps) {
+  const [hover, setHover] = useState(false);
+  const [focused, setFocused] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-current={active ? "page" : undefined}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onFocus={(e) => setFocused(e.currentTarget.matches(":focus-visible"))}
+      onBlur={() => setFocused(false)}
+      style={{
+        ...navButtonBaseStyle,
+        background: active
+          ? "var(--surface-card)"
+          : hover
+            ? "var(--surface-card-hover)"
+            : "transparent",
+        color: active ? "var(--text)" : "var(--text-muted)",
+        ...focusRing(focused),
+      }}
+    >
+      <Icon size={14} strokeWidth={2} aria-hidden="true" />
+      {label}
+    </button>
+  );
+}
+
+interface SettingsScreenProps {
+  onClose: () => void;
+  initialTab?: SettingsTab;
+  tunnelState: TunnelState;
+  soundEnabled: boolean;
+  onToggleSound: (enabled: boolean) => void;
+}
+
+export function SettingsScreen({
+  onClose,
+  initialTab = "filters",
+  tunnelState,
+  soundEnabled,
+  onToggleSound,
+}: SettingsScreenProps) {
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
+  const [entered, setEntered] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const backButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
+  const requestClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    setTimeout(() => onCloseRef.current(), 150);
+  }, []);
+
+  useEffect(() => {
+    backButtonRef.current?.focus();
+    const raf = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const filters = useFiltersTab(requestClose);
+  const modelsTab = useModelsTab(requestClose);
+  const workspacesTab = useWorkspacesTab();
+  const playbooksTab = usePlaybooksTab(tab === "playbooks");
+  const remoteTab = useRemoteTab();
+  const cleanupTab = useCleanupTab(requestClose);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (playbooksTab.editorState || playbooksTab.deleteTarget) return;
+      requestClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [playbooksTab.editorState, playbooksTab.deleteTarget, requestClose]);
+
+  const activeSection =
+    SETTINGS_SECTIONS.find((section) => section.id === tab) ??
+    SETTINGS_SECTIONS[0];
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Settings"
+      style={{
+        ...overlayStyle,
+        opacity: entered && !closing ? 1 : 0,
+      }}
+    >
+      <nav aria-label="Settings sections" style={sidebarStyle}>
+        <SettingsScreen.BackToApp ref={backButtonRef} onClick={requestClose} />
+        <div style={navListStyle}>
+          {SETTINGS_SECTIONS.map((section) => (
+            <SettingsNavItem
+              key={section.id}
+              icon={section.icon}
+              label={section.label}
+              active={tab === section.id}
+              onClick={() => setTab(section.id)}
+            />
+          ))}
+        </div>
+      </nav>
+
+      <div style={contentColumnStyle}>
+        <div style={contentHeaderStyle}>
+          <h1 style={contentHeadingStyle}>{activeSection.label}</h1>
+        </div>
+
+        <div style={contentBodyStyle}>
+          {tab === "filters" && <SettingsScreen.FiltersTab filters={filters} />}
+          {tab === "models" && (
+            <SettingsScreen.ModelsTab modelsTab={modelsTab} />
+          )}
+          {tab === "workspaces" && (
+            <SettingsScreen.WorkspacesTab workspacesTab={workspacesTab} />
+          )}
+          {tab === "playbooks" && (
+            <SettingsScreen.PlaybooksTab playbooksTab={playbooksTab} />
+          )}
+          {tab === "remote" && (
+            <SettingsScreen.RemoteTab
+              tunnelState={tunnelState}
+              remoteTab={remoteTab}
+            />
+          )}
+          {tab === "notifications" && (
+            <SettingsScreen.NotificationsTab
+              soundEnabled={soundEnabled}
+              onToggleSound={onToggleSound}
+            />
+          )}
+          {tab === "cleanup" && (
+            <SettingsScreen.CleanupTab cleanupTab={cleanupTab} />
+          )}
+        </div>
+
+        {tab === "filters" && (
+          <div style={footerStyle}>
             <Button
               variant="primary"
-              onClick={() => {
-                firstTriggerRef.current?.focus();
-                void filters.handleSave();
-              }}
+              onClick={() => void filters.handleSave()}
               disabled={!filters.draft}
               loading={filters.saving}
             >
               {filters.saving ? "Saving filters…" : "Save Filters"}
             </Button>
           </div>
-        ) : tab === "cleanup" ? (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              flex: "0 0 auto",
-            }}
-          >
+        )}
+        {tab === "cleanup" && (
+          <div style={footerStyle}>
             <Button
               variant="primary"
               onClick={() => void cleanupTab.handleSave()}
@@ -1395,13 +2058,55 @@ export function SettingsModal({
               {cleanupTab.saving ? "Saving…" : "Save cleanup delay"}
             </Button>
           </div>
-        ) : null}
-      </Modal.Actions>
-    </Modal>
+        )}
+        {tab === "models" && (
+          <div style={footerStyle}>
+            <Button
+              variant="primary"
+              onClick={() => void modelsTab.handleSave()}
+              disabled={!modelsTab.loaded}
+              loading={modelsTab.saving}
+            >
+              {modelsTab.saving ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {playbooksTab.editorState && (
+        <PlaybookEditorModal
+          mode={playbooksTab.editorState.mode}
+          playbook={playbooksTab.editorState.playbook}
+          existingNames={(playbooksTab.playbooks ?? [])
+            .filter((p) => p.slug !== playbooksTab.editorState?.playbook?.slug)
+            .map((p) => p.name)}
+          onSaved={() => {
+            playbooksTab.closeEditor();
+            void playbooksTab.reload();
+          }}
+          onClose={playbooksTab.closeEditor}
+        />
+      )}
+
+      {playbooksTab.deleteTarget && (
+        <PlaybookDeleteConfirm
+          playbook={playbooksTab.deleteTarget}
+          onClose={playbooksTab.closeDelete}
+          onDeleted={() => {
+            playbooksTab.closeDelete();
+            void playbooksTab.reload();
+          }}
+        />
+      )}
+    </div>
   );
 }
 
-SettingsModal.FiltersTab = FiltersTabSection;
-SettingsModal.PlaybooksTab = PlaybooksTabSection;
-SettingsModal.RemoteTab = RemoteTabSection;
-SettingsModal.CleanupTab = CleanupTabSection;
+SettingsScreen.BackToApp = BackToAppButton;
+SettingsScreen.FiltersTab = FiltersTabSection;
+SettingsScreen.ModelsTab = ModelsTabSection;
+SettingsScreen.WorkspacesTab = WorkspacesTabSection;
+SettingsScreen.PlaybooksTab = PlaybooksTabSection;
+SettingsScreen.RemoteTab = RemoteTabSection;
+SettingsScreen.NotificationsTab = NotificationsTabSection;
+SettingsScreen.CleanupTab = CleanupTabSection;

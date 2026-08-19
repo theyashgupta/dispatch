@@ -42,7 +42,8 @@ src/web/
 │   ├── board/      # Board, Column, Card, CardView, EmptyState
 │   ├── detail/     # DetailPanel, PanelHeader, ReferenceBlocks, SessionLostSection, TerminalRegion
 │   ├── sync/       # SyncStrip
-│   ├── modals/     # StartModal, SettingsModal, CleanupModal, MultiSelect
+│   ├── modals/     # StartModal, CleanupModal, MultiSelect
+│   ├── settings/   # SettingsScreen (full-screen, sidebar-nav), PlaybookEditorModal
 │   └── badges/     # GoneBadge, PlanReadyBadge, SourceBadge — shared leaf feature (see import direction)
 ├── hooks/          # data/effect hooks: useBoardStream, useUnseenActivity, useTransitionNotifications, useResumeFeedback, useMediaQuery
 ├── lib/            # non-UI helpers: api.ts, card-badges.ts, format-age.ts, resume-feedback.ts, start-request.ts
@@ -57,14 +58,15 @@ src/web/
 | `Board.tsx`, `Column.tsx`, `Card.tsx`, `CardView.tsx`, `EmptyState.tsx`                                                  | `features/board/`                |
 | `DetailPanel.tsx`, `PanelHeader.tsx`, `ReferenceBlocks.tsx`, `SessionLostSection.tsx`, `TerminalRegion.tsx`              | `features/detail/`               |
 | `SyncStrip.tsx`                                                                                                          | `features/sync/`                 |
-| `StartModal.tsx`, `SettingsModal.tsx`, `CleanupModal.tsx`, `MultiSelect.tsx`                                             | `features/modals/`               |
+| `StartModal.tsx`, `CleanupModal.tsx`, `MultiSelect.tsx`                                                                  | `features/modals/`               |
+| `SettingsScreen.tsx`, `PlaybookEditorModal.tsx`                                                                          | `features/settings/`             |
 | `GoneBadge.tsx`, `PlanReadyBadge.tsx`, `SourceBadge.tsx`                                                                 | `features/badges/` (shared leaf) |
 | `useBoardStream.ts`, `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts` | `hooks/`                         |
 | `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`                                    | `lib/`                           |
 | `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Glyph` / `Markdown`                                            | `primitives/`                    |
 | `tokens.css`                                                                                                             | `styles/`                        |
 
-A component lives in the folder of the feature that consumes it; a component consumed by exactly one feature is co-located with that consumer (`MultiSelect` sits in `modals/` because `SettingsModal` is its only consumer).
+A component lives in the folder of the feature that consumes it; a component consumed by exactly one feature is co-located with that consumer (`PlaybookEditorModal` sits in `settings/` because `SettingsScreen` is its only consumer). `MultiSelect` stays in `modals/` even though both `settings/` and `inbox/` now consume it — cross-feature reuse goes through the owning feature's `index.ts` barrel rather than forcing a move.
 
 ## Import direction (unidirectional)
 
@@ -80,15 +82,15 @@ Feature folders never import from sibling feature folders — cross-feature shar
 
 One convention spans the whole tree. Every artifact kind has a fixed pattern and folder home:
 
-| Artifact kind                 | Location             | Pattern                     | Example             |
-| ----------------------------- | -------------------- | --------------------------- | ------------------- |
-| React component               | `src/web/**`         | `PascalCase.tsx`            | `SettingsModal.tsx` |
-| React hook                    | `src/web/hooks`      | `useX.ts` (camelCase)       | `useBoardStream.ts` |
-| Web util / client             | `src/web/lib`        | `kebab-case.ts`             | `card-badges.ts`    |
-| HTTP route module             | `src/server/routes`  | `<resource>.route.ts`       | `cards.route.ts`    |
-| Store module                  | `src/server/store`   | `<domain>.store.ts`         | `board.store.ts`    |
-| Ticket source                 | `src/server/sources` | `<name>.source.ts`          | `linear.source.ts`  |
-| Service / adapter / bootstrap | `src/server/**`      | `kebab-case.ts` (no suffix) | `start-session.ts`  |
+| Artifact kind                 | Location             | Pattern                     | Example              |
+| ----------------------------- | -------------------- | --------------------------- | -------------------- |
+| React component               | `src/web/**`         | `PascalCase.tsx`            | `SettingsScreen.tsx` |
+| React hook                    | `src/web/hooks`      | `useX.ts` (camelCase)       | `useBoardStream.ts`  |
+| Web util / client             | `src/web/lib`        | `kebab-case.ts`             | `card-badges.ts`     |
+| HTTP route module             | `src/server/routes`  | `<resource>.route.ts`       | `cards.route.ts`     |
+| Store module                  | `src/server/store`   | `<domain>.store.ts`         | `board.store.ts`     |
+| Ticket source                 | `src/server/sources` | `<name>.source.ts`          | `linear.source.ts`   |
+| Service / adapter / bootstrap | `src/server/**`      | `kebab-case.ts` (no suffix) | `start-session.ts`   |
 
 The enforceable rule: `.tsx` → PascalCase; `hooks/*.ts` → `useX` camelCase; every other `.ts` → kebab-case; `route`/`store`/`source` suffixes layered on via glob. Role suffixes apply **only** where a folder groups by resource (`routes/`, `store/`, `sources/`) — everywhere else the folder already encodes the layer, so the suffix is dropped (the Angular v20 lesson: no redundant type suffixes). Helpers that live inside a resource folder but are not themselves the resource module (`store/mapping.ts`, `sources/registry.ts`, `sources/linear/filter.ts`, `routes/loopback.ts`) stay plain kebab-case.
 
