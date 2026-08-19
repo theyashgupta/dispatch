@@ -277,6 +277,52 @@ along even if the entity grows. It deliberately carries no per-entry `active` fl
 compares `entry.id === card.activeSessionId` against the wire's own single source of truth, rather
 than trusting a second, independently-computed boolean that could disagree with it.
 
+### Session Inheritance
+
+**What inheritance actually is here: git ancestry and nothing else.** Dispatch persists no
+generated docs, roadmaps or PRDs anywhere — not on the card, not on the session record, not in
+`~/.dispatch`. There is no in-app artifact to copy, so the only real inheritance vector is the
+child's branch being cut from the parent's branch rather than from the repo's configured base.
+
+**The explicit inherited / not-inherited list, criterion 1's own record:**
+
+- INHERITED — the parent's commits, via git ancestry (the child's branch descends from the parent's
+  branch tip).
+- INHERITED — `workspace` (the ticket's repo/base pairs), already seeded at reservation time since
+  Phase 94; identical across a ticket's sessions.
+- INHERITED — a line in the kickoff naming the parent's branch, so the agent knows what it is
+  building on.
+- NOT INHERITED — **uncommitted work in the parent's worktree.** This is the honest boundary of
+  "starting with the context that makes it useful," and it is stated plainly here rather than left
+  to be discovered.
+- NOT INHERITED — `prs`, `previews`, `prsUnknown`, `previewsUnknown`. The child probes its own
+  branch and discovers fresh; copying them would assert a PR the child's branch does not have,
+  exactly the failure `ARTIFACT-01` exists to kill.
+- NOT INHERITED — `hookToken` and `claudeSessionId`. Fresh per session, non-negotiable: they are the
+  credential and the identity that make per-session hook routing work at all.
+
+**Depth is one level, and it is recorded, not enforced by refusal.** `Session.builtFrom` always
+names the DIRECT parent. A session built from an already-inherited session records that inherited
+session — not the root and not nothing. Flatten-to-root was rejected because recording that session
+3 came from session 1 when the user built it from session 2 records something the user did not do;
+refusing outright was rejected because it records no relationship at all. What decision `D-C`
+deferred is arbitrary depth with its layer-navigation UI and naming scheme; the invariant that keeps
+this honest is that **nothing in the product traverses `builtFrom` transitively** — the wire
+resolver (`redactCard`) reads exactly one hop and there is no helper that could read more.
+
+**The two ordinals, and which one the wire reports.** `SessionSummary.ordinal` is POSITIONAL,
+derived at read time from sessions sorted by `createdAt`, never stored. `Card.nextSessionOrdinal` is
+MONOTONIC and never reused, and it is what produces the `-2`/`-3` branch and tmux suffix. They
+diverge after a cleanup — a session on branch `PROJ-123-4` can display as "Session 2".
+`SessionSummary.parentOrdinal` is the POSITIONAL one, on both sides, so a non-parent's removal
+renumbers the relationship consistently.
+
+**Degradation when the parent is gone.** Cleanup removes session records, so a `builtFrom` can
+outlive its target. When it does not resolve to a live session on the same card, `parentOrdinal` is
+ABSENT and the caption does not render. The record's `builtFrom` is deliberately NOT cleared: the
+provenance fact stays true and only its rendering degrades. Erasing history to simplify a view is
+the same class of error as flatten-to-root.
+
 ### Downgrade Safety
 
 dispatch ships via npx, so one machine updating before another is ordinary, and both builds share
@@ -2640,13 +2686,15 @@ phase (Phase 96's single-session parity audit is the natural home, per 94-07's o
 
 ### Arbitrary session depth deferred (decision D-C)
 
-Phase 94 ships exactly one level: a ticket owns N sessions, and starting another always starts a
-FRESH session rather than one that inherits from an existing sibling. Arbitrary depth — the
-original `MULTI-03` sketch, its layer-navigation UI, and the naming scheme that would convey which
-session builds on which — is explicitly deferred to Phase 95 ("Inheriting from a sibling session"),
-per the v3.0 `REQUIREMENTS.md` decision `D-C`. Inheritance is meant to land as an option ON this
-phase's start saga, not a second, parallel start path — one entry point, verified by grep, so a
-future phase does not double every per-session guard this milestone just built.
+Depth 1 has shipped (Phase 95, see [Session Inheritance](#session-inheritance) for the full
+record): a ticket owns N sessions, and starting another can OPTIONALLY inherit from an existing
+sibling — the child's branch descends from the chosen parent's, and `Session.builtFrom` records the
+DIRECT parent. What remains deferred is ARBITRARY depth — the original `MULTI-03` sketch, its
+layer-navigation UI, and the naming scheme that would convey which session builds on which — per the
+v3.0 `REQUIREMENTS.md` decision `D-C`. The property that protects that deferral is the
+no-transitive-traversal invariant: nothing in the product ever walks a `builtFrom` chain past one
+hop, so the recorded relationship stays a single edge no matter how many times a session is built
+from an already-inherited one.
 
 ### `KEEP-02`: the N=1 panel gains one row (accepted deviation)
 
