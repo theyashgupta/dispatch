@@ -149,6 +149,21 @@
  *                                                                   live by firing it too, with a
  *                                                                   permanent guard against the
  *                                                                   same-due-time dead instrument
+ *   node scripts/session-liveness-v3.mjs --check inherit-ancestry  Phase 95 criterion 1
+ *                                                                   (MULTI-02): a REAL inherited
+ *                                                                   start's child branch is proven
+ *                                                                   to descend from the parent's
+ *                                                                   OWN named commit sha (never
+ *                                                                   just "is-ancestor exited 0",
+ *                                                                   which a base-cut child would
+ *                                                                   also satisfy if the fixture's
+ *                                                                   parent carried no commit of its
+ *                                                                   own), the fetch-skip is proven
+ *                                                                   by a zero-warning board, and the
+ *                                                                   child's own tmux pane is proven
+ *                                                                   to have received the "Building
+ *                                                                   on a previous session" kickoff
+ *                                                                   heading
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -2037,14 +2052,22 @@ async function postCleanup(built, opts) {
  * a second-session check exercises the exact same request path a real drag-triggered "Start
  * another session" click sends: server-side 409 re-validation, the reserve-before-run store step,
  * and every saga step in between.
+ * @remarks `inheritFrom` (Phase 95) rides the same body only when the caller supplies it — every
+ * pre-95 call site destructures `{ newSession }` alone, so `inheritFrom` is `undefined` for them
+ * and the conditional spread below omits the key entirely, keeping their request body byte-for-byte
+ * unchanged.
  */
-async function startSecondSession(built, { newSession }) {
+async function startSecondSession(built, { newSession, inheritFrom }) {
   const res = await fetch(
     `http://127.0.0.1:${built.port}/api/cards/${built.cardId}/start`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ extraDirection: "", newSession }),
+      body: JSON.stringify({
+        extraDirection: "",
+        newSession,
+        ...(inheritFrom != null ? { inheritFrom } : {}),
+      }),
     },
   );
   const body = await res.json().catch(() => undefined);
@@ -8360,6 +8383,211 @@ async function checkArtifactAttribution(built) {
   return violations;
 }
 
+/**
+ * `--check inherit-ancestry` (Plan 95-05 Task 1, criterion C1, MULTI-02): drives a REAL inherited
+ * start (`inheritFrom` naming session 1) and proves session 2's branch genuinely descends from
+ * session 1's own committed history, proves the fetch-skip 95-03 exists to guarantee, and proves
+ * the child's agent was told what it was built on.
+ *
+ * THIS CHECK'S OWN DEAD-INSTRUMENT TRAP, 95-VALIDATION.md's sharpest one: `git merge-base
+ * --is-ancestor <parent-tip> <child-branch>` would ALSO exit 0 for a child cut fresh from the
+ * repo's base if the fixture's parent branch carried no commit of its own beyond that base —
+ * because the parent tip WOULD BE the base tip, and every branch descends from the base. Step A
+ * below asserts `PARENT_TIP !== BASE_TIP` as a violation of its own, with an early return BEFORE
+ * any ancestry assertion runs: a future fixture regression that drops the parent's own commit makes
+ * this check report itself dead, never a false pass. `standUpRealSagaFixture` already commits
+ * `"fixture session 1"` after the branch point (`:1391-1400`), so this guard holds on a healthy
+ * tree today — it is still asserted rather than trusted.
+ * @remarks Step C's ancestry proof is deliberately TWO assertions: `is-ancestor` exiting 0 is
+ * exactly the assertion the trap above defeats, so the named `PARENT_TIP` sha's literal presence in
+ * `git rev-list <childBranch>` is also checked.
+ * @remarks Step E deliberately never substring-matches the PARENT's branch name in the captured
+ * pane — the CHILD's own branch (`<identifier>-2`) CONTAINS the parent's (`<identifier>`) as a
+ * prefix, so that assertion would pass vacuously. The kickoff's `## Building on a previous session`
+ * heading (`kickoff.ts`) is the collision-free anchor.
+ */
+async function checkInheritAncestry(built) {
+  const violations = [];
+
+  // --- A. Establish the named parent commit, and prove the instrument is not dead. ---
+  const PARENT_TIP = (
+    await execFileP(
+      "git",
+      ["rev-parse", "refs/heads/" + built.session1Branch],
+      { cwd: built.repoPath },
+    )
+  ).stdout.trim();
+  const BASE_TIP = (
+    await execFileP("git", ["rev-parse", "refs/heads/" + built.repoBase], {
+      cwd: built.repoPath,
+    })
+  ).stdout.trim();
+  console.log(
+    `inherit-ancestry: PARENT_TIP (branch ${built.session1Branch}) = ${PARENT_TIP}, BASE_TIP (branch ${built.repoBase}) = ${BASE_TIP}`,
+  );
+  if (PARENT_TIP === BASE_TIP) {
+    violations.push(
+      `inherit-ancestry: DEAD INSTRUMENT — the fixture's parent branch "${built.session1Branch}" (PARENT_TIP=${PARENT_TIP}) carries no commit of its own beyond the repo's base branch "${built.repoBase}" (BASE_TIP=${BASE_TIP}); they are the SAME commit. "git merge-base --is-ancestor" cannot distinguish genuine inheritance from a child cut fresh off the base in this state, so this check refuses to run the ancestry assertion and report a pass.`,
+    );
+    return violations;
+  }
+
+  // --- B. Drive a REAL inherited start. ---
+  const { status, body } = await startSecondSession(built, {
+    newSession: true,
+    inheritFrom: built.sessionA.id,
+  });
+  console.log(
+    `inherit-ancestry: POST /start {newSession:true, inheritFrom:${built.sessionA.id}} -> ${status}`,
+  );
+  if (status !== 202) {
+    violations.push(
+      `inherit-ancestry: POST /start returned ${status}, expected 202 (body=${JSON.stringify(body)})`,
+    );
+    return violations;
+  }
+
+  const { card, timedOut } = await waitForSagaSettled(built, {
+    timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+  });
+  if (timedOut) {
+    violations.push(
+      `inherit-ancestry: saga did not settle within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (last observed card=${JSON.stringify(card)})`,
+    );
+    return violations;
+  }
+  if (card?.startError != null) {
+    violations.push(
+      `inherit-ancestry: saga recorded a startError instead of an inherited second session: ${JSON.stringify(card.startError)}`,
+    );
+    return violations;
+  }
+
+  const childId = (card?.sessionSummaries ?? [])
+    .map((s) => s.id)
+    .find((id) => id !== built.sessionA.id);
+  if (!childId) {
+    violations.push(
+      `inherit-ancestry: could not resolve the child session's id from sessionSummaries=${JSON.stringify(card?.sessionSummaries)}`,
+    );
+    return violations;
+  }
+  const childBranch = built.identifier + "-2";
+  console.log(
+    `inherit-ancestry: parent session=${built.sessionA.id} (branch ${built.session1Branch}), child session=${childId} (expected branch ${childBranch})`,
+  );
+
+  // --- C. Assert positively on the CHILD (fan-out) — never only that the parent was undisturbed. ---
+  let ancestorExitsZero = true;
+  try {
+    await execFileP(
+      "git",
+      ["merge-base", "--is-ancestor", PARENT_TIP, childBranch],
+      { cwd: built.repoPath },
+    );
+  } catch (err) {
+    ancestorExitsZero = false;
+    violations.push(
+      `inherit-ancestry: "git merge-base --is-ancestor ${PARENT_TIP} ${childBranch}" did not exit 0: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  console.log(
+    `inherit-ancestry: is-ancestor(${PARENT_TIP}, ${childBranch}) exits 0 = ${ancestorExitsZero}`,
+  );
+
+  const revListShas = (
+    await execFileP("git", ["rev-list", childBranch], { cwd: built.repoPath })
+  ).stdout
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const revListContainsParentTip = revListShas.includes(PARENT_TIP);
+  console.log(
+    `inherit-ancestry: git rev-list ${childBranch} contains PARENT_TIP ${PARENT_TIP} = ${revListContainsParentTip} (${revListShas.length} commits total)`,
+  );
+  if (!revListContainsParentTip) {
+    violations.push(
+      `inherit-ancestry: "git rev-list ${childBranch}" does NOT literally contain the named PARENT_TIP sha ${PARENT_TIP} — this is the assertion the bare is-ancestor exit code alone cannot prove (rev-list output: ${JSON.stringify(revListShas)})`,
+    );
+  }
+
+  if (childBranch === built.session1Branch) {
+    violations.push(
+      `inherit-ancestry: child branch equals the parent's own branch "${childBranch}" — expected a distinct sibling branch`,
+    );
+  }
+
+  const session2WorkspacePath = join(built.home, "workspaces", childBranch);
+  const session2WtPath = join(session2WorkspacePath, "alpha");
+  if (session2WtPath === built.session1WorktreePath) {
+    violations.push(
+      `inherit-ancestry: child worktree path equals the parent's own worktree path (${session2WtPath})`,
+    );
+  }
+  if (!existsSync(session2WtPath)) {
+    violations.push(
+      `inherit-ancestry: child worktree directory does not exist: ${session2WtPath}`,
+    );
+  }
+
+  const persisted = readCard(built.dbPath, built.cardId);
+  const childRecord = persisted?.sessions?.find((s) => s.id === childId);
+  console.log(
+    `inherit-ancestry: persisted child session ${childId} builtFrom = ${JSON.stringify(childRecord?.builtFrom)} (expected parent id ${built.sessionA.id})`,
+  );
+  if (childRecord?.builtFrom !== built.sessionA.id) {
+    violations.push(
+      `inherit-ancestry: persisted child session ${childId}'s builtFrom is ${JSON.stringify(childRecord?.builtFrom)}, expected the parent's id ${built.sessionA.id}`,
+    );
+  }
+
+  // --- D. Assert the fetch-skip — the trap Plan 95-03 exists to avoid. ---
+  const boardText = await (
+    await fetch(`http://127.0.0.1:${built.port}/api/board`)
+  ).text();
+  const fetchOriginCount = (boardText.match(/git fetch origin/g) ?? []).length;
+  const failedInCount = (boardText.match(/failed in/g) ?? []).length;
+  console.log(
+    `inherit-ancestry: board JSON occurrences — "git fetch origin"=${fetchOriginCount}, "failed in"=${failedInCount}; card.startWarning=${JSON.stringify(card?.startWarning)}`,
+  );
+  if (card?.startWarning != null) {
+    violations.push(
+      `inherit-ancestry: card.startWarning is "${card.startWarning}" — an inherited start must skip fetchBase entirely and emit no warning; this string names which branch was fetched and is the whole diagnosis`,
+    );
+  }
+  if (fetchOriginCount > 0 || failedInCount > 0) {
+    violations.push(
+      `inherit-ancestry: the board JSON itself contains a fetch-failure trace ("git fetch origin" x${fetchOriginCount}, "failed in" x${failedInCount}) — an inherited start must never reach fetchBase at all`,
+    );
+  }
+
+  // --- E. Assert the kickoff reached the child's agent. ---
+  const childTmuxName = "dsp-" + built.identifier + "-2";
+  const childPane = (
+    await execFileP("tmux", [
+      "capture-pane",
+      "-p",
+      "-t",
+      "=dsp-" + built.identifier + "-2:",
+      "-S",
+      "-",
+    ])
+  ).stdout;
+  const normalizedChildPane = childPane.replace(/\n/g, " ");
+  const kickoffHeading = "## Building on a previous session";
+  const paneHasHeading = normalizedChildPane.includes(kickoffHeading);
+  console.log(
+    `inherit-ancestry: child pane (${childTmuxName}, full scrollback, newline-stripped) contains "${kickoffHeading}" = ${paneHasHeading}`,
+  );
+  if (!paneHasHeading) {
+    violations.push(
+      `inherit-ancestry: the child's tmux pane (${childTmuxName}) does not contain the literal kickoff heading "${kickoffHeading}" — the child's agent was never told what it was built on. Captured pane (first 2000 chars): ${JSON.stringify(childPane.slice(0, 2000))}`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -8412,6 +8640,12 @@ const CHECKS = {
     withFixture(
       "artifact-attribution",
       checkArtifactAttribution,
+      SECOND_SESSION_FIXTURE,
+    ),
+  "inherit-ancestry": () =>
+    withFixture(
+      "inherit-ancestry",
+      checkInheritAncestry,
       SECOND_SESSION_FIXTURE,
     ),
 };
