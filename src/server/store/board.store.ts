@@ -106,9 +106,15 @@ export function compareDoneOrder(a: Card, b: Card): number {
  * `wireCard.sessionSummaries`, sorted by `createdAt` ascending, following the identical
  * never-spread discipline as `activeSession` — this is the only place a non-active session's own
  * `prs`/`previews`/`prsUnknown`/`previewsUnknown` become observable on the wire (`ARTIFACT-01`),
- * since `Card`'s own four fields stay a mirror of the active session only. Operates on the shallow
+ * since `Card`'s own four fields stay a mirror of the active session only. Also resolves each
+ * summary's `parentOrdinal` from `s.builtFrom` against the SAME sorted-by-`createdAt` array that
+ * produces `ordinal`, so both sides of the relationship are positional and renumber together; an
+ * unresolvable parent (never inherited, or the parent record has since been cleaned) yields
+ * ABSENCE by explicit branch, never `undefined` leaking through a bare lookup. Resolves exactly one
+ * hop — `builtFrom` is never traversed transitively (decision `D-C`). Operates on the shallow
  * copy only; never mutates the source card's `sessions` array or any session object.
  * @see docs/ARCHITECTURE.md#session-projection-chokepoint
+ * @see docs/ARCHITECTURE.md#session-inheritance
  */
 export function redactCard(card: Card): Card {
   const wireCard = { ...card };
@@ -125,23 +131,32 @@ export function redactCard(card: Card): Card {
         workspace: active.workspace,
       }
     : undefined;
-  wireCard.sessionCount =
-    (card.sessions?.length ?? 0) >= 2 ? card.sessions!.length : undefined;
-  wireCard.sessionSummaries =
-    (card.sessions?.length ?? 0) >= 2
-      ? [...card.sessions!]
-          .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-          .map((s, i) => ({
-            id: s.id,
-            ordinal: i + 1,
-            lost: s.tmuxSession == null,
-            cleanupBlocked: s.cleanupBlocked,
-            prs: s.prs,
-            prsUnknown: s.prsUnknown,
-            previews: s.previews,
-            previewsUnknown: s.previewsUnknown,
-          }))
-      : undefined;
+  const hasMultipleSessions = (card.sessions?.length ?? 0) >= 2;
+  wireCard.sessionCount = hasMultipleSessions
+    ? card.sessions!.length
+    : undefined;
+  const sortedSessions = hasMultipleSessions
+    ? [...card.sessions!].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    : undefined;
+  const displayOrdinalById = new Map<string, number>();
+  sortedSessions?.forEach((s, i) => displayOrdinalById.set(s.id, i + 1));
+  wireCard.sessionSummaries = sortedSessions?.map((s, i) => {
+    const resolvedParentOrdinal =
+      s.builtFrom != null ? displayOrdinalById.get(s.builtFrom) : undefined;
+    return {
+      id: s.id,
+      ordinal: i + 1,
+      lost: s.tmuxSession == null,
+      cleanupBlocked: s.cleanupBlocked,
+      prs: s.prs,
+      prsUnknown: s.prsUnknown,
+      previews: s.previews,
+      previewsUnknown: s.previewsUnknown,
+      ...(resolvedParentOrdinal != null
+        ? { parentOrdinal: resolvedParentOrdinal }
+        : {}),
+    };
+  });
   return wireCard;
 }
 
