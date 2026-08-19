@@ -194,12 +194,32 @@ const prepareWorkspace: SagaStep = {
  * an existing-worktree restart never needs `baseRef` and an offline `git fetch` cannot fail a
  * repo that is skipped anyway (WR-03). Records only saga-created worktrees/branches, so undo never
  * removes a reused pre-existing branch (ORCH-01/03).
+ *
+ * An inherited start (`ctx.inheritBaseRef` set) skips `fetchBase` entirely and cuts from the
+ * parent's local branch directly, with no warning: the parent's branch is local-only (dispatch
+ * never pushes), so a fetch of it can only fail, and routing that failure through the ordinary
+ * catch would emit a user-visible `git fetch origin … failed` warning on every single inherited
+ * start while still succeeding — working by accident, through the error path. The fallback to
+ * this repo's own configured base is evaluated per repo, not once for the whole saga, because one
+ * `sessionName` token spans every repo but a parent whose start partially failed may not have its
+ * branch in all of them; that per-repo miss is the one case where a warning is genuinely
+ * informative. The leading-dash argument-injection guard applies to the inherited ref for the same
+ * reason it applies to the configured base: both reach `git worktree add`'s argument vector
+ * regardless of where the value originated.
  * @see docs/ARCHITECTURE.md#orchestration-saga
+ * @see docs/ARCHITECTURE.md#session-inheritance
  */
 const createWorktrees: SagaStep = {
   name: "creating worktrees",
   statusText: "Creating worktrees…",
   async run(ctx) {
+    if (ctx.inheritBaseRef?.startsWith("-")) {
+      throw new StartStepError(
+        "creating worktrees",
+        "inherited base branch must not start with '-'",
+        "config",
+      );
+    }
     for (const { path: repoPath, base } of ctx.card.workspace?.repos ?? []) {
       if (base.startsWith("-")) {
         throw new StartStepError(
@@ -217,25 +237,37 @@ const createWorktrees: SagaStep = {
       }
 
       let baseRef: string;
-      try {
-        await fetchBase(repoPath, base);
-        baseRef = "origin/" + base;
-      } catch (err) {
-        ctx.warnings.push(
-          `git fetch origin ${base} failed in ${path.basename(repoPath)} — cut from local ${base}`,
-        );
-        const hasLocalBase = await revParseVerify(
-          repoPath,
-          "refs/heads/" + base,
-        );
-        if (!hasLocalBase) {
-          throw new StartStepError(
-            "creating worktrees",
-            stderrOf(err),
-            "config",
+      const inheritedLocally =
+        ctx.inheritBaseRef != null &&
+        (await revParseVerify(repoPath, "refs/heads/" + ctx.inheritBaseRef));
+      if (inheritedLocally) {
+        baseRef = ctx.inheritBaseRef as string;
+      } else {
+        if (ctx.inheritBaseRef != null) {
+          ctx.warnings.push(
+            `inherited branch ${ctx.inheritBaseRef} not found in ${path.basename(repoPath)} — cut from ${base}`,
           );
         }
-        baseRef = base;
+        try {
+          await fetchBase(repoPath, base);
+          baseRef = "origin/" + base;
+        } catch (err) {
+          ctx.warnings.push(
+            `git fetch origin ${base} failed in ${path.basename(repoPath)} — cut from local ${base}`,
+          );
+          const hasLocalBase = await revParseVerify(
+            repoPath,
+            "refs/heads/" + base,
+          );
+          if (!hasLocalBase) {
+            throw new StartStepError(
+              "creating worktrees",
+              stderrOf(err),
+              "config",
+            );
+          }
+          baseRef = base;
+        }
       }
 
       if (await branchExists(repoPath, ctx.sessionName)) {
