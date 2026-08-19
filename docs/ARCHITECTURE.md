@@ -41,6 +41,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Dev-Server Preview Detection](#dev-server-preview-detection)
   - [Design System Invariants](#design-system-invariants)
   - [App Shell Zones](#app-shell-zones)
+  - [Modal Focus Containment](#modal-focus-containment)
 - [Do Not Change Contracts](#do-not-change-contracts)
 - [Security Threat Model](#security-threat-model)
 - [Known Residuals](#known-residuals)
@@ -2511,6 +2512,40 @@ transparent with `var(--text-muted)`. The Inbox toggle's open state was aligned 
 `radiogroup`/`radio`, since that conversion would change keyboard semantics. See
 `docs/standards/design-contract.md`'s `## Deferred decisions` row 2 for the full rendered-evidence
 comparison and the later retuning.
+
+### Modal Focus Containment
+
+`Modal.tsx` traps `Tab`/`Shift+Tab` inside the TOPMOST dialog only, mirroring the discipline its
+own pre-existing `Escape` handler already used: a module-level `modalStack` records mount order,
+and the keydown handler no-ops unless the dialog it belongs to is the last entry — so a modal
+opened from inside another modal (`SettingsModal` → `PlaybookEditorModal`/`PlaybookDeleteConfirm`,
+`StartModal` → `FolderBrowserModal` via `WorkspaceAdd`'s "Browse…") never fights its parent for the
+keystroke, and the parent resumes trapping the instant the child unmounts. The focusable set is
+recomputed LIVE on every `Tab` keydown from the dialog's current DOM (`a[href]`,
+non-disabled `button`/`input`/`select`/`textarea`, and any `[tabindex]` other than `-1`, filtered to
+elements that are not `hidden`, not inside `[inert]`, and actually rendered) rather than cached at
+mount — several consumers reveal or hide controls conditionally after open (`CleanupModal`'s
+blocked-vs-confirm actions, `StartModal`'s inherit toggle, `SettingsModal`'s per-tab content), so a
+mount-time snapshot would silently trap against a stale boundary. If focus is ever found outside
+the dialog when `Tab` fires (nothing errored, initial focus just never landed — see the residual
+below), the handler treats that the same as a boundary hit and sends focus to the first/last
+focusable element rather than doing nothing, so containment self-recovers on the very next
+keystroke instead of requiring a correctly-landed starting point.
+
+This closes `KEEP-06`'s `F-96-D` finding: `Modal.tsx` shipped with no `Tab` containment at all
+since it was introduced, byte-identical from `v2.9.0` through Phase 96's own audit (96-11 confirmed
+via `git show v2.9.0:src/web/primitives/Modal.tsx`) — pre-existing debt paid down here, not a v3.0
+regression. `scripts/panel-96.mjs`'s `CleanupModal` a11y leg is the instrument that caught it and
+is what now asserts containment on every run.
+
+**Residual, not closed by this fix:** `Modal.tsx` has no focus-RESTORATION on close (nothing
+returns focus to whatever triggered the modal, or to a parent modal once a nested one unmounts) and
+`SettingsModal`'s `initialFocusRef` targets a button that only mounts once its async Linear-filters
+fetch resolves — the mount-time-only focus effect (`useEffect(() => { initialFocusRef?.current?.
+focus(); ... }, [initialFocusRef])`) fires before that ref attaches, so initial focus can land
+outside the dialog on open. Both are pre-existing gaps orthogonal to Tab containment (the trap's
+outside-the-dialog fallback above is exactly what makes them harmless rather than a lockout), left
+for a future accessibility-hardening pass rather than folded into this fix.
 
 ## Do Not Change Contracts
 

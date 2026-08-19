@@ -20,6 +20,32 @@ export interface ModalControl {
 let stackCounter = 0;
 const modalStack: number[] = [];
 
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+function isRendered(element: HTMLElement): boolean {
+  return (
+    element.offsetWidth > 0 ||
+    element.offsetHeight > 0 ||
+    element.getClientRects().length > 0
+  );
+}
+
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+  ).filter(
+    (element) =>
+      !element.hidden && !element.closest("[inert]") && isRendered(element),
+  );
+}
+
 interface ModalProps {
   ariaLabel: string;
   onClose: () => void;
@@ -152,6 +178,7 @@ export function Modal({
   const [entered, setEntered] = useState(false);
   const [closing, setClosing] = useState(false);
   const closingRef = useRef(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const idRef = useRef<number | undefined>(undefined);
   if (idRef.current === undefined) idRef.current = stackCounter++;
   const onCloseRef = useRef(onClose);
@@ -194,6 +221,34 @@ export function Modal({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Tab" || event.defaultPrevented) return;
+      if (modalStack[modalStack.length - 1] !== idRef.current) return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = getFocusableElements(dialog);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey) {
+        if (active === first || !dialog.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !dialog.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const active = entered && !closing;
   if (import.meta.env.DEV) warnUnrecognizedChildren(children);
   const headerContent = extractSlot(children, ModalHeader);
@@ -210,6 +265,7 @@ export function Modal({
 
       <div style={centerStyle}>
         <div
+          ref={dialogRef}
           role="dialog"
           aria-modal="true"
           aria-label={ariaLabel}
