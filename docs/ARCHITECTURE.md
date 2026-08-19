@@ -323,6 +323,51 @@ ABSENT and the caption does not render. The record's `builtFrom` is deliberately
 provenance fact stays true and only its rendering degrades. Erasing history to simplify a view is
 the same class of error as flatten-to-root.
 
+**The two frontend surfaces, recorded here because `src/web/**/*.tsx` forbids all comments,
+including JSDoc.** `StartModal`'s inherit toggle and `SessionSwitcher`'s parentage caption are both
+built entirely from tokens and idioms this panel and modal already ship; this is their only home
+for rationale.
+
+**Why the toggle is a checkbox and not a switch.** This codebase has no toggle-switch primitive and
+this phase does not invent one; the control is `RepoRow`'s already-shipped native `<input
+type="checkbox">` treatment reused verbatim, which is also what supplies the keyboard path and the
+`:focus-visible` ring without authoring a new focus mechanism.
+
+**Why it is default OFF.** Inheriting silently changes which commits the child starts from — a real
+behavioural difference a person should opt into rather than discover.
+
+**Why it is gated on `newSession === true` and absent rather than disabled.** A ticket's very first
+session has no parent to build on, so there is nothing to offer; a disabled control would imply an
+unavailable capability rather than an inapplicable one.
+
+**Why there is no session picker in the modal.** The toggle always inherits from whichever session
+is ACTIVE when the modal opens. To build on a specific sibling, a person switches to it first with
+the already-shipped `SessionSwitcher`, then opens "Start another session." A second selection
+control in the same row would read as two competing start paths — the coherence problem Phase 94's
+own affordance already had to guard against.
+
+**Why the caption lives inside `SessionSwitcher` and not in `DetailPanel`.** It reuses Phase 92's
+shipped control rather than adding panel chrome; the change is a non-visual outer flex wrapper plus
+a sibling text node, leaving the `role="group"` container, its children and its explicit 28px
+height untouched, so the session row's 49px/45px figures from Phase 94 are unchanged and Phase 92's
+structural instrument keeps measuring the same node.
+
+**Why the caption renders at all four breakpoints.** An earlier draft hid it below 768px and relied
+on `title` as the fallback. `title` does not fire on tap on a touch-primary device — a genuinely
+supported path since v2.6's remote access — so a sighted person on a phone would have had no way to
+see the fact at all. `UI-03`'s clause is "the panel shows which session a new one was built from";
+a fix that holds at three breakpoints out of four is not a closure. `overflowX: "auto"` on the
+wrapper is the defensive fallback for the theoretical long-history case, the same mechanism Phase
+92 established one level down, not a new one.
+
+**Why the extended `aria-label`/`title` is a secondary aid, not the carrier.** It is a superset of
+Phase 92's strings — an entry with no parent reads identically — and it exists for hover and
+screen-reader discoverability of NON-active entries, alongside the always-visible caption for the
+active one.
+
+**The `parentOrdinal != null` gate is a null check on purpose.** `parentOrdinal` is a number; a
+truthiness gate would be indistinguishable today and wrong the moment an ordinal 0 could exist.
+
 ### Downgrade Safety
 
 dispatch ships via npx, so one machine updating before another is ordinary, and both builds share
