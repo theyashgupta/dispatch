@@ -360,6 +360,9 @@ a fix that holds at three breakpoints out of four is not a closure. `overflowX: 
 wrapper is the defensive fallback for the theoretical long-history case, the same mechanism Phase
 92 established one level down, not a new one.
 
+This caption is what closes `UI-03`'s parentage clause, carried forward unsatisfied since Phase 92
+because parentage did not exist until this phase — see `95-VERDICT.md`'s dedicated closure section.
+
 **Why the extended `aria-label`/`title` is a secondary aid, not the carrier.** It is a superset of
 Phase 92's strings — an entry with no parent reads identically — and it exists for hover and
 screen-reader discoverability of NON-active entries, alongside the always-visible caption for the
