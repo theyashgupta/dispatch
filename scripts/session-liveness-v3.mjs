@@ -190,6 +190,19 @@
  *                                                                   session fixture so the removal
  *                                                                   cannot drop the card below
  *                                                                   redactCard's own N>=2 gate
+ *   node scripts/session-liveness-v3.mjs --check inherit-depth     Phase 95 criterion 4
+ *                                                                   (MULTI-02/UI-03, decision D-C):
+ *                                                                   a REAL 1 -> 2 -> 3 chain is
+ *                                                                   built by two separate inherited
+ *                                                                   starts, and session 3 is proven
+ *                                                                   to record SESSION 2 — the
+ *                                                                   session the user actually built
+ *                                                                   from — never session 1 and never
+ *                                                                   nothing, at the record, at the
+ *                                                                   wire and in git at BOTH hops,
+ *                                                                   with a source census that fails
+ *                                                                   if anyone ever starts walking
+ *                                                                   the chain
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -206,6 +219,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   statSync,
@@ -8960,7 +8974,9 @@ async function checkInheritParentage(built) {
   ).text();
   const wire1 = {
     text: wire1Text,
-    card: (JSON.parse(wire1Text)?.cards ?? []).find((c) => c.id === built.cardId),
+    card: (JSON.parse(wire1Text)?.cards ?? []).find(
+      (c) => c.id === built.cardId,
+    ),
   };
   const summaries1 = wire1.card?.sessionSummaries ?? [];
   const sum2 = summaries1.find((s) => s.id === session2Id);
@@ -8984,7 +9000,8 @@ async function checkInheritParentage(built) {
       `inherit-parentage: session 1 (${session1Id}) was never inherited, yet its wire entry CARRIES a parentOrdinal key (Object.hasOwn === true, value=${JSON.stringify(sum1.parentOrdinal)}) — a session with no parent must report nothing at all, not nothing-ness — offending JSON fragment: ${JSON.stringify(sum1)}`,
     );
   }
-  const nullOrdinalCount = (wire1.text.match(/"parentOrdinal":null/g) ?? []).length;
+  const nullOrdinalCount = (wire1.text.match(/"parentOrdinal":null/g) ?? [])
+    .length;
   const undefinedOrdinalCount = (
     wire1.text.match(/parentOrdinal":undefined/g) ?? []
   ).length;
@@ -9038,7 +9055,9 @@ async function checkInheritParentage(built) {
   ).text();
   const wirePre = {
     text: wirePreText,
-    card: (JSON.parse(wirePreText)?.cards ?? []).find((c) => c.id === built.cardId),
+    card: (JSON.parse(wirePreText)?.cards ?? []).find(
+      (c) => c.id === built.cardId,
+    ),
   };
   const summariesPre = wirePre.card?.sessionSummaries ?? [];
   const preSum2 = summariesPre.find((s) => s.id === session2Id);
@@ -9066,7 +9085,10 @@ async function checkInheritParentage(built) {
 
   // --- STAGE 2b: remove the parent's RECORD with the server down, then re-read the wire. ---
   await killAndWait(built.server?.child);
-  const serverGone = await waitForServerGone(built.port, LISTEN_POLL_TIMEOUT_MS);
+  const serverGone = await waitForServerGone(
+    built.port,
+    LISTEN_POLL_TIMEOUT_MS,
+  );
   console.log(
     `inherit-parentage: sandbox server on :${built.port} stopped before the persisted edit — refused=${serverGone}`,
   );
@@ -9115,7 +9137,9 @@ async function checkInheritParentage(built) {
   ).text();
   const wirePost = {
     text: wirePostText,
-    card: (JSON.parse(wirePostText)?.cards ?? []).find((c) => c.id === built.cardId),
+    card: (JSON.parse(wirePostText)?.cards ?? []).find(
+      (c) => c.id === built.cardId,
+    ),
   };
   const summariesPost = wirePost.card?.sessionSummaries ?? [];
   const postSum2 = summariesPost.find((s) => s.id === session2Id);
@@ -9139,7 +9163,8 @@ async function checkInheritParentage(built) {
       `inherit-parentage: session 2 (${session2Id})'s parent record no longer exists, yet its wire entry STILL carries a parentOrdinal key (Object.hasOwn === true, value=${JSON.stringify(postSum2.parentOrdinal)}) — an unresolvable parent must yield ABSENCE by explicit branch — offending JSON fragment: ${JSON.stringify(postSum2)}`,
     );
   }
-  const fromUndefinedCount = (wirePost.text.match(/from undefined/g) ?? []).length;
+  const fromUndefinedCount = (wirePost.text.match(/from undefined/g) ?? [])
+    .length;
   const postSum2Text = JSON.stringify(postSum2);
   console.log(
     `inherit-parentage: raw post-removal body — 'from undefined' x${fromUndefinedCount}; session 2 fragment carries "parentOrdinal" = ${postSum2Text.includes("parentOrdinal")}`,
@@ -9165,6 +9190,396 @@ async function checkInheritParentage(built) {
       `inherit-parentage: session 2 (${session2Id})'s persisted builtFrom is ${JSON.stringify(record2Post?.builtFrom)} after its parent's record was removed, expected it to STILL be ${session1Id} — the RENDERING degrades, the RECORD does not; provenance stays true even once the parent is gone`,
     );
   }
+
+  return violations;
+}
+
+/**
+ * The `builtFrom` read sites this codebase is allowed to have, hardcoded so a NEW read fails this
+ * census rather than being absorbed silently. Counts are EXACT-WORD occurrences after comments are
+ * stripped: `board.store.ts` carries three (the resolver's null-guard and its lookup on the SAME
+ * line, plus `reserveNewSession`'s mint patch), `types.ts` carries the declaration.
+ * @remarks `builtFromBranch` (`steps.ts`, `kickoff.ts`) merely CONTAINS this substring and is a
+ * different field entirely — a branch name, not a session id. The exact-word matcher below excludes
+ * it by construction; a bare substring `grep` would count four extra sites and make this list wrong
+ * on the day it was written.
+ */
+const BUILT_FROM_EXPECTED_SITES = {
+  "src/server/store/board.store.ts": 3,
+  "src/shared/types.ts": 1,
+};
+
+/** Every `.ts`/`.tsx` file under `dir`, recursively. */
+function collectSourceFiles(dir, out = []) {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) collectSourceFiles(full, out);
+    else if (/\.tsx?$/.test(full)) out.push(full);
+  }
+  return out;
+}
+
+/**
+ * The no-transitive-traversal census (Plan 95-06 Task 2, decision `D-C`): re-read `src/` FRESH from
+ * disk, strip every comment, and enumerate exact-word `builtFrom` occurrences.
+ *
+ * @remarks Comments are stripped before counting because this codebase's own JSDoc DESCRIBES the
+ * one-hop rule in prose — an unfiltered `grep -c` would count that prose and make the gate
+ * self-satisfying, the trap `93-07-PLAN.md` named and this file's `cleanup.ts` census already
+ * guards against.
+ *
+ * @remarks MISSING-SUBJECT SENTINEL. An empty result is a FAILURE, not a pass: if
+ * `board.store.ts` contributes zero sites the field has been renamed or moved, and a census that
+ * reported "no unexpected sites" in that state would be reporting on nothing at all.
+ *
+ * @remarks THE CHAINED-READ DETECTOR, and its stated limit. The literal rule "no line contains
+ * `builtFrom` twice" is NOT usable here: `board.store.ts`'s shipped, CORRECT resolver line carries
+ * it twice (`s.builtFrom != null ? displayOrdinalById.get(s.builtFrom)`) — a null-guard and a
+ * lookup on the SAME receiver, which is one hop, not two. The detector below therefore compares the
+ * RECEIVER of each occurrence: repeated reads off one identifier are one hop; a second read whose
+ * receiver is a call/index RESULT (`).builtFrom`) is a resolve-then-read, which is precisely the
+ * arbitrary-depth traversal `D-C` deferred. A `builtFrom` navigated INTO (`.builtFrom.` /
+ * `.builtFrom?.`) is flagged unconditionally.
+ * This is a per-LINE textual detector: a chain split across two statements is invisible to it. That
+ * is why `checkInheritDepth`'s behavioural assertions (session 3's stored parent, and its
+ * `parentOrdinal`) are the primary detector and this census is the second, independent one.
+ */
+function enumerateBuiltFromReadsFromSource() {
+  const violations = [];
+  const wordRe = /(?<![A-Za-z0-9_$])builtFrom(?![A-Za-z0-9_$])/g;
+  const sites = [];
+  const countsByFile = {};
+
+  for (const file of collectSourceFiles(join(REPO_ROOT, "src"))) {
+    const rel = file.slice(REPO_ROOT.length + 1);
+    const strippedLines = stripCommentsPerLine(readFileSync(file, "utf8"));
+    strippedLines.forEach((line, idx) => {
+      const matches = [...line.matchAll(wordRe)];
+      if (matches.length === 0) return;
+      countsByFile[rel] = (countsByFile[rel] ?? 0) + matches.length;
+      sites.push({
+        rel,
+        line: idx + 1,
+        count: matches.length,
+        raw: line,
+        text: line.trim(),
+        matches,
+      });
+    });
+  }
+
+  console.log(
+    `inherit-depth: CENSUS — parsed ${Object.keys(countsByFile).length} file(s) with exact-word ` +
+      `\`builtFrom\` (comments stripped): ` +
+      sites.map((s) => `${s.rel}:${s.line} x${s.count}`).join(", "),
+  );
+
+  // MISSING-SUBJECT SENTINEL — an empty subject must fail, never pass.
+  for (const expectedFile of Object.keys(BUILT_FROM_EXPECTED_SITES)) {
+    if ((countsByFile[expectedFile] ?? 0) === 0) {
+      violations.push(
+        `inherit-depth: CENSUS MISSING SUBJECT — expected \`builtFrom\` to appear in ${expectedFile} and it appears ZERO times. The field has been renamed, moved, or deleted; a census that reported "no unexpected read sites" in this state would be reporting on nothing at all, so this is a failure rather than a pass.`,
+      );
+    }
+  }
+
+  for (const [file, expected] of Object.entries(BUILT_FROM_EXPECTED_SITES)) {
+    const actual = countsByFile[file] ?? 0;
+    if (actual !== 0 && actual !== expected) {
+      violations.push(
+        `inherit-depth: CENSUS VIOLATED — expected exactly ${expected} exact-word \`builtFrom\` occurrence(s) in ${file}, found ${actual} — a read site was added or removed since this census was written: ${sites
+          .filter((s) => s.rel === file)
+          .map((s) => `${s.line}:${s.text}`)
+          .join(" | ")}`,
+      );
+    }
+  }
+  for (const file of Object.keys(countsByFile)) {
+    if (!Object.hasOwn(BUILT_FROM_EXPECTED_SITES, file)) {
+      violations.push(
+        `inherit-depth: CENSUS VIOLATED — \`builtFrom\` is read in ${file}, which is NOT in the expected site list (${Object.keys(BUILT_FROM_EXPECTED_SITES).join(", ")}): ${sites
+          .filter((s) => s.rel === file)
+          .map((s) => `${s.line}:${s.text}`)
+          .join(" | ")}`,
+      );
+    }
+  }
+
+  // The chained-read detector.
+  for (const site of sites) {
+    const receivers = site.matches.map((m) => {
+      const after = site.raw.slice(m.index + "builtFrom".length);
+      const navigatedInto = /^\s*(\?\.|\.|\[)/.test(after);
+      const before = site.raw.slice(0, m.index);
+      const recv = /([A-Za-z0-9_$)\]]+)\s*\??\.\s*$/.exec(before);
+      return {
+        navigatedInto,
+        receiver: recv ? recv[1] : null,
+        simple: recv ? /^[A-Za-z0-9_$]+$/.test(recv[1]) : true,
+      };
+    });
+    for (const r of receivers) {
+      if (r.navigatedInto) {
+        violations.push(
+          `inherit-depth: CHAINED READ — ${site.rel}:${site.line} navigates INTO a \`builtFrom\` value (\`builtFrom\` followed by a further dereference): ${site.text}. \`builtFrom\` names the DIRECT parent and is resolved exactly one hop; walking it further is the arbitrary-depth traversal decision \`D-C\` deferred.`,
+        );
+      }
+    }
+    if (site.count < 2) continue;
+    const distinct = new Set(receivers.map((r) => r.receiver));
+    const anyNonSimple = receivers.some((r) => !r.simple);
+    if (distinct.size > 1 || anyNonSimple) {
+      violations.push(
+        `inherit-depth: CHAINED READ — ${site.rel}:${site.line} reads \`builtFrom\` ${site.count} times off ${distinct.size} different receiver(s) (${[...distinct].map((d) => JSON.stringify(d)).join(", ")}${anyNonSimple ? ", at least one of which is a call/index RESULT rather than a plain identifier" : ""}): ${site.text}. Resolving a session BY a \`builtFrom\` value and then reading THAT session's own \`builtFrom\` is precisely the arbitrary-depth traversal decision \`D-C\` deferred; repeated reads off one identifier (a null-guard plus its lookup) are one hop and are allowed.`,
+      );
+    }
+  }
+
+  return violations;
+}
+
+/**
+ * `--check inherit-depth` (Plan 95-06 Task 2, criterion C4, `MULTI-02`/`UI-03`): proves a session
+ * built from an ALREADY-INHERITED session records the session it was actually built from — one hop,
+ * never the root — and that nothing in `src/` walks the chain.
+ *
+ * @remarks Criterion 4 is verified by ATTEMPTING the thing decision `D-C` bounds, because there is
+ * no refusal path to test: recording normally was the locked decision, and both flatten-to-root
+ * (which records something the user did not do) and refuse-outright (which records no relationship
+ * at all, the one thing the criterion says must not happen) were explicitly REJECTED. A non-202 or
+ * a `startError` on the second inherited start is therefore itself a violation, not an expected
+ * outcome.
+ *
+ * @remarks Session 2's own commit is PLANTED before session 3 starts, and the plant is guarded:
+ * if `S2_TIP === PARENT_TIP` the ancestry statement about session 3 cannot distinguish "cut from
+ * session 2" from "cut from session 1", and the check refuses to run rather than report a pass —
+ * the same dead-instrument discipline `checkInheritAncestry`'s own `PARENT_TIP === BASE_TIP` guard
+ * applies one hop earlier.
+ * @see docs/ARCHITECTURE.md#session-inheritance
+ */
+async function checkInheritDepth(built) {
+  const violations = [];
+  const session1Id = built.sessionA.id;
+  const repoDirName = basename(built.repoPath);
+
+  const PARENT_TIP = (
+    await execFileP(
+      "git",
+      ["rev-parse", "refs/heads/" + built.session1Branch],
+      { cwd: built.repoPath },
+    )
+  ).stdout.trim();
+
+  // --- A1. Hop one: session 2, built from session 1. ---
+  const hop1 = await startSecondSession(built, {
+    newSession: true,
+    inheritFrom: session1Id,
+  });
+  console.log(
+    `inherit-depth: HOP 1 — POST /start {newSession:true, inheritFrom:${session1Id}} -> ${hop1.status}`,
+  );
+  if (hop1.status !== 202) {
+    violations.push(
+      `inherit-depth: HOP 1's POST /start returned ${hop1.status}, expected 202 (body=${JSON.stringify(hop1.body)})`,
+    );
+    return violations;
+  }
+  const settled2 = await waitForSagaSettled(built, {
+    timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+  });
+  if (settled2.timedOut || settled2.card?.startError != null) {
+    violations.push(
+      `inherit-depth: HOP 1 did not produce a session (timedOut=${settled2.timedOut}, startError=${JSON.stringify(settled2.card?.startError)})`,
+    );
+    return violations;
+  }
+  const session2Id = (settled2.card?.sessionSummaries ?? [])
+    .map((s) => s.id)
+    .find((id) => id !== session1Id);
+  if (!session2Id) {
+    violations.push(
+      `inherit-depth: could not resolve session 2's id from sessionSummaries=${JSON.stringify(settled2.card?.sessionSummaries)}`,
+    );
+    return violations;
+  }
+  const session2Branch = built.identifier + "-2";
+
+  // --- A2. PLANT session 2's own commit, and refuse to continue if it did not move the tip. ---
+  const session2Record = readCard(built.dbPath, built.cardId)?.sessions?.find(
+    (s) => s.id === session2Id,
+  );
+  const session2WtPath = join(session2Record?.workspacePath ?? "", repoDirName);
+  if (!existsSync(session2WtPath)) {
+    violations.push(
+      `inherit-depth: session 2's worktree does not exist at ${session2WtPath} — cannot plant the commit the ancestry assertion depends on`,
+    );
+    return violations;
+  }
+  writeFileSync(
+    join(session2WtPath, "session-2-own-work.txt"),
+    "committed inside session 2's own worktree, after its start settled\n",
+  );
+  await execFileP("git", ["add", "session-2-own-work.txt"], {
+    cwd: session2WtPath,
+  });
+  await execFileP(
+    "git",
+    ["commit", "-m", "fixture session 2 own work", "--no-gpg-sign"],
+    { cwd: session2WtPath },
+  );
+  const S2_TIP = (
+    await execFileP("git", ["rev-parse", "refs/heads/" + session2Branch], {
+      cwd: built.repoPath,
+    })
+  ).stdout.trim();
+  console.log(
+    `inherit-depth: PARENT_TIP (branch ${built.session1Branch}) = ${PARENT_TIP}, S2_TIP (branch ${session2Branch}, after planting session 2's own commit) = ${S2_TIP}`,
+  );
+  if (S2_TIP === PARENT_TIP) {
+    violations.push(
+      `inherit-depth: THIS CHECK WOULD BE VACUOUS — session 2's branch "${session2Branch}" (S2_TIP=${S2_TIP}) carries no commit of its own beyond session 1's tip (PARENT_TIP=${PARENT_TIP}); they are the SAME commit even after a commit was planted. Every ancestry statement about session 3 would then be satisfied by a child cut from session 1, so this check refuses to run the hop-2 ancestry assertion and report a pass.`,
+    );
+    return violations;
+  }
+
+  // --- A3. Hop two: session 3, built from the ALREADY-INHERITED session 2. ---
+  const hop2 = await startSecondSession(built, {
+    newSession: true,
+    inheritFrom: session2Id,
+  });
+  console.log(
+    `inherit-depth: HOP 2 — POST /start {newSession:true, inheritFrom:${session2Id}} (an ALREADY-INHERITED parent) -> ${hop2.status}`,
+  );
+  if (hop2.status !== 202) {
+    violations.push(
+      `inherit-depth: HOP 2's POST /start returned ${hop2.status}, expected 202 (body=${JSON.stringify(hop2.body)}). Building from an already-inherited session must RECORD NORMALLY — refuse-outright was explicitly REJECTED (it records no relationship at all, the one thing criterion 4 says must not happen), so a refusal here is a violation, not an expected outcome.`,
+    );
+    return violations;
+  }
+  const settled3 = await waitForNthSessionSettled(built, 3, {
+    timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+  });
+  if (settled3.timedOut) {
+    violations.push(
+      `inherit-depth: HOP 2's saga did not settle within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (last observed card=${JSON.stringify(settled3.card)})`,
+    );
+    return violations;
+  }
+  if (settled3.card?.startError != null) {
+    violations.push(
+      `inherit-depth: HOP 2 recorded a startError: ${JSON.stringify(settled3.card.startError)}. Building from an already-inherited session must succeed and record normally — refuse-outright was explicitly REJECTED, so this is a violation rather than an expected refusal.`,
+    );
+    return violations;
+  }
+  const session3Id = (settled3.card?.sessionSummaries ?? [])
+    .map((s) => s.id)
+    .find((id) => id !== session1Id && id !== session2Id);
+  if (!session3Id) {
+    violations.push(
+      `inherit-depth: could not resolve session 3's id from sessionSummaries=${JSON.stringify(settled3.card?.sessionSummaries)}`,
+    );
+    return violations;
+  }
+  const session3Branch = built.identifier + "-3";
+  console.log(
+    `inherit-depth: chain — session 1=${session1Id} (${built.session1Branch}), session 2=${session2Id} (${session2Branch}), session 3=${session3Id} (${session3Branch})`,
+  );
+
+  // --- B. The stored shape: one hop, naming the session the user actually built from. ---
+  const persisted = readCard(built.dbPath, built.cardId);
+  const record2 = persisted?.sessions?.find((s) => s.id === session2Id);
+  const record3 = persisted?.sessions?.find((s) => s.id === session3Id);
+  console.log(
+    `inherit-depth: PERSISTED — session 2 builtFrom=${JSON.stringify(record2?.builtFrom)} (expected session 1 ${session1Id}); session 3 builtFrom=${JSON.stringify(record3?.builtFrom)} (expected session 2 ${session2Id})`,
+  );
+  if (record3 == null) {
+    violations.push(
+      `inherit-depth: session 3 (${session3Id}) has no persisted record at all`,
+    );
+    return violations;
+  }
+  if (!Object.hasOwn(record3, "builtFrom")) {
+    violations.push(
+      `inherit-depth: session 3 (${session3Id}) carries NO builtFrom key at all (Object.hasOwn === false) — it was built from session 2 and must record that; recording no relationship is the one outcome criterion 4 forbids. Record: ${JSON.stringify(record3)}`,
+    );
+  }
+  if (record3.builtFrom !== session2Id) {
+    violations.push(
+      `inherit-depth: session 3 (${session3Id})'s builtFrom is ${JSON.stringify(record3.builtFrom)}, expected session 2's id ${session2Id} — builtFrom always names the DIRECT parent, the session the user actually built from`,
+    );
+  }
+  if (record3.builtFrom === session1Id) {
+    violations.push(
+      `inherit-depth: FLATTEN-TO-ROOT — session 3 (${session3Id})'s builtFrom is session 1's id ${session1Id}, but the user built it from session 2 (${session2Id}). Flatten-to-root was explicitly REJECTED: it records something the user did not do.`,
+    );
+  }
+  if (record2?.builtFrom !== session1Id) {
+    violations.push(
+      `inherit-depth: session 2 (${session2Id})'s builtFrom is ${JSON.stringify(record2?.builtFrom)}, expected session 1's id ${session1Id} — the chain must stay intact at BOTH hops, not only the newest one`,
+    );
+  }
+
+  // --- C. The wire shape: session 3 reporting 1 is the visible signature of a flatten bug. ---
+  const wireText = await (
+    await fetch(`http://127.0.0.1:${built.port}/api/board`)
+  ).text();
+  const wireCard = (JSON.parse(wireText)?.cards ?? []).find(
+    (c) => c.id === built.cardId,
+  );
+  const summaries = wireCard?.sessionSummaries ?? [];
+  const sum2 = summaries.find((s) => s.id === session2Id);
+  const sum3 = summaries.find((s) => s.id === session3Id);
+  console.log(
+    `inherit-depth: WIRE — ${summaries.length} summaries; session 2=${JSON.stringify(sum2)}; session 3=${JSON.stringify(sum3)}`,
+  );
+  if (sum3?.parentOrdinal !== 2) {
+    violations.push(
+      `inherit-depth: session 3 (${session3Id}) reports parentOrdinal=${JSON.stringify(sum3?.parentOrdinal)}, expected 2 (session 2's own display ordinal)${sum3?.parentOrdinal === 1 ? " — reporting 1 is the VISIBLE SIGNATURE of a flatten-to-root bug: the wire is naming the root instead of the direct parent" : ""} — offending JSON fragment: ${JSON.stringify(sum3)}`,
+    );
+  }
+  if (sum2?.parentOrdinal !== 1) {
+    violations.push(
+      `inherit-depth: session 2 (${session2Id}) reports parentOrdinal=${JSON.stringify(sum2?.parentOrdinal)}, expected 1 — offending JSON fragment: ${JSON.stringify(sum2)}`,
+    );
+  }
+
+  // --- D. The git shape at BOTH hops — the fan-out direction, not merely the field. ---
+  for (const hop of [
+    { label: "HOP 1", tip: PARENT_TIP, branch: session2Branch },
+    { label: "HOP 2", tip: S2_TIP, branch: session3Branch },
+  ]) {
+    let ancestorExitsZero = true;
+    try {
+      await execFileP(
+        "git",
+        ["merge-base", "--is-ancestor", hop.tip, hop.branch],
+        { cwd: built.repoPath },
+      );
+    } catch (err) {
+      ancestorExitsZero = false;
+      violations.push(
+        `inherit-depth: ${hop.label} — "git merge-base --is-ancestor ${hop.tip} ${hop.branch}" did not exit 0: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    const revListShas = (
+      await execFileP("git", ["rev-list", hop.branch], { cwd: built.repoPath })
+    ).stdout
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const contains = revListShas.includes(hop.tip);
+    console.log(
+      `inherit-depth: ${hop.label} — is-ancestor(${hop.tip}, ${hop.branch}) exits 0 = ${ancestorExitsZero}; git rev-list ${hop.branch} contains it = ${contains} (${revListShas.length} commits)`,
+    );
+    if (!contains) {
+      violations.push(
+        `inherit-depth: ${hop.label} — "git rev-list ${hop.branch}" does NOT literally contain the named sha ${hop.tip} — the assertion the bare is-ancestor exit code alone cannot prove (rev-list output: ${JSON.stringify(revListShas)})`,
+      );
+    }
+  }
+
+  // --- E. The no-transitive-traversal source census. ---
+  violations.push(...enumerateBuiltFromReadsFromSource());
 
   return violations;
 }
@@ -9241,6 +9656,8 @@ const CHECKS = {
       checkInheritParentage,
       SECOND_SESSION_FIXTURE,
     ),
+  "inherit-depth": () =>
+    withFixture("inherit-depth", checkInheritDepth, SECOND_SESSION_FIXTURE),
 };
 
 /**
