@@ -1666,9 +1666,12 @@ async function main() {
               structurallyPresent = match != null;
               rowEl = match ? match.el.parentElement : null;
             } else {
+              // Phase 96 finding F-96-E: Phase 95's caption wrapped [role="group"] in a NEW
+              // outer flex <div> (panel-95.mjs TRAP 3), so group.parentElement now resolves to
+              // that wrapper, not the row — the walk needs TWO levels, not one.
               var group = aside.querySelector('[role="group"][aria-label="Sessions"]');
               structurallyPresent = group !== null;
-              rowEl = group ? group.parentElement : null;
+              rowEl = group ? group.parentElement.parentElement : null;
             }
             if (!structurallyPresent || !rowEl) {
               return { structurallyPresent: structurallyPresent, height: null };
