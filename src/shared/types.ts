@@ -256,17 +256,17 @@ export interface Card {
   nextSessionOrdinal?: number;
   /**
    * Wire-only projection of the session named by `activeSessionId`, populated exclusively by the
-   * store's `redactCard` chokepoint and absent from the persisted row. It mirrors the same session
-   * the six flat fields above already project — a deliberate redundancy the detail panel reads on
-   * purpose, so a wire-shape regression in this field is visible on screen (a permanent "Connecting
-   * to terminal…") instead of hiding inside the store. The full `sessions` array is deliberately
-   * not part of the wire shape.
-   * @remarks That visible-regression property only holds while EVERY gate in one decision reads
-   * ONE field. `TerminalRegion` renders the terminal `<iframe>` on `activeSession.ttydPort`, so
-   * `DetailPanel`'s "a terminal already exists, do not spawn" gate reads it too. Splitting that
-   * single decision across `activeSession.ttydPort` and the flat `card.ttydPort` turns the intended
-   * canary into a wedge: the panel would show "Connecting to terminal…" while suppressing the spawn
-   * that clears it, with no recovery affordance on that branch.
+   * store's `redactCard` chokepoint and absent from the persisted row. The full `sessions` array is
+   * deliberately not part of the wire shape.
+   * @remarks `TerminalRegion` renders the terminal `<iframe>` on `activeSession.ttydPort`, keyed by
+   * `activeSession.id`, so `DetailPanel`'s "a terminal already exists, do not spawn" gate reads
+   * `activeSession.ttydPort` too — the ONLY two fields either client reader ever touches (F-96-F,
+   * `96-11-SUMMARY.md`). `ActiveSessionWire` field-picks exactly those two; `tmuxSession`,
+   * `claudeSessionId`, `workspacePath` and `workspace` are NOT re-projected here because the six
+   * flat fields above already carry the identical values for the SAME active session (`KEEP-02`'s
+   * own wire-parity contract requires those flat fields present regardless), so nesting them a
+   * second time was pure duplicated payload weight, not a second source of truth — confirmed a real
+   * ~35% N=1 board-payload regression by `96-10`'s baseline re-run before this fix.
    * @see docs/ARCHITECTURE.md#session-projection-chokepoint
    */
   activeSession?: ActiveSessionWire;
@@ -559,20 +559,17 @@ export interface Session {
  * chokepoint via a field pick (never a spread) so the secret field is omitted BY CONSTRUCTION — a
  * future field added to `Session` cannot silently reintroduce it through this type. Never the
  * persisted shape; the full record (with the secret) is what lives on disk.
+ * @remarks Deliberately narrow: `id` and `ttydPort` are the only two fields any client reader
+ * touches (`TerminalRegion`, `DetailPanel`'s spawn gate). `tmuxSession`/`claudeSessionId`/
+ * `workspacePath`/`workspace` were dropped by F-96-F's fix — they duplicated the six flat fields
+ * `Card` already carries for the same active session, adding ~35% to the N=1 board payload for
+ * data no reader ever used. See `docs/ARCHITECTURE.md#session-projection-chokepoint`.
  */
 export interface ActiveSessionWire {
   /** Mirrors `Session.id`. */
   id: string;
-  /** Mirrors `Session.tmuxSession`. */
-  tmuxSession?: string;
   /** Mirrors `Session.ttydPort`. */
   ttydPort?: number;
-  /** Mirrors `Session.claudeSessionId`. */
-  claudeSessionId?: string;
-  /** Mirrors `Session.workspacePath`. */
-  workspacePath?: string;
-  /** Mirrors `Session.workspace`. */
-  workspace?: { folder: string; repos: { path: string; base: string }[] };
 }
 
 /**

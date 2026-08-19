@@ -704,3 +704,59 @@ stated explicitly per this plan's own criterion that an unjudged number is not a
 `dispatch-perf-board-*` directory or listener on `:47820`/`:9359` remained after any run; real
 `~/.dispatch/board.db` unchanged (`27d52060517adea9fe81712f9abe1da0`, `28672` bytes, same mtime as
 before this plan started) throughout.
+
+### Phase 96 — F-96-F fix, AFTER numbers (96-11)
+
+- **Date:** 2026-08-20
+- **Git SHA measured:** working tree at 96-11's F-96-F commit (`ActiveSessionWire` narrowed from
+  six keys to two — `id`, `ttydPort` — dropping `tmuxSession`/`claudeSessionId`/`workspacePath`/
+  `workspace`, which duplicated the flat mirror fields `KEEP-02` already requires present on the
+  wire for the SAME active session). `TerminalRegion`/`DetailPanel` only ever read `.id`/
+  `.ttydPort`, confirmed by repo-wide grep before narrowing.
+
+**Baseline leg — same exact command as the BEFORE run above:**
+`node scripts/perf-board.mjs --done=500 --runs=3`
+
+```
+run=1 initialBytes=17409 initialCards=50 sseFrameBytes=17654 loadCommits=7 commits=5
+run=2 initialBytes=17409 initialCards=50 sseFrameBytes=17654 loadCommits=10 commits=5
+run=3 initialBytes=17409 initialCards=50 sseFrameBytes=17654 loadCommits=8 commits=5
+
+PERF-BOARD mode=prod done=500 initialBytes=17409 initialCards=50 sseFrameBytes=17654 loadCommits=8 commits=5
+```
+
+**Verdict vs. the `6d2549f` thresholds:** `initialBytes` `15029`→`17409` (**+2380, +15.83%, still
+FAIL against the strict "must not grow at all" threshold**, but **-2930 bytes recovered from the
+pre-fix `20339`, a 55.2% reduction of the regression**); `sseFrameBytes` `15274`→`17654` (**+2380,
++15.42%**, same -2930/55.2% recovery); `loadCommits`/`commits` unaffected (PASS, as before).
+
+**Why a residual gap remains, and why it is not further reducible inside this plan's budget.** The
+remaining ~119 bytes/session-bearing card is the cost of `activeSession: {id, ttydPort}` itself —
+not duplication, but the deliberate Phase 90 "canary" design (`src/shared/types.ts`'s
+`ActiveSessionWire` JSDoc): `TerminalRegion` renders the terminal `<iframe>` keyed on
+`activeSession.id`/`.ttydPort`, and `DetailPanel`'s "don't double-spawn" gate reads the SAME nested
+field rather than the flat mirror, specifically so a wire-shape regression here is visible on
+screen (a permanent "Connecting to terminal…") instead of silently hiding inside the store — see
+`96-11-SUMMARY.md`'s F-96-F disposition for the full reasoning and why eliminating it further would
+mean reversing that already-shipped Phase 90 decision, out of this plan's scope.
+
+**Multi-session leg — same command, confirming the fix's saving stacks identically:**
+`node scripts/perf-board.mjs --done=500 --runs=3 --sessions-per-card=3`
+
+```
+run=1 initialBytes=20844 initialCards=50 sseFrameBytes=21089 loadCommits=7 commits=5
+run=2 initialBytes=20844 initialCards=50 sseFrameBytes=21089 loadCommits=8 commits=5
+run=3 initialBytes=20844 initialCards=50 sseFrameBytes=21089 loadCommits=8 commits=5
+
+PERF-BOARD-MULTI mode=prod done=500 sessionsPerCard=3 initialBytes=20844 initialCards=50 sseFrameBytes=21089 loadCommits=8 commits=5
+```
+
+Pre-fix `24014`/`24259` → post-fix `20844`/`21089`, a `-3170` byte reduction on both legs — the
+same `activeSession` narrowing applied once per card regardless of session count, consistent with
+the baseline leg's own `-2930`-ish recovery (the small delta between `-2930` and `-3170` is the
+`--sessions-per-card=3` seeding's own extra session records changing which 20 cards fall inside the
+window's byte accounting, not a second cause).
+
+**Environment:** `com.dispatch.app` confirmed stopped and `:4700` refusing throughout; no
+`dispatch-perf-board-*` directory or stray listener remained after either run; real
+`~/.dispatch/board.db` unchanged (`27d52060517adea9fe81712f9abe1da0`, `28672` bytes) throughout.

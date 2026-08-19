@@ -99,10 +99,12 @@ export function compareDoneOrder(a: Card, b: Card): number {
  * duplicate the strip, so the redaction boundary can never drift. Four responsibilities:
  * (1) remove the card's own secret field; (2) remove `sessions` outright — the full array is
  * server-side only and carries every session's own secret field; (3) resolve the ACTIVE
- * session by `card.activeSessionId` and, when one resolves, FIELD-PICK exactly the six
- * `ActiveSessionWire` keys onto `wireCard.activeSession` — never spread the session object, so the
- * secret is omitted by construction and a future field added to `Session` cannot leak through this
- * path; (4) at two or more sessions, FIELD-PICK the `SessionSummary` keys per session onto
+ * session by `card.activeSessionId` and, when one resolves, FIELD-PICK exactly the two
+ * `ActiveSessionWire` keys (`id`, `ttydPort` — F-96-F narrowed this from six; the other four
+ * duplicated the flat mirror below for zero reader benefit) onto `wireCard.activeSession` — never
+ * spread the session object, so the secret is omitted by construction and a future field added to
+ * `Session` cannot leak through this path; (4) at two or more sessions, FIELD-PICK the
+ * `SessionSummary` keys per session onto
  * `wireCard.sessionSummaries`, sorted by `createdAt` ascending, following the identical
  * never-spread discipline as `activeSession` — this is the only place a non-active session's own
  * `prs`/`previews`/`prsUnknown`/`previewsUnknown` become observable on the wire (`ARTIFACT-01`),
@@ -122,14 +124,7 @@ export function redactCard(card: Card): Card {
   delete wireCard.sessions;
   const active = card.sessions?.find((s) => s.id === card.activeSessionId);
   wireCard.activeSession = active
-    ? {
-        id: active.id,
-        tmuxSession: active.tmuxSession,
-        ttydPort: active.ttydPort,
-        claudeSessionId: active.claudeSessionId,
-        workspacePath: active.workspacePath,
-        workspace: active.workspace,
-      }
+    ? { id: active.id, ttydPort: active.ttydPort }
     : undefined;
   const hasMultipleSessions = (card.sessions?.length ?? 0) >= 2;
   wireCard.sessionCount = hasMultipleSessions

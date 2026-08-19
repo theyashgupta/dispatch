@@ -2906,7 +2906,8 @@ async function checkHookAttribution(built) {
  * self-rescheduling tick. Samples the wire's `sessionLost` on EVERY poll — not only the terminal
  * read — so a transient `true` is a violation even when the final read looks clean.
  * @remarks `kind === "active"` kills the card's ACTIVE session (A) and polls the WIRE for the
- * promotion (`activeSession.tmuxSession` becoming B's) — the wire is enough because the
+ * promotion (`card.tmuxSession`, the flat mirror, becoming B's — F-96-F narrowed `activeSession`
+ * off `tmuxSession` since the flat mirror already carries it) — the wire is enough because the
  * promoted-to session is, by definition, the new active one. `kind === "sibling"` kills the
  * NON-active session (B) and polls the PERSISTED record directly instead, because the wire's
  * `redactCard` projection never exposes a non-active session's own fields — the active pointer
@@ -2938,8 +2939,7 @@ async function checkLivenessDirection(kind) {
       lastWireCard = await fetchFixtureCard(built);
       if (lastWireCard?.sessionLost === true) sawSessionLostTrue = true;
       if (kind === "active") {
-        transitioned =
-          lastWireCard?.activeSession?.tmuxSession === survivingTmux;
+        transitioned = lastWireCard?.tmuxSession === survivingTmux;
       } else {
         let persisted;
         try {
@@ -2992,9 +2992,9 @@ async function checkLivenessDirection(kind) {
           `liveness (${kind}): wire activeSession.id expected the untouched active session ${surviving.id}, actual ${lastWireCard?.activeSession?.id}`,
         );
       }
-      if (lastWireCard?.activeSession?.tmuxSession !== survivingTmux) {
+      if (lastWireCard?.tmuxSession !== survivingTmux) {
         violations.push(
-          `liveness (${kind}): wire activeSession.tmuxSession expected the untouched ${survivingTmux}, actual ${lastWireCard?.activeSession?.tmuxSession}`,
+          `liveness (${kind}): wire card.tmuxSession (flat mirror) expected the untouched ${survivingTmux}, actual ${lastWireCard?.tmuxSession}`,
         );
       }
     }
@@ -4442,11 +4442,6 @@ async function checkSwitchAtomicity(built) {
             return;
           }
           const known = knownSessions[active.id];
-          if (active.tmuxSession !== known.tmuxSession) {
-            readViolations.push(
-              `read ${i}: activeSession(${active.id}).tmuxSession expected "${known.tmuxSession}", actual ${JSON.stringify(active.tmuxSession)} — torn nested projection`,
-            );
-          }
           if (active.ttydPort !== known.ttydPort) {
             readViolations.push(
               `read ${i}: activeSession(${active.id}).ttydPort expected ${known.ttydPort}, actual ${JSON.stringify(active.ttydPort)} — torn nested projection`,
@@ -4548,9 +4543,9 @@ async function checkSwitchAtomicity(built) {
         `switch-atomicity: interleaving 1 deterministic follow-up — card.ttydPort (flat mirror) expected ${known.ttydPort} after an AWAITED switch to B, actual ${JSON.stringify(deterministicCard.ttydPort)} — the flat mirror lagged its pointer`,
       );
     }
-    if (deterministicCard.activeSession?.tmuxSession !== known.tmuxSession) {
+    if (deterministicCard.activeSession?.ttydPort !== known.ttydPort) {
       violations.push(
-        `switch-atomicity: interleaving 1 deterministic follow-up — activeSession.tmuxSession expected "${known.tmuxSession}", actual ${JSON.stringify(deterministicCard.activeSession?.tmuxSession)}`,
+        `switch-atomicity: interleaving 1 deterministic follow-up — activeSession.ttydPort expected ${known.ttydPort}, actual ${JSON.stringify(deterministicCard.activeSession?.ttydPort)}`,
       );
     }
   }
