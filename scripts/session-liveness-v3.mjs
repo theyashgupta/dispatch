@@ -174,6 +174,22 @@
  *                                                                   into the child, and the parent's
  *                                                                   EXACT tmux session still answers
  *                                                                   a real typed round trip
+ *   node scripts/session-liveness-v3.mjs --check inherit-parentage Phase 95 criterion 3
+ *                                                                   (MULTI-02/UI-03): the parent's
+ *                                                                   id is PERSISTED on the child's
+ *                                                                   record, the wire reports it as a
+ *                                                                   positional display ordinal, a
+ *                                                                   session that was never inherited
+ *                                                                   carries NO parentOrdinal key at
+ *                                                                   all (Object.hasOwn, never a
+ *                                                                   nullish test), and a child whose
+ *                                                                   parent record has been removed
+ *                                                                   degrades to silence on the wire
+ *                                                                   while KEEPING its recorded
+ *                                                                   builtFrom — asserted on a THREE
+ *                                                                   session fixture so the removal
+ *                                                                   cannot drop the card below
+ *                                                                   redactCard's own N>=2 gate
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -8839,6 +8855,320 @@ async function checkInheritParentIntact(built) {
   return violations;
 }
 
+/**
+ * Poll until a THIRD session has landed. {@link waitForSagaSettled}'s own predicate is
+ * `sessionCount >= 2`, which is ALREADY true once session 2 exists — reusing it for session 3
+ * would return instantly on the pre-existing state and the check would read the wire before the
+ * saga had finished, which is the "settled" reading that is not a settled state.
+ */
+async function waitForNthSessionSettled(built, n, { timeoutMs }) {
+  const deadline = Date.now() + timeoutMs;
+  let card;
+  while (Date.now() < deadline) {
+    card = await fetchFixtureCard(built);
+    const settled =
+      card != null &&
+      card.provisioningStep == null &&
+      ((card.sessionCount ?? 1) >= n || card.startError != null);
+    if (settled) return { card, timedOut: false };
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return { card, timedOut: true };
+}
+
+/**
+ * `--check inherit-parentage` (Plan 95-06 Task 1, criterion C3, `MULTI-02`/`UI-03`): proves the
+ * parent's id is PERSISTED on the child's record, that the wire reports it as a positional display
+ * ordinal, that a session which was never inherited carries NO `parentOrdinal` KEY AT ALL, and that
+ * a child whose parent record has been removed degrades to silence on the wire while keeping its
+ * recorded provenance.
+ *
+ * @remarks The measured surface is `GET /api/board`, never the store's in-memory shape: the
+ * resolver under test lives in `redactCard`, so an in-memory assertion would measure the wrong
+ * layer entirely.
+ *
+ * @remarks Absence is asserted with `Object.hasOwn`, never with a nullish test. `entry.parentOrdinal
+ * == null` passes for `parentOrdinal: undefined` — which is exactly the shape the resolver must not
+ * emit — so a nullish test cannot distinguish "reported nothing" from "reported nothing-ness".
+ *
+ * @remarks THE DEAD-INSTRUMENT TRAP THIS CHECK IS SHAPED AROUND. `redactCard` emits
+ * `sessionSummaries` only at `(card.sessions?.length ?? 0) >= 2`. On a TWO-session fixture,
+ * removing the parent drops the card to N=1, `sessionSummaries` vanishes entirely, and "session 2
+ * has no `parentOrdinal`" is trivially true for a reason that has nothing to do with the resolver's
+ * degradation branch — which could be completely absent and this check would still pass. The
+ * dangling stage therefore runs on a THREE-session fixture (1, 2-built-from-1, 3-fresh) and asserts
+ * the summary COUNT on both sides of the removal — 3 before, 2 after — each with its own named
+ * violation, so the N>=2 gate can never be the reason the assertion passes.
+ * @see docs/ARCHITECTURE.md#session-inheritance
+ */
+async function checkInheritParentage(built) {
+  const violations = [];
+  const session1Id = built.sessionA.id;
+
+  // --- STAGE 1: a REAL inherited start records the parent and reports it as an ordinal. ---
+  const { status, body } = await startSecondSession(built, {
+    newSession: true,
+    inheritFrom: session1Id,
+  });
+  console.log(
+    `inherit-parentage: POST /start {newSession:true, inheritFrom:${session1Id}} -> ${status}`,
+  );
+  if (status !== 202) {
+    violations.push(
+      `inherit-parentage: POST /start returned ${status}, expected 202 (body=${JSON.stringify(body)})`,
+    );
+    return violations;
+  }
+  const settled2 = await waitForSagaSettled(built, {
+    timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+  });
+  if (settled2.timedOut) {
+    violations.push(
+      `inherit-parentage: session 2's saga did not settle within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (last observed card=${JSON.stringify(settled2.card)})`,
+    );
+    return violations;
+  }
+  if (settled2.card?.startError != null) {
+    violations.push(
+      `inherit-parentage: session 2's saga recorded a startError instead of an inherited session: ${JSON.stringify(settled2.card.startError)}`,
+    );
+    return violations;
+  }
+  const session2Id = (settled2.card?.sessionSummaries ?? [])
+    .map((s) => s.id)
+    .find((id) => id !== session1Id);
+  if (!session2Id) {
+    violations.push(
+      `inherit-parentage: could not resolve session 2's id from sessionSummaries=${JSON.stringify(settled2.card?.sessionSummaries)}`,
+    );
+    return violations;
+  }
+
+  const persistedAfter2 = readCard(built.dbPath, built.cardId);
+  const record2 = persistedAfter2?.sessions?.find((s) => s.id === session2Id);
+  console.log(
+    `inherit-parentage: PERSISTED session 2 (${session2Id}) builtFrom = ${JSON.stringify(record2?.builtFrom)} (expected session 1's id ${session1Id})`,
+  );
+  if (record2?.builtFrom !== session1Id) {
+    violations.push(
+      `inherit-parentage: the PERSISTED record for session 2 (${session2Id}) has builtFrom=${JSON.stringify(record2?.builtFrom)}, expected session 1's id ${session1Id} — the parent's id was not recorded on the child`,
+    );
+  }
+
+  const wire1Text = await (
+    await fetch(`http://127.0.0.1:${built.port}/api/board`)
+  ).text();
+  const wire1 = {
+    text: wire1Text,
+    card: (JSON.parse(wire1Text)?.cards ?? []).find((c) => c.id === built.cardId),
+  };
+  const summaries1 = wire1.card?.sessionSummaries ?? [];
+  const sum2 = summaries1.find((s) => s.id === session2Id);
+  const sum1 = summaries1.find((s) => s.id === session1Id);
+  console.log(
+    `inherit-parentage: WIRE after session 2 — ${summaries1.length} summaries; session 2 entry=${JSON.stringify(sum2)}; session 1 entry=${JSON.stringify(sum1)}`,
+  );
+  if (sum2 == null || sum1 == null) {
+    violations.push(
+      `inherit-parentage: the wire did not carry both sessions in sessionSummaries (session1=${JSON.stringify(sum1)}, session2=${JSON.stringify(sum2)}) — nothing downstream can be asserted`,
+    );
+    return violations;
+  }
+  if (sum2.parentOrdinal !== 1) {
+    violations.push(
+      `inherit-parentage: session 2 (${session2Id}) reports parentOrdinal=${JSON.stringify(sum2.parentOrdinal)}, expected the display ordinal 1 (session 1 is the first entry when sorted by createdAt) — offending JSON fragment: ${JSON.stringify(sum2)}`,
+    );
+  }
+  if (Object.hasOwn(sum1, "parentOrdinal")) {
+    violations.push(
+      `inherit-parentage: session 1 (${session1Id}) was never inherited, yet its wire entry CARRIES a parentOrdinal key (Object.hasOwn === true, value=${JSON.stringify(sum1.parentOrdinal)}) — a session with no parent must report nothing at all, not nothing-ness — offending JSON fragment: ${JSON.stringify(sum1)}`,
+    );
+  }
+  const nullOrdinalCount = (wire1.text.match(/"parentOrdinal":null/g) ?? []).length;
+  const undefinedOrdinalCount = (
+    wire1.text.match(/parentOrdinal":undefined/g) ?? []
+  ).length;
+  console.log(
+    `inherit-parentage: raw board body occurrences — '"parentOrdinal":null'=${nullOrdinalCount}, 'parentOrdinal":undefined'=${undefinedOrdinalCount}`,
+  );
+  if (nullOrdinalCount > 0 || undefinedOrdinalCount > 0) {
+    violations.push(
+      `inherit-parentage: the raw board body serialises an EMPTY parentOrdinal ('"parentOrdinal":null' x${nullOrdinalCount}, 'parentOrdinal":undefined' x${undefinedOrdinalCount}) — the resolver must omit the key by explicit branch, never emit it holding nothing`,
+    );
+  }
+
+  // --- STAGE 2: a THIRD, non-inherited session, so the dangling assertion can mean something. ---
+  const third = await startSecondSession(built, { newSession: true });
+  console.log(
+    `inherit-parentage: POST /start {newSession:true} (no inheritFrom) -> ${third.status}`,
+  );
+  if (third.status !== 202) {
+    violations.push(
+      `inherit-parentage: the third (non-inherited) POST /start returned ${third.status}, expected 202 (body=${JSON.stringify(third.body)}) — the three-session fixture the dangling assertion requires could not be built`,
+    );
+    return violations;
+  }
+  const settled3 = await waitForNthSessionSettled(built, 3, {
+    timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+  });
+  if (settled3.timedOut) {
+    violations.push(
+      `inherit-parentage: session 3's saga did not settle within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (last observed card=${JSON.stringify(settled3.card)})`,
+    );
+    return violations;
+  }
+  if (settled3.card?.startError != null) {
+    violations.push(
+      `inherit-parentage: session 3's saga recorded a startError: ${JSON.stringify(settled3.card.startError)}`,
+    );
+    return violations;
+  }
+  const session3Id = (settled3.card?.sessionSummaries ?? [])
+    .map((s) => s.id)
+    .find((id) => id !== session1Id && id !== session2Id);
+  if (!session3Id) {
+    violations.push(
+      `inherit-parentage: could not resolve session 3's id from sessionSummaries=${JSON.stringify(settled3.card?.sessionSummaries)}`,
+    );
+    return violations;
+  }
+
+  const wirePreText = await (
+    await fetch(`http://127.0.0.1:${built.port}/api/board`)
+  ).text();
+  const wirePre = {
+    text: wirePreText,
+    card: (JSON.parse(wirePreText)?.cards ?? []).find((c) => c.id === built.cardId),
+  };
+  const summariesPre = wirePre.card?.sessionSummaries ?? [];
+  const preSum2 = summariesPre.find((s) => s.id === session2Id);
+  const preSum3 = summariesPre.find((s) => s.id === session3Id);
+  console.log(
+    `inherit-parentage: PRE-REMOVAL WIRE — ${summariesPre.length} summaries; session 2=${JSON.stringify(preSum2)}; session 3=${JSON.stringify(preSum3)}`,
+  );
+  if (summariesPre.length !== 3) {
+    violations.push(
+      `inherit-parentage: THIS CHECK WOULD BE VACUOUS — expected exactly 3 sessionSummaries before the parent is removed, found ${summariesPre.length}. The dangling assertion only means something on a fixture that stays ABOVE redactCard's N>=2 gate after the removal; below it, sessionSummaries disappears entirely and "session 2 has no parentOrdinal" is true for a reason unrelated to the resolver. Refusing to run the degradation assertion. Summaries: ${JSON.stringify(summariesPre)}`,
+    );
+    return violations;
+  }
+  if (preSum2?.parentOrdinal !== 1) {
+    violations.push(
+      `inherit-parentage: before the removal, session 2 (${session2Id}) reports parentOrdinal=${JSON.stringify(preSum2?.parentOrdinal)}, expected 1 — the post-removal delta would not be attributable — offending JSON fragment: ${JSON.stringify(preSum2)}`,
+    );
+    return violations;
+  }
+  if (preSum3 == null || Object.hasOwn(preSum3, "parentOrdinal")) {
+    violations.push(
+      `inherit-parentage: session 3 (${session3Id}) was started with NO inheritFrom, yet its wire entry carries a parentOrdinal key (Object.hasOwn === ${preSum3 == null ? "n/a — entry missing" : "true"}) — offending JSON fragment: ${JSON.stringify(preSum3)}`,
+    );
+  }
+
+  // --- STAGE 2b: remove the parent's RECORD with the server down, then re-read the wire. ---
+  await killAndWait(built.server?.child);
+  const serverGone = await waitForServerGone(built.port, LISTEN_POLL_TIMEOUT_MS);
+  console.log(
+    `inherit-parentage: sandbox server on :${built.port} stopped before the persisted edit — refused=${serverGone}`,
+  );
+  if (!serverGone) {
+    violations.push(
+      `inherit-parentage: the sandbox server on :${built.port} still answers GET /api/board after kill — editing the persisted card now would be raced by a live server re-persisting over it`,
+    );
+    return violations;
+  }
+
+  const cardForEdit = readCard(built.dbPath, built.cardId);
+  const survivingSessions = (cardForEdit?.sessions ?? []).filter(
+    (s) => s.id !== session1Id,
+  );
+  if (cardForEdit == null || survivingSessions.length !== 2) {
+    violations.push(
+      `inherit-parentage: expected exactly 2 sessions to survive removing session 1, found ${survivingSessions.length} (persisted sessions=${JSON.stringify((cardForEdit?.sessions ?? []).map((s) => s.id))})`,
+    );
+    return violations;
+  }
+  const priorActive = cardForEdit.activeSessionId;
+  cardForEdit.sessions = survivingSessions;
+  if (!survivingSessions.some((s) => s.id === cardForEdit.activeSessionId)) {
+    const promoted = survivingSessions.find((s) => s.id === session3Id);
+    cardForEdit.activeSessionId = promoted.id;
+    cardForEdit.tmuxSession = promoted.tmuxSession;
+    cardForEdit.ttydPort = promoted.ttydPort;
+    cardForEdit.hookToken = promoted.hookToken;
+    cardForEdit.workspacePath = promoted.workspacePath;
+    cardForEdit.workspace = promoted.workspace;
+    cardForEdit.branch = promoted.branch;
+  }
+  console.log(
+    `inherit-parentage: removing session 1's (${session1Id}) record while the server is down; activeSessionId ${priorActive} -> ${cardForEdit.activeSessionId}; session 2's builtFrom left UNCHANGED at ${JSON.stringify(survivingSessions.find((s) => s.id === session2Id)?.builtFrom)}`,
+  );
+  seedFixtureCard(built.home, cardForEdit);
+
+  built.server = bootServer(built.home, { pathPrefix: built.pathPrefix });
+  await waitForReady(built.port);
+  console.log(
+    `inherit-parentage: sandbox server rebooted on :${built.port} against the edited board`,
+  );
+
+  const wirePostText = await (
+    await fetch(`http://127.0.0.1:${built.port}/api/board`)
+  ).text();
+  const wirePost = {
+    text: wirePostText,
+    card: (JSON.parse(wirePostText)?.cards ?? []).find((c) => c.id === built.cardId),
+  };
+  const summariesPost = wirePost.card?.sessionSummaries ?? [];
+  const postSum2 = summariesPost.find((s) => s.id === session2Id);
+  console.log(
+    `inherit-parentage: POST-REMOVAL WIRE — ${summariesPost.length} summaries; session 2=${JSON.stringify(postSum2)}`,
+  );
+  if (summariesPost.length !== 2) {
+    violations.push(
+      `inherit-parentage: THIS CHECK WOULD BE VACUOUS — expected exactly 2 sessionSummaries after removing the parent, found ${summariesPost.length}. At fewer than 2, redactCard emits no sessionSummaries at all and the absent parentOrdinal below would prove nothing about the resolver's degradation branch. Summaries: ${JSON.stringify(summariesPost)}`,
+    );
+    return violations;
+  }
+  if (postSum2 == null) {
+    violations.push(
+      `inherit-parentage: session 2 (${session2Id}) is missing from the wire entirely after its parent's record was removed — removing a PARENT must not remove the CHILD`,
+    );
+    return violations;
+  }
+  if (Object.hasOwn(postSum2, "parentOrdinal")) {
+    violations.push(
+      `inherit-parentage: session 2 (${session2Id})'s parent record no longer exists, yet its wire entry STILL carries a parentOrdinal key (Object.hasOwn === true, value=${JSON.stringify(postSum2.parentOrdinal)}) — an unresolvable parent must yield ABSENCE by explicit branch — offending JSON fragment: ${JSON.stringify(postSum2)}`,
+    );
+  }
+  const fromUndefinedCount = (wirePost.text.match(/from undefined/g) ?? []).length;
+  const postSum2Text = JSON.stringify(postSum2);
+  console.log(
+    `inherit-parentage: raw post-removal body — 'from undefined' x${fromUndefinedCount}; session 2 fragment carries "parentOrdinal" = ${postSum2Text.includes("parentOrdinal")}`,
+  );
+  if (fromUndefinedCount > 0) {
+    violations.push(
+      `inherit-parentage: the raw post-removal board body contains "from undefined" x${fromUndefinedCount} — a dangling parent must degrade to silence, never to a rendered placeholder`,
+    );
+  }
+  if (postSum2Text.includes("parentOrdinal")) {
+    violations.push(
+      `inherit-parentage: session 2 (${session2Id})'s own serialised wire fragment still mentions parentOrdinal after the parent was removed: ${postSum2Text}`,
+    );
+  }
+
+  const persistedPost = readCard(built.dbPath, built.cardId);
+  const record2Post = persistedPost?.sessions?.find((s) => s.id === session2Id);
+  console.log(
+    `inherit-parentage: PERSISTED session 2 after the removal — builtFrom = ${JSON.stringify(record2Post?.builtFrom)} (must STILL be session 1's id ${session1Id})`,
+  );
+  if (record2Post?.builtFrom !== session1Id) {
+    violations.push(
+      `inherit-parentage: session 2 (${session2Id})'s persisted builtFrom is ${JSON.stringify(record2Post?.builtFrom)} after its parent's record was removed, expected it to STILL be ${session1Id} — the RENDERING degrades, the RECORD does not; provenance stays true even once the parent is gone`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -8903,6 +9233,12 @@ const CHECKS = {
     withFixture(
       "inherit-parent-intact",
       checkInheritParentIntact,
+      SECOND_SESSION_FIXTURE,
+    ),
+  "inherit-parentage": () =>
+    withFixture(
+      "inherit-parentage",
+      checkInheritParentage,
       SECOND_SESSION_FIXTURE,
     ),
 };
