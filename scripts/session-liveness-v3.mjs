@@ -1147,6 +1147,64 @@ function writeExitingStubClaudeBinary(home) {
   return binDir;
 }
 
+/**
+ * Plant a stub `gh` beside the stub `claude` in the SAME `bin/` directory
+ * {@link writeStubClaudeBinary} already put on the sandbox server's `PATH`, so no `bootServer`
+ * restart is needed to make it resolvable — `listPrsForBranch` spawns `gh` fresh on every probe
+ * tick and resolves it through the child's `PATH` at spawn time, not at server boot.
+ *
+ * @remarks The stub answers `gh pr list --head <branch> …` with a set that is a DETERMINISTIC
+ * FUNCTION OF THE BRANCH, which is the whole point: `ARTIFACT-01`'s regression broadcasts one
+ * session's result onto its sibling, and a fixture where both sessions expect the SAME PR set
+ * cannot tell correct attribution from a broadcast. The PR number is derived from the branch's
+ * own suffix so session 1 and session 2 can never coincide.
+ *
+ * Failure injection for the per-session-backoff assertion is driven by a control FILE
+ * (`gh-fail-branch` under the sandbox home) rather than by rewriting this script, so one branch
+ * can be made to fail while the other keeps succeeding WITHOUT touching the binary the running
+ * server has already resolved. An empty/absent file means every branch succeeds.
+ */
+function writeStubGhBinary(home) {
+  const binDir = join(home, "bin");
+  mkdirSync(binDir, { recursive: true });
+  const ghPath = join(binDir, "gh");
+  const failFile = join(home, "gh-fail-branch");
+  writeFileSync(
+    ghPath,
+    "#!/bin/sh\n" +
+      "branch=''\n" +
+      "prev=''\n" +
+      'for a in "$@"; do\n' +
+      '  if [ "$prev" = "--head" ]; then branch="$a"; fi\n' +
+      '  prev="$a"\n' +
+      "done\n" +
+      `if [ -f '${failFile}' ] && [ "$(cat '${failFile}')" = "$branch" ]; then\n` +
+      "  echo 'gh pr list failed: stub-injected failure' >&2\n" +
+      "  exit 1\n" +
+      "fi\n" +
+      'suffix=$(echo "$branch" | sed "s/.*-//")\n' +
+      'case "$suffix" in\n' +
+      '  ""|*[!0-9]*) num=101 ;;\n' +
+      "  *) num=$((200 + suffix)) ;;\n" +
+      "esac\n" +
+      'printf \'[{"number":%s,"url":"https://example.invalid/pr/%s","title":"stub PR for %s","state":"OPEN","isDraft":false,"statusCheckRollup":[]}]\\n\' "$num" "$num" "$branch"\n',
+    { mode: 0o755 },
+  );
+  return { binDir, ghPath, failFile };
+}
+
+/**
+ * The PR number {@link writeStubGhBinary}'s stub answers for `branch`, recomputed here in JS so the
+ * check's expectation is derived INDEPENDENTLY of the shell script rather than read back from it —
+ * an expectation the fixture itself supplies is not an assertion.
+ */
+function expectedStubPrNumber(branch) {
+  const suffix = branch.includes("-")
+    ? branch.slice(branch.lastIndexOf("-") + 1)
+    : "";
+  return /^[0-9]+$/.test(suffix) ? 200 + Number(suffix) : 101;
+}
+
 /** `{ exists, mtimeMs, size }` for `path`, or an all-null/false shape when it doesn't exist. */
 function statFile(path) {
   try {
@@ -8090,6 +8148,218 @@ async function checkSecondStartRollback() {
   return violations;
 }
 
+/**
+ * Poll the PERSISTED card until `predicate` holds for it, returning `{ card, timedOut }` rather
+ * than throwing, so a caller reports the LAST OBSERVED state inside a named violation instead of an
+ * opaque exception. Reads through a fresh `readOnly: true` connection every poll — never through
+ * the live server process — because the subject here is what actually landed on disk.
+ */
+async function waitForPersistedCard(built, predicate, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let card;
+  while (Date.now() < deadline) {
+    card = readCard(built.dbPath, built.cardId);
+    if (card != null && predicate(card)) return { card, timedOut: false };
+    await sleep(POLL_INTERVAL_MS * 5);
+  }
+  return { card, timedOut: true };
+}
+
+/**
+ * Ceiling for the artifact probe's self-rescheduling ~10s tick
+ * (`artifact-detect.ts`'s `ARTIFACT_DETECT_INTERVAL_MS`). Generous rather than tight: the check
+ * must POLL for a tick, never assume one has run, and a single missed tick boundary must not
+ * produce a false "attribution never landed" violation. Two failure-backoff doublings (10s + 20s)
+ * plus a full interval still fits inside this.
+ */
+const ARTIFACT_TICK_TIMEOUT_MS = 45_000;
+
+/**
+ * Criterion 6 / `ARTIFACT-01`: with two branches live, each session's PRs are attributed to its own
+ * branch and readable on its OWN record.
+ *
+ * @remarks The subject is deliberately the NON-ACTIVE sibling, and assertion 1 targets it by id and
+ * branch. The regression this criterion exists to catch reverts the probe's input to
+ * `cards.map((c) => c.tmuxSession)` — under which the ACTIVE session is still probed correctly, so
+ * an assertion made against the active session PASSES while attribution is completely broken. That
+ * is the vacuous form this codebase has now caught fifteen times; plan 94-08's Task 2 demonstrates
+ * it explicitly by weakening this check and watching it pass under the same break.
+ *
+ * The two sessions' expected PR sets are DIFFERENT ({@link expectedStubPrNumber} derives each from
+ * its own branch), so a probe that broadcasts one session's result onto its sibling fails
+ * assertions 1-3 rather than coincidentally satisfying them.
+ */
+async function checkArtifactAttribution(built) {
+  const violations = [];
+
+  const n1Wire = await fetchFixtureCard(built);
+  if (n1Wire?.sessionSummaries != null || n1Wire?.sessionCount != null) {
+    violations.push(
+      `artifact-attribution: N=1 wire parity broken BEFORE the second session — sessionSummaries=${JSON.stringify(n1Wire?.sessionSummaries)}, sessionCount=${JSON.stringify(n1Wire?.sessionCount)}, both must be absent at N=1`,
+    );
+  } else {
+    console.log(
+      "artifact-attribution: N=1 wire parity — sessionSummaries and sessionCount both absent",
+    );
+  }
+
+  const { ghPath, failFile } = writeStubGhBinary(built.home);
+  console.log(`artifact-attribution: stub gh planted — ${ghPath}`);
+
+  const { status, body } = await startSecondSession(built, {
+    newSession: true,
+  });
+  if (status !== 202) {
+    violations.push(
+      `artifact-attribution: POST /start {newSession:true} returned ${status}, expected 202 (body=${JSON.stringify(body)})`,
+    );
+    return violations;
+  }
+  const { card: settled, timedOut: sagaTimedOut } = await waitForSagaSettled(
+    built,
+    { timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS },
+  );
+  if (sagaTimedOut || settled?.startError != null) {
+    violations.push(
+      `artifact-attribution: second start did not settle cleanly (timedOut=${sagaTimedOut}, startError=${JSON.stringify(settled?.startError)})`,
+    );
+    return violations;
+  }
+
+  const branch1 = built.identifier;
+  const branch2 = `${built.identifier}-2`;
+  const expected1 = expectedStubPrNumber(branch1);
+  const expected2 = expectedStubPrNumber(branch2);
+  if (expected1 === expected2) {
+    violations.push(
+      `artifact-attribution: the fixture's two expected PR sets are IDENTICAL (${expected1}) — this check cannot tell correct attribution from a broadcast and is a dead instrument`,
+    );
+    return violations;
+  }
+  console.log(
+    `artifact-attribution: expecting PR #${expected1} on ${branch1}, PR #${expected2} on ${branch2}`,
+  );
+
+  const { card: probed, timedOut } = await waitForPersistedCard(
+    built,
+    (c) => (c.sessions ?? []).every((s) => s.prs != null),
+    ARTIFACT_TICK_TIMEOUT_MS,
+  );
+  if (timedOut) {
+    violations.push(
+      `artifact-attribution: no probe tick attributed PRs to both sessions within ${ARTIFACT_TICK_TIMEOUT_MS}ms (last persisted sessions=${JSON.stringify((probed?.sessions ?? []).map((s) => ({ id: s.id, branch: s.branch, prs: s.prs, prsUnknown: s.prsUnknown })))})`,
+    );
+    return violations;
+  }
+
+  const sessions = probed.sessions ?? [];
+  const active = sessions.find((s) => s.id === probed.activeSessionId);
+  const sibling = sessions.find((s) => s.id !== probed.activeSessionId);
+  for (const s of sessions) {
+    console.log(
+      `artifact-attribution: session ${s.id} branch=${s.branch} prs=${JSON.stringify((s.prs ?? []).map((p) => p.number))} active=${s.id === probed.activeSessionId}`,
+    );
+  }
+  if (active == null || sibling == null) {
+    violations.push(
+      `artifact-attribution: expected exactly one active and one non-active session, got ${sessions.length} record(s) with activeSessionId=${probed.activeSessionId}`,
+    );
+    return violations;
+  }
+
+  const numbersOf = (rec) => (rec.prs ?? []).map((p) => p.number).sort();
+  const expectedFor = (rec) => [expectedStubPrNumber(rec.branch ?? "")];
+
+  const siblingNums = numbersOf(sibling);
+  if (JSON.stringify(siblingNums) !== JSON.stringify(expectedFor(sibling))) {
+    violations.push(
+      `artifact-attribution: NON-ACTIVE sibling ${sibling.id} (branch ${sibling.branch}) carries prs ${JSON.stringify(siblingNums)}, expected ${JSON.stringify(expectedFor(sibling))} — its own branch's set, not the active session's and not undefined`,
+    );
+  }
+
+  const activeNums = numbersOf(active);
+  if (JSON.stringify(activeNums) !== JSON.stringify(expectedFor(active))) {
+    violations.push(
+      `artifact-attribution: ACTIVE session ${active.id} (branch ${active.branch}) carries prs ${JSON.stringify(activeNums)}, expected ${JSON.stringify(expectedFor(active))}`,
+    );
+  }
+  if (JSON.stringify(siblingNums) === JSON.stringify(activeNums)) {
+    violations.push(
+      `artifact-attribution: both sessions carry the SAME prs ${JSON.stringify(activeNums)} — a broadcast, not attribution`,
+    );
+  }
+
+  if (sibling.workspace == null) {
+    violations.push(
+      `artifact-attribution: the NON-ACTIVE sibling ${sibling.id} has no \`workspace\` — the artifact probe gates on \`rec.workspace != null\`, so this session can never be probed for PRs at all`,
+    );
+  }
+  if (probed.workspace == null) {
+    violations.push(
+      `artifact-attribution: card.workspace was WIPED by the second session completing — the closing six-field mirror re-derives it from the newly promoted record, and \`cleanupWorkspace\` reads \`card.workspace.repos\``,
+    );
+  }
+
+  const cardNums = (probed.prs ?? []).map((p) => p.number).sort();
+  if (JSON.stringify(cardNums) !== JSON.stringify(activeNums)) {
+    violations.push(
+      `artifact-attribution: card.prs mirror is ${JSON.stringify(cardNums)}, expected the ACTIVE session's ${JSON.stringify(activeNums)} (sibling's is ${JSON.stringify(siblingNums)})`,
+    );
+  }
+
+  const wire = await fetchFixtureCard(built);
+  const summaries = wire?.sessionSummaries ?? [];
+  if (summaries.length !== 2) {
+    violations.push(
+      `artifact-attribution: wire sessionSummaries has ${summaries.length} entries, expected 2`,
+    );
+  } else {
+    const wireSibling = summaries.find((s) => s.id === sibling.id);
+    const wireNums = (wireSibling?.prs ?? []).map((p) => p.number).sort();
+    if (JSON.stringify(wireNums) !== JSON.stringify(expectedFor(sibling))) {
+      violations.push(
+        `artifact-attribution: the sibling's WIRE sessionSummaries entry carries prs ${JSON.stringify(wireNums)}, expected ${JSON.stringify(expectedFor(sibling))} — per-session artifacts must be observable at N>=2`,
+      );
+    }
+  }
+
+  writeFileSync(failFile, sibling.branch ?? "");
+  console.log(
+    `artifact-attribution: injecting probe failure for the sibling's branch only — ${sibling.branch}`,
+  );
+  const activeBefore = numbersOf(active);
+  const { card: afterFail, timedOut: failTimedOut } =
+    await waitForPersistedCard(
+      built,
+      (c) =>
+        (c.sessions ?? []).find((s) => s.id === sibling.id)?.prsUnknown != null,
+      ARTIFACT_TICK_TIMEOUT_MS,
+    );
+  if (failTimedOut) {
+    violations.push(
+      `artifact-attribution: the sibling never gained prsUnknown after its branch's probe was made to fail within ${ARTIFACT_TICK_TIMEOUT_MS}ms — per-session failure tracking unproven`,
+    );
+  } else {
+    const activeAfter = (
+      (afterFail.sessions ?? []).find((s) => s.id === active.id)?.prs ?? []
+    )
+      .map((p) => p.number)
+      .sort();
+    if (JSON.stringify(activeAfter) !== JSON.stringify(activeBefore)) {
+      violations.push(
+        `artifact-attribution: the ACTIVE session's prs changed from ${JSON.stringify(activeBefore)} to ${JSON.stringify(activeAfter)} while only its SIBLING's probe was failing — the failure streak and retry backoff are shared, not per session`,
+      );
+    } else {
+      console.log(
+        `artifact-attribution: sibling gained prsUnknown while the active session's prs stayed ${JSON.stringify(activeAfter)} — backoff is per session`,
+      );
+    }
+  }
+  writeFileSync(failFile, "");
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -8138,6 +8408,12 @@ const CHECKS = {
       SECOND_SESSION_FIXTURE,
     ),
   "second-start-rollback": checkSecondStartRollback,
+  "artifact-attribution": () =>
+    withFixture(
+      "artifact-attribution",
+      checkArtifactAttribution,
+      SECOND_SESSION_FIXTURE,
+    ),
 };
 
 /**
