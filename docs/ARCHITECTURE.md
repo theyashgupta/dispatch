@@ -1231,12 +1231,15 @@ Fixed by mirroring `PanelHeader`'s own "Start" button instead, which opens the s
 no local flag at all, relying solely on the server-confirmed `provisioningStep`.
 
 **Accepted `KEEP-02` deviation.** This row is the one thing Phase 94 adds to the N=1 panel. Row
-height is 48px whenever the button is present (`8px` padding + the `Button` primitive's own 32px
-height + `8px` padding), 4px taller than Phase 92's 44px switcher-only row (`8 + 28 + 8`) — a
-32px `Button` is taller than the 28px `SessionSwitcher` container, and `alignItems: "center"`
-centers the shorter one inside the taller row wherever both are present. The button-absent case
-(Done column with `sessionSummaries` still present, pre-cleanup) keeps Phase 92's original 44px
-figure unchanged.
+height is 49px whenever the button is present (`8px` padding + the `Button` primitive's own 32px
+height + `8px` padding + the row's own pre-existing 1px `borderBottom`, present since Phase 92),
+4px taller than the 45px switcher-only row (`8 + 28 + 8 + 1`) — a 32px `Button` is taller than
+the 28px `SessionSwitcher` container, and `alignItems: "center"` centers the shorter one inside
+the taller row wherever both are present. The button-absent case (Done column with
+`sessionSummaries` still present, pre-cleanup) keeps the switcher-only row unchanged at 45px.
+`panel-94.mjs`'s criterion 5 live-corrected both figures by 1px each — the original 48px/44px
+arithmetic (this section and `94-UI-SPEC.md`) never accounted for the row's own border, a
+pre-existing gap that predates this phase; nothing about the row's actual layout changed.
 
 ### Tmux Invocations
 
