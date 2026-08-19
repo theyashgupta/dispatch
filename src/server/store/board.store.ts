@@ -332,6 +332,13 @@ export interface ReservedSession {
   sessionId: string;
   ordinal: number;
   sessionName: string;
+  /**
+   * The resolved parent record's own `branch` value, captured inside the same `enqueue` that
+   * mints so the saga never has to re-read the store to learn which git ref to cut from. Absent
+   * when the reservation did not inherit, and absent when the resolved parent record carries no
+   * `branch` of its own.
+   */
+  parentBranch?: string;
 }
 
 class BoardStore extends EventEmitter {
@@ -1933,11 +1940,23 @@ class BoardStore extends EventEmitter {
    * would never be probed (defeating `ARTIFACT-01` for the exact N>=2 case it exists for), and the
    * closing six-field mirror re-derives `card.workspace` from the newly promoted record, wiping the
    * card's own repo list that `cleanupWorkspace` reads.
+   * @remarks `inheritFrom`, when supplied, resolves against `card.sessions` and is refused BEFORE
+   * `card.nextSessionOrdinal` advances — a refused reservation must not consume an ordinal, so the
+   * resolve-or-refuse guard runs first. This is what makes "an unresolvable parent id can never be
+   * persisted" a structural property of the mint rather than a hope. The resolved record is a
+   * SEPARATE lookup from `parent` above (the ACTIVE session, used for `workspace` seeding): when
+   * `inheritFrom` names a non-active sibling the two are different records, and both are correct as
+   * written — `workspace` is identical across a ticket's sessions, while lineage must name the
+   * session the caller actually chose. `builtFrom` rides the existing `mintSibling` patch
+   * conditionally, so a non-inherited reservation's record carries no `builtFrom` key at all — one
+   * synchronous mutation, the `NEW-21` chokepoint intact, no new store method.
    * @see docs/ARCHITECTURE.md#session-projection-chokepoint
+   * @see docs/ARCHITECTURE.md#session-inheritance
    */
   reserveNewSession(
     cardId: string,
     identifier: string,
+    inheritFrom?: string,
   ): Promise<ReservedSession | null> {
     let reserved: ReservedSession | null = null;
     return this.enqueue(() => {
@@ -1957,19 +1976,38 @@ class BoardStore extends EventEmitter {
         );
         return [];
       }
+      const inheritedParent =
+        inheritFrom != null
+          ? card.sessions?.find((s) => s.id === inheritFrom)
+          : undefined;
+      if (inheritFrom != null && inheritedParent == null) {
+        console.error(
+          `[store] card ${cardId} — reserveNewSession inheritFrom ${inheritFrom} does not resolve, refusing`,
+        );
+        return [];
+      }
       const ordinal = card.nextSessionOrdinal ?? 2;
       card.nextSessionOrdinal = ordinal + 1;
       const sessionName = `${identifier}-${ordinal}`;
       const parent = card.sessions?.find((s) => s.id === card.activeSessionId);
       const sessionId = this.setActiveSession(
         card,
-        { branch: sessionName, workspace: parent?.workspace },
+        {
+          branch: sessionName,
+          workspace: parent?.workspace,
+          ...(inheritFrom != null ? { builtFrom: inheritFrom } : {}),
+        },
         undefined,
         false,
         true,
       );
       if (sessionId === undefined) return [];
-      reserved = { sessionId, ordinal, sessionName };
+      reserved = {
+        sessionId,
+        ordinal,
+        sessionName,
+        parentBranch: inheritedParent?.branch,
+      };
       return [];
     }).then(() => reserved);
   }

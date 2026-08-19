@@ -542,6 +542,16 @@ export interface Session {
    * projects onto `Card`, same reasoning as {@link Session.hookRoutedAt} (`ARTIFACT-01`).
    */
   previewsUnknown?: ProbeUnknown;
+  /**
+   * Id of the session THIS one was built on top of. Absent on a session that was not inherited.
+   * Always names the DIRECT parent and is NEVER traversed transitively (decision `D-C`, depth 1).
+   * Deliberately NOT one of the six flat fields `setActiveSession` projects onto `Card`, same
+   * reasoning as {@link Session.hookRoutedAt}: routing lineage through the shared patch would let
+   * an unrelated projection write on one session overwrite a sibling's parent. Never cleared when
+   * the parent record is removed — the provenance fact stays true, only its rendering degrades.
+   * @see docs/ARCHITECTURE.md#session-inheritance
+   */
+  builtFrom?: string;
 }
 
 /**
@@ -602,6 +612,16 @@ export interface SessionSummary {
    * Mirrors {@link Session.previewsUnknown} for THIS session (`ARTIFACT-01`), same idiom as `prs`.
    */
   previewsUnknown?: ProbeUnknown;
+  /**
+   * The DISPLAY ordinal of this entry's own parent — the same positional `ordinal` field on this
+   * same type, NOT the monotonic `Card.nextSessionOrdinal` that produces the `-2`/`-3` branch
+   * suffix. The two numbering schemes diverge after a cleanup; this one is positional on both
+   * sides, so it renumbers consistently. Absent when this session was not inherited AND absent
+   * when its recorded parent no longer resolves to a live session on the same card — same
+   * absent-means-nothing-to-report idiom as `cleanupBlocked`/`prs` above.
+   * @see docs/ARCHITECTURE.md#session-inheritance
+   */
+  parentOrdinal?: number;
 }
 
 /**
