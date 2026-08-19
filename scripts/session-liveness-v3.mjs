@@ -263,6 +263,21 @@ const DIST_WORKSPACE_PATHS = join(
 );
 
 /**
+ * `KEEP-02` row 9's own source of truth for the board's shared column set — loaded from
+ * `dist/shared/` (never re-derived by hand) so `MOVABLE_COLUMNS = [...COLUMNS, "inbox"]` is
+ * computed from the product's own column list at runtime rather than a hardcoded 7-entry literal.
+ * Same dynamic-`import()`-after-{@link assertBuilt} discipline as {@link DIST_GIT_ADAPTER} /
+ * {@link DIST_WORKSPACE_PATHS} above, for the same staleness reason.
+ * @remarks Row 9 does NOT similarly import `isManualMoveAllowed` / `blocksAgentDoneManualEntry` /
+ * `blocksTodoToInProgressManualMove` (`column-transitions.ts`) or `isDemoteEligible`
+ * (`demote-eligibility.ts`) to compute its own EXPECTED outcome — see
+ * {@link isAgentDoneManualTargetBlocked}'s own JSDoc for why importing the same function the
+ * product enforces with would make this row structurally blind to the exact break
+ * `96-06-PLAN.md` specifies.
+ */
+const DIST_TYPES = join(REPO_ROOT, "dist", "shared", "types.js");
+
+/**
  * The package script {@link assertBuilt} shells out to. Named here rather than spelled as a raw
  * `tsc -p …` invocation so the harness can never compile the server differently from the way the
  * project does — one build command, not two literals that can drift apart.
@@ -1160,6 +1175,16 @@ async function loadWorkspacePathsAdapter() {
     workspacePathsModule = await import(DIST_WORKSPACE_PATHS);
   }
   return workspacePathsModule;
+}
+
+/** Memoized `dist/shared/types.js` load — same discipline as {@link loadGitAdapter}. */
+let typesModule = null;
+async function loadTypes() {
+  if (typesModule === null) {
+    assertBuilt();
+    typesModule = await import(DIST_TYPES);
+  }
+  return typesModule;
 }
 
 /**
@@ -2467,6 +2492,21 @@ function stopBodyWithReason(reason) {
 }
 
 /**
+ * The exact `DISPATCH_STATUS: DONE — <summary>` Stop-payload text `parse.ts#MARKER_RE` matches —
+ * row 9's own way to reach `agent_done`, the one column manual moves can never legally enter
+ * (`blocksAgentDoneManualEntry`). `summary` must be unique per call: `applyMarker`'s dedup key is
+ * `"DONE " + summary` alone (never gated on the card's current column), so re-posting the SAME
+ * summary a second time — row 9 re-enters `agent_done` once per `from=agent_done` pair it drives —
+ * would silently no-op on the second call.
+ */
+function doneBodyWithSummary(summary) {
+  return {
+    hook_event_name: "Stop",
+    last_assistant_message: `⏺ DISPATCH_STATUS: DONE — ${summary}`,
+  };
+}
+
+/**
  * POST `{ column }` to the real `/api/cards/:id/move` route — never a direct `store.moveCardManual`
  * call — so the fixture card's transition to Done goes through the SAME guard chain (grouped-member
  * refusal, the inbox/manual-move allowlists) a real drag would, and stamps `cleanupDueAt` on every
@@ -2483,6 +2523,25 @@ async function moveCard(built, column) {
   );
   await res.body?.cancel().catch(() => {});
   return res.status;
+}
+
+/**
+ * `moveCard`'s generic counterpart, keyed to an ARBITRARY card id and returning the parsed BODY as
+ * well as the status — row 9 needs the response body's `error` text to assert the exact refusal
+ * message, never just the status, and needs an arbitrary target because it drives both
+ * {@link PARITY_FIXTURE}'s own card and row 9's own throwaway inbox-eligible card.
+ */
+async function postMoveForCard(built, cardId, column) {
+  const res = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${cardId}/move`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ column }),
+    },
+  );
+  const body = await res.json().catch(() => undefined);
+  return { status: res.status, body };
 }
 
 /** POST `opts` to the real `/api/cards/:id/cleanup` route — the manual fan-out entry point. */
@@ -11501,6 +11560,816 @@ async function checkParityRecovery(built) {
   ];
 }
 
+/**
+ * `KEEP-02` row 9's own literal mirrors of `cards.route.ts`'s module-private refusal message text
+ * (`manualMoveTransitionError` / `inboxTransitionError` are never exported — there is no function
+ * to import for the message half). A future change to either message's TEXT fails this row's own
+ * strict-equality assertion rather than drifting silently.
+ */
+const MSG_AGENT_DONE_BLOCKED =
+  "Agent Done is set automatically by a real agent completion signal — it is never a manual move target";
+const MSG_TODO_TO_IN_PROGRESS_BLOCKED =
+  "starting a To Do card requires the start flow — drag it to In Progress (or use Start) rather than posting a bare move";
+const MSG_INBOX_ONLY_PROMOTE = "inbox cards can only be promoted to To Do";
+const MSG_INBOX_ONLY_FROM_TODO = "only To Do cards can be moved to Inbox";
+const MSG_INBOX_SESSION_HISTORY =
+  "cards with session history cannot be moved to Inbox";
+
+/**
+ * Row 9's own INDEPENDENT restatement of `column-transitions.ts`'s `blocksAgentDoneManualEntry` —
+ * an "explicitly-stated table" (`96-06-PLAN.md`'s own sanctioned alternative to importing the live
+ * predicate: "derived... from the predicates' own definitions OR from an explicitly-stated table
+ * that a source change would invalidate"). Deliberately NOT a dynamic `import()` of the real
+ * function: {@link checkParityRow9Moves} derives its own "expected" outcome from THIS restatement,
+ * and `96-06-PLAN.md`'s own break table specifies inverting the REAL predicate
+ * (`blocksTodoToInProgressManualMove` — see {@link isTodoToInProgressManualMoveBlocked}) as row
+ * 9's proof-of-failure. If this row imported the SAME function the product enforces with to
+ * compute its own expectation, that break would move "expected" and "actual" in lockstep — the
+ * row would keep reporting PASS against its own now-also-broken expectation, exactly the
+ * dead-instrument shape this milestone exists to catch. Confirmed by inspection to match
+ * `column-transitions.ts`'s own `blocksAgentDoneManualEntry` at HEAD `8a92400` (BOARD-07: any
+ * `X -> agent_done` is refused); re-confirm this restatement on any future read of that file.
+ */
+function isAgentDoneManualTargetBlocked(to) {
+  return to === "agent_done";
+}
+
+/**
+ * Row 9's own independent restatement of `column-transitions.ts`'s
+ * `blocksTodoToInProgressManualMove` — same rationale and same non-import discipline as
+ * {@link isAgentDoneManualTargetBlocked}'s own JSDoc. Confirmed by inspection to match the real
+ * predicate at HEAD `8a92400` (`todo -> in_progress` is reserved for the start saga).
+ */
+function isTodoToInProgressManualMoveBlocked(from, to) {
+  return from === "todo" && to === "in_progress";
+}
+
+/**
+ * Row 9's own independent restatement of `demote-eligibility.ts`'s `isDemoteEligible` — same
+ * non-import discipline as {@link isAgentDoneManualTargetBlocked}'s own JSDoc, so a future change
+ * to any of the six real fields the live predicate inspects diverges from this row's own
+ * expectation instead of moving with it. Confirmed by inspection to match the real predicate's own
+ * six fields at HEAD `8a92400`.
+ */
+function isDemoteEligibleIndependent(card) {
+  return (
+    card?.branch == null &&
+    card?.tmuxSession == null &&
+    card?.claudeSessionId == null &&
+    card?.workspacePath == null &&
+    card?.provisioningStep == null &&
+    card?.startError == null
+  );
+}
+
+/**
+ * Derive the EXPECTED outcome of a `(from, to)` manual move from row 9's own independent
+ * restatements above (never the live, importable predicates — see
+ * {@link isAgentDoneManualTargetBlocked}'s own JSDoc for why) plus `demoteEligible` (the caller's
+ * own single {@link isDemoteEligibleIndependent} read). Mirrors `cards.route.ts`'s own branch
+ * ORDER exactly (`inboxTransitionError` decides first, then `manualMoveTransitionError`), so a
+ * future reordering of that precedence is also caught, not only a change to either predicate's own
+ * boolean result. Returns `{ legal: true }` or `{ legal: false, message }`.
+ */
+function deriveExpectedMoveOutcome(from, to, demoteEligible) {
+  if (from === "inbox") {
+    if (to === "todo") return { legal: true };
+    return { legal: false, message: MSG_INBOX_ONLY_PROMOTE };
+  }
+  if (to === "inbox") {
+    if (from !== "todo")
+      return { legal: false, message: MSG_INBOX_ONLY_FROM_TODO };
+    if (!demoteEligible)
+      return { legal: false, message: MSG_INBOX_SESSION_HISTORY };
+    return { legal: true };
+  }
+  if (isAgentDoneManualTargetBlocked(to)) {
+    return { legal: false, message: MSG_AGENT_DONE_BLOCKED };
+  }
+  if (isTodoToInProgressManualMoveBlocked(from, to)) {
+    return { legal: false, message: MSG_TODO_TO_IN_PROGRESS_BLOCKED };
+  }
+  return { legal: true };
+}
+
+/**
+ * Reset {@link PARITY_FIXTURE}'s own card to `target` using only REAL, legal affordances — never a
+ * direct store/sqlite write — so every one of row 9's 36 driven pairs starts from a state the
+ * product itself can actually reach. Two targets need a real detour:
+ * - `agent_done`: a manual move can NEVER legally enter it (`blocksAgentDoneManualEntry`), so this
+ *   bounces through `needs_input` (always a legal manual target) and then POSTs a real, uniquely
+ *   worded `DONE` marker over the fixture's own hook token ({@link doneBodyWithSummary} —
+ *   `applyMarker`, a DIFFERENT code path than `moveCardManual` that legally reaches `agent_done`).
+ * - `in_progress` when the card is currently `todo`: `todo -> in_progress` is itself manual-move-
+ *   blocked (`blocksTodoToInProgressManualMove`), so this bounces through `needs_input` first.
+ * Every other target is one legal manual hop away from any state this card can be in.
+ */
+async function resetParityCardToColumn(built, target, tag, violations) {
+  const before = await fetchFixtureCard(built);
+  if (before?.column === target) return true;
+  if (target === "agent_done") {
+    if (before?.column !== "needs_input") {
+      const bounce = await postMoveForCard(built, built.cardId, "needs_input");
+      if (bounce.status !== 204) {
+        violations.push(
+          `row 9 reset (${tag}): bounce to needs_input before entering agent_done returned ${bounce.status}, expected 204 (body=${JSON.stringify(bounce.body)})`,
+        );
+        return false;
+      }
+    }
+    const markerStatus = await postHook(
+      built,
+      built.sessionA.token,
+      doneBodyWithSummary(
+        `row9-reset-${tag}-${randomBytes(3).toString("hex")}`,
+      ),
+    );
+    if (markerStatus !== 204) {
+      violations.push(
+        `row 9 reset (${tag}): DONE marker POST to enter agent_done returned ${markerStatus}, expected 204`,
+      );
+      return false;
+    }
+    const after = await fetchFixtureCard(built);
+    if (after?.column !== "agent_done") {
+      violations.push(
+        `row 9 reset (${tag}): after a real DONE marker, card.column is "${after?.column}", expected "agent_done"`,
+      );
+      return false;
+    }
+    return true;
+  }
+  if (target === "in_progress" && before?.column === "todo") {
+    const bounce = await postMoveForCard(built, built.cardId, "needs_input");
+    if (bounce.status !== 204) {
+      violations.push(
+        `row 9 reset (${tag}): bounce to needs_input before todo -> in_progress returned ${bounce.status}, expected 204 (body=${JSON.stringify(bounce.body)})`,
+      );
+      return false;
+    }
+  }
+  const move = await postMoveForCard(built, built.cardId, target);
+  if (move.status !== 204) {
+    violations.push(
+      `row 9 reset (${tag}): moving to "${target}" returned ${move.status}, expected 204 (body=${JSON.stringify(move.body)})`,
+    );
+    return false;
+  }
+  return true;
+}
+
+/**
+ * `KEEP-02` row 9 (a drag across every column edge). The PAIR SET is DERIVED from the product's
+ * own source AT RUNTIME — never a hardcoded 42-literal table — via
+ * `MOVABLE_COLUMNS = [...COLUMNS, "inbox"]` (the exact expression `cards.route.ts` itself uses,
+ * `COLUMNS` loaded live from `dist/shared/types.js`). Each pair's EXPECTED outcome is derived from
+ * {@link deriveExpectedMoveOutcome}'s own independent restatement of the two blocked shapes and
+ * the inbox demote-eligibility gate — an "explicitly-stated table" (`96-06-PLAN.md`'s own
+ * sanctioned alternative to importing the live predicate; see
+ * {@link isAgentDoneManualTargetBlocked}'s own JSDoc for why THIS row specifically must not import
+ * the same function the product enforces with). A future change to either predicate's BOOLEAN
+ * shape diverges from this row's own restatement and correctly fails it; a future change to either
+ * route's own refusal MESSAGE TEXT fails this row's strict-equality assertion instead.
+ * @remarks {@link PARITY_FIXTURE}'s own card carries real session history for the WHOLE row (its
+ * one live session is never killed here), so demote-eligibility is read ONCE, up front, via
+ * {@link isDemoteEligibleIndependent}, and stays `false` for the entire row by construction — the
+ * six fields it inspects (`branch`/`tmuxSession`/`claudeSessionId`/`workspacePath`/
+ * `provisioningStep`/`startError`) are session-mirror fields a plain column move never touches.
+ * @remarks The 6 `from === "inbox"` pairs cannot be driven against {@link PARITY_FIXTURE}'s own
+ * card — a card carrying real session history can never legally ENTER `inbox` (demote-eligibility
+ * permanently `false`), so there is no live state to reset it FROM. They are driven instead
+ * against a SECOND, throwaway, genuinely demote-eligible sessionless card (reusing
+ * {@link createRollbackStartCard}'s own real-`POST /cards` pattern), which also gives sub-part
+ * (d)'s no-fan-out assertion a real second card whose own column this row watches stay untouched
+ * by every move on {@link PARITY_FIXTURE}'s own card.
+ * @remarks Sub-part (d) (the ordinary-card no-fan-out claim) is driven ONCE, via one representative
+ * legal move, not re-checked on every one of the 42 pairs — `mirrorMemberColumn`'s own guard is a
+ * single `if (!card.memberIds || card.memberIds.length === 0) return;` at the top of the function,
+ * not a per-column special case, so one legal move already exercises the exact same early return
+ * every other legal move in this row would. The positive counterpart (a legal move on a GROUP
+ * PARENT mirroring atomically to its members) is plan 96-07's own `--check group-session-guard`
+ * against `GROUP_SESSION_FIXTURE` — cited here, not duplicated.
+ */
+async function checkParityRow9Moves(built) {
+  const violations = [];
+  const { COLUMNS } = await loadTypes();
+  const MOVABLE_COLUMNS = [...COLUMNS, "inbox"];
+  const expectedPairCount =
+    MOVABLE_COLUMNS.length * (MOVABLE_COLUMNS.length - 1);
+  console.log(
+    `row 9 moves: MOVABLE_COLUMNS=${JSON.stringify(MOVABLE_COLUMNS)} (${MOVABLE_COLUMNS.length} columns) — expecting ${expectedPairCount} ordered pairs, computed as length*(length-1)`,
+  );
+
+  const persisted = readCard(built.dbPath, built.cardId);
+  const demoteEligible = persisted
+    ? isDemoteEligibleIndependent(persisted)
+    : false;
+  console.log(
+    `row 9 moves: PARITY_FIXTURE card isDemoteEligible=${demoteEligible} (expected false — the card carries real session history)`,
+  );
+  if (demoteEligible) {
+    violations.push(
+      "row 9 moves: PRECONDITION FAILED — PARITY_FIXTURE's own card reads isDemoteEligible=true; every to=inbox expectation below assumes false (session history present)",
+    );
+  }
+
+  const throwaway = await createRollbackStartCard(built);
+  console.log(
+    `row 9 moves: throwaway inbox-eligible card created — id=${throwaway.cardId} identifier=${throwaway.identifier}`,
+  );
+  let throwawayColumn = "todo";
+
+  let pairsDriven = 0;
+  const NON_INBOX_SOURCES = MOVABLE_COLUMNS.filter((c) => c !== "inbox");
+
+  const beforeFanout = await fetchFixtureCard(built);
+  const fanoutTarget =
+    beforeFanout?.column === "needs_input" ? "in_review" : "needs_input";
+  const fanoutMove = await postMoveForCard(built, built.cardId, fanoutTarget);
+  console.log(
+    `row 9 moves (sub-part d, no-fan-out): PARITY_FIXTURE ${beforeFanout?.column} -> ${fanoutTarget} -> ${fanoutMove.status} (expected 204)`,
+  );
+  if (fanoutMove.status !== 204) {
+    violations.push(
+      `row 9 moves (sub-part d): representative legal move ${beforeFanout?.column} -> ${fanoutTarget} returned ${fanoutMove.status}, expected 204`,
+    );
+  }
+  const afterFanoutWire = await fetchFixtureCard(built);
+  const afterFanoutThrowaway = await fetchCardById(built, throwaway.cardId);
+  console.log(
+    `row 9 moves (sub-part d, no-fan-out): PARITY_FIXTURE.groupId=${JSON.stringify(afterFanoutWire?.groupId)} memberIds=${JSON.stringify(afterFanoutWire?.memberIds)} (both expected absent/empty — an ordinary card); throwaway card column after=${afterFanoutThrowaway.body?.card?.column} (expected unchanged "${throwawayColumn}")`,
+  );
+  if (afterFanoutWire?.groupId != null) {
+    violations.push(
+      `row 9 moves (sub-part d): PARITY_FIXTURE's own card carries a groupId (${afterFanoutWire.groupId}) — it must be an ordinary, ungrouped card for this row's no-fan-out claim to mean anything`,
+    );
+  }
+  if (
+    Array.isArray(afterFanoutWire?.memberIds) &&
+    afterFanoutWire.memberIds.length > 0
+  ) {
+    violations.push(
+      `row 9 moves (sub-part d): PARITY_FIXTURE's own card carries memberIds (${JSON.stringify(afterFanoutWire.memberIds)}) — mirrorMemberColumn would have a real fan-out target, which this row's claim requires to be absent`,
+    );
+  }
+  if (afterFanoutThrowaway.body?.card?.column !== throwawayColumn) {
+    violations.push(
+      `row 9 moves (sub-part d): the ONLY other card in this fixture's board changed column ("${throwawayColumn}" -> "${afterFanoutThrowaway.body?.card?.column}") as a side effect of a legal move on the ordinary PARITY_FIXTURE card — mirrorMemberColumn must never fire for a non-group card (the positive group-mirroring counterpart is plan 96-07's own check, not duplicated here)`,
+    );
+  }
+
+  for (const from of NON_INBOX_SOURCES) {
+    for (const to of MOVABLE_COLUMNS) {
+      if (to === from) continue;
+      pairsDriven++;
+      const tag = `${from}->${to}`;
+      const resetOk = await resetParityCardToColumn(
+        built,
+        from,
+        tag,
+        violations,
+      );
+      if (!resetOk) continue;
+      const expected = deriveExpectedMoveOutcome(from, to, demoteEligible);
+      const { status, body } = await postMoveForCard(built, built.cardId, to);
+      if (expected.legal) {
+        if (status !== 204) {
+          violations.push(
+            `row 9 moves (${tag}): expected LEGAL (204), got ${status} (body=${JSON.stringify(body)})`,
+          );
+          continue;
+        }
+        const wire = await fetchFixtureCard(built);
+        if (wire?.column !== to) {
+          violations.push(
+            `row 9 moves (${tag}): move returned 204 but wire card.column is "${wire?.column}", expected "${to}"`,
+          );
+        }
+        const hasSessionCount = Object.hasOwn(wire ?? {}, "sessionCount");
+        const hasSessionSummaries = Object.hasOwn(
+          wire ?? {},
+          "sessionSummaries",
+        );
+        if (hasSessionCount || hasSessionSummaries) {
+          violations.push(
+            `row 9 moves (${tag}): wire card carries hasOwn(sessionCount)=${hasSessionCount} hasOwn(sessionSummaries)=${hasSessionSummaries} after a legal move at N=1 — both must be ABSENT`,
+          );
+        }
+      } else {
+        if (status !== 409) {
+          violations.push(
+            `row 9 moves (${tag}): expected BLOCKED (409, "${expected.message}"), got ${status} (body=${JSON.stringify(body)})`,
+          );
+          continue;
+        }
+        if (body?.error !== expected.message) {
+          violations.push(
+            `row 9 moves (${tag}): 409 body.error="${body?.error}", expected exactly "${expected.message}"`,
+          );
+        }
+        const wire = await fetchFixtureCard(built);
+        if (wire?.column !== from) {
+          violations.push(
+            `row 9 moves (${tag}): a BLOCKED move changed card.column to "${wire?.column}", expected it to stay "${from}"`,
+          );
+        }
+      }
+    }
+  }
+
+  const enterInbox = await postMoveForCard(built, throwaway.cardId, "inbox");
+  console.log(
+    `row 9 moves (inbox family): throwaway card todo -> inbox -> ${enterInbox.status} (expected 204 — a genuinely demote-eligible card)`,
+  );
+  if (enterInbox.status !== 204) {
+    violations.push(
+      `row 9 moves (inbox family): the throwaway demote-eligible card could not enter inbox — POST /move returned ${enterInbox.status} (body=${JSON.stringify(enterInbox.body)}), expected 204; the 6 from="inbox" pairs cannot be driven without this precondition`,
+    );
+  } else {
+    throwawayColumn = "inbox";
+    const inboxTargets = MOVABLE_COLUMNS.filter(
+      (c) => c !== "inbox" && c !== "todo",
+    );
+    for (const to of inboxTargets) {
+      pairsDriven++;
+      const tag = `inbox->${to}`;
+      const { status, body } = await postMoveForCard(
+        built,
+        throwaway.cardId,
+        to,
+      );
+      if (status !== 409) {
+        violations.push(
+          `row 9 moves (${tag}): expected BLOCKED (409, "${MSG_INBOX_ONLY_PROMOTE}"), got ${status} (body=${JSON.stringify(body)})`,
+        );
+        continue;
+      }
+      if (body?.error !== MSG_INBOX_ONLY_PROMOTE) {
+        violations.push(
+          `row 9 moves (${tag}): 409 body.error="${body?.error}", expected exactly "${MSG_INBOX_ONLY_PROMOTE}"`,
+        );
+      }
+    }
+    pairsDriven++;
+    const promote = await postMoveForCard(built, throwaway.cardId, "todo");
+    console.log(
+      `row 9 moves (inbox->todo): throwaway card inbox -> todo -> ${promote.status} (expected 204 — the sole legal inbox transition)`,
+    );
+    if (promote.status !== 204) {
+      violations.push(
+        `row 9 moves (inbox->todo): expected LEGAL (204), got ${promote.status} (body=${JSON.stringify(promote.body)})`,
+      );
+    } else {
+      throwawayColumn = "todo";
+    }
+  }
+
+  console.log(
+    `row 9 moves: pairs driven=${pairsDriven} (expected ${expectedPairCount})`,
+  );
+  if (pairsDriven !== expectedPairCount) {
+    violations.push(
+      `row 9 moves: drove ${pairsDriven} ordered pairs, expected exactly ${expectedPairCount} (MOVABLE_COLUMNS.length * (MOVABLE_COLUMNS.length - 1))`,
+    );
+  }
+
+  console.log(
+    `ROW 9 moves: ${violations.length === 0 ? "PASS" : `FAIL (${violations.length} violation(s))`}`,
+  );
+  return violations;
+}
+
+/**
+ * `KEEP-02` row 10 (the Done schedule) against {@link PARITY_FIXTURE}'s own N=1 subject.
+ * `checkCleanupScheduleRestart` (Phase 93) already proves this claim, but ONLY against
+ * `WORKTREE_FIXTURE` — a genuinely TWO-session fixture (`sessionKeys: ["a", "b"]`, confirmed by
+ * reading its own `"cleanup-schedule-restart"` `CHECKS` wiring) — so its own coverage is NOT cited
+ * here (`96-06-PLAN.md`'s own branch: "if its subject is two-session, row 10 drives the Done
+ * schedule against PARITY_FIXTURE here"). This row drives a genuine Done arrival on the real N=1
+ * card through the real `/move` route, confirms `cleanupDueAt` is stamped on both the session and
+ * the card-level mirror, then — because a real arrival's own `cleanupDelayMs` is DAYS in the
+ * future, never observable within this row's own runtime — backdates that SAME real timestamp
+ * directly on disk (the exact technique `checkCleanupScheduleRestartFalsifiability` already
+ * established for `WORKTREE_FIXTURE`) before driving the SAME overridable scheduler tick 93-03
+ * added (`DISPATCH_CLEANUP_TICK_MS`) and confirming the scheduled teardown actually fires for the
+ * card's ONE session.
+ * @remarks Bounces done -> todo -> done first: row 9 leaves the card sitting in `done` as a side
+ * effect of covering a DIFFERENT claim (its own last-driven pair), and `moveCardManual`'s own
+ * `from !== "done"` guard means a redundant done->done move would never mint a fresh schedule —
+ * this row's own claim needs a GENUINE arrival, not row 9's leftover state.
+ * @remarks LIVE-CAUGHT: the backdating reboot passes `{ pathPrefix: built.pathPrefix }` to
+ * {@link bootServer} — a first attempt omitted it (mirroring `restartServer`'s own
+ * pathPrefix-less reboot, which is safe for rows 8/12 because THEY never spawn a NEW `claude`
+ * process after reboot, only re-adopt an already-live one) and left the rebooted process's `PATH`
+ * without the fixture's own hooks-capable stub `claude`. Row 10 itself never spawns a session, so
+ * this omission never fails row 10's own assertions — it only surfaces one row later, when row 11
+ * drives a genuinely NEW `POST /start` against the SAME `built.server` this row rebooted, and that
+ * start hangs (a real-world `claude` binary or none at all on `PATH`, not the stub). Fixed here so
+ * every reboot after PARITY_FIXTURE's own real-saga stand-up preserves the stub consistently.
+ */
+async function checkParityRow10DoneSchedule(built) {
+  const violations = [];
+  console.log(
+    'row 10 Done schedule: checkCleanupScheduleRestart (Phase 93) runs ONLY against WORKTREE_FIXTURE (sessionKeys: ["a","b"], a genuine two-session subject) — NOT N=1-shaped, so this row DRIVES the claim fresh against PARITY_FIXTURE\'s own N=1 card rather than citing that coverage.',
+  );
+
+  const outMove = await postMoveForCard(built, built.cardId, "todo");
+  if (outMove.status !== 204) {
+    violations.push(
+      `row 10 Done schedule: precondition move to todo returned ${outMove.status}, expected 204 (body=${JSON.stringify(outMove.body)})`,
+    );
+    console.log(
+      `ROW 10 Done schedule: FAIL (${violations.length} violation(s))`,
+    );
+    return violations;
+  }
+  const arrival = await postMoveForCard(built, built.cardId, "done");
+  console.log(
+    `row 10 Done schedule: genuine Done arrival todo -> done -> ${arrival.status} (expected 204)`,
+  );
+  if (arrival.status !== 204) {
+    violations.push(
+      `row 10 Done schedule: genuine Done arrival returned ${arrival.status}, expected 204 (body=${JSON.stringify(arrival.body)})`,
+    );
+    console.log(
+      `ROW 10 Done schedule: FAIL (${violations.length} violation(s))`,
+    );
+    return violations;
+  }
+
+  const wireAtDone = await fetchFixtureCard(built);
+  const hasSessionCount = Object.hasOwn(wireAtDone ?? {}, "sessionCount");
+  const hasSessionSummaries = Object.hasOwn(
+    wireAtDone ?? {},
+    "sessionSummaries",
+  );
+  console.log(
+    `row 10 Done schedule: wire hasOwn(sessionCount)=${hasSessionCount} hasOwn(sessionSummaries)=${hasSessionSummaries} (both expected false at N=1)`,
+  );
+  if (hasSessionCount || hasSessionSummaries) {
+    violations.push(
+      `row 10 Done schedule: wire card carries hasOwn(sessionCount)=${hasSessionCount} hasOwn(sessionSummaries)=${hasSessionSummaries} right after a genuine Done arrival at N=1 — both must be ABSENT`,
+    );
+  }
+
+  const persistedAtDone = readCard(built.dbPath, built.cardId);
+  const sessionRecordAtDone = persistedAtDone?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  console.log(
+    `row 10 Done schedule: session.cleanupDueAt=${sessionRecordAtDone?.cleanupDueAt} card.cleanupDueAt=${persistedAtDone?.cleanupDueAt} (both expected set, non-null, after a genuine Done arrival)`,
+  );
+  if (sessionRecordAtDone?.cleanupDueAt == null) {
+    violations.push(
+      "row 10 Done schedule: the card's ONE session carries no cleanupDueAt after a genuine Done arrival",
+    );
+  }
+  if (persistedAtDone?.cleanupDueAt == null) {
+    violations.push(
+      "row 10 Done schedule: card.cleanupDueAt (the active-session mirror) is not set after a genuine Done arrival",
+    );
+  }
+  if (violations.length > 0) {
+    console.log(
+      `ROW 10 Done schedule: FAIL (${violations.length} violation(s))`,
+    );
+    return violations;
+  }
+
+  console.log(
+    "row 10 Done schedule: backdating the real (session-level) cleanupDueAt on disk — same technique checkCleanupScheduleRestartFalsifiability already established — so the scheduler's own real teardown is observable within this row's runtime rather than days away",
+  );
+  await killAndWait(built.server?.child);
+  const cardToBackdate = readCard(built.dbPath, built.cardId);
+  const sessionToBackdate = cardToBackdate?.sessions?.find(
+    (s) => s.id === built.sessionA.id,
+  );
+  if (sessionToBackdate) sessionToBackdate.cleanupDueAt = Date.now() - 5_000;
+  if (cardToBackdate) cardToBackdate.cleanupDueAt = Date.now() - 5_000;
+  seedFixtureCard(built.home, cardToBackdate);
+
+  const priorTickEnv = process.env.DISPATCH_CLEANUP_TICK_MS;
+  process.env.DISPATCH_CLEANUP_TICK_MS = "500";
+  try {
+    built.server = bootServer(built.home, { pathPrefix: built.pathPrefix });
+    await waitForReady(built.port);
+  } finally {
+    if (priorTickEnv === undefined) delete process.env.DISPATCH_CLEANUP_TICK_MS;
+    else process.env.DISPATCH_CLEANUP_TICK_MS = priorTickEnv;
+  }
+  console.log(
+    "row 10 Done schedule: sandbox server restarted with DISPATCH_CLEANUP_TICK_MS=500 (PATH preserving the fixture's own hooks-capable stub claude, needed by row 11's subsequent fresh start) — the scheduler's own boot-time tick should pick up the ONE due session within a few ticks",
+  );
+
+  const deadline = Date.now() + CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS;
+  let settled;
+  let sessionGone = false;
+  while (Date.now() < deadline) {
+    settled = readCard(built.dbPath, built.cardId);
+    sessionGone =
+      settled != null &&
+      !(settled.sessions ?? []).some((s) => s.id === built.sessionA.id);
+    if (sessionGone) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `row 10 Done schedule: real scheduler teardown of the ONE session — settled sessionGone=${sessionGone} (sessions now=${JSON.stringify(settled?.sessions?.map((s) => s.id))})`,
+  );
+  if (!sessionGone) {
+    violations.push(
+      `row 10 Done schedule: the real scheduler tick did not tear down the card's due session within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+    );
+  } else {
+    const liveTmux = await tmuxListSessionNames();
+    const tmuxGone = !liveTmux.includes(built.tmux.a);
+    console.log(
+      `row 10 Done schedule: real tmux session ${built.tmux.a} gone=${tmuxGone} after the scheduler's own real teardown`,
+    );
+    if (!tmuxGone) {
+      violations.push(
+        `row 10 Done schedule: tmux session ${built.tmux.a} is still live after the scheduler's own real teardown`,
+      );
+    }
+  }
+
+  console.log(
+    `ROW 10 Done schedule: ${violations.length === 0 ? "PASS" : `FAIL (${violations.length} violation(s))`}`,
+  );
+  return violations;
+}
+
+/**
+ * `KEEP-02` row 11 (manual cleanup of the card's ONLY session) against a card whose one session
+ * owns a REAL git worktree. {@link PARITY_FIXTURE}'s own original session was already consumed by
+ * row 10's own real scheduler-driven teardown (this row runs AFTER it, in the SAME fixture pass —
+ * `96-06-PLAN.md`'s own "against ONE PARITY_FIXTURE subject" lock), so this row re-drives a
+ * GENUINE real single-session start (`postStartForCard` + `waitForCardFirstStartSettled`, the
+ * EXACT mechanism {@link standUpParityFixtureSession1} used for the fixture's own first session)
+ * before driving the manual `/cleanup` route. The resulting session is therefore genuinely the
+ * card's ONLY session, with a genuine, freshly-created real worktree, exactly what row 11's own
+ * claim needs.
+ * @remarks LIVE-CAUGHT, not anticipated: `card.workspace` is NOT preserved across a teardown the
+ * way a first read of `finishCleanup` suggests. `workspace` is one of `PROJECTED_SESSION_FIELDS`'
+ * SIX mirrored fields (`board.store.ts:202`, alongside `tmuxSession`/`ttydPort`/`hookToken`/
+ * `claudeSessionId`/`workspacePath`) — `setActiveSession`'s own closing re-derivation re-projects
+ * ALL SIX from whatever the (post-removal) active session now is, and after `removeSessionRecord`
+ * there is none, so `card.workspace` re-derives to `undefined` too. A first attempt at this row
+ * called `POST /start` with only `{ extraDirection: "" }` (mirroring
+ * {@link standUpParityFixtureSession1}'s own first-start call, which relies on a card ALREADY
+ * seeded with `workspace` at stand-up time) and got a real, correct 400 ("No workspace selected
+ * for this ticket") — matching the real product's own behavior for a genuinely fully-cleaned
+ * ticket, not a check bug. Fixed by supplying the real `folder`/`repos` payload explicitly, the
+ * same request a user re-selecting a workspace after a fully torn-down ticket would send.
+ * @remarks Phase 93's own criterion 4 ("cleaning the last leaves the card sessionless with no
+ * active pointer") was proven by the SECOND cleanup on a two-session `WORKTREE_FIXTURE` card — a
+ * card that always had a live sibling available to promote to, right up until its very last
+ * removal. This row's subject never had a sibling at all, which is the sharper, previously-unproven
+ * claim: `removeSessionRecord`'s own `live.sort(byRecency)[0] ?? [...card.sessions].sort(byRecency)[0]`
+ * promotion fallback has NOTHING to find on a genuinely one-session-total card, so
+ * `activeSessionId` must land on `undefined`, never a stale pointer at the just-removed record.
+ */
+async function checkParityRow11Cleanup(built) {
+  const violations = [];
+  console.log(
+    "row 11 cleanup: Phase 93's criterion 4 proved the LAST-session claim via the SECOND cleanup on a two-session WORKTREE_FIXTURE card (a card that always had a sibling until the very end) — this row drives a card that never had one, a genuinely different subject.",
+  );
+
+  const outMove = await postMoveForCard(built, built.cardId, "todo");
+  if (outMove.status !== 204) {
+    violations.push(
+      `row 11 cleanup: precondition move to todo returned ${outMove.status}, expected 204 (body=${JSON.stringify(outMove.body)})`,
+    );
+    console.log(`ROW 11 cleanup: FAIL (${violations.length} violation(s))`);
+    return violations;
+  }
+  const startRes = await postStartForCard(built, built.cardId, {
+    extraDirection: "",
+    folder: join(built.home, "repos"),
+    repos: [{ path: built.repoPath, base: built.repoBase }],
+  });
+  console.log(
+    `row 11 cleanup: real single-session start (no newSession) -> ${startRes.status} (expected 202)`,
+  );
+  if (startRes.status !== 202) {
+    violations.push(
+      `row 11 cleanup: POST /start for the fresh only-session returned ${startRes.status}, expected 202 (body=${JSON.stringify(startRes.body)})`,
+    );
+    console.log(`ROW 11 cleanup: FAIL (${violations.length} violation(s))`);
+    return violations;
+  }
+  const { card: settled, timedOut } = await waitForCardFirstStartSettled(
+    built,
+    built.cardId,
+    { timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS },
+  );
+  console.log(
+    `row 11 cleanup: fresh start settled — tmuxSession=${settled?.tmuxSession} startError=${JSON.stringify(settled?.startError)} timedOut=${timedOut}`,
+  );
+  if (timedOut || settled?.startError != null || settled?.tmuxSession == null) {
+    violations.push(
+      `row 11 cleanup: the fresh only-session start did not settle into a live session (timedOut=${timedOut}, startError=${JSON.stringify(settled?.startError)}, tmuxSession=${settled?.tmuxSession}) — row 11's own subject cannot be built without it`,
+    );
+    console.log(`ROW 11 cleanup: FAIL (${violations.length} violation(s))`);
+    return violations;
+  }
+
+  const freshTmux = settled.tmuxSession;
+  const freshPersisted = readCard(built.dbPath, built.cardId);
+  const freshSessionId = freshPersisted?.activeSessionId;
+  const freshRecord = freshPersisted?.sessions?.find(
+    (s) => s.id === freshSessionId,
+  );
+  // `workspacePath` is the per-TICKET workspace FOLDER (`types.ts`'s own doc comment), not the
+  // per-REPO worktree directory itself — `worktreePath(workspacePath, repoPath)` (production's
+  // own `workspace-paths.ts`, loaded live rather than re-deriving the "basename(repoPath)" join by
+  // hand) is what actually names the git worktree cleanupWorkspace removes. LIVE-CAUGHT: a first
+  // attempt asserted against `freshRecord.workspacePath` directly and got a real, correct
+  // "registered=false" BASELINE failure — the workspace FOLDER was never itself registered as a
+  // worktree, only the "alpha" subdirectory inside it is.
+  const { worktreePath } = await loadWorkspacePathsAdapter();
+  const freshRepoPath = freshRecord?.workspace?.repos?.[0]?.path;
+  const freshWorktreePath =
+    freshRecord?.workspacePath != null && freshRepoPath != null
+      ? worktreePath(freshRecord.workspacePath, freshRepoPath)
+      : undefined;
+  console.log(
+    `row 11 cleanup: fresh only-session id=${freshSessionId} tmux=${freshTmux} workspacePath=${freshRecord?.workspacePath} worktree=${freshWorktreePath} repo=${freshRepoPath}`,
+  );
+  if (
+    freshSessionId == null ||
+    freshWorktreePath == null ||
+    freshRepoPath == null
+  ) {
+    violations.push(
+      "row 11 cleanup: the fresh only-session's persisted record is missing activeSessionId/workspacePath/workspace.repos[0].path — cannot verify teardown without a real worktree path to check",
+    );
+    console.log(`ROW 11 cleanup: FAIL (${violations.length} violation(s))`);
+    return violations;
+  }
+  assertUnderTmpdir(freshWorktreePath, "row 11's fresh only-session worktree");
+  console.log(
+    `row 11 cleanup: fresh worktree path verified structurally under tmpdir BEFORE any removal — ${freshWorktreePath}`,
+  );
+
+  const registeredBefore = await gitWorktreeListRegistered(freshRepoPath);
+  const wasRegisteredBefore =
+    existsSync(freshWorktreePath) &&
+    registeredBefore.has(realpathSync(freshWorktreePath));
+  console.log(
+    `row 11 cleanup: BASELINE — worktree exists on disk=${existsSync(freshWorktreePath)} registered=${wasRegisteredBefore}`,
+  );
+  if (!wasRegisteredBefore) {
+    violations.push(
+      "row 11 cleanup: BASELINE FAILED — the fresh only-session's worktree is not registered before cleanup even runs, so its removal below would be vacuous",
+    );
+    console.log(`ROW 11 cleanup: FAIL (${violations.length} violation(s))`);
+    return violations;
+  }
+
+  const arrival = await postMoveForCard(built, built.cardId, "done");
+  console.log(
+    `row 11 cleanup: move to done (cleanup's own precondition) -> ${arrival.status} (expected 204)`,
+  );
+  if (arrival.status !== 204) {
+    violations.push(
+      `row 11 cleanup: move to done before /cleanup returned ${arrival.status}, expected 204 (body=${JSON.stringify(arrival.body)})`,
+    );
+    console.log(`ROW 11 cleanup: FAIL (${violations.length} violation(s))`);
+    return violations;
+  }
+
+  const cleanupRes = await postCleanup(built, {});
+  console.log(`row 11 cleanup: POST /cleanup -> ${cleanupRes} (expected 202)`);
+  if (cleanupRes !== 202) {
+    violations.push(
+      `row 11 cleanup: POST /cleanup returned ${cleanupRes}, expected 202`,
+    );
+    console.log(`ROW 11 cleanup: FAIL (${violations.length} violation(s))`);
+    return violations;
+  }
+
+  const deadline = Date.now() + CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS;
+  let settledCard;
+  let sessionGone = false;
+  while (Date.now() < deadline) {
+    settledCard = readCard(built.dbPath, built.cardId);
+    sessionGone =
+      settledCard != null &&
+      !(settledCard.sessions ?? []).some((s) => s.id === freshSessionId);
+    if (sessionGone) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `row 11 cleanup: manual fan-out settled — sessionGone=${sessionGone} sessions=${JSON.stringify(settledCard?.sessions?.map((s) => s.id))}`,
+  );
+  if (!sessionGone) {
+    violations.push(
+      `row 11 cleanup: manual cleanup did not remove the only session within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
+    );
+    console.log(`ROW 11 cleanup: FAIL (${violations.length} violation(s))`);
+    return violations;
+  }
+
+  const liveTmux = await tmuxListSessionNames();
+  const tmuxGone = !liveTmux.includes(freshTmux);
+  console.log(
+    `row 11 cleanup: real tmux session ${freshTmux} gone=${tmuxGone} (exact-match against tmux list-sessions)`,
+  );
+  if (!tmuxGone) {
+    violations.push(
+      `row 11 cleanup: real tmux session ${freshTmux} is still live after manual cleanup`,
+    );
+  }
+
+  const registeredAfter = await gitWorktreeListRegistered(freshRepoPath);
+  const worktreeGoneFromDisk = !existsSync(freshWorktreePath);
+  const worktreeStillRegistered = registeredAfter.has(
+    existsSync(freshWorktreePath)
+      ? realpathSync(freshWorktreePath)
+      : freshWorktreePath,
+  );
+  console.log(
+    `row 11 cleanup: worktree removed from disk=${worktreeGoneFromDisk} deregistered from repo=${!worktreeStillRegistered} (two SEPARATE assertions)`,
+  );
+  if (!worktreeGoneFromDisk) {
+    violations.push(
+      `row 11 cleanup: worktree directory still exists on disk — ${freshWorktreePath}`,
+    );
+  }
+  if (worktreeStillRegistered) {
+    violations.push(
+      `row 11 cleanup: worktree is still registered in \`git worktree list\` — ${freshWorktreePath} (registered: ${[...registeredAfter].join(", ")})`,
+    );
+  }
+
+  console.log(
+    `row 11 cleanup: persisted card sessions.length=${settledCard?.sessions?.length ?? 0} (expected 0), activeSessionId=${JSON.stringify(settledCard?.activeSessionId)} (expected ABSENT — no sibling to promote to)`,
+  );
+  if ((settledCard?.sessions?.length ?? 0) !== 0) {
+    violations.push(
+      `row 11 cleanup: persisted card carries ${settledCard?.sessions?.length} session(s) after cleaning its only session, expected exactly 0`,
+    );
+  }
+  if (settledCard?.activeSessionId !== undefined) {
+    violations.push(
+      `row 11 cleanup: persisted card.activeSessionId is "${settledCard?.activeSessionId}" after cleaning the ONLY session — expected ABSENT (undefined), never a pointer at the just-removed session with no sibling to promote to`,
+    );
+  }
+
+  const mirrorFields = [
+    "tmuxSession",
+    "ttydPort",
+    "hookToken",
+    "workspacePath",
+  ];
+  const stale = mirrorFields.filter((f) => settledCard?.[f] != null);
+  console.log(
+    `row 11 cleanup: card-level singular mirror fields after cleanup — ${mirrorFields.map((f) => `${f}=${JSON.stringify(settledCard?.[f])}`).join(" ")} (all expected null/undefined)`,
+  );
+  if (stale.length > 0) {
+    violations.push(
+      `row 11 cleanup: card-level mirror field(s) left stale after cleanup: ${stale.join(", ")} (expected cleared, not left pointing at the removed session)`,
+    );
+  }
+
+  const wireAfter = await fetchFixtureCard(built);
+  const hasSessionCount = Object.hasOwn(wireAfter ?? {}, "sessionCount");
+  const hasSessionSummaries = Object.hasOwn(
+    wireAfter ?? {},
+    "sessionSummaries",
+  );
+  console.log(
+    `row 11 cleanup: wire hasOwn(sessionCount)=${hasSessionCount} hasOwn(sessionSummaries)=${hasSessionSummaries} (both expected false at N=1)`,
+  );
+  if (hasSessionCount || hasSessionSummaries) {
+    violations.push(
+      `row 11 cleanup: wire card carries hasOwn(sessionCount)=${hasSessionCount} hasOwn(sessionSummaries)=${hasSessionSummaries} after cleaning the only session — both must be ABSENT`,
+    );
+  }
+
+  console.log(
+    `ROW 11 cleanup: ${violations.length === 0 ? "PASS" : `FAIL (${violations.length} violation(s))`}`,
+  );
+  return violations;
+}
+
+/**
+ * `--check parity-moves` (Plan 96-06, Phase 96 Wave 5): the three `KEEP-02` rows this milestone's
+ * previous parity plans left for last — a drag across every column edge (row 9), the Done schedule
+ * (row 10) and manual cleanup of the card's only session (row 11) — against ONE
+ * {@link PARITY_FIXTURE} subject, each its own independently named verdict. Rows run in THIS
+ * order deliberately: row 10's own real scheduler-driven teardown consumes
+ * {@link PARITY_FIXTURE}'s original session, so row 11 (which needs a genuinely fresh only-session
+ * subject regardless) runs strictly after it — see {@link checkParityRow11Cleanup}'s own JSDoc.
+ */
+async function checkParityMoves(built) {
+  return [
+    ...(await checkParityRow9Moves(built)),
+    ...(await checkParityRow10DoneSchedule(built)),
+    ...(await checkParityRow11Cleanup(built)),
+  ];
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -11580,6 +12449,8 @@ const CHECKS = {
     withFixture("parity-lifecycle", checkParityLifecycle, PARITY_FIXTURE),
   "parity-recovery": () =>
     withFixture("parity-recovery", checkParityRecovery, PARITY_FIXTURE),
+  "parity-moves": () =>
+    withFixture("parity-moves", checkParityMoves, PARITY_FIXTURE),
 };
 
 /**
