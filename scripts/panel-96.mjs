@@ -62,21 +62,30 @@
  * UNRESOLVED `process.argv[1]`; `realpathSync(entry)` before spawn fixes it (see `bootServerAt`).
  *
  * Usage:
- *   node scripts/panel-96.mjs                the real run: all three surfaces, exits non-zero on
- *                                             any contract violation.
- *   node scripts/panel-96.mjs --break-radius  Task 2's proven-mismatch self-check ONLY: overrides
- *                                             one session-switcher segment's border-radius to an
- *                                             off-contract 20px, confirms the SAME check function
- *                                             used by the real run reports the mismatch BY NAME with
- *                                             both the measured and expected values, restores the
- *                                             captured original inline value, and re-confirms PASS —
- *                                             all inside one Chrome tab, never touching a source
- *                                             file. Harness-only; touches no product code.
+ *   node scripts/panel-96.mjs                the real run: all three KEEP-04 contract surfaces plus
+ *                                             the KEEP-06 a11y leg (96-09) — SessionSwitcher's
+ *                                             never-checked focus-ring leg, CleanupModal's three
+ *                                             legs from zero, and research assumption A2 — exits
+ *                                             non-zero on any violation.
+ *   node scripts/panel-96.mjs --break-radius  96-08 Task 2's proven-mismatch self-check ONLY:
+ *                                             overrides one session-switcher segment's border-radius
+ *                                             to an off-contract 20px, confirms the SAME check
+ *                                             function used by the real run reports the mismatch BY
+ *                                             NAME with both the measured and expected values,
+ *                                             restores the captured original inline value, and
+ *                                             re-confirms PASS — all inside one Chrome tab, never
+ *                                             touching a source file. Harness-only.
+ *   node scripts/panel-96.mjs --break-a11y    96-09 Task 2's four a11y break legs ONLY (reachability,
+ *                                             accessible name, focus-ring TRIP, focus-ring RESTORE)
+ *                                             against SessionSwitcher's session pill 1 — every break
+ *                                             reuses the SAME check function the real run uses,
+ *                                             fires it, records verbatim FAIL output, reverts, and
+ *                                             re-confirms PASS. Harness-only; touches no source file.
  *
- * Exit codes: 0 every check PASS (or, under `--break-radius`, the mismatch was correctly detected
- * and the restore leg re-passed). 1 a live :4700, a failed build, a sandbox safety violation, a DOM
- * element the evaluate could not find, any measured-criterion violation, the real board.db changing
- * during the run, or a sandbox port still held after teardown.
+ * Exit codes: 0 every check PASS (or, under `--break-radius`/`--break-a11y`, every break correctly
+ * fired and every restore leg re-passed). 1 a live :4700, a failed build, a sandbox safety
+ * violation, a DOM element the evaluate could not find, any measured-criterion violation, the real
+ * board.db changing during the run, or a sandbox port still held after teardown.
  */
 import { spawn, execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
@@ -129,7 +138,17 @@ const FAKE_LINEAR_API_KEY = "panel-96-harness-fake-key-never-real";
 
 const CARD_ID = "panel96-chain";
 const IDENTIFIER = "PANEL96-CHAIN";
-const ALL_IDENTIFIERS = [IDENTIFIER];
+/** `KEEP-06` (96-09) — CleanupModal has never had a dedicated a11y verdict; two fixture cards give
+ * it the confirm-copy path and the blocked/destructive-action-name path. */
+const CLEANUP_CONFIRM_CARD_ID = "panel96-cleanup-confirm";
+const CLEANUP_CONFIRM_IDENTIFIER = "PANEL96-CLEANUP-CONFIRM";
+const CLEANUP_BLOCKED_CARD_ID = "panel96-cleanup-blocked";
+const CLEANUP_BLOCKED_IDENTIFIER = "PANEL96-CLEANUP-BLOCKED";
+const ALL_IDENTIFIERS = [
+  IDENTIFIER,
+  CLEANUP_CONFIRM_IDENTIFIER,
+  CLEANUP_BLOCKED_IDENTIFIER,
+];
 
 /**
  * The eleven-file `v2.9.0..HEAD` census, read hunk-by-hunk by `96-01-SUMMARY.md`, and this run's
@@ -552,11 +571,43 @@ function makeFixture(workspacePath) {
 }
 
 /**
- * Boot once against the still-empty sandbox home so the store creates the real sqlite schema (the
- * panel-93/94/95.mjs seeding idiom, never a hand-duplicated schema), kill that boot, then insert the
- * fixture row directly via `node:sqlite`.
+ * `awaitingCleanup` (`PanelHeader.tsx:78-79`) needs `column === "done"` plus a truthy
+ * `tmuxSession`/`workspacePath` — neither needs to point at anything real on disk, since this
+ * fixture never opens a terminal or calls the cleanup route, only renders and drives the modal.
+ * `blocked` mirrors `cleanupBlocked` onto the flat card field the way production's write-time
+ * mirror does at N=1 (`panel-93.mjs`'s own `cardFor` does the identical hand-mirror for the same
+ * reason: this seed bypasses every write-time method by going straight to `node:sqlite`).
  */
-async function seedFixtureCard(home, card) {
+function makeCleanupFixture(id, identifier, home, blocked) {
+  const s = makeInertSession(id, 4000, {
+    workspacePath: join(home, "workspaces", `${id}-ws`),
+  });
+  if (blocked) s.cleanupBlocked = [{ repo: "alpha", count: 2 }];
+  const now = new Date().toISOString();
+  return {
+    id,
+    issueId: `${id}-issue`,
+    identifier,
+    title: "panel-96 cleanup fixture card",
+    description: null,
+    priority: 3,
+    column: "done",
+    groupId: undefined,
+    updatedAt: now,
+    workspacePath: s.workspacePath,
+    activeSessionId: s.id,
+    tmuxSession: undefined,
+    cleanupBlocked: s.cleanupBlocked,
+    sessions: [s],
+  };
+}
+
+/**
+ * Boot once against the still-empty sandbox home so the store creates the real sqlite schema (the
+ * panel-93/94/95.mjs seeding idiom, never a hand-duplicated schema), kill that boot, then insert
+ * every fixture row (`cards`, plural) directly via `node:sqlite` in the same pass.
+ */
+async function seedFixtureCards(home, cards) {
   const dbPath = join(home, ".dispatch", "board.db");
   const ATTEMPTS = 3;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
@@ -580,21 +631,22 @@ async function seedFixtureCard(home, card) {
           .get() != null;
       if (!hasCardsTable) {
         console.log(
-          `seedFixtureCard: schema not yet created after warmup attempt ${attempt}/${ATTEMPTS} — retrying`,
+          `seedFixtureCards: schema not yet created after warmup attempt ${attempt}/${ATTEMPTS} — retrying`,
         );
         continue;
       }
-      db.prepare(
+      const insert = db.prepare(
         `INSERT INTO cards (id, data) VALUES (?, ?)
          ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
-      ).run(card.id, JSON.stringify(card));
+      );
+      for (const card of cards) insert.run(card.id, JSON.stringify(card));
       return;
     } finally {
       db.close();
     }
   }
   throw new Error(
-    `seedFixtureCard: sqlite schema never appeared after ${ATTEMPTS} warmup-boot attempts`,
+    `seedFixtureCards: sqlite schema never appeared after ${ATTEMPTS} warmup-boot attempts`,
   );
 }
 
@@ -1380,6 +1432,1163 @@ async function measureStartModal(cdp, sessionId, violations, verdicts) {
 }
 
 // ---------------------------------------------------------------------------
+// Surface 4/5 — KEEP-06 a11y leg (96-09). SessionSwitcher's never-checked focus-ring
+// leg, and CleanupModal's three legs measured from zero. Every leg reports
+// reachable/operable, focus visibly painted, and accessible name announced
+// SEPARATELY, per this plan's own must_haves.
+// ---------------------------------------------------------------------------
+
+/** Paired `rawKeyDown` + `keyUp` CDP dispatch (`panel-92.mjs:830-836`'s proven shape) — a `Tab`
+ * with no `text` payload, so `rawKeyDown` is correct here (unlike Enter/Space below). */
+async function dispatchTab(cdp, sessionId, shift = false) {
+  const modifiers = shift ? 8 : 0;
+  await cdp.send(
+    "Input.dispatchKeyEvent",
+    {
+      type: "rawKeyDown",
+      key: "Tab",
+      code: "Tab",
+      windowsVirtualKeyCode: 9,
+      modifiers,
+    },
+    sessionId,
+  );
+  await cdp.send(
+    "Input.dispatchKeyEvent",
+    {
+      type: "keyUp",
+      key: "Tab",
+      code: "Tab",
+      windowsVirtualKeyCode: 9,
+      modifiers,
+    },
+    sessionId,
+  );
+}
+
+/** Enter is a TEXT-producing key — `keyDown` (never `rawKeyDown`) is required or the dispatch is a
+ * silent no-op, the exact trap `panel-94.mjs:1373-1377` recorded live. */
+async function dispatchEnter(cdp, sessionId) {
+  await cdp.send(
+    "Input.dispatchKeyEvent",
+    {
+      type: "keyDown",
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      text: "\r",
+      unmodifiedText: "\r",
+    },
+    sessionId,
+  );
+  await cdp.send(
+    "Input.dispatchKeyEvent",
+    { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 },
+    sessionId,
+  );
+}
+
+async function dispatchEscape(cdp, sessionId) {
+  await cdp.send(
+    "Input.dispatchKeyEvent",
+    {
+      type: "rawKeyDown",
+      key: "Escape",
+      code: "Escape",
+      windowsVirtualKeyCode: 27,
+    },
+    sessionId,
+  );
+  await cdp.send(
+    "Input.dispatchKeyEvent",
+    { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+    sessionId,
+  );
+}
+
+async function blurActiveElement(cdp, sessionId) {
+  await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      if (document.activeElement && document.activeElement !== document.body) {
+        document.activeElement.blur();
+      }
+      return true;
+    })()`,
+  );
+}
+
+async function readActiveOutline(cdp, sessionId) {
+  return evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var s = getComputedStyle(document.activeElement);
+      return { outlineWidth: s.outlineWidth, outlineStyle: s.outlineStyle };
+    })()`,
+  );
+}
+
+/**
+ * Reads the BROWSER-COMPUTED accessible name via the CDP `Accessibility` domain (not a DOM
+ * attribute read) — closes research assumption A2, which explicitly requires the two to be
+ * independently checkable since they can disagree. `returnByValue: false` yields an `objectId`,
+ * `DOM.requestNode` resolves it to a `nodeId`, `Accessibility.getPartialAXTree` reads the
+ * browser's own accessible-name computation for that node.
+ */
+async function readAccessibleName(cdp, sessionId, expression) {
+  await cdp.send("DOM.enable", {}, sessionId);
+  await cdp.send("Accessibility.enable", {}, sessionId);
+  const { result, exceptionDetails } = await cdp.send(
+    "Runtime.evaluate",
+    { expression, returnByValue: false, awaitPromise: false },
+    sessionId,
+  );
+  if (exceptionDetails) {
+    throw new Error(
+      `readAccessibleName eval failed: ${exceptionDetails.text}\n--- expression ---\n${expression}`,
+    );
+  }
+  if (!result.objectId) {
+    return {
+      name: null,
+      role: null,
+      error: "expression did not resolve to an element",
+    };
+  }
+  // `Accessibility.queryAXTree` accepts an `objectId` DIRECTLY — no `DOM.requestNode` hop, which
+  // (live-caught in this plan's own development) threw "Could not find node with given id" even
+  // after `DOM.enable`/`DOM.getDocument`, apparently because this objectId's backend node was never
+  // pushed into the DOM domain's own tracked tree (the element was never queried via `DOM.*`, only
+  // ever touched via `Runtime.evaluate`). `queryAXTree` resolves the accessibility node straight
+  // from the JS object reference, sidestepping that gap entirely.
+  const { nodes } = await cdp.send(
+    "Accessibility.queryAXTree",
+    { objectId: result.objectId },
+    sessionId,
+  );
+  const node = nodes && nodes[0];
+  return { name: node?.name?.value ?? null, role: node?.role?.value ?? null };
+}
+
+/** Locate a session pill by its visible ORDINAL DIGIT — never by any style property (dead
+ * instrument #9), matching `clickSessionPill`'s own selector shape. */
+const FIND_SESSION_PILL_SRC = `
+  function panel96FindSessionPill(ordinal) {
+    var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+    var group = aside ? aside.querySelector('[role="group"][aria-label="Sessions"]') : null;
+    if (!group) return null;
+    var btns = Array.prototype.slice.call(group.querySelectorAll("button"));
+    return btns.find(function (b) { return b.textContent.trim() === String(ordinal); }) ?? null;
+  }
+`;
+
+/**
+ * The RE-CONFIRMED legs (cited from `panel-92.mjs`'s `assertKeyboardTraversal`, 800-861): DOM-order
+ * Tab traversal, per-pill `aria-label`, and the container's `role="group"` / `aria-label="Sessions"`.
+ * Reused verbatim by both the real run and every `--break-a11y` leg below (the 96-08 idiom: the
+ * SAME check function both proves the real behaviour and proves it can fail).
+ */
+async function checkSessionSwitcherTraversalAndNames(
+  cdp,
+  sessionId,
+  violations,
+  label,
+) {
+  const groupMeta = await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+      var group = aside ? aside.querySelector('[role="group"][aria-label="Sessions"]') : null;
+      if (!group) return { present: false };
+      return {
+        present: true,
+        role: group.getAttribute("role"),
+        ariaLabel: group.getAttribute("aria-label"),
+        allLabels: Array.prototype.map.call(group.querySelectorAll("button"), function (b) {
+          return b.getAttribute("aria-label");
+        }),
+      };
+    })()`,
+  );
+  if (!groupMeta.present) {
+    violations.push(
+      `${label}: [role=group][aria-label=Sessions] container not found`,
+    );
+    return { visited: [], missing: [], allLabels: [] };
+  }
+  if (groupMeta.role !== "group" || groupMeta.ariaLabel !== "Sessions") {
+    violations.push(
+      `${label}: expected role="group" aria-label="Sessions", got role=${groupMeta.role} aria-label=${JSON.stringify(groupMeta.ariaLabel)}`,
+    );
+  }
+
+  await blurActiveElement(cdp, sessionId);
+  const visited = [];
+  for (let i = 0; i < 20; i++) {
+    await dispatchTab(cdp, sessionId);
+    const info = await evalValue(
+      cdp,
+      sessionId,
+      `(function () {
+        var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+        var group = aside ? aside.querySelector('[role="group"][aria-label="Sessions"]') : null;
+        var el = document.activeElement;
+        var inside = group ? group.contains(el) : false;
+        return { inside: inside, ariaLabel: el ? el.getAttribute("aria-label") : null };
+      })()`,
+    );
+    if (info.inside) visited.push(info.ariaLabel);
+    else if (visited.length > 0) break;
+  }
+  const missing = groupMeta.allLabels.filter((l) => !visited.includes(l));
+  console.log(
+    `${label}: pills=${JSON.stringify(groupMeta.allLabels)}, Tab-visited(DOM order)=${JSON.stringify(visited)}, missing=${JSON.stringify(missing)}`,
+  );
+  if (missing.length > 0) {
+    violations.push(
+      `${label}: session pill(s) not reachable via Tab: ${JSON.stringify(missing)}`,
+    );
+  }
+  if (visited.length !== groupMeta.allLabels.length && missing.length === 0) {
+    violations.push(
+      `${label}: Tab traversal visited ${visited.length} pill(s), expected ${groupMeta.allLabels.length}`,
+    );
+  }
+  if (visited.some((l) => l == null || l.trim() === "")) {
+    violations.push(
+      `${label}: one or more Tab-reached session pills had no aria-label — visited=${JSON.stringify(visited)}`,
+    );
+  }
+  return { visited, missing, allLabels: groupMeta.allLabels };
+}
+
+/** Reachable AND operable — Enter on a focused, Tab-reached pill must switch the active session
+ * (an observed `aria-pressed` state change), not merely move focus onto it. */
+async function checkSessionSwitcherOperability(
+  cdp,
+  sessionId,
+  violations,
+  label,
+) {
+  await blurActiveElement(cdp, sessionId);
+  let reached = false;
+  for (let i = 0; i < 20; i++) {
+    await dispatchTab(cdp, sessionId);
+    const hit = await evalValue(
+      cdp,
+      sessionId,
+      `${FIND_SESSION_PILL_SRC} document.activeElement === panel96FindSessionPill(1)`,
+    );
+    if (hit) {
+      reached = true;
+      break;
+    }
+  }
+  console.log(`${label}: Tab reached session pill 1 = ${reached}`);
+  if (!reached) {
+    violations.push(`${label}: Tab traversal never reached session pill 1`);
+    return;
+  }
+  const beforePressed = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_SESSION_PILL_SRC} panel96FindSessionPill(1).getAttribute("aria-pressed")`,
+  );
+  await dispatchEnter(cdp, sessionId);
+  const deadline = Date.now() + RENDER_TIMEOUT_MS;
+  let afterPressed = null;
+  while (Date.now() < deadline) {
+    afterPressed = await evalValue(
+      cdp,
+      sessionId,
+      `${FIND_SESSION_PILL_SRC} panel96FindSessionPill(1).getAttribute("aria-pressed")`,
+    );
+    if (afterPressed === "true") break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  console.log(
+    `${label}: session pill 1 aria-pressed ${beforePressed} -> ${afterPressed} on Enter`,
+  );
+  if (afterPressed !== "true") {
+    violations.push(
+      `${label}: Enter on a focused, Tab-reachable session pill did not switch the active session (aria-pressed stayed ${JSON.stringify(afterPressed)}) — reachable but not operable`,
+    );
+  }
+}
+
+/** The GAP this plan exists to close, trip half: keyboard Tab to pill 1, read the outline, expect
+ * a visible 2px solid ring per the design contract's `focus-ring` role. */
+async function checkSessionSwitcherFocusRingKeyboard(
+  cdp,
+  sessionId,
+  violations,
+  label,
+) {
+  await blurActiveElement(cdp, sessionId);
+  let reached = false;
+  for (let i = 0; i < 20; i++) {
+    await dispatchTab(cdp, sessionId);
+    const hit = await evalValue(
+      cdp,
+      sessionId,
+      `${FIND_SESSION_PILL_SRC} document.activeElement === panel96FindSessionPill(1)`,
+    );
+    if (hit) {
+      reached = true;
+      break;
+    }
+  }
+  if (!reached) {
+    violations.push(
+      `${label}: Tab traversal never reached session pill 1 for the focus-ring read`,
+    );
+    return null;
+  }
+  const outline = await readActiveOutline(cdp, sessionId);
+  console.log(`${label}: keyboard focus outline = ${JSON.stringify(outline)}`);
+  if (outline.outlineWidth !== "2px" || outline.outlineStyle !== "solid") {
+    violations.push(
+      `${label}: expected a visible 2px solid focus ring on keyboard focus, got ${JSON.stringify(outline)}`,
+    );
+  }
+  return outline;
+}
+
+/** The GAP this plan exists to close, restore half: a GENUINELY fresh page load (Chrome's
+ * `:focus-visible` heuristic carries keyboard history over otherwise), a real mouse click, outline
+ * read BETWEEN mousedown and mouseup (`panel-94.mjs:1522-1527`'s lesson — the click's own onClick
+ * fires only on mouseup and could steal focus by then). */
+async function checkSessionSwitcherFocusRingMouse(
+  cdp,
+  sessionId,
+  violations,
+  label,
+) {
+  await cdp.send("Page.reload", { ignoreCache: true }, sessionId);
+  await waitForBoardRootLoaded(cdp, sessionId, ALL_IDENTIFIERS);
+  await selectCardViaOrcaNav(cdp, sessionId, IDENTIFIER);
+  const rect = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_SESSION_PILL_SRC}
+    (function () {
+      var target = panel96FindSessionPill(1);
+      if (!target) throw new Error("panel96: session pill 1 not found for mouse-click reading");
+      var r = target.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    { type: "mouseMoved", x: rect.x, y: rect.y },
+    sessionId,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mousePressed",
+      x: rect.x,
+      y: rect.y,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+  const outline = await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var el = document.activeElement;
+      if (!el || el.tagName !== "BUTTON") return { outlineWidth: null, outlineStyle: null, wrongElement: true, activeTag: el ? el.tagName : null };
+      var s = getComputedStyle(el);
+      return { outlineWidth: s.outlineWidth, outlineStyle: s.outlineStyle };
+    })()`,
+  );
+  console.log(
+    `${label}: mouse-click outline (fresh load, read between mousedown and mouseup) = ${JSON.stringify(outline)}`,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseReleased",
+      x: rect.x,
+      y: rect.y,
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+  await sleep(100);
+  const ringAbsent =
+    outline.outlineWidth === "0px" || outline.outlineStyle === "none";
+  if (!ringAbsent) {
+    violations.push(
+      `${label}: expected NO focus ring on a mouse click, got ${JSON.stringify(outline)}`,
+    );
+  }
+  return outline;
+}
+
+async function measureSessionSwitcherA11y(
+  cdp,
+  sessionId,
+  violations,
+  verdicts,
+) {
+  console.log("\n--- a11y: SessionSwitcher (KEEP-06) ---");
+  const before = violations.length;
+  await selectCardViaOrcaNav(cdp, sessionId, IDENTIFIER);
+  await clickSessionPill(cdp, sessionId, 2);
+
+  await checkSessionSwitcherTraversalAndNames(
+    cdp,
+    sessionId,
+    violations,
+    "SessionSwitcher a11y — Tab order + aria-label + group role (RE-CONFIRMED, cited panel-92.mjs assertKeyboardTraversal)",
+  );
+  await checkSessionSwitcherOperability(
+    cdp,
+    sessionId,
+    violations,
+    "SessionSwitcher a11y — reachable AND operable (Enter switches the active session)",
+  );
+  await checkSessionSwitcherFocusRingKeyboard(
+    cdp,
+    sessionId,
+    violations,
+    "SessionSwitcher a11y — focus ring, keyboard TRIP (the never-checked leg)",
+  );
+  await checkSessionSwitcherFocusRingMouse(
+    cdp,
+    sessionId,
+    violations,
+    "SessionSwitcher a11y — focus ring, mouse RESTORE (the never-checked leg)",
+  );
+
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+  await sleep(RESIZE_SETTLE_MS);
+
+  const added = violations.slice(before);
+  verdicts.push({
+    surface: "src/web/features/detail/SessionSwitcher.tsx — a11y (KEEP-06)",
+    pass: added.length === 0,
+    violations: added,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// CleanupModal — ZERO dedicated a11y verdict anywhere in panel-92/93/94/95.mjs. All
+// three legs measured from scratch, on the confirm-copy path and the blocked
+// (destructive-action) path.
+// ---------------------------------------------------------------------------
+
+async function waitForCleanupDialog(cdp, sessionId, present) {
+  const probe = `document.querySelector('[role="dialog"][aria-label="Clean up workspace"]') !== null`;
+  const deadline = Date.now() + RENDER_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if ((await evalValue(cdp, sessionId, probe)) === present) return true;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return false;
+}
+
+/** Reuses `panel-93.mjs`'s own opening path (`openCleanupModal`, 788-804) — the Orca nav then the
+ * panel's "Clean up now" button — rather than inventing a new one. */
+async function openCleanupModalByIdentifier(cdp, sessionId, identifier) {
+  await selectCardViaOrcaNav(cdp, sessionId, identifier);
+  await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+      if (!aside) throw new Error("panel96: ticket detail aside not found for " + ${JSON.stringify(identifier)});
+      var btn = Array.prototype.find.call(aside.querySelectorAll("button"), function (b) {
+        return b.textContent.trim() === "Clean up now";
+      });
+      if (!btn) throw new Error("panel96: 'Clean up now' button not found for " + ${JSON.stringify(identifier)});
+      btn.click();
+      return true;
+    })()`,
+  );
+  const opened = await waitForCleanupDialog(cdp, sessionId, true);
+  if (!opened)
+    throw new Error(`panel96: CleanupModal never opened for ${identifier}`);
+}
+
+/** Dialog accessible name (non-empty `aria-label`, `aria-modal="true"`) and the destructive
+ * action's own name — must describe what it does, never a bare "Confirm". */
+async function checkCleanupModalAccessibleName(
+  cdp,
+  sessionId,
+  violations,
+  label,
+  expectDestructive,
+) {
+  const reading = await evalReport(
+    cdp,
+    sessionId,
+    violations,
+    label,
+    `(function () {
+      var dlg = document.querySelector('[role="dialog"][aria-label="Clean up workspace"]');
+      if (!dlg) return { structurallyPresent: false };
+      var btns = Array.prototype.slice.call(dlg.querySelectorAll("button"));
+      var action = btns.find(function (b) {
+        return b.textContent.trim() !== "Keep workspace" && b.getAttribute("aria-label") !== "Close";
+      });
+      return {
+        structurallyPresent: true,
+        dialogAriaLabel: dlg.getAttribute("aria-label"),
+        ariaModal: dlg.getAttribute("aria-modal"),
+        actionName: action ? (action.getAttribute("aria-label") || action.textContent.trim()) : null,
+      };
+    })()`,
+  );
+  if (reading == null) return;
+  if (!reading.structurallyPresent) {
+    violations.push(
+      `${label}: [role=dialog][aria-label="Clean up workspace"] not found structurally`,
+    );
+    return;
+  }
+  console.log(`${label}: ${JSON.stringify(reading)}`);
+  if (!reading.dialogAriaLabel || reading.dialogAriaLabel.trim() === "") {
+    violations.push(
+      `${label}: dialog aria-label expected non-empty, got ${JSON.stringify(reading.dialogAriaLabel)}`,
+    );
+  }
+  if (reading.ariaModal !== "true") {
+    violations.push(
+      `${label}: expected aria-modal="true" on the dialog, got ${reading.ariaModal}`,
+    );
+  }
+  const bare =
+    reading.actionName != null &&
+    reading.actionName.trim().toLowerCase() === "confirm";
+  if (bare) {
+    violations.push(
+      `${label}: destructive action's accessible name is a bare "Confirm" (${JSON.stringify(reading.actionName)}), not descriptive`,
+    );
+  }
+  if (
+    expectDestructive &&
+    !(reading.actionName && /discard|clean ?up/i.test(reading.actionName))
+  ) {
+    violations.push(
+      `${label}: expected the blocked-variant action name to describe discarding/cleaning up, got ${JSON.stringify(reading.actionName)}`,
+    );
+  }
+}
+
+/** Reachable/operable, INCLUDING the two never-independently-confirmed pieces of `Modal.tsx`'s own
+ * wiring this modal inherits: initial focus landing on "Keep workspace" and Escape-to-close. Also
+ * measures whether Tab is CONTAINED inside the dialog — `Modal.tsx` implements no focus trap by
+ * source (confirmed by reading it), so this leg is expected to be a genuine finding, not assumed
+ * one; it is measured here regardless and reported honestly either way. */
+async function checkCleanupModalReachability(
+  cdp,
+  sessionId,
+  violations,
+  label,
+) {
+  const initial = await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var el = document.activeElement;
+      return { tag: el ? el.tagName : null, text: el ? el.textContent.trim() : null };
+    })()`,
+  );
+  console.log(`${label}: initial focus = ${JSON.stringify(initial)}`);
+  if (!(initial.tag === "BUTTON" && initial.text === "Keep workspace")) {
+    violations.push(
+      `${label}: expected initial focus on "Keep workspace" (Modal.tsx's initialFocusRef), got ${JSON.stringify(initial)}`,
+    );
+  }
+
+  await dispatchTab(cdp, sessionId, true); // Shift+Tab backward from initial focus -> Close (X)
+  const backward = await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var el = document.activeElement;
+      return { tag: el ? el.tagName : null, ariaLabel: el ? el.getAttribute("aria-label") : null };
+    })()`,
+  );
+  console.log(
+    `${label}: Shift+Tab from initial focus = ${JSON.stringify(backward)}`,
+  );
+  if (!(backward.tag === "BUTTON" && backward.ariaLabel === "Close")) {
+    violations.push(
+      `${label}: expected Shift+Tab from initial focus to reach the Close (X) button, got ${JSON.stringify(backward)}`,
+    );
+  }
+
+  await dispatchTab(cdp, sessionId); // forward -> back to Keep workspace
+  const backToKeep = await evalValue(
+    cdp,
+    sessionId,
+    `(function () { var el = document.activeElement; return el ? el.textContent.trim() : null; })()`,
+  );
+  console.log(`${label}: Tab from Close (X) = ${JSON.stringify(backToKeep)}`);
+  if (backToKeep !== "Keep workspace") {
+    violations.push(
+      `${label}: expected Tab from Close (X) to return to "Keep workspace", got ${JSON.stringify(backToKeep)}`,
+    );
+  } else {
+    // The focus-ring KEYBOARD TRIP leg, read right here — a REAL Tab keypress just landed on this
+    // element, unambiguously "keyboard modality." Reading the ring on the modal's raw INITIAL
+    // (programmatic `initialFocusRef.current.focus()`) open state was tried first and was WRONG:
+    // that focus follows a synthetic `.click()` open, and Chrome's `:focus-visible` heuristic
+    // inherits "mouse" input modality from the immediately-preceding click, painting no ring even
+    // though the SAME element correctly paints one when a real Tab keypress reaches it (confirmed
+    // live: initial-focus read outlineStyle "none", this real-Tab read outlineStyle "solid").
+    const ringLabel = `${label} :: focus ring, keyboard TRIP`;
+    const outline = await readActiveOutline(cdp, sessionId);
+    console.log(
+      `${ringLabel}: outline on Tab-reached "Keep workspace" = ${JSON.stringify(outline)}`,
+    );
+    if (outline.outlineWidth !== "2px" || outline.outlineStyle !== "solid") {
+      violations.push(
+        `${ringLabel}: expected a visible 2px solid focus ring on keyboard focus, got ${JSON.stringify(outline)}`,
+      );
+    }
+  }
+
+  await dispatchTab(cdp, sessionId); // forward -> the primary/danger action
+  const action = await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var dlg = document.querySelector('[role="dialog"][aria-label="Clean up workspace"]');
+      var el = document.activeElement;
+      return { insideDialog: dlg ? dlg.contains(el) : false, text: el ? el.textContent.trim() : null };
+    })()`,
+  );
+  console.log(`${label}: Tab from Keep workspace = ${JSON.stringify(action)}`);
+  if (!action.insideDialog) {
+    violations.push(
+      `${label}: Tab from "Keep workspace" left the dialog, expected the primary/danger action — got ${JSON.stringify(action)}`,
+    );
+  }
+
+  // Containment — does Tab past the LAST focusable control stay inside the dialog?
+  await dispatchTab(cdp, sessionId);
+  const afterLast = await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var dlg = document.querySelector('[role="dialog"][aria-label="Clean up workspace"]');
+      var el = document.activeElement;
+      return {
+        insideDialog: dlg ? dlg.contains(el) : false,
+        tag: el ? el.tagName : null,
+        ariaLabel: el ? el.getAttribute("aria-label") : null,
+        text: el ? el.textContent.trim().slice(0, 60) : null,
+      };
+    })()`,
+  );
+  console.log(
+    `${label}: Tab past the last dialog control (containment check) = ${JSON.stringify(afterLast)}`,
+  );
+  if (!afterLast.insideDialog) {
+    violations.push(
+      `${label}: focus escaped the dialog after Tabbing past its last control — Modal.tsx implements no focus trap; landed on ${JSON.stringify(afterLast)} (KEEP-06 finding for 96-11)`,
+    );
+  }
+
+  await dispatchEscape(cdp, sessionId);
+  const closed = await waitForCleanupDialog(cdp, sessionId, false);
+  console.log(`${label}: Escape closed the modal = ${closed}`);
+  if (!closed) {
+    violations.push(`${label}: Escape did not close CleanupModal`);
+  }
+}
+
+async function checkCleanupModalFocusRingMouse(
+  cdp,
+  sessionId,
+  violations,
+  label,
+) {
+  await cdp.send("Page.reload", { ignoreCache: true }, sessionId);
+  await waitForBoardRootLoaded(cdp, sessionId, ALL_IDENTIFIERS);
+  await openCleanupModalByIdentifier(
+    cdp,
+    sessionId,
+    CLEANUP_CONFIRM_IDENTIFIER,
+  );
+  // "Keep workspace" is ALREADY focused (Modal.tsx's initialFocusRef) the instant the modal opens —
+  // a mousedown on an already-focused element fires no NEW focus event, so React's onFocus handler
+  // (the thing that recomputes `:focus-visible` into the `focused` state) never re-runs and the
+  // ring painted by the earlier programmatic focus would survive untested. Blur first so the click
+  // below produces a genuine, freshly-observed mouse-triggered focus.
+  await blurActiveElement(cdp, sessionId);
+  const rect = await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var dlg = document.querySelector('[role="dialog"][aria-label="Clean up workspace"]');
+      var btns = Array.prototype.slice.call(dlg.querySelectorAll("button"));
+      var target = btns.find(function (b) { return b.textContent.trim() === "Keep workspace"; });
+      if (!target) throw new Error("panel96: Keep workspace button not found for mouse-click reading");
+      var r = target.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    { type: "mouseMoved", x: rect.x, y: rect.y },
+    sessionId,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mousePressed",
+      x: rect.x,
+      y: rect.y,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+  const outline = await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var el = document.activeElement;
+      if (!el || el.tagName !== "BUTTON") return { outlineWidth: null, outlineStyle: null, wrongElement: true, activeTag: el ? el.tagName : null };
+      var s = getComputedStyle(el);
+      return { outlineWidth: s.outlineWidth, outlineStyle: s.outlineStyle };
+    })()`,
+  );
+  console.log(
+    `${label}: mouse-click outline (fresh load, read between mousedown and mouseup) = ${JSON.stringify(outline)}`,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseReleased",
+      x: rect.x,
+      y: rect.y,
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+  await sleep(100);
+  const ringAbsent =
+    outline.outlineWidth === "0px" || outline.outlineStyle === "none";
+  if (!ringAbsent) {
+    violations.push(
+      `${label}: expected NO focus ring on a mouse click, got ${JSON.stringify(outline)}`,
+    );
+  }
+  await dispatchEscape(cdp, sessionId);
+  await waitForCleanupDialog(cdp, sessionId, false).catch(() => {});
+  return outline;
+}
+
+async function measureCleanupModalA11y(cdp, sessionId, violations, verdicts) {
+  console.log("\n--- a11y: CleanupModal (KEEP-06, zero prior verdict) ---");
+  const before = violations.length;
+
+  await openCleanupModalByIdentifier(
+    cdp,
+    sessionId,
+    CLEANUP_CONFIRM_IDENTIFIER,
+  );
+  await checkCleanupModalAccessibleName(
+    cdp,
+    sessionId,
+    violations,
+    "CleanupModal a11y (confirm) — accessible name",
+    false,
+  );
+  // checkCleanupModalReachability's own real Tab traversal reads the focus-ring keyboard TRIP leg
+  // inline (right after a genuine Tab keypress lands back on "Keep workspace") — reading the
+  // ring on the modal's raw INITIAL open state was tried first and was wrong, see that function's
+  // own inline comment.
+  await checkCleanupModalReachability(
+    cdp,
+    sessionId,
+    violations,
+    "CleanupModal a11y (confirm) — reachable/operable + Escape + containment",
+  );
+
+  await checkCleanupModalFocusRingMouse(
+    cdp,
+    sessionId,
+    violations,
+    "CleanupModal a11y (confirm) — focus ring, mouse RESTORE",
+  );
+
+  await openCleanupModalByIdentifier(
+    cdp,
+    sessionId,
+    CLEANUP_BLOCKED_IDENTIFIER,
+  );
+  await checkCleanupModalAccessibleName(
+    cdp,
+    sessionId,
+    violations,
+    "CleanupModal a11y (blocked) — destructive action's accessible name",
+    true,
+  );
+  await dispatchEscape(cdp, sessionId);
+  await waitForCleanupDialog(cdp, sessionId, false).catch(() => {});
+
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+  await sleep(RESIZE_SETTLE_MS);
+
+  const added = violations.slice(before);
+  verdicts.push({
+    surface:
+      "src/web/features/modals/CleanupModal.tsx — a11y (KEEP-06, measured from zero)",
+    pass: added.length === 0,
+    violations: added,
+  });
+}
+
+/**
+ * Research assumption A2: is the `StartModal` inherit checkbox's accessible NAME an explicit
+ * `aria-label`/`aria-labelledby`, or does it rely on visible-label association only (native
+ * `<label>`-wrapping)? Closed by BOTH a markup grep AND a CDP-computed accessible-name read,
+ * since the two can disagree.
+ */
+async function closeAssumptionA2(cdp, sessionId, violations, verdicts) {
+  console.log(
+    "\n--- research assumption A2: StartModal inherit toggle's accessible name ---",
+  );
+  const before = violations.length;
+  await selectCardViaOrcaNav(cdp, sessionId, IDENTIFIER);
+  await clickStartAnotherSession(cdp, sessionId);
+  const markup = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_INHERIT_LABEL_SRC}
+    (function () {
+      var label = panel96FindInheritLabel();
+      if (!label) return { present: false };
+      var input = label.querySelector('input[type="checkbox"]');
+      return {
+        present: true,
+        inputHasAriaLabel: input ? input.hasAttribute("aria-label") : null,
+        inputHasAriaLabelledby: input ? input.hasAttribute("aria-labelledby") : null,
+        wrappedByLabel: input ? input.closest("label") === label : null,
+      };
+    })()`,
+  );
+  console.log(`A2 markup grep (CDP-read): ${JSON.stringify(markup)}`);
+  if (!markup.present) {
+    violations.push("A2: inherit checkbox label not found structurally");
+  } else {
+    const ax = await readAccessibleName(
+      cdp,
+      sessionId,
+      `${FIND_INHERIT_LABEL_SRC} panel96FindInheritLabel().querySelector('input[type="checkbox"]')`,
+    );
+    console.log(`A2 CDP computed accessible name: ${JSON.stringify(ax)}`);
+    if (!ax.name || ax.name.trim() === "") {
+      violations.push(
+        `A2: inherit checkbox's CDP-computed accessible name is empty — ${JSON.stringify(ax)}`,
+      );
+    }
+    const mechanism =
+      markup.inputHasAriaLabel || markup.inputHasAriaLabelledby
+        ? "explicit aria-label/aria-labelledby"
+        : markup.wrappedByLabel
+          ? "native <label>-wrapping association (visible-label only, no explicit aria-label/aria-labelledby)"
+          : "unknown — neither an explicit attribute nor label-wrapping detected";
+    console.log(
+      `A2 verdict: name supplied by ${mechanism}; CDP-computed name = ${JSON.stringify(ax.name)}`,
+    );
+  }
+  await dispatchEscape(cdp, sessionId);
+  await waitForModal(cdp, sessionId, false).catch(() => {});
+  const added = violations.slice(before);
+  verdicts.push({
+    surface:
+      "src/web/features/modals/StartModal.tsx — inherit toggle accessible name (research assumption A2)",
+    pass: added.length === 0,
+    violations: added,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// --break-a11y: four independent breaks (reachability, accessible name, focus-ring
+// TRIP, focus-ring RESTORE) proving the a11y leg's own assertions are not dead
+// instruments. All against SessionSwitcher's session pill 1 — never a source edit,
+// every selector keyed on role/aria-label/text, never on the property mutated.
+// ---------------------------------------------------------------------------
+
+async function runA11yBreakReachability(cdp, sessionId) {
+  console.log("\n--break-a11y: reachability leg");
+  await selectCardViaOrcaNav(cdp, sessionId, IDENTIFIER);
+  const hadTabindex = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_SESSION_PILL_SRC} panel96FindSessionPill(1).hasAttribute("tabindex")`,
+  );
+  console.log(
+    `--break-a11y: session pill 1 had an explicit tabindex before the break = ${hadTabindex}`,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_SESSION_PILL_SRC} panel96FindSessionPill(1).tabIndex = -1`,
+  );
+  const tripViolations = [];
+  await checkSessionSwitcherTraversalAndNames(
+    cdp,
+    sessionId,
+    tripViolations,
+    "break (reachability leg)",
+  );
+  console.log(
+    `--break-a11y REACHABILITY leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired = tripViolations.some((v) =>
+    v.includes("not reachable via Tab"),
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_SESSION_PILL_SRC}
+    (function () {
+      var t = panel96FindSessionPill(1);
+      if (${JSON.stringify(hadTabindex)}) t.tabIndex = 0;
+      else t.removeAttribute("tabindex");
+      return true;
+    })()`,
+  );
+  const restoreViolations = [];
+  await checkSessionSwitcherTraversalAndNames(
+    cdp,
+    sessionId,
+    restoreViolations,
+    "break (reachability leg, restore)",
+  );
+  console.log(
+    `--break-a11y REACHABILITY leg RESTORE: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return { tripFired, restoreClean: restoreViolations.length === 0 };
+}
+
+async function runA11yBreakName(cdp, sessionId) {
+  console.log("\n--break-a11y: accessible-name leg");
+  await selectCardViaOrcaNav(cdp, sessionId, IDENTIFIER);
+  const original = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_SESSION_PILL_SRC} panel96FindSessionPill(1).getAttribute("aria-label")`,
+  );
+  console.log(
+    `--break-a11y: captured original aria-label = ${JSON.stringify(original)}`,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_SESSION_PILL_SRC} panel96FindSessionPill(1).removeAttribute("aria-label")`,
+  );
+  const tripViolations = [];
+  await checkSessionSwitcherTraversalAndNames(
+    cdp,
+    sessionId,
+    tripViolations,
+    "break (name leg)",
+  );
+  console.log(
+    `--break-a11y NAME leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const nameFired = tripViolations.some((v) => v.includes("had no aria-label"));
+  const stillReachable = !tripViolations.some((v) =>
+    v.includes("not reachable via Tab"),
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_SESSION_PILL_SRC} panel96FindSessionPill(1).setAttribute("aria-label", ${JSON.stringify(original)})`,
+  );
+  const restoreViolations = [];
+  await checkSessionSwitcherTraversalAndNames(
+    cdp,
+    sessionId,
+    restoreViolations,
+    "break (name leg, restore)",
+  );
+  console.log(
+    `--break-a11y NAME leg RESTORE: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    nameFired,
+    stillReachable,
+    restoreClean: restoreViolations.length === 0,
+  };
+}
+
+async function runA11yBreakRingTrip(cdp, sessionId) {
+  console.log("\n--break-a11y: focus-ring TRIP leg");
+  await selectCardViaOrcaNav(cdp, sessionId, IDENTIFIER);
+  await blurActiveElement(cdp, sessionId);
+  for (let i = 0; i < 20; i++) {
+    await dispatchTab(cdp, sessionId);
+    const hit = await evalValue(
+      cdp,
+      sessionId,
+      `${FIND_SESSION_PILL_SRC} document.activeElement === panel96FindSessionPill(1)`,
+    );
+    if (hit) break;
+  }
+  // The selector below keys on FOCUS STATE (document.activeElement), never on the outline property
+  // the break is about to mutate — dead instrument #9.
+  const original = await evalValue(
+    cdp,
+    sessionId,
+    `document.activeElement.style.getPropertyValue("outline")`,
+  );
+  console.log(
+    `--break-a11y: captured original inline outline = ${JSON.stringify(original)}`,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `document.activeElement.style.setProperty("outline", "none")`,
+  );
+  const tripOutline = await readActiveOutline(cdp, sessionId);
+  console.log(
+    `--break-a11y RING TRIP leg FAIL output: keyboard focus outline = ${JSON.stringify(tripOutline)}`,
+  );
+  const tripFired =
+    tripOutline.outlineWidth !== "2px" || tripOutline.outlineStyle !== "solid";
+  await evalValue(
+    cdp,
+    sessionId,
+    `document.activeElement.style.setProperty("outline", ${JSON.stringify(original)})`,
+  );
+  const restoreOutline = await readActiveOutline(cdp, sessionId);
+  console.log(
+    `--break-a11y RING TRIP leg RESTORE: ${JSON.stringify(restoreOutline)}`,
+  );
+  const restoreClean =
+    restoreOutline.outlineWidth === "2px" &&
+    restoreOutline.outlineStyle === "solid";
+  return { tripFired, restoreClean };
+}
+
+/** Proves the RESTORE leg is independently load-bearing (dead instrument #7's shape) — forces a
+ * ring to paint on MOUSE focus and confirms the restore assertion fires, distinctly from the trip
+ * leg above. Reverts via a fresh page load (discards the forced inline style entirely) and
+ * re-verifies clean through the SAME check function the real run uses. */
+async function runA11yBreakRingRestore(cdp, sessionId) {
+  console.log("\n--break-a11y: focus-ring RESTORE-leg load-bearing check");
+  await cdp.send("Page.reload", { ignoreCache: true }, sessionId);
+  await waitForBoardRootLoaded(cdp, sessionId, ALL_IDENTIFIERS);
+  await selectCardViaOrcaNav(cdp, sessionId, IDENTIFIER);
+  const rect = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_SESSION_PILL_SRC}
+    (function () {
+      var t = panel96FindSessionPill(1);
+      var r = t.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    { type: "mouseMoved", x: rect.x, y: rect.y },
+    sessionId,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mousePressed",
+      x: rect.x,
+      y: rect.y,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var el = document.activeElement;
+      if (el && el.tagName === "BUTTON") el.style.setProperty("outline", "2px solid rgb(94, 106, 210)");
+      return true;
+    })()`,
+  );
+  const forcedOutline = await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var el = document.activeElement;
+      if (!el || el.tagName !== "BUTTON") return { outlineWidth: null, outlineStyle: null, wrongElement: true };
+      var s = getComputedStyle(el);
+      return { outlineWidth: s.outlineWidth, outlineStyle: s.outlineStyle };
+    })()`,
+  );
+  console.log(
+    `--break-a11y RING RESTORE leg FAIL output: mouse-click outline (forced) = ${JSON.stringify(forcedOutline)}`,
+  );
+  const restoreLegFired = !(
+    forcedOutline.outlineWidth === "0px" ||
+    forcedOutline.outlineStyle === "none"
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseReleased",
+      x: rect.x,
+      y: rect.y,
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+  await sleep(100);
+
+  const reVerifyViolations = [];
+  await checkSessionSwitcherFocusRingMouse(
+    cdp,
+    sessionId,
+    reVerifyViolations,
+    "break (ring-restore leg) re-verify",
+  );
+  console.log(
+    `--break-a11y RING RESTORE leg RESTORE: ${reVerifyViolations.length === 0 ? "PASS" : `FAIL:\n${reVerifyViolations.join("\n")}`}`,
+  );
+  return { restoreLegFired, restoreClean: reVerifyViolations.length === 0 };
+}
+
+async function runBreakA11y(cdp, sessionId) {
+  const reachability = await runA11yBreakReachability(cdp, sessionId);
+  const name = await runA11yBreakName(cdp, sessionId);
+  const ringTrip = await runA11yBreakRingTrip(cdp, sessionId);
+  const ringRestore = await runA11yBreakRingRestore(cdp, sessionId);
+  return { reachability, name, ringTrip, ringRestore };
+}
+
+// ---------------------------------------------------------------------------
 // --break-radius: proves checkSegmentRadius can report a mismatch by name, both
 // values printed, then restores the CAPTURED original inline value and re-passes.
 // ---------------------------------------------------------------------------
@@ -1472,6 +2681,7 @@ async function runBreakRadius(cdp, sessionId) {
 async function main() {
   const argv = process.argv.slice(2);
   const breakRadius = readFlag(argv, "--break-radius");
+  const breakA11y = readFlag(argv, "--break-a11y");
 
   console.log("Census disposition (v2.9.0..HEAD, src/web/):");
   for (const c of CENSUS_DISPOSITION) {
@@ -1500,7 +2710,21 @@ async function main() {
     const pathPrefix = writeStubClaudeBinary(home);
     console.log(`standup: stub claude planted — ${join(pathPrefix, "claude")}`);
 
-    await seedFixtureCard(home, makeFixture(undefined));
+    await seedFixtureCards(home, [
+      makeFixture(undefined),
+      makeCleanupFixture(
+        CLEANUP_CONFIRM_CARD_ID,
+        CLEANUP_CONFIRM_IDENTIFIER,
+        home,
+        false,
+      ),
+      makeCleanupFixture(
+        CLEANUP_BLOCKED_CARD_ID,
+        CLEANUP_BLOCKED_IDENTIFIER,
+        home,
+        true,
+      ),
+    ]);
 
     server = bootServerAt(home, pathPrefix);
     await waitForReady(SANDBOX_PORT);
@@ -1515,6 +2739,7 @@ async function main() {
 
     // Re-seed with a real workspacePath now that the folder is known (StartAnotherSessionButton's
     // gate needs card.workspacePath != null, and StartModal's picker needs a real registered path).
+    // The two cleanup fixtures don't depend on the registered folder — they stay as seeded above.
     await killAndWait(server);
     const db = new DatabaseSync(join(home, ".dispatch", "board.db"));
     try {
@@ -1573,10 +2798,15 @@ async function main() {
 
     if (breakRadius) {
       breakResult = await runBreakRadius(cdp, sessionId);
+    } else if (breakA11y) {
+      breakResult = await runBreakA11y(cdp, sessionId);
     } else {
       await measureDetailPanelRow(cdp, sessionId, violations, verdicts);
       await measureSessionSwitcher(cdp, sessionId, violations, verdicts);
       await measureStartModal(cdp, sessionId, violations, verdicts);
+      await measureSessionSwitcherA11y(cdp, sessionId, violations, verdicts);
+      await measureCleanupModalA11y(cdp, sessionId, violations, verdicts);
+      await closeAssumptionA2(cdp, sessionId, violations, verdicts);
     }
   } finally {
     if (cdp) cdp.close();
@@ -1628,6 +2858,36 @@ async function main() {
     }
     console.log(
       "PASS (--break-radius self-check): trip leg correctly reported the mismatch by name with both values, restore leg re-passed clean.",
+    );
+    process.exit(0);
+  }
+
+  if (breakA11y) {
+    const r = breakResult;
+    console.log(
+      `\n--break-a11y summary: reachability.tripFired=${r.reachability.tripFired} reachability.restoreClean=${r.reachability.restoreClean} ` +
+        `name.nameFired=${r.name.nameFired} name.stillReachable=${r.name.stillReachable} name.restoreClean=${r.name.restoreClean} ` +
+        `ringTrip.tripFired=${r.ringTrip.tripFired} ringTrip.restoreClean=${r.ringTrip.restoreClean} ` +
+        `ringRestore.restoreLegFired=${r.ringRestore.restoreLegFired} ringRestore.restoreClean=${r.ringRestore.restoreClean}`,
+    );
+    const allGood =
+      r.reachability.tripFired &&
+      r.reachability.restoreClean &&
+      r.name.nameFired &&
+      r.name.stillReachable &&
+      r.name.restoreClean &&
+      r.ringTrip.tripFired &&
+      r.ringTrip.restoreClean &&
+      r.ringRestore.restoreLegFired &&
+      r.ringRestore.restoreClean;
+    if (!allGood) {
+      console.log(
+        "FAIL (--break-a11y self-check): one or more a11y break legs did not fire or did not restore clean — a dead instrument.",
+      );
+      process.exit(1);
+    }
+    console.log(
+      "PASS (--break-a11y self-check): all four a11y break legs (reachability, name, focus-ring trip, focus-ring restore) fired correctly and restored clean.",
     );
     process.exit(0);
   }
