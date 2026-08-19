@@ -12370,6 +12370,831 @@ async function checkParityMoves(built) {
   ];
 }
 
+/**
+ * `--check group-session-guard` (`KEEP-03`, Plan 96-07). Two independently-named legs against ONE
+ * {@link GROUP_SESSION_FIXTURE} stand-up (96-02's own measured census: 5 column-writing mutators
+ * fanning out via `mirrorMemberColumn`, 8 single-card routes carrying the `groupedMemberError` 409
+ * guard):
+ *
+ * - The MUTATOR leg ({@link checkGroupSessionGuardMutators}) drives all five mutators through their
+ *   real entry points against the fixture's multi-session group parent, folding in the atomicity
+ *   claim for `moveCardManual` as a deterministic AWAITED mutate-then-read loop (never a concurrent
+ *   storm — `checkSwitchAtomicity`'s own 92-VALIDATION.md finding that a naive storm reports ZERO
+ *   violations under the real regression because fire-and-forget mutations settle faster than reads
+ *   can observe a torn window).
+ * - The ROUTE leg ({@link checkGroupSessionGuardRoutes}) drives all eight single-card routes against
+ *   a real member card, asserting the exact 409 + message text, proves the SAME well-formed request
+ *   against a non-member control card does NOT 409, and carries the route-count sentinel that binds
+ *   the driven-case count to a fresh source measurement of `groupedMemberError` guard call sites in
+ *   `cards.route.ts` — so a ninth guarded route added later without a matching case fails this check
+ *   by name instead of silently under-covering (96-02's own "seven vs eight" correction, made
+ *   permanent).
+ *
+ * `GROUP_SESSION_FIXTURE` ships with `realSaga: false` / `worktrees: false` (96-03's own deliberate
+ * design — its subject is the group/member relationship, not saga machinery). `completeStart` and
+ * `attachExistingSession` can only be reached live through a genuine `/start`/`/resume` saga, so the
+ * mutator leg extends the running sandbox mid-check with exactly what row 11 (96-06) already proved
+ * works for a DIFFERENT fixture: a hooks-capable stub `claude` on `PATH` (a server reboot, since
+ * `PATH` is inherited at spawn and cannot change under an already-running child) plus a real
+ * throwaway git repo, then drives `/start` with an explicit `folder`/`repos` payload the same way
+ * row 11 did. The real tmux/ttyd artifacts this creates for the fixture's THIRD session are outside
+ * what the fixture's own (non-real-saga) `tearDownFixture` knows to look for — {@link
+ * cleanupExtraGroupSession} tears them down explicitly before `withFixture`'s own teardown runs.
+ */
+async function checkGroupSessionGuard(built) {
+  const violations = [];
+  violations.push(...(await checkGroupSessionGuardMutators(built)));
+  violations.push(...(await checkGroupSessionGuardRoutes(built)));
+  return violations;
+}
+
+/**
+ * Reboot {@link GROUP_SESSION_FIXTURE}'s sandbox server with a hooks-capable stub `claude` planted
+ * on `PATH` — the fixture's own stand-up boots with no stub at all. `PATH` is inherited at process
+ * spawn and cannot be changed on an already-running child, so this KILLS and re-boots the server
+ * rather than merely writing the file, passing `{ pathPrefix: built.pathPrefix }` explicitly the
+ * same way `checkParityRow10DoneSchedule` (96-06) had to once it live-caught that
+ * {@link restartServer}'s own pathPrefix-less reboot is unsafe for a check that spawns a NEW
+ * `claude` process after the reboot. Session records already seeded to disk by
+ * {@link standUpGroupSessionFixture} survive the reboot unchanged (the in-memory `Map` reloads from
+ * the same `board.db`).
+ */
+async function rebootGroupFixtureWithStubClaude(built) {
+  await killAndWait(built.server?.child);
+  neutralizeSandboxLinearApiKey(built);
+  built.pathPrefix = writeHooksCapableStubClaudeBinary(built.home);
+  built.server = bootServer(built.home, { pathPrefix: built.pathPrefix });
+  await waitForReady(built.port);
+  console.log(
+    `group-session-guard: rebooted with hooks-capable stub claude on PATH — ${join(built.pathPrefix, "claude")}`,
+  );
+}
+
+/**
+ * SAFETY (live-caught mid-plan): force the sandbox's own `config.json` to carry an empty
+ * `linearApiKey` before the reboot above, so the `sync-linear` route case below can NEVER reach
+ * `syncCardToLinear`'s real `claude -p ...` subprocess spawn — a live run of this check observed a
+ * non-empty `linearApiKey` surviving into a freshly-seeded sandbox `HOME` on at least one boot
+ * (root cause not fully isolated; `orchestrationConfig` is loaded once per boot from
+ * `<HOME>/.dispatch/config.json`, `os.homedir()`-derived, and should default to `linearApiKey: ""`
+ * per `bootstrap/config.ts`'s own `CONFIG_TEMPLATE` — see 96-07-SUMMARY.md for the incident and
+ * why this is a belt-and-suspenders write rather than a root-cause fix). Left the real `claude -p`
+ * process it produced hung against the stub's own "not --version" infinite-loop branch, spawned
+ * via a REAL Linear MCP prompt; killed manually, no Linear-side or `board.db` side effect observed.
+ * A no-op if the file does not yet exist or already carries an empty key.
+ */
+function neutralizeSandboxLinearApiKey(built) {
+  const configPath = join(built.home, DISPATCH_DIR_NAME, "config.json");
+  if (!existsSync(configPath)) return;
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(configPath, "utf8"));
+  } catch {
+    return;
+  }
+  if (parsed.linearApiKey) {
+    parsed.linearApiKey = "";
+    writeFileSync(configPath, JSON.stringify(parsed, null, 2) + "\n");
+    console.log(
+      `group-session-guard: SAFETY — neutralized a non-empty linearApiKey found in the sandbox config (${configPath}) before booting; the sync-linear route case must never be able to reach a real network/claude call`,
+    );
+  }
+}
+
+/** `GET /cards/:id` for both {@link GROUP_SESSION_FIXTURE} member cards, parallel-fetched. */
+async function fetchGroupMemberCards(built) {
+  const [aRes, bRes] = await Promise.all([
+    fetchCardById(built, built.memberAId),
+    fetchCardById(built, built.memberBId),
+  ]);
+  return {
+    a: aRes.status === 200 ? aRes.body?.card : undefined,
+    b: bRes.status === 200 ? bRes.body?.card : undefined,
+  };
+}
+
+/**
+ * Assert the parent AND both members landed on `expectedColumn`, read entirely through the wire
+ * (`GET /cards/:id`, never the seeded fixture object) — the parent's own read and the two members'
+ * reads are three SEPARATE round trips, so a bug in one resolver can never mask a bug in another.
+ * Also asserts the parent's own `sessionCount` matches `expectedSessionCount` (the collision
+ * `KEEP-03` names would show up here, as a mirroring operation disturbing the parent's own session
+ * set) and that neither member carries any session-level field of its own.
+ */
+/**
+ * Print a NAMED per-mutator verdict line (`MUTATOR NAME: PASS` / `FAIL (n)` plus the violations
+ * added since `beforeCount`) — so `96-VERDICT.md` gets a five-row table rather than one collapsed
+ * pass/fail, and so a break confined to ONE mutator's own code is provably independent of the other
+ * four (each still prints its own PASS in the same run).
+ */
+function printMutatorVerdict(name, beforeCount, afterCount, violations) {
+  const own = violations.slice(beforeCount, afterCount);
+  const verdict = own.length === 0 ? "PASS" : `FAIL (${own.length})`;
+  console.log(`GROUP-SESSION-GUARD mutator [${name}]: ${verdict}`);
+  for (const v of own) console.log(`  ${v}`);
+}
+
+async function assertGroupMirror(
+  built,
+  label,
+  expectedColumn,
+  expectedSessionCount,
+  violations,
+) {
+  const { status: pStatus, body: pBody } = await fetchCardById(
+    built,
+    built.cardId,
+  );
+  const parent = pStatus === 200 ? pBody?.card : undefined;
+  const { a, b } = await fetchGroupMemberCards(built);
+  console.log(
+    `group-session-guard mutator [${label}]: parent.column=${parent?.column} memberA.column=${a?.column} memberB.column=${b?.column} parent.sessionCount=${parent?.sessionCount}`,
+  );
+  if (parent?.column !== expectedColumn) {
+    violations.push(
+      `${label}: parent column expected "${expectedColumn}", actual ${JSON.stringify(parent?.column)}`,
+    );
+  }
+  if (a?.column !== expectedColumn) {
+    violations.push(
+      `${label}: member A (${built.memberAId}) column expected "${expectedColumn}" (mirrored from the parent), actual ${JSON.stringify(a?.column)} — UNMIRRORED`,
+    );
+  }
+  if (b?.column !== expectedColumn) {
+    violations.push(
+      `${label}: member B (${built.memberBId}) column expected "${expectedColumn}" (mirrored from the parent), actual ${JSON.stringify(b?.column)} — UNMIRRORED`,
+    );
+  }
+  if (
+    expectedSessionCount != null &&
+    (parent?.sessionCount ?? 1) !== expectedSessionCount
+  ) {
+    violations.push(
+      `${label}: parent sessionCount expected ${expectedSessionCount}, actual ${JSON.stringify(parent?.sessionCount)} — a member-mirroring operation must never disturb the parent's own session set`,
+    );
+  }
+  for (const [tag, member] of [
+    ["A", a],
+    ["B", b],
+  ]) {
+    if (member == null) continue;
+    if (member.tmuxSession != null) {
+      violations.push(
+        `${label}: member ${tag} carries a tmuxSession (${JSON.stringify(member.tmuxSession)}) — a group member must never own session-level fields`,
+      );
+    }
+    if (member.activeSession != null) {
+      violations.push(
+        `${label}: member ${tag} carries an activeSession (${JSON.stringify(member.activeSession)}) — a group member must never own session-level fields`,
+      );
+    }
+    if (member.groupId !== built.cardId) {
+      violations.push(
+        `${label}: member ${tag}'s groupId expected "${built.cardId}", actual ${JSON.stringify(member.groupId)}`,
+      );
+    }
+  }
+  return { parent, a, b };
+}
+
+/**
+ * Kill the REAL tmux session and REAL ttyd process a genuine `/start`/`/resume` saga created for
+ * the fixture's third session — artifacts entirely outside what {@link GROUP_SESSION_FIXTURE}'s own
+ * (non-real-saga) `tearDownFixture` knows to look for, since it only ever inspects `sessionKeys`
+ * `a`/`b`. Reads the CURRENT persisted record (not the stale `sessionRecord` snapshot the caller
+ * captured earlier) so a tmux/ttyd identity that changed underneath (e.g. a real resume minting a
+ * new tmux name) is still torn down correctly. The real worktree/repo this session's saga created
+ * lives entirely under `built.home` (both `folder` and `repos[0].path` were seeded there), so
+ * `tearDownFixture`'s own blanket `rmSync(built.home, ...)` removes it — no separate
+ * `worktreeRemove` call is needed here.
+ */
+async function cleanupExtraGroupSession(built, sessionId, violations) {
+  if (sessionId == null) return;
+  const current = readCard(built.dbPath, built.cardId)?.sessions?.find(
+    (s) => s.id === sessionId,
+  );
+  if (current?.tmuxSession) {
+    await tmuxKillSessionExact(current.tmuxSession);
+  }
+  if (current?.ttydPort && (await isPortListening(current.ttydPort))) {
+    for (const pid of await pidsListeningOnPort(current.ttydPort)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // already gone
+      }
+    }
+  }
+  console.log(
+    `group-session-guard: extra-session cleanup — tmux=${current?.tmuxSession ?? "(none)"} ttydPort=${current?.ttydPort ?? "(none)"}`,
+  );
+  if (current?.tmuxSession) {
+    const stillLive = (await tmuxListSessionNames()).includes(
+      current.tmuxSession,
+    );
+    if (stillLive) {
+      violations.push(
+        `cleanup: extra group session's real tmux "${current.tmuxSession}" still present after kill-session`,
+      );
+    }
+  }
+}
+
+/**
+ * The MUTATOR leg of `--check group-session-guard`: drives all FIVE column-writing mutators through
+ * their real entry points against {@link GROUP_SESSION_FIXTURE}'s multi-session (>= 2) group
+ * parent, asserting on EVERY step that both real members mirrored the parent's new column, the
+ * parent's own session set was undisturbed (except where the mutator itself legitimately grows it —
+ * `completeStart`), and neither member gained any session-level field. The five are driven in an
+ * order chosen so EVERY official assertion sees a genuine column CHANGE (`applyMarker`/`flipBack`
+ * setup calls between them exist only to reach a legal source column for the next official mutator —
+ * logged, but not double-counted as a second row):
+ *
+ * 1. `moveCardManual` — `POST /move`, folded into the atomicity loop below.
+ * 2. `applyMarker` — a real `Stop` hook POST (`in_review -> needs_input`).
+ * 3. `completeStart` — a real THIRD session landing on the parent via `POST /start
+ *    {newSession:true}` (`needs_input -> in_progress`).
+ * 4. `attachExistingSession` — a real tmux kill + the real 3-strike detector + `POST /resume`
+ *    (`agent_done -> in_progress`).
+ * 5. `flipBack` — a real `UserPromptSubmit` hook POST (`needs_input -> in_progress`).
+ *
+ * @remarks THE ATOMICITY ASSERTION (`moveCardManual`). A DETERMINISTIC AWAITED mutate-then-read
+ * loop, never a concurrent storm: `checkSwitchAtomicity`'s own finding (92-VALIDATION.md) is that a
+ * storm of concurrent switches/reads reports ZERO violations against the real regression, because
+ * fire-and-forget mutations settle faster than concurrent reads can ever observe a torn window — a
+ * dead instrument by this milestone's own definition. `moveCardManual` runs inside `enqueue`'s
+ * single-writer promise chain (`board.store.ts:731`, `return this.queue`): the mutator writes
+ * `card.column` AND fans out to every member via `mirrorMemberColumn` in the SAME synchronous
+ * closure, with no `await` between the two writes, and the route's own `POST /move` handler does not
+ * send its response until that whole chained promise has resolved. This means the in-memory state
+ * transitions from "parent+members all old" to "parent+members all new" in one synchronous step with
+ * no possible intermediate window — so a read taken immediately after the AWAITED POST resolves can
+ * only ever observe one of those two states, never a disagreement between them. Running this
+ * mutate-then-read pair repeatedly (never merely once) is what gives the assertion teeth: a
+ * hypothetical regression that broke atomicity only probabilistically would still be caught by
+ * enough repetitions, without needing concurrency to manufacture the race.
+ */
+/**
+ * The card-level flat `hookToken` mirror for {@link GROUP_SESSION_FIXTURE}'s parent, re-read FRESH
+ * from disk on every call — the exact field `setActiveSession`'s projection chokepoint keeps in
+ * sync with whichever session is CURRENTLY active (`steps.ts#startClaude`'s own real mint/register
+ * sequence targets it), so it is always correct for the active session regardless of which
+ * mint/resume call last wrote it. Preferred over reading a captured session record's own
+ * `hookToken` field, which can go stale across a later resume.
+ */
+function activeHookToken(built) {
+  return readCard(built.dbPath, built.cardId)?.hookToken;
+}
+
+/**
+ * POST a hook event using the CURRENT `activeHookToken`, re-reading it and retrying on a 401 until
+ * `timeoutMs` elapses — LIVE-CAUGHT: immediately after a real `/start {newSession:true}` saga
+ * settles on the wire (`sessionCount` incremented, `provisioningStep` cleared), the freshly minted
+ * session's own `hookToken` is not always ALREADY resolvable through `resolveHookToken` on the
+ * very first hook POST — a real, reproducible small window between the wire reporting the saga
+ * settled and the in-memory hook-token registry (`hook-tokens.ts`, populated by
+ * `steps.ts#startClaude`'s own `registerHookToken` call) being consultable by a request racing in
+ * from outside the process. Treated as an eventually-consistent condition to poll for, the same
+ * posture every other settle-then-act step in this file already takes, rather than asserted on the
+ * first attempt.
+ */
+async function postHookWithRetry(built, body, { timeoutMs }) {
+  const deadline = Date.now() + timeoutMs;
+  let status;
+  let attempts = 0;
+  let lastToken;
+  for (;;) {
+    attempts += 1;
+    lastToken = activeHookToken(built);
+    status = await postHook(built, lastToken, body);
+    if (status === 204 || Date.now() >= deadline) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return { status, attempts, token: lastToken };
+}
+
+async function checkGroupSessionGuardMutators(built) {
+  const violations = [];
+
+  await rebootGroupFixtureWithStubClaude(built);
+  await seedFixtureRepo(built);
+
+  // --- 1. moveCardManual, driven as the deterministic awaited atomicity loop. ---
+  const ATOMICITY_ITERATIONS = 12;
+  let column = "in_progress";
+  for (let i = 0; i < ATOMICITY_ITERATIONS; i++) {
+    const target = column === "in_progress" ? "in_review" : "in_progress";
+    const moveRes = await postMoveForCard(built, built.cardId, target);
+    if (moveRes.status !== 204) {
+      violations.push(
+        `moveCardManual (atomicity iteration ${i}): POST /move -> ${moveRes.status}, expected 204 (body=${JSON.stringify(moveRes.body)})`,
+      );
+      break;
+    }
+    await assertGroupMirror(
+      built,
+      `moveCardManual (atomicity iteration ${i})`,
+      target,
+      2,
+      violations,
+    );
+    column = target;
+  }
+  console.log(
+    `group-session-guard mutator moveCardManual: drove ${ATOMICITY_ITERATIONS} AWAITED mutate-then-read cycles alternating in_progress/in_review — parent+both members read in agreement on every single one`,
+  );
+  printMutatorVerdict("moveCardManual", 0, violations.length, violations);
+  if (column !== "in_review") {
+    const fix = await postMoveForCard(built, built.cardId, "in_review");
+    if (fix.status !== 204) {
+      violations.push(
+        `moveCardManual: could not settle the atomicity loop on "in_review" for the sequence below, got ${fix.status}`,
+      );
+    }
+  }
+
+  // --- 2. applyMarker: in_review -> needs_input, via session A's real hook token. ---
+  const beforeApplyMarker = violations.length;
+  const statusApplyA = await postHook(
+    built,
+    built.sessionA.token,
+    stopBodyWithReason("group-mutator-applyMarker"),
+  );
+  console.log(
+    `group-session-guard mutator applyMarker: POST /api/hook/claude (session A, Stop NEEDS_INPUT) -> ${statusApplyA} (expected 204)`,
+  );
+  if (statusApplyA !== 204) {
+    violations.push(
+      `applyMarker: POST /api/hook/claude (session A, Stop NEEDS_INPUT) -> ${statusApplyA}, expected 204`,
+    );
+  }
+  await assertGroupMirror(built, "applyMarker", "needs_input", 2, violations);
+  printMutatorVerdict(
+    "applyMarker",
+    beforeApplyMarker,
+    violations.length,
+    violations,
+  );
+
+  // --- 3. completeStart: needs_input -> in_progress, via a REAL third session on the parent. ---
+  let sessionCId;
+  const beforeCompleteStart = violations.length;
+  try {
+    const startRes = await postStartForCard(built, built.cardId, {
+      extraDirection: "",
+      newSession: true,
+      folder: join(built.home, "repos"),
+      repos: [{ path: built.repoPath, base: built.repoBase }],
+    });
+    console.log(
+      `group-session-guard mutator completeStart: POST /start {newSession:true} -> ${startRes.status} (expected 202, body=${JSON.stringify(startRes.body)})`,
+    );
+    if (startRes.status !== 202) {
+      violations.push(
+        `completeStart: POST /start {newSession:true} -> ${startRes.status}, expected 202 (body=${JSON.stringify(startRes.body)})`,
+      );
+    } else {
+      const { card: settled3, timedOut } = await waitForNthSessionSettled(
+        built,
+        3,
+        { timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS },
+      );
+      console.log(
+        `completeStart: third session settled — sessionCount=${settled3?.sessionCount} startError=${JSON.stringify(settled3?.startError)} timedOut=${timedOut}`,
+      );
+      if (
+        timedOut ||
+        settled3?.startError != null ||
+        (settled3?.sessionCount ?? 0) < 3
+      ) {
+        violations.push(
+          `completeStart: the real third-session start did not settle (timedOut=${timedOut}, startError=${JSON.stringify(settled3?.startError)}, sessionCount=${settled3?.sessionCount})`,
+        );
+      }
+    }
+    await assertGroupMirror(
+      built,
+      "completeStart",
+      "in_progress",
+      3,
+      violations,
+    );
+    printMutatorVerdict(
+      "completeStart",
+      beforeCompleteStart,
+      violations.length,
+      violations,
+    );
+
+    const afterStart = readCard(built.dbPath, built.cardId);
+    const knownIds = new Set([built.sessionA.id, built.sessionB.id]);
+    const sessionC = afterStart?.sessions?.find((s) => !knownIds.has(s.id));
+    if (sessionC == null) {
+      violations.push(
+        "completeStart: could not resolve the new (third) session's persisted record on disk — cannot drive attachExistingSession/flipBack against it",
+      );
+      return violations;
+    }
+    sessionCId = sessionC.id;
+    console.log(
+      `completeStart: new session C id=${sessionC.id} tmux=${sessionC.tmuxSession}`,
+    );
+
+    // --- setup only (moveCardManual, already asserted above): in_progress -> needs_input. ---
+    // A manual move, never a hook POST: session C's own hook channel is what the NEXT step exists
+    // to fix (see the remark below), so setup here must not depend on it being valid yet.
+    const beforeAttachExisting = violations.length;
+    const setupMove = await postMoveForCard(built, built.cardId, "needs_input");
+    if (setupMove.status !== 204) {
+      violations.push(
+        `setup (manual move, reaching needs_input for the attachExistingSession leg below): POST /move -> ${setupMove.status}, expected 204 (body=${JSON.stringify(setupMove.body)})`,
+      );
+    }
+    await assertGroupMirror(
+      built,
+      "moveCardManual (setup for attachExistingSession)",
+      "needs_input",
+      3,
+      violations,
+    );
+
+    // --- 4. attachExistingSession: needs_input -> in_progress. ---
+    // LIVE-CAUGHT (real product finding, recorded for 96-11 in the SUMMARY): `attachExistingSession`
+    // is NOT reached through `/resume` at all — `/resume` calls the COLUMN-PRESERVING
+    // `store.resumeSession` (`resume-session.ts`), a DIFFERENT store method. `attachExistingSession`
+    // is only reached through `start-session.ts`'s "already live" branch: `POST /start` (no
+    // `newSession`) when `hasSession('=dsp-<identifier>')` is already true. 96-02's own census
+    // phrase ("Resume path completing onto an existing session") reads as the literal `/resume`
+    // route; it is not — it is `/start`'s reattach-onto-an-already-running-tmux branch. This also
+    // surfaced a SEPARATE, genuine hook-token misattribution: `steps.ts#startClaude`'s
+    // `store.mintHookChannel` call resolves its target via the card's CURRENT `activeSessionId`,
+    // but `reserveNewSession` deliberately does NOT promote the newly reserved session to active
+    // until `completeStart` succeeds (`D-NOPROMOTE-ON-RESERVE`) — so for a `newSession:true` start,
+    // the freshly minted hook token is registered against the OLD (still-active) session, not the
+    // new one being launched, and the new session's real hook channel is unauthenticated
+    // (`resolveHookToken` 401s) until something else (e.g. a resume) mints it a token correctly.
+    // Named KEEP-03 finding, recorded in 96-07-SUMMARY.md for 96-11's remediation budget.
+    //
+    // `card.sessionLost` is a WHOLE-CARD flag, DERIVED true only when EVERY session the card owns
+    // is dead (`board.store.ts#markSessionLost`'s own doc) — its sibling-promotion branch means
+    // killing only the ACTIVE session's tmux on a multi-session card PROMOTES a live sibling
+    // instead, so all THREE of the fixture's real sessions must die to reach `sessionLost=true` at
+    // all; A and B are no longer needed by any later assertion in this sequence.
+    await tmuxKillSessionExact(built.tmux.a);
+    await tmuxKillSessionExact(built.tmux.b);
+    await tmuxKillSessionExact(sessionC.tmuxSession);
+    const liveAfterKill = await tmuxListSessionNames();
+    console.log(
+      `attachExistingSession: killed ALL THREE real tmux sessions (a=${built.tmux.a}, b=${built.tmux.b}, C=${sessionC.tmuxSession}) — any still in tmux list-sessions after kill=${JSON.stringify(liveAfterKill.filter((n) => [built.tmux.a, built.tmux.b, sessionC.tmuxSession].includes(n)))}`,
+    );
+    let sawLostC = false;
+    const lostDeadline = Date.now() + LIVENESS_POLL_TIMEOUT_MS;
+    while (Date.now() < lostDeadline) {
+      const wire = await fetchFixtureCard(built);
+      if (wire?.sessionLost === true) {
+        sawLostC = true;
+        break;
+      }
+      await sleep(LIVENESS_POLL_INTERVAL_MS);
+    }
+    console.log(
+      `attachExistingSession: real 3-strike sessionLost observed=${sawLostC}`,
+    );
+    if (!sawLostC) {
+      violations.push(
+        "attachExistingSession: killing all three real tmux sessions did not produce a real card-level sessionLost=true within the liveness timeout",
+      );
+    }
+
+    // Step A: a real `/resume` — `store.resumeSession`, column-preserving, revives a BARE-named
+    // real tmux ("dsp-<identifier>") and (since no tmux existed) mints session C a FRESH,
+    // CORRECTLY-attributed hook token (mint targets `card.activeSessionId`, already C by now, with
+    // no reserve-then-promote gap in this path). Necessary precursor, not the mutator under test.
+    const resumeRes = await postResumeForCard(built, built.cardId);
+    console.log(
+      `attachExistingSession (precursor): POST /resume -> ${resumeRes.status} (expected 202)`,
+    );
+    if (resumeRes.status !== 202) {
+      violations.push(
+        `attachExistingSession (precursor): POST /resume -> ${resumeRes.status}, expected 202 (body=${JSON.stringify(resumeRes.body)})`,
+      );
+    } else {
+      const { card: resumed, timedOut: resumeTimedOut } =
+        await waitForResumeSettled(built, {
+          timeoutMs: RESTART_REPL_TIMEOUT_SETTLE_MS,
+        });
+      console.log(
+        `attachExistingSession (precursor): resume settled — sessionLost=${resumed?.sessionLost} tmuxSession=${resumed?.tmuxSession} column=${resumed?.column} (expected preserved "needs_input") timedOut=${resumeTimedOut}`,
+      );
+      if (
+        resumeTimedOut ||
+        resumed?.sessionLost === true ||
+        resumed?.tmuxSession == null
+      ) {
+        violations.push(
+          `attachExistingSession (precursor): the real resume did not settle into a live session (timedOut=${resumeTimedOut}, sessionLost=${resumed?.sessionLost}, tmuxSession=${resumed?.tmuxSession})`,
+        );
+      }
+      if (resumed?.column !== "needs_input") {
+        violations.push(
+          `attachExistingSession (precursor): store.resumeSession is documented column-preserving, expected column to stay "needs_input", actual ${JSON.stringify(resumed?.column)}`,
+        );
+      }
+    }
+
+    // Step B: the REAL `attachExistingSession` entry point — `POST /start` with NO `newSession`,
+    // now that the bare-named tmux resume just created is genuinely alive, so
+    // `start-session.ts`'s "already live" branch fires. `card.workspace` already resolves (set by
+    // the earlier real `/start {newSession:true}` saga), so an empty body is well-formed here.
+    const reattachRes = await postStartForCard(built, built.cardId, {
+      extraDirection: "",
+    });
+    console.log(
+      `attachExistingSession: POST /start (no newSession, tmux already live) -> ${reattachRes.status} (expected 202, body=${JSON.stringify(reattachRes.body)})`,
+    );
+    if (reattachRes.status !== 202) {
+      violations.push(
+        `attachExistingSession: POST /start (reattach branch) -> ${reattachRes.status}, expected 202 (body=${JSON.stringify(reattachRes.body)})`,
+      );
+    }
+    // The route returns 202 fire-and-forget (`void startSession(...)`) — `attachExistingSession`'s
+    // own mutation lands moments later, asynchronously. Poll for the column to settle rather than
+    // asserting immediately against the just-sent response.
+    let attachSettled = false;
+    const attachDeadline = Date.now() + RESTART_REPL_TIMEOUT_SETTLE_MS;
+    while (Date.now() < attachDeadline) {
+      const wire = await fetchFixtureCard(built);
+      if (wire?.column === "in_progress") {
+        attachSettled = true;
+        break;
+      }
+      await sleep(POLL_INTERVAL_MS);
+    }
+    console.log(
+      `attachExistingSession: settled (column reached "in_progress")=${attachSettled}`,
+    );
+    await assertGroupMirror(
+      built,
+      "attachExistingSession",
+      "in_progress",
+      3,
+      violations,
+    );
+    printMutatorVerdict(
+      "attachExistingSession",
+      beforeAttachExisting,
+      violations.length,
+      violations,
+    );
+
+    // --- setup only (applyMarker again): in_progress -> needs_input, via the RESUMED token. ---
+    const beforeFlipBack = violations.length;
+    const needsC = await postHookWithRetry(
+      built,
+      stopBodyWithReason("group-mutator-setup-for-flipBack"),
+      { timeoutMs: RESTART_REPL_TIMEOUT_SETTLE_MS },
+    );
+    console.log(
+      `setup (applyMarker NEEDS_INPUT via the resumed session C): POST /api/hook/claude -> ${needsC.status} after ${needsC.attempts} attempt(s) (expected 204)`,
+    );
+    if (needsC.status !== 204) {
+      violations.push(
+        `setup (applyMarker NEEDS_INPUT via the resumed session C, reaching a flipBack source): POST /api/hook/claude -> ${needsC.status} after ${needsC.attempts} attempt(s), expected 204`,
+      );
+    }
+    await assertGroupMirror(
+      built,
+      "applyMarker (setup for flipBack)",
+      "needs_input",
+      3,
+      violations,
+    );
+
+    // --- 5. flipBack: needs_input -> in_progress, via a real UserPromptSubmit hook POST. ---
+    const flipStatus = await postPromptSubmit(built, activeHookToken(built));
+    console.log(
+      `group-session-guard mutator flipBack: POST /api/hook/claude (UserPromptSubmit) -> ${flipStatus} (expected 204)`,
+    );
+    if (flipStatus !== 204) {
+      violations.push(
+        `flipBack: POST /api/hook/claude (UserPromptSubmit) -> ${flipStatus}, expected 204`,
+      );
+    }
+    await assertGroupMirror(built, "flipBack", "in_progress", 3, violations);
+    printMutatorVerdict(
+      "flipBack",
+      beforeFlipBack,
+      violations.length,
+      violations,
+    );
+  } finally {
+    await cleanupExtraGroupSession(built, sessionCId, violations);
+  }
+
+  const verdict =
+    violations.length === 0
+      ? "PASS"
+      : `FAIL (${violations.length} violation(s))`;
+  console.log(
+    `GROUP-SESSION-GUARD mutators (5/5 driven: moveCardManual, applyMarker, completeStart, attachExistingSession, flipBack): ${verdict}`,
+  );
+  return violations;
+}
+
+/**
+ * Count `groupedMemberError` guard CALL sites in `src/server/routes/cards.route.ts`, freshly
+ * re-read from disk and comment-stripped (both `/* *\/` and `//` styles — {@link
+ * stripCommentsPerLine}, the exact filter 96-02's own census needed once a `//`-commented-out guard
+ * had to be detected), excluding the function's own definition line. This is the count leg of the
+ * route-count sentinel: `checkGroupSessionGuardRoutes` asserts this equals the number of routes it
+ * drives, so a ninth guard added later without a matching driven case fails the check by name.
+ */
+function countGroupedMemberErrorGuardSites() {
+  const file = join(REPO_ROOT, "src", "server", "routes", "cards.route.ts");
+  const stripped = stripCommentsPerLine(readFileSync(file, "utf8"));
+  const wordRe = /(?<![A-Za-z0-9_$])groupedMemberError(?![A-Za-z0-9_$])/g;
+  const sites = [];
+  stripped.forEach((line, idx) => {
+    const matches = [...line.matchAll(wordRe)];
+    if (matches.length === 0) return;
+    if (/function\s+groupedMemberError\s*\(/.test(line)) return;
+    sites.push({ line: idx + 1, count: matches.length, text: line.trim() });
+  });
+  const count = sites.reduce((sum, s) => sum + s.count, 0);
+  return { count, sites };
+}
+
+/** POST `body` to `path(cardId)` on the sandbox, returning `{ status, body }`. */
+async function postCardRoute(built, cardId, path, body) {
+  const res = await fetch(`http://127.0.0.1:${built.port}${path(cardId)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const parsed = await res.json().catch(() => undefined);
+  return { status: res.status, body: parsed };
+}
+
+/**
+ * The eight single-card routes carrying the `groupedMemberError` 409 guard (96-02's own measured
+ * census), each with a WELL-FORMED body for that route — one that reaches PAST the route's own
+ * body-shape validation, so a 400 from a malformed body can never masquerade as the guard firing.
+ * Bodies are chosen so the SAME well-formed request, sent to the fresh non-member control card
+ * (`todo`, no workspace, no sessions), resolves to a NON-409 status through real business logic —
+ * never a status this table has to special-case per card, and never one that requires a full real
+ * saga to reach (`/start`/`/resume`/`/terminal`/`/session` all resolve on their own early
+ * precondition checks against a sessionless, workspaceless card).
+ */
+const GROUP_ROUTE_CASES = [
+  {
+    name: "move",
+    label: "POST /cards/:id/move",
+    path: (id) => `/api/cards/${id}/move`,
+    body: { column: "in_review" },
+  },
+  {
+    name: "start",
+    label: "POST /cards/:id/start",
+    path: (id) => `/api/cards/${id}/start`,
+    body: { extraDirection: "" },
+  },
+  {
+    name: "resume",
+    label: "POST /cards/:id/resume",
+    path: (id) => `/api/cards/${id}/resume`,
+    body: {},
+  },
+  {
+    name: "terminal",
+    label: "POST /cards/:id/terminal",
+    path: (id) => `/api/cards/${id}/terminal`,
+    body: {},
+  },
+  {
+    name: "session",
+    label: "POST /cards/:id/session",
+    path: (id) => `/api/cards/${id}/session`,
+    body: { sessionId: "nonexistent-session-id" },
+  },
+  {
+    name: "open-editor",
+    label: "POST /cards/:id/open-editor",
+    path: (id) => `/api/cards/${id}/open-editor`,
+    body: { editor: "cursor" },
+  },
+  {
+    name: "cleanup",
+    label: "POST /cards/:id/cleanup",
+    path: (id) => `/api/cards/${id}/cleanup`,
+    body: {},
+  },
+  {
+    name: "sync-linear",
+    label: "POST /cards/:id/sync-linear",
+    path: (id) => `/api/cards/${id}/sync-linear`,
+    body: {},
+  },
+];
+
+/**
+ * The ROUTE leg of `--check group-session-guard`: drives all EIGHT {@link GROUP_ROUTE_CASES} against
+ * a real member card (`built.memberAId`) AND a fresh, real, non-member control card (created via a
+ * real `POST /cards`), asserting per route:
+ *
+ * - the member request returns EXACTLY 409, carrying `groupedMemberError`'s own message text
+ *   (`card is grouped under <parentId> — act on the group card`), never merely a 4xx;
+ * - the control request, given the IDENTICAL well-formed body, does NOT return 409 — proving the
+ *   member's 409 came from the group guard specifically, not from a route that refuses everything.
+ *
+ * The `cleanup` case needs the control card in `done` (its own business-rule 409 otherwise fires for
+ * ANY non-Done card, member or not, which would make the control leg indistinguishable from the
+ * guard) — driven there via two real, legal `/move` calls before that one case runs; every other
+ * case is state-insensitive by design (see {@link GROUP_ROUTE_CASES}'s own doc comment).
+ *
+ * Then the ROUTE-COUNT SENTINEL: {@link countGroupedMemberErrorGuardSites} re-measures
+ * `cards.route.ts` fresh from disk and asserts the count equals `GROUP_ROUTE_CASES.length` — the
+ * assertion that makes 96-02's "seven vs eight" correction permanent rather than a one-time fix.
+ */
+async function checkGroupSessionGuardRoutes(built) {
+  const violations = [];
+
+  const control = await createRollbackStartCard(built);
+  console.log(
+    `group-session-guard routes: control (non-member) card = ${control.cardId} (${control.identifier})`,
+  );
+
+  const GROUPED_MEMBER_ERROR_TEXT = `card is grouped under ${built.cardId} — act on the group card`;
+
+  for (const testCase of GROUP_ROUTE_CASES) {
+    if (testCase.name === "cleanup") {
+      const toReview = await postMoveForCard(
+        built,
+        control.cardId,
+        "in_review",
+      );
+      const toDone = await postMoveForCard(built, control.cardId, "done");
+      console.log(
+        `group-session-guard routes: control -> in_review (${toReview.status}) -> done (${toDone.status}), setting up the cleanup case`,
+      );
+      if (toReview.status !== 204 || toDone.status !== 204) {
+        violations.push(
+          `route ${testCase.label}: could not drive the control card to "done" for the cleanup case (in_review=${toReview.status}, done=${toDone.status})`,
+        );
+      }
+    }
+
+    const memberRes = await postCardRoute(
+      built,
+      built.memberAId,
+      testCase.path,
+      testCase.body,
+    );
+    const controlRes = await postCardRoute(
+      built,
+      control.cardId,
+      testCase.path,
+      testCase.body,
+    );
+    console.log(
+      `group-session-guard route [${testCase.name}] ${testCase.label}: member -> ${memberRes.status} (expect 409 groupedMemberError), control -> ${controlRes.status} (expect NOT 409, body=${JSON.stringify(controlRes.body)})`,
+    );
+
+    if (memberRes.status !== 409) {
+      violations.push(
+        `route ${testCase.label}: member card returned ${memberRes.status}, expected EXACTLY 409 (body=${JSON.stringify(memberRes.body)})`,
+      );
+    } else if (memberRes.body?.error !== GROUPED_MEMBER_ERROR_TEXT) {
+      violations.push(
+        `route ${testCase.label}: member card 409 body.error=${JSON.stringify(memberRes.body?.error)}, expected exactly ${JSON.stringify(GROUPED_MEMBER_ERROR_TEXT)}`,
+      );
+    }
+    if (controlRes.status === 409) {
+      violations.push(
+        `route ${testCase.label}: the IDENTICAL well-formed request against the non-member control card ALSO returned 409 (body=${JSON.stringify(controlRes.body)}) — cannot distinguish the group guard firing from a route that refuses everything`,
+      );
+    }
+  }
+
+  const { count: sourceCount, sites } = countGroupedMemberErrorGuardSites();
+  console.log(
+    `group-session-guard sentinel: source guard call sites in cards.route.ts = ${sourceCount}, routes driven by this check = ${GROUP_ROUTE_CASES.length}`,
+  );
+  if (sourceCount !== GROUP_ROUTE_CASES.length) {
+    violations.push(
+      `sentinel: cards.route.ts carries ${sourceCount} groupedMemberError guard call site(s) but this check drives ${GROUP_ROUTE_CASES.length} routes — a route was added or removed without a matching case here (sites: ${JSON.stringify(sites)})`,
+    );
+  }
+
+  const verdict =
+    violations.length === 0
+      ? "PASS"
+      : `FAIL (${violations.length} violation(s))`;
+  console.log(
+    `GROUP-SESSION-GUARD routes (${GROUP_ROUTE_CASES.length}/${GROUP_ROUTE_CASES.length} driven, sentinel ${sourceCount}==${GROUP_ROUTE_CASES.length}): ${verdict}`,
+  );
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -12451,6 +13276,12 @@ const CHECKS = {
     withFixture("parity-recovery", checkParityRecovery, PARITY_FIXTURE),
   "parity-moves": () =>
     withFixture("parity-moves", checkParityMoves, PARITY_FIXTURE),
+  "group-session-guard": () =>
+    withFixture(
+      "group-session-guard",
+      checkGroupSessionGuard,
+      GROUP_SESSION_FIXTURE,
+    ),
 };
 
 /**
