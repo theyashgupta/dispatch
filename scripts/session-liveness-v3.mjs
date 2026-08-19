@@ -406,6 +406,111 @@ const SECOND_SESSION_FIXTURE = {
   realSaga: true,
 };
 
+const PARITY_SANDBOX_PORT = 47867;
+
+/**
+ * A real ticket identifier the actual start saga will consume, following
+ * {@link SECOND_SESSION_IDENTIFIER}'s own PID-suffixed idiom — doubles as {@link PARITY_FIXTURE}'s
+ * tmux namespace (`dsp-<identifier>`) so a leaked sibling from a prior failed run is still caught
+ * by {@link assertPreflightClean}'s generic prefix filter with no change to that function.
+ */
+const PARITY_IDENTIFIER = `ZZ96${process.pid}-1`;
+
+/**
+ * `KEEP-02`'s single merged fixture (96-CONTEXT.md's "one merged profile, not three
+ * sub-profiles" decision): the one profile carrying all three properties no prior profile ever
+ * combined — `sessionKeys: ["a"]` (N=1: {@link SINGLE_SESSION_FIXTURE}'s own property;
+ * `redactCard` emits `sessionCount`/`sessionSummaries` only at >= 2, so N=1 is a structurally
+ * different subject, never a two-session fixture with one participant idle), `realSaga: true`
+ * ({@link SECOND_SESSION_FIXTURE}'s property — a genuine `POST /start` through the real
+ * orchestrator, needed for `KEEP-02` rows 1/2/8), and `worktrees: true` ({@link WORKTREE_FIXTURE}'s
+ * property — a real, git-registered worktree, needed for rows 10/11's teardown).
+ *
+ * The card is seeded WITH ZERO SESSIONS, not with session 1 pre-built the way
+ * {@link standUpRealSagaFixture}'s existing branch pre-builds {@link SECOND_SESSION_FIXTURE}'s own
+ * session 1: {@link standUpRealSagaFixture} branches on `built.worktrees` (true for this profile
+ * only) to seed a sessionless card and drive session 1 into existence through one real
+ * `POST /cards/:id/start` (no `newSession`) — the exact request a card's very first "Start" click
+ * sends. This fixture's own stand-up therefore IS row 1's (start) exercise, unavoidably run before
+ * any check against it can proceed, rather than a separate row a later check has to remember to
+ * drive.
+ *
+ * **The two flags compose without any conflict, and no double-creation is possible.** `realSaga`
+ * and `worktrees` were never set together before this profile, but they need no new arbitration:
+ * `standUpFixture` branches on `realSaga` FIRST and returns immediately into
+ * {@link standUpRealSagaFixture}, which never once reads `built.worktrees` for the ORIGINAL
+ * (non-`worktrees`) branch it keeps unchanged for {@link SECOND_SESSION_FIXTURE} — so setting
+ * `worktrees: true` cannot layer a second, redundant worktree-creation path onto the real-saga
+ * path; it can only SELECT the alternate `worktrees`-branch this profile introduces. Inside that
+ * branch, the ONLY worktree creation is the real saga's own "creating worktrees" step
+ * (`steps.ts`) — there is no `seedFixtureRepo`-plus-manual-`worktreeAddNewBranch` step running
+ * ahead of it the way {@link standUpFixture}'s non-real-saga `worktrees` branch has, so nothing
+ * competes with the real saga to create the SAME worktree twice. Teardown is symmetric:
+ * {@link tearDownFixture} branches on `realSaga` first and returns into
+ * {@link tearDownRealSagaFixture}, which ALREADY discovers and removes every worktree via
+ * `git worktree list --porcelain` (never a hardcoded path list) regardless of `built.worktrees` —
+ * that discovery-based removal is what {@link SECOND_SESSION_FIXTURE}'s own session-2 worktree
+ * already relies on, so this profile needs no teardown change either. Every existing profile's own
+ * stand-up/tear-down code path is therefore untouched byte-for-byte; this profile only adds ONE
+ * new conditional branch inside {@link standUpRealSagaFixture} that nothing else can reach.
+ * @remarks `sessionKeys`' LENGTH stays load-bearing here exactly as it is on every other profile
+ * (this file's own header on {@link SESSION_FIELD_BY_KEY}): the default single-key array creates
+ * ONLY session 1 through the real first-start saga described above, but
+ * {@link standUpParityFixtureSession1} drives one additional real `POST /start {newSession:true}`
+ * per key beyond the first, so a break that widens `sessionKeys` to `["a", "b"]` genuinely
+ * produces a real two-session card — never a documentary flag with no runtime effect — which is
+ * what makes this profile's own N=1 claim break-provable rather than merely asserted.
+ */
+const PARITY_FIXTURE = {
+  port: PARITY_SANDBOX_PORT,
+  tmuxPrefix: `dsp-${PARITY_IDENTIFIER}`,
+  sessionKeys: ["a"],
+  identifier: PARITY_IDENTIFIER,
+  realSaga: true,
+  worktrees: true,
+};
+
+const GROUP_SESSION_SANDBOX_PORT = 47868;
+
+const GROUP_SESSION_TMUX_PREFIX = `dsp96g-${process.pid}-`;
+
+/**
+ * The `KEEP-03` subject: a group PARENT card owning two or more REAL sessions (`sessionKeys`
+ * length >= 2, the same load-bearing-length convention every profile shares) that ALSO owns two
+ * member cards — the shape no existing profile comes close to (none seeds a group card at all,
+ * `96-RESEARCH.md` `## 3`). A parent owning exactly one session would prove nothing about
+ * `KEEP-03`: the requirement's own wording is "a group card owning N sessions must not collide
+ * with the existing members concept," and a one-session group card behaved this way before this
+ * milestone too (`96-RESEARCH.md` Pitfall 3) — only a genuinely multi-session parent forces the
+ * multi-session shape and the members concept to actually coexist.
+ *
+ * `group: true` is the flag {@link standUpFixture} branches on to reach
+ * {@link standUpGroupSessionFixture} instead of the generic two-session body every other non-
+ * real-saga profile above shares; no other profile sets it, so their own paths through
+ * {@link standUpFixture} are unchanged. The parent is seeded in `in_progress` (matching
+ * {@link TWO_SESSION_FIXTURE}/{@link WORKTREE_FIXTURE}'s own precedent for a card with real,
+ * already-live sessions) rather than `todo`: `96-RESEARCH.md`'s Phase 90 `in_progress` pitfall
+ * (`reconcileSessions`'s dead-tmux marking producing a false mismatch) is an ORDERING hazard —
+ * real tmux/ttyd must exist before the fixture's own final boot runs `reconcileSessions` — and
+ * {@link standUpGroupSessionFixture} follows the exact same tmux-then-ttyd-then-boot ordering
+ * {@link standUpFixture}'s own remarks document, so the pitfall does not recur here regardless of
+ * column. The two member cards stay in `todo` (no sessions of their own), matching
+ * `createGroupCard`'s own real-mint eligibility shape for an ordinary member.
+ * @remarks The member linkage is derived FROM the parent's own `memberIds`, not hardcoded
+ * independently of it: {@link standUpGroupSessionFixture} loops over `parent.memberIds` to decide
+ * which cards get seeded with `groupId` pointing at the parent, the same relationship the real
+ * server's own `membersOf` (`board.store.ts:1144`, a `groupId === parentId` filter) depends on.
+ * This is what makes Break 2 (dropping `memberIds` from the seeded parent) a REAL break: with an
+ * empty `memberIds`, the loop seeds no `groupId`-linked member at all, so `membersOf` genuinely
+ * returns zero — never a fixture that reports a healthy group over a link that was never real.
+ */
+const GROUP_SESSION_FIXTURE = {
+  port: GROUP_SESSION_SANDBOX_PORT,
+  tmuxPrefix: GROUP_SESSION_TMUX_PREFIX,
+  sessionKeys: ["a", "b"],
+  group: true,
+};
+
 /**
  * Ceiling for {@link waitForSagaSettled}'s poll of the real start saga: the stub `claude`'s own
  * REPL-ready line prints in milliseconds, but `git worktree add` on the throwaway repo plus
@@ -1397,11 +1502,20 @@ function assertBuilt() {
  * @remarks Session 2 is deliberately NOT created here: it is created by the checks themselves,
  * driving the real `POST /cards/:id/start` route ({@link startSecondSession}) against the server
  * booted at the end of this function — that is the entire point of this fixture shape.
+ * @remarks (Plan 96-03) When `built.worktrees` is set ({@link PARITY_FIXTURE} only), this function
+ * hands off entirely to {@link standUpParityFixtureSession1} instead of running the branch below —
+ * see {@link PARITY_FIXTURE}'s own doc comment for why the two flags compose without conflict.
+ * {@link SECOND_SESSION_FIXTURE} never sets `worktrees`, so its own path through this function is
+ * byte-for-byte unchanged.
  */
 async function standUpRealSagaFixture(built) {
   const warmup = bootServer(built.home);
   await waitForReady(built.port);
   await killAndWait(warmup.child);
+
+  if (built.worktrees) {
+    return standUpParityFixtureSession1(built);
+  }
 
   built.tmux.a = `dsp-${built.identifier}`;
   await tmuxNewSession(built.tmux.a, built.home);
@@ -1500,8 +1614,155 @@ async function standUpRealSagaFixture(built) {
   console.log(`standup (real-saga): sandbox server ready on :${built.port}`);
 }
 
+/**
+ * {@link waitForSagaSettled}'s N=1 counterpart: polls until a FIRST start (no `newSession`) has
+ * settled — `provisioningStep` clear, and either the flat `tmuxSession` mirror `completeStart`
+ * projects onto the wire card has landed, or the saga recorded a `startError`. Written as its own
+ * function rather than widening {@link waitForSagaSettled}: that function's settle predicate is
+ * deliberately N>=2-shaped (`(card.sessionCount ?? 1) >= 2`), and a shared predicate accepting
+ * either shape could mistake an N=1 settle for row 8/9's own N>=2 subject, or vice versa.
+ */
+async function waitForFirstStartSettled(built, { timeoutMs }) {
+  const deadline = Date.now() + timeoutMs;
+  let card;
+  while (Date.now() < deadline) {
+    card = await fetchFixtureCard(built);
+    const settled =
+      card != null &&
+      card.provisioningStep == null &&
+      (card.tmuxSession != null || card.startError != null);
+    if (settled) return { card, timedOut: false };
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return { card, timedOut: true };
+}
+
+/**
+ * Session-1 stand-up for {@link PARITY_FIXTURE} ONLY — reached exclusively via
+ * {@link standUpRealSagaFixture}'s `built.worktrees` branch, which no other fixture profile can
+ * enter. Seeds a card carrying ZERO sessions with its `workspace` already resolved (so the real
+ * route's `hasWorkspacePayload` body-validation branch is never exercised — this fixture is about
+ * the SAGA, not the route's own body-shape check), boots the sandbox server, then drives ONE real
+ * `POST /cards/:id/start` carrying no `newSession` flag — the exact request a card's very first
+ * "Start" click sends. `start-session.ts`'s own first-start branch names the session after
+ * `card.identifier` (`sessionName = card.identifier` when `wantsNewSession` is false), so the
+ * resulting tmux name, workspace path and branch are identical in SHAPE to
+ * {@link standUpRealSagaFixture}'s own manually-built session 1 for {@link SECOND_SESSION_FIXTURE}
+ * — the only difference is WHO creates them: the real saga here, this function there.
+ */
+async function standUpParityFixtureSession1(built) {
+  await seedFixtureRepo(built);
+  console.log(
+    `standup (real-saga, first-start): fixture repo ready — ${built.repoPath} (base ${built.repoBase})`,
+  );
+
+  const now = new Date().toISOString();
+  const card = {
+    id: built.cardId,
+    issueId: `${built.cardId}-issue`,
+    identifier: built.identifier,
+    title:
+      "session-liveness-v3 parity fixture card — 0 sessions, real first start",
+    description: null,
+    priority: 3,
+    column: "todo",
+    updatedAt: now,
+    workspace: {
+      folder: join(built.home, "repos"),
+      repos: [{ path: built.repoPath, base: built.repoBase }],
+    },
+  };
+  seedFixtureCard(built.home, card);
+
+  built.pathPrefix = writeStubClaudeBinary(built.home);
+  console.log(
+    `standup (real-saga, first-start): stub claude planted — ${join(built.pathPrefix, "claude")}`,
+  );
+
+  built.server = bootServer(built.home, { pathPrefix: built.pathPrefix });
+  await waitForReady(built.port);
+  console.log(
+    `standup (real-saga, first-start): sandbox server ready on :${built.port}`,
+  );
+
+  const res = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${built.cardId}/start`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ extraDirection: "" }),
+    },
+  );
+  const startBody = await res.json().catch(() => undefined);
+  if (res.status !== 202) {
+    throw new Error(
+      `standup (real-saga, first-start): POST /start returned ${res.status}, expected 202 (body=${JSON.stringify(startBody)})`,
+    );
+  }
+
+  const { card: settled, timedOut } = await waitForFirstStartSettled(built, {
+    timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+  });
+  if (timedOut) {
+    throw new Error(
+      `standup (real-saga, first-start): saga did not settle within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (last observed card=${JSON.stringify(settled)})`,
+    );
+  }
+  if (settled?.startError != null) {
+    throw new Error(
+      `standup (real-saga, first-start): saga recorded a startError instead of session 1: ${JSON.stringify(settled.startError)}`,
+    );
+  }
+
+  built.tmux.a = settled.tmuxSession;
+  built.sessionA = { id: settled.activeSession?.id };
+  built.session1WorkspacePath = join(
+    built.home,
+    "workspaces",
+    built.identifier,
+  );
+  built.session1WorktreePath = join(built.session1WorkspacePath, "alpha");
+  built.session1Branch = built.identifier;
+  console.log(
+    `standup (real-saga, first-start): session 1 live via real saga — tmux=${built.tmux.a} worktree=${built.session1WorktreePath}`,
+  );
+
+  // Every key beyond the first drives one more real `POST /start {newSession:true}` — see
+  // PARITY_FIXTURE's own `@remarks` on why `sessionKeys`' length stays load-bearing. The default
+  // profile's single-key array means this loop never runs in normal use; it exists so a break that
+  // widens `sessionKeys` genuinely produces a real two-session card.
+  for (const key of built.sessionKeys.slice(1)) {
+    const { status, body } = await startSecondSession(built, {
+      newSession: true,
+    });
+    if (status !== 202) {
+      throw new Error(
+        `standup (real-saga, first-start): POST /start {newSession:true} for extra key "${key}" returned ${status}, expected 202 (body=${JSON.stringify(body)})`,
+      );
+    }
+    const { card: extraSettled, timedOut: extraTimedOut } =
+      await waitForSagaSettled(built, {
+        timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+      });
+    if (extraTimedOut) {
+      throw new Error(
+        `standup (real-saga, first-start): extra session for key "${key}" did not settle within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (last observed card=${JSON.stringify(extraSettled)})`,
+      );
+    }
+    if (extraSettled?.startError != null) {
+      throw new Error(
+        `standup (real-saga, first-start): extra session for key "${key}" recorded a startError: ${JSON.stringify(extraSettled.startError)}`,
+      );
+    }
+    console.log(
+      `standup (real-saga, first-start): extra session for key "${key}" live — sessionCount now ${extraSettled.sessionCount}`,
+    );
+  }
+}
+
 async function standUpFixture(built) {
   if (built.realSaga) return standUpRealSagaFixture(built);
+  if (built.group) return standUpGroupSessionFixture(built);
   const warmup = bootServer(built.home);
   await waitForReady(built.port);
   await killAndWait(warmup.child);
@@ -1631,6 +1892,118 @@ async function standUpFixture(built) {
   built.server = bootServer(built.home);
   await waitForReady(built.port);
   console.log(`standup: sandbox server ready on :${built.port}`);
+}
+
+/**
+ * Stand up {@link GROUP_SESSION_FIXTURE}: real tmux+ttyd for every `sessionKeys` entry, exactly the
+ * same ordering {@link standUpFixture}'s own remarks document (warmup boot to create the sqlite
+ * schema FIRST, then real tmux/ttyd, THEN the fixture cards, THEN the real boot the checks run
+ * against) — so the same Phase-90 `in_progress`-ordering pitfall {@link GROUP_SESSION_FIXTURE}'s own
+ * doc comment names cannot recur here either. Seeds the PARENT card carrying every session record
+ * plus `source: "group"` and `memberIds`, THEN seeds one member card per id in
+ * `parent.memberIds` (never independently of it — see {@link GROUP_SESSION_FIXTURE}'s `@remarks`),
+ * all before the one real boot at the end. No worktrees, no real saga: this fixture's only subject
+ * is the group/member relationship and the multi-session shape on the parent, so it reuses no
+ * worktree or real-saga machinery.
+ */
+async function standUpGroupSessionFixture(built) {
+  const warmup = bootServer(built.home);
+  await waitForReady(built.port);
+  await killAndWait(warmup.child);
+
+  for (const key of built.sessionKeys) {
+    built.tmux[key] = `${built.tmuxPrefix}${key}`;
+    await tmuxNewSession(built.tmux[key], built.home);
+  }
+  const live = await tmuxListSessionNames();
+  const missing = built.sessionKeys
+    .map((key) => built.tmux[key])
+    .filter((name) => !live.includes(name));
+  if (missing.length > 0) {
+    throw new Error(
+      `group fixture tmux sessions did not all come up: missing ${missing.join(", ")}, live=${JSON.stringify(live)}`,
+    );
+  }
+  console.log(
+    `standup (group): tmux sessions live — ${built.sessionKeys.map((key) => built.tmux[key]).join(", ")}`,
+  );
+
+  const handles = {};
+  for (const key of built.sessionKeys) {
+    handles[key] = { id: randomUUID(), token: randomBytes(32).toString("hex") };
+    built[SESSION_FIELD_BY_KEY[key]] = handles[key];
+  }
+  for (const key of built.sessionKeys) {
+    built.ttyd[key] = await spawnTtyd(built.tmux[key], handles[key].id);
+  }
+  for (const key of built.sessionKeys) {
+    await waitForPortListening(built.ttyd[key].port);
+  }
+  console.log(
+    `standup (group): ttyd ports LISTENING — ${built.sessionKeys.map((key) => `${key}=${built.ttyd[key].port}`).join(", ")}`,
+  );
+
+  const now = new Date().toISOString();
+  const records = built.sessionKeys.map((key) => ({
+    id: handles[key].id,
+    createdAt: now,
+    updatedAt: now,
+    tmuxSession: built.tmux[key],
+    ttydPort: built.ttyd[key].port,
+    hookToken: handles[key].token,
+    workspacePath: join(
+      built.home,
+      "workspaces",
+      WORKSPACE_SUFFIX_BY_SESSION_KEY[key] ?? `GROUP-96-${key}`,
+    ),
+  }));
+  const [activeRecord] = records;
+
+  built.memberAId = `${built.cardId}-member-a`;
+  built.memberBId = `${built.cardId}-member-b`;
+  const memberIds = [built.memberAId, built.memberBId];
+
+  const parent = {
+    id: built.cardId,
+    issueId: `${built.cardId}-issue`,
+    identifier: "GROUP-961",
+    title: `session-liveness-v3 group fixture parent — ${records.length} real sessions, ${memberIds.length} members`,
+    description: null,
+    priority: 0,
+    column: "in_progress",
+    updatedAt: now,
+    source: "group",
+    memberIds,
+    sessions: records,
+    activeSessionId: activeRecord.id,
+    tmuxSession: activeRecord.tmuxSession,
+    ttydPort: activeRecord.ttydPort,
+    hookToken: activeRecord.hookToken,
+    workspacePath: activeRecord.workspacePath,
+  };
+  seedFixtureCard(built.home, parent);
+
+  const memberTitleByOrdinal = { 0: "A", 1: "B" };
+  (parent.memberIds ?? []).forEach((id, i) => {
+    seedFixtureCard(built.home, {
+      id,
+      issueId: `${id}-issue`,
+      identifier: `GROUP-96${2 + i}`,
+      title: `session-liveness-v3 group fixture member ${memberTitleByOrdinal[i] ?? i}`,
+      description: null,
+      priority: 3,
+      column: "todo",
+      updatedAt: now,
+      groupId: built.cardId,
+    });
+  });
+  console.log(
+    `standup (group): parent=${built.cardId} (memberIds=[${memberIds.join(", ")}]) — ${(parent.memberIds ?? []).length} member card(s) seeded`,
+  );
+
+  built.server = bootServer(built.home);
+  await waitForReady(built.port);
+  console.log(`standup (group): sandbox server ready on :${built.port}`);
 }
 
 /**
@@ -1945,6 +2318,7 @@ async function withFixture(label, fn, profile = TWO_SESSION_FIXTURE) {
     sessionKeys: profile.sessionKeys,
     worktrees: profile.worktrees === true,
     realSaga: profile.realSaga === true,
+    group: profile.group === true,
     identifier: profile.identifier,
     tmux: {},
     ttyd: {},
@@ -9584,6 +9958,201 @@ async function checkInheritDepth(built) {
   return violations;
 }
 
+/** `GET /api/cards/:id` — the single-card fetch, `{ card, members }`, `members` populated only for `source: "group"`. */
+async function fetchCardById(built, id) {
+  const res = await fetch(`http://127.0.0.1:${built.port}/api/cards/${id}`);
+  const body = await res.json().catch(() => undefined);
+  return { status: res.status, body };
+}
+
+/**
+ * `--check parity-fixture` (Plan 96-03, Phase 96 Wave 0): proves {@link PARITY_FIXTURE} and
+ * {@link GROUP_SESSION_FIXTURE} each stand up and tear down against a real server the way they
+ * claim to, following {@link checkSecondStartRollback}'s own two-`withFixture`-calls-in-one-check
+ * shape — this is not a `KEEP-02`/`KEEP-03` verdict check itself (those are later plans' own
+ * `--check` modes measured against these two profiles), only the fixtures' own self-proof.
+ */
+async function checkParityFixture() {
+  const violations = [];
+  violations.push(
+    ...(await withFixture(
+      "parity-fixture-n1",
+      checkParityFixtureN1,
+      PARITY_FIXTURE,
+    )),
+  );
+  violations.push(
+    ...(await withFixture(
+      "parity-fixture-group",
+      checkParityFixtureGroup,
+      GROUP_SESSION_FIXTURE,
+    )),
+  );
+  return violations;
+}
+
+/**
+ * The {@link PARITY_FIXTURE} half of `--check parity-fixture`: the card owns exactly one real
+ * session brought up entirely through the real first-start saga, a real ttyd answers it, a real
+ * git worktree is registered for it, and the wire payload carries neither `sessionCount` nor
+ * `sessionSummaries` — read via `Object.hasOwn`, never a nullish test (`T-96-09`,
+ * `95-06`'s own finding restated as an acceptance criterion here): `JSON.stringify` drops an
+ * `undefined`-valued key entirely, so only `Object.hasOwn` can distinguish "genuinely absent" from
+ * "present and undefined".
+ */
+async function checkParityFixtureN1(built) {
+  const violations = [];
+
+  const persisted = readCard(built.dbPath, built.cardId);
+  const sessionCount = persisted?.sessions?.length ?? 0;
+  if (sessionCount !== 1) {
+    violations.push(
+      `parity-fixture-n1: persisted card owns ${sessionCount} session(s), expected exactly 1 (sessions=${JSON.stringify(persisted?.sessions)})`,
+    );
+  }
+
+  const expectedTmux = `dsp-${built.identifier}`;
+  if (built.tmux.a !== expectedTmux) {
+    violations.push(
+      `parity-fixture-n1: session 1's recorded tmux name ${built.tmux.a} !== the unsuffixed expected name ${expectedTmux}`,
+    );
+  }
+  const live = await tmuxListSessionNames();
+  if (!live.includes(expectedTmux)) {
+    violations.push(
+      `parity-fixture-n1: session 1's tmux name ${expectedTmux} is not a real LIVE tmux session: ${JSON.stringify(live)}`,
+    );
+  }
+  console.log(
+    `parity-fixture-n1: session count=${sessionCount}, tmux=${built.tmux.a} (live=${live.includes(expectedTmux)})`,
+  );
+
+  if (built.sessionA?.id == null) {
+    violations.push(
+      `parity-fixture-n1: could not resolve session 1's id from the settled saga — cannot bring its terminal up`,
+    );
+    return violations;
+  }
+  const readyResult = await ensureSessionTerminalReady(
+    built,
+    built.sessionA.id,
+  );
+  if (!readyResult.ok) {
+    violations.push(
+      `parity-fixture-n1: could not bring session 1's terminal up — ${readyResult.reason}`,
+    );
+  } else {
+    const marker = `parity-n1-${randomBytes(4).toString("hex")}`;
+    await writePaneMarker(built.tmux.a, built.home, marker);
+    const read = await readPaneThroughProxy({
+      port: built.port,
+      idSegment: built.sessionA.id,
+      expect: marker,
+      timeoutMs: PROXY_READ_TIMEOUT_MS,
+    });
+    console.log(
+      `parity-fixture-n1: real ttyd answered through the proxy — found marker=${read.text.includes(marker)}`,
+    );
+    if (!read.text.includes(marker)) {
+      violations.push(
+        `parity-fixture-n1: real ttyd did not echo marker "${marker}" through the proxy`,
+      );
+    }
+  }
+
+  const registered = await gitWorktreeListRegistered(built.repoPath);
+  const wtRealpath = existsSync(built.session1WorktreePath)
+    ? realpathSync(built.session1WorktreePath)
+    : built.session1WorktreePath;
+  if (!registered.has(wtRealpath)) {
+    violations.push(
+      `parity-fixture-n1: session 1 worktree not registered in \`git worktree list\`: ${built.session1WorktreePath} (registered=${[...registered].join(", ")})`,
+    );
+  }
+  console.log(
+    `parity-fixture-n1: worktree registered=${registered.has(wtRealpath)} — ${built.session1WorktreePath}`,
+  );
+
+  const wireCard = await fetchFixtureCard(built);
+  if (wireCard == null) {
+    violations.push(
+      `parity-fixture-n1: card ${built.cardId} not found on GET /api/board`,
+    );
+    return violations;
+  }
+  if (Object.hasOwn(wireCard, "sessionCount")) {
+    violations.push(
+      `parity-fixture-n1: wire card carries "sessionCount" (${JSON.stringify(wireCard.sessionCount)}) at N=1 — must be ABSENT, not merely falsy`,
+    );
+  }
+  if (Object.hasOwn(wireCard, "sessionSummaries")) {
+    violations.push(
+      `parity-fixture-n1: wire card carries "sessionSummaries" (${JSON.stringify(wireCard.sessionSummaries)}) at N=1 — must be ABSENT, not merely falsy`,
+    );
+  }
+  console.log(
+    `parity-fixture-n1: wire card hasOwn(sessionCount)=${Object.hasOwn(wireCard, "sessionCount")} hasOwn(sessionSummaries)=${Object.hasOwn(wireCard, "sessionSummaries")}`,
+  );
+
+  return violations;
+}
+
+/**
+ * The {@link GROUP_SESSION_FIXTURE} half of `--check parity-fixture`: the parent owns >= 2 real
+ * sessions AND is linked to both member cards through the server's OWN `membersOf` (read via a
+ * real `GET /cards/:id`, never by re-reading the seed object — `T-96-08`), and the parent's wire
+ * payload DOES carry `sessionCount` >= 2 (the multi-session shape and the members concept
+ * genuinely coexisting, `96-RESEARCH.md` Pitfall 3).
+ */
+async function checkParityFixtureGroup(built) {
+  const violations = [];
+
+  const persisted = readCard(built.dbPath, built.cardId);
+  const sessionCount = persisted?.sessions?.length ?? 0;
+  if (sessionCount < 2) {
+    violations.push(
+      `parity-fixture-group: parent owns ${sessionCount} session(s), expected >= 2 (sessions=${JSON.stringify(persisted?.sessions)})`,
+    );
+  }
+
+  const { status, body } = await fetchCardById(built, built.cardId);
+  if (status !== 200) {
+    violations.push(
+      `parity-fixture-group: GET /cards/${built.cardId} -> ${status}, expected 200 (body=${JSON.stringify(body)})`,
+    );
+    return violations;
+  }
+  const memberIds = (body?.members ?? []).map((m) => m.id).sort();
+  const expectedIds = [built.memberAId, built.memberBId].sort();
+  console.log(
+    `parity-fixture-group: GET /cards/${built.cardId} -> 200, real membersOf() returned ids=${JSON.stringify(memberIds)}`,
+  );
+  if (JSON.stringify(memberIds) !== JSON.stringify(expectedIds)) {
+    violations.push(
+      `parity-fixture-group: real membersOf() returned ${JSON.stringify(memberIds)}, expected exactly ${JSON.stringify(expectedIds)}`,
+    );
+  }
+
+  const wireCard = await fetchFixtureCard(built);
+  if (wireCard == null) {
+    violations.push(
+      `parity-fixture-group: card ${built.cardId} not found on GET /api/board`,
+    );
+    return violations;
+  }
+  const wireSessionCount = wireCard.sessionCount;
+  console.log(
+    `parity-fixture-group: wire card sessionCount=${JSON.stringify(wireSessionCount)}`,
+  );
+  if (!(Object.hasOwn(wireCard, "sessionCount") && wireSessionCount >= 2)) {
+    violations.push(
+      `parity-fixture-group: wire card must carry "sessionCount" >= 2 at N>=2, got ${JSON.stringify(wireSessionCount)} (hasOwn=${Object.hasOwn(wireCard, "sessionCount")})`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -9658,6 +10227,7 @@ const CHECKS = {
     ),
   "inherit-depth": () =>
     withFixture("inherit-depth", checkInheritDepth, SECOND_SESSION_FIXTURE),
+  "parity-fixture": checkParityFixture,
 };
 
 /**
