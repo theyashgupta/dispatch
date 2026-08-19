@@ -1922,6 +1922,17 @@ class BoardStore extends EventEmitter {
    * already moved even if a later saga step fails and the reservation is rolled back — a retry
    * reserves a FRESH ordinal rather than colliding with the failed attempt's surviving branch
    * (`D-ROLLBACK`). The counter never decrements anywhere in the codebase.
+   * @remarks The reserved record inherits the ACTIVE session's `workspace` (the ticket's source
+   * repo/base pairs), which is identical across a ticket's sessions — only `workspacePath`, the
+   * per-session worktree parent, differs, and `completeStart` sets that. Without this inheritance
+   * the sibling never receives a `workspace` at all: `setCardWorkspace` writes through
+   * `setActiveSession` with no explicit target, so it lands on whichever session is active, and a
+   * reserved sibling is deliberately NOT active yet (`D-NOPROMOTE-ON-RESERVE`), while
+   * `completeStart`'s patch carries only the four `SessionFields`. The two consequences are both
+   * silent: `artifact-detect` gates its probe on `rec.workspace != null`, so the sibling's PRs
+   * would never be probed (defeating `ARTIFACT-01` for the exact N>=2 case it exists for), and the
+   * closing six-field mirror re-derives `card.workspace` from the newly promoted record, wiping the
+   * card's own repo list that `cleanupWorkspace` reads.
    * @see docs/ARCHITECTURE.md#session-projection-chokepoint
    */
   reserveNewSession(
@@ -1949,9 +1960,10 @@ class BoardStore extends EventEmitter {
       const ordinal = card.nextSessionOrdinal ?? 2;
       card.nextSessionOrdinal = ordinal + 1;
       const sessionName = `${identifier}-${ordinal}`;
+      const parent = card.sessions?.find((s) => s.id === card.activeSessionId);
       const sessionId = this.setActiveSession(
         card,
-        { branch: sessionName },
+        { branch: sessionName, workspace: parent?.workspace },
         undefined,
         false,
         true,
