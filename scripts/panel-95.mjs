@@ -511,9 +511,22 @@ function makeFixtures(n1CleanWorkspacePath) {
   // 1/2/3 in the order the fixture intends. `builtFrom` is seeded on the PERSISTED session rows —
   // never `parentOrdinal` directly on the wire — so the server's own resolver is what this
   // instrument measures, not the fixture's own claim about itself.
-  const c1 = makeInertSession("chain-1", 9000);
-  const c2 = makeInertSession("chain-2", 6000, { builtFrom: c1.id });
-  const c3 = makeInertSession("chain-3", 3000, { builtFrom: c2.id });
+  // Every session in the chain carries its own workspacePath — `switchSession` re-mirrors the
+  // CARD's flat workspacePath from whichever session becomes active (`withActiveMirror`'s own
+  // shape), so a session left with `workspacePath: undefined` would silently WIPE the card-level
+  // value on switch and hide `StartAnotherSessionButton` — live-caught in this plan's own
+  // development (a "Restart" button appearing where "Start another session" was expected).
+  const c1 = makeInertSession("chain-1", 9000, {
+    workspacePath: n1CleanWorkspacePath,
+  });
+  const c2 = makeInertSession("chain-2", 6000, {
+    builtFrom: c1.id,
+    workspacePath: n1CleanWorkspacePath,
+  });
+  const c3 = makeInertSession("chain-3", 3000, {
+    builtFrom: c2.id,
+    workspacePath: n1CleanWorkspacePath,
+  });
   const chain = baseCard(CHAIN_ID, CHAIN, {
     column: "in_progress",
     groupId: undefined,
@@ -773,6 +786,104 @@ async function evalReport(cdp, sessionId, violations, label, expr) {
     violations.push(`${label}: ${err.message}`);
     return null;
   }
+}
+
+/**
+ * Click a session pill by its visible ordinal digit, via a REAL click on the shipped `IconButton`
+ * (never a store poke) — `switchSession`'s own optimistic `aria-pressed` flip is what this polls
+ * for, so the read that follows is against a genuinely re-rendered DOM.
+ */
+async function clickSessionPill(cdp, sessionId, ordinal) {
+  const ordinalStr = JSON.stringify(String(ordinal));
+  await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+      var group = aside ? aside.querySelector('[role="group"][aria-label="Sessions"]') : null;
+      if (!group) throw new Error("panel95: sessions group not found");
+      var btns = Array.prototype.slice.call(group.querySelectorAll("button"));
+      var target = btns.find(function (b) { return b.textContent.trim() === ${ordinalStr}; });
+      if (!target) throw new Error("panel95: session pill " + ${ordinalStr} + " not found");
+      target.click();
+      return true;
+    })()`,
+  );
+  const probe = `(function () {
+    var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+    var group = aside ? aside.querySelector('[role="group"][aria-label="Sessions"]') : null;
+    if (!group) return false;
+    var btns = Array.prototype.slice.call(group.querySelectorAll("button"));
+    var target = btns.find(function (b) { return b.textContent.trim() === ${ordinalStr}; });
+    return target != null && target.getAttribute("aria-pressed") === "true";
+  })()`;
+  const deadline = Date.now() + RENDER_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (await evalValue(cdp, sessionId, probe)) return;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    `session pill ${ordinal} never went aria-pressed=true within ${RENDER_TIMEOUT_MS}ms`,
+  );
+}
+
+/**
+ * Read `[role="group"][aria-label="Sessions"]` and its sibling caption `<span>`, structurally —
+ * `group.parentElement` is `SessionSwitcher`'s OWN new outer wrapper (plan 95-04's addition), so the
+ * caption (a direct child of that wrapper, sibling of `group`) is found via
+ * `wrapper.querySelector(':scope > span')`, never a positional/text-content-first guess. Returns
+ * `null` structurally at every level a node is absent, never a false geometry read.
+ */
+const FIND_SWITCHER_SRC = `
+  function panel95FindSwitcher() {
+    var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+    if (!aside) return null;
+    var group = aside.querySelector('[role="group"][aria-label="Sessions"]');
+    if (!group) return { group: null, wrapper: null, caption: null };
+    var wrapper = group.parentElement;
+    var caption = wrapper ? wrapper.querySelector(":scope > span") : null;
+    return { group: group, wrapper: wrapper, caption: caption };
+  }
+`;
+
+/**
+ * Criterion 7's row-height read, paired with a structural existence assertion on BOTH the row node
+ * and the caption (proving the addition, not just its absence, costs zero height). `mode: "button"`
+ * resolves the row via the button's own parent (StartAnotherSessionButton renders its `<Button>` as
+ * a DIRECT child of the row div, unchanged by plan 95-04). `mode: "switcher"` must walk up TWO
+ * levels from `group` — `group.parentElement` is `SessionSwitcher`'s OWN new outer wrapper, not the
+ * row (see this file's header, TRAP 3).
+ */
+function geometryReadExpr(mode) {
+  return `${FIND_SWITCHER_SRC}
+  (function () {
+    var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+    var s = panel95FindSwitcher();
+    var captionPresent = s != null && s.caption != null;
+    var rowEl = null;
+    var rowFound = false;
+    if (${JSON.stringify(mode)} === "button") {
+      // Below the 520px narrow-panel breakpoint, StartAnotherSessionButton hides its text label
+      // and carries the family string only via aria-label/title (narrowPanel gate) — matching on
+      // textContent alone would go blind exactly at the 390px breakpoint this criterion sweeps.
+      var btns = Array.prototype.slice.call(aside.querySelectorAll("button"));
+      var btn = btns.find(function (b) {
+        return b.textContent.trim() === "Start another session" ||
+          b.getAttribute("aria-label") === "Start another session" ||
+          b.getAttribute("title") === "Start another session";
+      });
+      rowFound = btn != null;
+      rowEl = btn ? btn.parentElement : null;
+    } else {
+      rowFound = s != null && s.wrapper != null;
+      rowEl = s && s.wrapper ? s.wrapper.parentElement : null;
+    }
+    if (!rowFound || !rowEl || !captionPresent) {
+      return { structurallyPresent: false, captionPresent: captionPresent, rowFound: rowFound };
+    }
+    var rect = rowEl.getBoundingClientRect();
+    return { structurallyPresent: true, height: rect.height };
+  })()`;
 }
 
 function statRealBoardDb() {
@@ -1390,6 +1501,13 @@ async function main() {
         })()`,
       );
       await waitForModal(cdp, sessionId, true);
+      // Focus-follows-click on a native form control needs the TARGET (tab) itself activated —
+      // without it, headless Chrome fires the click's onChange handler (so a value-toggle click
+      // works fine) but never moves `document.activeElement`, live-caught in this plan's own
+      // development (elementFromPoint confirmed the coordinates were exactly on the input, yet
+      // activeElement stayed BODY after a full mousedown+mouseup).
+      await cdp.send("Target.activateTarget", { targetId });
+      await sleep(150);
       const checkboxRect = await evalReport(
         cdp,
         sessionId,
@@ -1401,52 +1519,70 @@ async function main() {
           var input = label.querySelector('input[type="checkbox"]');
           input.scrollIntoView({ block: "center" });
           var r = input.getBoundingClientRect();
-          return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+          var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+          return { x: cx, y: cy };
         })()`,
       );
       if (checkboxRect != null) {
-        await cdp.send(
-          "Input.dispatchMouseEvent",
-          { type: "mouseMoved", x: checkboxRect.x, y: checkboxRect.y },
-          sessionId,
-        );
-        await cdp.send(
-          "Input.dispatchMouseEvent",
-          {
-            type: "mousePressed",
-            x: checkboxRect.x,
-            y: checkboxRect.y,
-            button: "left",
-            buttons: 1,
-            clickCount: 1,
-          },
-          sessionId,
-        );
-        const mouseOutline = await evalValue(
-          cdp,
-          sessionId,
-          `(function () {
-            var el = document.activeElement;
-            if (!el || el.tagName !== "INPUT") return { outlineWidth: null, outlineStyle: null, wrongElement: true, activeTag: el ? el.tagName : null };
-            var s = getComputedStyle(el);
-            return { outlineWidth: s.outlineWidth, outlineStyle: s.outlineStyle };
-          })()`,
-        );
-        console.log(
-          `criterion 8 (mouse): outline (between mousedown/mouseup) = ${JSON.stringify(mouseOutline)}`,
-        );
-        await cdp.send(
-          "Input.dispatchMouseEvent",
-          {
-            type: "mouseReleased",
-            x: checkboxRect.x,
-            y: checkboxRect.y,
-            button: "left",
-            buttons: 0,
-            clickCount: 1,
-          },
-          sessionId,
-        );
+        // Headless Chrome's focus-follows-click timing on a native form control is measurably
+        // racy even with the tab activated — live-caught in this plan's own development as an
+        // intermittent BODY read despite `elementFromPoint` confirming the coordinates were
+        // exactly on the input. Retried up to 3 attempts, each a full mousedown+mouseup pair,
+        // rather than trusting the first attempt; every attempt is a REAL dispatched click, never
+        // a synthetic `.focus()` fallback that would defeat the point of this measurement.
+        let mouseOutline = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          await cdp.send(
+            "Input.dispatchMouseEvent",
+            { type: "mouseMoved", x: checkboxRect.x, y: checkboxRect.y },
+            sessionId,
+          );
+          await cdp.send(
+            "Input.dispatchMouseEvent",
+            {
+              type: "mousePressed",
+              x: checkboxRect.x,
+              y: checkboxRect.y,
+              button: "left",
+              buttons: 1,
+              clickCount: 1,
+            },
+            sessionId,
+          );
+          await sleep(30);
+          // Unlike panel-94.mjs's button (which focuses on mousedown and then loses focus to a
+          // modal on mouseup), a native `<input type="checkbox">` wrapped in a `<label>` only
+          // takes focus once the full click completes (mouseup) — reading between mousedown/
+          // mouseup here observes BODY, not the checkbox. This control has no side effect
+          // stealing focus back afterward, so reading post-mouseup is both accurate and safe.
+          await cdp.send(
+            "Input.dispatchMouseEvent",
+            {
+              type: "mouseReleased",
+              x: checkboxRect.x,
+              y: checkboxRect.y,
+              button: "left",
+              buttons: 0,
+              clickCount: 1,
+            },
+            sessionId,
+          );
+          await sleep(50);
+          mouseOutline = await evalValue(
+            cdp,
+            sessionId,
+            `(function () {
+              var el = document.activeElement;
+              if (!el || el.tagName !== "INPUT") return { outlineWidth: null, outlineStyle: null, wrongElement: true, activeTag: el ? el.tagName : null };
+              var s = getComputedStyle(el);
+              return { outlineWidth: s.outlineWidth, outlineStyle: s.outlineStyle };
+            })()`,
+          );
+          console.log(
+            `criterion 8 (mouse) attempt ${attempt}: outline (after a full mousedown+mouseup click) = ${JSON.stringify(mouseOutline)}`,
+          );
+          if (!mouseOutline.wrongElement) break;
+        }
         await sleep(100);
         const mouseRingAbsent =
           mouseOutline.outlineWidth === "0px" ||
@@ -1460,16 +1596,357 @@ async function main() {
       await closeModal(cdp, sessionId).catch(() => {});
     }
 
-    // =====================================================================
-    // Criteria 5-7 and criterion 8's absence half land in Task 2 — until then, explicit
-    // NOT-YET-IMPLEMENTED violations so this file never silently reports a false PASS for them.
-    // =====================================================================
-    violations.push(
-      "criterion-5: NOT YET IMPLEMENTED (lands in Task 2)",
-      "criterion-6: NOT YET IMPLEMENTED (lands in Task 2)",
-      "criterion-7: NOT YET IMPLEMENTED (lands in Task 2)",
-      "criterion-8 (absence half): NOT YET IMPLEMENTED (lands in Task 2)",
-    );
+    if (geometryExpectWrong) {
+      // Self-check-only run — swap criterion 7's expectations to deliberately wrong values and
+      // confirm the check fires. Every other criterion is skipped (panel-94.mjs's own
+      // --n1-expect-44 shape).
+      console.log(
+        "\n--geometry-expect-wrong: self-check mode, criterion 7 only with wrong constants",
+      );
+      await selectCardViaOrcaNav(cdp, sessionId, CHAIN);
+      await clickSessionPill(cdp, sessionId, 2);
+      const wrongGeometryFixtures = [
+        {
+          label: "CHAIN (button present)",
+          identifier: CHAIN,
+          mode: "button",
+          expected: 1,
+        },
+        {
+          label: "CHAIN_DONE (switcher only)",
+          identifier: CHAIN_DONE,
+          mode: "switcher",
+          expected: 1,
+        },
+      ];
+      for (const bp of BREAKPOINTS) {
+        await cdp.send(
+          "Emulation.setDeviceMetricsOverride",
+          {
+            width: bp.width,
+            height: bp.height,
+            deviceScaleFactor: 1,
+            mobile: false,
+          },
+          sessionId,
+        );
+        await sleep(RESIZE_SETTLE_MS);
+        for (const gf of wrongGeometryFixtures) {
+          await selectCardViaOrcaNav(cdp, sessionId, gf.identifier);
+          await clickSessionPill(cdp, sessionId, 2);
+          const reading = await evalReport(
+            cdp,
+            sessionId,
+            violations,
+            `criterion-7-selfcheck (${gf.label} @ ${bp.name})`,
+            geometryReadExpr(gf.mode),
+          );
+          console.log(
+            `criterion 7 self-check (${gf.label} @ ${bp.name}px): ${JSON.stringify(reading)} expected=${gf.expected}`,
+          );
+          if (reading == null) continue;
+          if (!reading.structurallyPresent) {
+            violations.push(
+              `criterion-7-selfcheck (${gf.label} @ ${bp.name}): structural preconditions not met`,
+            );
+            continue;
+          }
+          if (Math.abs(reading.height - gf.expected) > HEIGHT_TOLERANCE_PX) {
+            violations.push(
+              `criterion-7-selfcheck (${gf.label} @ ${bp.name}): expected ~${gf.expected}px (deliberately wrong), got ${reading.height}px — this MUST fire`,
+            );
+          }
+        }
+      }
+    } else {
+      // =====================================================================
+      // Criterion 5 — the caption follows the ACTIVE session through a real two-hop chain
+      // =====================================================================
+      console.log(
+        "\n--- criterion 5: caption tracks the active session, two-hop chain ---",
+      );
+      await selectCardViaOrcaNav(cdp, sessionId, CHAIN);
+      const initial = await evalReport(
+        cdp,
+        sessionId,
+        violations,
+        "criterion-5 (session1 initial)",
+        `${FIND_SWITCHER_SRC}
+        (function () {
+          var s = panel95FindSwitcher();
+          if (!s || !s.group) return { groupFound: false };
+          return {
+            groupFound: true,
+            childCount: s.group.querySelectorAll("button").length,
+            captionPresent: s.caption != null,
+          };
+        })()`,
+      );
+      console.log(`criterion 5 (session1 active): ${JSON.stringify(initial)}`);
+      if (initial != null) {
+        if (!initial.groupFound) {
+          violations.push(
+            "criterion-5: [role=group][aria-label=Sessions] not found on the CHAIN fixture",
+          );
+        } else {
+          if (initial.childCount !== 3) {
+            violations.push(
+              `criterion-5: expected 3 session pills (Phase 92's structural contract), got ${initial.childCount}`,
+            );
+          }
+          if (initial.captionPresent) {
+            violations.push(
+              "criterion-5: session 1 (root, never inherited) unexpectedly shows a caption when active",
+            );
+          }
+        }
+      }
+
+      await clickSessionPill(cdp, sessionId, 2);
+      const captionAt2 = await evalValue(
+        cdp,
+        sessionId,
+        `${FIND_SWITCHER_SRC}
+        (function () {
+          var s = panel95FindSwitcher();
+          return s && s.caption ? s.caption.textContent : null;
+        })()`,
+      );
+      console.log(
+        `criterion 5 (session2 active): caption = ${JSON.stringify(captionAt2)}`,
+      );
+      if (captionAt2 !== "· from 1") {
+        violations.push(
+          `criterion-5: expected caption "· from 1" with session 2 active, got ${JSON.stringify(captionAt2)}`,
+        );
+      }
+
+      await clickSessionPill(cdp, sessionId, 3);
+      const captionAt3 = await evalValue(
+        cdp,
+        sessionId,
+        `${FIND_SWITCHER_SRC}
+        (function () {
+          var s = panel95FindSwitcher();
+          return s && s.caption ? s.caption.textContent : null;
+        })()`,
+      );
+      console.log(
+        `criterion 5 (session3 active): caption = ${JSON.stringify(captionAt3)}`,
+      );
+      if (captionAt3 !== "· from 2") {
+        violations.push(
+          `criterion-5: expected caption "· from 2" with session 3 active, got ${JSON.stringify(captionAt3)}`,
+        );
+      }
+      if (captionAt3 === "· from 1") {
+        violations.push(
+          'criterion-5: FLATTEN-TO-ROOT — caption reads "· from 1" with session 3 active; the ' +
+            "IMMEDIATE parent (session 2) must be named, never the root — this is the one place a " +
+            "tree-shaped bug becomes visible on screen rather than only in a stored field",
+        );
+      }
+
+      await clickSessionPill(cdp, sessionId, 1);
+      const captionAbsentAt1 = await evalValue(
+        cdp,
+        sessionId,
+        `${FIND_SWITCHER_SRC}
+        (function () {
+          var s = panel95FindSwitcher();
+          return s ? s.caption == null : null;
+        })()`,
+      );
+      console.log(
+        `criterion 5 (session1 active again): caption structurally absent = ${captionAbsentAt1}`,
+      );
+      if (captionAbsentAt1 !== true) {
+        violations.push(
+          "criterion-5: expected the caption node to be structurally ABSENT (querySelector null) " +
+            "with session 1 (never inherited) active again — a sibling having a parent must not " +
+            "produce a caption for it",
+        );
+      }
+
+      // Leave session 2 active (has a parent) for criteria 6 and 7's fixture.
+      await clickSessionPill(cdp, sessionId, 2);
+
+      // =====================================================================
+      // Criterion 6 — real rendered text at all four breakpoints, independently
+      // =====================================================================
+      console.log(
+        "\n--- criterion 6: caption visible at all four breakpoints ---",
+      );
+      for (const bp of BREAKPOINTS) {
+        await cdp.send(
+          "Emulation.setDeviceMetricsOverride",
+          {
+            width: bp.width,
+            height: bp.height,
+            deviceScaleFactor: 1,
+            mobile: false,
+          },
+          sessionId,
+        );
+        await sleep(RESIZE_SETTLE_MS);
+        const reading = await evalReport(
+          cdp,
+          sessionId,
+          violations,
+          `criterion-6 (@ ${bp.name})`,
+          `${FIND_SWITCHER_SRC}
+          (function () {
+            var s = panel95FindSwitcher();
+            if (!s || !s.caption) return { structurallyPresent: false };
+            var cs = getComputedStyle(s.caption);
+            var r = s.caption.getBoundingClientRect();
+            return {
+              structurallyPresent: true,
+              display: cs.display,
+              visibility: cs.visibility,
+              width: r.width,
+              text: s.caption.textContent,
+            };
+          })()`,
+        );
+        console.log(`criterion 6 (@ ${bp.name}px): ${JSON.stringify(reading)}`);
+        if (reading == null) continue;
+        if (!reading.structurallyPresent) {
+          violations.push(
+            `criterion-6 (@ ${bp.name}): caption node not found structurally — a computed-style/width read here would be blind`,
+          );
+          continue;
+        }
+        if (reading.display === "none" || reading.visibility === "hidden") {
+          violations.push(
+            `criterion-6 (@ ${bp.name}): expected neither display:none nor visibility:hidden, got display=${reading.display} visibility=${reading.visibility}`,
+          );
+        }
+        if (!(reading.width > 0)) {
+          violations.push(
+            `criterion-6 (@ ${bp.name}): expected non-zero rendered width, got ${reading.width}`,
+          );
+        }
+        if (reading.text !== "· from 1") {
+          violations.push(
+            `criterion-6 (@ ${bp.name}): expected caption text "· from 1", got ${JSON.stringify(reading.text)}`,
+          );
+        }
+      }
+
+      // =====================================================================
+      // Criterion 7 — row geometry unchanged, caption present, both button and switcher-only modes
+      // =====================================================================
+      console.log(
+        "\n--- criterion 7: row geometry, caption present, all four breakpoints ---",
+      );
+      const geometryFixtures = [
+        {
+          label: "CHAIN (button present)",
+          identifier: CHAIN,
+          mode: "button",
+          expected: ROW_HEIGHT_BUTTON,
+        },
+        {
+          label: "CHAIN_DONE (switcher only)",
+          identifier: CHAIN_DONE,
+          mode: "switcher",
+          expected: ROW_HEIGHT_SWITCHER,
+        },
+      ];
+      for (const bp of BREAKPOINTS) {
+        await cdp.send(
+          "Emulation.setDeviceMetricsOverride",
+          {
+            width: bp.width,
+            height: bp.height,
+            deviceScaleFactor: 1,
+            mobile: false,
+          },
+          sessionId,
+        );
+        await sleep(RESIZE_SETTLE_MS);
+        for (const gf of geometryFixtures) {
+          await selectCardViaOrcaNav(cdp, sessionId, gf.identifier);
+          await clickSessionPill(cdp, sessionId, 2);
+          const reading = await evalReport(
+            cdp,
+            sessionId,
+            violations,
+            `criterion-7 (${gf.label} @ ${bp.name})`,
+            geometryReadExpr(gf.mode),
+          );
+          console.log(
+            `criterion 7 (${gf.label} @ ${bp.name}px): ${JSON.stringify(reading)} expected=${gf.expected}`,
+          );
+          if (reading == null) continue;
+          if (!reading.structurallyPresent) {
+            violations.push(
+              `criterion-7 (${gf.label} @ ${bp.name}): structural preconditions not met (row and/or caption) — ${JSON.stringify(reading)}`,
+            );
+            continue;
+          }
+          if (Math.abs(reading.height - gf.expected) > HEIGHT_TOLERANCE_PX) {
+            violations.push(
+              `criterion-7 (${gf.label} @ ${bp.name}): expected ~${gf.expected}px, got ${reading.height}px`,
+            );
+          }
+        }
+      }
+      await cdp.send(
+        "Emulation.setDeviceMetricsOverride",
+        { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false },
+        sessionId,
+      );
+      await sleep(RESIZE_SETTLE_MS);
+
+      // =====================================================================
+      // Criterion 8, absence half — a genuinely single-session card shows zero new chrome
+      // =====================================================================
+      console.log(
+        "\n--- criterion 8 (absence half): N=1 shows zero new chrome ---",
+      );
+      await selectCardViaOrcaNav(cdp, sessionId, N1_CLEAN);
+      const absence = await evalReport(
+        cdp,
+        sessionId,
+        violations,
+        "criterion-8 (absence)",
+        `${FIND_INHERIT_LABEL_SRC}${FIND_SWITCHER_SRC}
+        (function () {
+          var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+          var label = panel95FindInheritLabel();
+          var s = panel95FindSwitcher();
+          var captionAnywhere = Array.prototype.some.call(
+            aside.querySelectorAll("span"),
+            function (el) { return /^· from \\d+$/.test(el.textContent); },
+          );
+          return {
+            checkboxLabelPresent: label != null,
+            groupPresent: s != null && s.group != null,
+            captionAnywherePresent: captionAnywhere,
+          };
+        })()`,
+      );
+      console.log(`criterion 8 (absence): ${JSON.stringify(absence)}`);
+      if (absence != null) {
+        if (absence.checkboxLabelPresent) {
+          violations.push(
+            "criterion-8 (absence): inherit checkbox unexpectedly present with the modal closed",
+          );
+        }
+        if (absence.groupPresent) {
+          violations.push(
+            "criterion-8 (absence): [role=group][aria-label=Sessions] unexpectedly present on a genuinely single-session, never-inherited card",
+          );
+        }
+        if (absence.captionAnywherePresent) {
+          violations.push(
+            "criterion-8 (absence): a parentage caption is present somewhere in the panel despite N=1",
+          );
+        }
+      }
+    }
   } finally {
     if (cdp) cdp.close();
     await killAndWait(chromeChild);
