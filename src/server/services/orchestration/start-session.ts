@@ -81,13 +81,20 @@ function toStartError(
  * mint two DIFFERENT session ids, so a per-session key could never collide and would let both
  * through, whereas the card gate makes the second request return early and COALESCE onto the
  * session the first reserve already minted — one session, not an error.
+ * @remarks (Phase 95) Inheritance is an OPTION on this saga, never a second path (criterion 5):
+ * `opts.inheritFrom` rides the same `newSession` reservation call rather than a parallel entry
+ * point. The authoritative parent resolution lives entirely in `store.reserveNewSession` — this
+ * function never re-resolves it or re-checks the card's own session list to find the parent
+ * itself, so there is exactly one chokepoint for "does this id name a session the card owns".
+ * The saga context's inherited-base-ref field carries the parent's BRANCH, not its session id,
+ * because the consuming saga step needs a git ref to build a worktree from.
  * @see docs/ARCHITECTURE.md#orchestration-saga
  */
 export async function startSession(
   cardId: string,
   extraDirection: string,
   config: Config,
-  opts?: { playbook?: string; newSession?: boolean },
+  opts?: { playbook?: string; newSession?: boolean; inheritFrom?: string },
 ): Promise<void> {
   if (store.isStarting(cardId)) return;
   store.beginStart(cardId);
@@ -106,11 +113,18 @@ export async function startSession(
 
     let sessionName = card.identifier;
     if (wantsNewSession) {
-      reserved = await store.reserveNewSession(cardId, card.identifier);
+      reserved = await store.reserveNewSession(
+        cardId,
+        card.identifier,
+        opts?.inheritFrom,
+      );
       if (reserved == null) {
         await store.setStartError(cardId, {
           step: "reserving session",
-          stderr: "no existing session to start another from",
+          stderr:
+            opts?.inheritFrom != null
+              ? "unknown session to inherit from"
+              : "no existing session to start another from",
           variant: "generic",
           newSession: true,
         });
@@ -162,6 +176,7 @@ export async function startSession(
       restarted: card.sessionLost === true,
       playbookBody,
       warnings,
+      inheritBaseRef: reserved?.parentBranch,
     };
 
     const done: SagaStep[] = [];

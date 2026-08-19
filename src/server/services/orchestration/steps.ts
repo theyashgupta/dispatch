@@ -103,6 +103,15 @@ export interface SagaContext {
   playbookBody?: string;
   /** Non-fatal notices (e.g. fetch-fallback) surfaced on the card after a successful start. */
   warnings: string[];
+  /**
+   * The inherited parent session's branch, present only on an inherited start. A git REF (a
+   * branch name), not a session id — `createWorktrees` needs a ref to build from, never a
+   * record. Captured ONCE by the reserve step from `ReservedSession.parentBranch` and never
+   * re-read from the store mid-saga, so there is no window for the parent's branch to change
+   * out from under a running saga. LOCAL-ONLY: dispatch never pushes, so `origin/<this>` does
+   * not exist — a consumer must not attempt to fetch it.
+   */
+  inheritBaseRef?: string;
 }
 
 type StartVariant = NonNullable<StartError["variant"]>;
