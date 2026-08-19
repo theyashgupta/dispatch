@@ -1270,6 +1270,37 @@ function writeStubClaudeBinary(home) {
 }
 
 /**
+ * {@link writeStubClaudeBinary}'s own shape, with ONE byte-level difference: `--version` reports
+ * `2.2.0`, ABOVE `hook-setup.ts`'s `HOOKS_FLOOR` (`[2, 1, 207]`) rather than below it. Every other
+ * fixture's stub deliberately reports a below-floor version so its saga takes the simpler
+ * hook-SILENT launch branch (`writeStubClaudeBinary`'s own doc comment) — {@link PARITY_FIXTURE}'s
+ * session 1 is the one exception: `KEEP-02` rows 3-5 (marker routing, needs-input flip, flip-back)
+ * exercise the REAL per-session hook-token channel `checkSingleSession` itself tests, which only
+ * mints when `checkHooksCapability` resolves `capable: true`. Used ONLY by
+ * {@link standUpParityFixtureSession1} — no other fixture profile reaches that function, so no
+ * other check's stub shape is affected.
+ */
+function writeHooksCapableStubClaudeBinary(home) {
+  const binDir = join(home, "bin");
+  mkdirSync(binDir, { recursive: true });
+  const claudePath = join(binDir, "claude");
+  writeFileSync(
+    claudePath,
+    "#!/bin/sh\n" +
+      'case " $* " in\n' +
+      '  *" --version "*)\n' +
+      '    echo "2.2.0 (Claude Code)"\n' +
+      "    exit 0\n" +
+      "    ;;\n" +
+      "esac\n" +
+      "echo 'bypass permissions on (shift+tab to cycle)'\n" +
+      "while true; do sleep 3600; done\n",
+    { mode: 0o755 },
+  );
+  return binDir;
+}
+
+/**
  * Overwrite the stub `claude` binary IN PLACE (same path {@link writeStubClaudeBinary} planted, so
  * no `PATH` change is needed) with a variant that EXITS IMMEDIATELY instead of blocking forever.
  * Used by {@link checkSecondStartRollbackDirection2} as the forced-failure vehicle: tmux's default
@@ -1674,9 +1705,9 @@ async function standUpParityFixtureSession1(built) {
   };
   seedFixtureCard(built.home, card);
 
-  built.pathPrefix = writeStubClaudeBinary(built.home);
+  built.pathPrefix = writeHooksCapableStubClaudeBinary(built.home);
   console.log(
-    `standup (real-saga, first-start): stub claude planted — ${join(built.pathPrefix, "claude")}`,
+    `standup (real-saga, first-start): hooks-capable stub claude planted — ${join(built.pathPrefix, "claude")}`,
   );
 
   built.server = bootServer(built.home, { pathPrefix: built.pathPrefix });
@@ -1715,7 +1746,14 @@ async function standUpParityFixtureSession1(built) {
   }
 
   built.tmux.a = settled.tmuxSession;
-  built.sessionA = { id: settled.activeSession?.id };
+  const settledPersisted = readCard(built.dbPath, built.cardId);
+  const settledRecord = settledPersisted?.sessions?.find(
+    (s) => s.id === settled.activeSession?.id,
+  );
+  built.sessionA = {
+    id: settled.activeSession?.id,
+    token: settledRecord?.hookToken,
+  };
   built.session1WorkspacePath = join(
     built.home,
     "workspaces",
@@ -10153,6 +10191,592 @@ async function checkParityFixtureGroup(built) {
   return violations;
 }
 
+/**
+ * Create a SECOND, throwaway sessionless card via the real `POST /cards` local-card route — never
+ * {@link seedFixtureCard}'s raw `node:sqlite` insert, which writes to disk but is invisible to the
+ * ALREADY-BOOTED sandbox server's in-memory store (a live server never re-reads `board.db` after
+ * its own `load()`; a row inserted after boot is real on disk yet the running route handler
+ * reports `unknown card id`, live-caught by this row's own first draft). `store.createLocalCard`
+ * mints a fresh `LOCAL-<n>` identifier itself (matches the `/start` route's own ticket-identifier
+ * regex) and returns `column: "todo"`, no workspace — the START request itself carries the
+ * workspace payload (`folder`/`repos`, `cards.route.ts`'s `hasWorkspacePayload` branch) reusing
+ * {@link PARITY_FIXTURE}'s own already-seeded throwaway repo, since no `store.setCardWorkspace`
+ * call is reachable from outside the process. Row 1's rollback leg needs this SECOND card because
+ * {@link PARITY_FIXTURE}'s own card already carries a real, settled session 1 by the time any
+ * check runs (its stand-up drives the happy path) — forcing a FIRST-start saga to fail needs a
+ * card no prior stand-up step has touched.
+ */
+async function createRollbackStartCard(built) {
+  const res = await fetch(`http://127.0.0.1:${built.port}/api/cards`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      title: "session-liveness-v3 parity-lifecycle row 1 rollback card",
+      description:
+        "throwaway sessionless card for row 1's forced-failure rollback leg",
+    }),
+  });
+  const body = await res.json().catch(() => undefined);
+  if (res.status !== 201 || body?.identifier == null) {
+    throw new Error(
+      `row 1 start (rollback): POST /cards to create the throwaway rollback card failed — status=${res.status} body=${JSON.stringify(body)}`,
+    );
+  }
+  return { cardId: body.id, identifier: body.identifier };
+}
+
+/**
+ * POST the real `/api/cards/:id/start` route against an ARBITRARY card id — row 1's rollback leg
+ * needs this because {@link startSecondSession} is hardcoded onto `built.cardId`
+ * ({@link PARITY_FIXTURE}'s own card), never the throwaway rollback card
+ * {@link createRollbackStartCard} mints.
+ */
+async function postStartForCard(built, cardId, body) {
+  const res = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${cardId}/start`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  const parsed = await res.json().catch(() => undefined);
+  return { status: res.status, body: parsed };
+}
+
+/**
+ * {@link waitForFirstStartSettled}'s generic counterpart, keyed to an ARBITRARY card id via
+ * {@link fetchCardById} rather than {@link fetchFixtureCard}'s hardcoded `built.cardId` — needed
+ * because row 1's rollback leg drives the throwaway rollback card
+ * {@link createRollbackStartCard} mints, a card {@link PARITY_FIXTURE}'s own stand-up never
+ * touches.
+ */
+/**
+ * @remarks Requires an OBSERVED non-null `provisioningStep` tick before ever accepting settlement
+ * — row 1's own rollback-then-retry sequence calls this TWICE against the SAME card, and the
+ * second call's target already carries a stale `startError` from the first, failed attempt. A
+ * naive settle predicate (`provisioningStep == null && (tmuxSession != null || startError !=
+ * null)`) would read that STALE state as "already settled" on its very FIRST poll, before the
+ * retry's own saga has done anything — reporting the retry's own eventual outcome as whatever the
+ * prior attempt already left behind. Seeing a genuine in-flight tick first proves THIS call's own
+ * saga actually ran.
+ */
+async function waitForCardFirstStartSettled(built, cardId, { timeoutMs }) {
+  const deadline = Date.now() + timeoutMs;
+  let card;
+  let sawProvisioning = false;
+  while (Date.now() < deadline) {
+    const { status, body } = await fetchCardById(built, cardId);
+    card = status === 200 ? body?.card : undefined;
+    if (card?.provisioningStep != null) sawProvisioning = true;
+    const settled =
+      card != null &&
+      sawProvisioning &&
+      card.provisioningStep == null &&
+      (card.tmuxSession != null || card.startError != null);
+    if (settled) return { card, timedOut: false };
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return { card, timedOut: true };
+}
+
+/**
+ * `KEEP-02` row 1 (start). {@link PARITY_FIXTURE}'s own stand-up already drove the happy path (one
+ * real `POST /cards/:id/start`, no `newSession`) — this reasserts that outcome as the row's OWN
+ * named claim (never silently borrowed from `checkParityFixtureN1`'s own self-proof) and adds the
+ * two legs that self-proof never exercised: an EXACT-equality bare-unsuffixed-name assertion
+ * widened to `branch`/`workspacePath` (not only `tmuxSession`), and the rollback leg — a forced
+ * saga failure on a SECOND, throwaway sessionless card ({@link createRollbackStartCard}) returning
+ * to its pre-start column with `startError` populated and no live tmux session left behind,
+ * followed by a restored-stub re-run of the SAME card's happy path. A start row that never
+ * exercises rollback is a row that cannot notice a half-started strand (`T-96-13`'s behavioural
+ * leg — the wire-shape leg is `T-96-13`'s named acceptance criterion, proven by this row's own
+ * `Object.hasOwn` assertions below and by the `sessionCount`-at-N=1 break in Task 2).
+ * @remarks Exact-equality, not a suffix regex: `built.identifier` itself legitimately ends in
+ * `-<digits>` (a ticket number, e.g. `ZZ96<pid>-1`), so a trailing-digits pattern would false-flag
+ * every correct session — only comparing against the KNOWN bare value distinguishes a real Phase
+ * 94 ordinal suffix (`<identifier>-2`) from the ticket number's own trailing digits.
+ */
+async function checkParityRow1Start(built) {
+  const violations = [];
+
+  const persisted = readCard(built.dbPath, built.cardId);
+  const sessionCount = persisted?.sessions?.length ?? 0;
+  if (sessionCount !== 1) {
+    violations.push(
+      `row 1 start: persisted card owns ${sessionCount} session(s), expected exactly 1 (sessions=${JSON.stringify(persisted?.sessions)})`,
+    );
+  }
+  const expectedTmux = `dsp-${built.identifier}`;
+  const live = await tmuxListSessionNames();
+  console.log(
+    `row 1 start (happy path): session count=${sessionCount}, tmux=${built.tmux.a} (live=${live.includes(expectedTmux)})`,
+  );
+  if (built.tmux.a !== expectedTmux || !live.includes(expectedTmux)) {
+    violations.push(
+      `row 1 start: session 1's tmux name expected the bare unsuffixed "${expectedTmux}", got recorded=${built.tmux.a} live=${JSON.stringify(live)}`,
+    );
+  }
+  const record = persisted?.sessions?.find((s) => s.id === built.sessionA?.id);
+  if (record) {
+    if (record.branch !== built.identifier) {
+      violations.push(
+        `row 1 start: session 1's branch expected the bare unsuffixed "${built.identifier}", actual "${record.branch}"`,
+      );
+    }
+    if (record.workspacePath !== built.session1WorkspacePath) {
+      violations.push(
+        `row 1 start: session 1's workspacePath expected the bare unsuffixed "${built.session1WorkspacePath}", actual "${record.workspacePath}"`,
+      );
+    }
+    console.log(
+      `row 1 start (happy path): branch="${record.branch}" workspacePath="${record.workspacePath}" — both expected bare, no ordinal suffix`,
+    );
+  } else {
+    violations.push(
+      `row 1 start: session 1 record ${built.sessionA?.id} missing from persisted sessions[] — cannot assert branch/workspacePath bareness`,
+    );
+  }
+
+  if (built.sessionA?.id != null) {
+    const readyResult = await ensureSessionTerminalReady(
+      built,
+      built.sessionA.id,
+    );
+    if (!readyResult.ok) {
+      violations.push(
+        `row 1 start: could not bring session 1's terminal up — ${readyResult.reason}`,
+      );
+    } else {
+      const marker = `row1-${randomBytes(4).toString("hex")}`;
+      await writePaneMarker(built.tmux.a, built.home, marker);
+      const read = await readPaneThroughProxy({
+        port: built.port,
+        idSegment: built.sessionA.id,
+        expect: marker,
+        timeoutMs: PROXY_READ_TIMEOUT_MS,
+      });
+      console.log(
+        `row 1 start (happy path): real ttyd answered through the proxy — found marker=${read.text.includes(marker)}`,
+      );
+      if (!read.text.includes(marker)) {
+        violations.push(
+          `row 1 start: real ttyd did not echo marker "${marker}" through the proxy`,
+        );
+      }
+    }
+  }
+
+  const registered = await gitWorktreeListRegistered(built.repoPath);
+  const wtRealpath = existsSync(built.session1WorktreePath)
+    ? realpathSync(built.session1WorktreePath)
+    : built.session1WorktreePath;
+  console.log(
+    `row 1 start (happy path): worktree registered=${registered.has(wtRealpath)} — ${built.session1WorktreePath}`,
+  );
+  if (!registered.has(wtRealpath)) {
+    violations.push(
+      `row 1 start: session 1 worktree not registered in \`git worktree list\`: ${built.session1WorktreePath}`,
+    );
+  }
+
+  const wireCard = await fetchFixtureCard(built);
+  if (wireCard == null) {
+    violations.push(
+      `row 1 start: card ${built.cardId} not found on GET /api/board`,
+    );
+  } else {
+    console.log(
+      `row 1 start (happy path): wire card hasOwn(sessionCount)=${Object.hasOwn(wireCard, "sessionCount")} hasOwn(sessionSummaries)=${Object.hasOwn(wireCard, "sessionSummaries")} (both expected false at N=1)`,
+    );
+    if (Object.hasOwn(wireCard, "sessionCount")) {
+      violations.push(
+        `row 1 start: wire card carries "sessionCount" (${JSON.stringify(wireCard.sessionCount)}) at N=1 — must be ABSENT, not merely falsy`,
+      );
+    }
+    if (Object.hasOwn(wireCard, "sessionSummaries")) {
+      violations.push(
+        `row 1 start: wire card carries "sessionSummaries" (${JSON.stringify(wireCard.sessionSummaries)}) at N=1 — must be ABSENT, not merely falsy`,
+      );
+    }
+  }
+
+  const rollbackCard = await createRollbackStartCard(built);
+  const rollbackWorkspacePayload = {
+    extraDirection: "",
+    folder: join(built.home, "repos"),
+    repos: [{ path: built.repoPath, base: built.repoBase }],
+  };
+  const rollbackTmux = `dsp-${rollbackCard.identifier}`;
+  try {
+    writeExitingStubClaudeBinary(built.home);
+    console.log(
+      `row 1 start (rollback): created throwaway sessionless card ${rollbackCard.cardId} (identifier ${rollbackCard.identifier}), swapped the stub claude for an exit-immediately variant`,
+    );
+    const { status: startStatus, body: startBody } = await postStartForCard(
+      built,
+      rollbackCard.cardId,
+      rollbackWorkspacePayload,
+    );
+    console.log(
+      `row 1 start (rollback): POST /start on the throwaway sessionless card -> ${startStatus} (expected 202)`,
+    );
+    if (startStatus !== 202) {
+      violations.push(
+        `row 1 start (rollback): POST /start returned ${startStatus}, expected 202 (body=${JSON.stringify(startBody)})`,
+      );
+    } else {
+      const { card: failedCard, timedOut } = await waitForCardFirstStartSettled(
+        built,
+        rollbackCard.cardId,
+        { timeoutMs: RESTART_REPL_TIMEOUT_SETTLE_MS },
+      );
+      console.log(
+        `row 1 start (rollback): forced-failure saga settled — column=${failedCard?.column} (expected "todo"), startError=${JSON.stringify(failedCard?.startError)} (expected populated), tmuxSession=${failedCard?.tmuxSession} (expected absent), timedOut=${timedOut}`,
+      );
+      if (timedOut) {
+        violations.push(
+          `row 1 start (rollback): forced-failure saga did not settle within ${RESTART_REPL_TIMEOUT_SETTLE_MS}ms`,
+        );
+      } else {
+        if (failedCard?.column !== "todo") {
+          violations.push(
+            `row 1 start (rollback): card column expected "todo" (pre-start), actual "${failedCard?.column}" — a failed first start must never strand the card mid-provision`,
+          );
+        }
+        if (failedCard?.startError == null) {
+          violations.push(
+            "row 1 start (rollback): expected startError populated after the forced failure, got none",
+          );
+        }
+        if (failedCard?.tmuxSession != null) {
+          violations.push(
+            `row 1 start (rollback): card.tmuxSession expected absent after rollback, got "${failedCard?.tmuxSession}" — a failed start must not leave a half-started session pointer`,
+          );
+        }
+      }
+      const liveAfterFail = await tmuxListSessionNames();
+      if (liveAfterFail.includes(rollbackTmux)) {
+        violations.push(
+          `row 1 start (rollback): tmux session ${rollbackTmux} still LIVE after the forced-failure saga's own compensation — a half-started strand`,
+        );
+      }
+    }
+
+    writeStubClaudeBinary(built.home);
+    console.log(
+      "row 1 start (rollback re-run): restored the working stub claude, re-running the happy path on the same rollback card",
+    );
+    const { status: retryStatus, body: retryBody } = await postStartForCard(
+      built,
+      rollbackCard.cardId,
+      rollbackWorkspacePayload,
+    );
+    if (retryStatus !== 202) {
+      violations.push(
+        `row 1 start (rollback re-run): POST /start returned ${retryStatus}, expected 202 (body=${JSON.stringify(retryBody)})`,
+      );
+    } else {
+      const { card: recovered, timedOut: recoverTimedOut } =
+        await waitForCardFirstStartSettled(built, rollbackCard.cardId, {
+          timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+        });
+      console.log(
+        `row 1 start (rollback re-run): column=${recovered?.column} (expected "in_progress"), tmuxSession=${recovered?.tmuxSession} (expected present), startError=${JSON.stringify(recovered?.startError)} (expected none), timedOut=${recoverTimedOut}`,
+      );
+      if (
+        recoverTimedOut ||
+        recovered?.startError != null ||
+        recovered?.column !== "in_progress" ||
+        recovered?.tmuxSession == null
+      ) {
+        violations.push(
+          `row 1 start (rollback re-run): the restored stub did not recover a genuine start — column=${recovered?.column}, startError=${JSON.stringify(recovered?.startError)}, tmuxSession=${recovered?.tmuxSession} — a prior failed start must never wedge the saga`,
+        );
+      }
+    }
+  } finally {
+    await tmuxKillSessionExact(rollbackTmux).catch(() => {});
+  }
+
+  const verdict =
+    violations.length === 0
+      ? "PASS"
+      : `FAIL (${violations.length} violation(s))`;
+  console.log(`ROW 1 start: ${verdict}`);
+  return violations;
+}
+
+/**
+ * `KEEP-02` row 2 (kickoff). Read the pane content the real saga's own `sendKickoff` step already
+ * typed into session 1 during {@link PARITY_FIXTURE}'s stand-up, through the real proxy — never a
+ * 204 or a settled saga as a stand-in, the exact "reads a constant" dead-instrument shape
+ * `.planning/milestones/v2.9-ROADMAP.md` names (dead instrument family #4/#7). `buildKickoff`'s
+ * own deterministic head line (`kickoff.ts:217`, `You are working on Linear ticket <identifier>:
+ * <title>`) embeds `card.identifier` — {@link PARITY_IDENTIFIER}, unique per harness run — so
+ * matching it proves THIS run's real kickoff landed, not a stale pane from an earlier run.
+ * @remarks Phase 94's own open residual R2 (bare, unprefixed tmux targets inside `awaitReplReady` /
+ * `sendKickoff`) is structurally UNREACHABLE at N=1: there is no live sibling for a broken
+ * prefix-match to land on, so this row measures kickoff delivery only — R2's own closure belongs
+ * to plan 96-11, stated explicitly in this row's own verdict rather than left for the reader to
+ * wonder about.
+ */
+async function checkParityRow2Kickoff(built) {
+  const violations = [];
+  if (built.sessionA?.id == null) {
+    violations.push(
+      "row 2 kickoff: no session 1 id resolved — cannot read its pane",
+    );
+    console.log(`ROW 2 kickoff: FAIL (${violations.length} violation(s))`);
+    return violations;
+  }
+
+  const kickoffHeadFragment = `You are working on Linear ticket ${built.identifier}`;
+  const read = await readPaneThroughProxy({
+    port: built.port,
+    idSegment: built.sessionA.id,
+    expect: kickoffHeadFragment,
+    timeoutMs: PROXY_READ_TIMEOUT_MS,
+  });
+  console.log(
+    `row 2 kickoff: real pane content through the proxy — found kickoff head line=${read.text.includes(kickoffHeadFragment)} (opened=${read.opened})`,
+  );
+  if (!read.text.includes(kickoffHeadFragment)) {
+    violations.push(
+      `row 2 kickoff: real pane content did not include the kickoff's own head line "${kickoffHeadFragment}" — the saga's sendKickoff step must not silently fail to deliver`,
+    );
+  }
+  console.log(
+    "row 2 kickoff: Phase 94's residual R2 (bare tmux prefix-match hazard in awaitReplReady/sendKickoff) is structurally UNREACHABLE at N=1 — no live sibling exists for a broken prefix match to land on; this row measures kickoff delivery only, R2's own closure is plan 96-11's",
+  );
+
+  const verdict =
+    violations.length === 0
+      ? "PASS"
+      : `FAIL (${violations.length} violation(s))`;
+  console.log(`ROW 2 kickoff: ${verdict}`);
+  return violations;
+}
+
+/**
+ * `KEEP-02` rows 3 (marker routing), 4 (needs-input flip) and 5 (flip-back), against
+ * {@link PARITY_FIXTURE}'s own subject — porting {@link checkSingleSession}'s steps 1/2 assertion
+ * shapes (Phase 91.1, PRE-DATING this plan) so the whole six-row checklist reports against ONE
+ * card, never re-presenting their coverage as new. `--check single-session` itself is left
+ * unmodified (its own fixture, {@link SINGLE_SESSION_FIXTURE}, is a separate card entirely).
+ * @remarks Row 3's negative case cannot recreate {@link registerHookToken}'s own ownership-refusal
+ * REGISTRATION path with only one card in the sandbox — that guard fires when a session id is
+ * registered against a card that does not own it, and every registration this fixture's own boot
+ * performs is genuinely self-owned by construction, so there is no way to reach it from outside the
+ * process without a second, differently-owned session already live. A garbage, never-registered
+ * token is used instead, which exercises the auth GATE ({@link resolveHookToken} returning
+ * `undefined`) rather than the registration guard. Both are load-bearing for the identical claim
+ * ("a token not naming this session must never be silently accepted"); this substitution, and why
+ * the literally-specified break needed a different vehicle, are recorded in the SUMMARY as a
+ * deviation per criterion 2.
+ * @remarks Row 5's own claim is corrected against the ACTUAL code, not the plan's paraphrase:
+ * `FLIP_BACK_CLEARS_LAST_MARKER` (`column-transitions.ts:92`) deliberately EXCLUDES `needs_input`
+ * (FLOW-05 — flipping out of `needs_input` stays byte-identical to before Phase 90, `lastMarker`
+ * left UNTOUCHED), so this row asserts `lastMarker` STAYS SET after the flip-back — the true
+ * invariant — rather than "clears" as the plan's own action text states. See the SUMMARY's
+ * Deviations section.
+ */
+async function checkParityRows345(built) {
+  const row3 = [];
+  const row4 = [];
+  const row5 = [];
+  const only = built.sessionA;
+
+  const garbageToken = randomBytes(32).toString("hex");
+  const preStatus = await postHook(
+    built,
+    garbageToken,
+    stopBodyWithReason("garbage-token-negative-case"),
+  );
+  const preWire = await fetchFixtureCard(built);
+  console.log(
+    `row 3 marker routing (negative case): POST Stop with a garbage, never-registered token -> ${preStatus} (expected 401); card.column after=${preWire?.column} (expected unchanged, "in_progress")`,
+  );
+  if (preStatus !== 401) {
+    row3.push(
+      `row 3 marker routing (negative case): garbage token POST returned ${preStatus}, expected 401`,
+    );
+  }
+  if (preWire?.column !== "in_progress") {
+    row3.push(
+      `row 3 marker routing (negative case): card.column changed to "${preWire?.column}" after a garbage-token POST — a token that does not resolve must never be silently accepted`,
+    );
+  }
+
+  const statusStop = await postHook(
+    built,
+    only.token,
+    stopBodyWithReason("parity-lifecycle-reason"),
+  );
+  console.log(
+    `row 3 marker routing (positive case): POST Stop via session 1's own token -> ${statusStop} (expected 204)`,
+  );
+  if (statusStop !== 204) {
+    row3.push(
+      `row 3 marker routing (positive case): POST Stop returned ${statusStop}, expected 204`,
+    );
+  }
+  let wire = await fetchFixtureCard(built);
+  console.log(
+    `row 4 needs-input flip: wire card.column = ${wire?.column} (expected "needs_input")`,
+  );
+  if (wire?.column !== "needs_input") {
+    row4.push(
+      `row 4 needs-input flip: card.column expected "needs_input", actual "${wire?.column}"`,
+    );
+  }
+  if (wire?.sessionCount !== undefined) {
+    row4.push(
+      `row 4 needs-input flip: wire card.sessionCount expected absent at N=1, actual ${wire?.sessionCount}`,
+    );
+  }
+  const markerAfterStop = wire?.lastMarker;
+
+  const statusPrompt = await postPromptSubmit(built, only.token);
+  console.log(
+    `row 5 flip-back: POST UserPromptSubmit -> ${statusPrompt} (expected 204)`,
+  );
+  if (statusPrompt !== 204) {
+    row5.push(
+      `row 5 flip-back: POST UserPromptSubmit returned ${statusPrompt}, expected 204`,
+    );
+  }
+  wire = await fetchFixtureCard(built);
+  console.log(
+    `row 5 flip-back: wire card.column = ${wire?.column} (expected "in_progress"); lastMarker before=${JSON.stringify(markerAfterStop)} after=${JSON.stringify(wire?.lastMarker)} (expected STAYS SET — FLOW-05 excludes needs_input from FLIP_BACK_CLEARS_LAST_MARKER)`,
+  );
+  if (wire?.column !== "in_progress") {
+    row5.push(
+      `row 5 flip-back: card.column expected "in_progress" after flip-back, actual "${wire?.column}"`,
+    );
+  }
+  if (wire?.lastMarker !== markerAfterStop) {
+    row5.push(
+      `row 5 flip-back: lastMarker expected to STAY SET at "${markerAfterStop}" (FLOW-05 — needs_input is excluded from FLIP_BACK_CLEARS_LAST_MARKER), actual ${JSON.stringify(wire?.lastMarker)}`,
+    );
+  }
+  if (markerAfterStop == null) {
+    row5.push(
+      "row 5 flip-back: precondition failed — row 4's own Stop POST left lastMarker unset, so this row's \"stays set\" claim is unproven",
+    );
+  }
+
+  const verdict3 =
+    row3.length === 0 ? "PASS" : `FAIL (${row3.length} violation(s))`;
+  const verdict4 =
+    row4.length === 0 ? "PASS" : `FAIL (${row4.length} violation(s))`;
+  const verdict5 =
+    row5.length === 0 ? "PASS" : `FAIL (${row5.length} violation(s))`;
+  console.log(`ROW 3 marker routing: ${verdict3}`);
+  console.log(`ROW 4 needs-input flip: ${verdict4}`);
+  console.log(`ROW 5 flip-back: ${verdict5}`);
+  return [...row3, ...row4, ...row5];
+}
+
+/**
+ * `KEEP-02` row 6 (terminal open). Open session 1's real terminal through the real proxy and
+ * assert real, PER-RUN-UNIQUE bytes come back — never a successful WS upgrade alone, the exact
+ * "reads connection success instead of content" dead-instrument shape `92-RESEARCH.md`'s own named
+ * trap describes for a bare GET (which serves dispatch's own static bundle and never touches ttyd
+ * — {@link readPaneThroughProxy}'s own WS-protocol read already avoids that trap by construction,
+ * never issuing a GET). Also asserts the resolution needed nothing beyond the session's own id: the
+ * wire card's `activeSession.id` IS `built.sessionA.id` directly, with no `sessionSummaries` list a
+ * switcher could have consulted (already proven absent by row 1's own wire-shape assertion,
+ * restated here as row 6's own precondition for its own resolution path).
+ */
+async function checkParityRow6TerminalOpen(built) {
+  const violations = [];
+  if (built.sessionA?.id == null) {
+    violations.push(
+      "row 6 terminal open: no session 1 id resolved — cannot open its terminal",
+    );
+    console.log(
+      `ROW 6 terminal open: FAIL (${violations.length} violation(s))`,
+    );
+    return violations;
+  }
+
+  const wireCard = await fetchFixtureCard(built);
+  console.log(
+    `row 6 terminal open: wire card.activeSession.id=${JSON.stringify(wireCard?.activeSession?.id)} (expected "${built.sessionA.id}", the sole session — no switcher selection); hasOwn(sessionSummaries)=${Object.hasOwn(wireCard ?? {}, "sessionSummaries")} (expected false)`,
+  );
+  if (wireCard?.activeSession?.id !== built.sessionA.id) {
+    violations.push(
+      `row 6 terminal open: wire card.activeSession.id expected "${built.sessionA.id}" (the sole session, no switcher selection), actual ${JSON.stringify(wireCard?.activeSession?.id)}`,
+    );
+  }
+  if (Object.hasOwn(wireCard ?? {}, "sessionSummaries")) {
+    violations.push(
+      `row 6 terminal open: wire card carries "sessionSummaries" at N=1 — a real switcher list existing would mean this row's "no switcher state consulted" claim is unproven`,
+    );
+  }
+
+  const readyResult = await ensureSessionTerminalReady(
+    built,
+    built.sessionA.id,
+  );
+  if (!readyResult.ok) {
+    violations.push(
+      `row 6 terminal open: could not bring session 1's terminal up through the real proxy — ${readyResult.reason}`,
+    );
+    console.log(
+      `ROW 6 terminal open: FAIL (${violations.length} violation(s))`,
+    );
+    return violations;
+  }
+  const token = `row6-${randomBytes(8).toString("hex")}`;
+  await writePaneMarker(built.tmux.a, built.home, token);
+  const read = await readPaneThroughProxy({
+    port: built.port,
+    idSegment: built.sessionA.id,
+    expect: token,
+    timeoutMs: PROXY_READ_TIMEOUT_MS,
+  });
+  console.log(
+    `row 6 terminal open: real ttyd answered through the proxy with a per-run unique token — opened=${read.opened}, found=${read.text.includes(token)}`,
+  );
+  if (!read.opened) {
+    violations.push(
+      "row 6 terminal open: the WS upgrade never opened — never connected",
+    );
+  } else if (!read.text.includes(token)) {
+    violations.push(
+      `row 6 terminal open: real ttyd bytes did not include the per-run unique token "${token}" — connected but read the WRONG content`,
+    );
+  }
+
+  const verdict =
+    violations.length === 0
+      ? "PASS"
+      : `FAIL (${violations.length} violation(s))`;
+  console.log(`ROW 6 terminal open: ${verdict}`);
+  return violations;
+}
+
+/**
+ * `--check parity-lifecycle` (Plan 96-04, Phase 96 Wave 3): the first six rows of the `KEEP-02`
+ * single-session parity checklist — start, kickoff, marker routing, needs-input flip, flip-back,
+ * terminal open — all against {@link PARITY_FIXTURE}'s ONE card, each reported as its own named
+ * verdict. Rows 3/4/5 are {@link checkSingleSession}'s (Phase 91.1) own assertion shapes
+ * re-asserted against this merged subject, cited as pre-existing coverage, never re-presented as
+ * new. The accepted N=1 detail-panel deviation (Phase 94's UI-SPEC, the session region's corrected
+ * 49px/45px row) is recorded in `96-04-SUMMARY.md`'s own preamble, not measured here and not
+ * counted among the six rows this mode covers.
+ */
+async function checkParityLifecycle(built) {
+  return [
+    ...(await checkParityRow1Start(built)),
+    ...(await checkParityRow2Kickoff(built)),
+    ...(await checkParityRows345(built)),
+    ...(await checkParityRow6TerminalOpen(built)),
+  ];
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -10228,6 +10852,8 @@ const CHECKS = {
   "inherit-depth": () =>
     withFixture("inherit-depth", checkInheritDepth, SECOND_SESSION_FIXTURE),
   "parity-fixture": checkParityFixture,
+  "parity-lifecycle": () =>
+    withFixture("parity-lifecycle", checkParityLifecycle, PARITY_FIXTURE),
 };
 
 /**
