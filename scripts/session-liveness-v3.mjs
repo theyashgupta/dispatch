@@ -10777,6 +10777,730 @@ async function checkParityLifecycle(built) {
   ];
 }
 
+/** POST the real `/api/cards/:id/resume` route against an ARBITRARY card id. */
+async function postResumeForCard(built, cardId) {
+  const res = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${cardId}/resume`,
+    { method: "POST", headers: { "content-type": "application/json" } },
+  );
+  const body = await res.json().catch(() => undefined);
+  return { status: res.status, body };
+}
+
+/**
+ * Poll {@link fetchFixtureCard} until a resume attempt has settled on SUCCESS:
+ * `sessionLost !== true` AND `tmuxSession` is live again. Never ambiguous with the pre-resume
+ * state it is called from — every caller starts from `sessionLost === true, tmuxSession == null`,
+ * a shape a successful resume can never merely resemble by accident, so (unlike
+ * {@link waitForCardFirstStartSettled}'s own retry hazard) no "observed a tick first" gate is
+ * needed here.
+ */
+async function waitForResumeSettled(built, { timeoutMs }) {
+  const deadline = Date.now() + timeoutMs;
+  let card;
+  while (Date.now() < deadline) {
+    card = await fetchFixtureCard(built);
+    if (card != null && card.sessionLost !== true && card.tmuxSession != null) {
+      return { card, timedOut: false };
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return { card, timedOut: true };
+}
+
+/**
+ * Poll {@link fetchFixtureCard} until a resume attempt has settled on FAILURE:
+ * `resumeError != null` — {@link BoardStore.recordResumeFailure}'s own sentinel, populated in the
+ * SAME atomic mutation as `sessionLost = true` and the session-field clear, so observing it is
+ * sufficient to know the whole compensating write already landed.
+ */
+async function waitForResumeFailureSettled(built, { timeoutMs }) {
+  const deadline = Date.now() + timeoutMs;
+  let card;
+  while (Date.now() < deadline) {
+    card = await fetchFixtureCard(built);
+    if (card != null && card.resumeError != null) {
+      return { card, timedOut: false };
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return { card, timedOut: true };
+}
+
+/**
+ * Kill the real 3-strike detector's target and wait for the wire to derive `sessionLost === true`
+ * — {@link checkSingleSession}'s own step-3 shape ({@link checkSingleSession}, Phase 91.1),
+ * factored out here because rows 7, 8 and 12 all need it and each must reach it through the SAME
+ * real detector, never a synthetic flag flip.
+ */
+async function driveToSessionLost(built) {
+  const columnBeforeLoss = (await fetchFixtureCard(built))?.column;
+  await tmuxKillSession(built.tmux.a);
+  let sawLost = false;
+  const deadline = Date.now() + LIVENESS_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const wire = await fetchFixtureCard(built);
+    if (wire?.sessionLost === true) {
+      sawLost = true;
+      break;
+    }
+    await sleep(LIVENESS_POLL_INTERVAL_MS);
+  }
+  return { sawLost, columnBeforeLoss };
+}
+
+/**
+ * `KEEP-02` row 7 (resume, BOTH outcomes) against {@link PARITY_FIXTURE}'s own session, driven to
+ * `sessionLost` the REAL way ({@link driveToSessionLost}, {@link checkSingleSession}'s own step-3
+ * shape — a real tmux kill plus the real 3-strike watcher, never a synthetic flag flip). No
+ * existing `--check` mode has ever called `POST /cards/:id/resume` — {@link checkSingleSession}
+ * gets the card TO `sessionLost` and stops there — so both legs of this row are net-new coverage,
+ * and `recordResumeFailure` specifically has never been exercised by any `--check` mode before
+ * this one.
+ * @remarks Order, and why: happy path first (the working hooks-capable stub is already live from
+ * stand-up), THEN a SECOND real tmux kill drives the card back to `sessionLost` for the failure
+ * leg (a forced `awaitReplReady` timeout via {@link writeExitingStubClaudeBinary},
+ * {@link checkSecondStartRollbackDirection2}'s own forced-failure vehicle, applied here to resume
+ * instead of start), THEN the working stub is restored and resume is driven ONE MORE time to
+ * recover a live session — rows 8 and 12 both need one, and this third call is recovery, not a
+ * new assertion leg, logged as such rather than silently folded into the failure leg's own claim.
+ * @remarks Column-preserving on BOTH legs (`column-transitions.ts` item 11: "Resume /
+ * resume-failed — column-PRESERVING — owner board.store.ts#resumeSession /
+ * #recordResumeFailure"): every assertion below compares the column AFTER each leg against the
+ * column this row itself recorded BEFORE that leg's own tmux kill, never against a hardcoded
+ * literal, so the row is correct regardless of which column the fixture happens to be in.
+ */
+async function checkParityRow7Resume(built) {
+  const violations = [];
+
+  const { sawLost: sawLostHappy, columnBeforeLoss: columnBeforeHappy } =
+    await driveToSessionLost(built);
+  console.log(
+    `row 7 resume (happy path): killed tmux ${built.tmux.a}, real 3-strike sessionLost observed=${sawLostHappy}, column before loss=${columnBeforeHappy}`,
+  );
+  if (!sawLostHappy) {
+    violations.push(
+      `row 7 resume (happy path): the real 3-strike detector did not derive sessionLost=true within ${LIVENESS_POLL_TIMEOUT_MS}ms — resume cannot be exercised without it`,
+    );
+    console.log(`ROW 7 resume: FAIL (${violations.length} violation(s))`);
+    return violations;
+  }
+
+  const { status: happyStatus } = await postResumeForCard(built, built.cardId);
+  console.log(
+    `row 7 resume (happy path): POST /resume -> ${happyStatus} (expected 202)`,
+  );
+  if (happyStatus !== 202) {
+    violations.push(
+      `row 7 resume (happy path): POST /resume returned ${happyStatus}, expected 202`,
+    );
+  } else {
+    const { card: resumed, timedOut } = await waitForResumeSettled(built, {
+      timeoutMs: RESTART_REPL_TIMEOUT_SETTLE_MS,
+    });
+    console.log(
+      `row 7 resume (happy path): settled — sessionLost=${resumed?.sessionLost} (expected not true), column=${resumed?.column} (expected preserved "${columnBeforeHappy}"), tmuxSession=${resumed?.tmuxSession} (expected live), timedOut=${timedOut}`,
+    );
+    if (timedOut) {
+      violations.push(
+        `row 7 resume (happy path): resume did not settle within ${RESTART_REPL_TIMEOUT_SETTLE_MS}ms`,
+      );
+    } else {
+      if (resumed?.sessionLost === true) {
+        violations.push(
+          "row 7 resume (happy path): sessionLost still true after a successful resume",
+        );
+      }
+      if (resumed?.column !== columnBeforeHappy) {
+        violations.push(
+          `row 7 resume (happy path): column changed from "${columnBeforeHappy}" to "${resumed?.column}" — resume is column-preserving per column-transitions.ts item 11`,
+        );
+      }
+      if (resumed?.tmuxSession == null) {
+        violations.push(
+          `row 7 resume (happy path): card.tmuxSession expected live after resume, got ${resumed?.tmuxSession}`,
+        );
+      }
+      const persisted = readCard(built.dbPath, built.cardId);
+      const sessionCount = persisted?.sessions?.length ?? 0;
+      console.log(
+        `row 7 resume (happy path): persisted sessionCount=${sessionCount} (expected exactly 1)`,
+      );
+      if (sessionCount !== 1) {
+        violations.push(
+          `row 7 resume (happy path): persisted card owns ${sessionCount} session(s) after resume, expected exactly 1 (sessions=${JSON.stringify(persisted?.sessions)})`,
+        );
+      }
+      const liveNames = await tmuxListSessionNames();
+      if (!liveNames.includes(built.tmux.a)) {
+        violations.push(
+          `row 7 resume (happy path): real tmux session ${built.tmux.a} not found live after resume (live=${JSON.stringify(liveNames)})`,
+        );
+      }
+      if (built.sessionA?.id != null) {
+        const readyResult = await ensureSessionTerminalReady(
+          built,
+          built.sessionA.id,
+        );
+        if (!readyResult.ok) {
+          violations.push(
+            `row 7 resume (happy path): could not bring the resumed terminal up through the real proxy — ${readyResult.reason}`,
+          );
+        } else {
+          const marker = `row7-${randomBytes(4).toString("hex")}`;
+          await writePaneMarker(built.tmux.a, built.home, marker);
+          const read = await readPaneThroughProxy({
+            port: built.port,
+            idSegment: built.sessionA.id,
+            expect: marker,
+            timeoutMs: PROXY_READ_TIMEOUT_MS,
+          });
+          console.log(
+            `row 7 resume (happy path): real ttyd answered through the proxy — found marker=${read.text.includes(marker)}`,
+          );
+          if (!read.text.includes(marker)) {
+            violations.push(
+              `row 7 resume (happy path): real ttyd did not echo marker "${marker}" through the proxy after resume`,
+            );
+          }
+        }
+      }
+      const wireCard = await fetchFixtureCard(built);
+      console.log(
+        `row 7 resume (happy path): wire card hasOwn(sessionCount)=${Object.hasOwn(wireCard ?? {}, "sessionCount")} hasOwn(sessionSummaries)=${Object.hasOwn(wireCard ?? {}, "sessionSummaries")} (both expected false at N=1)`,
+      );
+      if (Object.hasOwn(wireCard ?? {}, "sessionCount")) {
+        violations.push(
+          `row 7 resume (happy path): wire card carries "sessionCount" (${JSON.stringify(wireCard.sessionCount)}) at N=1 after resume — must be ABSENT`,
+        );
+      }
+      if (Object.hasOwn(wireCard ?? {}, "sessionSummaries")) {
+        violations.push(
+          `row 7 resume (happy path): wire card carries "sessionSummaries" at N=1 after resume — must be ABSENT`,
+        );
+      }
+    }
+  }
+
+  const { sawLost: sawLostFail, columnBeforeLoss: columnBeforeFail } =
+    await driveToSessionLost(built);
+  console.log(
+    `row 7 resume (failure leg): killed tmux ${built.tmux.a} a second time, real 3-strike sessionLost observed=${sawLostFail}, column before loss=${columnBeforeFail}`,
+  );
+  if (!sawLostFail) {
+    violations.push(
+      `row 7 resume (failure leg): the real 3-strike detector did not re-derive sessionLost=true after the second kill`,
+    );
+    console.log(`ROW 7 resume: FAIL (${violations.length} violation(s))`);
+    return violations;
+  }
+
+  writeExitingStubClaudeBinary(built.home);
+  console.log(
+    "row 7 resume (failure leg): swapped the stub claude for an exit-immediately variant — forcing resume's own awaitReplReady to time out, the same forced-failure vehicle checkSecondStartRollbackDirection2 uses for start",
+  );
+  const { status: failStatus } = await postResumeForCard(built, built.cardId);
+  console.log(
+    `row 7 resume (failure leg): POST /resume -> ${failStatus} (expected 202 — the failure surfaces async via SSE, the route's own response never reflects it)`,
+  );
+  if (failStatus !== 202) {
+    violations.push(
+      `row 7 resume (failure leg): POST /resume returned ${failStatus}, expected 202`,
+    );
+  } else {
+    const { card: failed, timedOut: failTimedOut } =
+      await waitForResumeFailureSettled(built, {
+        timeoutMs: RESTART_REPL_TIMEOUT_SETTLE_MS,
+      });
+    console.log(
+      `row 7 resume (failure leg): settled — resumeError=${JSON.stringify(failed?.resumeError)} (expected populated — recordResumeFailure fired), sessionLost=${failed?.sessionLost} (expected true), column=${failed?.column} (expected preserved "${columnBeforeFail}"), tmuxSession=${failed?.tmuxSession} (expected absent), timedOut=${failTimedOut}`,
+    );
+    if (failTimedOut) {
+      violations.push(
+        `row 7 resume (failure leg): forced resume failure did not settle within ${RESTART_REPL_TIMEOUT_SETTLE_MS}ms`,
+      );
+    } else {
+      if (failed?.resumeError == null) {
+        violations.push(
+          "row 7 resume (failure leg): expected resumeError populated after a forced resume failure, got none — recordResumeFailure must have fired",
+        );
+      }
+      if (failed?.sessionLost !== true) {
+        violations.push(
+          `row 7 resume (failure leg): sessionLost expected true after a failed resume, actual ${failed?.sessionLost}`,
+        );
+      }
+      if (failed?.column !== columnBeforeFail) {
+        violations.push(
+          `row 7 resume (failure leg): column changed from "${columnBeforeFail}" to "${failed?.column}" — resume failure is column-preserving per column-transitions.ts item 11 (never asserted as a column CHANGE)`,
+        );
+      }
+      if (failed?.tmuxSession != null) {
+        violations.push(
+          `row 7 resume (failure leg): card.tmuxSession expected absent after a failed resume, got "${failed?.tmuxSession}"`,
+        );
+      }
+    }
+  }
+
+  writeHooksCapableStubClaudeBinary(built.home);
+  console.log(
+    "row 7 resume (recovery, not a new assertion leg): restored the hooks-capable stub claude and resuming once more so rows 8 and 12 have a live session to restart",
+  );
+  const { status: recoverStatus } = await postResumeForCard(
+    built,
+    built.cardId,
+  );
+  if (recoverStatus !== 202) {
+    violations.push(
+      `row 7 resume (recovery): POST /resume returned ${recoverStatus}, expected 202 — rows 8/12 require a live session to proceed`,
+    );
+  } else {
+    const { card: recovered, timedOut: recoverTimedOut } =
+      await waitForResumeSettled(built, {
+        timeoutMs: RESTART_REPL_TIMEOUT_SETTLE_MS,
+      });
+    console.log(
+      `row 7 resume (recovery): settled — sessionLost=${recovered?.sessionLost} (expected not true), tmuxSession=${recovered?.tmuxSession} (expected live), timedOut=${recoverTimedOut}`,
+    );
+    if (
+      recoverTimedOut ||
+      recovered?.sessionLost === true ||
+      recovered?.tmuxSession == null
+    ) {
+      violations.push(
+        "row 7 resume (recovery): could not recover a live session after the forced failure — rows 8 and 12 cannot proceed without one",
+      );
+    } else if (built.sessionA?.id != null) {
+      // recordResumeFailure cleared the prior hookToken; the recovery resume minted a fresh one —
+      // refresh the in-memory reference so any later row's hook POST uses the CURRENT token, not
+      // the stand-up-time one this fixture originally captured.
+      const persisted = readCard(built.dbPath, built.cardId);
+      const record = persisted?.sessions?.find(
+        (s) => s.id === built.sessionA.id,
+      );
+      if (record?.hookToken) built.sessionA.token = record.hookToken;
+    }
+  }
+
+  const verdict =
+    violations.length === 0
+      ? "PASS"
+      : `FAIL (${violations.length} violation(s))`;
+  console.log(`ROW 7 resume: ${verdict}`);
+  return violations;
+}
+
+/**
+ * Kill the card's own bare-named tmux session then POST `/cards/:id/start` with NO `newSession`
+ * flag — the exact request {@link SessionLostSection}'s "Restart" button sends
+ * (`startCard(card.id, card.extraDirection ?? "")`,
+ * `src/web/features/detail/SessionLostSection.tsx`). With `reserved` staying `null`
+ * (`start-session.ts`'s own `if (wantsNewSession)` guard), the saga re-runs against the card's
+ * EXISTING session id rather than minting a sibling — the property rows 8 and 12 both measure,
+ * each from state it captures ITSELF via its own call to this function. Pre-killing tmux (rather
+ * than calling restart against a still-live session) forces the FULL saga path rather than the
+ * cheaper reattach branch, so {@link waitForCardFirstStartSettled}'s `sawProvisioning` gate
+ * genuinely observes a tick from THIS call, not a stale one.
+ */
+async function driveRestart(
+  built,
+  { timeoutMs = RESTART_REPL_TIMEOUT_SETTLE_MS } = {},
+) {
+  await tmuxKillSessionExact(built.tmux.a);
+  const { status, body } = await postStartForCard(built, built.cardId, {
+    extraDirection: "",
+  });
+  if (status !== 202) {
+    return {
+      postFailed: true,
+      startStatus: status,
+      startBody: body,
+      card: undefined,
+      timedOut: false,
+    };
+  }
+  const { card, timedOut } = await waitForCardFirstStartSettled(
+    built,
+    built.cardId,
+    { timeoutMs },
+  );
+  return {
+    postFailed: false,
+    startStatus: status,
+    startBody: body,
+    card,
+    timedOut,
+  };
+}
+
+/**
+ * `KEEP-02` row 8 (restart at TRUE N=1) — the decision `96-05-PLAN.md` makes explicit: assert at
+ * genuine N=1, manufacture no sibling, and cite rather than re-execute the historical break.
+ * @remarks The historical tmux prefix-kill regression (94-02's fix, 94-07 Direction 2's live
+ * reproduction) required a LIVE SIBLING for a broken prefix-match to wrongly kill — structurally
+ * UNREACHABLE at genuine N=1, where there is nothing else for a prefix match to land on. This row
+ * therefore CITES `94-VERDICT.md`'s own verbatim break-and-revert evidence for that regression
+ * (logged below, labelled explicitly as a citation) rather than re-executing it, and manufactures
+ * NO sibling to do so — doing so inside a "single-session parity" row would disguise a two-session
+ * check as a one-session one and re-prove a defect 94-07 already closed with better evidence.
+ * @remarks This row's OWN executed break (Task 2) is the regression THIS milestone could actually
+ * have introduced: Phase 94 added `reserveNewSession` and gated it behind `start-session.ts`'s own
+ * `if (wantsNewSession)` branch — forcing a bare restart (no `newSession` flag) down that branch
+ * would silently turn "restart" into "start another session", leaving the card owning TWO sessions
+ * where it must own one. That is what this row's assertions below are built to catch.
+ */
+async function checkParityRow8Restart(built) {
+  const violations = [];
+
+  const beforePersisted = readCard(built.dbPath, built.cardId);
+  const beforeSessionId = beforePersisted?.activeSessionId;
+  const beforeSessionCount = beforePersisted?.sessions?.length ?? 0;
+  console.log(
+    `row 8 restart: before — session id=${beforeSessionId}, sessionCount=${beforeSessionCount}, tmux=${built.tmux.a}`,
+  );
+  if (beforeSessionCount !== 1) {
+    violations.push(
+      `row 8 restart: precondition failed — card owns ${beforeSessionCount} session(s) before restart, expected exactly 1 (row 7's own recovery leg must leave a genuinely live single session)`,
+    );
+    console.log(`ROW 8 restart: FAIL (${violations.length} violation(s))`);
+    return violations;
+  }
+
+  const { postFailed, startStatus, card, timedOut } = await driveRestart(built);
+  if (postFailed) {
+    violations.push(
+      `row 8 restart: POST /start returned ${startStatus}, expected 202`,
+    );
+    console.log(`ROW 8 restart: FAIL (${violations.length} violation(s))`);
+    return violations;
+  }
+  console.log(
+    `row 8 restart: settled — column=${card?.column}, startError=${JSON.stringify(card?.startError)} (expected none), tmuxSession=${card?.tmuxSession}, timedOut=${timedOut}`,
+  );
+  if (timedOut) {
+    violations.push(
+      `row 8 restart: restart saga did not settle within ${RESTART_REPL_TIMEOUT_SETTLE_MS}ms`,
+    );
+    console.log(`ROW 8 restart: FAIL (${violations.length} violation(s))`);
+    return violations;
+  }
+  if (card?.startError != null) {
+    violations.push(
+      `row 8 restart: restart saga recorded a startError, expected a clean restart: ${JSON.stringify(card.startError)}`,
+    );
+  }
+
+  const afterPersisted = readCard(built.dbPath, built.cardId);
+  const afterSessionCount = afterPersisted?.sessions?.length ?? 0;
+  const afterSessionId = afterPersisted?.activeSessionId;
+  console.log(
+    `row 8 restart: after — session id=${afterSessionId} (expected the SAME id as before, "${beforeSessionId}"), sessionCount=${afterSessionCount} (expected exactly 1)`,
+  );
+  if (afterSessionId !== beforeSessionId) {
+    violations.push(
+      `row 8 restart: session id changed across restart — before="${beforeSessionId}" after="${afterSessionId}", expected the SAME session id reused, never a freshly minted one`,
+    );
+  }
+  if (afterSessionCount !== 1) {
+    violations.push(
+      `row 8 restart: persisted card owns ${afterSessionCount} session(s) after restart, expected exactly 1 (sessions=${JSON.stringify(afterPersisted?.sessions)})`,
+    );
+  }
+
+  const liveNames = await tmuxListSessionNames();
+  const expectedBare = built.tmux.a;
+  const suffixPattern = new RegExp(
+    `^${expectedBare.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-\\d+$`,
+  );
+  const suffixedSiblings = liveNames.filter((n) => suffixPattern.test(n));
+  console.log(
+    `row 8 restart: live tmux=${JSON.stringify(liveNames)}; bare "${expectedBare}" present=${liveNames.includes(expectedBare)}; suffixed siblings matching ${suffixPattern}=${JSON.stringify(suffixedSiblings)} (expected NONE)`,
+  );
+  if (!liveNames.includes(expectedBare)) {
+    violations.push(
+      `row 8 restart: expected the bare tmux session "${expectedBare}" live after restart, not found in ${JSON.stringify(liveNames)}`,
+    );
+  }
+  if (suffixedSiblings.length > 0) {
+    violations.push(
+      `row 8 restart: a suffixed sibling tmux session exists after restart at true N=1 — ${JSON.stringify(suffixedSiblings)} — restart must reuse the same session, never mint another`,
+    );
+  }
+
+  const wireCard = await fetchFixtureCard(built);
+  console.log(
+    `row 8 restart: wire card hasOwn(sessionCount)=${Object.hasOwn(wireCard ?? {}, "sessionCount")} hasOwn(sessionSummaries)=${Object.hasOwn(wireCard ?? {}, "sessionSummaries")} (both expected false at N=1)`,
+  );
+  if (Object.hasOwn(wireCard ?? {}, "sessionCount")) {
+    violations.push(
+      `row 8 restart: wire card carries "sessionCount" (${JSON.stringify(wireCard.sessionCount)}) after restart at N=1 — must be ABSENT, not merely falsy`,
+    );
+  }
+  if (Object.hasOwn(wireCard ?? {}, "sessionSummaries")) {
+    violations.push(
+      `row 8 restart: wire card carries "sessionSummaries" after restart at N=1 — must be ABSENT, not merely falsy`,
+    );
+  }
+
+  console.log(
+    "row 8 restart (CITATION, not executed by this row): the historical tmux prefix-kill regression is structurally unreachable at genuine N=1 — it requires a live sibling for a broken prefix-match to wrongly kill. 94-VERDICT.md, verbatim: \"stripping the `=` exact-match prefix from steps.ts's rollback killSession reproduced the PHASE'S HEADLINE DEFECT: the unprefixed kill prefix-matched onto the live suffixed sibling and killed it, taking down the entire tmux server since it was the last session — Direction 2 failed naming the missing exact tmux name\" (94-02's fix, 94-07 Direction 2's live reproduction). This row CITES that evidence and does NOT re-execute it, and manufactures NO sibling to do so.",
+  );
+
+  const verdict =
+    violations.length === 0
+      ? "PASS"
+      : `FAIL (${violations.length} violation(s))`;
+  console.log(`ROW 8 restart: ${verdict}`);
+  return violations;
+}
+
+/**
+ * `KEEP-02` row 12 (restart durability) — a GENUINELY NEW check, not a restatement of
+ * {@link checkSingleSession}'s own steps 4-5.
+ *
+ * **DISCLAIMER, load-bearing, also printed at runtime below:** `--check single-session`'s steps
+ * 4-5 (`checkSingleSession`, Phase 91.1) kill the SERVER after a session was already KILLED and
+ * marked lost by the real 3-strike detector — they prove a session that DIED stays correctly dead
+ * across a backend reboot (its cleared `tmuxSession` and its stamped `outputChangedAt` survive).
+ * That is a different claim from this row's: a session that was ACTUALLY RESTARTED survives a
+ * LATER backend reboot with its LIVE fields intact. `checkSingleSession` never once calls the
+ * restart route, so it cannot be evidence for this row's claim — the two share vocabulary
+ * ("survives a restart") but are different code paths, exactly the adjacent-sounding-claim shape
+ * `.planning/milestones/v2.9-ROADMAP.md`'s nine dead instruments were caught by
+ * (`96-RESEARCH.md` Pitfall 1).
+ * @remarks Sequence, strictly, and verifiable by reading this function alone: (1) restart the
+ * session via {@link driveRestart} — row 8's own route, called again here so this row's own call
+ * order proves the restart happened BEFORE the backend is ever killed; (2) ensure a genuinely live
+ * terminal for the restarted session ({@link ensureSessionTerminalReady} — a restart's own
+ * `completeStart` call explicitly clears `ttydPort`, so a fresh ttyd must be brought up before
+ * there is anything for adoption to adopt); (3) capture the restarted session's identity via a
+ * FRESH `readOnly: true` sqlite read; (4) kill the sandbox server and verify the port is free
+ * before rebooting; (5) reboot on the SAME home/port and let `reconcileSessions` complete before
+ * asserting (`bootstrap/index.ts` awaits it before `listen()`, so a post-`waitForReady` read is
+ * already post-reconcile); (6) assert the RESTARTED session survived: same id, same bare tmux name
+ * still live, its ttyd ADOPTED (not swept — LISTENING on the SAME port, never a respawned one),
+ * its hook token re-registered and ROUTABLE (a real hook POST, not merely a persisted string
+ * comparison), `sessionLost` not set, exactly one session, and the wire still carrying neither
+ * `sessionCount` nor `sessionSummaries`.
+ */
+async function checkParityRow12RestartDurability(built) {
+  const violations = [];
+
+  console.log(
+    "row 12 restart durability: DISCLAIMER — --check single-session's own steps 4-5 (checkSingleSession, Phase 91.1) kill the SERVER after a session was already KILLED and marked lost; they prove a DEAD session's persisted fields survive a reboot, never that a RESTARTED session does. This row restarts the session FIRST (below), then kills the backend — the sequence that makes it a genuine restart-durability claim — and is NEW coverage, not a restatement of that one.",
+  );
+
+  const {
+    postFailed,
+    startStatus,
+    card: restarted,
+    timedOut: restartTimedOut,
+  } = await driveRestart(built);
+  if (postFailed || restartTimedOut || restarted?.startError != null) {
+    violations.push(
+      `row 12 restart durability: the precondition restart (row 8's own route) did not settle cleanly — postFailed=${postFailed} startStatus=${startStatus} timedOut=${restartTimedOut} startError=${JSON.stringify(restarted?.startError)} — cannot measure durability without a genuinely restarted session`,
+    );
+    console.log(
+      `ROW 12 restart durability: FAIL (${violations.length} violation(s))`,
+    );
+    return violations;
+  }
+  console.log(
+    `row 12 restart durability: precondition restart settled — tmuxSession=${restarted?.tmuxSession}`,
+  );
+
+  if (built.sessionA?.id != null) {
+    const readyResult = await ensureSessionTerminalReady(
+      built,
+      built.sessionA.id,
+    );
+    console.log(
+      `row 12 restart durability: ensured a live terminal for the restarted session — ok=${readyResult.ok}${readyResult.ok ? "" : ` (${readyResult.reason})`}`,
+    );
+    if (!readyResult.ok) {
+      violations.push(
+        `row 12 restart durability: could not bring the restarted session's own terminal up before reboot — ${readyResult.reason}`,
+      );
+      console.log(
+        `ROW 12 restart durability: FAIL (${violations.length} violation(s))`,
+      );
+      return violations;
+    }
+  }
+
+  const beforeReboot = readCard(built.dbPath, built.cardId);
+  const beforeRecord = beforeReboot?.sessions?.find(
+    (s) => s.id === beforeReboot?.activeSessionId,
+  );
+  if (!beforeRecord) {
+    violations.push(
+      "row 12 restart durability: could not resolve the restarted session's own persisted record before reboot",
+    );
+    console.log(
+      `ROW 12 restart durability: FAIL (${violations.length} violation(s))`,
+    );
+    return violations;
+  }
+  const restartedSessionId = beforeRecord.id;
+  const restartedTmuxSession = beforeRecord.tmuxSession;
+  const restartedTtydPort = beforeRecord.ttydPort;
+  console.log(
+    `row 12 restart durability: captured the RESTARTED session's identity before reboot — id=${restartedSessionId} tmux=${restartedTmuxSession} ttydPort=${restartedTtydPort} workspacePath=${beforeRecord.workspacePath}`,
+  );
+
+  await killAndWait(built.server?.child);
+  const stillListening = await isPortListening(built.port);
+  console.log(
+    `row 12 restart durability: sandbox server killed — port ${built.port} still listening=${stillListening} (expected false)`,
+  );
+  if (stillListening) {
+    violations.push(
+      `row 12 restart durability: sandbox server port ${built.port} still listening after kill — refusing to reboot onto a live orphan`,
+    );
+    console.log(
+      `ROW 12 restart durability: FAIL (${violations.length} violation(s))`,
+    );
+    return violations;
+  }
+
+  built.server = bootServer(built.home, { pathPrefix: built.pathPrefix });
+  await waitForReady(built.port);
+  console.log(
+    `row 12 restart durability: sandbox server rebooted on :${built.port} — waitForReady resolved, so reconcileSessions (awaited before listen()) has already completed`,
+  );
+
+  const afterReboot = readCard(built.dbPath, built.cardId);
+  const afterRecord = afterReboot?.sessions?.find(
+    (s) => s.id === restartedSessionId,
+  );
+  const sessionCountAfter = afterReboot?.sessions?.length ?? 0;
+  console.log(
+    `row 12 restart durability: after reboot — persisted sessionCount=${sessionCountAfter} (expected 1), record present=${!!afterRecord}, tmuxSession=${afterRecord?.tmuxSession} (expected "${restartedTmuxSession}"), sessionLost=${afterReboot?.sessionLost} (expected not true), activeSessionId=${afterReboot?.activeSessionId} (expected "${restartedSessionId}")`,
+  );
+  if (sessionCountAfter !== 1) {
+    violations.push(
+      `row 12 restart durability: persisted card owns ${sessionCountAfter} session(s) after reboot, expected exactly 1`,
+    );
+  }
+  if (!afterRecord) {
+    violations.push(
+      `row 12 restart durability: the restarted session ${restartedSessionId} is missing from persisted sessions[] after reboot`,
+    );
+  } else if (afterRecord.tmuxSession !== restartedTmuxSession) {
+    violations.push(
+      `row 12 restart durability: the restarted session's tmuxSession changed across reboot — before="${restartedTmuxSession}" after="${afterRecord.tmuxSession}"`,
+    );
+  }
+  if (afterReboot?.sessionLost === true) {
+    violations.push(
+      "row 12 restart durability: card.sessionLost is true after reboot — the RESTARTED session must survive, not be swept as dead",
+    );
+  }
+  if (afterReboot?.activeSessionId !== restartedSessionId) {
+    violations.push(
+      `row 12 restart durability: activeSessionId after reboot expected the restarted session "${restartedSessionId}", actual "${afterReboot?.activeSessionId}"`,
+    );
+  }
+
+  const liveNames = await tmuxListSessionNames();
+  console.log(
+    `row 12 restart durability: real tmux "${restartedTmuxSession}" live after reboot=${liveNames.includes(restartedTmuxSession)}`,
+  );
+  if (!liveNames.includes(restartedTmuxSession)) {
+    violations.push(
+      `row 12 restart durability: real tmux session "${restartedTmuxSession}" not found live after reboot — expected exact-match survival, not just a persisted record`,
+    );
+  }
+
+  if (restartedTtydPort != null) {
+    const ttydListening = await isPortListening(restartedTtydPort);
+    console.log(
+      `row 12 restart durability: restarted session's ttyd port ${restartedTtydPort} listening after reboot=${ttydListening} (expected true — ADOPTED, not swept)`,
+    );
+    if (!ttydListening) {
+      violations.push(
+        `row 12 restart durability: restarted session's ttyd port ${restartedTtydPort} not LISTENING after reboot — it must be ADOPTED, not swept`,
+      );
+    }
+    if (afterRecord && afterRecord.ttydPort !== restartedTtydPort) {
+      violations.push(
+        `row 12 restart durability: persisted ttydPort changed across reboot — before=${restartedTtydPort} after=${afterRecord.ttydPort} — adoption must keep the SAME port, never respawn a new one`,
+      );
+    }
+  } else {
+    violations.push(
+      "row 12 restart durability: the restarted session had no ttydPort before reboot — the terminal-ensure step above should have set one",
+    );
+  }
+
+  const tokenAfter = afterRecord?.hookToken;
+  console.log(
+    `row 12 restart durability: hook token present after reboot=${tokenAfter != null} (expected truthy — re-registered by reconcileSessions's hookToken rebuild)`,
+  );
+  if (tokenAfter == null) {
+    violations.push(
+      "row 12 restart durability: persisted hookToken is absent after reboot — reconcileSessions's rebuild must re-register one for a still-live session",
+    );
+  } else {
+    const hookStatus = await postHook(
+      built,
+      tokenAfter,
+      stopBodyWithReason("row-12-restart-durability"),
+    );
+    console.log(
+      `row 12 restart durability: POST a real hook with the post-reboot token -> ${hookStatus} (expected 204 — the token must be ROUTABLE, not merely a persisted string)`,
+    );
+    if (hookStatus !== 204) {
+      violations.push(
+        `row 12 restart durability: POST hook with the post-reboot token returned ${hookStatus}, expected 204 — the token must resolve through reconcileSessions's registerHookToken rebuild, not merely persist on disk`,
+      );
+    }
+  }
+
+  const wireCard = await fetchFixtureCard(built);
+  console.log(
+    `row 12 restart durability: wire card hasOwn(sessionCount)=${Object.hasOwn(wireCard ?? {}, "sessionCount")} hasOwn(sessionSummaries)=${Object.hasOwn(wireCard ?? {}, "sessionSummaries")} (both expected false at N=1)`,
+  );
+  if (Object.hasOwn(wireCard ?? {}, "sessionCount")) {
+    violations.push(
+      `row 12 restart durability: wire card carries "sessionCount" after reboot at N=1 — must be ABSENT, not merely falsy`,
+    );
+  }
+  if (Object.hasOwn(wireCard ?? {}, "sessionSummaries")) {
+    violations.push(
+      `row 12 restart durability: wire card carries "sessionSummaries" after reboot at N=1 — must be ABSENT, not merely falsy`,
+    );
+  }
+
+  const verdict =
+    violations.length === 0
+      ? "PASS"
+      : `FAIL (${violations.length} violation(s))`;
+  console.log(
+    `ROW 12 restart durability: ${verdict} — DISCLAIMER: this is NEW coverage; --check single-session's steps 4-5 prove a killed-not-restarted session's persisted fields survive a reboot, a DIFFERENT claim than this row's`,
+  );
+  return violations;
+}
+
+/**
+ * `--check parity-recovery` (Plan 96-05, Phase 96 Wave 4): the three `KEEP-02` rows with the LEAST
+ * prior coverage — resume (row 7, both outcomes), restart at true N=1 (row 8), and restart
+ * durability (row 12) — against {@link PARITY_FIXTURE}'s ONE card, each its own independently
+ * named verdict. Row 7 ends by resuming the session (its own recovery leg, not a new claim), so
+ * rows 8 and 12 both start from a genuinely live single session with no redundant stand-up. Row
+ * 12 calls {@link driveRestart} a second time itself (row 8 already proved its own claim with its
+ * own call) so its own "restart before kill" sequencing is provable by reading row 12's function
+ * alone, never by borrowing row 8's.
+ */
+async function checkParityRecovery(built) {
+  return [
+    ...(await checkParityRow7Resume(built)),
+    ...(await checkParityRow8Restart(built)),
+    ...(await checkParityRow12RestartDurability(built)),
+  ];
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -10854,6 +11578,8 @@ const CHECKS = {
   "parity-fixture": checkParityFixture,
   "parity-lifecycle": () =>
     withFixture("parity-lifecycle", checkParityLifecycle, PARITY_FIXTURE),
+  "parity-recovery": () =>
+    withFixture("parity-recovery", checkParityRecovery, PARITY_FIXTURE),
 };
 
 /**
