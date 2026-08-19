@@ -160,6 +160,26 @@ cardsRouter.post("/cards/:id/move", async (req, res) => {
   res.status(204).end();
 });
 
+/**
+ * `inheritFrom`, when present, is client-supplied and ultimately selects a git ref for
+ * `createWorktrees`' `baseRef` (via the parent session's own persisted `branch`). It is
+ * re-validated here against membership in THIS card's `card.sessions` — never trusted as a ref
+ * itself and never checked against the global session space — the same argument-injection
+ * surface the `base.startsWith("-")` guard in `steps.ts` exists to stop. Requiring `newSession`
+ * alongside it means a caller can never believe it inherited when the field was silently dropped.
+ */
+function inheritFromError(
+  card: Card,
+  newSession: boolean,
+  inheritFrom: string | undefined,
+): string | null {
+  if (inheritFrom === undefined) return null;
+  if (!newSession) return "inheritance requires a new session";
+  if (!card.sessions?.some((s) => s.id === inheritFrom))
+    return "unknown session to inherit from";
+  return null;
+}
+
 cardsRouter.post("/cards/:id/start", async (req, res) => {
   const { id } = req.params;
 
@@ -200,9 +220,12 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
         repos?: unknown;
         playbook?: unknown;
         newSession?: unknown;
+        inheritFrom?: unknown;
       }
     | undefined;
   const newSession = body?.newSession === true;
+  const inheritFrom =
+    typeof body?.inheritFrom === "string" ? body.inheritFrom : undefined;
 
   if (
     newSession &&
@@ -211,6 +234,12 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
     res
       .status(409)
       .json({ error: "no existing session to start another from" });
+    return;
+  }
+
+  const inheritError = inheritFromError(card, newSession, inheritFrom);
+  if (inheritError != null) {
+    res.status(409).json({ error: inheritError });
     return;
   }
 
@@ -277,7 +306,11 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
     return;
   }
 
-  void startSession(id, extraDirection, config, { playbook, newSession });
+  void startSession(id, extraDirection, config, {
+    playbook,
+    newSession,
+    inheritFrom,
+  });
   res.status(202).json({ started: true });
 });
 
