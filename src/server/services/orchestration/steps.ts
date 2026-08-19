@@ -325,23 +325,28 @@ const createWorktrees: SagaStep = {
  * resume saga can reuse the identical readiness contract and the READY/TRUST_DIALOG signatures and
  * timeout budget stay single-sourced; on timeout it throws the same `StartStepError` the start
  * flow surfaces, keeping `startClaude`'s observable behaviour unchanged.
+ * @remarks (`NEW-13`, Phase 96 R2) `capturePane`/`sendKeys` are pane-level targets and require the
+ * TRAILING-COLON exact-match form (`=<name>:`), built once here rather than at each call site, so
+ * a suffixed sibling session can never be silently prefix-matched once the exact session is gone.
+ * @see docs/ARCHITECTURE.md#tmux-invocations
  * @see docs/ARCHITECTURE.md#in-review-lifecycle
  */
 export async function awaitReplReady(session: string): Promise<void> {
+  const paneTarget = `=${session}:`;
   const deadline = Date.now() + READINESS_TIMEOUT_MS;
   let trustAccepted = false;
   let bypassAccepted = false;
   let lastPane = "";
   while (Date.now() < deadline) {
-    lastPane = await capturePane(session);
+    lastPane = await capturePane(paneTarget);
     if (READY.test(lastPane)) return;
     if (!trustAccepted && TRUST_DIALOG.test(lastPane)) {
-      await sendKeys(session, ["Enter"]);
+      await sendKeys(paneTarget, ["Enter"]);
       trustAccepted = true;
     }
     if (!bypassAccepted && BYPASS_DIALOG.test(lastPane)) {
-      await sendKeys(session, ["Down"]);
-      await sendKeys(session, ["Enter"]);
+      await sendKeys(paneTarget, ["Down"]);
+      await sendKeys(paneTarget, ["Enter"]);
       bypassAccepted = true;
     }
     await sleep(POLL_INTERVAL_MS);
@@ -369,12 +374,14 @@ export async function awaitReplReady(session: string): Promise<void> {
  * `mintHookChannel` reports no session — an unknown card id, or an active pointer naming no
  * record (`WR-03`) — registration is skipped and the launch falls through to the hook-silent
  * branch, the existing safe degradation for a card the store cannot resolve.
- * @remarks (Phase 94) tmux resolves a `-t` target by PREFIX when no exact match exists, so once a
- * suffixed sibling can coexist with the bare session (`dsp-PROJ-123-2` beside `dsp-PROJ-123`),
- * every `has-session`/`kill-session` target built from a name that can be a prefix of a sibling's
- * must use the `=` exact-match form — live-reproduced on tmux 3.6a, not theoretical. `undo`
- * below applies it. `send-keys`/`capture-pane` must NOT: the `=` form reports "can't find pane"
- * for those subcommands on this tmux version, so the plain session name stays in use for them.
+ * @remarks (Phase 94, corrected Phase 96 `R2`) tmux resolves a `-t` target by PREFIX when no exact
+ * match exists, so once a suffixed sibling can coexist with the bare session (`dsp-PROJ-123-2`
+ * beside `dsp-PROJ-123`), every target built from a name that can be a prefix of a sibling's must
+ * use the `=` exact-match form — live-reproduced on tmux 3.6a, not theoretical. `undo` below
+ * applies the session-level form (`=<name>`, no colon); `send-keys`/`capture-pane` need the SAME
+ * exact-match protection but as pane-level targets require a TRAILING COLON (`=<name>:`) to
+ * resolve at all — `awaitReplReady` and `sendKickoff` build that form once, internally.
+ * @see docs/ARCHITECTURE.md#tmux-invocations
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 const startClaude: SagaStep = {
@@ -452,11 +459,12 @@ const sendKickoff: SagaStep = {
       `dsp-kickoff-${ctx.sessionName}-${Date.now()}.txt`,
     );
     await fsp.writeFile(tmpFile, kickoff, "utf8");
+    const paneTarget = `=${session}:`;
     try {
       await loadBuffer(session, tmpFile);
-      await pasteBuffer(session, session);
+      await pasteBuffer(session, paneTarget);
       await sleep(PASTE_SETTLE_MS);
-      await sendKeys(session, ["Enter"]);
+      await sendKeys(paneTarget, ["Enter"]);
     } finally {
       await fsp.unlink(tmpFile).catch(() => {});
     }

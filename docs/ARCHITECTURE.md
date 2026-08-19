@@ -1411,16 +1411,18 @@ phase's own plan summaries mis-generalized as "never use `=` for `send-keys`/`ca
   `capturePane(`=${tmuxName}:`, ...)` is the one call site in this codebase already shipping the
   correct colon-qualified form.
 
-**Still open: `steps.ts`'s own kickoff-sending calls use NEITHER form.** `capturePane`/`sendKeys`/
-`pasteBuffer` inside `awaitReplReady`/`sendKickoff` (`steps.ts`) pass the bare, unprefixed session
-name. Live-reproduced by Phase 94 plan 07: with the exact session absent and a suffixed sibling
-alive, all three silently resolve onto the sibling and report success rather than throwing, so only
-`awaitReplReady`'s own hardcoded 30s wall-clock deadline can ever turn that absence into a genuine
-failure. The fix is the SAME already-proven colon-qualified convention above, not a new pane/session-
-id targeting mechanism — recorded as an open residual (see [Known Residuals](#known-residuals))
-because no criterion in Phase 94 depends on those three calls behaving correctly under a suffixed
-sibling in the failure path, and applying the fix was out of this closeout's scope. Commands that
-take no target (`list-sessions`) carry no `=` prefix.
+**Closed (Phase 96 plan 11, R2): `steps.ts`'s own kickoff-sending calls now use the colon-qualified
+form too.** `capturePane`/`sendKeys`/`pasteBuffer` inside `awaitReplReady`/`sendKickoff` (`steps.ts`)
+used to pass the bare, unprefixed session name. Live-reproduced by Phase 94 plan 07: with the exact
+session absent and a suffixed sibling alive, all three silently resolved onto the sibling and
+reported success rather than throwing, so only `awaitReplReady`'s own hardcoded 30s wall-clock
+deadline could ever turn that absence into a genuine failure — and even then the surfaced error's
+`stderr` carried the SIBLING's pane content, not a clean "no such session" message. Both functions
+now build `` `=${session}:` `` once and pass it to every pane-level call, matching the convention
+above; live-proven with a real N=2 fixture both ways (`checkSecondStartRollbackDirection3`,
+`scripts/session-liveness-v3.mjs --check second-start-rollback`) — the bare form still silently
+resolves onto the sibling and misdelivers `send-keys`, the colon-qualified form now fails loudly
+instead. Commands that take no target (`list-sessions`) carry no `=` prefix.
 
 Two further tmux invariants have their durable home in the adapter's JSDoc rather than here, because
 each is scoped to a single function: `capturePane`'s `-J` soft-wrap rejoin (`NEW-02`),

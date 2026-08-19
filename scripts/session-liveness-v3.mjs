@@ -872,8 +872,10 @@ async function tmuxKillSession(name) {
  * Required whenever a target name can be a tmux PREFIX of a live sibling (`dsp-<identifier>`
  * beside `dsp-<identifier>-2`): the bare form in {@link tmuxKillSession} prefix-matches on tmux
  * 3.6a when no exact match exists, so killing session 1 by its bare name after session 2 already
- * exists is not guaranteed to kill session 1 specifically. Never used for `send-keys`/
- * `capture-pane`, which report "can't find pane" under `=` on this tmux version.
+ * exists is not guaranteed to kill session 1 specifically. `send-keys`/`capture-pane` need the
+ * SAME exact-match protection but as pane-level targets require a TRAILING COLON (`=<name>:`) to
+ * resolve at all — the colon-less form here reports "can't find pane" for those subcommands even
+ * against a live session (Phase 96 plan 11, `checkSecondStartRollbackDirection3`).
  */
 async function tmuxKillSessionExact(name) {
   try {
@@ -8657,11 +8659,210 @@ async function checkSecondStartRollbackDirection2(built) {
 }
 
 /**
- * `--check second-start-rollback` (Plan 94-07, criterion C3, START-02): both directions the
- * criterion names, each its own fresh {@link SECOND_SESSION_FIXTURE} instance — a failing SECOND
- * start must not disturb session 1 (Direction 1, proves Break A: removing the rollback call),
- * and a failing FIRST-session rollback must not kill the suffixed sibling (Direction 2, proves
- * Break B: the tmux prefix-kill, this phase's headline defect).
+ * Direction 3 (Phase 96 plan 11, closing R2): the raw tmux-targeting proof underlying Direction
+ * 2's own doc comment above. Direction 2 already documents that once session 1's exact tmux name
+ * is absent while the suffixed sibling is alive, a BARE `-t`-targeted `capturePane`/`sendKeys`/
+ * `pasteBuffer` call silently PREFIX-MATCHES onto the sibling and reports success rather than
+ * throwing — this direction proves that claim DIRECTLY against the two real, live-created tmux
+ * sessions the N=2 fixture stands up, rather than inferring it from the saga's eventual outcome.
+ * It issues the exact argv shapes `steps.ts` builds: the bare form (what `awaitReplReady`/
+ * `sendKickoff` used before this plan's fix) and the trailing-colon exact-match form (`=<name>:`,
+ * what they build now), against the SAME live N=2 state. Both legs run unconditionally — this is
+ * a property of tmux's own target resolution, not of which form `steps.ts` currently happens to
+ * build — so this direction proves the hazard AND the fix on every run, not just once at the
+ * moment of the fix.
+ * @see docs/ARCHITECTURE.md#tmux-invocations
+ */
+async function checkSecondStartRollbackDirection3(built) {
+  const violations = [];
+  const session1Name = built.tmux.a;
+
+  const { status, body } = await startSecondSession(built, {
+    newSession: true,
+  });
+  console.log(
+    `second-start-rollback (d3): POST /start {newSession:true} (session 2 setup) -> ${status}`,
+  );
+  if (status !== 202) {
+    violations.push(
+      `second-start-rollback (d3): session 2 setup POST /start returned ${status}, expected 202 (body=${JSON.stringify(body)})`,
+    );
+    return violations;
+  }
+  const { card, timedOut } = await waitForSagaSettled(built, {
+    timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+  });
+  if (timedOut) {
+    violations.push(
+      `second-start-rollback (d3): session 2 setup saga did not settle within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (last observed card=${JSON.stringify(card)})`,
+    );
+    return violations;
+  }
+  if (card?.startError != null) {
+    violations.push(
+      `second-start-rollback (d3): session 2 setup recorded a startError: ${JSON.stringify(card.startError)}`,
+    );
+    return violations;
+  }
+  const session2Name = `dsp-${built.identifier}-2`;
+  const liveSetup = await tmuxListSessionNames();
+  if (!liveSetup.includes(session2Name)) {
+    violations.push(
+      `second-start-rollback (d3): session 2's EXACT tmux name ${session2Name} not found right after creation: ${JSON.stringify(liveSetup)}`,
+    );
+    return violations;
+  }
+
+  // A unique marker written into session 2's own pane, so a cross-session read is provable by
+  // CONTENT, not inferred from a READY-pattern coincidence.
+  const marker = `d3-marker-${randomBytes(4).toString("hex")}`;
+  await writePaneMarker(session2Name, built.home, marker);
+  await sleep(POLL_INTERVAL_MS);
+  const session2Own = await execFileP("tmux", [
+    "capture-pane",
+    "-p",
+    "-t",
+    `=${session2Name}:`,
+  ]).catch((err) => ({ stdout: "", err: err.stderr ?? err.message }));
+  if (!(session2Own.stdout ?? "").includes(marker)) {
+    violations.push(
+      `second-start-rollback (d3): session 2's own marker "${marker}" never landed in its own pane before the cross-session probe (${JSON.stringify(session2Own)}) — fixture itself is not answerable`,
+    );
+    return violations;
+  }
+
+  await tmuxKillSessionExact(session1Name);
+  const liveAfterKill = await tmuxListSessionNames();
+  console.log(
+    `second-start-rollback (d3): session 1 exact name killed; live sessions = ${JSON.stringify(liveAfterKill)}`,
+  );
+  if (liveAfterKill.includes(session1Name)) {
+    violations.push(
+      `second-start-rollback (d3): session 1's exact tmux name ${session1Name} still present after an exact-match kill — fixture precondition (exact session ABSENT) not met`,
+    );
+    return violations;
+  }
+  if (!liveAfterKill.includes(session2Name)) {
+    violations.push(
+      `second-start-rollback (d3): session 2's exact tmux name ${session2Name} missing after killing session 1 — fixture precondition (suffixed sibling PRESENT) not met`,
+    );
+    return violations;
+  }
+
+  // BEFORE leg — the bare, unprefixed form awaitReplReady/sendKickoff issued before this plan's
+  // fix. Real tmux 3.6a target resolution, not product code under test here.
+  let bareCapture;
+  try {
+    const { stdout } = await execFileP("tmux", [
+      "capture-pane",
+      "-p",
+      "-t",
+      session1Name,
+    ]);
+    bareCapture = { resolved: true, stdout };
+  } catch (err) {
+    bareCapture = { resolved: false, stderr: err.stderr ?? err.message };
+  }
+  console.log(
+    `second-start-rollback (d3): BEFORE (bare target "${session1Name}") capture-pane -> ${JSON.stringify(bareCapture)}`,
+  );
+  if (!bareCapture.resolved || !(bareCapture.stdout ?? "").includes(marker)) {
+    violations.push(
+      `second-start-rollback (d3): BEFORE leg expected the bare capture-pane target to silently resolve onto session 2's marker "${marker}" (the documented tmux 3.6a hazard) but got ${JSON.stringify(bareCapture)} — either the hazard no longer reproduces on this tmux version or the fixture drifted; the "before" half of R2's proof did not fire as expected`,
+    );
+  }
+
+  let bareSendKeysResolved = true;
+  try {
+    await execFileP("tmux", [
+      "send-keys",
+      "-t",
+      session1Name,
+      "-l",
+      "--",
+      "echo d3-BEFORE-bare-sendkeys",
+    ]);
+    await execFileP("tmux", ["send-keys", "-t", session1Name, "Enter"]);
+  } catch {
+    bareSendKeysResolved = false;
+  }
+  await sleep(POLL_INTERVAL_MS);
+  const session2AfterBareSendKeys = await execFileP("tmux", [
+    "capture-pane",
+    "-p",
+    "-t",
+    `=${session2Name}:`,
+  ]).catch(() => ({ stdout: "" }));
+  const bareSendKeysLandedOnSibling =
+    bareSendKeysResolved &&
+    (session2AfterBareSendKeys.stdout ?? "").includes(
+      "d3-BEFORE-bare-sendkeys",
+    );
+  console.log(
+    `second-start-rollback (d3): BEFORE (bare target) send-keys resolved=${bareSendKeysResolved}, landed on sibling's pane=${bareSendKeysLandedOnSibling}`,
+  );
+  if (!bareSendKeysLandedOnSibling) {
+    violations.push(
+      `second-start-rollback (d3): BEFORE leg expected the bare send-keys target to silently misdeliver onto session 2's pane, got resolved=${bareSendKeysResolved} landedOnSibling=${bareSendKeysLandedOnSibling}`,
+    );
+  }
+
+  // AFTER leg — the trailing-colon exact-match form awaitReplReady/sendKickoff build now. Must
+  // fail LOUDLY rather than silently succeeding against the wrong pane.
+  let exactCapture;
+  try {
+    const { stdout } = await execFileP("tmux", [
+      "capture-pane",
+      "-p",
+      "-t",
+      `=${session1Name}:`,
+    ]);
+    exactCapture = { resolved: true, stdout };
+  } catch (err) {
+    exactCapture = { resolved: false, stderr: err.stderr ?? err.message };
+  }
+  console.log(
+    `second-start-rollback (d3): AFTER (exact-match "=${session1Name}:") capture-pane -> ${JSON.stringify(exactCapture)}`,
+  );
+  if (exactCapture.resolved) {
+    violations.push(
+      `second-start-rollback (d3): AFTER leg expected the exact-match capture-pane target to FAIL (no exact session, no fallback to the sibling) but it resolved: ${JSON.stringify(exactCapture)}`,
+    );
+  }
+
+  let exactSendKeysFailed = false;
+  try {
+    await execFileP("tmux", [
+      "send-keys",
+      "-t",
+      `=${session1Name}:`,
+      "-l",
+      "--",
+      "echo d3-AFTER-exact-sendkeys",
+    ]);
+  } catch (err) {
+    exactSendKeysFailed = true;
+    console.log(
+      `second-start-rollback (d3): AFTER (exact-match) send-keys correctly failed — ${err.stderr ?? err.message}`,
+    );
+  }
+  if (!exactSendKeysFailed) {
+    violations.push(
+      `second-start-rollback (d3): AFTER leg expected the exact-match send-keys target to FAIL, but it resolved without error`,
+    );
+  }
+
+  return violations;
+}
+
+/**
+ * `--check second-start-rollback` (Plan 94-07, criterion C3, START-02; Direction 3 added by Phase
+ * 96 plan 11): the three directions, each its own fresh {@link SECOND_SESSION_FIXTURE} instance —
+ * a failing SECOND start must not disturb session 1 (Direction 1, proves Break A: removing the
+ * rollback call), a failing FIRST-session rollback must not kill the suffixed sibling (Direction
+ * 2, proves Break B: the tmux prefix-kill, Phase 94's headline defect), and the raw tmux-targeting
+ * proof that `steps.ts`'s kickoff-path calls now use the safe exact-match form (Direction 3,
+ * closes Phase 94's residual R2 / Phase 96 finding).
  */
 async function checkSecondStartRollback() {
   const violations = [];
@@ -8676,6 +8877,13 @@ async function checkSecondStartRollback() {
     ...(await withFixture(
       "second-start-rollback-d2",
       checkSecondStartRollbackDirection2,
+      SECOND_SESSION_FIXTURE,
+    )),
+  );
+  violations.push(
+    ...(await withFixture(
+      "second-start-rollback-d3",
+      checkSecondStartRollbackDirection3,
       SECOND_SESSION_FIXTURE,
     )),
   );
