@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+# Least privilege: the workflow token can only read the repo.
+permissions:
+  contents: read
+
 # Cancel superseded runs on the same ref.
 concurrency:
   group: ci-${{ github.ref }}
@@ -15,11 +19,14 @@ jobs:
     name: check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22.22"
           cache: npm
-      - run: npm ci
+      # --ignore-scripts: no dependency may run code at install time (supply-chain worms
+      # ride preinstall/postinstall). Native-binary deps here (esbuild, unrs-resolver)
+      # ship prebuilt optional packages, so nothing needs a build step.
+      - run: npm ci --ignore-scripts
       - name: npm run check
         run: npm run check

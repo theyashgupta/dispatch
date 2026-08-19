@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # Keep pinned action SHAs current (Dependabot updates the SHA and the version comment).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # Wait 7 days after a release before proposing it. Every npm worm wave so far was
+    # detected and unpublished within hours, so this alone would have skipped all of them.
+    cooldown:
+      default-days: 7
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+    commit-message:
+      prefix: chore
+      prefix-development: chore
