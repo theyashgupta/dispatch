@@ -41,38 +41,65 @@ export function SessionSwitcher({ card }: SessionSwitcherProps) {
 
   const entries = card.sessionSummaries ?? [];
   const activeId = optimisticId ?? card.activeSessionId;
+  const activeEntry = entries.find((e) => e.id === activeId);
 
   return (
-    <div style={containerStyle} role="group" aria-label="Sessions">
-      {entries.map((entry) => {
-        const active = entry.id === activeId;
-        const label = entry.lost
-          ? `Session ${entry.ordinal} — lost`
-          : `Session ${entry.ordinal}`;
-        return (
-          <IconButton
-            key={entry.id}
-            aria-label={label}
-            title={label}
-            aria-pressed={active}
-            onClick={() => {
-              setOptimisticId(entry.id);
-              switchSession(card.id, entry.id).catch(console.error);
-            }}
-            style={{
-              ...segmentStyle,
-              color: active
-                ? "var(--accent)"
-                : entry.lost
-                  ? "var(--destructive)"
-                  : "var(--text-muted)",
-              ...(active ? { background: activeSegmentTint } : {}),
-            }}
-          >
-            {entry.ordinal}
-          </IconButton>
-        );
-      })}
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--space-xs)",
+        overflowX: "auto",
+        maxWidth: "100%",
+      }}
+    >
+      <div style={containerStyle} role="group" aria-label="Sessions">
+        {entries.map((entry) => {
+          const active = entry.id === activeId;
+          let label = entry.lost
+            ? `Session ${entry.ordinal} — lost`
+            : `Session ${entry.ordinal}`;
+          if (entry.parentOrdinal != null) {
+            label += ` — built from Session ${entry.parentOrdinal}`;
+          }
+          return (
+            <IconButton
+              key={entry.id}
+              aria-label={label}
+              title={label}
+              aria-pressed={active}
+              onClick={() => {
+                setOptimisticId(entry.id);
+                switchSession(card.id, entry.id).catch(console.error);
+              }}
+              style={{
+                ...segmentStyle,
+                color: active
+                  ? "var(--accent)"
+                  : entry.lost
+                    ? "var(--destructive)"
+                    : "var(--text-muted)",
+                ...(active ? { background: activeSegmentTint } : {}),
+              }}
+            >
+              {entry.ordinal}
+            </IconButton>
+          );
+        })}
+      </div>
+      {activeEntry?.parentOrdinal != null && (
+        <span
+          style={{
+            fontSize: "var(--font-label)",
+            lineHeight: "var(--line-label)",
+            color: "var(--text-muted)",
+            whiteSpace: "nowrap",
+            flex: "0 0 auto",
+          }}
+        >
+          {`· from ${activeEntry.parentOrdinal}`}
+        </span>
+      )}
     </div>
   );
 }
