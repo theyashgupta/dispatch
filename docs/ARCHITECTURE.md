@@ -1218,6 +1218,18 @@ resource, and this button also disables while a sibling's own saga is mid-flight
 the standing "no spinner on board interactions" rule — the label change and the `disabled` state
 together are the entire in-flight signal.
 
+**No local optimistic `pending` flag — `disabled` reads `card.provisioningStep` alone.** 94-04
+shipped an optimistic flag set synchronously in `onClick` (mirroring `PanelHeader`'s Sync Linear
+button, which fires its request directly on click). That precedent doesn't transfer: this button's
+`onClick` only opens `StartModal`— the actual start doesn't begin until the modal is submitted. A
+flag that clears solely when `provisioningStep` transitions to null never resets if the modal is
+opened and then cancelled without submitting, since `provisioningStep` never leaves null on that
+path — the button stayed permanently disabled ("Starting…") until something unrelated changed
+`provisioningStep`. Live-reproduced by `panel-94.mjs`'s keyboard-path check (open via Enter, close
+via Escape, then Tab can't reach the button again — a disabled control drops out of tab order).
+Fixed by mirroring `PanelHeader`'s own "Start" button instead, which opens the same modal and has
+no local flag at all, relying solely on the server-confirmed `provisioningStep`.
+
 **Accepted `KEEP-02` deviation.** This row is the one thing Phase 94 adds to the N=1 panel. Row
 height is 48px whenever the button is present (`8px` padding + the `Button` primitive's own 32px
 height + `8px` padding), 4px taller than Phase 92's 44px switcher-only row (`8 + 28 + 8`) — a
