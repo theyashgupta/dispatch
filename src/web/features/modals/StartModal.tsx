@@ -1072,6 +1072,79 @@ export function usePlaybookPicker(onInteraction: () => void): PlaybookPicker {
   };
 }
 
+interface InheritToggleSectionProps {
+  card: CardModel;
+  inherit: boolean;
+  onChange: (inherit: boolean) => void;
+}
+
+function InheritToggleSection({
+  card,
+  inherit,
+  onChange,
+}: InheritToggleSectionProps) {
+  const [checkFocus, setCheckFocus] = useState(false);
+  const parentOrdinal =
+    card.sessionSummaries?.find((s) => s.id === card.activeSessionId)
+      ?.ordinal ?? 1;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-xs)",
+        flex: "0 0 auto",
+      }}
+    >
+      <Field>Starting point</Field>
+      <label
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "var(--space-sm)",
+          cursor: "pointer",
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={inherit}
+          onChange={(e) => onChange(e.target.checked)}
+          onFocus={(e) =>
+            setCheckFocus(e.currentTarget.matches(":focus-visible"))
+          }
+          onBlur={() => setCheckFocus(false)}
+          style={{
+            accentColor: "var(--accent)",
+            outline: "none",
+            ...focusRing(checkFocus),
+          }}
+        />
+        <span style={{ display: "flex", flexDirection: "column" }}>
+          <span
+            style={{
+              fontSize: "var(--font-body)",
+              lineHeight: "var(--line-body)",
+              color: "var(--text)",
+            }}
+          >
+            {`Build on Session ${parentOrdinal}`}
+          </span>
+          <span
+            style={{
+              fontSize: "var(--font-label)",
+              lineHeight: "var(--line-label)",
+              color: "var(--text-muted)",
+            }}
+          >
+            {`Includes Session ${parentOrdinal}'s commits. Any uncommitted work in Session ${parentOrdinal} stays exactly where it is — this new session just starts without it.`}
+          </span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
 interface PlaybookPickerSectionProps {
   playbook: PlaybookPicker;
   onEditPlaybooks: () => void;
@@ -1143,6 +1216,7 @@ export function StartModal({
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [focused, setFocused] = useState<"textarea" | null>(null);
+  const [inherit, setInherit] = useState(false);
 
   const clearError = useCallback(() => setError(null), []);
   const workspace = useWorkspacePicker(clearError);
@@ -1174,6 +1248,7 @@ export function StartModal({
         chosen,
         playbookArg,
         newSession === true,
+        inherit && newSession === true ? card.activeSessionId : undefined,
       );
       if (result.ok) {
         modalRef.current?.requestClose();
@@ -1216,6 +1291,14 @@ export function StartModal({
           workspace={workspace}
           onInteraction={clearError}
         />
+
+        {newSession === true && (
+          <InheritToggleSection
+            card={card}
+            inherit={inherit}
+            onChange={setInherit}
+          />
+        )}
 
         <PlaybookPickerSection
           playbook={playbook}

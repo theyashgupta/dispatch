@@ -58,6 +58,12 @@ export type StartResult =
  * `newSession` carries the "start another session" intent (`UI-04`) through to the body's
  * `newSession` field, included only when `true` so the field is omitted entirely — and the N=1
  * request body stays byte-identical to before this parameter existed — for every other caller.
+ *
+ * `inheritFrom` carries the "build this session on an existing one" intent through to the body's
+ * `inheritFrom` field, included only when supplied, so the body for every other caller —
+ * including a `newSession`-true request that did not opt in — stays byte-identical to Phase 94's
+ * shipped shape. The name matches the route's own field exactly so nothing translates between
+ * this client call and the request body.
  */
 export async function startCard(
   id: string,
@@ -66,6 +72,7 @@ export async function startCard(
   repos?: { path: string; base: string }[],
   playbook?: string,
   newSession?: boolean,
+  inheritFrom?: string,
 ): Promise<StartResult> {
   const body =
     folder !== undefined || repos !== undefined
@@ -75,11 +82,13 @@ export async function startCard(
           repos,
           playbook,
           newSession: newSession === true ? true : undefined,
+          inheritFrom,
         }
       : {
           extraDirection,
           playbook,
           newSession: newSession === true ? true : undefined,
+          inheritFrom,
         };
   const res = await fetch(`/api/cards/${encodeURIComponent(id)}/start`, {
     method: "POST",
