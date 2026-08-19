@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { Plus } from "lucide-react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import type { StartRequest } from "../../lib/start-request.js";
@@ -18,15 +17,8 @@ export function StartAnotherSessionButton({
   docked = false,
   takeover = false,
 }: StartAnotherSessionButtonProps) {
-  const [pending, setPending] = useState(false);
   const narrowViewport = useMediaQuery("(max-width: 520px)");
   const narrowPanel = (docked || takeover) && narrowViewport;
-
-  useEffect(() => {
-    if (card.provisioningStep == null) {
-      setPending(false);
-    }
-  }, [card.provisioningStep]);
 
   if (
     card.column === "done" ||
@@ -36,7 +28,7 @@ export function StartAnotherSessionButton({
     return null;
   }
 
-  const inFlight = pending || card.provisioningStep != null;
+  const inFlight = card.provisioningStep != null;
   const label = inFlight ? "Starting…" : "Start another session";
   const reason = inFlight
     ? "Starting another session…"
@@ -48,10 +40,7 @@ export function StartAnotherSessionButton({
     <Button
       variant="secondary"
       disabled={inFlight}
-      onClick={() => {
-        setPending(true);
-        onStartRequest?.({ cardId: card.id, newSession: true });
-      }}
+      onClick={() => onStartRequest?.({ cardId: card.id, newSession: true })}
       aria-label={reason}
       title={reason}
     >
