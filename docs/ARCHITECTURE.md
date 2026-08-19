@@ -179,7 +179,38 @@ removes a record and so can safely leave the pointer in place on an unplanned de
 `removeSessionRecord` has just removed the pointed-at record, so leaving records present with no
 active pointer would be exactly the "N sessions and no active one" state `--check switch-atomicity`
 already forbids and this section says a card must never be observed in; the pointer is cleared to
-`undefined` only when no record remains at all. The check runs on the TypeScript parser, not a line scan, because a mutation has more
+`undefined` only when no record remains at all.
+
+**`mintSibling` — the third widening of the sole chokepoint (Phase 94).** `setActiveSession` gained
+a `mintSibling` boolean parameter that mints a new session record for a card that ALREADY has an
+active session, without promoting it — the mirror image of Phase 91's `promoteTarget` (promote
+without mint). `reserveNewSession`/`rollbackReservedSession` (`BoardStore`, public) are the store's
+reserve-before-run and rollback-on-failure primitives for the start saga's second-session path.
+`reserveNewSession` advances `Card.nextSessionOrdinal` — a monotonic, never-decrementing per-card
+counter — BEFORE the mint can fail, so a rolled-back reservation never reissues a consumed ordinal;
+it is never decremented because branches are never deleted (`NEW-14`, see [Cleanup
+Lifecycle](#cleanup-lifecycle)), so a length-derived ordinal would collide with a dead sibling's
+surviving branch. `reserveNewSession` also seeds the minted sibling's `workspace`
+from the active session's — without this seed, a reserved sibling's `workspace` stayed `undefined`
+until its OWN saga completed, which silently exempted it from artifact probing entirely (the probe
+gates on `rec.workspace != null`, see [Dev-Server Preview Detection](#dev-server-preview-detection))
+and wiped `card.workspace` the moment the sibling's saga later promoted it, since `cleanupWorkspace`
+reads `card.workspace?.repos` — a real defect this phase's own `artifact-attribution` check found
+and fixed (`829dd4a`). `rollbackReservedSession` delegates to the existing private
+`removeSessionRecord`; its promotion branch is a structural no-op here, because a reserved session
+is never promoted before its saga succeeds, so there is nothing to re-promote on rollback. Neither
+method writes `card.sessions` directly — both route through the sanctioned chokepoint or its
+existing splice helper, so `scripts/check-invariants.mjs`'s `SANCTIONED_WRITERS` allowlist needed no
+change for either, and the "exactly THREE declared writers" count above is unchanged.
+
+`Session.branch` now has a per-session home (Phase 94); `Card.branch` mirrors only the ACTIVE
+session, and its write is GATED on `card.activeSessionId === resolvedId` — the pre-call id captured
+before the mutating call, checked after it returns — joining the `hookRoutedAt`/cleanup-fields
+family of gated mirrors (Phase 90/93) rather than the six unconditionally-projected fields above.
+Without the gate, a non-active session's `completeStart` could overwrite the active session's
+`branch` mirror with its own.
+
+The check runs on the TypeScript parser, not a line scan, because a mutation has more
 surface forms than a regex can enumerate — `Object.assign(card, { … })`, computed member access,
 destructuring assignment and a line break before the `=` were all invisible to the scan that
 preceded it. The flat
@@ -1264,13 +1295,38 @@ paste: bracketed paste arrives as one message, and a folded-in Enter fires the p
 full text has landed in the input box, submitting a truncated kickoff. The separate Enter, sent
 after the paste settles, is the only reliable submit.
 
-**The `=<name>:` exact-name trap (`NEW-13`).** Every pane target that names a specific session uses
-the `=<name>:` form (e.g. `capture-pane -t =<session>:`, `ttyd … attach -t =<session>`). The leading
-`=` forces EXACT-name matching — tmux target resolution otherwise falls back to PREFIX/fuzzy
-matching, so with `dsp-ABC-1` gone and `dsp-ABC-10` alive, a bare `-t dsp-ABC-1` would silently attach
-the WRONG ticket's session. The trailing `:` makes it a session-qualified pane target. Commands that
-take NO target (`list-sessions`) carry no `=` prefix. Dropping either the `=` or the `:` is a
-correctness bug, not a style choice.
+**The `=` exact-match convention (`NEW-13`), and the colon that decides whether it works.** Every
+target that could otherwise resolve against more than one live session uses tmux's leading `=` to
+force EXACT-name matching — tmux target resolution otherwise falls back to PREFIX matching, so with
+`dsp-ABC-1` gone and `dsp-ABC-1-2` alive, a bare `-t dsp-ABC-1` silently resolves onto the WRONG
+session. Live-reproduced repeatedly on tmux 3.6a across Phases 93 and 94, most recently during this
+phase's own closeout: `kill-session`/`has-session -t dsp-ABC-1` (no `=`) resolves onto a live
+`dsp-ABC-1-2` sibling and reports success. Which exact-match FORM applies depends on whether the
+target names a SESSION or a PANE — conflating the two, not the `=` itself, is what several of this
+phase's own plan summaries mis-generalized as "never use `=` for `send-keys`/`capture-pane`":
+
+- **Session-level targets** (`has-session`, `kill-session`, `tmux … attach`) take the bare
+  exact-match form, `=<name>` — no trailing colon. Every call site in `src/server` already passes
+  this form: `steps.ts`'s rollback `killSession`, `start-session.ts`'s reattach `hasSession` check,
+  `resume-session.ts`, `cleanup.ts`, `uninstall.ts`, and `ttyd.ts`'s `spawnTtyd` attach target.
+- **Pane-level targets** (`capture-pane`, `send-keys`, `paste-buffer`) require a TRAILING COLON,
+  `=<name>:`, to resolve AT ALL. Live-verified directly on this machine's tmux 3.6a: `capture-pane -t
+=<name>` (no colon) fails with `can't find pane` even against a session that is genuinely alive,
+  while `capture-pane -t =<name>:` (with colon) correctly resolves the exact session and ignores a
+  longer-named live sibling — same result confirmed for `send-keys`. `markers/watcher.ts`'s
+  `capturePane(`=${tmuxName}:`, ...)` is the one call site in this codebase already shipping the
+  correct colon-qualified form.
+
+**Still open: `steps.ts`'s own kickoff-sending calls use NEITHER form.** `capturePane`/`sendKeys`/
+`pasteBuffer` inside `awaitReplReady`/`sendKickoff` (`steps.ts`) pass the bare, unprefixed session
+name. Live-reproduced by Phase 94 plan 07: with the exact session absent and a suffixed sibling
+alive, all three silently resolve onto the sibling and report success rather than throwing, so only
+`awaitReplReady`'s own hardcoded 30s wall-clock deadline can ever turn that absence into a genuine
+failure. The fix is the SAME already-proven colon-qualified convention above, not a new pane/session-
+id targeting mechanism — recorded as an open residual (see [Known Residuals](#known-residuals))
+because no criterion in Phase 94 depends on those three calls behaving correctly under a suffixed
+sibling in the failure path, and applying the fix was out of this closeout's scope. Commands that
+take no target (`list-sessions`) carry no `=` prefix.
 
 Two further tmux invariants have their durable home in the adapter's JSDoc rather than here, because
 each is scoped to a single function: `capturePane`'s `-J` soft-wrap rejoin (`NEW-02`),
@@ -1304,6 +1360,29 @@ at start time is authoritative: the runner reattaches idempotently and never kil
 (tmux is the source of truth). On the error path the card stays in To Do —
 `setProvisioning`/`setStartError` never promote it — so no forward promotion happens when a start
 fails.
+
+**Session-awareness (Phase 94).** The second-session path rides the SAME route and the SAME four
+steps — there is no second endpoint. `POST /cards/:id/start` accepts an optional `newSession: true`
+body flag, re-validated server-side against `card.activeSessionId` (a 409 when the card has no
+active session to start another from; the flag is never trusted to also carry a client-supplied
+session id, ordinal, or name). The reserve step (`store.reserveNewSession`) runs INSIDE the same
+card-level `isStarting`/`beginStart` critical section described above, which is what makes two
+genuinely concurrent `newSession: true` POSTs coalesce onto exactly ONE new session rather than two:
+the guard serializes the RESERVE STEP itself, before either request's session id exists, so a
+per-session lock could never have caught this race — each concurrent reserve mints a DIFFERENT id
+from `card.nextSessionOrdinal`, so two mints never collide with each other; only the card-level gate
+makes the second request return early and coalesce onto the session the first reserve already
+minted. `SagaContext.sessionName` is the single naming token every tmux/branch/worktree derivation
+in `steps.ts` reads — `card.identifier` for session 1, `` `${identifier}-${ordinal}` `` for session
+N — collapsing eight independent `"dsp-" + identifier` recomputations that predated this phase into
+one field, set once, at saga start. `ctx.identifier` survives only inside `IDENTIFIER_RE`'s
+validation guard and its error string: `IDENTIFIER_RE` rejects a second hyphen-digit group, so what
+gets format-validated is always the bare ticket id, never a suffixed session name. On failure,
+compensation still runs in reverse over `SagaContext`'s own do-bookkeeping exactly as described
+above; a reserved second-session record is THEN rolled back via `store.rollbackReservedSession`
+BEFORE `setStartError` runs, so a failed second start never leaves a zombie reservation behind; and
+`StartError.newSession` rides every failure this saga produces — not only `StartStepError`s — so
+Retry reproduces "start another session" intent regardless of which step failed.
 
 Failure surfaces as a real error the card renders: a failed adapter call rejects with the child
 process's `stderr` attached (see [Exec Chokepoint](#exec-chokepoint)), the step wraps it in a
@@ -2069,31 +2148,54 @@ keeps polling its healthy siblings at full cadence. While a card is backed off i
 skipped entirely and `prsUnknown` is left standing — nothing was re-checked, so nothing may claim to
 have been.
 
-**The fan-out is scoped to PROBED cards, not every `cardsWithSession()` card — Done is excluded
+**The fan-out is scoped to PROBED sessions, not every `sessionsWithTmux()` pair — Done is excluded
 (milestone-integration-audit, closes a cross-phase blocker between `LIFE-02`'s deferred-cleanup
-retention and this loop).** `cardsWithSession()` alone stopped being naturally bounded by "how many
+retention and this loop).** `sessionsWithTmux()` alone stopped being naturally bounded by "how many
 agents are actively working" the moment Phase 81 started keeping a Done card's tmux session alive
 for days awaiting cleanup — measured at 60 concurrent `gh pr list` spawns in a single ~10s tick for
 60 awaiting-cleanup cards, unbounded and indefinite as the retained-Done population grows. The
-module-local `probedCards()` helper filters `cardsWithSession()` down to every column except Done
-before either the PR fan-out or the preview scan runs. This is SIGNAL semantics, not a scale
-shim: Done is a parked column with no Restart affordance, the card's work is finished there, and
-nothing about a finished card's PR state or dev-server preview can change from further probing — a
-PR merging after Done gates no further work for a card none is happening on. A Done card's
-`prs`/`previews` therefore FREEZE at whatever the last probe resolved before the card left an
-active column, rather than staying live for the length of the deferred-cleanup window; that is the
-deliberate tradeoff, not an oversight. Every other live column (`in_progress` / `needs_input` /
-`agent_done`; `todo` never carries a `tmuxSession` so was never in the input set) keeps probing
+module-local `probedSessions()` helper (Phase 94, renamed from the pre-Phase-94 `probedCards()` —
+the probed UNIT is now a SESSION, not a card) filters `sessionsWithTmux()` down to every pair whose
+card's column is not Done before either the PR fan-out or the preview scan runs. This is SIGNAL
+semantics, not a scale shim: Done is a parked column with no Restart affordance, the card's work is
+finished there, and nothing about a finished card's PR state or dev-server preview can change from
+further probing — a PR merging after Done gates no further work for a card none is happening on. A
+Done card's `prs`/`previews` therefore FREEZE at whatever the last probe resolved before the card
+left an active column, rather than staying live for the length of the deferred-cleanup window; that
+is the deliberate tradeoff, not an oversight. Every other live column (`in_progress` / `needs_input`
+/ `agent_done`; `todo` never carries a `tmuxSession` so was never in the input set) keeps probing
 exactly as before — `RESIL-02`'s failure-ceiling and backoff, and the `null`-vs-`[]`
 unknown-vs-confirmed-negative distinction above, are unchanged for those columns. The three
-per-card bookkeeping maps (`prFailureCounts`, `prRetryNotBefore`, `previewFailureCounts`) are
-pruned against this same `probedCards()` set at the end of each tick, so a card that moves to Done
-mid-tick has its streak evicted on the very next tick rather than lingering forever. Concurrency
-within `probedCards()` itself remains an unbounded `Promise.all` — acceptable at the scale of
-"cards with an actively live session" (a handful at a time in normal use), unlike the
+bookkeeping maps (`prFailureCounts`, `prRetryNotBefore`, `previewFailureCounts`) are now keyed by
+SESSION id, not card id (Phase 94), and pruned against this same `probedSessions()` set at the end
+of each tick, so a session that moves to Done mid-tick — or a non-active sibling whose own probe is
+failing — has its own streak evicted or bounded independently, never consuming the other live
+session's budget. Concurrency within `probedSessions()` itself remains an unbounded `Promise.all` —
+acceptable at the scale of "sessions actively live" (a handful at a time in normal use), unlike the
 now-closed retained-Done-population case; a hard concurrency cap was deliberately left as a
 follow-up rather than bundled into this fix, since nothing in the audit measured it as a live
 problem once Done stopped inflating the set.
+
+**The probe iterates SESSIONS, not cards (Phase 94, `ARTIFACT-01`).** Each `sessionsWithTmux()` pair
+is probed against its OWN `session.branch`/`session.workspace` — never `card.branch`/`card.workspace`
+— so a card with two live sessions is probed ONCE PER SESSION, each against its own branch. Results
+land on the `Session` record itself: `prs`/`previews`/`prsUnknown`/`previewsUnknown` are unfenced
+`Session` fields (not part of `setActiveSession`'s six-field projection — see [Session Projection
+Chokepoint](#session-projection-chokepoint)), gated-mirrored onto the identically-named `Card` field
+ONLY when the resolved session is the card's currently ACTIVE one, following the same
+resolve-inside-the-queue, mirror-on-match shape `Card.branch` now uses. `excludedPorts` is built from
+every live session's `ttydPort` across `store.sessionsWithTmux()` — not just the active card's
+mirror — so a non-active sibling's own ttyd port is excluded from a preview scan exactly as the
+active session's already was. **Why this matters, stated explicitly:** the alternative — an
+active-session-only probe, which is what the pre-Phase-94 `probedCards()` effectively was — makes
+"no PRs" for a card's non-active sibling mean "never probed," not "confirmed none." That is the
+`could not check reads as a confirmed negative` defect class v2.8 existed to kill, reopened here for
+a card's second live session specifically; iterating sessions rather than cards is what closes it.
+Proven load-bearing by `--check artifact-attribution`'s own prescribed break (reverting the probe to
+`cardsWithSession()` with the card's flat projection synthesized as the "session"): the check FAILED
+with the non-active sibling never gaining PR attribution within the poll window, and a deliberately
+WEAKENED version of the same check — asserting only against the active session — PASSED under the
+identical break, the fifteenth instrument-shape this codebase has caught unable to report a failure.
 
 **The single-flight guard is retained for future callers, and enforces nothing today.** The loop arms
 its next timer only in the awaited tick's `finally`, so a slow tick delays the following one instead
@@ -2520,6 +2622,39 @@ the tunnel manager parsed) instead — shipping the sentinel without this second
 403'd every legitimate remote user. Both landed together in Phase 74 Plan 01; the BLOCKING live
 verification (spoofed `Host: 127.0.0.1` rejected AND a legitimate remote user still authenticates)
 is the `phase-smoke-tester` gate's job before the phase is considered done.
+
+### Bare-target tmux calls in `steps.ts`'s kickoff path (Phase 94, open)
+
+`capturePane`/`sendKeys`/`pasteBuffer` inside `awaitReplReady`/`sendKickoff` (`steps.ts`) target a
+session by its bare, unprefixed name — neither the `=<name>` session-level exact-match form nor the
+`=<name>:` pane-level colon-qualified form documented in [Tmux Invocations](#tmux-invocations).
+Live-reproduced by Phase 94 plan 07: once a card's tmux prefix has a live suffixed sibling and the
+exact-named session has genuinely died mid-poll, all three calls silently resolve onto the sibling
+and report success rather than throwing — so the ONLY thing that can ever surface that absence as a
+real failure is `awaitReplReady`'s own hardcoded 30s wall-clock deadline, not the tmux calls
+themselves. No criterion in Phase 94 depends on these three calls behaving correctly under a
+suffixed sibling in the failure path, so this was recorded rather than fixed at this phase's
+closeout. The fix, now that it has been isolated, is small: add the same colon-qualified `=<name>:`
+form these three calls are missing — not a new pane/session-id targeting mechanism. Owner: a future
+phase (Phase 96's single-session parity audit is the natural home, per 94-07's own recommendation).
+
+### Arbitrary session depth deferred (decision D-C)
+
+Phase 94 ships exactly one level: a ticket owns N sessions, and starting another always starts a
+FRESH session rather than one that inherits from an existing sibling. Arbitrary depth — the
+original `MULTI-03` sketch, its layer-navigation UI, and the naming scheme that would convey which
+session builds on which — is explicitly deferred to Phase 95 ("Inheriting from a sibling session"),
+per the v3.0 `REQUIREMENTS.md` decision `D-C`. Inheritance is meant to land as an option ON this
+phase's start saga, not a second, parallel start path — one entry point, verified by grep, so a
+future phase does not double every per-session guard this milestone just built.
+
+### `KEEP-02`: the N=1 panel gains one row (accepted deviation)
+
+The session row's height is 49px whenever `StartAnotherSessionButton` is present, 4px taller than
+the 45px switcher-only row — the one visible change Phase 94 makes to the N=1 detail panel. Full
+rationale and the row's own pre-existing-border arithmetic correction live in [Second Session
+Affordance](#second-session-affordance); recorded here as well because it is the deviation Phase
+96's parity audit should carry forward as ACCEPTED and RECORDED, not rediscover as a finding.
 
 ### Worktree Path
 
