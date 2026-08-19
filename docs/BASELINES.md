@@ -614,3 +614,93 @@ src/server/` names only pre-existing Phase-82-era commits already merged before 
 environment-attributable amount unrelated to this phase's radius-token diff; `loadCommits`/`commits`
 moved within the already-documented `SyncStrip`-tick noise band on both sides. Criterion 3's
 `perf-board.mjs` half is MET.
+
+### Phase 96 — KEEP-05 audit (baseline re-run + multi-session leg)
+
+- **Date:** 2026-08-19
+- **Git SHA measured:** `53b833f` (both legs measured against this SHA; the multi-session leg's
+  `scripts/perf-board.mjs` edit landed in the same working session, `git diff --stat` confirmed
+  clean of any `src/` change throughout)
+- **Machine:** Apple Silicon, local (Chrome headless via `--headless=new`)
+- **Thresholds, written down BEFORE either run** (per the recorded `6d2549f` baseline above —
+  "must not grow at all," not tolerances): `initialBytes <= 15029`, `sseFrameBytes <= 15274`,
+  `loadCommits <= 8`, `commits <= 5`.
+
+**Baseline leg — exact recorded command, no new flags:**
+`npm run build && node scripts/perf-board.mjs --done=500 --runs=3`
+
+```
+run=1 initialBytes=20339 initialCards=50 sseFrameBytes=20584 loadCommits=7 commits=5
+run=2 initialBytes=20339 initialCards=50 sseFrameBytes=20584 loadCommits=8 commits=5
+run=3 initialBytes=20339 initialCards=50 sseFrameBytes=20584 loadCommits=8 commits=5
+
+PERF-BOARD mode=prod done=500 initialBytes=20339 initialCards=50 sseFrameBytes=20584 loadCommits=8 commits=5
+```
+
+**Verdict vs. the `6d2549f` thresholds:** `initialBytes` `15029`→`20339` (**+5310, +35.33%, FAIL —
+named regression**); `sseFrameBytes` `15274`→`20584` (**+5310, +34.76%, FAIL — named regression**);
+`loadCommits` `8`→`8` (PASS); `commits` `5`→`5` (PASS). Root cause, confirmed by source read (not
+inferred): `redactCard`'s new `activeSession` wire object (`src/shared/types.ts:563-575`,
+`src/server/store/board.store.ts:119-159`) rides the wire for every session-bearing card, even at
+N=1 — this is a DIFFERENT wire addition than `sessionCount`/`sessionSummaries` (structurally absent
+here; every seeded card has 0 or 1 session, never `>= 2`). `migrateCardsToSessionEntity`
+(`board.store.ts:301-340`) converts each of this harness's 20 flat-seeded "awaiting" cards
+(`AWAITING_EVERY_NTH=25` of 500) into a `Session` record without deleting the original flat
+`tmuxSession`/`workspacePath` fields, so each of those 20 cards carries its session data TWICE —
+once flat, once nested in `activeSession` — and `compareDoneOrder`'s awaiting-first sort
+(`board.store.ts:87-94`) puts all 20 inside the `DONE_PAGE_SIZE=50` window on both the REST and SSE
+legs, which is why both legs show the identical `+5310`-byte delta. This is deliberate v3.0
+architecture (Phase 90-92's session-entity model), not a bug in this plan's scope — **recorded as a
+named `KEEP-05` finding for 96-11's remediation budget**, not fixed here (full detail:
+`96-10-SUMMARY.md`, Task 1).
+
+**Multi-session leg — additive, off-by-default `--sessions-per-card=N` flag (proven a structural
+no-op when absent: re-running the exact baseline command above after the flag's introduction
+produced the identical four numbers).** Command:
+`node scripts/perf-board.mjs --done=500 --runs=3 --sessions-per-card=3`
+
+```
+run=1 initialBytes=24014 initialCards=50 sseFrameBytes=24259 loadCommits=7 commits=5
+run=2 initialBytes=24014 initialCards=50 sseFrameBytes=24259 loadCommits=8 commits=5
+run=3 initialBytes=24014 initialCards=50 sseFrameBytes=24259 loadCommits=8 commits=5
+
+PERF-BOARD-MULTI mode=prod done=500 sessionsPerCard=3 initialBytes=24014 initialCards=50 sseFrameBytes=24259 loadCommits=8 commits=5
+```
+
+**Verdict vs. this same-tree baseline** (`20339`/`50`/`20584`/`8`/`5`): `initialBytes` `20339`→
+`24014` (**+3675, +18.07%**); `sseFrameBytes` `20584`→`24259` (**+3675, +17.86%**); `loadCommits`
+`8`→`8` (0); `commits` `5`→`5` (0). Verdict: **expected cost, not a regression** — the additional
+`+3675` bytes on top of the baseline leg's own `activeSession` cost is attributable by name to
+`sessionCount` and three compact `SessionSummary` entries (`{id, ordinal, lost}` each, every other
+field absent-and-dropped by `JSON.stringify` for these synthetic sessions) that only appear once a
+card genuinely owns `>= 2` sessions — exactly the cost `KEEP-05`'s multi-session leg exists to
+measure, not a defect. `loadCommits`/`commits` show ZERO increase over the baseline leg — the most
+direct proxy this harness has for perceptible latency is unaffected by carrying multiple sessions
+per card.
+
+**The byte assertion is proven able to fire.** A temporary one-line edit (`if (i % AWAITING_EVERY_NTH
+=== 0)` → `if (true)`, forcing the multi-session shape onto EVERY seeded card instead of only the
+1-in-25 "awaiting" subset) produced, same command:
+
+```
+PERF-BOARD-MULTI mode=prod done=500 sessionsPerCard=3 initialBytes=41394 initialCards=50 sseFrameBytes=42228 loadCommits=8 commits=5
+```
+
+`41394`/`42228` are far outside both the `15029`/`15274` recorded thresholds and this leg's own
+`24014`/`24259` expected-cost numbers. Reverted immediately after recording this output;
+`git status --porcelain -- src/` was clean throughout (no product code was ever touched by this
+break), and `git diff --stat -- scripts/perf-board.mjs` after the revert showed only the intended
+`--sessions-per-card` feature addition — no bloat-break residue. Re-ran the exact multi-session
+command afterward and confirmed the numbers returned to `24014`/`24259` (recorded above).
+
+**Verdict is applied by the READER of this document, not by `scripts/perf-board.mjs` itself.** The
+harness is a pure measurement instrument: it prints raw numbers and never exits non-zero on a
+threshold breach (its only non-zero exits are setup/teardown errors and the hook-never-fired hard
+failure). Every PASS/FAIL/expected-cost verdict in this section was computed by comparing this
+run's printed numbers against the thresholds/baselines named above, by hand, in this document —
+stated explicitly per this plan's own criterion that an unjudged number is not a check.
+
+**Environment:** `com.dispatch.app` confirmed stopped and `:4700` refusing before either leg; no
+`dispatch-perf-board-*` directory or listener on `:47820`/`:9359` remained after any run; real
+`~/.dispatch/board.db` unchanged (`27d52060517adea9fe81712f9abe1da0`, `28672` bytes, same mtime as
+before this plan started) throughout.

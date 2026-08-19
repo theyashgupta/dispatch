@@ -31,9 +31,25 @@
  * Usage:
  *   node scripts/perf-board.mjs [--done=500] [--runs=3]     measure the production build (default)
  *   node scripts/perf-board.mjs --dev                        unsupported — prints why, exits 1
+ *   node scripts/perf-board.mjs [--done=500] [--runs=3] --sessions-per-card=N   (N >= 2) multi-session
+ *                                                              leg — see below
+ *
+ * `--sessions-per-card=N` (Phase 96, KEEP-05): an ADDITIVE, off-by-default multi-session leg. When
+ * ABSENT (the default, `sessionsPerCard=0`), the seed step is byte-for-byte the same code path this
+ * flag's introducing commit found — every 25th card gets exactly the same flat
+ * `tmuxSession`/`workspacePath` pair it always got, a structural no-op, not a widened default. When
+ * present (N >= 2), those SAME every-25th cards are seeded with `N` real `sessions[]` records
+ * directly (bypassing the store's own flat-card migration entirely, since a card already carrying
+ * `sessions` is skipped by it) so `redactCard` emits `sessionCount`/`sessionSummaries` on them — the
+ * wire cost `KEEP-05`'s multi-session leg exists to measure. The baseline leg's own command and seed
+ * must stay untouched by this flag's presence in argv; see `docs/BASELINES.md`'s Phase 96 section for
+ * why the two legs are never conflated.
  *
  * Prints one stderr line per run, then a machine-parsable summary:
  *   PERF-BOARD mode=<prod|dev> done=<n> initialBytes=<n> initialCards=<n> sseFrameBytes=<n> loadCommits=<n> commits=<n>
+ *   PERF-BOARD-MULTI mode=<prod|dev> done=<n> sessionsPerCard=<n> initialBytes=<n> initialCards=<n> sseFrameBytes=<n> loadCommits=<n> commits=<n>
+ *     (only when --sessions-per-card=N is passed — a distinct label so this leg's numbers can never
+ *     be mistaken for a baseline PERF-BOARD line when grepped out of docs/BASELINES.md)
  *
  * Exit codes: 0 success. 1 setup/teardown/build error. 2 production hook never fired (rerun is
  * pointless — --dev is unsupported, so this is a hard failure, not a retry signal).
@@ -104,6 +120,26 @@ function readRunsFlag(argv) {
 
 function readDevFlag(argv) {
   return argv.includes("--dev");
+}
+
+/**
+ * Read `--sessions-per-card=N` off argv, defaulting to 0 (off — the baseline leg's structural
+ * no-op). N must be >= 2 when present: the whole point of the multi-session leg is exercising
+ * `redactCard`'s `hasMultipleSessions` (>= 2) branch, so `sessionCount`/`sessionSummaries` actually
+ * appear on the wire; N=1 would silently measure nothing new.
+ */
+function readSessionsPerCardFlag(argv) {
+  const flag = argv.find((a) => a.startsWith("--sessions-per-card="));
+  if (!flag) return 0;
+  const n = Number(flag.slice("--sessions-per-card=".length));
+  if (!Number.isInteger(n) || n < 2) {
+    console.error(
+      `--sessions-per-card must be an integer >= 2 (redactCard's sessionCount/sessionSummaries ` +
+        `only appear at >= 2 sessions), got: ${flag}`,
+    );
+    process.exit(1);
+  }
+  return n;
 }
 
 function sleep(ms) {
@@ -356,11 +392,42 @@ function bootServer(home, dev) {
 }
 
 /**
+ * Build `n` real `Session`-shaped records for card `i`'s multi-session leg — bypassing the store's
+ * own flat-card migration entirely (a card already carrying `sessions` is skipped by
+ * `migrateCardsToSessionEntity`), so this is the only way to get `redactCard` to see `>= 2`
+ * sessions on one card. Mirrors the field shape (and rough string lengths) the flat-field branch
+ * below would have produced for a single session, so the multi-session leg's byte growth is
+ * attributable to `sessionCount`/`sessionSummaries` and per-session field duplication, not to an
+ * unrelated shape change in this harness's own synthetic data.
+ */
+function buildSyntheticSessions(home, i, n) {
+  const sessions = [];
+  for (let s = 0; s < n; s++) {
+    const createdAt = new Date(
+      Date.now() - (i * 60_000 + s * 1_000),
+    ).toISOString();
+    sessions.push({
+      id: `perf-session-${i}-${s}`,
+      createdAt,
+      updatedAt: createdAt,
+      tmuxSession: `dsp-PERF-${i}-${s}`,
+      workspacePath: join(home, "workspaces", `PERF-${i}`, `session-${s}`),
+    });
+  }
+  return sessions;
+}
+
+/**
  * TWO-BOOT seeding: boot once so the store's own `board-db.ts` creates the real schema (WAL mode,
  * every table/index), kill it, then insert `count` Done cards directly via node:sqlite. This
  * avoids a second, hand-duplicated schema that could drift from the store's own.
+ * @param {number} sessionsPerCard Phase 96 KEEP-05 multi-session leg (default 0 — off). ABSENT
+ * (0/1) leaves this function's every-25th-card seed step byte-for-byte identical to before this
+ * flag existed — a structural no-op, not a widened default (see file header). Present (>= 2)
+ * additively swaps that same every-25th card's flat `tmuxSession`/`workspacePath` pair for `N` real
+ * `sessions[]` records, so `redactCard` emits `sessionCount`/`sessionSummaries` for them.
  */
-async function seedDoneCards(home, count) {
+async function seedDoneCards(home, count, sessionsPerCard = 0) {
   const warmup = bootServer(home, false);
   try {
     await waitForReady(SANDBOX_PORT);
@@ -390,8 +457,20 @@ async function seedDoneCards(home, count) {
         updatedAt,
       };
       if (i % AWAITING_EVERY_NTH === 0) {
-        card.tmuxSession = `dsp-PERF-${i}`;
-        card.workspacePath = join(home, "workspaces", `PERF-${i}`);
+        if (sessionsPerCard >= 2) {
+          const sessions = buildSyntheticSessions(home, i, sessionsPerCard);
+          card.sessions = sessions;
+          card.activeSessionId = sessions[0].id;
+          // Faithful to the real product's `setActiveSession` chokepoint (board.store.ts:606),
+          // which mirrors the active session's fields onto the card's own flat fields — the exact
+          // mechanism Task 1's finding identified as riding the wire ALONGSIDE `activeSession`.
+          // Seeding sessions[] alone (skipping this mirror) would understate the real byte cost.
+          card.tmuxSession = sessions[0].tmuxSession;
+          card.workspacePath = sessions[0].workspacePath;
+        } else {
+          card.tmuxSession = `dsp-PERF-${i}`;
+          card.workspacePath = join(home, "workspaces", `PERF-${i}`);
+        }
       }
       insert.run(id, JSON.stringify(card));
     }
@@ -534,8 +613,10 @@ function median(values) {
  * sandbox home in every case (success, thrown error, or the exit-2 hook-never-fired path).
  * @returns The five per-run metrics, or `null` if the hook-never-fired diagnostic fired (caller
  * must stop the whole run immediately — `process.exitCode` is already set to 2).
+ * @param {number} sessionsPerCard Threaded straight through to {@link seedDoneCards}; 0 (default)
+ * keeps this run's seed identical to before the flag existed.
  */
-async function runMetrics(doneCount, runIndex) {
+async function runMetrics(doneCount, runIndex, sessionsPerCard = 0) {
   const home = makeSandboxHome(`run${runIndex}`);
   const scratchDir = join(
     tmpdir(),
@@ -548,7 +629,7 @@ async function runMetrics(doneCount, runIndex) {
   let cdp = null;
 
   try {
-    await seedDoneCards(home, doneCount);
+    await seedDoneCards(home, doneCount, sessionsPerCard);
     server = bootServer(home, false);
     await waitForReady(SANDBOX_PORT);
 
@@ -661,6 +742,7 @@ async function main() {
 
   const doneCount = readDoneFlag(argv);
   const runs = readRunsFlag(argv);
+  const sessionsPerCard = readSessionsPerCardFlag(argv);
 
   const initialBytesArr = [];
   const initialCardsArr = [];
@@ -670,7 +752,7 @@ async function main() {
 
   try {
     for (let i = 1; i <= runs; i++) {
-      const result = await runMetrics(doneCount, i);
+      const result = await runMetrics(doneCount, i, sessionsPerCard);
       if (result === null) return;
       initialBytesArr.push(result.initialBytes);
       initialCardsArr.push(result.initialCards);
@@ -682,8 +764,11 @@ async function main() {
     await warnIfPortsHeld();
   }
 
+  const label = sessionsPerCard >= 2 ? "PERF-BOARD-MULTI" : "PERF-BOARD";
+  const sessionsField =
+    sessionsPerCard >= 2 ? `sessionsPerCard=${sessionsPerCard} ` : "";
   console.error(
-    `PERF-BOARD mode=prod done=${doneCount} initialBytes=${median(initialBytesArr)} ` +
+    `${label} mode=prod done=${doneCount} ${sessionsField}initialBytes=${median(initialBytesArr)} ` +
       `initialCards=${median(initialCardsArr)} sseFrameBytes=${median(sseFrameBytesArr)} ` +
       `loadCommits=${median(loadCommitsArr)} commits=${median(commitsArr)}`,
   );
