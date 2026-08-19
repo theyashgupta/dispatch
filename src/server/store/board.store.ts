@@ -1389,11 +1389,12 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Mint the hook channel's credential at session launch: stamp `card.hookToken` ONLY. Written
-   * BEFORE the session spawns (`steps.ts#startClaude` / `resume-session.ts#resumeSession`'s
-   * hooks-capable branches, immediately before `newSession`) so a hook POST arriving as early as
-   * the kickoff paste already authenticates. SECURITY: the token value is never logged. No-op if
-   * the id is unknown.
+   * Mint the hook channel's credential at session launch: stamp the TARGET session's `hookToken`
+   * (and `card.hookToken` too, when that target is the card's active session). Written BEFORE the
+   * session spawns (`steps.ts#startClaude` / `resume-session.ts#resumeSession`'s hooks-capable
+   * branches, immediately before `newSession`) so a hook POST arriving as early as the kickoff
+   * paste already authenticates. SECURITY: the token value is never logged. No-op if the id is
+   * unknown.
    * @remarks (`WR-05`) This mutator deliberately does NOT stamp `card.hookRoutedAt`. The latch is
    * EVIDENCE that hook events actually arrive, never a PREDICTION derived from a `claude --version`
    * parse: the capability check says nothing about whether the hook script's `curl` exists on the
@@ -1414,18 +1415,25 @@ class BoardStore extends EventEmitter {
    * launch whose token authenticates nothing (`registerHookToken` refuses the orphan) AND skip the
    * hook-silent branch's `clearHookChannel()` reset, so the documented safe degradation would not
    * happen for the one card shape it was written for. `undefined` therefore means EITHER an unknown
-   * card id OR an active pointer that names no record.
+   * card id OR an explicit or active pointer that names no record.
+   * @remarks (Phase 96 finding F-96-A) `sessionId`, optional and defaulting to
+   * `card.activeSessionId`, is required for a `newSession:true` launch: `reserveNewSession` mints
+   * the new session WITHOUT promoting it active (`D-NOPROMOTE-ON-RESERVE`), so before this fix the
+   * implicit default resolved to the card's CURRENT active session and minted the launching
+   * session's own credential onto the WRONG, already-live session — leaving the new session's hook
+   * channel unauthenticated until an unrelated mutation happened to repair it.
    * @see docs/ARCHITECTURE.md#hooks-status-channel
    */
-  mintHookChannel(id: string, token: string): Promise<string | undefined> {
+  mintHookChannel(
+    id: string,
+    token: string,
+    sessionId?: string,
+  ): Promise<string | undefined> {
     let minted: string | undefined;
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) {
-        this.setActiveSession(card, { hookToken: token });
-        minted = card.sessions?.some((s) => s.id === card.activeSessionId)
-          ? card.activeSessionId
-          : undefined;
+        minted = this.setActiveSession(card, { hookToken: token }, sessionId);
       }
       return [];
     }).then(() => minted);
@@ -1461,19 +1469,26 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Clear a card's recorded Claude session id BEFORE a fresh session spawns. Called by the start
-   * saga's launch step (a new kickoff is a new conversation) so the reset lands ahead of the
+   * Clear a session's recorded Claude session id BEFORE a fresh session spawns. Called by the
+   * start saga's launch step (a new kickoff is a new conversation) so the reset lands ahead of the
    * kickoff paste's first hook event — otherwise a restart of a card that still holds its old id
    * would make the new session's early events log a spurious `session_id mismatch` and drop the
    * genuine first capture. Symmetric with the pre-spawn hook-token mint. Distinct from the
    * first-event-wins setter and never called on the resume path, which must KEEP the id.
    * No-op if the id is unknown.
+   * @remarks (Phase 96, found alongside F-96-A) `sessionId`, optional and defaulting to
+   * `card.activeSessionId`, is required for the same reason `mintHookChannel` needs it: a
+   * `newSession:true` launch's reserved session is not yet active
+   * (`D-NOPROMOTE-ON-RESERVE`), so the implicit default previously cleared the CURRENT active
+   * session's own `claudeSessionId` — wiping an unrelated, still-live sibling's `--resume`
+   * capability as a side effect of starting a second session.
    * @see docs/ARCHITECTURE.md#hooks-status-channel
    */
-  resetClaudeSessionId(id: string): Promise<void> {
+  resetClaudeSessionId(id: string, sessionId?: string): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
-      if (card) this.setActiveSession(card, { claudeSessionId: undefined });
+      if (card)
+        this.setActiveSession(card, { claudeSessionId: undefined }, sessionId);
       return [];
     });
   }

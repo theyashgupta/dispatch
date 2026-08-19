@@ -381,6 +381,18 @@ export async function awaitReplReady(session: string): Promise<void> {
  * applies the session-level form (`=<name>`, no colon); `send-keys`/`capture-pane` need the SAME
  * exact-match protection but as pane-level targets require a TRAILING COLON (`=<name>:`) to
  * resolve at all — `awaitReplReady` and `sendKickoff` build that form once, internally.
+ * @remarks (Phase 96 finding `F-96-A`) `ctx.sessionId` (the reserved session's id, `undefined` for
+ * a card's first session) is threaded into `resetClaudeSessionId` and `mintHookChannel` so a
+ * `newSession:true` launch targets the session actually being started rather than defaulting to
+ * `card.activeSessionId` — the OLD, still-live session for exactly this launch, since
+ * `reserveNewSession` does not promote the new session until `completeStart` succeeds
+ * (`D-NOPROMOTE-ON-RESERVE`). Before this fix the default silently minted the new launch's
+ * credential onto the wrong session (leaving the new session unauthenticated) and reset the wrong
+ * session's `claudeSessionId` (wiping an unrelated sibling's `--resume` capability). The reserved
+ * session's own previous token is always none (it has never held one), so `previousToken` is
+ * computed only for the `ctx.sessionId === undefined` case — never read off the card's flat
+ * mirror when targeting a reserved sibling, which would otherwise revoke the unrelated active
+ * session's own still-valid token.
  * @see docs/ARCHITECTURE.md#tmux-invocations
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
@@ -390,15 +402,22 @@ const startClaude: SagaStep = {
   async run(ctx) {
     const session = "dsp-" + ctx.sessionName;
     await preSeedTrust(ctx.workspacePath);
-    await store.resetClaudeSessionId(ctx.card.id);
+    await store.resetClaudeSessionId(ctx.card.id, ctx.sessionId);
 
     const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
     const runtime = getHooksRuntime();
     let launchedHooksCapable = false;
     if (runtime?.capable && runtime.statusChannel !== "pane") {
-      const previousToken = store.getCard(ctx.card.id)?.hookToken;
+      const previousToken =
+        ctx.sessionId === undefined
+          ? store.getCard(ctx.card.id)?.hookToken
+          : undefined;
       const token = newHookTokenValue();
-      const sessionId = await store.mintHookChannel(ctx.card.id, token);
+      const sessionId = await store.mintHookChannel(
+        ctx.card.id,
+        token,
+        ctx.sessionId,
+      );
       if (sessionId !== undefined) {
         registerHookToken(token, ctx.card.id, sessionId, previousToken);
         await newSession(

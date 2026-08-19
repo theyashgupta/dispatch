@@ -485,6 +485,25 @@ const PARITY_FIXTURE = {
   worktrees: true,
 };
 
+/**
+ * `--check hook-token-attribution` (Phase 96 plan 11, F-96-A): identical to {@link PARITY_FIXTURE}
+ * except for `sessionKeys`, whose second entry drives {@link standUpParityFixtureSession1}'s own
+ * "one more real `POST /start {newSession:true}`" loop — the only PARITY-shaped profile this
+ * milestone stands up with a live sibling AND a hooks-capable stub from boot.
+ * {@link SECOND_SESSION_FIXTURE} cannot substitute: its stand-up plants the below-floor stub
+ * (`writeStubClaudeBinary`), and `getHooksRuntime()`'s capability flag is probed once at boot and
+ * cached for the server's lifetime, so a second session created on that fixture never reaches
+ * `startClaude`'s hooks-capable branch at all — the very branch F-96-A lives in.
+ */
+const HOOK_ATTRIBUTION_FIXTURE = {
+  port: PARITY_SANDBOX_PORT,
+  tmuxPrefix: `dsp-${PARITY_IDENTIFIER}`,
+  sessionKeys: ["a", "b"],
+  identifier: PARITY_IDENTIFIER,
+  realSaga: true,
+  worktrees: true,
+};
+
 const GROUP_SESSION_SANDBOX_PORT = 47868;
 
 const GROUP_SESSION_TMUX_PREFIX = `dsp96g-${process.pid}-`;
@@ -13403,6 +13422,93 @@ async function checkGroupSessionGuardRoutes(built) {
   return violations;
 }
 
+/**
+ * `--check hook-token-attribution` (Phase 96 plan 11, closes finding `F-96-A`): stands up
+ * {@link HOOK_ATTRIBUTION_FIXTURE} — session A minted through the real first-start saga, session B
+ * through a real `POST /start {newSession:true}` — and proves BOTH halves of the fix directly
+ * against the live server, never by inspection: (1) session B's OWN persisted `hookToken` is set
+ * and authenticates a hook POST on the FIRST, un-retried attempt (before this fix it was
+ * `undefined` — the mint landed on session A, the card's still-active pointer, instead), and (2)
+ * session A's ORIGINAL token — captured at stand-up, before session B ever existed — still
+ * authenticates afterward (before this fix, `previousToken` read the card's flat mirror rather
+ * than the target session's own prior token and revoked session A's still-live credential as a
+ * side effect of minting session B's).
+ */
+async function checkHookTokenAttribution(built) {
+  const violations = [];
+  const sessionAToken = built.sessionA?.token;
+  console.log(
+    `hook-token-attribution: session A id=${built.sessionA?.id} token present=${sessionAToken != null}`,
+  );
+  if (sessionAToken == null) {
+    violations.push(
+      "hook-token-attribution: session A's own token was never captured at stand-up — cannot prove anything about session B's attribution without a known-good baseline",
+    );
+    return violations;
+  }
+
+  const persisted = readCard(built.dbPath, built.cardId);
+  const persistedSessions = persisted?.sessions ?? [];
+  const sessionB = persistedSessions.find((s) => s.id !== built.sessionA?.id);
+  if (persistedSessions.length !== 2 || sessionB == null) {
+    violations.push(
+      `hook-token-attribution: expected exactly 2 persisted sessions with session B resolvable, got ${JSON.stringify(persistedSessions.map((s) => ({ id: s.id, tmuxSession: s.tmuxSession })))}`,
+    );
+    return violations;
+  }
+  console.log(
+    `hook-token-attribution: session B id=${sessionB.id} tmux=${sessionB.tmuxSession} own hookToken present=${sessionB.hookToken != null}`,
+  );
+
+  // 1. Session B's OWN record must carry its own token — never left unset because the mint
+  // landed on session A (the still-active pointer at mint time) instead.
+  if (sessionB.hookToken == null) {
+    violations.push(
+      "hook-token-attribution: session B's own persisted hookToken is unset — F-96-A: the newSession:true launch's mint must target the reserved session itself, not the still-active sibling",
+    );
+    return violations;
+  }
+  if (sessionB.hookToken === sessionAToken) {
+    violations.push(
+      "hook-token-attribution: session B's own persisted hookToken is IDENTICAL to session A's — the two sessions must never share one credential",
+    );
+  }
+
+  // 2. Session B's token authenticates on the FIRST, un-retried POST — proving the mint/register
+  // pair landed on B at launch time, never requiring a later resume to repair it.
+  const statusB = await postHook(
+    built,
+    sessionB.hookToken,
+    stopBodyWithReason("hook-token-attribution-B"),
+  );
+  console.log(
+    `hook-token-attribution: session B's own token, first un-retried POST -> ${statusB} (expected 204)`,
+  );
+  if (statusB !== 204) {
+    violations.push(
+      `hook-token-attribution: session B's own token did not authenticate on the first attempt -> ${statusB}, expected 204`,
+    );
+  }
+
+  // 3. Session A's ORIGINAL token — captured before session B ever existed — must still
+  // authenticate: minting B's credential must never revoke an unrelated sibling's live one.
+  const statusA = await postHook(
+    built,
+    sessionAToken,
+    stopBodyWithReason("hook-token-attribution-A-still-live"),
+  );
+  console.log(
+    `hook-token-attribution: session A's ORIGINAL token, POST after B's mint -> ${statusA} (expected 204)`,
+  );
+  if (statusA !== 204) {
+    violations.push(
+      `hook-token-attribution: session A's original token no longer authenticates after session B's mint -> ${statusA}, expected 204 — a newSession:true launch must never revoke an unrelated sibling's still-live credential`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -13489,6 +13595,12 @@ const CHECKS = {
       "group-session-guard",
       checkGroupSessionGuard,
       GROUP_SESSION_FIXTURE,
+    ),
+  "hook-token-attribution": () =>
+    withFixture(
+      "hook-token-attribution",
+      checkHookTokenAttribution,
+      HOOK_ATTRIBUTION_FIXTURE,
     ),
 };
 
