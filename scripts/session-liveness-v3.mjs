@@ -164,6 +164,16 @@
  *                                                                   to have received the "Building
  *                                                                   on a previous session" kickoff
  *                                                                   heading
+ *   node scripts/session-liveness-v3.mjs --check inherit-parent-intact
+ *                                                                   Phase 95 criterion 2 (MULTI-02):
+ *                                                                   the parent's worktree HEAD and
+ *                                                                   porcelain are byte-identical
+ *                                                                   before/after a REAL inherited
+ *                                                                   child starts, its planted
+ *                                                                   uncommitted file never crosses
+ *                                                                   into the child, and the parent's
+ *                                                                   EXACT tmux session still answers
+ *                                                                   a real typed round trip
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -8588,6 +8598,247 @@ async function checkInheritAncestry(built) {
   return violations;
 }
 
+/**
+ * `--check inherit-parent-intact` (Plan 95-05 Task 2, criterion C2, MULTI-02): proves the parent
+ * session's worktree is byte-identical, its planted uncommitted work never crosses into the child,
+ * and its EXACT tmux session still answers a REAL typed round trip after a real inherited child
+ * starts — plus the fan-out shape (95-VALIDATION.md, carried from Phase 93's gate): the child is
+ * asserted to start exactly at the parent's committed tip, never only that the parent survived.
+ * @remarks Step A plants uncommitted work BEFORE capturing the parent's before-state so the
+ * porcelain comparison in Step E cannot compare two empty strings — an empty-porcelain fixture
+ * would make that comparison pass even if the worktree were destroyed and silently recreated
+ * (95-VALIDATION.md's dead-instrument discipline). Step B refuses early, the same discipline as
+ * Task 1's `PARENT_TIP === BASE_TIP` guard, if that plant somehow left the porcelain empty.
+ * @remarks Every `has-session` target below uses the colon-LESS `=<name>` exact-match form; every
+ * `send-keys`/`capture-pane` target uses the TRAILING-COLON `=<name>:` form — the tmux 3.6a
+ * determinant this whole plan's fixture depends on (94-VALIDATION.md, corrected 2026-08-19). A bare
+ * (unprefixed) target is never used: `dsp-<identifier>` and `dsp-<identifier>-2` are a genuine
+ * PREFIX pair here, so a bare target would read the wrong session and pass regardless of the truth.
+ */
+async function checkInheritParentIntact(built) {
+  const violations = [];
+
+  const parentTmuxName = "dsp-" + built.identifier;
+  const childTmuxName = "dsp-" + built.identifier + "-2";
+
+  // --- A. Plant uncommitted work in the parent's worktree, BEFORE the child starts. ---
+  const plantedFileName = "parent-uncommitted.txt";
+  writeFileSync(
+    join(built.session1WorktreePath, plantedFileName),
+    "parent's own uncommitted work — must never transfer to a child\n",
+  );
+
+  // --- B. Capture the parent's before-state. ---
+  const PARENT_HEAD_BEFORE = (
+    await execFileP("git", ["rev-parse", "HEAD"], {
+      cwd: built.session1WorktreePath,
+    })
+  ).stdout.trim();
+  const PARENT_PORCELAIN_BEFORE = (
+    await execFileP("git", ["status", "--porcelain"], {
+      cwd: built.session1WorktreePath,
+    })
+  ).stdout;
+  console.log(
+    `inherit-parent-intact: PARENT_HEAD_BEFORE=${PARENT_HEAD_BEFORE}, PARENT_PORCELAIN_BEFORE=${JSON.stringify(PARENT_PORCELAIN_BEFORE)}`,
+  );
+  if (PARENT_PORCELAIN_BEFORE.trim() === "") {
+    violations.push(
+      `inherit-parent-intact: DEAD INSTRUMENT — the planted file "${plantedFileName}" did not register in \`git status --porcelain\` (before-state is empty), so the before/after porcelain comparison below would be vacuous even if the worktree were destroyed and recreated. Refusing to continue.`,
+    );
+    return violations;
+  }
+
+  // --- C. Drive the real inherited start. ---
+  const { status, body } = await startSecondSession(built, {
+    newSession: true,
+    inheritFrom: built.sessionA.id,
+  });
+  console.log(
+    `inherit-parent-intact: POST /start {newSession:true, inheritFrom:${built.sessionA.id}} -> ${status}`,
+  );
+  if (status !== 202) {
+    violations.push(
+      `inherit-parent-intact: POST /start returned ${status}, expected 202 (body=${JSON.stringify(body)})`,
+    );
+    return violations;
+  }
+
+  const { card, timedOut } = await waitForSagaSettled(built, {
+    timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+  });
+  if (timedOut) {
+    violations.push(
+      `inherit-parent-intact: saga did not settle within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (last observed card=${JSON.stringify(card)})`,
+    );
+    return violations;
+  }
+  if (card?.startError != null) {
+    violations.push(
+      `inherit-parent-intact: saga recorded a startError instead of an inherited second session: ${JSON.stringify(card.startError)}`,
+    );
+    return violations;
+  }
+
+  const childId = (card?.sessionSummaries ?? [])
+    .map((s) => s.id)
+    .find((id) => id !== built.sessionA.id);
+  if (!childId) {
+    violations.push(
+      `inherit-parent-intact: could not resolve the child session's id from sessionSummaries=${JSON.stringify(card?.sessionSummaries)}`,
+    );
+    return violations;
+  }
+  console.log(
+    `inherit-parent-intact: parent session=${built.sessionA.id} (${parentTmuxName}), child session=${childId} (${childTmuxName})`,
+  );
+
+  // --- D. Assert positively on the CHILD (fan-out), not only that the parent survived. ---
+  const childWorkspacePath = join(
+    built.home,
+    "workspaces",
+    built.identifier + "-2",
+  );
+  const childWtPath = join(childWorkspacePath, "alpha");
+  if (!existsSync(childWtPath)) {
+    violations.push(
+      `inherit-parent-intact: child worktree directory does not exist: ${childWtPath}`,
+    );
+  } else if (childWtPath === built.session1WorktreePath) {
+    violations.push(
+      `inherit-parent-intact: child worktree path equals the parent's own worktree path (${childWtPath})`,
+    );
+  } else {
+    const childHasPlantedFile = existsSync(join(childWtPath, plantedFileName));
+    console.log(
+      `inherit-parent-intact: child worktree (${childWtPath}) contains "${plantedFileName}" = ${childHasPlantedFile} (expected false — uncommitted work does not transfer)`,
+    );
+    if (childHasPlantedFile) {
+      violations.push(
+        `inherit-parent-intact: the child's worktree (${childWtPath}) contains "${plantedFileName}" — the parent's UNCOMMITTED work crossed into the child, violating the documented boundary`,
+      );
+    }
+
+    const childHead = (
+      await execFileP("git", ["rev-parse", "HEAD"], { cwd: childWtPath })
+    ).stdout.trim();
+    console.log(
+      `inherit-parent-intact: child HEAD=${childHead}, expected PARENT_HEAD_BEFORE=${PARENT_HEAD_BEFORE}`,
+    );
+    if (childHead !== PARENT_HEAD_BEFORE) {
+      violations.push(
+        `inherit-parent-intact: child's HEAD (${childHead}) does not equal the parent's committed tip PARENT_HEAD_BEFORE (${PARENT_HEAD_BEFORE}) — the child did not start exactly where the parent's history ended`,
+      );
+    }
+  }
+
+  let childHasSession = false;
+  try {
+    await execFileP("tmux", [
+      "has-session",
+      "-t",
+      "=dsp-" + built.identifier + "-2",
+    ]);
+    childHasSession = true;
+  } catch {
+    childHasSession = false;
+  }
+  console.log(
+    `inherit-parent-intact: has-session -t "=${childTmuxName}" (no trailing colon) = ${childHasSession}`,
+  );
+  if (!childHasSession) {
+    violations.push(
+      `inherit-parent-intact: the child's EXACT tmux session "${childTmuxName}" is not live (has-session -t "=${childTmuxName}" failed)`,
+    );
+  }
+
+  // --- E. Assert the parent is intact AND answerable. ---
+  const PARENT_HEAD_AFTER = (
+    await execFileP("git", ["rev-parse", "HEAD"], {
+      cwd: built.session1WorktreePath,
+    })
+  ).stdout.trim();
+  const PARENT_PORCELAIN_AFTER = (
+    await execFileP("git", ["status", "--porcelain"], {
+      cwd: built.session1WorktreePath,
+    })
+  ).stdout;
+  console.log(
+    `inherit-parent-intact: PARENT_HEAD_AFTER=${PARENT_HEAD_AFTER}, PARENT_PORCELAIN_AFTER=${JSON.stringify(PARENT_PORCELAIN_AFTER)}`,
+  );
+  if (PARENT_HEAD_AFTER !== PARENT_HEAD_BEFORE) {
+    violations.push(
+      `inherit-parent-intact: parent's HEAD changed — before=${PARENT_HEAD_BEFORE} after=${PARENT_HEAD_AFTER}`,
+    );
+  }
+  if (PARENT_PORCELAIN_AFTER !== PARENT_PORCELAIN_BEFORE) {
+    violations.push(
+      `inherit-parent-intact: parent's \`git status --porcelain\` changed — before=${JSON.stringify(PARENT_PORCELAIN_BEFORE)} after=${JSON.stringify(PARENT_PORCELAIN_AFTER)} (the planted "${plantedFileName}" must still be present and still uncommitted)`,
+    );
+  }
+
+  let parentHasSession = false;
+  try {
+    await execFileP("tmux", ["has-session", "-t", "=dsp-" + built.identifier]);
+    parentHasSession = true;
+  } catch {
+    parentHasSession = false;
+  }
+  console.log(
+    `inherit-parent-intact: has-session -t "=${parentTmuxName}" (no trailing colon, EXACT form — a bare target would prefix-match ${childTmuxName}) = ${parentHasSession}`,
+  );
+  if (!parentHasSession) {
+    violations.push(
+      `inherit-parent-intact: the parent's EXACT tmux session "${parentTmuxName}" is not live (has-session -t "=${parentTmuxName}" failed) — a bare target here would have prefix-matched the child (${childTmuxName}) and passed while the parent was dead`,
+    );
+  } else {
+    const token =
+      "d95-round-trip-" + process.pid + "-" + randomBytes(4).toString("hex");
+    await execFileP("tmux", [
+      "send-keys",
+      "-t",
+      "=dsp-" + built.identifier + ":",
+      "-l",
+      "--",
+      "echo " + token,
+    ]);
+    await execFileP("tmux", [
+      "send-keys",
+      "-t",
+      "=dsp-" + built.identifier + ":",
+      "Enter",
+    ]);
+    const deadline = Date.now() + PROXY_READ_TIMEOUT_MS;
+    let found = false;
+    let lastPane = "";
+    while (Date.now() < deadline) {
+      lastPane = (
+        await execFileP("tmux", [
+          "capture-pane",
+          "-p",
+          "-t",
+          "=dsp-" + built.identifier + ":",
+        ])
+      ).stdout;
+      if (lastPane.includes(token)) {
+        found = true;
+        break;
+      }
+      await sleep(POLL_INTERVAL_MS);
+    }
+    console.log(
+      `inherit-parent-intact: parent round trip — send-keys/capture-pane -t "=${parentTmuxName}:" (trailing colon) echoed token "${token}" back = ${found}`,
+    );
+    if (!found) {
+      violations.push(
+        `inherit-parent-intact: the parent's exact tmux session "${parentTmuxName}" did NOT answer a real typed round trip within ${PROXY_READ_TIMEOUT_MS}ms — token "${token}" never appeared in its captured pane. This is a FAILURE, not a retry-and-continue. Last captured pane: ${JSON.stringify(lastPane.slice(-2000))}`,
+      );
+    }
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -8646,6 +8897,12 @@ const CHECKS = {
     withFixture(
       "inherit-ancestry",
       checkInheritAncestry,
+      SECOND_SESSION_FIXTURE,
+    ),
+  "inherit-parent-intact": () =>
+    withFixture(
+      "inherit-parent-intact",
+      checkInheritParentIntact,
       SECOND_SESSION_FIXTURE,
     ),
 };
