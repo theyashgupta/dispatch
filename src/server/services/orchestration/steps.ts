@@ -445,6 +445,7 @@ const sendKickoff: SagaStep = {
       restarted: ctx.restarted,
       playbookBody: ctx.playbookBody,
       members,
+      builtFromBranch: ctx.inheritBaseRef,
     });
     const tmpFile = path.join(
       os.tmpdir(),

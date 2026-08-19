@@ -184,12 +184,23 @@ function groupTicketSection(members: Card[]): string[] {
  * boundary. This mirrors `linear-sync.ts`'s pre-existing title fencing for its own Sync-to-Linear
  * prompt.
  * @see docs/ARCHITECTURE.md#marker-protocol
+ * @remarks `opts.builtFromBranch` (Phase 95) adds an inheritance-notice section naming only the
+ * parent's branch — never a summary of the parent's work, since dispatch persists no such
+ * artifact and generating one would fabricate. It states the uncommitted-work boundary (the
+ * parent's commits are in this history; its uncommitted worktree changes are not) because that
+ * boundary is the honest limit of what inheritance actually carries.
+ * @see docs/ARCHITECTURE.md#session-inheritance
  */
 export function buildKickoff(
   card: Card,
   extraDirection: string,
   repoNames: string[],
-  opts: { restarted?: boolean; playbookBody?: string; members?: Card[] } = {},
+  opts: {
+    restarted?: boolean;
+    playbookBody?: string;
+    members?: Card[];
+    builtFromBranch?: string;
+  } = {},
 ): string {
   const slim = (card.source ?? "linear") === "linear";
   const isGroup = card.source === "group";
@@ -225,6 +236,13 @@ export function buildKickoff(
           ``,
           `## Restarted session`,
           "This session was restarted (the previous one was lost, likely after a reboot). Your prior work may already exist in this workspace — run `git status` first before continuing.",
+        ]
+      : []),
+    ...(opts.builtFromBranch
+      ? [
+          ``,
+          `## Building on a previous session`,
+          `This session's branch was cut from ${opts.builtFromBranch}, which belongs to another session on this same ticket. That session's commits are already in this history — but any uncommitted work in that session's worktree is not.`,
         ]
       : []),
     ``,
