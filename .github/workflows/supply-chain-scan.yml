@@ -1,0 +1,80 @@
+name: Supply-chain scan
+
+# Tripwires for npm supply-chain worms (Shai-Hulud pattern: trojanized deps that add
+# install-time hooks, drop loader/exfil files, and publish stolen credentials). Each
+# step fails loudly on its indicator so a compromise is caught on push, on PR, and on
+# a daily schedule even when nothing is being committed.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: IOC filenames (worm droppers and stolen-secret dumps)
+        run: |
+          hits=$(find . -path ./node_modules -prune -o -type f \( \
+            -name "setup_bun.js" -o -name "bun_environment.js" \
+            -o -iname "*shai*hulud*" -o -iname "*sha1*hulud*" \
+            -o -name "processor.sh" -o -name "migrate-repos.sh" \
+            -o -name "truffleSecrets.json" -o -name "actionsSecrets.json" \
+            -o -name "cloud.json" -o -name "environment.json" \
+            -o -name "Math_Symbol.js" -o -name "math_init.js" \
+          \) -print)
+          if [ -n "$hits" ]; then echo "::error::IOC filenames found:"; echo "$hits"; exit 1; fi
+
+      - name: IOC strings (exfil endpoints, credential harvesting)
+        run: |
+          hits=$(grep -rEli "webhook\.site|shai.?hulud|sha1.?hulud|trufflehog|npm-cache\.com|pypi-get\.com|js-mirror\.com" . \
+            --exclude-dir=node_modules --exclude-dir=.git \
+            --exclude=supply-chain-scan.yml || true)
+          if [ -n "$hits" ]; then echo "::error::IOC strings found in:"; echo "$hits"; exit 1; fi
+
+      - name: Lockfile resolves only to registry.npmjs.org
+        run: |
+          bad=$(grep -oE '"resolved": "[^"]+"' package-lock.json \
+            | grep -v 'https://registry.npmjs.org' || true)
+          if [ -n "$bad" ]; then echo "::error::Non-npmjs resolved URLs:"; echo "$bad"; exit 1; fi
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22.22"
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+
+      - name: Install-hook allowlist (new lifecycle hooks are the worm's entry point)
+        run: |
+          allow="esbuild unrs-resolver"
+          fail=0
+          for f in node_modules/*/package.json node_modules/@*/*/package.json; do
+            [ -f "$f" ] || continue
+            name=$(node -e "try{console.log(require('./$f').name||'')}catch(e){}")
+            hooks=$(node -e "
+              try{const s=require('./$f').scripts||{};
+              const h=['preinstall','install','postinstall'].filter(k=>s[k]);
+              if(h.length)console.log(h.join(','))}catch(e){}")
+            if [ -n "$hooks" ]; then
+              case " $allow " in *" $name "*) ;; *)
+                echo "::error::Unexpected install hook in $name ($hooks) — vet it, then extend the allowlist."
+                fail=1;;
+              esac
+            fi
+          done
+          exit $fail
+
+      - name: npm audit (critical blocks; high reported)
+        run: |
+          npm audit --audit-level=high || true
+          npm audit --audit-level=critical
