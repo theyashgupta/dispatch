@@ -10,6 +10,10 @@ on:
 # to steal, and npm attaches build provenance automatically.
 # One-time setup on npmjs.com → package @theyashgupta/dispatch → Settings → Trusted
 # Publisher: GitHub Actions, repo theyashgupta/dispatch, workflow publish.yml.
+# setup-node must NOT be given registry-url: it writes an .npmrc carrying
+# //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN} and exports a placeholder token.
+# npm then authenticates with that placeholder instead of exchanging an OIDC token,
+# and the registry answers 404. npm defaults to registry.npmjs.org anyway.
 permissions:
   contents: read
   id-token: write
@@ -23,7 +27,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22.22"
-          registry-url: "https://registry.npmjs.org"
           cache: npm
       # Node 22 bundles npm 10; trusted publishing needs npm >= 11.5.1.
       - run: npm install -g npm@^11
