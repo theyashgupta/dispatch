@@ -29,7 +29,14 @@ jobs:
           node-version: "22.22"
           cache: npm
       # Node 22 bundles npm 10; trusted publishing needs npm >= 11.5.1.
-      - run: npm install -g npm@^11
+      - run: npm install -g npm@latest
+      - name: Report publish preconditions
+        run: |
+          echo "npm: $(npm -v)"
+          echo "node: $(node -v)"
+          echo "id-token url present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
+          echo "npmrc files:"; ls -la ~/.npmrc "$NPM_CONFIG_USERCONFIG" 2>/dev/null || true
+          npm config get registry
       - run: npm ci --ignore-scripts
       - run: npm run build
       - run: npm publish --access public
