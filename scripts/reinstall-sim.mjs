@@ -42,7 +42,10 @@
  * with `--break stale-plist-uncorrected`, which skips the first heal call and reports
  * `FAIL (plist-staleness)` with `second healServicePlist call reported "rewritten", expected
  * "unchanged"` and `the plist changed on the second heal call, a repeat call must be a
- * byte-identical no-op`. `uninstall-keeps` was proven able to fail by its own leg logic: the real
+ * byte-identical no-op`, and with `--break boot-heal-repoints-node`, which runs the explicit heal
+ * where the boot shape (`{ repointNode: false }`) is expected and reports `FAIL (plist-staleness)`
+ * naming a `"rewritten"` outcome, the missing node-differs line and a changed plist digest.
+ * `uninstall-keeps` was proven able to fail by its own leg logic: the real
  * `v3.0.0` `--dry-run Remove:` section lists `config.json` before the current build's fix ever
  * runs, the same shipped bug this leg exists to catch.
  */
@@ -546,6 +549,20 @@ function lastLine(text) {
 }
 
 /**
+ * Rewrite the FIRST `<string>` entry (index 0, the `nodePath` slot) inside a rendered plist's
+ * `ProgramArguments`, simulating a LaunchAgent installed under a node this process is not.
+ */
+function withForeignNode(xml, nodePath) {
+  const arrayStart = xml.indexOf(
+    "<array>",
+    xml.indexOf("<key>ProgramArguments</key>"),
+  );
+  const open = xml.indexOf("<string>", arrayStart) + "<string>".length;
+  const close = xml.indexOf("</string>", open);
+  return xml.slice(0, open) + nodePath + xml.slice(close);
+}
+
+/**
  * Read-only `launchctl print` of the real `com.dispatch.app` registration, the single permitted
  * `launchctl` verb anywhere in this file (enforced by `scripts/check-invariants.mjs`). Used only to
  * prove the plist-staleness leg never touched the real registration: called once before and once
@@ -574,9 +591,14 @@ function capturePrintState(uid) {
  * current build's self-heal repairs a plist stuck at the old path and is a no-op on a second call.
  * The plist is obtained only through `dispatch service install --print` (stdout-only, zero
  * `launchctl` calls of its own), never through a real `service install`.
+ * Then the boot shape: `healServicePlist({ repointNode: false })` (what the server's own boot
+ * passes) must leave a plist whose node differs from this process alone and say so, the explicit
+ * `service restart` shape must repoint it, and a plist whose `ProgramArguments` cannot be parsed
+ * must be healed even by the boot shape.
  * @param opts.break `"stale-plist-uncorrected"` skips the first heal call and asserts the second
- * call's success criteria anyway, demonstrating the leg fails on the exact condition it exists to
- * catch.
+ * call's success criteria anyway; `"boot-heal-repoints-node"` runs the explicit shape where the
+ * boot shape is expected, so the node guard assertions fail. Each demonstrates the leg fails on
+ * the exact condition it exists to catch.
  * @returns Violation lines, empty on PASS.
  */
 async function legPlistStaleness(opts = {}) {
@@ -647,15 +669,20 @@ async function legPlistStaleness(opts = {}) {
       "orchestration",
       "service.js",
     );
-    const healScript =
-      `import(${JSON.stringify(pathToFileURL(healEntry).href)})` +
-      `.then((m) => m.healServicePlist())` +
-      `.then((r) => console.log(r))`;
-    const runHeal = () =>
-      spawnSync(process.execPath, ["--input-type=module", "-e", healScript], {
-        env: { ...process.env, HOME: home },
-        encoding: "utf8",
-      });
+    const runHeal = (optsLiteral = "") =>
+      spawnSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `import(${JSON.stringify(pathToFileURL(healEntry).href)})` +
+            `.then((m) => m.healServicePlist(${optsLiteral}))` +
+            `.then((r) => console.log(r))`,
+        ],
+        { env: { ...process.env, HOME: home }, encoding: "utf8" },
+      );
+    const plistDigest = () =>
+      createHash("sha256").update(readFileSync(plistPath)).digest("hex");
 
     if (opts.break !== "stale-plist-uncorrected") {
       const healResult = runHeal();
@@ -681,9 +708,7 @@ async function legPlistStaleness(opts = {}) {
       }
     }
 
-    const digestBeforeSecondCall = createHash("sha256")
-      .update(readFileSync(plistPath))
-      .digest("hex");
+    const digestBeforeSecondCall = plistDigest();
     const healResult2 = runHeal();
     const outcome2 = lastLine(healResult2.stdout);
     console.log(
@@ -697,12 +722,100 @@ async function legPlistStaleness(opts = {}) {
         `second healServicePlist call reported "${outcome2}", expected "unchanged"`,
       );
     }
-    const digestAfterSecondCall = createHash("sha256")
-      .update(readFileSync(plistPath))
-      .digest("hex");
-    if (digestAfterSecondCall !== digestBeforeSecondCall) {
+    if (plistDigest() !== digestBeforeSecondCall) {
       violations.push(
         `the plist changed on the second heal call, a repeat call must be a byte-identical no-op`,
+      );
+    }
+
+    const foreignNode = "/nonexistent/node-versions/v0/bin/node";
+    writeFileSync(
+      plistPath,
+      withForeignNode(readFileSync(plistPath, "utf8"), foreignNode),
+    );
+    const digestBeforeBootCall = plistDigest();
+    const bootOpts =
+      opts.break === "boot-heal-repoints-node" ? "" : "{ repointNode: false }";
+    const bootResult = runHeal(bootOpts);
+    const bootOutcome = lastLine(bootResult.stdout);
+    console.log(
+      `  heal call 3 (boot shape, foreign node): ${bootOutcome || "(no output)"}` +
+        (bootResult.stderr ? `\n    stderr: ${bootResult.stderr.trim()}` : ""),
+    );
+    if (bootOutcome !== "unchanged") {
+      violations.push(
+        `boot-shape healServicePlist({ repointNode: false }) reported "${bootOutcome}", expected "unchanged"`,
+      );
+    }
+    if (
+      !/plist node \(.*\) differs from this process/.test(bootResult.stdout)
+    ) {
+      violations.push(
+        `boot-shape heal did not say the plist node differs from this process`,
+      );
+    }
+    if (!bootResult.stdout.includes("dispatch service restart")) {
+      violations.push(
+        `boot-shape heal did not point at \`dispatch service restart\` as the way to repoint`,
+      );
+    }
+    if (plistDigest() !== digestBeforeBootCall) {
+      violations.push(
+        `the boot-shape heal changed a plist whose node differs from this process, it must leave it alone`,
+      );
+    }
+
+    const explicitResult = runHeal();
+    const explicitOutcome = lastLine(explicitResult.stdout);
+    console.log(
+      `  heal call 4 (explicit shape, foreign node): ${explicitOutcome || "(no output)"}` +
+        (explicitResult.stderr
+          ? `\n    stderr: ${explicitResult.stderr.trim()}`
+          : ""),
+    );
+    if (explicitOutcome !== "rewritten") {
+      violations.push(
+        `explicit healServicePlist() on a foreign node reported "${explicitOutcome}", expected "rewritten"`,
+      );
+    }
+    const repointedArgs = extractProgramArguments(
+      readFileSync(plistPath, "utf8"),
+    );
+    if (repointedArgs[0] !== process.execPath) {
+      violations.push(
+        `after the explicit heal, the plist's node is "${repointedArgs[0]}", expected "${process.execPath}"`,
+      );
+    }
+
+    writeFileSync(
+      plistPath,
+      readFileSync(plistPath, "utf8").replace(
+        "<key>ProgramArguments</key>",
+        "<key>ProgramArguments-corrupt</key>",
+      ),
+    );
+    const corruptResult = runHeal("{ repointNode: false }");
+    const corruptOutcome = lastLine(corruptResult.stdout);
+    console.log(
+      `  heal call 5 (boot shape, unparseable ProgramArguments): ${corruptOutcome || "(no output)"}` +
+        (corruptResult.stderr
+          ? `\n    stderr: ${corruptResult.stderr.trim()}`
+          : ""),
+    );
+    if (corruptOutcome !== "rewritten") {
+      violations.push(
+        `boot-shape heal on an unparseable ProgramArguments reported "${corruptOutcome}", expected "rewritten"`,
+      );
+    }
+    const repairedArgs = extractProgramArguments(
+      readFileSync(plistPath, "utf8"),
+    );
+    if (
+      repairedArgs[0] !== process.execPath ||
+      repairedArgs[1] !== newArgs[1]
+    ) {
+      violations.push(
+        `after healing an unparseable ProgramArguments, the plist reads [${repairedArgs[0]}, ${repairedArgs[1]}], expected [${process.execPath}, ${newArgs[1]}]`,
       );
     }
 
@@ -903,7 +1016,7 @@ const LEGS = {
   persistence: { run: legPersistence, breaks: ["mutate-config"] },
   "plist-staleness": {
     run: legPlistStaleness,
-    breaks: ["stale-plist-uncorrected"],
+    breaks: ["stale-plist-uncorrected", "boot-heal-repoints-node"],
   },
   "uninstall-keeps": { run: legUninstallKeeps, breaks: [] },
 };
