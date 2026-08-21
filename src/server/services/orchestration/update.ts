@@ -54,18 +54,30 @@ export function detectInstallMode(): "global" | "npx" | "local" {
 }
 
 /**
- * Whether this copy runs from an installed package tree (npm, pnpm or yarn global, or npx) rather
- * than a source checkout.
- * @remarks Every package manager unpacks the tarball under a `node_modules/@theyashgupta/dispatch/`
- * segment and a checkout never has one. {@link detectInstallMode}'s `"global"` stays npm-prefix
- * shaped on purpose, since the updater's `npm i -g` is npm-specific; this predicate exists for
- * the boot plist heal, which must run on any installed layout but never from a checkout.
+ * Whether this copy runs from a DURABLE global package root: npm/nvm/volta's `lib/node_modules`,
+ * pnpm's global store or yarn's global folder.
+ * @remarks The boot plist heal is the only consumer, and it must never point the LaunchAgent at a
+ * directory the user can delete without uninstalling dispatch. A bare `node_modules/@theyashgupta/
+ * dispatch/` test admitted a project-local devDependency and every `npx`/`dlx` temp copy, so only
+ * roots a global prefix has are accepted and the prunable layouts are excluded by name.
+ * {@link detectInstallMode}'s `"global"` stays npm-prefix shaped because the updater's `npm i -g`
+ * is npm-specific.
  */
 export function isPackagedInstall(): boolean {
   const entry = fileURLToPath(import.meta.url);
-  return entry.includes(
-    `${sep}node_modules${sep}@theyashgupta${sep}dispatch${sep}`,
-  );
+  if (
+    !entry.includes(`${sep}node_modules${sep}@theyashgupta${sep}dispatch${sep}`)
+  )
+    return false;
+  if (entry.startsWith(join(process.cwd(), "node_modules") + sep)) return false;
+  const prunable = [`${sep}_npx${sep}`, `${sep}dlx${sep}`, `${sep}dlx-`];
+  if (prunable.some((p) => entry.includes(p))) return false;
+  const globalRoots = [
+    `${sep}lib${sep}node_modules${sep}`,
+    `${sep}pnpm${sep}global${sep}`,
+    `${sep}yarn${sep}global${sep}`,
+  ];
+  return globalRoots.some((root) => entry.includes(root));
 }
 
 /**
