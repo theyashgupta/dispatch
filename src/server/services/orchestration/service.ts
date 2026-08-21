@@ -155,8 +155,8 @@ ${programArguments}
  * polled to completion first; a `bootstrap` that lands inside that window fails with EIO or
  * "already loaded" and leaves the job unloaded. `bootstrap`'s exit code is known to lie in both
  * directions, so only the post-condition (`print` succeeds after a confirmed unload) counts as
- * success. A job left unloaded is only recoverable through `dispatch service install`, so the
- * failure message names that command rather than `restart`.
+ * success. When the poll expires, `bootstrap` is still attempted, but since `print` cannot tell
+ * the old job from a new one, a loaded job then counts only when `bootstrap` itself exited 0.
  */
 async function reloadService(): Promise<boolean> {
   const uid = process.getuid?.();
@@ -174,10 +174,9 @@ async function reloadService(): Promise<boolean> {
     const e = err as (Error & { stderr?: string }) | undefined;
     return e?.stderr?.trim() || e?.message || "launchctl reported no error";
   };
-  const fail = (detail: string): false => {
+  const fail = (detail: string, hint: string): false => {
     process.stderr.write(
-      `  Failed to load the service: ${detail}\n` +
-        `  The agent may be unloaded, recover with: dispatch service install\n`,
+      `  Failed to load the service: ${detail}\n  ${hint}\n`,
     );
     return false;
   };
@@ -196,23 +195,37 @@ async function reloadService(): Promise<boolean> {
       break;
     }
   }
-  if (!unloaded)
-    return fail(`bootout did not unload ${target}: ${describe(bootoutError)}`);
+  if (!unloaded) {
+    process.stderr.write(
+      `  [service] ${target} did not unload within 1.4s ` +
+        `(${bootoutError === undefined ? "bootout exited 0" : describe(bootoutError)}); ` +
+        `attempting bootstrap anyway\n`,
+    );
+  }
 
   let lastError: unknown;
   for (const delayMs of [0, 400, 1200]) {
     if (delayMs > 0) await sleep(delayMs);
+    let bootstrapped = true;
     try {
       await run("launchctl", ["bootstrap", `gui/${uid}`, SERVICE_PLIST_PATH]);
     } catch (err) {
       lastError = err;
+      bootstrapped = false;
     }
-    if (await isLoaded()) return true;
+    if ((unloaded || bootstrapped) && (await isLoaded())) return true;
+  }
+  if (!unloaded && (await isLoaded())) {
+    return fail(
+      `${target} is still loaded with its previous arguments, the reload did not take effect`,
+      "The agent is still running, retry: dispatch service restart",
+    );
   }
   return fail(
     lastError === undefined
       ? `bootstrap returned 0 but launchd reports ${target} absent`
       : describe(lastError),
+    "The agent may be unloaded, recover with: dispatch service install",
   );
 }
 
