@@ -49,8 +49,10 @@ const ID_RE =
  * re-freeze (`NEW-22`) — see docs/ARCHITECTURE.md#design-system-invariants.
  * @remarks Moved from 123 to 124 for the deliberate one-ID exec-chokepoint perf-record
  * mitigation re-freeze (`T-98-05`), see docs/ARCHITECTURE.md#exec-chokepoint.
+ * @remarks Moved from 124 to 125 for the deliberate one-ID `PrInfo.repo` basename
+ * mitigation re-freeze (`T-98-01`), cited in `shared/types.ts` and `adapters/gh.ts`.
  */
-const FROZEN_COUNT = 124;
+const FROZEN_COUNT = 125;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");

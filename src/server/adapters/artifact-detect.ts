@@ -1,4 +1,5 @@
 import net from "node:net";
+import { basename } from "node:path";
 import type { Card, PreviewInfo, Session } from "../../shared/types.js";
 import { listPrsForBranch, type PrProbeResult } from "./gh.js";
 import { panePidsBySession } from "./tmux.js";
@@ -269,7 +270,9 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
         const branch = rec.branch;
         const repos = rec.workspace.repos;
         const results = await Promise.all(
-          repos.map((repo) => listPrsForBranch(repo.path, branch)),
+          repos.map((repo) =>
+            listPrsForBranch(repo.path, branch, basename(repo.path)),
+          ),
         );
         const answered = results.filter(
           (r): r is Extract<PrProbeResult, { ok: true }> => r.ok,

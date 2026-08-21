@@ -121,10 +121,20 @@ function rollupOf(checks: GhCheckRun[]): "pass" | "fail" | "pending" | null {
  * user moved or deleted mid-session reports the folder rather than latching
  * "gh CLI not available" forever while `gh` is installed and healthy. The `existsSync` cost is paid
  * only on the failure path, never on a successful lookup.
+ *
+ * `repo` is supplied by the caller, not derived here, because repo identity is only knowable at
+ * the call site (`artifact-detect.ts` already holds `workspace.repos[i]`'s own path); a folder
+ * basename is passed rather than `repoPath` so no absolute path can reach the wire (T-98-01).
+ *
+ * A `429`/`403` throttle response is classified as its own `"gh rate limited"` category, checked
+ * before the `HTTP 401` test in the same ternary chain: `gh` never emits `HTTP 401` or
+ * `gh auth login` for a rate-limit response, so the ordering is not load-bearing for correctness,
+ * grouping the two rate-limit phrasings together simply keeps the chain readable.
  */
 export async function listPrsForBranch(
   repoPath: string,
   branch: string,
+  repo: string,
 ): Promise<PrProbeResult> {
   try {
     const { stdout } = await run(
@@ -153,6 +163,7 @@ export async function listPrsForBranch(
         state: pr.state.toLowerCase() as PrInfo["state"],
         isDraft: pr.isDraft,
         ci: rollupOf(pr.statusCheckRollup),
+        repo,
       })),
     };
   } catch (err) {
@@ -163,11 +174,14 @@ export async function listPrsForBranch(
         ? existsSync(repoPath)
           ? "gh unavailable"
           : "repo path missing"
-        : stderr.includes("HTTP 401") || stderr.includes("gh auth login")
-          ? "gh not authenticated"
-          : stderr.includes("Could not resolve to a Repository")
-            ? "gh repo not accessible"
-            : "gh pr list failed";
+        : stderr.includes("API rate limit exceeded") ||
+            stderr.includes("secondary rate limit")
+          ? "gh rate limited"
+          : stderr.includes("HTTP 401") || stderr.includes("gh auth login")
+            ? "gh not authenticated"
+            : stderr.includes("Could not resolve to a Repository")
+              ? "gh repo not accessible"
+              : "gh pr list failed";
     if (!loggedCategories.has(category)) {
       loggedCategories.add(category);
       console.error(`[artifact-detect] ${category}`);

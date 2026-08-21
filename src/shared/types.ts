@@ -119,7 +119,7 @@ export interface ProbeUnknown {
    * this probe path does not stamp a time (the preview signal does not; Phase 99 owns previews) or
    * the record predates this field, never treat absence as "just checked". The PR write path
    * always sets it. Required would force preview call sites to invent a timestamp for a signal
-   * this phase does not touch, so optional is deliberate, not an oversight.
+   * they do not stamp, so optional is deliberate, not an oversight.
    */
   checkedAt?: string;
 }
