@@ -49,6 +49,44 @@ function xmlEscape(value: string): string {
 }
 
 /**
+ * Decode the same five XML entities {@link xmlEscape} applies, in the mirror order.
+ * @remarks `&amp;` decodes LAST: decoding it first would turn an original literal `&lt;` (already
+ * escaped once to `&amp;lt;`) back into `&lt;` and then, on the next pass, into `<`, corrupting text
+ * that was never meant to become a tag.
+ */
+function decodeXmlEntities(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * Extract the ordered `ProgramArguments` string values from a rendered plist.
+ * @remarks No XML parser: this file's plist schema is generated exclusively by {@link buildPlist},
+ * so a narrow scan of its own known shape is enough, and pulling in a general parser for a
+ * self-controlled, narrow-schema file would be overkill. Returns an empty array when the key or
+ * its `<array>` block is missing, which {@link healServicePlist} treats as unconditionally stale.
+ */
+function extractProgramArguments(xml: string): string[] {
+  const keyIndex = xml.indexOf("<key>ProgramArguments</key>");
+  if (keyIndex === -1) return [];
+  const arrayStart = xml.indexOf("<array>", keyIndex);
+  const arrayEnd = xml.indexOf("</array>", arrayStart);
+  if (arrayStart === -1 || arrayEnd === -1) return [];
+  const block = xml.slice(arrayStart, arrayEnd);
+  const values: string[] = [];
+  const stringRe = /<string>([\s\S]*?)<\/string>/g;
+  let match: RegExpExecArray | null;
+  while ((match = stringRe.exec(block)) !== null) {
+    values.push(decodeXmlEntities(match[1]));
+  }
+  return values;
+}
+
+/**
  * Render the launchd plist XML. A pure function — no filesystem/process access — so `--print` can
  * render it with zero side effects and `installService` can write the exact string it renders.
  * @remarks Every interpolated value is XML-escaped: the captured `PATH` and filesystem paths
@@ -98,6 +136,66 @@ ${programArguments}
 </dict>
 </plist>
 `;
+}
+
+/**
+ * Compare the on-disk plist's `ProgramArguments` against what {@link resolveCliEntry} returns right
+ * now, and rewrite it through {@link buildPlist} when they differ.
+ * @remarks Only entries 0 and 1 (`nodePath`, `cliEntry`) are compared, since `EnvironmentVariables.PATH`
+ * legitimately differs between a launchd-started and a shell-started process, so comparing it would
+ * rewrite the plist on every call. The existing plist's `--port` entry (if any) is preserved rather
+ * than re-derived from `config.json`, so a no-port install never gains one on its first heal.
+ * `reload` defaults to false: a boot-time caller runs inside the very agent a `reload: true` would
+ * re-bootstrap, which is the self-inflicted `KeepAlive` failure mode this default avoids. Only
+ * {@link restartService} (about to kickstart anyway) opts in.
+ */
+export async function healServicePlist(opts?: {
+  reload?: boolean;
+}): Promise<"not-installed" | "unchanged" | "rewritten" | "reload-failed"> {
+  if (!existsSync(SERVICE_PLIST_PATH)) return "not-installed";
+
+  let current: string[];
+  try {
+    current = extractProgramArguments(readFileSync(SERVICE_PLIST_PATH, "utf8"));
+  } catch {
+    current = [];
+  }
+
+  const cliEntry = resolveCliEntry();
+  const nodePath = process.execPath;
+  if (current[0] === nodePath && current[1] === cliEntry) return "unchanged";
+
+  let port: number | undefined;
+  const portFlagIndex = current.indexOf("--port");
+  if (portFlagIndex !== -1 && current[portFlagIndex + 1] !== undefined) {
+    const parsed = Number(current[portFlagIndex + 1]);
+    if (Number.isFinite(parsed)) port = parsed;
+  }
+
+  await writeFileAtomic(
+    SERVICE_PLIST_PATH,
+    buildPlist({ cliEntry, nodePath, path: process.env.PATH ?? "", port }),
+  );
+  process.stdout.write(
+    `  [service] plist ProgramArguments were stale, rewrote ${SERVICE_PLIST_PATH}\n`,
+  );
+
+  if (opts?.reload !== true) return "rewritten";
+
+  const uid = process.getuid?.();
+  try {
+    await run("launchctl", ["bootout", `gui/${uid}/${SERVICE_LABEL}`]);
+  } catch {}
+
+  try {
+    await run("launchctl", ["bootstrap", `gui/${uid}`, SERVICE_PLIST_PATH]);
+  } catch (err) {
+    process.stderr.write(
+      `  Failed to load the service: ${(err as Error & { stderr?: string }).stderr ?? (err as Error).message}\n`,
+    );
+    return "reload-failed";
+  }
+  return "rewritten";
 }
 
 /** Tolerant `config.json` port read, mirroring update.ts's `readCache` posture — never throws. */
@@ -233,7 +331,14 @@ export async function serviceStatus(): Promise<number> {
   return 0;
 }
 
-/** Kickstart (hard-restart) the loaded agent. Fails with a friendly hint when nothing is installed. */
+/**
+ * Kickstart (hard-restart) the loaded agent. Fails with a friendly hint when nothing is installed.
+ * @remarks Repairs a stale plist path before restarting: {@link healServicePlist} runs first with
+ * `reload: true`, and a `"rewritten"` result means its own bootout/bootstrap pair already restarted
+ * the job with corrected arguments, so this function skips `kickstart` for that outcome: launchd
+ * does not re-read the plist file on `kickstart`, only a bootout/bootstrap pair picks up a changed
+ * `ProgramArguments`.
+ */
 export async function restartService(): Promise<number> {
   if (!existsSync(SERVICE_PLIST_PATH)) {
     process.stdout.write(
@@ -241,6 +346,14 @@ export async function restartService(): Promise<number> {
     );
     return 1;
   }
+
+  const healed = await healServicePlist({ reload: true });
+  if (healed === "rewritten") {
+    process.stdout.write("  Restarted, service path refreshed.\n");
+    return 0;
+  }
+  if (healed === "reload-failed") return 1;
+
   const uid = process.getuid?.();
   try {
     await run("launchctl", ["kickstart", "-k", `gui/${uid}/${SERVICE_LABEL}`]);
