@@ -198,10 +198,12 @@ async function doctor(): Promise<void> {
  * installs get printed `@latest` guidance (never `npm i -g`, since the npx cache serves stale
  * versions), a local checkout gets dev-checkout guidance, and a global install offers `[Y/n]`
  * default-yes then runs it on confirm — under a pipe/CI it prints the command instead of prompting
- * or spawning. ALWAYS resolves without a non-zero exit, mirroring `doctor`'s diagnostic posture: a
- * failed update prints the manual fallback command rather than failing the command itself.
- * @remarks A successful update now restarts the service automatically when a plist exists, instead
- * of telling the user to do it; a failed restart is reported but does not make `update()` itself fail.
+ * or spawning. A failed or skipped update resolves with exit 0, mirroring `doctor`'s diagnostic
+ * posture: it prints the manual fallback command rather than failing the command itself.
+ * @remarks A successful update restarts the service automatically when a plist exists. A failed
+ * restart sets `process.exitCode = 1` (the caller exits with it) because the restart path boots
+ * the job out before bootstrapping, so a failure leaves the agent down, not merely stale, and a
+ * scripted `dispatch update` must not report success over a down service.
  */
 async function update(): Promise<void> {
   const status = await checkForUpdate({ liveCheck: true });
@@ -252,11 +254,14 @@ async function update(): Promise<void> {
         `  Updated to v${result.version}, restarting the service.\n`,
       );
       const code = await restartService();
-      process.stdout.write(
-        code === 0
-          ? `  Service restarted on v${result.version}.\n`
-          : `  Service restart failed, recover with: dispatch service install\n`,
-      );
+      if (code !== 0) {
+        process.stdout.write(
+          `  Service restart failed, recover with: dispatch service install\n`,
+        );
+        process.exitCode = 1;
+        return;
+      }
+      process.stdout.write(`  Service restarted on v${result.version}.\n`);
     } else {
       process.stdout.write(
         `  Updated to v${result.version}, restart dispatch to use it.\n`,
@@ -415,7 +420,7 @@ async function cli(): Promise<void> {
   }
   if (positionals[0] === "update") {
     await update();
-    process.exit(0);
+    process.exit();
   }
   if (positionals[0] === "service") {
     await service(positionals[1], values);
