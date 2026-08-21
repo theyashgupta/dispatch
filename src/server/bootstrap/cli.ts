@@ -255,7 +255,7 @@ async function update(): Promise<void> {
       process.stdout.write(
         code === 0
           ? `  Service restarted on v${result.version}.\n`
-          : `  Service restart failed, run it yourself: dispatch service restart\n`,
+          : `  Service restart failed, recover with: dispatch service install\n`,
       );
     } else {
       process.stdout.write(

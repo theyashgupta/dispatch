@@ -139,6 +139,39 @@ ${programArguments}
 }
 
 /**
+ * Bootout then bootstrap the agent so launchd re-reads the on-disk plist.
+ * @remarks `bootout` returns before launchd has finished tearing the job down, and a `bootstrap`
+ * that lands inside that window fails with EIO or "already loaded" and leaves the job unloaded; the
+ * bounded retry covers that window. A job left unloaded is only recoverable through
+ * `dispatch service install`, so the failure message names that command rather than `restart`.
+ */
+async function reloadService(): Promise<boolean> {
+  const uid = process.getuid?.();
+  try {
+    await run("launchctl", ["bootout", `gui/${uid}/${SERVICE_LABEL}`]);
+  } catch {}
+
+  let lastError: unknown;
+  for (const delayMs of [0, 400, 1200]) {
+    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+    try {
+      await run("launchctl", ["bootstrap", `gui/${uid}`, SERVICE_PLIST_PATH]);
+      return true;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  const detail =
+    (lastError as Error & { stderr?: string }).stderr ??
+    (lastError as Error).message;
+  process.stderr.write(
+    `  Failed to load the service: ${detail}\n` +
+      `  The agent may be unloaded, recover with: dispatch service install\n`,
+  );
+  return false;
+}
+
+/**
  * Compare the on-disk plist's `ProgramArguments` against what {@link resolveCliEntry} returns right
  * now, and rewrite it through {@link buildPlist} when they differ.
  * @remarks Only entries 0 and 1 (`nodePath`, `cliEntry`) are compared, since `EnvironmentVariables.PATH`
@@ -182,20 +215,7 @@ export async function healServicePlist(opts?: {
 
   if (opts?.reload !== true) return "rewritten";
 
-  const uid = process.getuid?.();
-  try {
-    await run("launchctl", ["bootout", `gui/${uid}/${SERVICE_LABEL}`]);
-  } catch {}
-
-  try {
-    await run("launchctl", ["bootstrap", `gui/${uid}`, SERVICE_PLIST_PATH]);
-  } catch (err) {
-    process.stderr.write(
-      `  Failed to load the service: ${(err as Error & { stderr?: string }).stderr ?? (err as Error).message}\n`,
-    );
-    return "reload-failed";
-  }
-  return "rewritten";
+  return (await reloadService()) ? "rewritten" : "reload-failed";
 }
 
 /** Tolerant `config.json` port read, mirroring update.ts's `readCache` posture — never throws. */
@@ -280,19 +300,7 @@ export async function installService(opts: {
     buildPlist({ cliEntry, nodePath, path, port: opts.port }),
   );
 
-  const uid = process.getuid?.();
-  try {
-    await run("launchctl", ["bootout", `gui/${uid}/${SERVICE_LABEL}`]);
-  } catch {}
-
-  try {
-    await run("launchctl", ["bootstrap", `gui/${uid}`, SERVICE_PLIST_PATH]);
-  } catch (err) {
-    process.stderr.write(
-      `  Failed to load the service: ${(err as Error & { stderr?: string }).stderr ?? (err as Error).message}\n`,
-    );
-    return 1;
-  }
+  if (!(await reloadService())) return 1;
 
   process.stdout.write(
     `  Installed ${SERVICE_PLIST_PATH}\n` +
