@@ -935,7 +935,8 @@ async function main() {
   const only = flagValue(args, "--only");
   const breakMode = flagValue(args, "--break");
 
-  if (only !== undefined && !LEGS[only]) usage(`unknown leg "${only}"`);
+  if (only !== undefined && !Object.hasOwn(LEGS, only))
+    usage(`unknown leg "${only}"`);
   if (breakMode !== undefined) {
     if (only === undefined) usage("--break requires --only <leg>");
     if (!LEGS[only].breaks.includes(breakMode)) {
