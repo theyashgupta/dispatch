@@ -616,7 +616,7 @@ async function legPlistStaleness(opts = {}) {
     );
     const healScript =
       `import(${JSON.stringify(pathToFileURL(healEntry).href)})` +
-      `.then((m) => m.healServicePlist({ reload: false }))` +
+      `.then((m) => m.healServicePlist())` +
       `.then((r) => console.log(r))`;
     const runHeal = () =>
       spawnSync(process.execPath, ["--input-type=module", "-e", healScript], {

@@ -178,13 +178,13 @@ async function reloadService(): Promise<boolean> {
  * legitimately differs between a launchd-started and a shell-started process, so comparing it would
  * rewrite the plist on every call. The existing plist's `--port` entry (if any) is preserved rather
  * than re-derived from `config.json`, so a no-port install never gains one on its first heal.
- * `reload` defaults to false: a boot-time caller runs inside the very agent a `reload: true` would
- * re-bootstrap, which is the self-inflicted `KeepAlive` failure mode this default avoids. Only
- * {@link restartService} (about to kickstart anyway) opts in.
+ * File-only on purpose: the boot-time caller runs inside the very agent a re-bootstrap would tear
+ * down (the self-inflicted `KeepAlive` failure mode), so launchd's in-memory job is left alone and
+ * only {@link restartService} reloads it.
  */
-export async function healServicePlist(opts?: {
-  reload?: boolean;
-}): Promise<"not-installed" | "unchanged" | "rewritten" | "reload-failed"> {
+export async function healServicePlist(): Promise<
+  "not-installed" | "unchanged" | "rewritten"
+> {
   if (!existsSync(SERVICE_PLIST_PATH)) return "not-installed";
 
   let current: string[];
@@ -212,10 +212,7 @@ export async function healServicePlist(opts?: {
   process.stdout.write(
     `  [service] plist ProgramArguments were stale, rewrote ${SERVICE_PLIST_PATH}\n`,
   );
-
-  if (opts?.reload !== true) return "rewritten";
-
-  return (await reloadService()) ? "rewritten" : "reload-failed";
+  return "rewritten";
 }
 
 /** Tolerant `config.json` port read, mirroring update.ts's `readCache` posture — never throws. */
@@ -340,12 +337,13 @@ export async function serviceStatus(): Promise<number> {
 }
 
 /**
- * Kickstart (hard-restart) the loaded agent. Fails with a friendly hint when nothing is installed.
- * @remarks Repairs a stale plist path before restarting: {@link healServicePlist} runs first with
- * `reload: true`, and a `"rewritten"` result means its own bootout/bootstrap pair already restarted
- * the job with corrected arguments, so this function skips `kickstart` for that outcome: launchd
- * does not re-read the plist file on `kickstart`, only a bootout/bootstrap pair picks up a changed
- * `ProgramArguments`.
+ * Hard-restart the agent through a bootout/bootstrap pair. Fails with a friendly hint when nothing
+ * is installed.
+ * @remarks Always re-bootstraps instead of `kickstart`: launchd does not re-read the plist file on
+ * `kickstart`, and a file-only boot heal may already have freshened the file while launchd still
+ * holds the stale `ProgramArguments` in memory, so the file's own freshness is no signal of whether
+ * a reload is pending. Re-bootstrapping unconditionally costs the same as a kickstart and makes the
+ * on-disk arguments the ones that take effect.
  */
 export async function restartService(): Promise<number> {
   if (!existsSync(SERVICE_PLIST_PATH)) {
@@ -355,23 +353,13 @@ export async function restartService(): Promise<number> {
     return 1;
   }
 
-  const healed = await healServicePlist({ reload: true });
-  if (healed === "rewritten") {
-    process.stdout.write("  Restarted, service path refreshed.\n");
-    return 0;
-  }
-  if (healed === "reload-failed") return 1;
-
-  const uid = process.getuid?.();
-  try {
-    await run("launchctl", ["kickstart", "-k", `gui/${uid}/${SERVICE_LABEL}`]);
-  } catch (err) {
-    process.stderr.write(
-      `  Restart failed: ${(err as Error & { stderr?: string }).stderr ?? (err as Error).message}\n`,
-    );
-    return 1;
-  }
-  process.stdout.write("  Restarted.\n");
+  const healed = await healServicePlist();
+  if (!(await reloadService())) return 1;
+  process.stdout.write(
+    healed === "rewritten"
+      ? "  Restarted, service path refreshed.\n"
+      : "  Restarted.\n",
+  );
   return 0;
 }
 

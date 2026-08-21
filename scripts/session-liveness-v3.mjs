@@ -13634,9 +13634,9 @@ function lastLine(text) {
  *
  * Never calls real `launchctl` in any form (not even `print`): the plist is obtained only through
  * `node dist/server/bootstrap/cli.js service install --print` (stdout-only, zero side effects, same
- * instrument `reinstall-sim.mjs` uses) and healed only through `healServicePlist({reload:false})`'s
- * file-only path, both spawned with `HOME` set to the fixture's own sandbox home so every path they
- * touch resolves inside it.
+ * instrument `reinstall-sim.mjs` uses) and healed only through `healServicePlist()`, which is
+ * file-only by design, both spawned with `HOME` set to the fixture's own sandbox home so every
+ * path they touch resolves inside it.
  *
  * `DISPATCH_REINSTALL_SESSION_BREAK` selects one of two proven-failing directions, read once at the
  * top so a break-mode run can never be mistaken for a real one:
@@ -13752,7 +13752,7 @@ async function checkReinstallSession(built) {
     );
     const healScript =
       `import(${JSON.stringify(pathToFileURL(healEntry).href)})` +
-      `.then((m) => m.healServicePlist({ reload: false }))` +
+      `.then((m) => m.healServicePlist())` +
       `.then((r) => console.log(r))`;
     const healResult = execFileSync(
       process.execPath,
