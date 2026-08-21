@@ -765,6 +765,50 @@ function checkSessionProjectionChokepoint() {
 }
 
 /**
+ * The sandbox harnesses that may only ever READ launchd. A sandboxed `HOME` redirects the plist
+ * file and `~/.dispatch`, but `launchctl bootstrap`'s `gui/<uid>/<Label>` registration is a real,
+ * per-user OS registry, so any mutating verb from inside a harness would clobber the researcher's
+ * own live `com.dispatch.app` agent regardless of the sandbox.
+ */
+const LAUNCHCTL_READONLY_HARNESSES = [
+  join("scripts", "reinstall-sim.mjs"),
+  join("scripts", "session-liveness-v3.mjs"),
+];
+
+/**
+ * launchctl-read-only gate over {@link LAUNCHCTL_READONLY_HARNESSES}: every `launchctl` occurrence
+ * in code (block comments stripped) must be immediately followed by the `print` verb, either as the
+ * argv array `"launchctl", ["print", ...]` or as prose inside a message string (`launchctl print
+ * gui/...`). Anything else, a different verb or a verb hidden behind a variable, is a violation.
+ * @remarks Requiring the verb to be INLINE is deliberate: a `spawnSync("launchctl", args)` whose
+ * verb lives in a variable cannot be audited by a pattern gate, and a gate that cannot see the verb
+ * cannot fail for the reason it exists.
+ * @returns Violation report lines, one per offending occurrence.
+ */
+function checkLaunchctlReadOnly() {
+  const violations = [];
+  const inlinePrint = /^launchctl["',\s[]*print\b/;
+  for (const file of LAUNCHCTL_READONLY_HARNESSES) {
+    if (!existsSync(file)) {
+      violations.push(`${file}: missing, cannot audit launchctl usage`);
+      continue;
+    }
+    const code = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    let at = code.indexOf("launchctl");
+    while (at !== -1) {
+      if (!inlinePrint.test(code.slice(at, at + 40))) {
+        const line = code.slice(0, at).split("\n").length;
+        violations.push(
+          `${file}:${line}: launchctl must be followed inline by the read-only "print" verb`,
+        );
+      }
+      at = code.indexOf("launchctl", at + 1);
+    }
+  }
+  return violations;
+}
+
+/**
  * Collect invariant IDs that appear inside JSDoc blocks only.
  * @remarks Toggles an in-block flag on `/**` and `*\/`; body/line `//` comments
  * are never scanned, so an undeleted original body comment is not a false home.
@@ -886,7 +930,7 @@ function generateBaseline() {
  * sentinels.
  * @returns Nothing; exits 0 iff MISSING, ORPHAN, EXTRA, RETIRED, STRIP
  * CASCADES, BOARD READING RHYTHM, TERMINAL FENCE, SESSION PROJECTION
- * CHOKEPOINT, and ATTENTION SINGLE SOURCE are all empty.
+ * CHOKEPOINT, ATTENTION SINGLE SOURCE, and LAUNCHCTL READ-ONLY are all empty.
  */
 function run() {
   const home = new Set();
@@ -910,6 +954,7 @@ function run() {
   const terminalFence = checkTerminalFence();
   const sessionChokepoint = checkSessionProjectionChokepoint();
   const attentionSingleSource = checkAttentionSingleSource();
+  const launchctlReadOnly = checkLaunchctlReadOnly();
 
   report("MISSING (baseline - home)", missing);
   report("ORPHAN  (present - baseline)", orphan);
@@ -920,6 +965,7 @@ function run() {
   report("TERMINAL FENCE (NEW-20)", terminalFence);
   report("SESSION PROJECTION CHOKEPOINT (NEW-21)", sessionChokepoint);
   report("ATTENTION SINGLE SOURCE (NEW-22)", attentionSingleSource);
+  report("LAUNCHCTL READ-ONLY (harnesses)", launchctlReadOnly);
 
   const defects =
     missing.length +
@@ -930,7 +976,8 @@ function run() {
     boardReadingRhythm.length +
     terminalFence.length +
     sessionChokepoint.length +
-    attentionSingleSource.length;
+    attentionSingleSource.length +
+    launchctlReadOnly.length;
   console.log(
     `\n${defects === 0 ? "PASS" : "FAIL"}: ${baseline.size - missing.length}/${baseline.size} invariants homed` +
       (missing.length ? ` (${missing.length} missing a home)` : "") +
@@ -954,6 +1001,9 @@ function run() {
         : "") +
       (attentionSingleSource.length
         ? ` (${attentionSingleSource.length} attention-single-source violation(s))`
+        : "") +
+      (launchctlReadOnly.length
+        ? ` (${launchctlReadOnly.length} launchctl read-only violation(s))`
         : ""),
   );
   process.exit(defects === 0 ? 0 : 1);

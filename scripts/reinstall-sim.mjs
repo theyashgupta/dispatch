@@ -20,7 +20,8 @@
  * Two rules hold everywhere in this file. Every subprocess invocation is a spawnSync/execFileSync
  * argv ARRAY, never a shell string, nothing here is ever interpreted by a shell (T-41-01). And the
  * harness never calls `launchctl` for anything other than a read-only `print` (the single permitted
- * verb, enforced by this file's own Task 2 verify command), and never calls `installService` at all,
+ * verb, enforced by `scripts/check-invariants.mjs` inside `npm run check`), and never calls
+ * `installService` at all,
  * the plist is obtained only through `dispatch service install --print`, which is stdout-only and
  * makes zero `launchctl` calls of its own. A sandboxed `HOME` redirects the plist FILE and the
  * `~/.dispatch` DIRECTORY, but `launchctl bootstrap`'s `gui/<uid>` registration is a real, per-user

@@ -2972,7 +2972,9 @@ mechanically-checkable question; none of them read prose for truth.
   able to fail by the real `v3.0.0` release's own shipped bug, whose `--dry-run Remove:` section
   lists `config.json` before the current build's fix runs). Two hard safety rules hold everywhere
   in the file: the only permitted `launchctl` verb is a read-only `print`, never
-  `bootstrap`/`bootout`/`load`/`unload`, and a plist is only ever obtained through
+  `bootstrap`/`bootout`/`load`/`unload` (mechanically enforced for this file and
+  `session-liveness-v3.mjs` by `check-invariants.mjs`'s launchctl read-only census, so the rule
+  survives the next edit rather than the next reader), and a plist is only ever obtained through
   `dispatch service install --print`, never a real `service install`. The `phase-smoke-tester`
   behavioral pass runs alongside this harness, not instead of it.
 - **`node scripts/session-liveness-v3.mjs --check <mode>`** (Phase 91/92/97): a real-tmux/real-ttyd
