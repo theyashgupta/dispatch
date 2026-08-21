@@ -39,6 +39,7 @@ import { reconcileSessions } from "./reconcile.js";
 import { resolveEditors } from "../adapters/editors.js";
 import { startUpdateCheckLoop } from "../services/orchestration/update.js";
 import { startCleanupScheduler } from "../services/orchestration/cleanup-scheduler.js";
+import { healServicePlist } from "../services/orchestration/service.js";
 import { DEFAULT_CLEANUP_DELAY_DAYS } from "../../shared/types.js";
 
 const DEFAULT_PORT = 4700;
@@ -262,6 +263,11 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   );
   await ensureHyperlinksTerminalFeature();
   await reconcileSessions();
+  await healServicePlist().catch((err: unknown) => {
+    console.warn(
+      `[service] boot plist self-heal rejected unexpectedly: ${(err as Error).message}`,
+    );
+  });
   startCleanupScheduler();
   await sweepStrayTunnels().catch((err: unknown) => {
     console.warn(
