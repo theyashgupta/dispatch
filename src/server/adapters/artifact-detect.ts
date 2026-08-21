@@ -294,9 +294,17 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
           if (realFailures.length > 0) {
             const count = (prFailureCounts.get(rec.id) ?? 0) + 1;
             prFailureCounts.set(rec.id, count);
-            if (rec.prsUnknown?.category !== category) {
+            // checkedAt bounds a standing failure to one broadcast per minute (PRLINK-05).
+            const checkedAt = new Date(
+              Math.floor(Date.now() / 60_000) * 60_000,
+            ).toISOString();
+            if (
+              rec.prsUnknown?.category !== category ||
+              rec.prsUnknown.checkedAt !== checkedAt
+            ) {
               await store.setPrsUnknownIfSession(card.id, session, {
                 category,
+                checkedAt,
               });
             }
             holdLastKnownPrs =
