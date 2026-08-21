@@ -546,14 +546,26 @@ function lastLine(text) {
 
 /**
  * Read-only `launchctl print` of the real `com.dispatch.app` registration, the single permitted
- * `launchctl` verb anywhere in this file (enforced by this file's own Task 2 verify command). Used
- * only to prove the plist-staleness leg never touched the real registration: called once before
- * and once after the leg's work, the two outputs must be identical.
+ * `launchctl` verb anywhere in this file (enforced by `scripts/check-invariants.mjs`). Used only to
+ * prove the plist-staleness leg never touched the real registration: called once before and once
+ * after the leg's work, the two captures must be identical.
+ * @remarks Reduced to loaded/absent plus the stable `path`/`program` lines: the raw output also
+ * carries `state`, `pid`, `runs` and `last exit code`, which change for reasons unrelated to this
+ * harness and would read as a false "the real registration was touched".
  */
 function capturePrintState(uid) {
-  const printArgs = ["print", `gui/${uid}/${SERVICE_LABEL}`];
-  const result = spawnSync("launchctl", printArgs, { encoding: "utf8" });
-  return `${result.status}:${result.stdout}${result.stderr}`;
+  const result = spawnSync(
+    "launchctl",
+    ["print", `gui/${uid}/${SERVICE_LABEL}`],
+    {
+      encoding: "utf8",
+    },
+  );
+  const stable = (result.stdout ?? "")
+    .split("\n")
+    .filter((line) => /^\s*(path|program) = /.test(line))
+    .join("\n");
+  return `${result.status === 0 ? "loaded" : "absent"}:${stable}`;
 }
 
 /**
