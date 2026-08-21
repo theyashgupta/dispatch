@@ -228,8 +228,10 @@ async function reloadService(): Promise<boolean> {
  * `EnvironmentVariables.PATH` are preserved rather than re-derived, so a no-port install never gains
  * one on its first heal and a heal run from a minimal shell never replaces the PATH launchd needs
  * to find `tmux`/`ttyd`/`git`/`claude`. A resolved `cliEntry` that does not exist on disk (a
- * checkout with no `dist/` built, or the walk's fallback path) is never written: installing a
- * broken entry is worse than leaving a stale one that at least points at a build that once ran.
+ * checkout with no `dist/` built, or the walk's fallback path) is never written and is reported as
+ * `"unrepairable"` so {@link restartService} can refuse instead of reloading a stale plist:
+ * installing a broken entry is worse than leaving a stale one that at least points at a build
+ * that once ran.
  * File-only on purpose: the boot-time caller runs inside the very agent a re-bootstrap would tear
  * down (the self-inflicted `KeepAlive` failure mode), so launchd's in-memory job is left alone and
  * only {@link restartService} reloads it. Refuses under npx like `installService` does (an npx
@@ -238,7 +240,7 @@ async function reloadService(): Promise<boolean> {
  * LaunchAgent at itself implicitly; an explicit `service restart` is unaffected.
  */
 export async function healServicePlist(): Promise<
-  "not-installed" | "unchanged" | "rewritten"
+  "not-installed" | "unchanged" | "unrepairable" | "rewritten"
 > {
   if (!existsSync(SERVICE_PLIST_PATH)) return "not-installed";
   if (detectInstallMode() === "npx") return "unchanged";
@@ -252,7 +254,13 @@ export async function healServicePlist(): Promise<
   const cliEntry = resolveCliEntry();
   const nodePath = process.execPath;
   if (current[0] === nodePath && current[1] === cliEntry) return "unchanged";
-  if (!existsSync(cliEntry)) return "unchanged";
+  if (!existsSync(cliEntry)) {
+    process.stderr.write(
+      `  [service] plist is stale but the resolved entry does not exist (${cliEntry}); ` +
+        `not rewriting. Re-run: dispatch service install\n`,
+    );
+    return "unrepairable";
+  }
 
   let port: number | undefined;
   const portFlagIndex = current.indexOf("--port");
@@ -412,6 +420,7 @@ export async function restartService(): Promise<number> {
   }
 
   const healed = await healServicePlist();
+  if (healed === "unrepairable") return 1;
   if (!(await reloadService())) return 1;
   process.stdout.write(
     healed === "rewritten"
