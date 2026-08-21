@@ -56,7 +56,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -105,18 +105,31 @@ function assertSandboxSafe(dir) {
 
 /**
  * Fail closed while the user's real service is up (WR-08). Re-run at the top of every leg rather
- * than once per process, so a leg started after the service came back up still refuses.
+ * than once per process, so a leg started after the service came back up still refuses. Probes the
+ * default port AND the port in the user's real `config.json` (read-only), since a service on a
+ * configured port is exactly as live as one on 4700.
  */
 async function assertNoLiveService() {
+  const ports = new Set([4700]);
   try {
-    const res = await fetch("http://127.0.0.1:4700/api/board");
-    await res.body?.cancel().catch(() => {});
-    fail(
-      "WR-08: a live dispatch service answered on :4700, refusing to proceed while the user's " +
-        "real service is up.",
+    const cfg = JSON.parse(
+      readFileSync(join(homedir(), ".dispatch", "config.json"), "utf8"),
     );
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith("WR-08")) throw err;
+    if (typeof cfg.port === "number") ports.add(cfg.port);
+  } catch {}
+  for (const port of ports) {
+    let answered = false;
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/board`);
+      await res.body?.cancel().catch(() => {});
+      answered = true;
+    } catch {}
+    if (answered) {
+      fail(
+        `WR-08: a live dispatch service answered on :${port}, refusing to proceed while the ` +
+          `user's real service is up.`,
+      );
+    }
   }
 }
 
