@@ -16,6 +16,14 @@ import { detectInstallMode } from "./update.js";
 const DEFAULT_PORT = 4700;
 
 /**
+ * Wall-clock bound per `launchctl` subprocess in {@link reloadService}.
+ * @remarks The retry COUNT there is bounded, but a wedged launchd would otherwise hang the whole
+ * reload forever; on expiry `execFile` SIGTERMs and rejects, which the loop already reads as a
+ * failed attempt.
+ */
+const LAUNCHCTL_TIMEOUT_MS = 5000;
+
+/**
  * Resolve the absolute path to the running copy's built `cli.js`, walking up from this module's own
  * `import.meta.url` (never `process.argv[1]`, which reflects the unresolved npm bin symlink, not the
  * real on-disk location — the same reasoning `detectInstallMode`/`readVersion` already rely on).
@@ -161,10 +169,12 @@ ${programArguments}
 async function reloadService(): Promise<boolean> {
   const uid = process.getuid?.();
   const target = `gui/${uid}/${SERVICE_LABEL}`;
+  const launchctl = (args: string[]) =>
+    run("launchctl", args, { timeout: LAUNCHCTL_TIMEOUT_MS });
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const isLoaded = async (): Promise<boolean> => {
     try {
-      await run("launchctl", ["print", target]);
+      await launchctl(["print", target]);
       return true;
     } catch {
       return false;
@@ -183,7 +193,7 @@ async function reloadService(): Promise<boolean> {
 
   let bootoutError: unknown;
   try {
-    await run("launchctl", ["bootout", target]);
+    await launchctl(["bootout", target]);
   } catch (err) {
     bootoutError = err;
   }
@@ -208,7 +218,7 @@ async function reloadService(): Promise<boolean> {
     if (delayMs > 0) await sleep(delayMs);
     let bootstrapped = true;
     try {
-      await run("launchctl", ["bootstrap", `gui/${uid}`, SERVICE_PLIST_PATH]);
+      await launchctl(["bootstrap", `gui/${uid}`, SERVICE_PLIST_PATH]);
     } catch (err) {
       lastError = err;
       bootstrapped = false;
