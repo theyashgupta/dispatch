@@ -2,15 +2,17 @@ import { useState } from "react";
 import type { PrInfo } from "../../../shared/types.js";
 import { prCiDotColor, prStateLabel, prStyleFor } from "./pr-style.js";
 
-export function PrBadge({ pr }: { pr: PrInfo }) {
+export function PrBadge({ pr, showRepo }: { pr: PrInfo; showRepo?: boolean }) {
   const [hovered, setHovered] = useState(false);
   const { icon: Icon, border, background, color } = prStyleFor(pr);
   const showCiDot = !pr.isDraft && pr.state === "open" && pr.ci != null;
+  const showRepoTag = showRepo === true && pr.repo !== "";
+  const repoPrefix = showRepoTag ? `${pr.repo} ` : "";
   const ciLabel =
     pr.ci != null
       ? ` · Checks ${pr.ci === "pass" ? "passing" : pr.ci === "fail" ? "failing" : "pending"}`
       : "";
-  const label = `PR #${pr.number} — ${prStateLabel(pr)}${ciLabel}`;
+  const label = `PR ${repoPrefix}#${pr.number} — ${prStateLabel(pr)}${ciLabel}`;
   return (
     <button
       type="button"
@@ -43,6 +45,9 @@ export function PrBadge({ pr }: { pr: PrInfo }) {
       }}
     >
       <Icon size={12} strokeWidth={2} aria-hidden="true" />
+      {showRepoTag && (
+        <span style={{ fontFamily: "var(--font-mono)" }}>{pr.repo}</span>
+      )}
       {`#${pr.number}`}
       {showCiDot && (
         <span
