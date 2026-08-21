@@ -1,7 +1,11 @@
 import net from "node:net";
 import { basename } from "node:path";
 import type { Card, PreviewInfo, Session } from "../../shared/types.js";
-import { listPrsForBranch, type PrProbeResult } from "./gh.js";
+import {
+  probePrsForBranch,
+  pruneGhReliability,
+  type GhProbeResult,
+} from "./gh-reliability.js";
 import { panePidsBySession } from "./tmux.js";
 import { listeningPortsBySession, type DiscoveredPort } from "./dev-server.js";
 import { store } from "../store/board.store.js";
@@ -21,8 +25,8 @@ const PREVIEW_PROBE_TIMEOUT_MS = 500;
  *
  * @remarks
  * The same threshold `RESIL-01` already uses for three consecutive capture failures, applied here
- * to a second signal. A counter increments ONLY on a genuine detection-tool failure — an
- * `{ ok: false }` result from `listPrsForBranch`, or a `null` return from
+ * to a second signal. A counter increments ONLY on a genuine detection-tool failure: a
+ * non-skipped `{ ok: false }` result from `probePrsForBranch` (PRLINK-05), or a `null` return from
  * `panePidsBySession`/`listeningPortsBySession` — never on a `confirmReachable`-rejected
  * candidate, which is a SUCCESSFUL tick that confirmed zero previews and resets the counter
  * instead. The unknown status is set on the first failure so a silent tooling failure is visible
@@ -271,40 +275,47 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
         const repos = rec.workspace.repos;
         const results = await Promise.all(
           repos.map((repo) =>
-            listPrsForBranch(repo.path, branch, basename(repo.path)),
+            probePrsForBranch(repo.path, branch, basename(repo.path)),
           ),
         );
         const answered = results.filter(
-          (r): r is Extract<PrProbeResult, { ok: true }> => r.ok,
+          (r): r is Extract<GhProbeResult, { ok: true }> => r.ok,
         );
         const failed = results.filter(
-          (r): r is Extract<PrProbeResult, { ok: false }> => !r.ok,
+          (r): r is Extract<GhProbeResult, { ok: false }> => !r.ok,
         );
+        // A skip is "we did not ask", never a strike toward PROBE_FAILURE_CEILING (PRLINK-05).
+        const realFailures = failed.filter((f) => f.skipped !== true);
         const finalPrs = answered.flatMap((r) => r.prs);
         let holdLastKnownPrs = false;
 
         if (failed.length > 0) {
-          const count = (prFailureCounts.get(rec.id) ?? 0) + 1;
-          prFailureCounts.set(rec.id, count);
           const category = failed[0].category;
-          if (rec.prsUnknown?.category !== category) {
-            await store.setPrsUnknownIfSession(card.id, session, {
-              category,
-            });
-          }
-          holdLastKnownPrs =
-            answered.length === 0 && count < PROBE_FAILURE_CEILING;
-          if (answered.length === 0) {
-            prRetryNotBefore.set(
-              rec.id,
-              Date.now() +
-                Math.min(
-                  ARTIFACT_DETECT_INTERVAL_MS * 2 ** count,
-                  PR_RETRY_MAX_MS,
-                ),
-            );
+          if (realFailures.length > 0) {
+            const count = (prFailureCounts.get(rec.id) ?? 0) + 1;
+            prFailureCounts.set(rec.id, count);
+            if (rec.prsUnknown?.category !== category) {
+              await store.setPrsUnknownIfSession(card.id, session, {
+                category,
+              });
+            }
+            holdLastKnownPrs =
+              answered.length === 0 && count < PROBE_FAILURE_CEILING;
+            if (answered.length === 0) {
+              prRetryNotBefore.set(
+                rec.id,
+                Date.now() +
+                  Math.min(
+                    ARTIFACT_DETECT_INTERVAL_MS * 2 ** count,
+                    PR_RETRY_MAX_MS,
+                  ),
+              );
+            } else {
+              prRetryNotBefore.delete(rec.id);
+            }
           } else {
-            prRetryNotBefore.delete(rec.id);
+            // Every failure was a skip: hold last-known-good, no bookkeeping map touched (PRLINK-05).
+            holdLastKnownPrs = answered.length === 0;
           }
         } else {
           prFailureCounts.delete(rec.id);
@@ -360,6 +371,13 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
   );
 
   const liveIds = new Set(probedSessions().map(({ session }) => session.id));
+  // Negative cache is keyed by repo path, not session id, so liveIds is the wrong set (PRLINK-05).
+  const liveRepoPaths = new Set(
+    probedSessions().flatMap(
+      ({ session }) => session.workspace?.repos.map((r) => r.path) ?? [],
+    ),
+  );
+  pruneGhReliability(liveRepoPaths);
   for (const id of prFailureCounts.keys()) {
     if (!liveIds.has(id)) prFailureCounts.delete(id);
   }

@@ -52,7 +52,7 @@ const ID_RE =
  * @remarks Moved from 124 to 125 for the deliberate one-ID `PrInfo.repo` basename
  * mitigation re-freeze (`T-98-01`), cited in `shared/types.ts` and `adapters/gh.ts`.
  */
-const FROZEN_COUNT = 125;
+const FROZEN_COUNT = 127;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");

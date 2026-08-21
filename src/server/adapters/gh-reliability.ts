@@ -119,7 +119,7 @@ async function tripBreakerIfRateLimited(): Promise<void> {
         );
       }
     } catch {
-      // A failed or unparseable rate_limit call sets no pause (T-98-03).
+      // no-op: see the doc block above, a thrown call sets no pause (PRLINK-05).
     }
   })();
   try {
