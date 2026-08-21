@@ -87,6 +87,16 @@ function extractProgramArguments(xml: string): string[] {
 }
 
 /**
+ * Extract the `EnvironmentVariables.PATH` value from a rendered plist, undefined when absent.
+ * @remarks Same narrow self-schema scan as {@link extractProgramArguments}: {@link buildPlist} is
+ * the only writer of this file, and `PATH` is its only `EnvironmentVariables` key.
+ */
+function extractEnvironmentPath(xml: string): string | undefined {
+  const match = /<key>PATH<\/key>\s*<string>([\s\S]*?)<\/string>/.exec(xml);
+  return match ? decodeXmlEntities(match[1]) : undefined;
+}
+
+/**
  * Render the launchd plist XML. A pure function — no filesystem/process access — so `--print` can
  * render it with zero side effects and `installService` can write the exact string it renders.
  * @remarks Every interpolated value is XML-escaped: the captured `PATH` and filesystem paths
@@ -176,8 +186,10 @@ async function reloadService(): Promise<boolean> {
  * now, and rewrite it through {@link buildPlist} when they differ.
  * @remarks Only entries 0 and 1 (`nodePath`, `cliEntry`) are compared, since `EnvironmentVariables.PATH`
  * legitimately differs between a launchd-started and a shell-started process, so comparing it would
- * rewrite the plist on every call. The existing plist's `--port` entry (if any) is preserved rather
- * than re-derived from `config.json`, so a no-port install never gains one on its first heal.
+ * rewrite the plist on every call. The existing plist's `--port` entry (if any) and its
+ * `EnvironmentVariables.PATH` are preserved rather than re-derived, so a no-port install never gains
+ * one on its first heal and a heal run from a minimal shell never replaces the PATH launchd needs
+ * to find `tmux`/`ttyd`/`git`/`claude`.
  * File-only on purpose: the boot-time caller runs inside the very agent a re-bootstrap would tear
  * down (the self-inflicted `KeepAlive` failure mode), so launchd's in-memory job is left alone and
  * only {@link restartService} reloads it. Refuses under npx like `installService` does (an npx
@@ -191,12 +203,11 @@ export async function healServicePlist(): Promise<
   if (!existsSync(SERVICE_PLIST_PATH)) return "not-installed";
   if (detectInstallMode() === "npx") return "unchanged";
 
-  let current: string[];
+  let xml = "";
   try {
-    current = extractProgramArguments(readFileSync(SERVICE_PLIST_PATH, "utf8"));
-  } catch {
-    current = [];
-  }
+    xml = readFileSync(SERVICE_PLIST_PATH, "utf8");
+  } catch {}
+  const current = extractProgramArguments(xml);
 
   const cliEntry = resolveCliEntry();
   const nodePath = process.execPath;
@@ -209,9 +220,10 @@ export async function healServicePlist(): Promise<
     if (Number.isFinite(parsed)) port = parsed;
   }
 
+  const path = extractEnvironmentPath(xml) || process.env.PATH || "";
   await writeFileAtomic(
     SERVICE_PLIST_PATH,
-    buildPlist({ cliEntry, nodePath, path: process.env.PATH ?? "", port }),
+    buildPlist({ cliEntry, nodePath, path, port }),
   );
   process.stdout.write(
     `  [service] plist ProgramArguments were stale, rewrote ${SERVICE_PLIST_PATH}\n`,
