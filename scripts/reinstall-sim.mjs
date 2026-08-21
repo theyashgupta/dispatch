@@ -47,7 +47,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SANDBOX_PREFIX = "dispatch-reinstall-sim-";
@@ -55,6 +55,8 @@ const OLD_RELEASE_TAG = "v3.0.0";
 const REQUIRED_TARBALL_ENTRY = "dist/server/bootstrap/cli.js";
 const PKG_NAME = "@theyashgupta/dispatch";
 const FAKE_LINEAR_API_KEY = "lin_api_FAKE_NOT_REAL_00000000000000";
+/** The launchd label the plist-staleness leg's one read-only `launchctl print` targets. */
+const SERVICE_LABEL = "com.dispatch.app";
 
 /**
  * Abort the harness with an actionable message. Reserved for setup failures (a bad build, a
@@ -74,10 +76,14 @@ function fail(message) {
  */
 function assertSandboxSafe(dir) {
   if (dir === REPO_ROOT) {
-    fail(`sandbox path ${dir} must never equal the repo root, refusing to proceed.`);
+    fail(
+      `sandbox path ${dir} must never equal the repo root, refusing to proceed.`,
+    );
   }
   if (!dir.startsWith(tmpdir())) {
-    fail(`sandbox path ${dir} must live under ${tmpdir()}, refusing to proceed.`);
+    fail(
+      `sandbox path ${dir} must live under ${tmpdir()}, refusing to proceed.`,
+    );
   }
   if (!basename(dir).startsWith(SANDBOX_PREFIX)) {
     fail(
@@ -125,8 +131,13 @@ function mkSandboxDir(label) {
  * @returns The absolute path to the packed tarball.
  */
 function buildAndPack(stageDir) {
-  console.log("\n  building dist/ (prepack does not fire under ignore-scripts)");
-  const built = spawnSync("npm", ["run", "build"], { cwd: REPO_ROOT, stdio: "inherit" });
+  console.log(
+    "\n  building dist/ (prepack does not fire under ignore-scripts)",
+  );
+  const built = spawnSync("npm", ["run", "build"], {
+    cwd: REPO_ROOT,
+    stdio: "inherit",
+  });
   if (built.status !== 0) fail("`npm run build` failed, cannot pack a tarball");
 
   console.log("  packing the working tree");
@@ -138,7 +149,8 @@ function buildAndPack(stageDir) {
   if (packed.status !== 0) fail(`\`npm pack\` failed:\n${packed.stderr}`);
 
   const start = packed.stdout.indexOf("[");
-  if (start === -1) fail(`\`npm pack --json\` printed no JSON:\n${packed.stdout}`);
+  if (start === -1)
+    fail(`\`npm pack --json\` printed no JSON:\n${packed.stdout}`);
   let meta;
   try {
     meta = JSON.parse(packed.stdout.slice(start))[0];
@@ -157,7 +169,9 @@ function buildAndPack(stageDir) {
   if (!existsSync(tarballPath)) {
     fail(`npm pack reported ${meta.filename} but it is not in ${stageDir}`);
   }
-  console.log(`  packed ${meta.filename} (${entries.length} files, ${REQUIRED_TARBALL_ENTRY} present)`);
+  console.log(
+    `  packed ${meta.filename} (${entries.length} files, ${REQUIRED_TARBALL_ENTRY} present)`,
+  );
   return tarballPath;
 }
 
@@ -169,22 +183,33 @@ function buildAndPack(stageDir) {
  * @returns The absolute path to the packed OLD-release tarball.
  */
 function buildOldRelease() {
-  const treeRoot = join(tmpdir(), `${SANDBOX_PREFIX}release-${OLD_RELEASE_TAG}`);
+  const treeRoot = join(
+    tmpdir(),
+    `${SANDBOX_PREFIX}release-${OLD_RELEASE_TAG}`,
+  );
   assertSandboxSafe(treeRoot);
   const builtEntry = join(treeRoot, REQUIRED_TARBALL_ENTRY);
 
   if (existsSync(builtEntry)) {
-    console.log(`\n  preflight: reusing cached ${OLD_RELEASE_TAG} build at ${builtEntry}`);
+    console.log(
+      `\n  preflight: reusing cached ${OLD_RELEASE_TAG} build at ${builtEntry}`,
+    );
   } else {
-    console.log(`\n  preflight: materializing ${OLD_RELEASE_TAG} from the git tag`);
+    console.log(
+      `\n  preflight: materializing ${OLD_RELEASE_TAG} from the git tag`,
+    );
     rmSync(treeRoot, { recursive: true, force: true });
     mkdirSync(treeRoot, { recursive: true });
     const tarPath = `${treeRoot}.tar`;
     try {
-      const tar = execFileSync("git", ["archive", "--format=tar", OLD_RELEASE_TAG], {
-        cwd: REPO_ROOT,
-        maxBuffer: 512 * 1024 * 1024,
-      });
+      const tar = execFileSync(
+        "git",
+        ["archive", "--format=tar", OLD_RELEASE_TAG],
+        {
+          cwd: REPO_ROOT,
+          maxBuffer: 512 * 1024 * 1024,
+        },
+      );
       writeFileSync(tarPath, tar);
       execFileSync("tar", ["-xf", tarPath, "-C", treeRoot], { stdio: "pipe" });
     } catch (err) {
@@ -196,7 +221,10 @@ function buildOldRelease() {
       rmSync(tarPath, { force: true });
     }
     try {
-      execFileSync("npm", ["ci", "--no-audit", "--no-fund"], { cwd: treeRoot, stdio: "pipe" });
+      execFileSync("npm", ["ci", "--no-audit", "--no-fund"], {
+        cwd: treeRoot,
+        stdio: "pipe",
+      });
       execFileSync("npm", ["run", "build"], { cwd: treeRoot, stdio: "pipe" });
     } catch (err) {
       const detail = [err.stdout?.toString(), err.stderr?.toString()]
@@ -211,7 +239,10 @@ function buildOldRelease() {
     console.log(`  built ${OLD_RELEASE_TAG} from the git tag -> ${builtEntry}`);
   }
 
-  const stageDir = join(tmpdir(), `${SANDBOX_PREFIX}release-${OLD_RELEASE_TAG}-pack`);
+  const stageDir = join(
+    tmpdir(),
+    `${SANDBOX_PREFIX}release-${OLD_RELEASE_TAG}-pack`,
+  );
   assertSandboxSafe(stageDir);
   rmSync(stageDir, { recursive: true, force: true });
   mkdirSync(stageDir, { recursive: true });
@@ -220,12 +251,15 @@ function buildOldRelease() {
     ["pack", "--json", "--ignore-scripts", "--pack-destination", stageDir],
     { cwd: treeRoot, encoding: "utf8" },
   );
-  if (packed.status !== 0) fail(`\`npm pack\` on ${OLD_RELEASE_TAG} failed:\n${packed.stderr}`);
+  if (packed.status !== 0)
+    fail(`\`npm pack\` on ${OLD_RELEASE_TAG} failed:\n${packed.stderr}`);
   const start = packed.stdout.indexOf("[");
   const meta = JSON.parse(packed.stdout.slice(start))[0];
   const entries = (meta.files ?? []).map((f) => f.path);
   if (!entries.includes(REQUIRED_TARBALL_ENTRY)) {
-    fail(`packed ${OLD_RELEASE_TAG} tarball is missing ${REQUIRED_TARBALL_ENTRY}`);
+    fail(
+      `packed ${OLD_RELEASE_TAG} tarball is missing ${REQUIRED_TARBALL_ENTRY}`,
+    );
   }
   const tarballPath = join(stageDir, meta.filename);
   console.log(`  packed ${OLD_RELEASE_TAG} -> ${tarballPath}`);
@@ -283,7 +317,10 @@ function seedDispatchDir(home) {
     Buffer.from([0xd0, 0x0f, 0xca, 0xfe, 0x0b, 0xa1, 0x01, 0x02]),
   );
   writeFileSync(join(dispatchDir, "hook.sh"), "#!/bin/sh\necho seeded-hook\n");
-  writeFileSync(join(dispatchDir, "hook-settings.json"), JSON.stringify({ seeded: true }) + "\n");
+  writeFileSync(
+    join(dispatchDir, "hook-settings.json"),
+    JSON.stringify({ seeded: true }) + "\n",
+  );
   return dispatchDir;
 }
 
@@ -304,7 +341,9 @@ function snapshotDispatchDir(home) {
         walk(full);
       } else if (entry.isFile()) {
         const rel = relative(root, full);
-        const hash = createHash("sha256").update(readFileSync(full)).digest("hex");
+        const hash = createHash("sha256")
+          .update(readFileSync(full))
+          .digest("hex");
         snap.set(rel, hash);
       }
     }
@@ -337,12 +376,18 @@ function diffSnapshots(before, after) {
  */
 function installTarball(tarball, prefix, home) {
   assertSandboxSafe(prefix);
-  const result = spawnSync("npm", ["install", "-g", "--prefix", prefix, tarball], {
-    env: { ...process.env, HOME: home, npm_config_prefix: prefix },
-    encoding: "utf8",
-  });
+  const result = spawnSync(
+    "npm",
+    ["install", "-g", "--prefix", prefix, tarball],
+    {
+      env: { ...process.env, HOME: home, npm_config_prefix: prefix },
+      encoding: "utf8",
+    },
+  );
   if (result.status !== 0) {
-    fail(`npm install -g --prefix ${prefix} ${tarball} failed:\n${result.stderr}`);
+    fail(
+      `npm install -g --prefix ${prefix} ${tarball} failed:\n${result.stderr}`,
+    );
   }
   const bin = join(prefix, "bin", "dispatch");
   if (!existsSync(bin)) {
@@ -362,7 +407,11 @@ function dispatchArgv(prefix, args, home) {
     env: { ...process.env, HOME: home },
     encoding: "utf8",
   });
-  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+  return {
+    status: result.status,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
 }
 
 /**
@@ -399,7 +448,9 @@ async function legPersistence(opts = {}) {
       const buf = readFileSync(configPath);
       buf[0] = buf[0] ^ 0xff;
       writeFileSync(configPath, buf);
-      console.log(`  --break mutate-config: flipped one byte of config.json between snapshots`);
+      console.log(
+        `  --break mutate-config: flipped one byte of config.json between snapshots`,
+      );
     }
 
     const newTarball = buildAndPack(newPackDir);
@@ -420,9 +471,390 @@ async function legPersistence(opts = {}) {
   return violations;
 }
 
+/**
+ * Extract the ordered `ProgramArguments` string values from a rendered plist. No XML parser: the
+ * plist schema is generated exclusively by this codebase's own `buildPlist` (`service.ts`), so a
+ * narrow scan of its known shape is enough. A local copy rather than an import, `service.ts`'s own
+ * `extractProgramArguments` is not exported, and this harness must read the plist independently of
+ * the code it is verifying.
+ * @returns The decoded `<string>` values inside `ProgramArguments`, empty when the key or its
+ * `<array>` block is missing.
+ */
+function extractProgramArguments(xml) {
+  const keyIndex = xml.indexOf("<key>ProgramArguments</key>");
+  if (keyIndex === -1) return [];
+  const arrayStart = xml.indexOf("<array>", keyIndex);
+  const arrayEnd = xml.indexOf("</array>", arrayStart);
+  if (arrayStart === -1 || arrayEnd === -1) return [];
+  const block = xml.slice(arrayStart, arrayEnd);
+  const values = [];
+  const stringRe = /<string>([\s\S]*?)<\/string>/g;
+  let match;
+  while ((match = stringRe.exec(block)) !== null) {
+    values.push(
+      match[1]
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .replace(/&amp;/g, "&"),
+    );
+  }
+  return values;
+}
+
+/**
+ * The final non-empty line of `text`. `healServicePlist` writes its own log line to stdout before
+ * the `node -e` script's `console.log(r)` prints the return value on the line after it, so the
+ * return value is always the LAST line, never the whole trimmed output.
+ */
+function lastLine(text) {
+  const lines = text.split("\n").filter((l) => l.trim() !== "");
+  return lines.length > 0 ? lines[lines.length - 1].trim() : "";
+}
+
+/**
+ * Read-only `launchctl print` of the real `com.dispatch.app` registration, the single permitted
+ * `launchctl` verb anywhere in this file (enforced by this file's own Task 2 verify command). Used
+ * only to prove the plist-staleness leg never touched the real registration: called once before
+ * and once after the leg's work, the two outputs must be identical.
+ */
+function capturePrintState(uid) {
+  const printArgs = ["print", `gui/${uid}/${SERVICE_LABEL}`];
+  const result = spawnSync("launchctl", printArgs, { encoding: "utf8" });
+  return `${result.status}:${result.stdout}${result.stderr}`;
+}
+
+/**
+ * PERSIST-03: prove a prefix change genuinely moves the resolved `cli.js` path, then prove the
+ * current build's self-heal repairs a plist stuck at the old path and is a no-op on a second call.
+ * The plist is obtained only through `dispatch service install --print` (stdout-only, zero
+ * `launchctl` calls of its own), never through a real `service install`.
+ * @param opts.break `"stale-plist-uncorrected"` skips the first heal call and asserts the second
+ * call's success criteria anyway, demonstrating the leg fails on the exact condition it exists to
+ * catch.
+ * @returns Violation lines, empty on PASS.
+ */
+async function legPlistStaleness(opts = {}) {
+  await assertNoLiveService();
+  const violations = [];
+  const uid = process.getuid?.();
+  const { home, prefixOld, prefixNew } = makeSandbox();
+  const newPackDir = mkSandboxDir("new-pack");
+  try {
+    const printBefore = capturePrintState(uid);
+
+    const oldTarball = buildOldRelease();
+    installTarball(oldTarball, prefixOld, home);
+    const newTarball = buildAndPack(newPackDir);
+    installTarball(newTarball, prefixNew, home);
+
+    const plistPath = join(
+      home,
+      "Library",
+      "LaunchAgents",
+      "com.dispatch.app.plist",
+    );
+    mkdirSync(dirname(plistPath), { recursive: true });
+
+    const oldRender = dispatchArgv(
+      prefixOld,
+      ["service", "install", "--print"],
+      home,
+    );
+    if (oldRender.status !== 0) {
+      violations.push(
+        `${OLD_RELEASE_TAG} \`service install --print\` exited ${oldRender.status}`,
+      );
+    }
+    const oldArgs = extractProgramArguments(oldRender.stdout);
+
+    const newRender = dispatchArgv(
+      prefixNew,
+      ["service", "install", "--print"],
+      home,
+    );
+    if (newRender.status !== 0) {
+      violations.push(
+        `current build \`service install --print\` exited ${newRender.status}`,
+      );
+    }
+    const newArgs = extractProgramArguments(newRender.stdout);
+
+    console.log(`  ${OLD_RELEASE_TAG} cli.js path: ${oldArgs[1]}`);
+    console.log(`  current build cli.js path: ${newArgs[1]}`);
+    if (oldArgs[1] === newArgs[1]) {
+      violations.push(
+        `the two prefixes rendered the SAME cli.js path (${oldArgs[1]}), this leg cannot prove ` +
+          `staleness without two genuinely different paths`,
+      );
+    }
+
+    writeFileSync(plistPath, oldRender.stdout);
+
+    const healEntry = join(
+      prefixNew,
+      "lib",
+      "node_modules",
+      PKG_NAME,
+      "dist",
+      "server",
+      "services",
+      "orchestration",
+      "service.js",
+    );
+    const healScript =
+      `import(${JSON.stringify(pathToFileURL(healEntry).href)})` +
+      `.then((m) => m.healServicePlist({ reload: false }))` +
+      `.then((r) => console.log(r))`;
+    const runHeal = () =>
+      spawnSync(process.execPath, ["--input-type=module", "-e", healScript], {
+        env: { ...process.env, HOME: home },
+        encoding: "utf8",
+      });
+
+    if (opts.break !== "stale-plist-uncorrected") {
+      const healResult = runHeal();
+      const outcome = lastLine(healResult.stdout);
+      console.log(
+        `  heal call 1: ${outcome || "(no output)"}` +
+          (healResult.stderr
+            ? `\n    stderr: ${healResult.stderr.trim()}`
+            : ""),
+      );
+      if (outcome !== "rewritten") {
+        violations.push(
+          `first healServicePlist call reported "${outcome}", expected "rewritten"`,
+        );
+      }
+      const healedArgs = extractProgramArguments(
+        readFileSync(plistPath, "utf8"),
+      );
+      if (healedArgs[1] !== newArgs[1]) {
+        violations.push(
+          `after the first heal, the plist's cli.js path is "${healedArgs[1]}", expected "${newArgs[1]}"`,
+        );
+      }
+    }
+
+    const digestBeforeSecondCall = createHash("sha256")
+      .update(readFileSync(plistPath))
+      .digest("hex");
+    const healResult2 = runHeal();
+    const outcome2 = lastLine(healResult2.stdout);
+    console.log(
+      `  heal call 2: ${outcome2 || "(no output)"}` +
+        (healResult2.stderr
+          ? `\n    stderr: ${healResult2.stderr.trim()}`
+          : ""),
+    );
+    if (outcome2 !== "unchanged") {
+      violations.push(
+        `second healServicePlist call reported "${outcome2}", expected "unchanged"`,
+      );
+    }
+    const digestAfterSecondCall = createHash("sha256")
+      .update(readFileSync(plistPath))
+      .digest("hex");
+    if (digestAfterSecondCall !== digestBeforeSecondCall) {
+      violations.push(
+        `the plist changed on the second heal call, a repeat call must be a byte-identical no-op`,
+      );
+    }
+
+    const printAfter = capturePrintState(uid);
+    if (printAfter !== printBefore) {
+      violations.push(
+        `launchctl print gui/${uid}/${SERVICE_LABEL} changed during this leg, the real ` +
+          `registration must never be touched`,
+      );
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(prefixOld, { recursive: true, force: true });
+    rmSync(prefixNew, { recursive: true, force: true });
+    rmSync(newPackDir, { recursive: true, force: true });
+  }
+  return violations;
+}
+
+/**
+ * Slice one `renderPlan` section (`"Remove:"`, `"Keep:"`, `"Stop:"`) out of a `--dry-run`/`--yes`
+ * transcript. `renderPlan` (`uninstall.ts`) always terminates a non-empty section with one blank
+ * line, which is what bounds the slice here.
+ * @returns The section's body lines joined by `\n`, empty string when the header is absent.
+ */
+function extractSection(text, header) {
+  const lines = text.split("\n");
+  const startIndex = lines.findIndex((l) => l.trim() === header);
+  if (startIndex === -1) return "";
+  const out = [];
+  for (let i = startIndex + 1; i < lines.length; i++) {
+    if (lines[i].trim() === "") break;
+    out.push(lines[i]);
+  }
+  return out.join("\n");
+}
+
+/** Indent every line of `text` by four spaces, for nesting a transcript excerpt under a log line. */
+function indent(text) {
+  return text
+    .split("\n")
+    .map((l) => `    ${l}`)
+    .join("\n");
+}
+
+/**
+ * PERSIST-02: prove the shipped {@link OLD_RELEASE_TAG} bug (bare uninstall deletes `config.json`)
+ * reproduces, then prove the current build's bare `uninstall --yes` keeps `config.json`/board
+ * data/playbooks byte-identical while removing only the dispatch-owned regenerables
+ * (`hook.sh`/`hook-settings.json`), stopping neither tmux sessions nor ttyd.
+ * @returns Violation lines, empty on PASS.
+ */
+async function legUninstallKeeps(opts = {}) {
+  await assertNoLiveService();
+  const violations = [];
+  const { home, prefixOld, prefixNew } = makeSandbox();
+  const newPackDir = mkSandboxDir("new-pack");
+  try {
+    seedDispatchDir(home);
+    const oldTarball = buildOldRelease();
+    installTarball(oldTarball, prefixOld, home);
+    const newTarball = buildAndPack(newPackDir);
+    installTarball(newTarball, prefixNew, home);
+
+    const plistPath = join(
+      home,
+      "Library",
+      "LaunchAgents",
+      "com.dispatch.app.plist",
+    );
+    rmSync(plistPath, { force: true });
+    if (existsSync(plistPath)) {
+      violations.push(
+        `refusing to run uninstall: ${plistPath} still exists after an attempted delete, a live ` +
+          `plist could cause runUninstall to boot out the real agent`,
+      );
+      return violations;
+    }
+
+    writeFileSync(
+      join(home, ".dispatch", "hook.sh"),
+      "#!/bin/sh\necho reseeded-hook\n",
+    );
+    writeFileSync(
+      join(home, ".dispatch", "hook-settings.json"),
+      JSON.stringify({ seeded: true }) + "\n",
+    );
+    const snapBefore = snapshotDispatchDir(home);
+    console.log(
+      `  before uninstall: ${snapBefore.size} file(s) under ~/.dispatch`,
+    );
+
+    const oldDryRun = dispatchArgv(prefixOld, ["uninstall", "--dry-run"], home);
+    const oldRemoveSection = extractSection(oldDryRun.stdout, "Remove:");
+    console.log(
+      `  ${OLD_RELEASE_TAG} --dry-run Remove: section:\n${indent(oldRemoveSection)}`,
+    );
+    if (!oldRemoveSection.includes("config.json")) {
+      violations.push(
+        `${OLD_RELEASE_TAG}'s bare --dry-run Remove: section does not list config.json, this ` +
+          `leg's fail-first premise (the shipped bug) did not reproduce`,
+      );
+    }
+
+    const newDryRun = dispatchArgv(prefixNew, ["uninstall", "--dry-run"], home);
+    const newKeepSection = extractSection(newDryRun.stdout, "Keep:");
+    const newRemoveSection = extractSection(newDryRun.stdout, "Remove:");
+    const newStopSection = extractSection(newDryRun.stdout, "Stop:");
+    console.log(
+      `  current build --dry-run Keep: section:\n${indent(newKeepSection)}`,
+    );
+    console.log(
+      `  current build --dry-run Remove: section:\n${indent(newRemoveSection)}`,
+    );
+    console.log(
+      `  current build --dry-run Stop: section:\n${indent(newStopSection || "(empty)")}`,
+    );
+
+    if (!newKeepSection.includes("config.json")) {
+      violations.push(
+        `current build's --dry-run Keep: section does not list config.json`,
+      );
+    }
+    if (newRemoveSection.includes("config.json")) {
+      violations.push(
+        `current build's --dry-run Remove: section lists config.json, it must stay under --purge only`,
+      );
+    }
+    const removeBasenames = newRemoveSection
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => l.split("/").pop());
+    const unexpectedRemoves = removeBasenames.filter(
+      (b) => b !== "hook.sh" && b !== "hook-settings.json",
+    );
+    if (unexpectedRemoves.length > 0) {
+      violations.push(
+        `current build's --dry-run Remove: section lists unexpected entries: ${unexpectedRemoves.join(", ")}`,
+      );
+    }
+    const stopHasSessionOrTtyd =
+      newStopSection.includes("tmux session") ||
+      newStopSection.includes("ttyd");
+    if (stopHasSessionOrTtyd) {
+      violations.push(
+        `current build's --dry-run Stop: section is not empty (a tmux session or ttyd line is ` +
+          `present): ${newStopSection}`,
+      );
+      violations.push(
+        `refusing to run uninstall --yes: the preceding --dry-run's Stop: section was not empty`,
+      );
+      return violations;
+    }
+
+    const execResult = dispatchArgv(prefixNew, ["uninstall", "--yes"], home);
+    console.log(`  current build uninstall --yes exit=${execResult.status}`);
+
+    const snapAfter = snapshotDispatchDir(home);
+    const keepChecks = [
+      "config.json",
+      "board.db",
+      "board.db.bak.1",
+      join("playbooks", "kickoff.md"),
+      join("playbooks", "review.md"),
+    ];
+    for (const rel of keepChecks) {
+      if (snapBefore.get(rel) !== snapAfter.get(rel)) {
+        violations.push(
+          `${rel} did not survive uninstall --yes byte-identical (before=` +
+            `${snapBefore.get(rel) ?? "absent"}, after=${snapAfter.get(rel) ?? "absent"})`,
+        );
+      }
+    }
+    for (const rel of ["hook.sh", "hook-settings.json"]) {
+      if (snapAfter.has(rel)) {
+        violations.push(
+          `${rel} still exists after uninstall --yes, it is a dispatch-owned regenerable and ` +
+            `must be removed`,
+        );
+      }
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(prefixOld, { recursive: true, force: true });
+    rmSync(prefixNew, { recursive: true, force: true });
+    rmSync(newPackDir, { recursive: true, force: true });
+  }
+  return violations;
+}
+
 /** The leg registry `--only` and the default all-legs run both dispatch through. */
 const LEGS = {
   persistence: legPersistence,
+  "plist-staleness": legPlistStaleness,
+  "uninstall-keeps": legUninstallKeeps,
 };
 
 async function main() {

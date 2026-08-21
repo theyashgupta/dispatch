@@ -56,6 +56,7 @@
     "migration-diff": "node scripts/migration-diff-v3.mjs",
     "downgrade-guard": "node scripts/downgrade-guard-v3.mjs",
     "redaction-capture": "node scripts/redaction-capture-v3.mjs",
+    "reinstall-sim": "node scripts/reinstall-sim.mjs",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants",
     "prepack": "npm run build"
   },
