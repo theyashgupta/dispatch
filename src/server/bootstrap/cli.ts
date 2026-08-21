@@ -31,7 +31,7 @@ Usage:
   dispatch doctor                     Check required binaries, then exit
   dispatch update                     Check for and guide you through an update
   dispatch uninstall [--purge] [--dry-run] [--yes]
-                                      Stop dispatch sessions and remove its config/hooks
+                                      Remove dispatch's hooks and launchd plist, keeping your data
   dispatch service <install|status|restart|uninstall>
                                       Run dispatch as a background launchd service (macOS)
   dispatch --help | --version
@@ -39,12 +39,14 @@ Usage:
 Options:
   --port <n>   Preferred port (falls back to a free port if taken)
   --no-open    Do not auto-open the browser
-  --purge      uninstall: also delete board data (your playbooks are still kept)
+  --purge      uninstall: also delete config.json and board data, and stop live dsp- sessions
   --dry-run    uninstall: print the plan and change nothing
   --yes        uninstall: skip the confirmation prompt
   --print      service install: print the plist and exit, no side effects
 
-Uninstall never deletes git worktrees — it lists them for you to remove.`;
+Uninstall never deletes git worktrees, it lists them for you to remove.
+Bare uninstall removes: hook.sh, hook-settings.json, com.dispatch.app.plist.
+Bare uninstall keeps: config.json, playbooks, board data, and any running dsp- sessions.`;
 
 /**
  * Read the package version from the nearest ancestor package.json so `--version` reports the same
