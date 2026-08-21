@@ -189,7 +189,9 @@ async function reloadService(): Promise<boolean> {
  * rewrite the plist on every call. The existing plist's `--port` entry (if any) and its
  * `EnvironmentVariables.PATH` are preserved rather than re-derived, so a no-port install never gains
  * one on its first heal and a heal run from a minimal shell never replaces the PATH launchd needs
- * to find `tmux`/`ttyd`/`git`/`claude`.
+ * to find `tmux`/`ttyd`/`git`/`claude`. A resolved `cliEntry` that does not exist on disk (a
+ * checkout with no `dist/` built, or the walk's fallback path) is never written: installing a
+ * broken entry is worse than leaving a stale one that at least points at a build that once ran.
  * File-only on purpose: the boot-time caller runs inside the very agent a re-bootstrap would tear
  * down (the self-inflicted `KeepAlive` failure mode), so launchd's in-memory job is left alone and
  * only {@link restartService} reloads it. Refuses under npx like `installService` does (an npx
@@ -212,6 +214,7 @@ export async function healServicePlist(): Promise<
   const cliEntry = resolveCliEntry();
   const nodePath = process.execPath;
   if (current[0] === nodePath && current[1] === cliEntry) return "unchanged";
+  if (!existsSync(cliEntry)) return "unchanged";
 
   let port: number | undefined;
   const portFlagIndex = current.indexOf("--port");
