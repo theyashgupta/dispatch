@@ -276,7 +276,11 @@ export async function healServicePlist(
   const cliEntry = resolveCliEntry();
   const nodePath = process.execPath;
   if (current[0] === nodePath && current[1] === cliEntry) return "unchanged";
-  if (current[0] !== nodePath && opts.repointNode === false) {
+  if (
+    current.length > 0 &&
+    current[0] !== nodePath &&
+    opts.repointNode === false
+  ) {
     process.stdout.write(
       `  [service] plist node (${current[0]}) differs from this process (${nodePath}); ` +
         `boot heal left it alone. To repoint: dispatch service restart\n`,
