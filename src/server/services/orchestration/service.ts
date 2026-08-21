@@ -149,36 +149,74 @@ ${programArguments}
 }
 
 /**
- * Bootout then bootstrap the agent so launchd re-reads the on-disk plist.
- * @remarks `bootout` returns before launchd has finished tearing the job down, and a `bootstrap`
- * that lands inside that window fails with EIO or "already loaded" and leaves the job unloaded; the
- * bounded retry covers that window. A job left unloaded is only recoverable through
- * `dispatch service install`, so the failure message names that command rather than `restart`.
+ * Bootout then bootstrap the agent so launchd re-reads the on-disk plist, reporting success only
+ * when `launchctl print` confirms the job is loaded afterwards.
+ * @remarks `bootout` returns before launchd has finished tearing the job down, so the unload is
+ * polled to completion first; a `bootstrap` that lands inside that window fails with EIO or
+ * "already loaded" and leaves the job unloaded. `bootstrap`'s exit code is known to lie in both
+ * directions, so only the post-condition (`print` succeeds after a confirmed unload) counts as
+ * success. A job left unloaded is only recoverable through `dispatch service install`, so the
+ * failure message names that command rather than `restart`.
  */
 async function reloadService(): Promise<boolean> {
   const uid = process.getuid?.();
+  const target = `gui/${uid}/${SERVICE_LABEL}`;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const isLoaded = async (): Promise<boolean> => {
+    try {
+      await run("launchctl", ["print", target]);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const describe = (err: unknown): string => {
+    const e = err as (Error & { stderr?: string }) | undefined;
+    return (
+      (e?.stderr?.trim() || e?.message) ??
+      (err === undefined ? "launchctl reported no error" : String(err))
+    );
+  };
+  const fail = (detail: string): false => {
+    process.stderr.write(
+      `  Failed to load the service: ${detail}\n` +
+        `  The agent may be unloaded, recover with: dispatch service install\n`,
+    );
+    return false;
+  };
+
+  let bootoutError: unknown;
   try {
-    await run("launchctl", ["bootout", `gui/${uid}/${SERVICE_LABEL}`]);
-  } catch {}
+    await run("launchctl", ["bootout", target]);
+  } catch (err) {
+    bootoutError = err;
+  }
+  let unloaded = false;
+  for (const delayMs of [0, 200, 400, 800]) {
+    if (delayMs > 0) await sleep(delayMs);
+    if (!(await isLoaded())) {
+      unloaded = true;
+      break;
+    }
+  }
+  if (!unloaded)
+    return fail(`bootout did not unload ${target}: ${describe(bootoutError)}`);
 
   let lastError: unknown;
   for (const delayMs of [0, 400, 1200]) {
-    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+    if (delayMs > 0) await sleep(delayMs);
     try {
       await run("launchctl", ["bootstrap", `gui/${uid}`, SERVICE_PLIST_PATH]);
-      return true;
     } catch (err) {
       lastError = err;
     }
+    if (await isLoaded()) return true;
   }
-  const detail =
-    (lastError as Error & { stderr?: string }).stderr ??
-    (lastError as Error).message;
-  process.stderr.write(
-    `  Failed to load the service: ${detail}\n` +
-      `  The agent may be unloaded, recover with: dispatch service install\n`,
+  return fail(
+    lastError === undefined
+      ? `bootstrap returned 0 but launchd reports ${target} absent`
+      : describe(lastError),
   );
-  return false;
 }
 
 /**
