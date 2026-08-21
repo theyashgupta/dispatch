@@ -220,7 +220,8 @@ export async function healServicePlist(): Promise<
   const portFlagIndex = current.indexOf("--port");
   if (portFlagIndex !== -1 && current[portFlagIndex + 1] !== undefined) {
     const parsed = Number(current[portFlagIndex + 1]);
-    if (Number.isFinite(parsed)) port = parsed;
+    if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535)
+      port = parsed;
   }
 
   const path = extractEnvironmentPath(xml) || process.env.PATH || "";
