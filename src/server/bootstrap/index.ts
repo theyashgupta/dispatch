@@ -38,7 +38,7 @@ import { startMarkerWatcher } from "../adapters/markers/watcher.js";
 import { reconcileSessions } from "./reconcile.js";
 import { resolveEditors } from "../adapters/editors.js";
 import {
-  detectInstallMode,
+  isPackagedInstall,
   startUpdateCheckLoop,
 } from "../services/orchestration/update.js";
 import { startCleanupScheduler } from "../services/orchestration/cleanup-scheduler.js";
@@ -266,8 +266,8 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   );
   await ensureHyperlinksTerminalFeature();
   await reconcileSessions();
-  if (detectInstallMode() === "global") {
-    await healServicePlist().catch((err: unknown) => {
+  if (isPackagedInstall()) {
+    await healServicePlist({ repointNode: false }).catch((err: unknown) => {
       console.warn(
         `[service] boot plist self-heal rejected unexpectedly: ${(err as Error).message}`,
       );

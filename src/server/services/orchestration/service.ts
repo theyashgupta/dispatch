@@ -236,12 +236,14 @@ async function reloadService(): Promise<boolean> {
  * down (the self-inflicted `KeepAlive` failure mode), so launchd's in-memory job is left alone and
  * only {@link restartService} reloads it. Refuses under npx like `installService` does (an npx
  * cache copy resolves a cliEntry npm will prune), and the boot caller additionally gates on a
- * global install so a dev checkout or an nvm-switched node never repoints the user's real
- * LaunchAgent at itself implicitly; an explicit `service restart` is unaffected.
+ * packaged install (`isPackagedInstall`) and passes `repointNode: false`, so a dev checkout never
+ * heals implicitly and a `dispatch` run under a different node (nvm switch) never repoints the
+ * LaunchAgent's node at itself, which an `nvm uninstall` would later brick; only the explicit
+ * `service restart`/`service install` may change the node.
  */
-export async function healServicePlist(): Promise<
-  "not-installed" | "unchanged" | "unrepairable" | "rewritten"
-> {
+export async function healServicePlist(
+  opts: { repointNode?: boolean } = {},
+): Promise<"not-installed" | "unchanged" | "unrepairable" | "rewritten"> {
   if (!existsSync(SERVICE_PLIST_PATH)) return "not-installed";
   if (detectInstallMode() === "npx") return "unchanged";
 
@@ -254,6 +256,13 @@ export async function healServicePlist(): Promise<
   const cliEntry = resolveCliEntry();
   const nodePath = process.execPath;
   if (current[0] === nodePath && current[1] === cliEntry) return "unchanged";
+  if (current[0] !== nodePath && opts.repointNode === false) {
+    process.stdout.write(
+      `  [service] plist node (${current[0]}) differs from this process (${nodePath}); ` +
+        `boot heal left it alone. To repoint: dispatch service restart\n`,
+    );
+    return "unchanged";
+  }
   if (!existsSync(cliEntry)) {
     process.stderr.write(
       `  [service] plist is stale but the resolved entry does not exist (${cliEntry}); ` +

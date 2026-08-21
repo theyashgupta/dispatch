@@ -54,6 +54,21 @@ export function detectInstallMode(): "global" | "npx" | "local" {
 }
 
 /**
+ * Whether this copy runs from an installed package tree (npm, pnpm or yarn global, or npx) rather
+ * than a source checkout.
+ * @remarks Every package manager unpacks the tarball under a `node_modules/@theyashgupta/dispatch/`
+ * segment and a checkout never has one. {@link detectInstallMode}'s `"global"` stays npm-prefix
+ * shaped on purpose, since the updater's `npm i -g` is npm-specific; this predicate exists for
+ * the boot plist heal, which must run on any installed layout but never from a checkout.
+ */
+export function isPackagedInstall(): boolean {
+  const entry = fileURLToPath(import.meta.url);
+  return entry.includes(
+    `${sep}node_modules${sep}@theyashgupta${sep}dispatch${sep}`,
+  );
+}
+
+/**
  * Fetch the registry's current `latest` version. Every failure — offline, timeout, non-2xx,
  * non-JSON — degrades identically to `null`; this function never throws.
  */
