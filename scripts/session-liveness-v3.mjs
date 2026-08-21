@@ -203,6 +203,23 @@
  *                                                                   with a source census that fails
  *                                                                   if anyone ever starts walking
  *                                                                   the chain
+ *   node scripts/session-liveness-v3.mjs --check reinstall-session PERSIST-04: a real dsp tmux plus
+ *                                                                   ttyd session survives a
+ *                                                                   simulated reinstall (a stale
+ *                                                                   plist healed) and a real
+ *                                                                   backend restart, held by the
+ *                                                                   SAME ttyd pid, with the
+ *                                                                   board's own GET /api/board wire
+ *                                                                   as the witness. Two break
+ *                                                                   modes, set via
+ *                                                                   DISPATCH_REINSTALL_SESSION_BREAK:
+ *                                                                   `kill-ttyd` (breaks the
+ *                                                                   adoption assertions) and
+ *                                                                   `skip-heal` (breaks the plist
+ *                                                                   assertion), observed
+ *                                                                   failing-direction evidence for
+ *                                                                   both is pending, plan 97-06
+ *                                                                   fills it in
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -227,7 +244,7 @@ import {
 } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
@@ -13504,6 +13521,307 @@ async function checkHookTokenAttribution(built) {
   return violations;
 }
 
+/**
+ * Escape the five XML-significant characters, the same set `service.ts`'s own (unexported)
+ * `xmlEscape` applies, so a corrupted `ProgramArguments` entry this check writes is well-formed
+ * plist body. A local copy, not an import, this harness must read/write the plist independently of
+ * the code under test, matching {@link extractProgramArguments}'s own reasoning below.
+ */
+function xmlEscape(value) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+/**
+ * Decode the same five XML entities {@link xmlEscape} applies, mirroring `service.ts`'s own
+ * (unexported) `decodeXmlEntities`.
+ */
+function decodeXmlEntities(value) {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * Extract the ordered `ProgramArguments` string values from a rendered plist. No XML parser: the
+ * plist schema is generated exclusively by `buildPlist` (`service.ts`), so a narrow scan of its own
+ * known shape is enough, mirroring `reinstall-sim.mjs`'s own local copy of the same primitive
+ * (`service.ts`'s `extractProgramArguments` is not exported).
+ * @returns The decoded `<string>` values inside `ProgramArguments`, empty when the key or its
+ * `<array>` block is missing.
+ */
+function extractProgramArguments(xml) {
+  const keyIndex = xml.indexOf("<key>ProgramArguments</key>");
+  if (keyIndex === -1) return [];
+  const arrayStart = xml.indexOf("<array>", keyIndex);
+  const arrayEnd = xml.indexOf("</array>", arrayStart);
+  if (arrayStart === -1 || arrayEnd === -1) return [];
+  const block = xml.slice(arrayStart, arrayEnd);
+  const values = [];
+  const stringRe = /<string>([\s\S]*?)<\/string>/g;
+  let match;
+  while ((match = stringRe.exec(block)) !== null) {
+    values.push(decodeXmlEntities(match[1]));
+  }
+  return values;
+}
+
+/**
+ * Rewrite the SECOND `<string>` entry (index 1, the `cliEntry` slot `buildPlist` renders right
+ * after `nodePath`) inside a rendered plist's `ProgramArguments` array, simulating the exact stale
+ * path a reinstall that moves the resolved binary leaves behind.
+ */
+function corruptSecondProgramArgument(xml, newValue) {
+  const keyIndex = xml.indexOf("<key>ProgramArguments</key>");
+  if (keyIndex === -1) {
+    throw new Error("rendered plist has no ProgramArguments key");
+  }
+  const arrayStart = xml.indexOf("<array>", keyIndex);
+  const arrayEnd = xml.indexOf("</array>", arrayStart);
+  if (arrayStart === -1 || arrayEnd === -1) {
+    throw new Error("rendered plist has no ProgramArguments array");
+  }
+  const block = xml.slice(arrayStart, arrayEnd);
+  const stringRe = /<string>([\s\S]*?)<\/string>/g;
+  const matches = [...block.matchAll(stringRe)];
+  if (matches.length < 2) {
+    throw new Error(
+      `rendered plist's ProgramArguments has ${matches.length} <string> entries, expected at least 2`,
+    );
+  }
+  const second = matches[1];
+  const rewrittenBlock =
+    block.slice(0, second.index) +
+    `<string>${xmlEscape(newValue)}</string>` +
+    block.slice(second.index + second[0].length);
+  return xml.slice(0, arrayStart) + rewrittenBlock + xml.slice(arrayEnd);
+}
+
+/**
+ * The final non-empty line of `text`. `healServicePlist` writes its own log line to stdout before
+ * the `node -e` wrapper's `console.log(r)` prints the return value on the line after it, so the
+ * return value is always the LAST line, never the whole trimmed output (mirrors `reinstall-sim.mjs`'s
+ * own `lastLine`).
+ */
+function lastLine(text) {
+  const lines = text.split("\n").filter((l) => l.trim() !== "");
+  return lines.length > 0 ? lines[lines.length - 1].trim() : "";
+}
+
+/**
+ * `--check reinstall-session` (PERSIST-04, Phase 97 plan 05): a real `dsp` tmux plus ttyd session,
+ * standing before this function runs, must still be held by the same ttyd pid after (1) a stale
+ * plist a simulated reinstall would leave behind is healed and (2) the backend restarts. The board's
+ * own `GET /api/board` wire is the witness both before and after, never a store record read
+ * directly, matching this file's header's "unfalsifiable" warning about store-only liveness claims.
+ *
+ * Never calls real `launchctl` in any form (not even `print`): the plist is obtained only through
+ * `node dist/server/bootstrap/cli.js service install --print` (stdout-only, zero side effects, same
+ * instrument `reinstall-sim.mjs` uses) and healed only through `healServicePlist({reload:false})`'s
+ * file-only path, both spawned with `HOME` set to the fixture's own sandbox home so every path they
+ * touch resolves inside it.
+ *
+ * `DISPATCH_REINSTALL_SESSION_BREAK` selects one of two proven-failing directions, read once at the
+ * top so a break-mode run can never be mistaken for a real one:
+ * - `kill-ttyd`: the fixture's real ttyd is SIGTERM'd after the heal and before the restart, so the
+ *   post-restart pid/adoption/wire assertions (steps 6-8) must fail.
+ * - `skip-heal`: the heal call itself is skipped, so the on-disk plist stays stale and step 4's own
+ *   assertions must fail.
+ * Any other non-empty value is a configuration error, not a silent no-op.
+ */
+async function checkReinstallSession(built) {
+  const violations = [];
+  const breakMode = process.env.DISPATCH_REINSTALL_SESSION_BREAK || undefined;
+  if (
+    breakMode !== undefined &&
+    breakMode !== "kill-ttyd" &&
+    breakMode !== "skip-heal"
+  ) {
+    throw new Error(
+      `unknown DISPATCH_REINSTALL_SESSION_BREAK "${breakMode}", expected "kill-ttyd" or "skip-heal"`,
+    );
+  }
+  console.log(
+    `reinstall-session: break mode = ${breakMode ?? "(none, real run)"}`,
+  );
+
+  // Step 1: the pre-restart ttyd pid, the baseline every adoption claim below is measured against.
+  const pidBefore = (await pidsListeningOnPort(built.ttyd.a.port))[0];
+  console.log(
+    `reinstall-session: step 1 pre-restart ttyd port ${built.ttyd.a.port} pid=${pidBefore}`,
+  );
+  if (pidBefore == null) {
+    violations.push(
+      `step 1: could not resolve a pre-restart lsof PID for ttyd port ${built.ttyd.a.port}`,
+    );
+    return violations;
+  }
+
+  // Step 2: the board's own wire, before anything is touched.
+  const cardBefore = await fetchFixtureCard(built);
+  console.log(
+    `reinstall-session: step 2 wire activeSession.id=${cardBefore?.activeSession?.id} ttydPort=${cardBefore?.activeSession?.ttydPort} sessionLost=${cardBefore?.sessionLost}`,
+  );
+  if (cardBefore?.activeSession?.id !== built.sessionA.id) {
+    violations.push(
+      `step 2: wire activeSession.id expected ${built.sessionA.id}, actual ${cardBefore?.activeSession?.id}`,
+    );
+  }
+  if (cardBefore?.activeSession?.ttydPort !== built.ttyd.a.port) {
+    violations.push(
+      `step 2: wire activeSession.ttydPort expected ${built.ttyd.a.port}, actual ${cardBefore?.activeSession?.ttydPort}`,
+    );
+  }
+  if (cardBefore?.sessionLost === true) {
+    violations.push(
+      `step 2: wire reported sessionLost=true before any restart, the fixture never started dead`,
+    );
+  }
+
+  // Step 3: simulate what a reinstall leaves behind, a plist rendered by the CURRENT build with its
+  // cliEntry rewritten to a path that no longer exists, written under the fixture's sandbox home.
+  const cliJsPath = join(REPO_ROOT, "dist", "server", "bootstrap", "cli.js");
+  const freshRender = execFileSync(
+    process.execPath,
+    [cliJsPath, "service", "install", "--print"],
+    { env: { ...process.env, HOME: built.home }, encoding: "utf8" },
+  );
+  const freshArgs = extractProgramArguments(freshRender);
+  const expectedCliEntry = freshArgs[1];
+  console.log(
+    `reinstall-session: step 3 fresh cli.js path = ${expectedCliEntry}`,
+  );
+  if (!expectedCliEntry) {
+    violations.push(
+      `step 3: fresh \`service install --print\` render produced no ProgramArguments[1]`,
+    );
+    return violations;
+  }
+  const stalePath = "/nonexistent/dispatch/dist/server/bootstrap/cli.js";
+  const stalePlist = corruptSecondProgramArgument(freshRender, stalePath);
+  const plistPath = join(
+    built.home,
+    "Library",
+    "LaunchAgents",
+    "com.dispatch.app.plist",
+  );
+  mkdirSync(dirname(plistPath), { recursive: true });
+  writeFileSync(plistPath, stalePlist);
+  console.log(
+    `reinstall-session: step 3 wrote a stale plist to ${plistPath} (cli.js -> ${stalePath})`,
+  );
+
+  // Step 4: heal it exactly as `service restart` would, minus the launchd reload, unless the
+  // skip-heal break mode is proving this exact step falls over without it.
+  let healOutcome;
+  if (breakMode !== "skip-heal") {
+    const healEntry = join(
+      REPO_ROOT,
+      "dist",
+      "server",
+      "services",
+      "orchestration",
+      "service.js",
+    );
+    const healScript =
+      `import(${JSON.stringify(pathToFileURL(healEntry).href)})` +
+      `.then((m) => m.healServicePlist({ reload: false }))` +
+      `.then((r) => console.log(r))`;
+    const healResult = execFileSync(
+      process.execPath,
+      ["--input-type=module", "-e", healScript],
+      { env: { ...process.env, HOME: built.home }, encoding: "utf8" },
+    );
+    healOutcome = lastLine(healResult);
+  } else {
+    console.log(
+      `reinstall-session: step 4 SKIPPED by DISPATCH_REINSTALL_SESSION_BREAK=skip-heal, the plist is left stale on purpose`,
+    );
+  }
+  console.log(
+    `reinstall-session: step 4 healServicePlist outcome = ${healOutcome ?? "(heal not run)"}`,
+  );
+  if (healOutcome !== "rewritten") {
+    violations.push(
+      `step 4: healServicePlist outcome expected "rewritten", actual ${JSON.stringify(healOutcome ?? null)}`,
+    );
+  }
+  const healedArgs = extractProgramArguments(readFileSync(plistPath, "utf8"));
+  if (healedArgs[1] !== expectedCliEntry) {
+    violations.push(
+      `step 4: on-disk plist cli.js path is "${healedArgs[1]}", expected "${expectedCliEntry}"`,
+    );
+  }
+
+  if (breakMode === "kill-ttyd") {
+    console.log(
+      `reinstall-session: DISPATCH_REINSTALL_SESSION_BREAK=kill-ttyd, killing the real ttyd (pid ${built.ttyd.a.child?.pid}) before the restart`,
+    );
+    await killAndWait(built.ttyd.a.child);
+  }
+
+  // Step 5: the service-restart half, tmux and its real ttyd (unless just killed above) untouched.
+  await restartServer(built);
+
+  // Step 6: the same ttyd pid, or this was a respawn, not the adoption PERSIST-04 claims.
+  const pidAfter = (await pidsListeningOnPort(built.ttyd.a.port))[0];
+  console.log(
+    `reinstall-session: step 6 post-restart ttyd port ${built.ttyd.a.port} pid=${pidAfter}`,
+  );
+  if (pidAfter !== pidBefore) {
+    violations.push(
+      `step 6: ttyd port ${built.ttyd.a.port} lsof PID changed across restart, before=${pidBefore} after=${pidAfter} (a respawn, not the adoption PERSIST-04 claims)`,
+    );
+  }
+
+  // Step 7: the boot's own [reconcile] line, the same ttyd-adopted count parse checkReconcileStage1 uses.
+  const reconcileLines = (built.server?.logLines ?? []).filter((l) =>
+    l.includes("[reconcile]"),
+  );
+  for (const line of reconcileLines) {
+    console.log(`reinstall-session: server log: ${line}`);
+  }
+  const adoptedMatch = reconcileLines
+    .map((l) => l.match(/ttyd adopted: (\d+)/))
+    .find((m) => m);
+  const adoptedCount = adoptedMatch ? Number(adoptedMatch[1]) : undefined;
+  if (adoptedCount !== 1) {
+    violations.push(
+      `step 7: [reconcile] boot line reported ttyd adopted=${adoptedCount}, expected 1`,
+    );
+  }
+
+  // Step 8: the board's own wire again, the session must be reported attached, not lost.
+  const cardAfter = await fetchFixtureCard(built);
+  console.log(
+    `reinstall-session: step 8 wire activeSession.id=${cardAfter?.activeSession?.id} ttydPort=${cardAfter?.activeSession?.ttydPort} sessionLost=${cardAfter?.sessionLost}`,
+  );
+  if (cardAfter?.activeSession?.id !== cardBefore?.activeSession?.id) {
+    violations.push(
+      `step 8: wire activeSession.id expected ${cardBefore?.activeSession?.id} (the same session as before the restart), actual ${cardAfter?.activeSession?.id}`,
+    );
+  }
+  if (cardAfter?.activeSession?.ttydPort !== built.ttyd.a.port) {
+    violations.push(
+      `step 8: wire activeSession.ttydPort expected ${built.ttyd.a.port}, actual ${cardAfter?.activeSession?.ttydPort}`,
+    );
+  }
+  if (cardAfter?.sessionLost === true) {
+    violations.push(
+      `step 8: wire reported sessionLost=true after boot reconciliation, PERSIST-04 requires the session reported attached again`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -13596,6 +13914,12 @@ const CHECKS = {
       "hook-token-attribution",
       checkHookTokenAttribution,
       HOOK_ATTRIBUTION_FIXTURE,
+    ),
+  "reinstall-session": () =>
+    withFixture(
+      "reinstall-session",
+      checkReinstallSession,
+      SINGLE_SESSION_FIXTURE,
     ),
 };
 
