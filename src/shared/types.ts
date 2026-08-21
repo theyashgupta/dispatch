@@ -66,6 +66,15 @@ export interface PrInfo {
   state: "open" | "merged" | "closed";
   isDraft: boolean;
   ci: "pass" | "fail" | "pending" | null;
+  /**
+   * The workspace repo folder BASENAME this PR was found in, e.g. `"frontend"`: never GitHub's
+   * `nameWithOwner` and never the repo's absolute path. Stamped server-side from
+   * `workspace.repos[i].path`, the only path the server already holds for this card; a basename
+   * is passed rather than the path itself so no absolute path or org name reaches the wire
+   * (T-98-01). REQUIRED, not optional: every `PrInfo` that reaches the wire names the repo it
+   * came from. NON-SECRET: rides `snapshot()` UNREDACTED like the rest of this interface.
+   */
+  repo: string;
 }
 
 /**
@@ -88,6 +97,7 @@ export type ProbeFailureCategory =
   | "repo path missing"
   | "gh not authenticated"
   | "gh repo not accessible"
+  | "gh rate limited"
   | "gh pr list failed"
   | "detection unavailable";
 
@@ -104,6 +114,14 @@ export type ProbeFailureCategory =
  */
 export interface ProbeUnknown {
   category: ProbeFailureCategory;
+  /**
+   * ISO timestamp of the most recent probe attempt for this signal, OPTIONAL. Absent means either
+   * this probe path does not stamp a time (the preview signal does not; Phase 99 owns previews) or
+   * the record predates this field, never treat absence as "just checked". The PR write path
+   * always sets it. Required would force preview call sites to invent a timestamp for a signal
+   * this phase does not touch, so optional is deliberate, not an oversight.
+   */
+  checkedAt?: string;
 }
 
 export interface Card {
