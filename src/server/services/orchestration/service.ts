@@ -172,10 +172,7 @@ async function reloadService(): Promise<boolean> {
   };
   const describe = (err: unknown): string => {
     const e = err as (Error & { stderr?: string }) | undefined;
-    return (
-      (e?.stderr?.trim() || e?.message) ??
-      (err === undefined ? "launchctl reported no error" : String(err))
-    );
+    return e?.stderr?.trim() || e?.message || "launchctl reported no error";
   };
   const fail = (detail: string): false => {
     process.stderr.write(
