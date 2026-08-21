@@ -33,6 +33,17 @@
  * and the harness's own claim is narrower and stronger than a logical row diff, that the install
  * step does not touch these bytes at all. Byte equality over opaque bytes sidesteps the SQLite
  * page-layout false positive a raw diff of a real, booted database could otherwise produce.
+ *
+ * Observed failing-direction evidence (Phase 97 plan 06, live runs against the current build):
+ * `persistence` was proven able to fail with `--break mutate-config`, which flips one byte of
+ * `config.json` between the two installs and reports `FAIL (persistence)` naming
+ * `after current-build install: changed: config.json`. `plist-staleness` was proven able to fail
+ * with `--break stale-plist-uncorrected`, which skips the first heal call and reports
+ * `FAIL (plist-staleness)` with `second healServicePlist call reported "rewritten", expected
+ * "unchanged"` and `the plist changed on the second heal call, a repeat call must be a
+ * byte-identical no-op`. `uninstall-keeps` was proven able to fail by its own leg logic: the real
+ * `v3.0.0` `--dry-run Remove:` section lists `config.json` before the current build's fix ever
+ * runs, the same shipped bug this leg exists to catch.
  */
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";

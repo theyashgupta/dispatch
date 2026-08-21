@@ -216,10 +216,20 @@
  *                                                                   `kill-ttyd` (breaks the
  *                                                                   adoption assertions) and
  *                                                                   `skip-heal` (breaks the plist
- *                                                                   assertion), observed
- *                                                                   failing-direction evidence for
- *                                                                   both is pending, plan 97-06
- *                                                                   fills it in
+ *                                                                   assertion). Both proven able to
+ *                                                                   fail live: `kill-ttyd` reports
+ *                                                                   `FAIL (reinstall-session): 3
+ *                                                                   violation(s)`, naming a changed
+ *                                                                   lsof PID across the restart, a
+ *                                                                   `ttyd adopted=0` boot line, and
+ *                                                                   a lost wire `ttydPort`.
+ *                                                                   `skip-heal` reports `FAIL
+ *                                                                   (reinstall-session): 2
+ *                                                                   violation(s)`, naming a
+ *                                                                   `healServicePlist` outcome of
+ *                                                                   `null` instead of `"rewritten"`
+ *                                                                   and an on-disk plist still
+ *                                                                   pointing at the corrupted path
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -13635,6 +13645,16 @@ function lastLine(text) {
  * - `skip-heal`: the heal call itself is skipped, so the on-disk plist stays stale and step 4's own
  *   assertions must fail.
  * Any other non-empty value is a configuration error, not a silent no-op.
+ *
+ * Observed failing-direction evidence (Phase 97 plan 06, live runs against the current build): the
+ * real run reports `PASS (reinstall-session)` with matching pre/post ttyd pid and `ttyd adopted: 1`.
+ * `kill-ttyd` was proven able to fail, reporting `FAIL (reinstall-session): 3 violation(s)`, naming
+ * `step 6: ttyd port ... lsof PID changed across restart`, `step 7: [reconcile] boot line reported
+ * ttyd adopted=0, expected 1`, and `step 8: wire activeSession.ttydPort expected ..., actual
+ * undefined`. `skip-heal` was proven able to fail, reporting `FAIL (reinstall-session): 2
+ * violation(s)`, naming `step 4: healServicePlist outcome expected "rewritten", actual null` and
+ * `step 4: on-disk plist cli.js path is "/nonexistent/dispatch/dist/server/bootstrap/cli.js",
+ * expected` the fresh path.
  */
 async function checkReinstallSession(built) {
   const violations = [];
