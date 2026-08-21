@@ -14,11 +14,13 @@ export interface ExecResult {
  * `DISPATCH_PERF_EXEC` is unset, and neither is read nor written anywhere else in {@link run}.
  * @remarks This is the sole subprocess chokepoint (NEW-11: execa was never installed), so wrapping
  * `run()` alone captures effectively all `git`/`tmux`/`ttyd` load system-wide without touching those
- * adapters individually.
+ * adapters individually. `shape` bounds each record to `cmd` plus the first two args (`gh pr list`,
+ * `git worktree`), enough to count an invocation kind and never enough to carry a branch name, a
+ * repo path, or a token (T-98-05); `opts.cwd` is deliberately never recorded here.
  * @see docs/ARCHITECTURE.md#exec-chokepoint
  */
 const perfExec = process.env.DISPATCH_PERF_EXEC === "1";
-const perfCalls: { cmd: string; ms: number }[] = [];
+const perfCalls: { cmd: string; shape: string; ms: number }[] = [];
 
 /**
  * Arm SIGTERM→grace→SIGKILL escalation for one child: schedule a `SIGKILL` `graceMs` after each
@@ -77,6 +79,7 @@ export async function run(
   } = {},
 ): Promise<ExecResult> {
   const t0 = perfExec ? performance.now() : 0;
+  const shape = perfExec ? [cmd, ...args.slice(0, 2)].join(" ") : "";
   const { killEscalationMs, ...execOpts } = opts;
   const pending = execFileP(cmd, args, { ...execOpts, encoding: "utf8" });
   const disarm =
@@ -85,10 +88,10 @@ export async function run(
       : armKillEscalation(pending.child, execOpts, killEscalationMs);
   try {
     const { stdout, stderr } = await pending;
-    if (perfExec) perfCalls.push({ cmd, ms: performance.now() - t0 });
+    if (perfExec) perfCalls.push({ cmd, shape, ms: performance.now() - t0 });
     return { stdout, stderr };
   } catch (err) {
-    if (perfExec) perfCalls.push({ cmd, ms: performance.now() - t0 });
+    if (perfExec) perfCalls.push({ cmd, shape, ms: performance.now() - t0 });
     const e = err as Error & {
       stderr?: string;
       stdout?: string;
@@ -116,10 +119,10 @@ function registerPerfExecDump(): void {
   process.on("SIGTERM", () => {
     const byCmd: Record<string, { count: number; ms: number }> = {};
     for (const c of perfCalls) {
-      const entry = byCmd[c.cmd] ?? { count: 0, ms: 0 };
+      const entry = byCmd[c.shape] ?? { count: 0, ms: 0 };
       entry.count += 1;
       entry.ms += c.ms;
-      byCmd[c.cmd] = entry;
+      byCmd[c.shape] = entry;
     }
     const total = perfCalls.reduce((sum, c) => sum + c.ms, 0);
     process.stderr.write(

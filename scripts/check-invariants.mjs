@@ -47,8 +47,10 @@ const ID_RE =
  * chokepoint re-freeze (`NEW-21`) — see docs/ARCHITECTURE.md#session-projection-chokepoint.
  * @remarks Moved from 122 to 123 for the deliberate one-ID attention single-source
  * re-freeze (`NEW-22`) — see docs/ARCHITECTURE.md#design-system-invariants.
+ * @remarks Moved from 123 to 124 for the deliberate one-ID exec-chokepoint perf-record
+ * mitigation re-freeze (`T-98-05`), see docs/ARCHITECTURE.md#exec-chokepoint.
  */
-const FROZEN_COUNT = 123;
+const FROZEN_COUNT = 124;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");
