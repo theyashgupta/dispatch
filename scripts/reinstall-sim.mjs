@@ -144,13 +144,58 @@ function mkSandboxDir(label) {
 }
 
 /**
+ * `npm pack --json` the package at `cwd` into `stageDir`, verifying the tarball carries the built
+ * CLI entry and actually landed where npm said. The one pack path for both the working tree and the
+ * cached old release, so neither copy can drift out of the other's guards.
+ * @remarks Runs with `--ignore-scripts`: on a machine where scripts are NOT ignored, `prepack`
+ * would re-run the build and print vite's progress output (raw ANSI escapes included) onto the same
+ * stdout `--json` parses, corrupting the JSON this function depends on. Callers build explicitly
+ * beforehand, so skipping `prepack` loses nothing.
+ * @param label Names the package in log and failure lines.
+ * @returns The absolute path to the packed tarball.
+ */
+function packTarball(cwd, stageDir, label) {
+  const packed = spawnSync(
+    "npm",
+    ["pack", "--json", "--ignore-scripts", "--pack-destination", stageDir],
+    { cwd, encoding: "utf8" },
+  );
+  if (packed.status !== 0)
+    fail(`\`npm pack\` on ${label} failed:\n${packed.stderr}`);
+
+  const start = packed.stdout.indexOf("[");
+  if (start === -1)
+    fail(`\`npm pack --json\` on ${label} printed no JSON:\n${packed.stdout}`);
+  let meta;
+  try {
+    meta = JSON.parse(packed.stdout.slice(start))[0];
+  } catch (err) {
+    fail(
+      `could not parse \`npm pack --json\` output for ${label}: ${err.message}`,
+    );
+  }
+
+  const entries = (meta.files ?? []).map((f) => f.path);
+  if (!entries.includes(REQUIRED_TARBALL_ENTRY)) {
+    fail(
+      `packed ${label} tarball is missing ${REQUIRED_TARBALL_ENTRY}, dist/ is stale or absent. ` +
+        `Run \`npm run build\` and check tsconfig.build.json.`,
+    );
+  }
+  const tarballPath = join(stageDir, meta.filename);
+  if (!existsSync(tarballPath)) {
+    fail(`npm pack reported ${meta.filename} but it is not in ${stageDir}`);
+  }
+  console.log(
+    `  packed ${label} -> ${meta.filename} (${entries.length} files, ${REQUIRED_TARBALL_ENTRY} present)`,
+  );
+  return tarballPath;
+}
+
+/**
  * Build the current working tree and pack it, mirroring `fresh-env-sim.mjs`'s `buildAndPack`.
  * `npm run build` runs explicitly rather than relying on `prepack`, which does not fire under an
- * `ignore-scripts=true` npm config. `npm pack` itself also runs with `--ignore-scripts`, on a
- * machine where scripts are NOT ignored, `prepack` would otherwise re-run the build and print
- * vite's progress output (including raw ANSI escapes) onto the same stdout `--json` parses,
- * corrupting the JSON this function depends on. The explicit build above already makes `dist/`
- * current, so skipping `prepack` here loses nothing.
+ * `ignore-scripts=true` npm config (and which {@link packTarball} skips on purpose).
  * @param stageDir Destination directory for the packed tarball.
  * @returns The absolute path to the packed tarball.
  */
@@ -163,40 +208,7 @@ function buildAndPack(stageDir) {
     stdio: "inherit",
   });
   if (built.status !== 0) fail("`npm run build` failed, cannot pack a tarball");
-
-  console.log("  packing the working tree");
-  const packed = spawnSync(
-    "npm",
-    ["pack", "--json", "--ignore-scripts", "--pack-destination", stageDir],
-    { cwd: REPO_ROOT, encoding: "utf8" },
-  );
-  if (packed.status !== 0) fail(`\`npm pack\` failed:\n${packed.stderr}`);
-
-  const start = packed.stdout.indexOf("[");
-  if (start === -1)
-    fail(`\`npm pack --json\` printed no JSON:\n${packed.stdout}`);
-  let meta;
-  try {
-    meta = JSON.parse(packed.stdout.slice(start))[0];
-  } catch (err) {
-    fail(`could not parse \`npm pack --json\` output: ${err.message}`);
-  }
-
-  const entries = (meta.files ?? []).map((f) => f.path);
-  if (!entries.includes(REQUIRED_TARBALL_ENTRY)) {
-    fail(
-      `packed tarball is missing ${REQUIRED_TARBALL_ENTRY}, dist/ is stale or absent. Run ` +
-        `\`npm run build\` and check tsconfig.build.json.`,
-    );
-  }
-  const tarballPath = join(stageDir, meta.filename);
-  if (!existsSync(tarballPath)) {
-    fail(`npm pack reported ${meta.filename} but it is not in ${stageDir}`);
-  }
-  console.log(
-    `  packed ${meta.filename} (${entries.length} files, ${REQUIRED_TARBALL_ENTRY} present)`,
-  );
-  return tarballPath;
+  return packTarball(REPO_ROOT, stageDir, "the working tree");
 }
 
 /**
@@ -270,24 +282,7 @@ function buildOldRelease() {
   assertSandboxSafe(stageDir);
   rmSync(stageDir, { recursive: true, force: true });
   mkdirSync(stageDir, { recursive: true });
-  const packed = spawnSync(
-    "npm",
-    ["pack", "--json", "--ignore-scripts", "--pack-destination", stageDir],
-    { cwd: treeRoot, encoding: "utf8" },
-  );
-  if (packed.status !== 0)
-    fail(`\`npm pack\` on ${OLD_RELEASE_TAG} failed:\n${packed.stderr}`);
-  const start = packed.stdout.indexOf("[");
-  const meta = JSON.parse(packed.stdout.slice(start))[0];
-  const entries = (meta.files ?? []).map((f) => f.path);
-  if (!entries.includes(REQUIRED_TARBALL_ENTRY)) {
-    fail(
-      `packed ${OLD_RELEASE_TAG} tarball is missing ${REQUIRED_TARBALL_ENTRY}`,
-    );
-  }
-  const tarballPath = join(stageDir, meta.filename);
-  console.log(`  packed ${OLD_RELEASE_TAG} -> ${tarballPath}`);
-  return tarballPath;
+  return packTarball(treeRoot, stageDir, OLD_RELEASE_TAG);
 }
 
 /**
