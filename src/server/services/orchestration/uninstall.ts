@@ -202,9 +202,7 @@ export function renderPlan(plan: UninstallPlan): string {
     );
   }
   for (const s of plan.keep.sessions) {
-    keepLines.push(
-      `  tmux session ${s}  (left running, pass --purge to stop)`,
-    );
+    keepLines.push(`  tmux session ${s}  (left running, pass --purge to stop)`);
   }
   if (plan.keep.worktrees.length > 0) {
     keepLines.push("  Git worktrees are never deleted — remove them yourself:");

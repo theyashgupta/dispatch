@@ -200,6 +200,8 @@ async function doctor(): Promise<void> {
  * default-yes then runs it on confirm — under a pipe/CI it prints the command instead of prompting
  * or spawning. ALWAYS resolves without a non-zero exit, mirroring `doctor`'s diagnostic posture: a
  * failed update prints the manual fallback command rather than failing the command itself.
+ * @remarks A successful update now restarts the service automatically when a plist exists, instead
+ * of telling the user to do it; a failed restart is reported but does not make `update()` itself fail.
  */
 async function update(): Promise<void> {
   const status = await checkForUpdate({ liveCheck: true });
@@ -245,14 +247,24 @@ async function update(): Promise<void> {
   }
   const result = await runUpdate({ interactive: true });
   if (result.ok) {
-    process.stdout.write(
-      existsSync(SERVICE_PLIST_PATH)
-        ? `  Updated to v${result.version} — restart the service to use it: dispatch service restart\n`
-        : `  Updated to v${result.version} — restart dispatch to use it.\n`,
-    );
+    if (existsSync(SERVICE_PLIST_PATH)) {
+      process.stdout.write(
+        `  Updated to v${result.version}, restarting the service.\n`,
+      );
+      const code = await restartService();
+      process.stdout.write(
+        code === 0
+          ? `  Service restarted on v${result.version}.\n`
+          : `  Service restart failed, run it yourself: dispatch service restart\n`,
+      );
+    } else {
+      process.stdout.write(
+        `  Updated to v${result.version}, restart dispatch to use it.\n`,
+      );
+    }
   } else {
     process.stdout.write(
-      `  Update failed — run it yourself: ${result.command}\n`,
+      `  Update failed, run it yourself: ${result.command}\n`,
     );
   }
 }
