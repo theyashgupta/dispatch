@@ -780,15 +780,17 @@ const LAUNCHCTL_READONLY_HARNESSES = [
 ];
 
 /**
- * launchctl-read-only gate over {@link LAUNCHCTL_READONLY_HARNESSES}: every `"launchctl"` string
- * literal must be the first argument of a call whose second argument is an array literal starting
- * with `"print"`. A different verb, a verb hidden behind a variable, or a bare `"launchctl"`
- * literal anywhere else is a violation. Comments and prose strings (`launchctl print gui/...` in a
- * message) are never matched because the walk is over the AST, not the text.
- * @remarks Requiring the verb to be INLINE is deliberate: a `spawnSync("launchctl", args)` whose
- * verb lives in a variable cannot be audited by a pattern gate, and a gate that cannot see the verb
- * cannot fail for the reason it exists. A text scan that strips comments first was tried and failed
- * open: a `/*` inside a string literal swallowed every line up to the next `*\/`.
+ * launchctl-read-only gate over {@link LAUNCHCTL_READONLY_HARNESSES}, two arms over the AST. Arm 1,
+ * the binary: a string literal whose text is `launchctl` or ends in `/launchctl` must be the first
+ * argument of a call whose second argument is an array literal starting with `"print"`. Arm 2, the
+ * command string: any other string or template literal whose text contains the token `launchctl`
+ * (an `execSync` one-liner, a `sh -c` payload, a message) must follow EVERY occurrence inline with
+ * `print`. Comments are never matched because the walk is over the AST, not the text.
+ * @remarks Requiring the verb INLINE is deliberate: a `spawnSync("launchctl", args)` whose verb
+ * lives in a variable cannot be audited by a pattern gate, and a gate that cannot see the verb
+ * cannot fail for the reason it exists. Arm 2 exists because arm 1 alone was blind to the most
+ * idiomatic shell form, `execSync("launchctl bootout ...")`. Out of scope on purpose: a binary
+ * assembled at runtime (`"launch" + "ctl"`), which is evasion rather than accident.
  * @returns Violation report lines, one per offending occurrence, with line numbers from the original
  * buffer.
  */
@@ -800,8 +802,17 @@ function checkLaunchctlReadOnly() {
       continue;
     }
     const sourceFile = parseSource(file, readFileSync(file, "utf8"));
+    const report = (node, reason) => {
+      const { line } = sourceFile.getLineAndCharacterOfPosition(
+        node.getStart(sourceFile),
+      );
+      violations.push(`${file}:${line + 1}: ${reason}`);
+    };
     const visit = (node) => {
-      if (ts.isStringLiteralLike(node) && node.text === "launchctl") {
+      const isBinary =
+        ts.isStringLiteralLike(node) &&
+        (node.text === "launchctl" || node.text.endsWith("/launchctl"));
+      if (isBinary) {
         const call = node.parent;
         const argv =
           ts.isCallExpression(call) && call.arguments[0] === node
@@ -812,11 +823,17 @@ function checkLaunchctlReadOnly() {
             ? argv.elements[0]
             : undefined;
         if (!(verb && ts.isStringLiteralLike(verb) && verb.text === "print")) {
-          const { line } = sourceFile.getLineAndCharacterOfPosition(
-            node.getStart(sourceFile),
+          report(
+            node,
+            `"launchctl" must be spawned with an argv array whose first element is the read-only "print" verb`,
           );
-          violations.push(
-            `${file}:${line + 1}: "launchctl" must be spawned with an argv array whose first element is the read-only "print" verb`,
+        }
+      } else if (ts.isStringLiteralLike(node) || ts.isTemplateLiteral(node)) {
+        const text = node.getText(sourceFile);
+        if (/\blaunchctl\b(?!\s+print\b)/.test(text)) {
+          report(
+            node,
+            `a string mentioning "launchctl" must follow every occurrence inline with the read-only "print" verb`,
           );
         }
       }
