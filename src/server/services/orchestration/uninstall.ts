@@ -20,18 +20,27 @@ import { run } from "../../adapters/exec.js";
 
 /**
  * The three groups `uninstall` reasons about, produced once by `scanFootprint` and consumed by both
- * `renderPlan` and `runUninstall` — so what the user is shown and what is actually touched can never
+ * `renderPlan` and `runUninstall`, so what the user is shown and what is actually touched can never
  * drift apart.
- * @remarks `stop.ttydPids` holds the pids captured AT SCAN TIME, not a count to re-derive later:
+ * @remarks `keep` holds everything the user authored or is currently working in: bare uninstall
+ * resets only dispatch-owned regenerables (hooks, the plist), so `config`, `boardData`, and the live
+ * `sessions` list all start in `keep`, and only `--purge` promotes them into `remove`/`stop`.
+ * `stop.ttydPids` holds the pids captured AT SCAN TIME, not a count to re-derive later:
  * `runUninstall` kills exactly this set, so a ttyd that starts between the scan and the (interactive,
- * possibly long) confirmation is never killed unseen. Rendered as a count only — the pids never reach
+ * possibly long) confirmation is never killed unseen. Rendered as a count only, the pids never reach
  * the user's terminal. `stop.service` is true only when the LaunchAgent plist exists AND the platform
  * is darwin, so a loaded agent gets booted out before its plist is removed via the plain `remove` list.
  */
 export interface UninstallPlan {
   remove: string[];
   stop: { sessions: string[]; ttydPids: number[]; service: boolean };
-  keep: { boardData: string[]; playbooks: string | null; worktrees: string[] };
+  keep: {
+    config: string | null;
+    boardData: string[];
+    playbooks: string | null;
+    sessions: string[];
+    worktrees: string[];
+  };
 }
 
 /**
@@ -104,8 +113,7 @@ export async function scanFootprint(opts: {
   purge: boolean;
 }): Promise<UninstallPlan> {
   const servicePlistExists = fs.existsSync(SERVICE_PLIST_PATH);
-  const footprint = [
-    CONFIG_PATH,
+  const regenerables = [
     HOOK_SCRIPT_PATH,
     HOOK_SETTINGS_PATH,
     ...(servicePlistExists ? [SERVICE_PLIST_PATH] : []),
@@ -115,19 +123,27 @@ export async function scanFootprint(opts: {
   const sessions = [...(await listSessions())]
     .filter((s) => s.startsWith("dsp-"))
     .sort();
+  const configExists = fs.existsSync(CONFIG_PATH);
 
   return {
     remove: opts.purge
-      ? [...footprint, ...boardData, ...boardSidecarPaths()]
-      : footprint,
+      ? [
+          ...regenerables,
+          ...(configExists ? [CONFIG_PATH] : []),
+          ...boardData,
+          ...boardSidecarPaths(),
+        ]
+      : regenerables,
     stop: {
-      sessions,
-      ttydPids: await findDspTtydOrphans(),
+      sessions: opts.purge ? sessions : [],
+      ttydPids: opts.purge ? await findDspTtydOrphans() : [],
       service: servicePlistExists && process.platform === "darwin",
     },
     keep: {
+      config: !opts.purge && configExists ? CONFIG_PATH : null,
       boardData: opts.purge ? [] : boardData,
       playbooks: fs.existsSync(playbooks) ? playbooks : null,
+      sessions: opts.purge ? [] : sessions,
       worktrees: scanWorktrees(),
     },
   };
@@ -172,12 +188,22 @@ export function renderPlan(plan: UninstallPlan): string {
   }
 
   const keepLines: string[] = [];
+  if (plan.keep.config) {
+    keepLines.push(
+      `  ${plan.keep.config}  (your settings and launch args, pass --purge to delete)`,
+    );
+  }
   for (const p of plan.keep.boardData) {
-    keepLines.push(`  ${p}  (board data — pass --purge to delete)`);
+    keepLines.push(`  ${p}  (board data, pass --purge to delete)`);
   }
   if (plan.keep.playbooks) {
     keepLines.push(
-      `  ${plan.keep.playbooks}  (your playbooks — kept even with --purge)`,
+      `  ${plan.keep.playbooks}  (your playbooks, kept even with --purge)`,
+    );
+  }
+  for (const s of plan.keep.sessions) {
+    keepLines.push(
+      `  tmux session ${s}  (left running, pass --purge to stop)`,
     );
   }
   if (plan.keep.worktrees.length > 0) {
