@@ -517,7 +517,11 @@ function parseSource(file, content) {
     content,
     ts.ScriptTarget.Latest,
     true,
-    file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    file.endsWith(".tsx")
+      ? ts.ScriptKind.TSX
+      : file.endsWith(".mjs")
+        ? ts.ScriptKind.JS
+        : ts.ScriptKind.TS,
   );
 }
 
@@ -776,34 +780,49 @@ const LAUNCHCTL_READONLY_HARNESSES = [
 ];
 
 /**
- * launchctl-read-only gate over {@link LAUNCHCTL_READONLY_HARNESSES}: every `launchctl` occurrence
- * in code (block comments stripped) must be immediately followed by the `print` verb, either as the
- * argv array `"launchctl", ["print", ...]` or as prose inside a message string (`launchctl print
- * gui/...`). Anything else, a different verb or a verb hidden behind a variable, is a violation.
+ * launchctl-read-only gate over {@link LAUNCHCTL_READONLY_HARNESSES}: every `"launchctl"` string
+ * literal must be the first argument of a call whose second argument is an array literal starting
+ * with `"print"`. A different verb, a verb hidden behind a variable, or a bare `"launchctl"`
+ * literal anywhere else is a violation. Comments and prose strings (`launchctl print gui/...` in a
+ * message) are never matched because the walk is over the AST, not the text.
  * @remarks Requiring the verb to be INLINE is deliberate: a `spawnSync("launchctl", args)` whose
  * verb lives in a variable cannot be audited by a pattern gate, and a gate that cannot see the verb
- * cannot fail for the reason it exists.
- * @returns Violation report lines, one per offending occurrence.
+ * cannot fail for the reason it exists. A text scan that strips comments first was tried and failed
+ * open: a `/*` inside a string literal swallowed every line up to the next `*\/`.
+ * @returns Violation report lines, one per offending occurrence, with line numbers from the original
+ * buffer.
  */
 function checkLaunchctlReadOnly() {
   const violations = [];
-  const inlinePrint = /^launchctl["',\s[]*print\b/;
   for (const file of LAUNCHCTL_READONLY_HARNESSES) {
     if (!existsSync(file)) {
       violations.push(`${file}: missing, cannot audit launchctl usage`);
       continue;
     }
-    const code = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-    let at = code.indexOf("launchctl");
-    while (at !== -1) {
-      if (!inlinePrint.test(code.slice(at, at + 40))) {
-        const line = code.slice(0, at).split("\n").length;
-        violations.push(
-          `${file}:${line}: launchctl must be followed inline by the read-only "print" verb`,
-        );
+    const sourceFile = parseSource(file, readFileSync(file, "utf8"));
+    const visit = (node) => {
+      if (ts.isStringLiteralLike(node) && node.text === "launchctl") {
+        const call = node.parent;
+        const argv =
+          ts.isCallExpression(call) && call.arguments[0] === node
+            ? call.arguments[1]
+            : undefined;
+        const verb =
+          argv && ts.isArrayLiteralExpression(argv)
+            ? argv.elements[0]
+            : undefined;
+        if (!(verb && ts.isStringLiteralLike(verb) && verb.text === "print")) {
+          const { line } = sourceFile.getLineAndCharacterOfPosition(
+            node.getStart(sourceFile),
+          );
+          violations.push(
+            `${file}:${line + 1}: "launchctl" must be spawned with an argv array whose first element is the read-only "print" verb`,
+          );
+        }
       }
-      at = code.indexOf("launchctl", at + 1);
-    }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
   }
   return violations;
 }
