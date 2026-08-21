@@ -2957,9 +2957,28 @@ mechanically-checkable question; none of them read prose for truth.
   the script's own header JSDoc for the full scope, its JSDoc-citation carve-out, and what it
   deliberately does not attempt (behavioral claims — no grep proves a paragraph's claim about
   what the code does is still true).
-- **`node scripts/session-liveness-v3.mjs --check <mode>`** (Phase 91/92) — a real-tmux/real-ttyd
+- **`node scripts/reinstall-sim.mjs`** (`npm run reinstall-sim`, PERSIST-01/02/03): an
+  isolated-`HOME`, isolated-npm-prefix harness that installs the real published `v3.0.0` release
+  then the current tree, deliberately OUTSIDE `npm run check` and requiring the live
+  `com.dispatch.app` service stopped for its duration, which makes it an on-demand gate, not a CI
+  gate. Three legs, run in one process: `persistence` (a byte-for-byte diff of everything under
+  `~/.dispatch` across both installs, proven able to fail with `--break mutate-config`, reported as
+  `after current-build install: changed: config.json`), `plist-staleness` (renders both builds'
+  plists, corrupts one, and drives the current build's `healServicePlist` through two calls
+  expecting `"rewritten"` then `"unchanged"`, proven able to fail with
+  `--break stale-plist-uncorrected`, reported as `second healServicePlist call reported
+"rewritten", expected "unchanged"`), and `uninstall-keeps` (proves a bare `uninstall --yes` keeps
+  `config.json`, board data, and playbooks, removing only `hook.sh`/`hook-settings.json`, proven
+  able to fail by the real `v3.0.0` release's own shipped bug, whose `--dry-run Remove:` section
+  lists `config.json` before the current build's fix runs). Two hard safety rules hold everywhere
+  in the file: the only permitted `launchctl` verb is a read-only `print`, never
+  `bootstrap`/`bootout`/`load`/`unload`, and a plist is only ever obtained through
+  `dispatch service install --print`, never a real `service install`. The `phase-smoke-tester`
+  behavioral pass runs alongside this harness, not instead of it.
+- **`node scripts/session-liveness-v3.mjs --check <mode>`** (Phase 91/92/97): a real-tmux/real-ttyd
   sandbox harness, deliberately OUTSIDE `npm run check` (it boots real processes and requires the
-  live `com.dispatch.app` service stopped for its duration). Phase 92 added four modes to the seven
+  live `com.dispatch.app` service stopped for its duration, which is what makes every mode in this
+  file an on-demand gate rather than a CI gate). Phase 92 added four modes to the seven
   it inherited from Phase 91: `--check proxy-addressing` (writes a distinguishable marker into each
   of two real tmux panes and reads it back through each session's OWN proxy path simultaneously —
   proven able to fail when the proxy misroutes, and proven that "the two ports merely differ" is NOT
@@ -2973,6 +2992,17 @@ switch-sockets` (a pid-scoped, `ESTABLISHED`-only, bounded poll-to-zero proof th
   constant unrelated to the leak); `--check switch-atomicity` (60 concurrent switch/read requests
   plus a deterministic awaited follow-up, and a switch racing a real tmux kill — proven able to fail
   when `switchActiveSession` bypasses `setActiveSession`, independently corroborated by `NEW-21`).
+  Phase 97 added an eighth mode, `--check reinstall-session` (PERSIST-04): a real `dsp` tmux plus
+  ttyd session must be held by the SAME ttyd pid after a simulated reinstall (a stale launchd plist
+  healed via `healServicePlist`) and a real backend restart, witnessed through the board's own
+  `GET /api/board` wire. Two named break modes, each proven able to fail live:
+  `DISPATCH_REINSTALL_SESSION_BREAK=kill-ttyd` (SIGTERMs the real ttyd between the heal and the
+  restart, reported as three violations: a changed lsof pid across the restart, a boot line reading
+  `ttyd adopted=0`, and a wire that lost the session's `ttydPort`) and
+  `DISPATCH_REINSTALL_SESSION_BREAK=skip-heal` (skips the heal call, reported as two violations: a
+  `healServicePlist` outcome of `null` instead of `"rewritten"`, and an on-disk plist still pointing
+  at the corrupted path). The `phase-smoke-tester` behavioral pass runs alongside this harness, not
+  instead of it.
 - **`node scripts/panel-92.mjs`** (Phase 92; `--legacy`/`--compare`/`--json`) — a CDP structural-
   presence and zero-gap-geometry instrument. `--legacy` builds and boots the real `v2.9.0` git tag in
   a throwaway worktree, seeded in that release's OWN pre-`sessions[]` card shape, so `--compare` can
