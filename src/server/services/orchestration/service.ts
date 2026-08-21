@@ -180,12 +180,16 @@ async function reloadService(): Promise<boolean> {
  * than re-derived from `config.json`, so a no-port install never gains one on its first heal.
  * File-only on purpose: the boot-time caller runs inside the very agent a re-bootstrap would tear
  * down (the self-inflicted `KeepAlive` failure mode), so launchd's in-memory job is left alone and
- * only {@link restartService} reloads it.
+ * only {@link restartService} reloads it. Refuses under npx like `installService` does (an npx
+ * cache copy resolves a cliEntry npm will prune), and the boot caller additionally gates on a
+ * global install so a dev checkout or an nvm-switched node never repoints the user's real
+ * LaunchAgent at itself implicitly; an explicit `service restart` is unaffected.
  */
 export async function healServicePlist(): Promise<
   "not-installed" | "unchanged" | "rewritten"
 > {
   if (!existsSync(SERVICE_PLIST_PATH)) return "not-installed";
+  if (detectInstallMode() === "npx") return "unchanged";
 
   let current: string[];
   try {
