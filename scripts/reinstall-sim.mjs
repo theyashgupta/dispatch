@@ -735,7 +735,7 @@ function indent(text) {
  * (`hook.sh`/`hook-settings.json`), stopping neither tmux sessions nor ttyd.
  * @returns Violation lines, empty on PASS.
  */
-async function legUninstallKeeps(opts = {}) {
+async function legUninstallKeeps() {
   await assertNoLiveService();
   const violations = [];
   const { home, prefixOld, prefixNew } = makeSandbox();
@@ -874,32 +874,63 @@ async function legUninstallKeeps(opts = {}) {
   return violations;
 }
 
-/** The leg registry `--only` and the default all-legs run both dispatch through. */
+/**
+ * The leg registry `--only` and the default all-legs run both dispatch through, each leg naming
+ * the `--break` modes it actually implements so a typo'd or unsupported mode is a usage error, not
+ * a normal run that prints PASS and reads as "the instrument was proven able to fail".
+ */
 const LEGS = {
-  persistence: legPersistence,
-  "plist-staleness": legPlistStaleness,
-  "uninstall-keeps": legUninstallKeeps,
+  persistence: { run: legPersistence, breaks: ["mutate-config"] },
+  "plist-staleness": {
+    run: legPlistStaleness,
+    breaks: ["stale-plist-uncorrected"],
+  },
+  "uninstall-keeps": { run: legUninstallKeeps, breaks: [] },
 };
+
+/** Print the usage line plus `reason` and exit 1. */
+function usage(reason) {
+  console.error(
+    `${reason}\nusage: node scripts/reinstall-sim.mjs [--only <${Object.keys(LEGS).join("|")}> [--break <mode>]]`,
+  );
+  process.exit(1);
+}
+
+/**
+ * The value following `flag` in `args`, undefined when the flag is absent. A flag that is last or
+ * followed by another flag is a usage error rather than a silent default.
+ */
+function flagValue(args, flag) {
+  const index = args.indexOf(flag);
+  if (index === -1) return undefined;
+  const value = args[index + 1];
+  if (value === undefined || value.startsWith("--")) {
+    usage(`${flag} requires a value`);
+  }
+  return value;
+}
 
 async function main() {
   const args = process.argv.slice(2);
-  const onlyIndex = args.indexOf("--only");
-  const only = onlyIndex >= 0 ? args[onlyIndex + 1] : undefined;
-  const breakIndex = args.indexOf("--break");
-  const breakMode = breakIndex >= 0 ? args[breakIndex + 1] : undefined;
+  const only = flagValue(args, "--only");
+  const breakMode = flagValue(args, "--break");
 
-  if (only && !LEGS[only]) {
-    console.error(
-      `usage: node scripts/reinstall-sim.mjs [--only <${Object.keys(LEGS).join("|")}>] [--break <mode>]`,
-    );
-    process.exit(1);
+  if (only !== undefined && !LEGS[only]) usage(`unknown leg "${only}"`);
+  if (breakMode !== undefined) {
+    if (only === undefined) usage("--break requires --only <leg>");
+    if (!LEGS[only].breaks.includes(breakMode)) {
+      usage(
+        `unknown --break "${breakMode}" for leg ${only}, supported: ` +
+          (LEGS[only].breaks.join("|") || "(none, this leg has no break mode)"),
+      );
+    }
   }
 
   const names = only ? [only] : Object.keys(LEGS);
   let anyFail = false;
   for (const name of names) {
     console.log(`\n=== leg: ${name} ===`);
-    const violations = await LEGS[name]({ break: breakMode });
+    const violations = await LEGS[name].run({ break: breakMode });
     if (violations.length > 0) {
       anyFail = true;
       console.log(`FAIL (${name})`);
