@@ -36,6 +36,7 @@ import {
   needsAttention as getNeedsAttention,
 } from "./card-attention.js";
 import { MemberRow } from "./MemberRow.js";
+import { useCardPrs } from "./use-card-prs.js";
 
 export const PRIORITY_DOT: Record<number, { color: string; label: string }> = {
   1: { color: "var(--prio-urgent)", label: "Urgent priority" },
@@ -95,6 +96,8 @@ export function CardView({
     useResumeFeedback(card);
   const compact = card.column === "done";
   const isGroup = card.source === "group";
+  const cardPrs = useCardPrs(card);
+  const showRepo = new Set(cardPrs.map((pr) => pr.repo)).size > 1;
   const selectable = card.column === "todo" && card.groupId == null && !isGroup;
   const needsAttention = getNeedsAttention(card);
   const priorityDot = isGroup ? undefined : PRIORITY_DOT[card.priority];
@@ -294,15 +297,24 @@ export function CardView({
           >
             <SourceBadge source={card.source ?? "linear"} />
             <LinearStateBadge card={card} />
-            {card.prs?.map((pr) => (
-              <PrBadge key={pr.url} pr={pr} />
-            ))}
-            {card.prsUnknown != null && (
-              <UnknownProbeBadge
-                signal="pr"
-                category={card.prsUnknown.category}
-                partial={(card.prs?.length ?? 0) > 0}
-              />
+            {!isGroup &&
+              cardPrs
+                .slice(0, 3)
+                .map((pr) => (
+                  <PrBadge key={pr.url} pr={pr} showRepo={showRepo} />
+                ))}
+            {!isGroup && cardPrs.length > 3 && (
+              <span
+                style={{
+                  ...chipStyle,
+                  border: "1px solid var(--border)",
+                  color: "var(--text-muted)",
+                }}
+                title={`${cardPrs.length - 3} more pull request${cardPrs.length - 3 === 1 ? "" : "s"}`}
+                aria-label={`${cardPrs.length - 3} more pull request${cardPrs.length - 3 === 1 ? "" : "s"}`}
+              >
+                {`+${cardPrs.length - 3}`}
+              </span>
             )}
             {card.previews?.map((preview) => (
               <PreviewBadge key={preview.port} preview={preview} />
