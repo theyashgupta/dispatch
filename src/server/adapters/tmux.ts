@@ -290,13 +290,16 @@ export async function sendKeys(target: string, keys: string[]): Promise<void> {
 }
 
 /**
- * Kill session `name` (`kill-session -t <name>`). Swallows failure — the rollback/undo
- * path must be idempotent (killing an already-gone session is a no-op success for us).
+ * Kill session `name` (`kill-session -t <name>`), reporting whether tmux accepted it. Never
+ * throws: the rollback/undo path must be idempotent (killing an already-gone session is a no-op).
  * @remarks Tolerant swallow-to-default (NEW-10): idempotent no-op if the session is already gone.
  * @see docs/ARCHITECTURE.md#resilience-and-reconcile
  */
-export async function killSession(name: string): Promise<void> {
+export async function killSession(name: string): Promise<boolean> {
   try {
     await run("tmux", ["kill-session", "-t", name]);
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }

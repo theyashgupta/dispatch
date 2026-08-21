@@ -52,6 +52,7 @@ export interface UninstallOutcome {
   plan: UninstallPlan;
   removed: string[];
   failed: { path: string; reason: string }[];
+  stopped: { sessions: number; ttyd: number };
 }
 
 const PACKAGE_NOTE =
@@ -261,9 +262,10 @@ function hasStopWork(plan: UninstallPlan): boolean {
 export async function runUninstall(
   plan: UninstallPlan,
 ): Promise<UninstallOutcome> {
-  killTtydPids(plan.stop.ttydPids);
+  const stoppedTtyd = killTtydPids(plan.stop.ttydPids);
+  let stoppedSessions = 0;
   for (const session of plan.stop.sessions) {
-    await killSession(`=${session}`);
+    if (await killSession(`=${session}`)) stoppedSessions++;
   }
   if (plan.stop.service) {
     try {
@@ -295,5 +297,6 @@ export async function runUninstall(
     },
     removed,
     failed,
+    stopped: { sessions: stoppedSessions, ttyd: stoppedTtyd },
   };
 }

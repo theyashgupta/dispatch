@@ -356,10 +356,11 @@ async function uninstall(values: {
     process.stdout.write("\n");
   }
 
-  const stopped = plan.stop.sessions.length;
-  const { plan: done, removed, failed } = await runUninstall(plan);
+  const { plan: done, removed, failed, stopped } = await runUninstall(plan);
   process.stdout.write(
-    `  Removed ${removed.length} file(s), stopped ${stopped} session(s).\n`,
+    `  Removed ${removed.length} file(s), stopped ${stopped.sessions} session(s)` +
+      (stopped.ttyd > 0 ? ` and ${stopped.ttyd} ttyd process(es)` : "") +
+      ".\n",
   );
   if (failed.length > 0) {
     process.stdout.write(`  Failed to remove ${failed.length} file(s):\n`);
