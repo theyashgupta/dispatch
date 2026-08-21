@@ -54,6 +54,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -215,7 +216,10 @@ function buildAndPack(stageDir) {
  * Materialize {@link OLD_RELEASE_TAG} into a tag-keyed tmpdir cache via `git archive`, never `git
  * worktree`, extracting a tar leaves the working repository's git state untouched. Builds it once
  * and reuses the compiled tree across runs (a tag is immutable, so the cache is always valid), but
- * always re-packs, packing is cheap and this keeps the returned tarball's mtime fresh.
+ * always re-packs, packing is cheap and this keeps the returned tarball's mtime fresh. A cache hit
+ * is trusted only when the tree is owned by this user and not group/world-writable: its contents
+ * are installed and then executed, and `os.tmpdir()` falls back to the shared `/tmp` when `TMPDIR`
+ * is unset.
  * @returns The absolute path to the packed OLD-release tarball.
  */
 function buildOldRelease() {
@@ -227,6 +231,13 @@ function buildOldRelease() {
   const builtEntry = join(treeRoot, REQUIRED_TARBALL_ENTRY);
 
   if (existsSync(builtEntry)) {
+    const st = statSync(treeRoot);
+    if (st.uid !== process.getuid?.() || (st.mode & 0o022) !== 0) {
+      fail(
+        `refusing to reuse ${treeRoot}: not owned by this user or group/world-writable. ` +
+          `Its contents get installed and executed, delete it and re-run.`,
+      );
+    }
     console.log(
       `\n  preflight: reusing cached ${OLD_RELEASE_TAG} build at ${builtEntry}`,
     );
@@ -235,8 +246,9 @@ function buildOldRelease() {
       `\n  preflight: materializing ${OLD_RELEASE_TAG} from the git tag`,
     );
     rmSync(treeRoot, { recursive: true, force: true });
-    mkdirSync(treeRoot, { recursive: true });
-    const tarPath = `${treeRoot}.tar`;
+    mkdirSync(treeRoot, { recursive: true, mode: 0o755 });
+    const tarDir = mkSandboxDir("release-tar");
+    const tarPath = join(tarDir, `${OLD_RELEASE_TAG}.tar`);
     try {
       const tar = execFileSync(
         "git",
@@ -254,7 +266,7 @@ function buildOldRelease() {
           `will not substitute a stand-in for it: ${err.message}`,
       );
     } finally {
-      rmSync(tarPath, { force: true });
+      rmSync(tarDir, { recursive: true, force: true });
     }
     try {
       execFileSync("npm", ["ci", "--no-audit", "--no-fund"], {
