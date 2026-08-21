@@ -270,6 +270,24 @@ async function update(): Promise<void> {
 }
 
 /**
+ * Parse a `--port` flag value, exiting 2 with a usage message on anything outside 1-65535.
+ * @remarks Shared by the boot path and `service install` so an invalid value can neither reach
+ * the listener nor be rendered into the plist, where `KeepAlive` would turn the CLI's own
+ * rejection into a respawn loop.
+ */
+function parsePortFlag(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    process.stderr.write(
+      `Invalid --port value: ${raw} (expected an integer 1-65535)\n`,
+    );
+    process.exit(2);
+  }
+  return port;
+}
+
+/**
  * Route the `dispatch service <sub>` family to its action and exit with the returned code. Unknown
  * or missing sub-command prints HELP and exits 2, matching the top-level unknown-command style.
  */
@@ -281,7 +299,7 @@ async function service(
   },
 ): Promise<void> {
   if (sub === "install") {
-    const port = values.port ? Number(values.port) : undefined;
+    const port = parsePortFlag(values.port);
     process.exit(await installService({ port, print: values.print }));
   }
   if (sub === "status") {
@@ -408,16 +426,7 @@ async function cli(): Promise<void> {
   }
 
   process.env.NODE_ENV ??= "production";
-  const desiredPort = values.port ? Number(values.port) : undefined;
-  if (
-    desiredPort !== undefined &&
-    (!Number.isInteger(desiredPort) || desiredPort < 1 || desiredPort > 65535)
-  ) {
-    process.stderr.write(
-      `Invalid --port value: ${values.port} (expected an integer 1–65535)\n`,
-    );
-    process.exit(2);
-  }
+  const desiredPort = parsePortFlag(values.port);
   const { main } = await import("./index.js");
   const { port } = await main({ desiredPort });
   const url = `http://127.0.0.1:${port}`;
