@@ -35,6 +35,7 @@ import {
   errorCopy,
   needsAttention as getNeedsAttention,
 } from "./card-attention.js";
+import { GroupPrRow } from "./GroupPrRow.js";
 import { MemberRow } from "./MemberRow.js";
 import { useCardPrs } from "./use-card-prs.js";
 
@@ -372,6 +373,8 @@ export function CardView({
         >
           {card.title}
         </div>
+
+        <GroupPrRow card={card} />
 
         <div
           style={{
