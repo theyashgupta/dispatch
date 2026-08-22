@@ -1141,6 +1141,15 @@ async function checkRepoTagging(cdp, sessionId, violations) {
     );
   }
 
+  await checkNoPrUnknownBadge(cdp, sessionId, violations);
+}
+
+/** PRLINK-04's board half, extracted so the break can drive the exact same assertion without
+ * re-running the whole repo-tagging orchestrator. Matches the RENDERED TEXT of a leaf node the
+ * way `gh-reliability-98.mjs` does, never `aria-label`/`title`: `UnknownProbeBadge` carries no
+ * `aria-label` at all and its `title` is the DETAIL sentence ("Could not check ..."), never the
+ * label, so an attribute-prefix scan cannot see the badge this requirement forbids. */
+async function checkNoPrUnknownBadge(cdp, sessionId, violations) {
   const fail = await evalReport(
     cdp,
     sessionId,
@@ -1148,22 +1157,21 @@ async function checkRepoTagging(cdp, sessionId, violations) {
     "repo-tagging (PR98-FAIL)",
     `${FIND_CARD_SRC}(function () {
       var card = panel98FindCardRoot(${JSON.stringify(FAIL_IDENTIFIER)});
-      var offenders = Array.prototype.filter.call(card.querySelectorAll("[aria-label], [title]"), function (el) {
-        var al = el.getAttribute("aria-label") || "";
-        var t = el.getAttribute("title") || "";
-        return al.indexOf("PR unknown") === 0 || al.indexOf("PR check incomplete") === 0 ||
-          t.indexOf("PR unknown") === 0 || t.indexOf("PR check incomplete") === 0;
+      var offenders = Array.prototype.filter.call(card.querySelectorAll("*"), function (el) {
+        if (el.children.length > 0) return false;
+        var t = (el.textContent || "").trim();
+        return t.indexOf("PR unknown") === 0 || t.indexOf("PR check incomplete") === 0;
       });
       return {
         structurallyPresent: true,
         offenderCount: offenders.length,
-        offenders: offenders.map(function (e) { return e.getAttribute("aria-label") || e.getAttribute("title"); }),
+        offenders: offenders.map(function (e) { return (e.textContent || "").trim(); }),
       };
     })()`,
   );
   if (fail != null && fail.offenderCount > 0) {
     violations.push(
-      `repo-tagging: PR98-FAIL card subtree contains ${fail.offenderCount} element(s) with a PR-unknown accessible name/title: ${JSON.stringify(fail.offenders)}`,
+      `repo-tagging: PR98-FAIL card subtree contains ${fail.offenderCount} element(s) rendering a PR-unknown badge label: ${JSON.stringify(fail.offenders)}`,
     );
   }
 }
@@ -1630,10 +1638,59 @@ async function runBreakRepoTagging(cdp, sessionId) {
   console.log(
     `--break repo-tagging RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
   );
+
+  // Second leg, PRLINK-04's own sub-assertion: the badge scan was never proven able to fire,
+  // since the leg above only blanks a repo-segment text node. The injected node carries the exact
+  // shape the real component renders (a bare span whose `title` is the DETAIL sentence and which
+  // carries no `aria-label` at all), so it also demonstrates why the old attribute-prefix scan
+  // could not see it.
+  console.log(
+    "\n--break repo-tagging: injecting a PR-unknown badge leaf into PR98-FAIL's own subtree",
+  );
+  const injectedId = "panel98-break-pr-unknown";
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(FAIL_IDENTIFIER)});
+      if (document.getElementById(${JSON.stringify(injectedId)})) throw new Error("panel98 break: injected node already present");
+      var span = document.createElement("span");
+      span.id = ${JSON.stringify(injectedId)};
+      span.setAttribute("title", "Could not check for pull requests: gh could not reach GitHub.");
+      span.textContent = "PR unknown";
+      card.appendChild(span);
+      return true;
+    })()`,
+  );
+  const badgeTripViolations = [];
+  await checkNoPrUnknownBadge(cdp, sessionId, badgeTripViolations);
+  console.log(
+    `--break repo-tagging (PR98-FAIL badge) TRIP leg FAIL output:\n${badgeTripViolations.join("\n")}`,
+  );
+  const badgeTripFired = badgeTripViolations.some(
+    (v) => v.indexOf("rendering a PR-unknown badge label") !== -1,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var el = document.getElementById(${JSON.stringify(injectedId)});
+      if (!el) throw new Error("panel98 break: injected node vanished before restore");
+      el.remove();
+      return document.getElementById(${JSON.stringify(injectedId)}) === null;
+    })()`,
+  );
+  const badgeRestoreViolations = [];
+  await checkNoPrUnknownBadge(cdp, sessionId, badgeRestoreViolations);
+  console.log(
+    `--break repo-tagging (PR98-FAIL badge) RESTORE leg: ${badgeRestoreViolations.length === 0 ? "PASS" : `FAIL:\n${badgeRestoreViolations.join("\n")}`}`,
+  );
+
   return {
-    tripFired,
-    restoreClean: restoreViolations.length === 0,
-    tripViolations,
+    tripFired: tripFired && badgeTripFired,
+    restoreClean:
+      restoreViolations.length === 0 && badgeRestoreViolations.length === 0,
+    tripViolations: [...tripViolations, ...badgeTripViolations],
   };
 }
 
