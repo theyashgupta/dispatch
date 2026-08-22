@@ -865,3 +865,72 @@ honesty standard.
 above; every `dispatch-perf-board-*` sandbox directory, every `dsp-pbf98-*` tmux session, and port
 `47820` were confirmed gone after each run; real `~/.dispatch/board.db` remained absent throughout
 (this machine has no live install, matching Phase 97's own recorded diagnosis).
+
+### Phase 99, Plan 06, evidence wire re-measurement (PORT-01/PORT-02 closeout)
+
+- **Date:** 2026-08-22
+- **Git SHA measured:** `c73a54b` (plans 99-01 through 99-06's own doc task landed, no further
+  `src/` change since).
+- **Machine:** Apple Silicon (arm64), local (Node v24.19.0).
+
+**Comparison point, stated explicitly.** The correct starting point for this phase's own gate is
+`98-01-SUMMARY.md`'s own BEFORE capture, `initialBytes=17410`/`sseFrameBytes=17655` at N=1 and
+`initialBytes=20845`/`sseFrameBytes=21090` at N=1 multi-session (`--sessions-per-card=3`), the same
+numbers the Phase 98 closeout entry above already re-confirmed byte-identical. A future reader
+should not compare against the older, superseded `15029`/`15274` figures.
+
+**Wire re-measurement, single-session leg, same exact command:**
+`node scripts/perf-board.mjs --done=500 --runs=3`
+
+```
+run=1 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=5
+run=2 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=8 commits=5
+run=3 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=5
+
+PERF-BOARD mode=prod done=500 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=5
+```
+
+**Wire re-measurement, multi-session leg, same exact command:**
+`node scripts/perf-board.mjs --done=500 --runs=3 --sessions-per-card=3`
+
+```
+run=1 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=7 commits=5
+run=2 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=8 commits=5
+run=3 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=8 commits=5
+
+PERF-BOARD-MULTI mode=prod done=500 sessionsPerCard=3 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=8 commits=5
+```
+
+**Delta: zero on both legs, and the honest reason why, stated rather than assumed.**
+`initialBytes`/`sseFrameBytes` are BYTE-IDENTICAL to the `17410`/`17655` and `20845`/`21090`
+comparison points on both legs. This is not because evidence is free: `scripts/perf-board.mjs`
+seeds every fixture card's PR state directly but never seeds a `previews` array on any of them
+(confirmed: `grep -n "previews" scripts/perf-board.mjs` returns nothing), and `PreviewInfo.evidence`
+only ever appears on a card that carries a preview at all. The same "the field costs zero bytes at
+N=1 because none of these fixtures carry the state that triggers it" reasoning the `98-09` entry
+above already applied to `PrInfo.repo` applies identically here to `evidence`. **Verdict: PASS, no
+regression measured on this harness's own fixture shape**, with the honest caveat that this harness
+does not exercise a card carrying `previews`, so it cannot bound the per-preview evidence cost the
+phase's own CONTEXT.md asked to see measured; `panel-99.mjs`'s own three fixture cards (below) are
+the instrument that actually carries evidence on the wire, and its own `density-91.mjs --compare`
+leg (99-04) already confirmed the evidence surface changes no rendered card geometry.
+
+**Environment:** `com.dispatch.app` confirmed stopped and `:4700` refusing throughout both runs;
+no `dispatch-perf-board-*` sandbox directory or stray listener on `47820`/`9359` remained after
+either run; real `~/.dispatch/board.db` remained absent throughout (this machine has no live
+install, matching every prior entry's own recorded diagnosis).
+
+**Every gate run sequentially on one tree, this closeout:**
+
+| Gate                             | Command                                                                                           | Exit |
+| -------------------------------- | ------------------------------------------------------------------------------------------------- | ---- |
+| standing CI gate                 | `npm run check`                                                                                   | 0    |
+| UI evidence harness              | `node scripts/panel-99.mjs`                                                                       | 0    |
+| real-process attribution harness | `node scripts/port-attribution-99.mjs`                                                            | 0    |
+| card geometry                    | `node scripts/density-91.mjs --compare .planning/phases/99-port-detection/99-density-before.json` | 0    |
+| Phase 98 regression guard        | `node scripts/panel-98.mjs`                                                                       | 0    |
+
+No leaked tmux session, held sandbox port, or leftover sandbox directory was found between any two
+of the five runs above, and the real `~/.dispatch/board.db` (absent on this machine throughout,
+matching every entry above) was unaffected. No live `com.dispatch.app` service exists on this
+machine to restore.
