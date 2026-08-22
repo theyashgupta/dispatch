@@ -693,6 +693,9 @@ async function seedPrFailingCards(home, count, repoPath) {
   const db = new DatabaseSync(dbPath);
   const tmuxNames = [];
   try {
+    // Prepared BEFORE the transaction opens: a failure here (schema not yet created, the exact
+    // condition gh-reliability-98.mjs's own seeder retries for) must surface as itself, not as the
+    // "cannot rollback, no transaction is active" the catch below would otherwise raise over it.
     const insert = db.prepare(
       `INSERT INTO cards (id, data) VALUES (?, ?)
        ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
@@ -705,7 +708,11 @@ async function seedPrFailingCards(home, count, repoPath) {
     }
     db.exec("COMMIT");
   } catch (err) {
-    db.exec("ROLLBACK");
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // no transaction was open, the original error below is the real diagnostic
+    }
     throw err;
   } finally {
     db.close();
