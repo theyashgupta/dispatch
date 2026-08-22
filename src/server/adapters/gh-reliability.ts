@@ -11,6 +11,9 @@ const NEGATIVE_CACHE_TTL_MS = 10 * 60_000;
 /** Below this many requests remaining in either GitHub rate-limit bucket, probing pauses. */
 const RATE_LIMIT_FLOOR = 50;
 
+/** Cooldown before a `gh api rate_limit` check that tripped no pause may be spawned again. */
+const RATE_LIMIT_RECHECK_MS = 60_000;
+
 /** Upper bound on a single breaker pause, regardless of what `reset` reports (T-98-03). */
 const MAX_PAUSE_MS = 60 * 60_000;
 
@@ -49,6 +52,16 @@ let pausedUntil = 0;
 /** Memoises the single in-flight `gh api rate_limit` call so simultaneous failures trip it once. */
 let rateLimitCheckInFlight: Promise<void> | null = null;
 
+/**
+ * Earliest epoch ms at which a completed check that tripped NO pause may be repeated.
+ *
+ * @remarks
+ * Without it the in-flight memo only dedupes strictly overlapping calls, so a body that never
+ * trips a pause (healthy `remaining`, malformed JSON, a `reset` already in the past) re-asks once
+ * per failing probe per tick forever, which is the spawn storm the breaker exists to avoid.
+ */
+let rateLimitRecheckAt = 0;
+
 let inFlight = 0;
 const queue: (() => void)[] = [];
 
@@ -86,15 +99,14 @@ interface GhRateLimitBody {
  * any stderr are never logged, only the closed `ProbeFailureCategory` token this function's caller
  * already returns may cross the wire (T-98-01).
  *
- * A standing pause returns immediately. {@link rateLimitCheckInFlight} dedupes only STRICTLY
+ * A standing pause returns immediately, and a check that completed without tripping one is not
+ * repeated until {@link rateLimitRecheckAt}: {@link rateLimitCheckInFlight} dedupes only STRICTLY
  * overlapping calls, since the initiating caller nulls it in its own `finally`, and rate-limited
- * `gh pr list` children exit milliseconds apart rather than simultaneously: without the
- * {@link pausedUntil} test, N rate-limited failures would spawn N `gh api rate_limit` subprocesses,
- * and a body that never trips a pause (a healthy `remaining`, a malformed body, a past `reset`)
- * would spawn one per failing probe per tick, forever.
+ * `gh pr list` children exit milliseconds apart rather than simultaneously.
  */
 async function tripBreakerIfRateLimited(): Promise<void> {
   if (Date.now() < pausedUntil) return;
+  if (Date.now() < rateLimitRecheckAt) return;
   if (rateLimitCheckInFlight != null) return rateLimitCheckInFlight;
   rateLimitCheckInFlight = (async () => {
     try {
@@ -134,6 +146,9 @@ async function tripBreakerIfRateLimited(): Promise<void> {
     await rateLimitCheckInFlight;
   } finally {
     rateLimitCheckInFlight = null;
+    if (Date.now() >= pausedUntil) {
+      rateLimitRecheckAt = Date.now() + RATE_LIMIT_RECHECK_MS;
+    }
   }
 }
 
