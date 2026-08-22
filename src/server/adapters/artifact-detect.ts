@@ -505,9 +505,17 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
       if (portsBySession == null) {
         const count = (previewFailureCounts.get(rec.id) ?? 0) + 1;
         previewFailureCounts.set(rec.id, count);
-        if (rec.previewsUnknown?.category !== "detection unavailable") {
+        // checkedAt bounds a standing failure to one broadcast per minute (PORT-02).
+        const checkedAt = new Date(
+          Math.floor(Date.now() / 60_000) * 60_000,
+        ).toISOString();
+        if (
+          rec.previewsUnknown?.category !== "detection unavailable" ||
+          rec.previewsUnknown.checkedAt !== checkedAt
+        ) {
           await store.setPreviewsUnknownIfSession(card.id, session, {
             category: "detection unavailable",
+            checkedAt,
           });
         }
         if (

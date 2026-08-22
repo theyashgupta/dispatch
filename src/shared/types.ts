@@ -143,11 +143,12 @@ export type ProbeFailureCategory =
 export interface ProbeUnknown {
   category: ProbeFailureCategory;
   /**
-   * ISO timestamp of the most recent probe attempt for this signal, OPTIONAL. Absent means either
-   * this probe path does not stamp a time (the preview signal does not; Phase 99 owns previews) or
-   * the record predates this field, never treat absence as "just checked". The PR write path
-   * always sets it. Required would force preview call sites to invent a timestamp for a signal
-   * they do not stamp, so optional is deliberate, not an oversight.
+   * ISO timestamp of the most recent probe attempt for this signal, OPTIONAL. Both the PR and
+   * preview write paths stamp a minute-truncated time when a probe genuinely ran; a skip carries
+   * the prior value forward or omits it, so absence never means "just checked", only that no
+   * fresh probe wrote this record (a negative-cache skip, or a record predating this field).
+   * Required would force a call site to invent a timestamp for a signal it did not stamp, so
+   * optional is deliberate, not an oversight.
    */
   checkedAt?: string;
 }
