@@ -5,6 +5,7 @@ import type {
   Column as ColumnId,
 } from "../../../shared/types.js";
 import { Card } from "./Card.js";
+import { isForceDimmed } from "./drag-selection.js";
 import { EmptyState } from "./EmptyState.js";
 import { COLUMN_ACCENT, COLUMN_LABELS } from "./column-meta.js";
 import {
@@ -24,6 +25,7 @@ interface ColumnProps {
   groupMembersById?: Map<string, CardModel[]>;
   selectedCardId?: string | null;
   selectedIds?: Set<string>;
+  activeCardId?: string | null;
   onSelectCard?: (id: string) => void;
   onStartRequest?: (id: string) => void;
   onToggleSelect?: (id: string) => void;
@@ -47,6 +49,7 @@ export function Column({
   groupMembersById,
   selectedCardId,
   selectedIds,
+  activeCardId,
   onSelectCard,
   onStartRequest,
   onToggleSelect,
@@ -222,6 +225,11 @@ export function Column({
         card={card}
         selected={card.id === selectedCardId}
         multiSelected={selectedIds?.has(card.id) ?? false}
+        forceDimmed={isForceDimmed(
+          card.id,
+          activeCardId ?? null,
+          selectedIds ?? new Set(),
+        )}
         members={groupMembersById?.get(card.id)}
         onSelect={onSelectCard}
         onStartRequest={onStartRequest}

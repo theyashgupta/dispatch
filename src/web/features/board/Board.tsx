@@ -342,6 +342,7 @@ export function Board({
                 groupMembersById={groupMembersById}
                 selectedCardId={selectedCardId}
                 selectedIds={selectedIds}
+                activeCardId={activeCardId}
                 onSelectCard={handleSelectCard}
                 onStartRequest={onStartRequest}
                 onToggleSelect={toggleSelect}
