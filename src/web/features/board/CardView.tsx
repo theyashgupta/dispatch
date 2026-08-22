@@ -23,6 +23,8 @@ import {
   GoneBadge,
   LinearStateBadge,
   PrBadge,
+  PrOverflowChip,
+  PR_CHIP_CAP,
   PreviewBadge,
   SourceBadge,
   UnknownProbeBadge,
@@ -300,22 +302,12 @@ export function CardView({
             <LinearStateBadge card={card} />
             {!isGroup &&
               prs
-                .slice(0, 3)
+                .slice(0, PR_CHIP_CAP)
                 .map((pr) => (
                   <PrBadge key={pr.url} pr={pr} showRepo={showRepo} />
                 ))}
-            {!isGroup && prs.length > 3 && (
-              <span
-                style={{
-                  ...chipStyle,
-                  border: "1px solid var(--border)",
-                  color: "var(--text-muted)",
-                }}
-                title={`${prs.length - 3} more pull request${prs.length - 3 === 1 ? "" : "s"}`}
-                aria-label={`${prs.length - 3} more pull request${prs.length - 3 === 1 ? "" : "s"}`}
-              >
-                {`+${prs.length - 3}`}
-              </span>
+            {!isGroup && prs.length > PR_CHIP_CAP && (
+              <PrOverflowChip hidden={prs.length - PR_CHIP_CAP} />
             )}
             {card.previews?.map((preview) => (
               <PreviewBadge key={preview.port} preview={preview} />
