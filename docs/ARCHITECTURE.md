@@ -2205,6 +2205,16 @@ at all when nothing is reachable.
 exclusion set and `PROBE_HOSTS_FOR_BIND` are unchanged by this cwd cross-check; it runs strictly
 after a candidate has already survived both.
 
+**The compared tree is the session's own `workspacePath`, never `workspace.folder`.**
+`Session.workspacePath` is the per ticket directory under `workspaceRoot` that holds the worktrees
+the dev server actually runs in; `Session.workspace.folder` is the folder the user picked in the
+start modal, which holds the ORIGINAL checkouts. The two are disjoint under the default
+configuration, so comparing the discovered cwd against `folder` stamped `cwdMismatch` on every
+correctly attributed preview, and reported a confident cwd match for a process sitting in a
+DIFFERENT ticket's source checkout under the same registered folder. A session with no
+`workspacePath` (an older record) is inconclusive: the cross check is skipped entirely and the
+evidence degrades to pane ancestry, never to a mismatch.
+
 **The realpath rule is not a macOS curiosity.** `lsof` reports the realpath of a process's working
 directory, and both `/tmp` and `os.tmpdir()` resolve through `/private` on macOS while
 `workspaceRoot` is user configurable, so any symlinked volume reopens this gap in production. Both

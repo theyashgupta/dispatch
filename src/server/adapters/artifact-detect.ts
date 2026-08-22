@@ -222,10 +222,17 @@ function safeRealpath(p: string): string | null {
 }
 
 /**
- * Whether `rawCwd` resolves inside `workspace`, the cwd cross-check for the pane-pid walk's
+ * Whether `rawCwd` resolves inside `workspacePath`, the cwd cross-check for the pane-pid walk's
  * attribution.
  *
  * @remarks
+ * `workspacePath` is the session's OWN per-ticket worktree root (`Session.workspacePath`,
+ * `workspaceRoot/<sessionName>`), never `Session.workspace.folder`, which is the folder the user
+ * picked in the start modal and holds the ORIGINAL checkouts. The two trees are disjoint under the
+ * default configuration, so comparing against `folder` stamped `cwdMismatch` on every correctly
+ * attributed preview and reported a cwd match for a process sitting in a DIFFERENT ticket's source
+ * checkout under the same registered folder (99-REVIEW CR-01). A session carrying no
+ * `workspacePath` at all is inconclusive at the call site, never a mismatch.
  * Both sides are realpath-normalized before comparison: macOS resolves `/tmp` and
  * `os.tmpdir()` through `/private/...`, `lsof` reports the realpath, and `workspaceRoot` is
  * user-configurable, so a naive string-prefix compare would fail on any symlinked path
@@ -239,23 +246,24 @@ function safeRealpath(p: string): string | null {
  */
 function matchWorkspace(
   rawCwd: string,
-  workspace: { folder: string; repos: { path: string; base: string }[] },
+  workspacePath: string,
+  repos: { path: string; base: string }[],
   displayNames: Map<string, string>,
 ): { inWorkspace: boolean; repoBasename?: string } | null {
   const cwd = safeRealpath(rawCwd);
   if (cwd == null) return null;
 
-  for (const repo of workspace.repos) {
-    const worktree = safeRealpath(worktreeDirFor(workspace.folder, repo.path));
+  for (const repo of repos) {
+    const worktree = safeRealpath(worktreeDirFor(workspacePath, repo.path));
     if (worktree == null) continue;
     if (cwd === worktree || cwd.startsWith(worktree + sep)) {
       return { inWorkspace: true, repoBasename: displayNames.get(repo.path) };
     }
   }
 
-  const folder = safeRealpath(workspace.folder);
-  if (folder == null) return null;
-  return { inWorkspace: cwd === folder || cwd.startsWith(folder + sep) };
+  const root = safeRealpath(workspacePath);
+  if (root == null) return null;
+  return { inWorkspace: cwd === root || cwd.startsWith(root + sep) };
 }
 
 /**
@@ -557,9 +565,15 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
           : new Map<string, string>();
       const next: PreviewInfo[] = confirmedCandidates.map((candidate) => {
         const rawCwd = cwdByPid.get(candidate.pid);
+        const workspacePath = rec.workspacePath;
         const matched =
-          rawCwd != null && previewWorkspace != null
-            ? matchWorkspace(rawCwd, previewWorkspace, previewDisplayNames)
+          rawCwd != null && previewWorkspace != null && workspacePath != null
+            ? matchWorkspace(
+                rawCwd,
+                workspacePath,
+                previewWorkspace.repos,
+                previewDisplayNames,
+              )
             : null;
         return {
           port: candidate.port,
