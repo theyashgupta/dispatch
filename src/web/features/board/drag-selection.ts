@@ -14,6 +14,15 @@ export function dragSelectionIds(
 }
 
 /**
+ * The stacked-deck back-face offsets, in pixels, ordered back to front (the 8px face, then the
+ * 4px face).
+ * @remarks Pure translation, deliberately no rotation and no scale: a rotated face's bounding rect
+ * would no longer equal the front face's rect translated by a constant, and that arithmetic is
+ * exactly how `panel-100.mjs` verifies the deck without a screenshot.
+ */
+export const DECK_BACK_OFFSETS_PX = [8, 4] as const;
+
+/**
  * Whether a resting (not physically grabbed) card should dim as if it were being dragged too.
  */
 export function isForceDimmed(

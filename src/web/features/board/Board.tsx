@@ -16,6 +16,7 @@ import type {
 } from "../../../shared/types.js";
 import type { CardSearchResult } from "../../../shared/search.js";
 import { blocksAgentDoneManualEntry } from "../../../shared/column-transitions.js";
+import { DECK_BACK_OFFSETS_PX, dragSelectionIds } from "./drag-selection.js";
 import { Column } from "./Column.js";
 import { CardView } from "./CardView.js";
 import { SearchBox } from "./SearchBox.js";
@@ -127,6 +128,8 @@ export function Board({
   const overlayShowDot =
     activeCard != null &&
     deriveShowDot(activeCard, overlaySelected, lastOpenedMap);
+  const overlayIds =
+    activeCardId != null ? dragSelectionIds(activeCardId, selectedIds) : null;
 
   const isCarousel = useMediaQuery(CAROUSEL_QUERY);
   const isPhone = useMediaQuery("(max-width: 767px)");
@@ -363,7 +366,7 @@ export function Board({
           </div>
         </div>
         <DragOverlay dropAnimation={null} style={{ pointerEvents: "none" }}>
-          {activeCard ? (
+          {activeCard && overlayIds == null ? (
             <CardView
               card={activeCard}
               members={groupMembersById.get(activeCard.id)}
@@ -374,6 +377,61 @@ export function Board({
               elevated
               domProps={{ "aria-hidden": true, inert: true }}
             />
+          ) : null}
+          {activeCard && overlayIds != null ? (
+            <div style={{ position: "relative" }} aria-hidden inert>
+              {DECK_BACK_OFFSETS_PX.slice(
+                Math.min(overlayIds.length, 3) === 3 ? 0 : 1,
+              ).map((offset) => (
+                <div
+                  key={offset}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    transform:
+                      offset === 8
+                        ? "translate(8px, 8px)"
+                        : "translate(4px, 4px)",
+                    zIndex: offset === 8 ? 1 : 2,
+                    background: "var(--surface-card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius)",
+                  }}
+                />
+              ))}
+              <CardView
+                card={activeCard}
+                members={groupMembersById.get(activeCard.id)}
+                selected={overlaySelected}
+                showDot={overlayShowDot}
+                showGone={overlayShowGone}
+                hover={false}
+                elevated
+                domProps={{ "aria-hidden": true, inert: true }}
+              />
+              <span
+                style={{
+                  position: "absolute",
+                  top: "calc(-1 * var(--space-sm))",
+                  right: "calc(-1 * var(--space-sm))",
+                  zIndex: 4,
+                  height: "20px",
+                  minWidth: "20px",
+                  padding: "0 var(--space-xs)",
+                  borderRadius: "10px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "var(--accent)",
+                  color: "var(--text)",
+                  fontSize: "var(--font-label)",
+                  fontWeight: "var(--weight-semibold)",
+                  lineHeight: "var(--line-label)",
+                }}
+              >
+                {overlayIds.length}
+              </span>
+            </div>
           ) : null}
         </DragOverlay>
       </DndContext>
