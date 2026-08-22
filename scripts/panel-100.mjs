@@ -73,14 +73,19 @@
  *   node scripts/panel-100.mjs                       every registered check, exits non-zero on any
  *                                                       violation. Plan 01 registered two:
  *                                                       single-card-unchanged | keyboard-unchanged.
- *                                                       Plan 05 (this revision) added three more:
- *                                                       stacked-overlay | overlay-unchanged-n1 |
- *                                                       a11y, registered BEFORE plan 01's two in
- *                                                       CHECKS (see PLAN 100-05 ADDITIONS below,
- *                                                       "CHECKS' insertion order is LOAD-BEARING").
- *                                                       group-modal-prefill/atomic-rollback remain
- *                                                       for a later plan to extend CHECKS/BREAKS
- *                                                       without touching this scaffold.
+ *                                                       Plan 05 added three more: stacked-overlay |
+ *                                                       overlay-unchanged-n1 | a11y, registered
+ *                                                       BEFORE plan 01's two in CHECKS (see PLAN
+ *                                                       100-05 ADDITIONS below, "CHECKS' insertion
+ *                                                       order is LOAD-BEARING"). Plan 06 (this
+ *                                                       revision) added the final two:
+ *                                                       group-modal-prefill | atomic-rollback,
+ *                                                       registered between a11y and the two
+ *                                                       permanent-movers for the same reason, and
+ *                                                       registered nine `--break <name>` legs
+ *                                                       total (see PLAN 100-06 ADDITIONS below).
+ *                                                       This is now the phase's complete
+ *                                                       seven-check harness.
  *   node scripts/panel-100.mjs --check <name>         one named check only.
  *   node scripts/panel-100.mjs --break <name>         that check's OWN break: fires the SAME check
  *                                                       function the real run uses against a DOM
@@ -89,8 +94,9 @@
  *                                                       and re-confirms PASS, all inside one Chrome
  *                                                       tab. Never edits a source file.
  *
- * BREAK EVIDENCE, all five checks run under `--break <name>` for real and observed reporting their
- * own violation. The quoted lines below are the VERBATIM TRIP-leg output captured from those runs:
+ * BREAK EVIDENCE, all seven checks (nine registered breaks, `atomic-rollback` carries three of its
+ * own) run under `--break <name>` for real and observed reporting their own violation. The quoted
+ * lines below are the VERBATIM TRIP-leg output captured from those runs:
  *   - `single-card-unchanged` proven able to fail: removing the `done` column's droppable DOM node
  *     (behind a same-size placeholder so no sibling column reflows) BEFORE the drag starts produced
  *     `single-card-unchanged: MSD-A expected column "done", measured "todo"`.
@@ -115,9 +121,34 @@
  *     container mid-drag produced `a11y: deck container aria-hidden expected "true", measured null`
  *     AND `a11y: badge's closest [aria-hidden="true"] ancestor is not the deck container, the count
  *     is not inside the hidden subtree`.
- * All five `--break <name>` runs' restore legs re-confirmed PASS (`tripFired=true restoreClean=true`
- * for each), and a plain `node scripts/panel-100.mjs` run immediately after all five breaks exited 0
- * with all five checks PASS, proving no break leaked DOM state.
+ *   - `group-modal-prefill` proven able to fail (100-06): a `MutationObserver` detaching the New
+ *     group modal's first `MemberRow` node the instant the modal appears produced
+ *     `group-modal-prefill: modal member identifier set expected ["MSD-A","MSD-B","MSD-C"], measured
+ *     ["MSD-B","MSD-C"]`, never "modal not found".
+ *   - `atomic-rollback` proven able to fail three ways (100-06):
+ *     (1) releasing all three initial `POST /move` requests successfully (no CDP failure injected)
+ *     produced `atomic-rollback: trip, [role="alert"] text expected "Couldn't move 3 tickets",
+ *     measured null` AND `atomic-rollback: trip, MSD-A expected column "todo" immediately after
+ *     rollback, measured "done"` (also reproduced for MSD-B/MSD-C, and again after a full page
+ *     reload);
+ *     (2) `atomic-rollback-toast`, a `MutationObserver` removing `[role="alert"]` the instant it
+ *     appears while the injection works normally, produced `atomic-rollback: leg 1 (clean rollback),
+ *     [role="alert"] text expected "Couldn't move 3 tickets", measured null` with every column
+ *     assertion still passing, proving the toast assertion is not masked by the column ones;
+ *     (3) `atomic-rollback-stranded-compensation`, a monkey-patched `window.console.error` that
+ *     swallows any "stranded" message plus a `MutationObserver` removing `[role="alert"]`, layered
+ *     on top of a genuinely permanent compensation failure (failing the targeted compensating call
+ *     AND its retry), produced `atomic-rollback: trip (detection signals suppressed), expected
+ *     [role="alert"] to stay visible past 3200ms for a stranded compensation, measured absent` AND
+ *     `atomic-rollback: trip (detection signals suppressed), expected a console.error mentioning
+ *     "stranded" and card id panel100-a, none captured`, proving the check's own stranded-card
+ *     detection (an alert that outlives the normal 3200ms auto-clear, plus a captured `console.error`
+ *     naming the card) is what catches this failure mode, not a column read (which a real SSE resync
+ *     eventually settles to the server's own un-reverted truth regardless of what this harness
+ *     asserts, see PLAN 100-06 ADDITIONS below).
+ * All nine `--break <name>` runs' restore legs re-confirmed PASS (`tripFired=true restoreClean=true`
+ * for each), and a plain `node scripts/panel-100.mjs` run immediately after all nine breaks exited 0
+ * with all seven checks PASS, proving no break leaked DOM state.
  *
  * PLAN 100-05 ADDITIONS AND FINDINGS, load-bearing for anyone extending this file further:
  *   - `selectCardsByIdentifier`/`ctrlClickCard` use CDP's Meta/Command modifier bit (`modifiers: 4`),
@@ -162,6 +193,58 @@
  *     PERMANENTLY drag MSD-A and MSD-B into `done` (that IS what they assert), which would make
  *     those two cards ineligible for a later ctrl-click (`Card.tsx` requires `column === "todo"`)
  *     if they ran first in the same full-suite invocation.
+ *
+ * PLAN 100-06 ADDITIONS AND FINDINGS, load-bearing for anyone extending this file further:
+ *   - `group-modal-prefill`/`atomic-rollback` reuse `panel-95.mjs`'s `Fetch.enable`/
+ *     `Fetch.requestPaused`/`Fetch.failRequest`/`Fetch.continueRequest` idiom, extended for THIS
+ *     phase's own shape: three initial paused requests arrive together (not one), and the two
+ *     compensating requests plan 04 fires after a partial failure arrive on the SAME pattern
+ *     afterward and must also be drained, or the page hangs on them. `fetchPausedQueue` (module
+ *     level, fed by `main()`'s single `cdp.ws` message listener, which spans every session) and
+ *     `waitForNextPausedRequest` mirror `panel-95.mjs`'s own queue/wait shape exactly.
+ *   - `atomic-rollback`'s `strandCompensation`/`retryCompensationOnce` legs need the same shared
+ *     capture: `consoleCapturedMessages` (also module level, fed by the same listener) retains every
+ *     `Runtime.consoleAPICalled` event so a check can assert a SPECIFIC `console.error` (here,
+ *     `performGroupMove`'s stranded-compensation log naming the card id) actually fired, not merely
+ *     grep this script's own stdout after the fact.
+ *   - `FIND_OVERLAY_SRC`/`FIND_FIXED_OVERLAY_SRC` needed a THIRD exclusion (`#activity-drawer`)
+ *     beyond `[data-column]`: the app's own Activity feed drawer is `position: fixed`,
+ *     `aria-hidden="true"`, `inert` when closed, exactly the same attribute/style signature a
+ *     `DragOverlay` node carries, and once a card's move has been logged even once, the drawer's own
+ *     (hidden) event text legitimately contains that card's identifier. No prior plan's checks ever
+ *     drove a SECOND drag against a card that already had activity history (this plan's
+ *     `atomic-rollback` break-restore repair does), so this collision was previously unreachable;
+ *     both locators now explicitly exclude `el.closest("#activity-drawer")`.
+ *   - `atomic-rollback`'s two legs (leg 1, the plan's own base scenario; leg 2, the plan-checker's
+ *     required addition proving a retried-once compensation is what actually saves a card, on the
+ *     client AND after a full page reload) share ONE `performAtomicRollbackLeg` body, branched by
+ *     `opts`. A break's own SCENARIO (e.g. `atomic-rollback`'s "release all three, no failure ever
+ *     occurs") is checked by running the SAME assertions the passing case uses, never a bespoke
+ *     "expect the broken outcome" branch: the former proves the check's own assertions can fail
+ *     when run against a genuinely wrong scenario, the latter proves nothing about the check at all.
+ *   - `atomic-rollback-stranded-compensation`'s own scenario (fail the compensating call AND its
+ *     retry) is `Board.tsx`'s OWN already-correct handling of a permanently-stranded card (plan 04),
+ *     not a bug, so the bare scenario alone produces a clean pass, not a violation. Proving THIS
+ *     check's own detection signals (an alert that outlives its normal 3200ms auto-clear, a captured
+ *     `console.error` naming the card) are load-bearing needed a DOM/JS-level mutation layered ON
+ *     TOP of the real stranding: a `MutationObserver` removing `[role="alert"]` the instant it
+ *     appears, plus a monkey-patched `window.console.error` swallowing any call mentioning
+ *     "stranded" (so this harness's own capture never observes it). The `atomic-rollback` and
+ *     `atomic-rollback-toast` breaks genuinely and permanently move real cards server-side
+ *     (`releaseAllInitial` lets all three moves land for real; the stranded scenario permanently
+ *     fails one compensation for real); both restore legs first drag the affected card(s) back to
+ *     `todo` via a real single-card `dragCardToColumn` (`repairCardsToTodo`) before reusing that
+ *     board session, since the following restore-verification run's own `selectCardsByIdentifier`
+ *     needs every fixture back in a selection-eligible column.
+ *   - `freshBoardSession()` now also closes the PREVIOUS target via `Target.closeTarget` (a
+ *     browser-process-level command, independent of whether the closed tab's own renderer is
+ *     responsive) once the new one is confirmed loaded. This plan's two new checks add substantially
+ *     more real drags per full-suite run than any prior plan (`atomic-rollback` alone drives two
+ *     full drags plus a `Page.reload` in one check); left unclosed, the accumulating stuck tabs
+ *     (deliberately never closed before this plan, see PLAN 100-05's own `CDP.send()` timeout note)
+ *     measurably starved the LAST fresh session in a full-suite run of enough CPU to render within
+ *     `RENDER_TIMEOUT_MS`, reproducing on 1 of 3 consecutive full-suite runs before this fix and on
+ *     0 of 2 after it.
  *
  * TIMING FINDING, load-bearing for the `single-card-unchanged` break specifically, and worth
  * recording since it corrects this plan's own `<interfaces>` block: dnd-kit caches a droppable's
@@ -215,6 +298,9 @@ const POLL_INTERVAL_MS = 100;
 const READY_TIMEOUT_MS = 30_000;
 const KILL_TIMEOUT_MS = 5_000;
 const RENDER_TIMEOUT_MS = 15_000;
+/** Same value/purpose as `panel-95.mjs`'s own constant of the same name: how long a check may wait
+ * for a `Fetch.requestPaused` event on the intercepted move pattern before giving up. */
+const FETCH_PAUSE_TIMEOUT_MS = 10_000;
 
 const CHROME_CANDIDATES = [
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -519,6 +605,32 @@ async function isPortListening(port) {
   }
 }
 
+/**
+ * Module-level, populated by `main()`'s single `cdp.ws` message listener (shared across every
+ * `Target.attachToTarget` session, including `freshBoardSession()`'s new tabs, since the listener
+ * lives on the one underlying WebSocket connection). `fetchPausedQueue` collects
+ * `Fetch.requestPaused` events for whichever check currently has the `Fetch` domain enabled;
+ * `consoleCapturedMessages` collects every `Runtime.consoleAPICalled` event's params (mirroring the
+ * existing DEBUG stderr line, but retained in memory so a check can assert a specific
+ * `console.error`, for example `performGroupMove`'s stranded-compensation log, actually fired,
+ * rather than only ever grepping this script's own stdout after the fact).
+ */
+const fetchPausedQueue = [];
+const consoleCapturedMessages = [];
+
+/** Shifts the next `Fetch.requestPaused` event off `fetchPausedQueue`, waiting up to `timeoutMs` if
+ * the queue is empty. Mirrors `panel-95.mjs`'s own `waitForNextPausedRequest`. */
+async function waitForNextPausedRequest(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fetchPausedQueue.length > 0) return fetchPausedQueue.shift();
+    await sleep(50);
+  }
+  throw new Error(
+    `no Fetch.requestPaused event observed within ${timeoutMs}ms`,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures. MSD-A..D are selection-eligible per Board.tsx's own predicate
 // (column === "todo" && groupId == null && source !== "group"); MSD-Z sits in
@@ -685,6 +797,18 @@ async function waitForBoardRootLoaded(cdp, sessionId, identifiers) {
  * function exists to avoid), and is cleaned up regardless once `main()`'s `finally` block kills the
  * whole Chrome process at the end of this script's run.
  */
+/**
+ * Tracks the targetId of the last board tab handed out (by `main()`'s own standup `Target.
+ * createTarget` call, or by a prior `freshBoardSession()`), so this call can close it once the NEW
+ * target is confirmed loaded. `Target.closeTarget` is a browser-process-level command, independent
+ * of whether the closed target's own renderer is responsive, so it reliably reaps even a genuinely
+ * stuck tab. This plan's own `group-modal-prefill`/`atomic-rollback` checks add several more real
+ * drags (and, for `atomic-rollback`, a `Page.reload`) per full-suite run than any prior plan; left
+ * unclosed, the accumulating stuck tabs measurably starved the LAST fresh session in a run of
+ * enough CPU to render within `RENDER_TIMEOUT_MS`, a load-bearing finding for this plan.
+ */
+let lastKnownTargetId = null;
+
 async function freshBoardSession(cdp, identifiers) {
   const { targetId } = await cdp.send("Target.createTarget", {
     url: `http://127.0.0.1:${SANDBOX_PORT}/`,
@@ -702,6 +826,12 @@ async function freshBoardSession(cdp, identifiers) {
     sessionId,
   );
   await waitForBoardRootLoaded(cdp, sessionId, identifiers);
+  if (lastKnownTargetId != null) {
+    await cdp
+      .send("Target.closeTarget", { targetId: lastKnownTargetId })
+      .catch(() => {});
+  }
+  lastKnownTargetId = targetId;
   return sessionId;
 }
 
@@ -847,7 +977,9 @@ const FIND_OVERLAY_SRC = `
     var candidates = Array.prototype.filter.call(
       root.querySelectorAll('[aria-hidden="true"][inert]'),
       function (el) {
-        return el.textContent.indexOf(identifier) !== -1 && !el.closest("[data-column]");
+        return el.textContent.indexOf(identifier) !== -1 &&
+          !el.closest("[data-column]") &&
+          !el.closest("#activity-drawer");
       }
     );
     if (candidates.length === 0) return null;
@@ -860,6 +992,51 @@ const FIND_OVERLAY_SRC = `
     return outer[0];
   }
 `;
+
+/**
+ * Locates `GroupStartModal`'s members container: `Modal` renders via `createPortal` straight onto
+ * `document.body` (verified, `Modal.tsx`'s own `createPortal(..., document.body)` call), OUTSIDE
+ * `#root` entirely, so this walks `document` directly rather than scoping to `#root` the way every
+ * card/column locator above does. The container is identified structurally, never by an
+ * attribute this phase's own break mutates (Trap 3): it is the `[role="dialog"]`'s descendant `div`
+ * whose FIRST element child's text matches `Members (<n>)` (`GroupStartModal.tsx`'s
+ * `Field section` label, always the members list's own first sibling). Returns `null`, never
+ * throws, since the modal may legitimately not be open yet while a check polls for it.
+ */
+const FIND_MODAL_MEMBERS_SRC = `
+  function panel100FindGroupModalMembersContainer() {
+    var dialog = document.querySelector('[role="dialog"][aria-label="New group"]');
+    if (!dialog) return null;
+    var divs = Array.prototype.slice.call(dialog.querySelectorAll("div"));
+    for (var i = 0; i < divs.length; i++) {
+      var el = divs[i];
+      var first = el.firstElementChild;
+      if (first && /^Members \\(\\d+\\)$/.test((first.textContent || "").trim())) return el;
+    }
+    return null;
+  }
+`;
+
+/** Reads the modal's Members label plus the identifier text of every row below it (`MemberRow.tsx`'s
+ * `Field mono` span, always each row's own first child), or `null` if the modal is not open. */
+async function readGroupModalMembers(cdp, sessionId) {
+  return evalValue(
+    cdp,
+    sessionId,
+    `${FIND_MODAL_MEMBERS_SRC}(function () {
+      var container = panel100FindGroupModalMembersContainer();
+      if (!container) return null;
+      var rows = Array.prototype.slice.call(container.children).slice(1);
+      return {
+        label: container.firstElementChild.textContent.trim(),
+        identifiers: rows.map(function (row) {
+          var first = row.firstElementChild;
+          return first ? (first.textContent || "").trim() : null;
+        }),
+      };
+    })()`,
+  );
+}
 
 /** Centre point and geometry of a card root scoped to `column`, throwing per
  * `FIND_CARD_IN_COLUMN_SRC`'s own zero/many-match discipline. */
@@ -1461,6 +1638,7 @@ const FIND_FIXED_OVERLAY_SRC = `
         // session.
         return el.textContent.indexOf(identifier) !== -1 &&
           !el.closest("[data-column]") &&
+          !el.closest("#activity-drawer") &&
           getComputedStyle(el).position === "fixed";
       }
     );
@@ -2215,10 +2393,783 @@ async function checkA11y(
   await clearSelectionViaEscape(cdp, sessionId);
 }
 
+// ---------------------------------------------------------------------------
+// group-modal-prefill (DRAG-04). Enables Fetch on the move pattern BEFORE the
+// drop so the check can prove a negative (zero paused move requests), drags
+// MSD-B onto in_progress (the only reachable "start a session" target,
+// RESEARCH Pitfall 1), and reads the resulting GroupStartModal's Members
+// list, which Modal.tsx portals straight onto document.body, outside #root.
+// ---------------------------------------------------------------------------
+
+/**
+ * `group-modal-prefill` leg body: selects MSD-A/B/C, enables `Fetch` on the move pattern, drags
+ * MSD-B onto `in_progress`, and asserts the resulting `GroupStartModal` lists exactly those three
+ * identifiers with MSD-D absent, and that zero `Fetch.requestPaused` events arrived for the move
+ * endpoint (the direct proof no doomed `todo` to `in_progress` request was ever fired, catching
+ * RESEARCH Pitfall 3). Closes the modal via a real `Escape` keypress (`Modal.tsx`'s own binding,
+ * `Board.tsx`'s own selection-clearing Escape effect is a no-op while `groupModalMembers != null`),
+ * then asserts all four MSD fixtures still read `todo` and clears the selection for the next check.
+ * `mutateHook`, when provided, runs immediately BEFORE the drop (mirroring `preDragHook`'s timing
+ * discipline), letting `runBreakGroupModalPrefill` install a `MutationObserver` that detaches the
+ * modal's first `MemberRow` node the instant it appears. `restoreHook` runs immediately after this
+ * leg's own reading captures the trip, mirroring `stacked-overlay`'s own restore-hook timing.
+ */
+async function performGroupModalPrefillLeg(
+  cdp,
+  sessionId,
+  violations,
+  mutateHook = null,
+  restoreHook = null,
+) {
+  await selectCardsByIdentifier(cdp, sessionId, [
+    MSD_A_IDENTIFIER,
+    MSD_B_IDENTIFIER,
+    MSD_C_IDENTIFIER,
+  ]);
+
+  fetchPausedQueue.length = 0;
+  await cdp.send(
+    "Fetch.enable",
+    {
+      patterns: [{ urlPattern: "*/api/cards/*/move", requestStage: "Request" }],
+    },
+    sessionId,
+  );
+
+  if (mutateHook) await mutateHook(cdp, sessionId);
+
+  const target = await columnDropPoint(cdp, sessionId, "in_progress");
+  const point = await beginDrag(
+    cdp,
+    sessionId,
+    "todo",
+    MSD_B_IDENTIFIER,
+    target,
+  );
+  await assertDragActivated(cdp, sessionId, MSD_B_IDENTIFIER);
+  await endDrag(cdp, sessionId, point);
+
+  const deadline = Date.now() + RENDER_TIMEOUT_MS;
+  let reading = null;
+  while (Date.now() < deadline) {
+    reading = await readGroupModalMembers(cdp, sessionId);
+    if (reading != null) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+
+  if (reading == null) {
+    violations.push(
+      `group-modal-prefill: New group modal never appeared within ${RENDER_TIMEOUT_MS}ms after the In Progress drop`,
+    );
+  } else {
+    const expected = [MSD_A_IDENTIFIER, MSD_B_IDENTIFIER, MSD_C_IDENTIFIER]
+      .slice()
+      .sort();
+    const measured = (reading.identifiers ?? []).slice().sort();
+    if (JSON.stringify(measured) !== JSON.stringify(expected)) {
+      violations.push(
+        `group-modal-prefill: modal member identifier set expected ${JSON.stringify(expected)}, measured ${JSON.stringify(measured)}`,
+      );
+    }
+    if ((reading.identifiers ?? []).includes(MSD_D_IDENTIFIER)) {
+      violations.push(
+        `group-modal-prefill: modal unexpectedly includes MSD-D, which was never part of the dragged selection`,
+      );
+    }
+    if (reading.label !== "Members (3)") {
+      violations.push(
+        `group-modal-prefill: modal Members label expected "Members (3)", measured ${JSON.stringify(reading.label)}`,
+      );
+    }
+  }
+
+  if (restoreHook) await restoreHook(cdp, sessionId);
+
+  // A short grace window, not the full FETCH_PAUSE_TIMEOUT_MS: this is a same-machine loopback
+  // fetch, so if performGroupMove's in_progress branch were wrongly wired to fire N moveCard calls
+  // anyway, the resulting requests would already be paused well within a couple hundred ms of the
+  // drop. Waiting the full 10s here would only slow every passing run for no added coverage.
+  const NO_MOVE_GRACE_MS = 1200;
+  await sleep(NO_MOVE_GRACE_MS);
+  if (fetchPausedQueue.length > 0) {
+    violations.push(
+      `group-modal-prefill: expected zero Fetch.requestPaused events on the move endpoint during the In Progress drop, measured ${fetchPausedQueue.length}`,
+    );
+    for (const paused of fetchPausedQueue.splice(0)) {
+      await cdp
+        .send(
+          "Fetch.continueRequest",
+          { requestId: paused.requestId },
+          sessionId,
+        )
+        .catch(() => {});
+    }
+  }
+
+  await clearSelectionViaEscape(cdp, sessionId);
+  await sleep(300);
+  const stillOpen = await evalValue(
+    cdp,
+    sessionId,
+    `document.querySelector('[role="dialog"][aria-label="New group"]') != null`,
+  );
+  if (stillOpen) {
+    violations.push(
+      `group-modal-prefill: New group modal still present after a real Escape keypress`,
+    );
+  }
+
+  for (const id of [
+    MSD_A_IDENTIFIER,
+    MSD_B_IDENTIFIER,
+    MSD_C_IDENTIFIER,
+    MSD_D_IDENTIFIER,
+  ]) {
+    const col = await pollUntilColumn(cdp, sessionId, id, "todo", 2000);
+    if (col !== "todo") {
+      violations.push(
+        `group-modal-prefill: ${id} expected column "todo" after the modal closed, measured ${JSON.stringify(col)}`,
+      );
+    }
+  }
+
+  await cdp.send("Fetch.disable", {}, sessionId);
+  await clearSelectionViaEscape(cdp, sessionId);
+}
+
+async function checkGroupModalPrefill(cdp, sessionId, violations) {
+  await performGroupModalPrefillLeg(cdp, sessionId, violations, null, null);
+}
+
+/**
+ * `group-modal-prefill` break: installs a `MutationObserver` (BEFORE the drop, watching
+ * `document.body`'s subtree) that detaches the modal's FIRST `MemberRow` node the instant the
+ * members container appears, stashing the captured node plus its parent/next-sibling on `window`
+ * so the restore hook can reinsert the exact same node object (never a recreated lookalike). The
+ * trip must report a member-set mismatch naming the expected three identifiers and the measured
+ * two, never "modal not found" (the modal DID appear, only one of its rows did not survive).
+ */
+async function runBreakGroupModalPrefill(cdp, sessionId) {
+  console.log(
+    "\n--break group-modal-prefill: detaching the modal's first MemberRow node the instant it appears",
+  );
+  const mutateHook = async (cdpArg, sessionIdArg) => {
+    await evalValue(
+      cdpArg,
+      sessionIdArg,
+      `${FIND_MODAL_MEMBERS_SRC}(function () {
+        var observer = new MutationObserver(function () {
+          var container = panel100FindGroupModalMembersContainer();
+          if (!container) return;
+          var rows = Array.prototype.slice.call(container.children).slice(1);
+          if (rows.length === 0) return;
+          var firstRow = rows[0];
+          window.__panel100BreakMemberRowNode = firstRow;
+          window.__panel100BreakMemberRowParent = container;
+          window.__panel100BreakMemberRowNextSibling = firstRow.nextSibling;
+          firstRow.remove();
+          observer.disconnect();
+          window.__panel100BreakMemberRowObserver = null;
+        });
+        window.__panel100BreakMemberRowObserver = observer;
+        observer.observe(document.body, { childList: true, subtree: true });
+        return true;
+      })()`,
+    );
+  };
+  const restoreHook = async (cdpArg, sessionIdArg) => {
+    await evalValue(
+      cdpArg,
+      sessionIdArg,
+      `(function () {
+        var node = window.__panel100BreakMemberRowNode;
+        var parent = window.__panel100BreakMemberRowParent;
+        var nextSibling = window.__panel100BreakMemberRowNextSibling;
+        if (node && parent && document.contains(parent) && !document.contains(node)) {
+          if (nextSibling && document.contains(nextSibling)) {
+            parent.insertBefore(node, nextSibling);
+          } else {
+            parent.appendChild(node);
+          }
+        }
+        delete window.__panel100BreakMemberRowNode;
+        delete window.__panel100BreakMemberRowParent;
+        delete window.__panel100BreakMemberRowNextSibling;
+        if (window.__panel100BreakMemberRowObserver) {
+          window.__panel100BreakMemberRowObserver.disconnect();
+          window.__panel100BreakMemberRowObserver = null;
+        }
+        return true;
+      })()`,
+    );
+  };
+
+  const tripViolations = [];
+  await performGroupModalPrefillLeg(
+    cdp,
+    sessionId,
+    tripViolations,
+    mutateHook,
+    restoreHook,
+  );
+  console.log(
+    `--break group-modal-prefill TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired =
+    tripViolations.some(
+      (v) =>
+        v.indexOf("modal member identifier set expected") !== -1 &&
+        v.indexOf('["MSD-A","MSD-B","MSD-C"]') !== -1,
+    ) && !tripViolations.some((v) => v.indexOf("never appeared") !== -1);
+
+  const restoreSessionId = await freshBoardSession(cdp, TOP_LEVEL_IDENTIFIERS);
+  const restoreViolations = [];
+  await checkGroupModalPrefill(cdp, restoreSessionId, restoreViolations);
+  console.log(
+    `--break group-modal-prefill RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// atomic-rollback (DRAG-05). Drags MSD-B onto "done" for a real cross-column
+// move, fails exactly MSD-B's own initial POST /move via CDP, and drains the
+// resulting compensating requests. Leg 1 is the plan's own base scenario
+// (both compensations succeed cleanly); leg 2 is the plan-checker's own
+// required addition, forcing the FIRST compensating request to fail once and
+// proving its retry is what actually saves the card, on the client and after
+// a full page reload. Neither leg edits src/; every failure is CDP-decided.
+// ---------------------------------------------------------------------------
+
+/** Moves every `identifiers` entry currently NOT in "todo" back to "todo" via a real single-card
+ * drag (`dragCardToColumn`, no selection required). Used after a break trip that let a real
+ * server-side move land (`atomic-rollback`'s "release all three" leg, or a permanently-stranded
+ * compensation), so the following restore-verification run's own `selectCardsByIdentifier` finds
+ * every fixture back in its selection-eligible column. */
+async function repairCardsToTodo(cdp, sessionId, identifiers) {
+  for (const id of identifiers) {
+    const col = await evalValue(
+      cdp,
+      sessionId,
+      `${FIND_CARD_COLUMN_SRC}panel100CardColumnOf(${JSON.stringify(id)})`,
+    );
+    if (col != null && col !== "todo") {
+      await dragCardToColumn(cdp, sessionId, col, id, "todo");
+    }
+  }
+}
+
+/**
+ * `atomic-rollback` leg body. Drags MSD-B onto `done` for a real cross-column move (never a
+ * harmless same-column drop, the whole point here is a genuine attempted batch move), collects the
+ * three initial paused `POST /move` requests, and fails exactly MSD-B's own request (unless
+ * `releaseAllInitial`, the base break's own scenario) while continuing the other two.
+ *
+ * Without `releaseAllInitial`, drains the two resulting compensating requests (asserting each
+ * targets `todo`) and, depending on `strandCompensation`/`retryCompensationOnce`, either lets both
+ * through immediately (the plan's own base scenario), or fails the FIRST one once and decides its
+ * retry's fate: continued (`retryCompensationOnce`, the plan-checker's required addition, proving
+ * the retry is what actually saves the card) or failed again (`strandCompensation`, the required
+ * break leg, permanently stranding that one card server-side).
+ *
+ * Returns `{ strandedIdentifier }`, the one card a `strandCompensation` run left permanently
+ * server-side `done`, or `null`, so a caller can repair the fixture before reusing this board
+ * session.
+ */
+async function performAtomicRollbackLeg(
+  cdp,
+  sessionId,
+  violations,
+  legLabel,
+  opts = {},
+) {
+  const {
+    mutateHook = null,
+    restoreHook = null,
+    releaseAllInitial = false,
+    strandCompensation = false,
+    retryCompensationOnce = false,
+  } = opts;
+
+  const consoleStart = consoleCapturedMessages.length;
+
+  await selectCardsByIdentifier(cdp, sessionId, [
+    MSD_A_IDENTIFIER,
+    MSD_B_IDENTIFIER,
+    MSD_C_IDENTIFIER,
+  ]);
+
+  fetchPausedQueue.length = 0;
+  await cdp.send(
+    "Fetch.enable",
+    {
+      patterns: [{ urlPattern: "*/api/cards/*/move", requestStage: "Request" }],
+    },
+    sessionId,
+  );
+
+  if (mutateHook) await mutateHook(cdp, sessionId);
+
+  const target = await columnDropPoint(cdp, sessionId, "done");
+  const point = await beginDrag(
+    cdp,
+    sessionId,
+    "todo",
+    MSD_B_IDENTIFIER,
+    target,
+  );
+  await assertDragActivated(cdp, sessionId, MSD_B_IDENTIFIER);
+  await endDrag(cdp, sessionId, point);
+
+  const initialPaused = [];
+  for (let i = 0; i < 3; i++) {
+    initialPaused.push(await waitForNextPausedRequest(FETCH_PAUSE_TIMEOUT_MS));
+  }
+  for (const paused of initialPaused) {
+    if (!releaseAllInitial && paused.request.url.indexOf(MSD_B_ID) !== -1) {
+      await cdp.send(
+        "Fetch.failRequest",
+        { requestId: paused.requestId, errorReason: "Failed" },
+        sessionId,
+      );
+    } else {
+      await cdp.send(
+        "Fetch.continueRequest",
+        { requestId: paused.requestId },
+        sessionId,
+      );
+    }
+  }
+
+  // `releaseAllInitial` (the base `atomic-rollback` break's own scenario) never fails anything, so
+  // `performGroupMove`'s `results.every(fulfilled)` branch returns immediately: no rollback, no
+  // alert, no compensating requests at all. Deliberately falls through into the SAME "expect todo,
+  // expect the alert" assertions every other leg uses below, rather than a bespoke "expect done, no
+  // alert" branch: a break's whole point is running the check's OWN real assertions against a
+  // broken scenario and watching them correctly report the resulting violations, never asserting
+  // the broken scenario's own (wrong) outcome as if it were the goal.
+  let strandedIdentifier = null;
+  let strandedId = null;
+  if (!releaseAllInitial) {
+    const compensating = [];
+    for (let i = 0; i < 2; i++) {
+      compensating.push(await waitForNextPausedRequest(FETCH_PAUSE_TIMEOUT_MS));
+    }
+    for (const paused of compensating) {
+      const body = paused.request.postData
+        ? JSON.parse(paused.request.postData)
+        : null;
+      if (!body || body.column !== "todo") {
+        violations.push(
+          `atomic-rollback: ${legLabel}, compensating request body expected {"column":"todo"}, measured ${JSON.stringify(body)}`,
+        );
+      }
+    }
+
+    if (strandCompensation || retryCompensationOnce) {
+      const targeted = compensating[0];
+      strandedId =
+        targeted.request.url.indexOf(MSD_A_ID) !== -1 ? MSD_A_ID : MSD_C_ID;
+      strandedIdentifier =
+        strandedId === MSD_A_ID ? MSD_A_IDENTIFIER : MSD_C_IDENTIFIER;
+      await cdp.send(
+        "Fetch.failRequest",
+        { requestId: targeted.requestId, errorReason: "Failed" },
+        sessionId,
+      );
+      await cdp.send(
+        "Fetch.continueRequest",
+        { requestId: compensating[1].requestId },
+        sessionId,
+      );
+      const retryPaused = await waitForNextPausedRequest(
+        FETCH_PAUSE_TIMEOUT_MS,
+      );
+      if (strandCompensation) {
+        await cdp.send(
+          "Fetch.failRequest",
+          { requestId: retryPaused.requestId, errorReason: "Failed" },
+          sessionId,
+        );
+      } else {
+        await cdp.send(
+          "Fetch.continueRequest",
+          { requestId: retryPaused.requestId },
+          sessionId,
+        );
+      }
+    } else {
+      for (const paused of compensating) {
+        await cdp.send(
+          "Fetch.continueRequest",
+          { requestId: paused.requestId },
+          sessionId,
+        );
+      }
+    }
+  } else {
+    await sleep(800);
+  }
+
+  await sleep(800);
+
+  const expectedAlertText = "Couldn't move 3 tickets";
+  const alertTextNow = await evalValue(
+    cdp,
+    sessionId,
+    `(function () { var el = document.querySelector('[role="alert"]'); return el ? el.textContent.trim() : null; })()`,
+  );
+  if (alertTextNow !== expectedAlertText) {
+    violations.push(
+      `atomic-rollback: ${legLabel}, [role="alert"] text expected ${JSON.stringify(expectedAlertText)}, measured ${JSON.stringify(alertTextNow)}`,
+    );
+  }
+
+  if (restoreHook) await restoreHook(cdp, sessionId);
+
+  for (const id of [MSD_A_IDENTIFIER, MSD_B_IDENTIFIER, MSD_C_IDENTIFIER]) {
+    // A permanently-stranded card's client column is not a stable read here: the board's own SSE
+    // resync (`Board.tsx`'s `useEffect` on the `board` prop) eventually overwrites the optimistic
+    // client-side revert with the server's real (still-"done") truth once a snapshot lands, so this
+    // one card's "immediately after rollback" state is racy by design, exactly why the plan routes
+    // detection through the alert-stays-open and console assertions below instead of a column read.
+    if (strandCompensation && id === strandedIdentifier) continue;
+    const col = await pollUntilColumn(cdp, sessionId, id, "todo", 2000);
+    if (col !== "todo") {
+      violations.push(
+        `atomic-rollback: ${legLabel}, ${id} expected column "todo" immediately after rollback, measured ${JSON.stringify(col)}`,
+      );
+    }
+  }
+  const colD = await pollUntilColumn(
+    cdp,
+    sessionId,
+    MSD_D_IDENTIFIER,
+    "todo",
+    1000,
+  );
+  if (colD !== "todo") {
+    violations.push(
+      `atomic-rollback: ${legLabel}, MSD-D expected column "todo" (never part of the dragged batch), measured ${JSON.stringify(colD)}`,
+    );
+  }
+
+  await sleep(3600);
+  const alertAfterWait = await evalValue(
+    cdp,
+    sessionId,
+    `(function () { var el = document.querySelector('[role="alert"]'); return el ? el.textContent.trim() : null; })()`,
+  );
+  if (strandCompensation) {
+    if (alertAfterWait == null) {
+      violations.push(
+        `atomic-rollback: ${legLabel}, expected [role="alert"] to stay visible past 3200ms for a stranded compensation, measured absent`,
+      );
+    }
+    const consoleHasStranded = consoleCapturedMessages
+      .slice(consoleStart)
+      .some((params) => {
+        const serialized = JSON.stringify(params.args);
+        return (
+          serialized.indexOf(strandedId) !== -1 &&
+          serialized.toLowerCase().indexOf("stranded") !== -1
+        );
+      });
+    if (!consoleHasStranded) {
+      violations.push(
+        `atomic-rollback: ${legLabel}, expected a console.error mentioning "stranded" and card id ${strandedId}, none captured`,
+      );
+    }
+  } else if (alertAfterWait != null) {
+    violations.push(
+      `atomic-rollback: ${legLabel}, expected [role="alert"] to auto-clear after 3200ms, still measured ${JSON.stringify(alertAfterWait)}`,
+    );
+  }
+
+  await cdp.send("Fetch.disable", {}, sessionId);
+  await cdp.send("Page.reload", {}, sessionId);
+  await waitForBoardRootLoaded(cdp, sessionId, TOP_LEVEL_IDENTIFIERS);
+
+  for (const id of [
+    MSD_A_IDENTIFIER,
+    MSD_B_IDENTIFIER,
+    MSD_C_IDENTIFIER,
+    MSD_D_IDENTIFIER,
+  ]) {
+    const expectStranded = strandCompensation && id === strandedIdentifier;
+    const col = await evalValue(
+      cdp,
+      sessionId,
+      `${FIND_CARD_COLUMN_SRC}panel100CardColumnOf(${JSON.stringify(id)})`,
+    );
+    if (expectStranded) {
+      if (col === "todo") {
+        violations.push(
+          `atomic-rollback: ${legLabel}, ${id} (the stranded card) expected a non-"todo" server column after a full page reload (the compensation never landed), measured "todo"`,
+        );
+      }
+    } else if (col !== "todo") {
+      violations.push(
+        `atomic-rollback: ${legLabel}, ${id} expected column "todo" after a full page reload, measured ${JSON.stringify(col)}`,
+      );
+    }
+  }
+
+  await clearSelectionViaEscape(cdp, sessionId);
+  return { strandedIdentifier };
+}
+
+async function checkAtomicRollback(cdp, sessionId, violations, opts = {}) {
+  await performAtomicRollbackLeg(
+    cdp,
+    sessionId,
+    violations,
+    "leg 1 (clean rollback)",
+    opts,
+  );
+  if (!opts.releaseAllInitial) {
+    await performAtomicRollbackLeg(
+      cdp,
+      sessionId,
+      violations,
+      "leg 2 (compensation retry succeeds)",
+      { retryCompensationOnce: true },
+    );
+  }
+}
+
+/**
+ * `atomic-rollback` break: releases ALL THREE initial move requests successfully via
+ * `Fetch.continueRequest`, so no failure is ever injected. The check must then report both the
+ * wrong columns (all three measured `done`, expected `todo`) and the absent alert. Since the real
+ * server genuinely persists this move, the restore leg first drags MSD-A/B/C back to `todo` for
+ * real (`repairCardsToTodo`) before re-running the actual `checkAtomicRollback` check.
+ */
+async function runBreakAtomicRollback(cdp, sessionId) {
+  console.log(
+    "\n--break atomic-rollback: releasing all three initial move requests successfully, no failure ever injected",
+  );
+  const tripViolations = [];
+  await performAtomicRollbackLeg(cdp, sessionId, tripViolations, "trip", {
+    releaseAllInitial: true,
+  });
+  console.log(
+    `--break atomic-rollback TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired =
+    tripViolations.some(
+      (v) =>
+        v.indexOf('expected column "todo" immediately after rollback') !== -1,
+    ) &&
+    tripViolations.some(
+      (v) => v.indexOf('[role="alert"] text expected') !== -1,
+    );
+
+  const restoreSessionId = await freshBoardSession(cdp, TOP_LEVEL_IDENTIFIERS);
+  await repairCardsToTodo(cdp, restoreSessionId, [
+    MSD_A_IDENTIFIER,
+    MSD_B_IDENTIFIER,
+    MSD_C_IDENTIFIER,
+  ]);
+  const restoreViolations = [];
+  await checkAtomicRollback(cdp, restoreSessionId, restoreViolations, {});
+  console.log(
+    `--break atomic-rollback RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
+/**
+ * `atomic-rollback-toast` break: with the injection working normally (MSD-B's own initial move
+ * still fails, both compensations still succeed), a `MutationObserver` removes the `[role="alert"]`
+ * node the instant it appears. The check must report the alert missing while the column assertions
+ * still pass, proving the toast assertion is not being masked by the column ones.
+ */
+async function runBreakAtomicRollbackToast(cdp, sessionId) {
+  console.log(
+    '\n--break atomic-rollback-toast: removing the [role="alert"] node the instant it appears, injection still working normally',
+  );
+  const mutateHook = async (cdpArg, sessionIdArg) => {
+    await evalValue(
+      cdpArg,
+      sessionIdArg,
+      `(function () {
+        var observer = new MutationObserver(function () {
+          var el = document.querySelector('[role="alert"]');
+          if (!el) return;
+          window.__panel100BreakAlertNode = el;
+          window.__panel100BreakAlertParent = el.parentNode;
+          window.__panel100BreakAlertNextSibling = el.nextSibling;
+          el.remove();
+          observer.disconnect();
+          window.__panel100BreakAlertObserver = null;
+        });
+        window.__panel100BreakAlertObserver = observer;
+        observer.observe(document.body, { childList: true, subtree: true });
+        return true;
+      })()`,
+    );
+  };
+  const restoreHook = async (cdpArg, sessionIdArg) => {
+    await evalValue(
+      cdpArg,
+      sessionIdArg,
+      `(function () {
+        var node = window.__panel100BreakAlertNode;
+        var parent = window.__panel100BreakAlertParent;
+        var nextSibling = window.__panel100BreakAlertNextSibling;
+        if (node && parent && document.contains(parent) && !document.contains(node)) {
+          if (nextSibling && document.contains(nextSibling)) {
+            parent.insertBefore(node, nextSibling);
+          } else {
+            parent.appendChild(node);
+          }
+        }
+        delete window.__panel100BreakAlertNode;
+        delete window.__panel100BreakAlertParent;
+        delete window.__panel100BreakAlertNextSibling;
+        if (window.__panel100BreakAlertObserver) {
+          window.__panel100BreakAlertObserver.disconnect();
+          window.__panel100BreakAlertObserver = null;
+        }
+        return true;
+      })()`,
+    );
+  };
+
+  const tripViolations = [];
+  await checkAtomicRollback(cdp, sessionId, tripViolations, {
+    mutateHook,
+    restoreHook,
+  });
+  console.log(
+    `--break atomic-rollback-toast TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired =
+    tripViolations.some(
+      (v) => v.indexOf('[role="alert"] text expected') !== -1,
+    ) &&
+    !tripViolations.some(
+      (v) =>
+        v.indexOf('expected column "todo" immediately after rollback') !== -1,
+    );
+
+  const restoreSessionId = await freshBoardSession(cdp, TOP_LEVEL_IDENTIFIERS);
+  const restoreViolations = [];
+  await checkAtomicRollback(cdp, restoreSessionId, restoreViolations, {});
+  console.log(
+    `--break atomic-rollback-toast RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
+/**
+ * `atomic-rollback-stranded-compensation` break, the plan-checker's own required additional leg.
+ * Fails MSD-B's own initial move (as always), then fails the FIRST compensating request AND its
+ * retry, permanently stranding that one card `done` server-side. The trip must report all three of:
+ * a non-"todo" server column for the stranded card after a full page reload (proving `leg 2`'s own
+ * retry-based assertion is not a dead instrument, since a permanently-failed retry correctly reads
+ * as a violation there), the failure alert staying visible past its normal 3200ms auto-clear, and a
+ * captured `console.error` naming the stranded card's id. The restore leg first repairs the
+ * stranded card back to `todo` for real before re-running the actual `checkAtomicRollback` check.
+ */
+/**
+ * `atomic-rollback-stranded-compensation` break, the plan-checker's own required additional leg.
+ * `Board.tsx`'s own compensation-retry logic (plan 04) already handles a permanently-stranded card
+ * correctly, on purpose: this is genuinely-correct product behavior, not a bug, so a bare scenario
+ * variation (failing the compensating call AND its retry) produces a clean check pass, not a
+ * violation, exactly proving the retry mechanism itself works. Proving the CHECK's OWN detection
+ * signals are load-bearing therefore needs a DOM/JS-level mutation on top of a real stranding
+ * scenario: this suppresses BOTH detection surfaces the check reads, a `MutationObserver` that
+ * removes `[role="alert"]` the instant it appears (mirroring `atomic-rollback-toast`'s technique),
+ * and a monkey-patched `window.console.error` that swallows any call whose text mentions
+ * "stranded" (so this harness's own `Runtime.consoleAPICalled` capture never observes it), while
+ * the underlying stranding still genuinely occurs server-side. The trip must report both the
+ * missing alert and the missing console message.
+ */
+async function runBreakAtomicRollbackStrandedCompensation(cdp, sessionId) {
+  console.log(
+    "\n--break atomic-rollback-stranded-compensation: suppressing the alert and console.error detection signals while a real permanent compensation failure still occurs",
+  );
+  const mutateHook = async (cdpArg, sessionIdArg) => {
+    await evalValue(
+      cdpArg,
+      sessionIdArg,
+      `(function () {
+        var origError = window.console.error.bind(window.console);
+        window.console.error = function () {
+          var args = Array.prototype.slice.call(arguments);
+          if (args.some(function (a) { return typeof a === "string" && a.indexOf("stranded") !== -1; })) return;
+          return origError.apply(window.console, args);
+        };
+        var observer = new MutationObserver(function () {
+          var el = document.querySelector('[role="alert"]');
+          if (!el) return;
+          el.remove();
+          observer.disconnect();
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        return true;
+      })()`,
+    );
+  };
+
+  const tripViolations = [];
+  const tripResult = await performAtomicRollbackLeg(
+    cdp,
+    sessionId,
+    tripViolations,
+    "trip (detection signals suppressed)",
+    { strandCompensation: true, mutateHook },
+  );
+  console.log(
+    `--break atomic-rollback-stranded-compensation TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired =
+    tripViolations.some(
+      (v) =>
+        v.indexOf('expected [role="alert"] to stay visible past 3200ms') !== -1,
+    ) &&
+    tripViolations.some(
+      (v) => v.indexOf('expected a console.error mentioning "stranded"') !== -1,
+    );
+
+  const restoreSessionId = await freshBoardSession(cdp, TOP_LEVEL_IDENTIFIERS);
+  if (tripResult.strandedIdentifier) {
+    await repairCardsToTodo(cdp, restoreSessionId, [
+      tripResult.strandedIdentifier,
+    ]);
+  }
+  const restoreViolations = [];
+  await checkAtomicRollback(cdp, restoreSessionId, restoreViolations, {});
+  console.log(
+    `--break atomic-rollback-stranded-compensation RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
 const CHECKS = {
   "stacked-overlay": checkStackedOverlay,
   "overlay-unchanged-n1": checkOverlayUnchangedN1,
   a11y: checkA11y,
+  "group-modal-prefill": checkGroupModalPrefill,
+  "atomic-rollback": checkAtomicRollback,
   "single-card-unchanged": checkSingleCardUnchanged,
   "keyboard-unchanged": checkKeyboardUnchanged,
 };
@@ -2667,6 +3618,11 @@ const BREAKS = {
   "stacked-overlay": runBreakStackedOverlay,
   "overlay-unchanged-n1": runBreakOverlayUnchangedN1,
   a11y: runBreakA11y,
+  "group-modal-prefill": runBreakGroupModalPrefill,
+  "atomic-rollback": runBreakAtomicRollback,
+  "atomic-rollback-toast": runBreakAtomicRollbackToast,
+  "atomic-rollback-stranded-compensation":
+    runBreakAtomicRollbackStrandedCompensation,
   "single-card-unchanged": runBreakSingleCardUnchanged,
   "keyboard-unchanged": runBreakKeyboardUnchanged,
 };
@@ -2736,6 +3692,7 @@ async function main() {
     const { targetId } = await cdp.send("Target.createTarget", {
       url: `http://127.0.0.1:${SANDBOX_PORT}/`,
     });
+    lastKnownTargetId = targetId;
     let { sessionId } = await cdp.send("Target.attachToTarget", {
       targetId,
       flatten: true,
@@ -2755,11 +3712,15 @@ async function main() {
         console.error(
           `DEBUG console.${msg.params.type}: ${JSON.stringify(msg.params.args)}`,
         );
+        consoleCapturedMessages.push(msg.params);
       }
       if (msg.method === "Runtime.exceptionThrown") {
         console.error(
           `page exception: ${JSON.stringify(msg.params.exceptionDetails)}`,
         );
+      }
+      if (msg.method === "Fetch.requestPaused") {
+        fetchPausedQueue.push(msg.params);
       }
     });
 
