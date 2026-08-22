@@ -1565,6 +1565,40 @@ async function checkBreakerPause(ctx, violations) {
 }
 
 /**
+ * The parity assertion itself, extracted so the break can drive the EXACT comparison the real
+ * check makes rather than a mis-stated constant.
+ *
+ * The measured count is bounded by a WINDOW, not an equality. `spawnCount` counts the whole leg
+ * log from server boot, while `waitTicks` only sleeps from the moment the leg starts observing,
+ * so the number of ticks actually seen is `1 + floor((bootDuration + window) / interval)`: any
+ * boot slower than roughly 6s (a cold `dist`, a loaded box, the `assertBuilt` build that just
+ * ran) adds a whole extra tick and an exact-equality assertion reports a violation that is
+ * nothing but boot skew. One extra whole tick is tolerated, nothing else is: the count must still
+ * be a whole multiple of the per-tick fan-out, so a second fetch path (which doubles every tick)
+ * or a single stray spawn still fails.
+ */
+function assertCallCountParity(ctx, h, ticks, violations) {
+  const perTick = ctx.pairMeta.sessionCount * ctx.pairMeta.repoCountPerSession;
+  const expected = perTick * ticks;
+  const measured = h.spawnCount("pr list");
+  if (
+    measured < expected ||
+    measured > expected + perTick ||
+    measured % perTick !== 0
+  ) {
+    violations.push(
+      `call-count-parity: expected ${expected} "pr list" spawns (sessions=${ctx.pairMeta.sessionCount} x repos=${ctx.pairMeta.repoCountPerSession} x ticks=${ticks}, computed from the seeded GHR98-PAIR fixture, tolerating at most one extra whole tick of ${perTick} for boot skew), measured ${measured}`,
+    );
+  }
+  const peak = h.peakConcurrency("pr list");
+  if (peak > 4) {
+    violations.push(
+      `call-count-parity: peak concurrency of "pr list" spawns measured ${peak}, expected at most 4 (the MAX_CONCURRENT semaphore)`,
+    );
+  }
+}
+
+/**
  * PRLINK-02: with GHR98-PAIR's two sessions each probing their own single repo under
  * `GH_SHIM_MODE=ok`, the "pr list" spawn count over `ticks` ticks equals `sessions * repos *
  * ticks`, computed from the seeded fixture rather than hardcoded, and peak concurrency never
@@ -1582,20 +1616,7 @@ async function checkCallCountParity(ctx, violations) {
     },
     async (h) => {
       await h.waitTicks(ticks);
-      const expected =
-        ctx.pairMeta.sessionCount * ctx.pairMeta.repoCountPerSession * ticks;
-      const measured = h.spawnCount("pr list");
-      if (measured !== expected) {
-        violations.push(
-          `call-count-parity: expected ${expected} "pr list" spawns (sessions=${ctx.pairMeta.sessionCount} x repos=${ctx.pairMeta.repoCountPerSession} x ticks=${ticks}, computed from the seeded GHR98-PAIR fixture), measured ${measured}`,
-        );
-      }
-      const peak = h.peakConcurrency("pr list");
-      if (peak > 4) {
-        violations.push(
-          `call-count-parity: peak concurrency of "pr list" spawns measured ${peak}, expected at most 4 (the MAX_CONCURRENT semaphore)`,
-        );
-      }
+      assertCallCountParity(ctx, h, ticks, violations);
     },
   );
 }
@@ -1935,48 +1956,67 @@ async function runBreakBreakerPause(ctx) {
 }
 
 /**
- * `call-count-parity` break: runs the check's own real leg (GHR98-PAIR, `GH_SHIM_MODE=ok`, a
- * widened `GH_SHIM_DELAY_MS=2000` to hold every invocation open longer) and then compares the
- * SAME measured spawn count against a DELIBERATELY MIS-STATED expected value (the real computed
- * value plus one), confirming the check fires, proving it compares against a value computed from
- * the seeded fixture rather than a hardcoded constant. Restore re-compares the same measurement
- * against the correctly-computed expected value.
+ * `call-count-parity` break: breaks the MEASUREMENT, not the expectation. The trip leg parks
+ * GHR98-PAIR in `done` (excluded from `probedSessions()` entirely) so the fan-out this check
+ * measures never runs at all, and drives the real {@link assertCallCountParity} against that
+ * measurement. The restore leg puts the card back in `in_progress` and re-runs the same
+ * assertion clean.
+ *
+ * The previous break compared the real measurement against the correct value plus one, which
+ * fires for essentially any measurement INCLUDING zero (a dead shim log, a server that never
+ * booted, a fan-out that never ran): it demonstrated only that `!==` against a wrong constant is
+ * true, never that the check can detect a real deviation in the spawn count.
  */
 async function runBreakCallCountParity(ctx) {
   const ticks = 2;
-  return withLeg(
+  console.log(
+    "\n--break call-count-parity: parking GHR98-PAIR in done so its fan-out never runs",
+  );
+  const tripViolations = await withLeg(
     ctx,
     {
-      label: "break:call-count-parity",
-      cards: [ctx.cardsByName.pair],
-      shimEnv: { GH_SHIM_MODE: "ok", GH_SHIM_DELAY_MS: "2000" },
+      label: "break:call-count-parity:trip",
+      cards: [{ ...ctx.cardsByName.pair, column: "done" }],
+      shimEnv: { GH_SHIM_MODE: "ok", GH_SHIM_DELAY_MS: "200" },
     },
     async (h) => {
       await h.waitTicks(ticks);
-      const correctExpected =
-        ctx.pairMeta.sessionCount * ctx.pairMeta.repoCountPerSession * ticks;
-      const misStatedExpected = correctExpected + 1;
-      const measured = h.spawnCount("pr list");
-
-      const tripFired = measured !== misStatedExpected;
-      const tripViolations = tripFired
-        ? [
-            `call-count-parity: expected ${misStatedExpected} "pr list" spawns (deliberately mis-stated by one), measured ${measured}`,
-          ]
-        : [
-            `call-count-parity: break failed to trip, measured spawn count coincidentally matched the mis-stated expected value`,
-          ];
-      console.log(
-        `\n--break call-count-parity TRIP leg output:\n${tripViolations.join("\n")}`,
-      );
-
-      const restoreClean = measured === correctExpected;
-      console.log(
-        `--break call-count-parity RESTORE leg: ${restoreClean ? "PASS" : `FAIL: measured ${measured}, correct expected ${correctExpected}`}`,
-      );
-      return { tripFired, restoreClean, tripViolations };
+      const found = [];
+      assertCallCountParity(ctx, h, ticks, found);
+      return found;
     },
   );
+  console.log(
+    `--break call-count-parity TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired = tripViolations.some(
+    (v) => v.indexOf("call-count-parity: expected") === 0,
+  );
+
+  console.log("--break call-count-parity: restoring GHR98-PAIR to in_progress");
+  const restoreViolations = await withLeg(
+    ctx,
+    {
+      label: "break:call-count-parity:restore",
+      cards: [ctx.cardsByName.pair],
+      shimEnv: { GH_SHIM_MODE: "ok", GH_SHIM_DELAY_MS: "200" },
+    },
+    async (h) => {
+      await h.waitTicks(ticks);
+      const found = [];
+      assertCallCountParity(ctx, h, ticks, found);
+      return found;
+    },
+  );
+  console.log(
+    `--break call-count-parity RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
 }
 
 const BREAKS = {
