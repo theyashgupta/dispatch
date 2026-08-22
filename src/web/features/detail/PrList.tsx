@@ -91,7 +91,9 @@ export function PrList({ card }: { card: Card }) {
   const prs = cardPrs(card);
   const unknown =
     card.prsUnknown ??
-    (card.sessionSummaries ?? []).find((s) => s.prsUnknown != null)?.prsUnknown;
+    (card.sessionSummaries ?? []).find(
+      (s) => s.lost !== true && s.prsUnknown != null,
+    )?.prsUnknown;
   if (prs.length === 0 && unknown == null) return null;
 
   const repoOrder: string[] = [];
