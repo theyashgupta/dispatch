@@ -93,10 +93,15 @@ export function PrList({ card }: { card: Card }) {
   if (prs.length === 0 && unknown == null) return null;
 
   const repoOrder: string[] = [];
+  let everyPrStamped = true;
   for (const pr of prs) {
+    if (pr.repo == null || pr.repo === "") {
+      everyPrStamped = false;
+      continue;
+    }
     if (!repoOrder.includes(pr.repo)) repoOrder.push(pr.repo);
   }
-  const grouped = repoOrder.length >= 2;
+  const grouped = repoOrder.length >= 2 && everyPrStamped;
 
   let diagnosticText: string | null = null;
   if (unknown != null) {

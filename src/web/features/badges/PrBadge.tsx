@@ -6,7 +6,7 @@ export function PrBadge({ pr, showRepo }: { pr: PrInfo; showRepo?: boolean }) {
   const [hovered, setHovered] = useState(false);
   const { icon: Icon, border, background, color } = prStyleFor(pr);
   const showCiDot = !pr.isDraft && pr.state === "open" && pr.ci != null;
-  const showRepoTag = showRepo === true && pr.repo !== "";
+  const showRepoTag = showRepo === true && pr.repo != null && pr.repo !== "";
   const repoPrefix = showRepoTag ? `${pr.repo} ` : "";
   const ciLabel =
     pr.ci != null
