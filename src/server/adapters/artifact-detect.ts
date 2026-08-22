@@ -238,7 +238,11 @@ function safeRealpath(p: string): string | null {
  * user-configurable, so a naive string-prefix compare would fail on any symlinked path
  * component in production, not just in this repo's own sandbox harness convention (T-99-01).
  * Returns `null` (inconclusive) when either side fails to resolve, the caller must degrade to
- * pane-ancestry evidence, never synthesize a mismatch from an unresolved path. `displayNames`
+ * pane-ancestry evidence, never synthesize a mismatch from an unresolved path. That covers the
+ * case where NO worktree path resolves at all (a worktree removed mid-cleanup, an `EACCES` on a
+ * path component, an ejected volume): falling through to the workspace-root check there would
+ * turn a transient filesystem state into a positive "this process runs somewhere else" claim
+ * (99-REVIEW WR-01). `displayNames`
  * is a PARAMETER: the caller must compute it over every repo path the CARD owns across all its
  * sessions, the same scope `repoDisplayNames` already requires for `PrInfo.repo`, never one
  * session's own `workspace.repos` alone (the 98-REVIEW WR-04 defect).
@@ -253,16 +257,18 @@ function matchWorkspace(
   const cwd = safeRealpath(rawCwd);
   if (cwd == null) return null;
 
+  let anyWorktreeResolved = false;
   for (const repo of repos) {
     const worktree = safeRealpath(worktreeDirFor(workspacePath, repo.path));
     if (worktree == null) continue;
+    anyWorktreeResolved = true;
     if (cwd === worktree || cwd.startsWith(worktree + sep)) {
       return { inWorkspace: true, repoBasename: displayNames.get(repo.path) };
     }
   }
 
   const root = safeRealpath(workspacePath);
-  if (root == null) return null;
+  if (root == null || !anyWorktreeResolved) return null;
   return { inWorkspace: cwd === root || cwd.startsWith(root + sep) };
 }
 
