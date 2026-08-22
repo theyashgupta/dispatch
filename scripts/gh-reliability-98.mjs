@@ -945,6 +945,13 @@ async function navigateAndWaitBoard(ctx) {
   await waitForBoardRootLoaded(ctx.cdp, ctx.sessionId, TOP_LEVEL_IDENTIFIERS);
 }
 
+/**
+ * Opens the detail panel for `identifier`, then, since every fixture here carries a live
+ * `tmuxSession`, also expands the collapsed-by-default "Details" section (`PanelHeader.tsx`'s
+ * `aria-expanded` toggle button) that gates `ReferenceBlocks`/`PrList` behind a click whenever
+ * `hasLiveSession` is true (`DetailPanel.tsx`): without this, the panel renders only the header
+ * and a "Connecting to terminal..." region, and `PrList` never mounts at all.
+ */
 async function openCardDetail(cdp, sessionId, identifier) {
   await evalValue(
     cdp,
@@ -957,12 +964,38 @@ async function openCardDetail(cdp, sessionId, identifier) {
   })()`;
   const deadline = Date.now() + RENDER_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (await evalValue(cdp, sessionId, probe)) return;
+    if (await evalValue(cdp, sessionId, probe)) break;
     await sleep(POLL_INTERVAL_MS);
   }
-  throw new Error(
-    `ghrel98: detail panel never showed ${identifier} within ${RENDER_TIMEOUT_MS}ms`,
-  );
+  if (Date.now() >= deadline) {
+    throw new Error(
+      `ghrel98: detail panel never showed ${identifier} within ${RENDER_TIMEOUT_MS}ms`,
+    );
+  }
+  const expandProbe = `(function () {
+    var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+    var toggle = aside ? aside.querySelector('button[aria-expanded]') : null;
+    if (!toggle) return "absent";
+    if (toggle.getAttribute("aria-expanded") === "true") return "expanded";
+    toggle.click();
+    return "clicked";
+  })()`;
+  const expandOutcome = await evalValue(cdp, sessionId, expandProbe);
+  if (expandOutcome === "clicked") {
+    const expandDeadline = Date.now() + RENDER_TIMEOUT_MS;
+    const isExpandedProbe = `(function () {
+      var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+      var toggle = aside ? aside.querySelector('button[aria-expanded]') : null;
+      return toggle != null && toggle.getAttribute("aria-expanded") === "true";
+    })()`;
+    while (Date.now() < expandDeadline) {
+      if (await evalValue(cdp, sessionId, isExpandedProbe)) return;
+      await sleep(POLL_INTERVAL_MS);
+    }
+    throw new Error(
+      `ghrel98: detail panel's "Details" toggle for ${identifier} never reached aria-expanded=true within ${RENDER_TIMEOUT_MS}ms`,
+    );
+  }
 }
 
 /** Zero leaf elements whose trimmed text starts with "PR unknown" or "PR check incomplete"
@@ -1024,8 +1057,16 @@ async function measureDiagnosticLine(cdp, sessionId) {
 // ---------------------------------------------------------------------------
 
 async function withLeg(ctx, opts, fn) {
-  const cards = opts.cards ?? ctx.allBaseCards;
-  resetCards(ctx.home, cards);
+  // Every leg resets ALL FOUR fixtures, not only the ones it cares about: a card left in its
+  // pristine `in_progress` column from a PRIOR leg (or the initial seed) would still be probed by
+  // the real fan-out every tick, inflating a spawn/peak-concurrency count this leg means to
+  // measure in isolation. A card not named in `opts.cards` is parked in `column: "done"` instead
+  // (excluded from `probedSessions()` entirely), never simply left out of the write.
+  const targetIds = new Set((opts.cards ?? ctx.allBaseCards).map((c) => c.id));
+  const cardsToWrite = ctx.allBaseCards.map((c) =>
+    targetIds.has(c.id) ? c : { ...c, column: "done" },
+  );
+  resetCards(ctx.home, cardsToWrite);
   const logPath = join(ctx.home, `gh-shim-log-${ctx.legCounter++}.txt`);
   writeFileSync(logPath, "");
   const includeGh = opts.includeGh !== false;
@@ -1055,33 +1096,375 @@ async function withLeg(ctx, opts, fn) {
 }
 
 // ---------------------------------------------------------------------------
-// Checks. Task 1 wires every one as a stub, so the boot, the PATH planting,
-// the seeding and the teardown are proven working before any assertion logic
-// exists. Task 2 replaces each body.
+// Checks. Every check restores the sandbox BETWEEN LEGS by tearing the
+// server down and re-seeding (via withLeg's own resetCards call), so a
+// cached failure or a tripped breaker from one leg can never leak into the
+// next. Sharing one boot across legs would be the obvious and wrong
+// optimisation here.
 // ---------------------------------------------------------------------------
 
-async function checkNoFailureChip() {
-  throw new Error("not implemented");
+/**
+ * PRLINK-04: for each of the six forcible categories (five shim `pr list` modes, one of which
+ * ["rate-limited"/"secondary-rate-limited"] collapses onto the same "gh rate limited" category,
+ * plus `repo path missing` via GHR98-MISSING, plus `gh unavailable` via no `gh` binary at all),
+ * boot, wait one tick, then assert BOTH the expected wire category (proving the failure really
+ * happened, so this check cannot pass vacuously) AND zero failure-badge elements in the target
+ * card's DOM subtree. The whole-board scan is a superset that also covers any group member row.
+ */
+async function checkNoFailureChip(ctx, violations) {
+  const legs = [
+    {
+      name: "not-authenticated",
+      shimEnv: { GH_SHIM_MODE: "not-authenticated" },
+      includeGh: true,
+      target: ONE_IDENTIFIER,
+      expected: "gh not authenticated",
+    },
+    {
+      name: "repo-not-accessible",
+      shimEnv: { GH_SHIM_MODE: "repo-not-accessible" },
+      includeGh: true,
+      target: ONE_IDENTIFIER,
+      expected: "gh repo not accessible",
+    },
+    {
+      name: "pr-list-failed",
+      shimEnv: { GH_SHIM_MODE: "pr-list-failed" },
+      includeGh: true,
+      target: ONE_IDENTIFIER,
+      expected: "gh pr list failed",
+    },
+    {
+      name: "rate-limited",
+      shimEnv: { GH_SHIM_MODE: "rate-limited", GH_SHIM_REMAINING: "5000" },
+      includeGh: true,
+      target: ONE_IDENTIFIER,
+      expected: "gh rate limited",
+    },
+    {
+      name: "secondary-rate-limited",
+      shimEnv: {
+        GH_SHIM_MODE: "secondary-rate-limited",
+        GH_SHIM_REMAINING: "5000",
+      },
+      includeGh: true,
+      target: ONE_IDENTIFIER,
+      expected: "gh rate limited",
+    },
+    {
+      name: "repo-path-missing",
+      shimEnv: {},
+      includeGh: true,
+      target: MISSING_IDENTIFIER,
+      expected: "repo path missing",
+    },
+    {
+      name: "gh-unavailable",
+      shimEnv: {},
+      includeGh: false,
+      target: ONE_IDENTIFIER,
+      expected: "gh unavailable",
+    },
+  ];
+
+  for (const leg of legs) {
+    await withLeg(
+      ctx,
+      {
+        label: `no-failure-chip:${leg.name}`,
+        shimEnv: leg.shimEnv,
+        includeGh: leg.includeGh,
+        dom: true,
+      },
+      async (h) => {
+        await h.waitTicks(1);
+        const board = await h.readBoard();
+        const card = findCard(board, leg.target);
+        if (card == null) {
+          violations.push(
+            `no-failure-chip: ${leg.name} card ${leg.target} not found on wire`,
+          );
+          return;
+        }
+        if (card.prsUnknown?.category !== leg.expected) {
+          violations.push(
+            `no-failure-chip: ${leg.name} expected wire category "${leg.expected}" on ${leg.target}, measured ${JSON.stringify(card.prsUnknown)}`,
+          );
+        }
+        const targetReading = await countFailureBadgeElements(
+          ctx.cdp,
+          ctx.sessionId,
+          leg.target,
+        );
+        if (targetReading.count !== 0) {
+          violations.push(
+            `no-failure-chip: ${leg.name} ${leg.target} card DOM subtree carries ${targetReading.count} failure-badge element(s): ${JSON.stringify(targetReading.samples)}`,
+          );
+        }
+        const boardReading = await countFailureBadgeElementsWholeBoard(
+          ctx.cdp,
+          ctx.sessionId,
+        );
+        if (boardReading.count !== 0) {
+          violations.push(
+            `no-failure-chip: ${leg.name} whole-board scan (covers any member row) carries ${boardReading.count} failure-badge element(s): ${JSON.stringify(boardReading.samples)}`,
+          );
+        }
+      },
+    );
+  }
 }
 
-async function checkDiagnosticLine() {
-  throw new Error("not implemented");
+/**
+ * PRLINK-04: with `GH_SHIM_MODE=repo-not-accessible`, open GHR98-ONE's detail panel and assert
+ * exactly one muted single-line node whose text contains the `unknownProbeCopy("pr", "gh repo
+ * not accessible")` detail sentence and the words "Last checked", with the rendered age in a
+ * `formatAge` shape rather than a raw ISO string or NaN.
+ */
+async function checkDiagnosticLine(ctx, violations) {
+  await withLeg(
+    ctx,
+    {
+      label: "diagnostic-line",
+      cards: [ctx.cardsByName.one],
+      shimEnv: { GH_SHIM_MODE: "repo-not-accessible" },
+      dom: true,
+    },
+    async (h) => {
+      await h.waitTicks(1);
+      const board = await h.readBoard();
+      const card = findCard(board, ONE_IDENTIFIER);
+      if (card?.prsUnknown?.category !== "gh repo not accessible") {
+        violations.push(
+          `diagnostic-line: wire category expected "gh repo not accessible" on ${ONE_IDENTIFIER}, measured ${JSON.stringify(card?.prsUnknown)}`,
+        );
+      }
+      await openCardDetail(ctx.cdp, ctx.sessionId, ONE_IDENTIFIER);
+      const reading = await measureDiagnosticLine(ctx.cdp, ctx.sessionId);
+      if (reading.count !== 1) {
+        violations.push(
+          `diagnostic-line: expected exactly 1 diagnostic line node, measured ${reading.count}: ${JSON.stringify(reading.texts)}`,
+        );
+      }
+      const text = reading.texts[0] ?? "";
+      const expectedFragment =
+        "this repo is not visible to the signed-in gh account, or the remote no longer exists";
+      if (text.indexOf(expectedFragment) === -1) {
+        violations.push(
+          `diagnostic-line: diagnostic text ${JSON.stringify(text)} does not contain the expected unknownProbeCopy sentence fragment ${JSON.stringify(expectedFragment)}`,
+        );
+      }
+      if (text.indexOf("Last checked") === -1) {
+        violations.push(
+          `diagnostic-line: diagnostic text ${JSON.stringify(text)} is missing "Last checked"`,
+        );
+      }
+      const ageMatch = /Last checked (.+)$/.exec(text);
+      const age = ageMatch ? ageMatch[1] : "";
+      if (!/^\d+[smhd] ago$/.test(age)) {
+        violations.push(
+          `diagnostic-line: rendered age ${JSON.stringify(age)} is not a formatAge shape (expected "<n>s/m/h/d ago")`,
+        );
+      }
+      if (/\d{4}-\d{2}-\d{2}T/.test(age) || age.indexOf("NaN") !== -1) {
+        violations.push(
+          `diagnostic-line: rendered age ${JSON.stringify(age)} looks like a raw ISO string or NaN`,
+        );
+      }
+    },
+  );
 }
 
-async function checkNegativeCache() {
-  throw new Error("not implemented");
+/**
+ * PRLINK-05: a deterministic category (`gh repo not accessible`) spawns `gh pr list` exactly once
+ * across four ticks (the 10-minute negative cache suppresses every repeat), while a transient
+ * category (`gh pr list failed`) spawns at least twice over the same window (never cached). The
+ * transient contrast leg is what stops the deterministic leg's pass being caused by a fan-out
+ * that stopped running at all.
+ */
+async function checkNegativeCache(ctx, violations) {
+  await withLeg(
+    ctx,
+    {
+      label: "negative-cache:deterministic",
+      cards: [ctx.cardsByName.one],
+      shimEnv: { GH_SHIM_MODE: "repo-not-accessible" },
+    },
+    async (h) => {
+      await h.waitTicks(4);
+      const count = h.spawnCount("pr list");
+      if (count !== 1) {
+        violations.push(
+          `negative-cache: deterministic leg expected exactly 1 "pr list" spawn across 4 ticks (10-minute cache should suppress every repeat), measured ${count}`,
+        );
+      }
+    },
+  );
+
+  await withLeg(
+    ctx,
+    {
+      label: "negative-cache:transient-contrast",
+      cards: [ctx.cardsByName.one],
+      shimEnv: { GH_SHIM_MODE: "pr-list-failed" },
+    },
+    async (h) => {
+      await h.waitTicks(4);
+      const count = h.spawnCount("pr list");
+      if (count < 2) {
+        violations.push(
+          `negative-cache: transient contrast leg expected at least 2 "pr list" spawns across 4 ticks (never cached), measured ${count}`,
+        );
+      }
+    },
+  );
 }
 
-async function checkLastKnownGood() {
-  throw new Error("not implemented");
+/**
+ * PRLINK-05 (Pitfall 4 composition assertion): seed GHR98-KNOWN with two PRs, force a
+ * deterministic failure, run for five ticks (past PROBE_FAILURE_CEILING of 3), and confirm both
+ * PRs are still on the wire, `prsUnknown` is set, and only 1 "pr list" spawn happened total, a
+ * negative-cache skip must never spend a strike, so the ceiling never clears the list.
+ */
+async function checkLastKnownGood(ctx, violations) {
+  await withLeg(
+    ctx,
+    {
+      label: "last-known-good",
+      cards: [ctx.cardsByName.known],
+      shimEnv: { GH_SHIM_MODE: "repo-not-accessible" },
+    },
+    async (h) => {
+      await h.waitTicks(5);
+      const board = await h.readBoard();
+      const card = findCard(board, KNOWN_IDENTIFIER);
+      const prCount = card?.prs?.length ?? 0;
+      if (prCount !== 2) {
+        violations.push(
+          `last-known-good: expected 2 seeded PRs still present on ${KNOWN_IDENTIFIER} after 5 ticks past the ${PROBE_FAILURE_CEILING}-strike ceiling, measured ${prCount}`,
+        );
+      }
+      if (card?.prsUnknown?.category == null) {
+        violations.push(
+          `last-known-good: expected prsUnknown set on ${KNOWN_IDENTIFIER} after 5 ticks of a standing failure, measured ${JSON.stringify(card?.prsUnknown)}`,
+        );
+      }
+      const count = h.spawnCount("pr list");
+      if (count !== 1) {
+        violations.push(
+          `last-known-good: expected exactly 1 "pr list" spawn across 5 ticks (negative cache after the first real failure), measured ${count}, a higher count means a skip is spending a strike or re-asking gh instead of caching`,
+        );
+      }
+    },
+  );
 }
 
-async function checkBreakerPause() {
-  throw new Error("not implemented");
+/**
+ * PRLINK-05: force a low `gh api rate_limit` remaining count while GHR98-PAIR's two sessions fail
+ * simultaneously (several repos failing in the same tick, alongside GHR98-KNOWN so the GLOBAL
+ * pause is proven to hold a card's last-known-good data even though that card's own repo never
+ * itself produced a rate-limited failure). Exactly one `gh api rate_limit` spawn total, `pr list`
+ * spawns stop growing once the breaker trips, and GHR98-KNOWN keeps its seeded PRs. The contrast
+ * leg (a malformed rate_limit body) proves a parse failure can never wedge probing.
+ */
+async function checkBreakerPause(ctx, violations) {
+  await withLeg(
+    ctx,
+    {
+      label: "breaker-pause:trip",
+      cards: [ctx.cardsByName.pair, ctx.cardsByName.known],
+      shimEnv: {
+        GH_SHIM_MODE: "rate-limited",
+        GH_SHIM_REMAINING: "10",
+        GH_SHIM_RESET: String(Math.floor(Date.now() / 1000) + 120),
+      },
+    },
+    async (h) => {
+      await h.waitTicks(1);
+      const prListAfterTick1 = h.spawnCount("pr list");
+      await h.waitTicks(3);
+      const prListAfterTick4 = h.spawnCount("pr list");
+      const rateLimitCalls = h.spawnCount("api rate_limit");
+      if (rateLimitCalls !== 1) {
+        violations.push(
+          `breaker-pause: expected exactly 1 "api rate_limit" spawn across the whole window (memoized breaker check across several simultaneously-failing repos), measured ${rateLimitCalls}`,
+        );
+      }
+      if (prListAfterTick4 !== prListAfterTick1) {
+        violations.push(
+          `breaker-pause: "pr list" spawn count grew from ${prListAfterTick1} (after tick 1) to ${prListAfterTick4} (after 3 more ticks), expected it to stop growing once the breaker tripped`,
+        );
+      }
+      const board = await h.readBoard();
+      const known = findCard(board, KNOWN_IDENTIFIER);
+      const knownPrCount = known?.prs?.length ?? 0;
+      if (knownPrCount !== 2) {
+        violations.push(
+          `breaker-pause: expected ${KNOWN_IDENTIFIER} to keep its 2 seeded PRs while the GLOBAL breaker paused all probing, measured ${knownPrCount}`,
+        );
+      }
+    },
+  );
+
+  await withLeg(
+    ctx,
+    {
+      label: "breaker-pause:malformed-body-contrast",
+      cards: [ctx.cardsByName.pair, ctx.cardsByName.known],
+      shimEnv: {
+        GH_SHIM_MODE: "rate-limited",
+        GH_SHIM_REMAINING: "10",
+        GH_SHIM_RATELIMIT_BODY: "malformed",
+      },
+    },
+    async (h) => {
+      await h.waitTicks(1);
+      const prListAfterTick1 = h.spawnCount("pr list");
+      await h.waitTicks(3);
+      const prListAfterTick4 = h.spawnCount("pr list");
+      if (!(prListAfterTick4 > prListAfterTick1)) {
+        violations.push(
+          `breaker-pause: malformed rate_limit body contrast leg expected "pr list" spawns to keep growing (a parse failure must never wedge probing), measured ${prListAfterTick1} after tick 1 and ${prListAfterTick4} after 3 more ticks`,
+        );
+      }
+    },
+  );
 }
 
-async function checkCallCountParity() {
-  throw new Error("not implemented");
+/**
+ * PRLINK-02: with GHR98-PAIR's two sessions each probing their own single repo under
+ * `GH_SHIM_MODE=ok`, the "pr list" spawn count over `ticks` ticks equals `sessions * repos *
+ * ticks`, computed from the seeded fixture rather than hardcoded, and peak concurrency never
+ * exceeds the 4-slot semaphore. Together these are the criterion-2 evidence that surfacing every
+ * session's PRs added no second fetch path and the criterion-5 evidence the fan-out is bounded.
+ */
+async function checkCallCountParity(ctx, violations) {
+  const ticks = 2;
+  await withLeg(
+    ctx,
+    {
+      label: "call-count-parity",
+      cards: [ctx.cardsByName.pair],
+      shimEnv: { GH_SHIM_MODE: "ok", GH_SHIM_DELAY_MS: "200" },
+    },
+    async (h) => {
+      await h.waitTicks(ticks);
+      const expected =
+        ctx.pairMeta.sessionCount * ctx.pairMeta.repoCountPerSession * ticks;
+      const measured = h.spawnCount("pr list");
+      if (measured !== expected) {
+        violations.push(
+          `call-count-parity: expected ${expected} "pr list" spawns (sessions=${ctx.pairMeta.sessionCount} x repos=${ctx.pairMeta.repoCountPerSession} x ticks=${ticks}, computed from the seeded GHR98-PAIR fixture), measured ${measured}`,
+        );
+      }
+      const peak = h.peakConcurrency("pr list");
+      if (peak > 4) {
+        violations.push(
+          `call-count-parity: peak concurrency of "pr list" spawns measured ${peak}, expected at most 4 (the MAX_CONCURRENT semaphore)`,
+        );
+      }
+    },
+  );
 }
 
 const CHECKS = {
