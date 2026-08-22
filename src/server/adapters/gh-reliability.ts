@@ -85,8 +85,16 @@ interface GhRateLimitBody {
  * call: a misbehaving `gh` must not be able to wedge PR probing (T-98-03). The response body and
  * any stderr are never logged, only the closed `ProbeFailureCategory` token this function's caller
  * already returns may cross the wire (T-98-01).
+ *
+ * A standing pause returns immediately. {@link rateLimitCheckInFlight} dedupes only STRICTLY
+ * overlapping calls, since the initiating caller nulls it in its own `finally`, and rate-limited
+ * `gh pr list` children exit milliseconds apart rather than simultaneously: without the
+ * {@link pausedUntil} test, N rate-limited failures would spawn N `gh api rate_limit` subprocesses,
+ * and a body that never trips a pause (a healthy `remaining`, a malformed body, a past `reset`)
+ * would spawn one per failing probe per tick, forever.
  */
 async function tripBreakerIfRateLimited(): Promise<void> {
+  if (Date.now() < pausedUntil) return;
   if (rateLimitCheckInFlight != null) return rateLimitCheckInFlight;
   rateLimitCheckInFlight = (async () => {
     try {
