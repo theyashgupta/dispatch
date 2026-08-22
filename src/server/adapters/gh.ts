@@ -22,7 +22,14 @@ interface GhPrResult {
   title: string;
   state: "OPEN" | "MERGED" | "CLOSED";
   isDraft: boolean;
-  statusCheckRollup: GhCheckRun[];
+  /**
+   * Null on a PR whose head commit is gone, reachable since `--state all` also returns merged and
+   * closed PRs. Nullable in the TYPE so the null can never reach {@link rollupOf}'s `.length`:
+   * that throw happens INSIDE the `try`, so one malformed PR reclassified a SUCCESSFUL lookup as
+   * `gh pr list failed`, blanked the whole repo's list and spent a `PROBE_FAILURE_CEILING` strike
+   * every tick until last-known-good was wiped.
+   */
+  statusCheckRollup: GhCheckRun[] | null;
 }
 
 const loggedCategories = new Set<string>();
@@ -162,7 +169,7 @@ export async function listPrsForBranch(
         title: pr.title,
         state: pr.state.toLowerCase() as PrInfo["state"],
         isDraft: pr.isDraft,
-        ci: rollupOf(pr.statusCheckRollup),
+        ci: rollupOf(pr.statusCheckRollup ?? []),
         repo,
       })),
     };
