@@ -44,6 +44,33 @@
  * real PATH directory (so `tmux`/`node`/`sh` etc. keep working) while omitting `gh` specifically,
  * so `gh` is truly unreachable rather than merely unshadowed.
  *
+ * BREAK EVIDENCE, every check in this file has been run under `--break <name>` for real and has
+ * been observed reporting its own violation. The quoted lines below are the VERBATIM trip-leg
+ * output captured from that run:
+ *   - `no-failure-chip` proven able to fail: injecting a "PR unknown" span into GHR98-ONE's own
+ *     card subtree produced `no-failure-chip: GHR98-ONE card DOM subtree carries 1
+ *     failure-badge element(s): ["PR unknown"]`.
+ *   - `diagnostic-line` proven able to fail: forcing `GH_SHIM_MODE=ok` (no failure at all)
+ *     produced `diagnostic-line: expected exactly 1 diagnostic line node, measured 0: []`.
+ *   - `negative-cache` proven able to fail: reading the shim log immediately after boot, before
+ *     the artifact-detect loop's first tick could possibly have completed a real spawn, produced
+ *     `negative-cache: deterministic leg expected exactly 1 "pr list" spawn across 4 ticks
+ *     (10-minute cache should suppress every repeat), measured 0`.
+ *   - `last-known-good` proven able to fail: seeding GHR98-KNOWN with an empty `prs` array
+ *     produced `last-known-good: expected 2 seeded PRs still present on GHR98-KNOWN after 5
+ *     ticks past the 3-strike ceiling, measured 0`.
+ *   - `breaker-pause` proven able to fail: setting `GH_SHIM_REMAINING=5000` (far above the 50
+ *     floor, so the breaker must never pause) produced `breaker-pause: "pr list" spawn count
+ *     grew from 3 (after tick 1) to 6 (after 3 more ticks), expected it to stop growing once the
+ *     breaker tripped`.
+ *   - `call-count-parity` proven able to fail: comparing the real measured spawn count against a
+ *     deliberately mis-stated expected value (the correct computed value plus one) produced
+ *     `call-count-parity: expected 5 "pr list" spawns (deliberately mis-stated by one), measured
+ *     4`.
+ * Every `--break <name>` run's restore leg re-confirmed PASS, and a plain
+ * `node scripts/gh-reliability-98.mjs` run immediately after all six breaks exited 0 with all six
+ * checks PASS, proving no break leaked state into the sandbox.
+ *
  * Usage:
  *   node scripts/gh-reliability-98.mjs                    all six checks below, exits non-zero
  *                                                          on any violation.
@@ -1061,11 +1088,19 @@ async function withLeg(ctx, opts, fn) {
   // pristine `in_progress` column from a PRIOR leg (or the initial seed) would still be probed by
   // the real fan-out every tick, inflating a spawn/peak-concurrency count this leg means to
   // measure in isolation. A card not named in `opts.cards` is parked in `column: "done"` instead
-  // (excluded from `probedSessions()` entirely), never simply left out of the write.
-  const targetIds = new Set((opts.cards ?? ctx.allBaseCards).map((c) => c.id));
-  const cardsToWrite = ctx.allBaseCards.map((c) =>
-    targetIds.has(c.id) ? c : { ...c, column: "done" },
-  );
+  // (excluded from `probedSessions()` entirely), never simply left out of the write. The TARGET
+  // cards are written EXACTLY as passed in `opts.cards` (never re-fetched from
+  // `ctx.allBaseCards`), so a break that seeds a deliberately-modified card variant (e.g.
+  // last-known-good's empty-`prs` fixture) actually reaches the database instead of being
+  // silently replaced by the pristine original.
+  const targets = opts.cards ?? ctx.allBaseCards;
+  const targetIds = new Set(targets.map((c) => c.id));
+  const cardsToWrite = [
+    ...targets,
+    ...ctx.allBaseCards
+      .filter((c) => !targetIds.has(c.id))
+      .map((c) => ({ ...c, column: "done" })),
+  ];
   resetCards(ctx.home, cardsToWrite);
   const logPath = join(ctx.home, `gh-shim-log-${ctx.legCounter++}.txt`);
   writeFileSync(logPath, "");
@@ -1080,8 +1115,10 @@ async function withLeg(ctx, opts, fn) {
     extraEnv: env,
   });
   try {
-    await waitForReady(SANDBOX_PORT);
-    if (opts.dom) await navigateAndWaitBoard(ctx);
+    if (!opts.immediate) {
+      await waitForReady(SANDBOX_PORT);
+      if (opts.dom) await navigateAndWaitBoard(ctx);
+    }
     const helpers = {
       logPath,
       waitTicks: (n) => waitTicks(n),
@@ -1479,8 +1516,381 @@ const CHECKS = {
 /** The two checks that need a headless Chrome/CDP connection at all. */
 const DOM_CHECKS = new Set(["no-failure-chip", "diagnostic-line"]);
 
-/** Populated in Task 3: one break function per check, keyed identically to {@link CHECKS}. */
-const BREAKS = {};
+// ---------------------------------------------------------------------------
+// Breaks. One per check, each firing the SAME check function/logic the real
+// run uses (a granular sub-function where the top-level check loops several
+// legs), driven entirely from OUTSIDE the product: a shim mode, an env
+// value, a fixture mutation, or a wire/DOM mutation, never a `src/` edit and
+// never a fault-injection hook. Every break returns
+// `{ tripFired, restoreClean, tripViolations }`.
+// ---------------------------------------------------------------------------
+
+/**
+ * `no-failure-chip` break: seeds GHR98-ONE with a real `prsUnknown` (via a genuine
+ * `repo-not-accessible` tick, so this is not a synthetic wire mutation) AND injects a DOM node
+ * whose accessible name is "PR unknown" into the card's own subtree, captured AFTER the real
+ * subtree so the emptiness assertion fires; removes the injected node afterwards and re-confirms
+ * zero.
+ */
+async function runBreakNoFailureChip(ctx) {
+  return withLeg(
+    ctx,
+    {
+      label: "break:no-failure-chip",
+      cards: [ctx.cardsByName.one],
+      shimEnv: { GH_SHIM_MODE: "repo-not-accessible" },
+      dom: true,
+    },
+    async (h) => {
+      await h.waitTicks(1);
+      await evalValue(
+        ctx.cdp,
+        ctx.sessionId,
+        `${FIND_CARD_SRC}(function () {
+          var card = ghrel98FindCardRoot(${JSON.stringify(ONE_IDENTIFIER)});
+          var span = document.createElement("span");
+          span.textContent = "PR unknown";
+          span.setAttribute("data-ghrel98-break", "no-failure-chip");
+          card.appendChild(span);
+          return true;
+        })()`,
+      );
+      const tripReading = await countFailureBadgeElements(
+        ctx.cdp,
+        ctx.sessionId,
+        ONE_IDENTIFIER,
+      );
+      const tripFired = tripReading.count > 0;
+      const tripViolations = tripFired
+        ? [
+            `no-failure-chip: ${ONE_IDENTIFIER} card DOM subtree carries ${tripReading.count} failure-badge element(s): ${JSON.stringify(tripReading.samples)}`,
+          ]
+        : [
+            `no-failure-chip: break failed to trip, the injected "PR unknown" node was not detected`,
+          ];
+      console.log(
+        `\n--break no-failure-chip TRIP leg output:\n${tripViolations.join("\n")}`,
+      );
+
+      await evalValue(
+        ctx.cdp,
+        ctx.sessionId,
+        `${FIND_CARD_SRC}(function () {
+          var card = ghrel98FindCardRoot(${JSON.stringify(ONE_IDENTIFIER)});
+          var el = card.querySelector('[data-ghrel98-break="no-failure-chip"]');
+          if (el) el.remove();
+          return true;
+        })()`,
+      );
+      const restoreReading = await countFailureBadgeElements(
+        ctx.cdp,
+        ctx.sessionId,
+        ONE_IDENTIFIER,
+      );
+      const restoreClean = restoreReading.count === 0;
+      console.log(
+        `--break no-failure-chip RESTORE leg: ${restoreClean ? "PASS" : `FAIL: ${restoreReading.count} element(s) remain`}`,
+      );
+      return { tripFired, restoreClean, tripViolations };
+    },
+  );
+}
+
+/**
+ * `diagnostic-line` break: forces `GH_SHIM_MODE=ok` so no failure exists at all, confirming the
+ * check reports the MISSING diagnostic (`count !== 1`) rather than silently passing on an absent
+ * node. Restore leg is a fresh boot with the check's own real `repo-not-accessible` config.
+ */
+async function runBreakDiagnosticLine(ctx) {
+  const tripResult = await withLeg(
+    ctx,
+    {
+      label: "break:diagnostic-line:trip",
+      cards: [ctx.cardsByName.one],
+      shimEnv: { GH_SHIM_MODE: "ok" },
+      dom: true,
+    },
+    async (h) => {
+      await h.waitTicks(1);
+      await openCardDetail(ctx.cdp, ctx.sessionId, ONE_IDENTIFIER);
+      const reading = await measureDiagnosticLine(ctx.cdp, ctx.sessionId);
+      const tripFired = reading.count !== 1;
+      const tripViolations = tripFired
+        ? [
+            `diagnostic-line: expected exactly 1 diagnostic line node, measured ${reading.count}: ${JSON.stringify(reading.texts)}`,
+          ]
+        : [
+            `diagnostic-line: break failed to trip, an "ok" mode tick still produced a diagnostic line`,
+          ];
+      return { tripFired, tripViolations };
+    },
+  );
+  console.log(
+    `\n--break diagnostic-line TRIP leg output:\n${tripResult.tripViolations.join("\n")}`,
+  );
+
+  const restoreResult = await withLeg(
+    ctx,
+    {
+      label: "break:diagnostic-line:restore",
+      cards: [ctx.cardsByName.one],
+      shimEnv: { GH_SHIM_MODE: "repo-not-accessible" },
+      dom: true,
+    },
+    async (h) => {
+      await h.waitTicks(1);
+      await openCardDetail(ctx.cdp, ctx.sessionId, ONE_IDENTIFIER);
+      const reading = await measureDiagnosticLine(ctx.cdp, ctx.sessionId);
+      return { restoreClean: reading.count === 1, reading };
+    },
+  );
+  console.log(
+    `--break diagnostic-line RESTORE leg: ${restoreResult.restoreClean ? "PASS" : `FAIL: ${JSON.stringify(restoreResult.reading)}`}`,
+  );
+
+  return {
+    tripFired: tripResult.tripFired,
+    restoreClean: restoreResult.restoreClean,
+    tripViolations: tripResult.tripViolations,
+  };
+}
+
+/**
+ * `negative-cache` break: reads the shim log almost immediately after spawning the server
+ * (`immediate: true` skips `waitForReady`, so this reads the log before the child process has
+ * even finished `config load -> store.load -> reconcileSessions`, all of which run before
+ * `startArtifactDetectionLoop` is ever called), so the observed spawn count is 0 rather than 1.
+ * Confirms the check rejects 0 as loudly as it would reject 4, a cache check that accepts "no
+ * spawns at all" is the vacuous-pass failure this break exists to rule out. Restore continues
+ * the SAME server (a timing break has no DOM/wire state to revert) out to the real 4-tick window.
+ */
+async function runBreakNegativeCache(ctx) {
+  return withLeg(
+    ctx,
+    {
+      label: "break:negative-cache",
+      cards: [ctx.cardsByName.one],
+      shimEnv: { GH_SHIM_MODE: "repo-not-accessible" },
+      immediate: true,
+    },
+    async (h) => {
+      const tripCount = h.spawnCount("pr list");
+      const tripFired = tripCount === 0;
+      const tripViolations = tripFired
+        ? [
+            `negative-cache: deterministic leg expected exactly 1 "pr list" spawn across 4 ticks (10-minute cache should suppress every repeat), measured ${tripCount}`,
+          ]
+        : [
+            `negative-cache: break failed to trip, spawn count was already ${tripCount} immediately after boot`,
+          ];
+      console.log(
+        `\n--break negative-cache TRIP leg output:\n${tripViolations.join("\n")}`,
+      );
+
+      await waitForReady(SANDBOX_PORT);
+      await h.waitTicks(4);
+      const restoreCount = h.spawnCount("pr list");
+      const restoreClean = restoreCount === 1;
+      console.log(
+        `--break negative-cache RESTORE leg: ${restoreClean ? "PASS" : `FAIL: measured ${restoreCount}, expected 1`}`,
+      );
+      return { tripFired, restoreClean, tripViolations };
+    },
+  );
+}
+
+/**
+ * `last-known-good` break: seeds GHR98-KNOWN with an empty `prs` array (on both the card mirror
+ * and its session record) instead of the real two, confirming the check reports the MISSING PRs
+ * rather than passing on an empty comparison. Restore is a fresh boot with the real, fully-seeded
+ * GHR98-KNOWN fixture.
+ */
+async function runBreakLastKnownGood(ctx) {
+  const brokenKnown = {
+    ...ctx.cardsByName.known,
+    prs: [],
+    sessions: ctx.cardsByName.known.sessions.map((s) => ({ ...s, prs: [] })),
+  };
+  const tripResult = await withLeg(
+    ctx,
+    {
+      label: "break:last-known-good:trip",
+      cards: [brokenKnown],
+      shimEnv: { GH_SHIM_MODE: "repo-not-accessible" },
+    },
+    async (h) => {
+      await h.waitTicks(5);
+      const board = await h.readBoard();
+      const card = findCard(board, KNOWN_IDENTIFIER);
+      const prCount = card?.prs?.length ?? 0;
+      const tripFired = prCount !== 2;
+      const tripViolations = tripFired
+        ? [
+            `last-known-good: expected 2 seeded PRs still present on ${KNOWN_IDENTIFIER} after 5 ticks past the ${PROBE_FAILURE_CEILING}-strike ceiling, measured ${prCount}`,
+          ]
+        : [
+            `last-known-good: break failed to trip, measured 2 PRs despite seeding zero`,
+          ];
+      return { tripFired, tripViolations };
+    },
+  );
+  console.log(
+    `\n--break last-known-good TRIP leg output:\n${tripResult.tripViolations.join("\n")}`,
+  );
+
+  const restoreResult = await withLeg(
+    ctx,
+    {
+      label: "break:last-known-good:restore",
+      cards: [ctx.cardsByName.known],
+      shimEnv: { GH_SHIM_MODE: "repo-not-accessible" },
+    },
+    async (h) => {
+      await h.waitTicks(5);
+      const board = await h.readBoard();
+      const card = findCard(board, KNOWN_IDENTIFIER);
+      const prCount = card?.prs?.length ?? 0;
+      return { restoreClean: prCount === 2, prCount };
+    },
+  );
+  console.log(
+    `--break last-known-good RESTORE leg: ${restoreResult.restoreClean ? "PASS" : `FAIL: measured ${restoreResult.prCount} PRs, expected 2`}`,
+  );
+
+  return {
+    tripFired: tripResult.tripFired,
+    restoreClean: restoreResult.restoreClean,
+    tripViolations: tripResult.tripViolations,
+  };
+}
+
+/**
+ * `breaker-pause` break: sets `GH_SHIM_REMAINING=5000`, far above the 50 floor, so the breaker
+ * must NOT pause, confirming the check reports the CONTINUING `pr list` spawns as a violation of
+ * its own "stops growing" expectation. This break proves the check is actually reading the spawn
+ * log rather than the shim mode alone (a rate-limited category with a healthy remaining count is
+ * a real, distinct scenario from a genuinely low one). Restore is a fresh boot with the real,
+ * genuinely-low `GH_SHIM_REMAINING=10` the check itself uses.
+ */
+async function runBreakBreakerPause(ctx) {
+  const tripResult = await withLeg(
+    ctx,
+    {
+      label: "break:breaker-pause:trip",
+      cards: [ctx.cardsByName.pair, ctx.cardsByName.known],
+      shimEnv: {
+        GH_SHIM_MODE: "rate-limited",
+        GH_SHIM_REMAINING: "5000",
+        GH_SHIM_RESET: String(Math.floor(Date.now() / 1000) + 120),
+      },
+    },
+    async (h) => {
+      await h.waitTicks(1);
+      const prListAfterTick1 = h.spawnCount("pr list");
+      await h.waitTicks(3);
+      const prListAfterTick4 = h.spawnCount("pr list");
+      const tripFired = prListAfterTick4 !== prListAfterTick1;
+      const tripViolations = tripFired
+        ? [
+            `breaker-pause: "pr list" spawn count grew from ${prListAfterTick1} (after tick 1) to ${prListAfterTick4} (after 3 more ticks), expected it to stop growing once the breaker tripped`,
+          ]
+        : [
+            `breaker-pause: break failed to trip, spawn count stayed at ${prListAfterTick1} despite a healthy remaining count that should never pause probing`,
+          ];
+      return { tripFired, tripViolations };
+    },
+  );
+  console.log(
+    `\n--break breaker-pause TRIP leg output:\n${tripResult.tripViolations.join("\n")}`,
+  );
+
+  const restoreResult = await withLeg(
+    ctx,
+    {
+      label: "break:breaker-pause:restore",
+      cards: [ctx.cardsByName.pair, ctx.cardsByName.known],
+      shimEnv: {
+        GH_SHIM_MODE: "rate-limited",
+        GH_SHIM_REMAINING: "10",
+        GH_SHIM_RESET: String(Math.floor(Date.now() / 1000) + 120),
+      },
+    },
+    async (h) => {
+      await h.waitTicks(1);
+      const prListAfterTick1 = h.spawnCount("pr list");
+      await h.waitTicks(3);
+      const prListAfterTick4 = h.spawnCount("pr list");
+      return {
+        restoreClean: prListAfterTick4 === prListAfterTick1,
+        prListAfterTick1,
+        prListAfterTick4,
+      };
+    },
+  );
+  console.log(
+    `--break breaker-pause RESTORE leg: ${restoreResult.restoreClean ? "PASS" : `FAIL: grew ${restoreResult.prListAfterTick1} -> ${restoreResult.prListAfterTick4}`}`,
+  );
+
+  return {
+    tripFired: tripResult.tripFired,
+    restoreClean: restoreResult.restoreClean,
+    tripViolations: tripResult.tripViolations,
+  };
+}
+
+/**
+ * `call-count-parity` break: runs the check's own real leg (GHR98-PAIR, `GH_SHIM_MODE=ok`, a
+ * widened `GH_SHIM_DELAY_MS=2000` to hold every invocation open longer) and then compares the
+ * SAME measured spawn count against a DELIBERATELY MIS-STATED expected value (the real computed
+ * value plus one), confirming the check fires, proving it compares against a value computed from
+ * the seeded fixture rather than a hardcoded constant. Restore re-compares the same measurement
+ * against the correctly-computed expected value.
+ */
+async function runBreakCallCountParity(ctx) {
+  const ticks = 2;
+  return withLeg(
+    ctx,
+    {
+      label: "break:call-count-parity",
+      cards: [ctx.cardsByName.pair],
+      shimEnv: { GH_SHIM_MODE: "ok", GH_SHIM_DELAY_MS: "2000" },
+    },
+    async (h) => {
+      await h.waitTicks(ticks);
+      const correctExpected =
+        ctx.pairMeta.sessionCount * ctx.pairMeta.repoCountPerSession * ticks;
+      const misStatedExpected = correctExpected + 1;
+      const measured = h.spawnCount("pr list");
+
+      const tripFired = measured !== misStatedExpected;
+      const tripViolations = tripFired
+        ? [
+            `call-count-parity: expected ${misStatedExpected} "pr list" spawns (deliberately mis-stated by one), measured ${measured}`,
+          ]
+        : [
+            `call-count-parity: break failed to trip, measured spawn count coincidentally matched the mis-stated expected value`,
+          ];
+      console.log(
+        `\n--break call-count-parity TRIP leg output:\n${tripViolations.join("\n")}`,
+      );
+
+      const restoreClean = measured === correctExpected;
+      console.log(
+        `--break call-count-parity RESTORE leg: ${restoreClean ? "PASS" : `FAIL: measured ${measured}, correct expected ${correctExpected}`}`,
+      );
+      return { tripFired, restoreClean, tripViolations };
+    },
+  );
+}
+
+const BREAKS = {
+  "no-failure-chip": runBreakNoFailureChip,
+  "diagnostic-line": runBreakDiagnosticLine,
+  "negative-cache": runBreakNegativeCache,
+  "last-known-good": runBreakLastKnownGood,
+  "breaker-pause": runBreakBreakerPause,
+  "call-count-parity": runBreakCallCountParity,
+};
 
 // ---------------------------------------------------------------------------
 // main
@@ -1550,6 +1960,7 @@ async function main() {
   let chromeUserDataDir = null;
   let cdp = null;
   let portsHeld = false;
+  let breakResult = null;
   const tmuxSpawned = [];
 
   const ctx = {
@@ -1638,7 +2049,7 @@ async function main() {
     }
 
     if (breakName != null) {
-      violations.push(`--break ${breakName}: not implemented`);
+      breakResult = await BREAKS[breakName](ctx);
     } else {
       for (const n of names) {
         console.log(`\n=== running check: ${n} ===`);
@@ -1697,8 +2108,25 @@ async function main() {
   }
 
   if (breakName != null) {
-    console.log(`\nFAIL: --break ${breakName} is not implemented yet`);
-    process.exit(1);
+    console.log(
+      `\n--break ${breakName} summary: tripFired=${breakResult.tripFired} restoreClean=${breakResult.restoreClean}`,
+    );
+    if (!breakResult.tripFired) {
+      console.log(
+        `FAIL (self-check): the trip leg did NOT report the expected violation for "${breakName}", the check is a dead instrument.`,
+      );
+      process.exit(1);
+    }
+    if (!breakResult.restoreClean) {
+      console.log(
+        `FAIL (self-check): the restore leg for "${breakName}" still reports a violation after restoring the correct condition.`,
+      );
+      process.exit(1);
+    }
+    console.log(
+      `PASS (--break ${breakName} self-check): trip leg correctly reported the violation, restore leg re-passed clean.`,
+    );
+    process.exit(0);
   }
 
   if (violations.length > 0) {
