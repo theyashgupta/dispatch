@@ -263,13 +263,19 @@ export function Board({
     performMove(String(active.id), over.id);
   }
 
+  function handleDragStart({ active }: DragStartEvent) {
+    const id = String(active.id);
+    if (selectedIds.size > 0 && !selectedIds.has(id)) {
+      setSelectedIds(new Set());
+    }
+    setActiveCardId(id);
+  }
+
   return (
     <>
       <DndContext
         sensors={sensors}
-        onDragStart={({ active }: DragStartEvent) =>
-          setActiveCardId(String(active.id))
-        }
+        onDragStart={handleDragStart}
         onDragEnd={(e) => {
           setActiveCardId(null);
           handleDragEnd(e);
