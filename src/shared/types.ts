@@ -71,8 +71,12 @@ export interface PrInfo {
    * `nameWithOwner` and never the repo's absolute path. Stamped server-side from
    * `workspace.repos[i].path`, the only path the server already holds for this card; a basename
    * is passed rather than the path itself so no absolute path or org name reaches the wire
-   * (T-98-01). REQUIRED, not optional: every `PrInfo` that reaches the wire names the repo it
-   * came from. NON-SECRET: rides `snapshot()` UNREDACTED like the rest of this interface.
+   * (T-98-01). The single exception is a card whose own `workspace.repos` holds two folders with
+   * the SAME basename, where the colliding entries alone are qualified with their parent folder
+   * name (`"acme/api"`): without that, the two collapse into one identity and the repo tag is
+   * suppressed in precisely the case it exists to disambiguate. Still a folder name, never an org.
+   * REQUIRED, not optional: every `PrInfo` that reaches the wire names the repo it came from.
+   * NON-SECRET: rides `snapshot()` UNREDACTED like the rest of this interface.
    */
   repo: string;
 }

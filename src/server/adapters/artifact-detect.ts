@@ -1,5 +1,5 @@
 import net from "node:net";
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 import type { Card, PreviewInfo, Session } from "../../shared/types.js";
 import {
   probePrsForBranch,
@@ -130,6 +130,33 @@ function connectOnce(
     sock.once("connect", () => done(true));
     sock.once("error", () => done(false));
     sock.setTimeout(timeoutMs, () => done(false));
+  });
+}
+
+/**
+ * The display name stamped onto every `PrInfo.repo` this tick, one entry per `repos` index.
+ *
+ * @remarks
+ * A bare basename is the whole identity on the wire (T-98-01) and the only thing the chip tag and
+ * the panel's grouping disambiguate by, so two registered repos named `api` under different
+ * parents collapsed into one: `new Set(prs.map((pr) => pr.repo)).size > 1` read false, the tag was
+ * suppressed as a single-repo card, and `PrList` merged two distinct repos into one ungrouped
+ * list, failing in exactly the case the tag exists for. A COLLIDING basename is therefore
+ * qualified with its parent folder name, and only a colliding one: the ordinary card keeps the
+ * short label the board's density budget was measured against, and no absolute path reaches the
+ * wire either way.
+ */
+function repoDisplayNames(repos: { path: string }[]): string[] {
+  const counts = new Map<string, number>();
+  for (const repo of repos) {
+    const name = basename(repo.path);
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return repos.map((repo) => {
+    const name = basename(repo.path);
+    return (counts.get(name) ?? 0) > 1
+      ? `${basename(dirname(repo.path))}/${name}`
+      : name;
   });
 }
 
@@ -282,9 +309,10 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
       ) {
         const branch = rec.branch;
         const repos = rec.workspace.repos;
+        const repoNames = repoDisplayNames(repos);
         const results = await Promise.all(
-          repos.map((repo) =>
-            probePrsForBranch(repo.path, branch, basename(repo.path)),
+          repos.map((repo, i) =>
+            probePrsForBranch(repo.path, branch, repoNames[i]),
           ),
         );
         const answered = results.filter(
