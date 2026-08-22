@@ -825,6 +825,36 @@ async function beginDrag(cdp, sessionId, column, identifier, target) {
   return { x: x1, y: y1 };
 }
 
+/**
+ * `mouseMoved` to `point` while the button is held (`buttons: 1`), for callers that need to
+ * relocate an already-activated drag to a DIFFERENT column than the one `beginDrag` targeted before
+ * releasing (e.g. the harmless same-column drops this phase's own checks use: drag "toward" one
+ * column for the mid-drag reading, then move back over `todo` before `endDrag`, so the drop actually
+ * resolves against `todo`'s droppable rather than wherever the LAST real `mousemove` landed). dnd-kit
+ * tracks collision purely from the most recent `mousemove` coordinates, never from `mouseReleased`'s
+ * own x/y, so `endDrag` alone at a different point than the drag's last move does NOT change where
+ * the drop resolves; this bridges that gap.
+ */
+async function moveDragTo(cdp, sessionId, point) {
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    { type: "mouseMoved", x: point.x, y: point.y, buttons: 1 },
+    sessionId,
+  );
+  // A single large jump (e.g. from over "done" back to over "todo") observably raced dnd-kit's own
+  // collision re-measurement in this harness: MSD-A landed in an UNRELATED intermediate column
+  // ("in_review") because `endDrag` fired before the post-jump collision recompute had settled. A
+  // second identical dispatch, after a real settle sleep, forces one more measurement pass against
+  // the STABLE final coordinates before the caller is allowed to release the button.
+  await sleep(150);
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    { type: "mouseMoved", x: point.x, y: point.y, buttons: 1 },
+    sessionId,
+  );
+  await sleep(150);
+}
+
 /** `mouseReleased` at `point`, then a settle sleep so the resulting `onDragEnd`/optimistic-update
  * work has a chance to run before the caller reads any post-drop DOM state. */
 async function endDrag(cdp, sessionId, point) {
@@ -1256,7 +1286,397 @@ async function checkKeyboardUnchanged(cdp, sessionId, violations) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Phase 100 plan 05: real ctrl-click selection, the stacked-overlay check,
+// the overlay-unchanged-n1 check, and the a11y check (DRAG-03). Every
+// selection below is built by real Input.dispatchMouseEvent ctrl-clicks,
+// never by writing selectedIds/React state directly (RESEARCH Pitfall 2,
+// 99-REVIEW.md CR-02's own root cause for this milestone). Every deck/overlay
+// lookup reuses a structural locator, never an aria-label prefix and never a
+// data-* attribute this phase's own code writes (Trap 3).
+//
+// RUN ORDER IS LOAD-BEARING: these three checks are registered BEFORE
+// single-card-unchanged/keyboard-unchanged in CHECKS below, deliberately.
+// single-card-unchanged permanently drags MSD-A into "done" and
+// keyboard-unchanged permanently moves MSD-B into "done" (that IS what those
+// two DRAG-05 baseline checks assert), so within one full-suite invocation
+// (`node scripts/panel-100.mjs`, one seed, one board session, every
+// registered check run back to back in CHECKS' own key order) MSD-A/MSD-B
+// would no longer be selection-eligible (Card.tsx's ctrl-click branch
+// requires `card.column === "todo"`) by the time a later check tried to
+// ctrl-click them. Every check in this block only ever performs SAME-COLUMN
+// (todo-to-todo) harmless drops, so MSD-A..D stay in "todo" throughout, but
+// that guarantee only holds if this block's checks run first.
+// ---------------------------------------------------------------------------
+
+/**
+ * Locates the TRUE dnd-kit `DragOverlay` portal node: the element whose computed `position` is
+ * `fixed` (matching `PositionedOverlay`'s own inline `position: 'fixed'` base style,
+ * `node_modules/@dnd-kit/core/dist/core.esm.js:3630-3676`), whose subtree contains `identifier`, and
+ * which has no `[data-column]` ancestor. Distinct from `FIND_OVERLAY_SRC` (plan 01), which finds the
+ * `aria-hidden`/`inert` node THIS PHASE's own JSX sets (the deck container or the bare `CardView`
+ * root); this one finds dnd-kit's own wrapper one level further out, load-bearing for
+ * `overlay-unchanged-n1`'s "no intervening wrapper" assertion, which needs to inspect what is
+ * DIRECTLY inside dnd-kit's real overlay node. Never keys on an attribute this phase's own code
+ * writes.
+ */
+const FIND_FIXED_OVERLAY_SRC = `
+  function panel100FindFixedOverlayNode(identifier) {
+    var root = document.getElementById("root");
+    if (!root) throw new Error("panel100: board root #root not found");
+    var candidates = Array.prototype.filter.call(
+      root.querySelectorAll("*"),
+      function (el) {
+        // Cheap string search FIRST, expensive getComputedStyle() only on the tiny surviving set:
+        // scanning every element in the tree with getComputedStyle() up front (forcing a style
+        // recalc per element) measurably degraded this harness under repeated drags in one long
+        // session.
+        return el.textContent.indexOf(identifier) !== -1 &&
+          !el.closest("[data-column]") &&
+          getComputedStyle(el).position === "fixed";
+      }
+    );
+    if (candidates.length === 0) return null;
+    var outer = candidates.filter(function (el) {
+      return !candidates.some(function (other) { return other !== el && other.contains(el); });
+    });
+    if (outer.length !== 1) {
+      throw new Error("panel100: fixed overlay node for " + identifier + " ambiguous, matched " + outer.length + " outermost candidates");
+    }
+    return outer[0];
+  }
+`;
+
+/** Finds a `"<n> selected"` span's current text, or `null` if none is mounted (`SelectionBar.tsx`
+ * only mounts at `count >= 2`). */
+async function readSelectionText(cdp, sessionId) {
+  return evalValue(
+    cdp,
+    sessionId,
+    `${FIND_SELECTION_TEXT_SRC}panel100FindSelectionText()`,
+  );
+}
+
+/**
+ * A REAL multi-select click: `mousePressed` then `mouseReleased` at the card's centre with
+ * `modifiers: 4` (CDP's Meta/Command bit) and `clickCount: 1`, matching `Card.tsx`'s own
+ * eligibility branch (`event.metaKey || event.ctrlKey`, gated on `column === "todo" && groupId ==
+ * null && source !== "group"`). Never writes `selectedIds` or any React state directly (RESEARCH
+ * Pitfall 2, `99-REVIEW.md` CR-02's own root cause for this milestone).
+ *
+ * USES META (Cmd), NOT CTRL, DELIBERATELY: an instrumented diagnostic run of this file
+ * (`cdp-click-test.mjs`, a throwaway isolated-page harness) proved that on this macOS Chrome build
+ * (151.0.7922.170, `--headless=new`), `Input.dispatchMouseEvent`'s `modifiers: 2` (Ctrl) bit
+ * SUPPRESSES the native `click` event synthesis entirely, on EVERY element tested, even a plain
+ * unstyled `<div>` on a `data:` URL with zero app code involved: `mousedown`/`mouseup` both fire
+ * with `ctrlKey: true`, but no `click` DOM event ever follows, exactly macOS's own long-standing
+ * "Control+click == secondary click" convention (Chrome routes it toward a context-menu gesture,
+ * not a left-click), so React's `onClick` (which only ever fires from a genuine `click` event) never
+ * sees it. `modifiers: 4` (Meta/Command), verified against the same isolated page, produces a normal
+ * `click` with `metaKey: true`, and `Card.tsx`'s own eligibility check already accepts EITHER
+ * modifier for exactly this cross-platform reason. This file's own `100-01-PLAN.md`-era
+ * `<interfaces>` note ("CDP's `modifiers` bit for Ctrl is 2") is correct about the bit VALUE but
+ * silent on this platform-specific interception; documented here so a later plan does not
+ * rediscover the same 45-minute trap.
+ */
+async function ctrlClickCard(cdp, sessionId, column, identifier) {
+  const rect = await findCardRect(cdp, sessionId, column, identifier);
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mousePressed",
+      x: rect.x,
+      y: rect.y,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+      modifiers: 4,
+    },
+    sessionId,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseReleased",
+      x: rect.x,
+      y: rect.y,
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+      modifiers: 4,
+    },
+    sessionId,
+  );
+  await sleep(120);
+}
+
+/**
+ * Ctrl-clicks every identifier in column "todo" in order, THROWS (never records a violation and
+ * continues, per T-100-16) unless the resulting `SelectionBar` text is exactly `"<identifiers.length>
+ * selected"`. A selection the harness fabricated, or a click that silently failed to register, would
+ * make every later assertion in this file meaningless (RESEARCH Pitfall 2).
+ */
+async function selectCardsByIdentifier(cdp, sessionId, identifiers) {
+  for (const identifier of identifiers) {
+    await ctrlClickCard(cdp, sessionId, "todo", identifier);
+  }
+  const text = await readSelectionText(cdp, sessionId);
+  const expected = `${identifiers.length} selected`;
+  if (text !== expected) {
+    throw new Error(
+      `selectCardsByIdentifier: expected SelectionBar text "${expected}" after ctrl-clicking ${JSON.stringify(identifiers)}, measured ${JSON.stringify(text)}`,
+    );
+  }
+}
+
+/**
+ * `stacked-overlay` leg body: drags MSD-B toward `done` (the release always lands back on `todo`, a
+ * harmless same-column drop, so nothing ever actually moves), reads the deck's geometry and badge
+ * while the button is down, and asserts against the SHARED overlay lookup (`FIND_OVERLAY_SRC`, plan
+ * 01), never an aria-label or a data-* value this phase's own code writes. `mutateHook`/`restoreHook`,
+ * when provided, run immediately after `assertDragActivated` proves the deck exists (mutate) and
+ * immediately after this leg's own reading captures the trip (restore), mirroring plan 01's
+ * `preDragHook` discipline.
+ */
+async function performStackedOverlayLeg(
+  cdp,
+  sessionId,
+  violations,
+  legLabel,
+  expectedN,
+  expectedBackFaceCount,
+  mutateHook,
+  restoreHook,
+) {
+  const doneTarget = await columnDropPoint(cdp, sessionId, "done");
+  const todoTarget = await columnDropPoint(cdp, sessionId, "todo");
+  await beginDrag(cdp, sessionId, "todo", MSD_B_IDENTIFIER, doneTarget);
+  await assertDragActivated(cdp, sessionId, MSD_B_IDENTIFIER);
+
+  if (mutateHook) await mutateHook(cdp, sessionId);
+
+  const reading = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_OVERLAY_SRC}(function () {
+      var overlay = panel100FindOverlayNode(${JSON.stringify(MSD_B_IDENTIFIER)});
+      if (!overlay) throw new Error("panel100: deck overlay not found for MSD-B");
+      var kids = Array.prototype.slice.call(overlay.children);
+      var backFaces = [];
+      var badge = null;
+      var cardRoot = null;
+      kids.forEach(function (el) {
+        var s = getComputedStyle(el);
+        var text = (el.textContent || "").trim();
+        if (s.position === "absolute" && s.borderRadius === "6px" && el.children.length === 0 && text === "") {
+          backFaces.push(el);
+        } else if (s.position === "absolute" && /^\\d+$/.test(text)) {
+          badge = el;
+        } else if (s.position === "relative" && text.indexOf(${JSON.stringify(MSD_B_IDENTIFIER)}) !== -1) {
+          cardRoot = el;
+        }
+      });
+      var probe = document.createElement("div");
+      probe.style.backgroundColor = "var(--accent)";
+      document.body.appendChild(probe);
+      var expectedAccentBackground = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      var frontRect = cardRoot ? cardRoot.getBoundingClientRect() : null;
+      var faceReadings = backFaces.map(function (el) {
+        var r = el.getBoundingClientRect();
+        return {
+          transform: getComputedStyle(el).transform,
+          textContent: el.textContent,
+          rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+        };
+      });
+      return {
+        cardRootFound: cardRoot != null,
+        backFaceCount: backFaces.length,
+        faces: faceReadings,
+        frontRect: frontRect ? { left: frontRect.left, top: frontRect.top, width: frontRect.width, height: frontRect.height } : null,
+        badgeFound: badge != null,
+        badgeText: badge ? badge.textContent : null,
+        badgePosition: badge ? getComputedStyle(badge).position : null,
+        badgeHeight: badge ? getComputedStyle(badge).height : null,
+        badgeBorderRadius: badge ? getComputedStyle(badge).borderRadius : null,
+        badgeBackgroundColor: badge ? getComputedStyle(badge).backgroundColor : null,
+        expectedAccentBackground: expectedAccentBackground,
+      };
+    })()`,
+  );
+
+  if (restoreHook) await restoreHook(cdp, sessionId);
+
+  if (!reading.cardRootFound) {
+    violations.push(
+      `stacked-overlay: ${legLabel}, front CardView root not classified within the deck overlay for MSD-B`,
+    );
+  }
+  if (reading.backFaceCount !== expectedBackFaceCount) {
+    violations.push(
+      `stacked-overlay: ${legLabel}, expected ${expectedBackFaceCount} back faces, measured ${reading.backFaceCount}`,
+    );
+  }
+  const faceExpectations = [
+    {
+      label: "8px back face",
+      transform: "matrix(1, 0, 0, 1, 8, 8)",
+      dx: 8,
+      dy: 8,
+    },
+    {
+      label: "4px back face",
+      transform: "matrix(1, 0, 0, 1, 4, 4)",
+      dx: 4,
+      dy: 4,
+    },
+  ].slice(expectedBackFaceCount === 2 ? 0 : 1);
+  for (let i = 0; i < faceExpectations.length; i++) {
+    const exp = faceExpectations[i];
+    const face = reading.faces[i];
+    if (!face) {
+      violations.push(
+        `stacked-overlay: ${legLabel}, ${exp.label} missing at deck child index ${i}`,
+      );
+      continue;
+    }
+    if (face.transform !== exp.transform) {
+      violations.push(
+        `stacked-overlay: ${legLabel}, ${exp.label} transform expected ${JSON.stringify(exp.transform)}, measured ${JSON.stringify(face.transform)}`,
+      );
+    }
+    if (face.textContent !== "") {
+      violations.push(
+        `stacked-overlay: ${legLabel}, ${exp.label} expected empty textContent, measured ${JSON.stringify(face.textContent)}`,
+      );
+    }
+    if (reading.frontRect) {
+      const expLeft = reading.frontRect.left + exp.dx;
+      const expTop = reading.frontRect.top + exp.dy;
+      const badRect =
+        Math.abs(face.rect.left - expLeft) > 0.5 ||
+        Math.abs(face.rect.top - expTop) > 0.5 ||
+        Math.abs(face.rect.width - reading.frontRect.width) > 0.5 ||
+        Math.abs(face.rect.height - reading.frontRect.height) > 0.5;
+      if (badRect) {
+        violations.push(
+          `stacked-overlay: ${legLabel}, ${exp.label} rect expected left=${expLeft.toFixed(2)} top=${expTop.toFixed(2)} width=${reading.frontRect.width.toFixed(2)} height=${reading.frontRect.height.toFixed(2)} (front rect translated by (${exp.dx},${exp.dy})), measured left=${face.rect.left.toFixed(2)} top=${face.rect.top.toFixed(2)} width=${face.rect.width.toFixed(2)} height=${face.rect.height.toFixed(2)}`,
+        );
+      }
+    }
+  }
+  if (!reading.badgeFound) {
+    violations.push(
+      `stacked-overlay: ${legLabel}, count badge not found in the deck overlay`,
+    );
+  } else {
+    if (reading.badgeText !== String(expectedN)) {
+      violations.push(
+        `stacked-overlay: ${legLabel}, badge text expected ${JSON.stringify(String(expectedN))}, measured ${JSON.stringify(reading.badgeText)}`,
+      );
+    }
+    if (reading.badgePosition !== "absolute") {
+      violations.push(
+        `stacked-overlay: ${legLabel}, badge position expected "absolute", measured ${JSON.stringify(reading.badgePosition)}`,
+      );
+    }
+    if (reading.badgeHeight !== "20px") {
+      violations.push(
+        `stacked-overlay: ${legLabel}, badge height expected "20px", measured ${JSON.stringify(reading.badgeHeight)}`,
+      );
+    }
+    if (reading.badgeBorderRadius !== "10px") {
+      violations.push(
+        `stacked-overlay: ${legLabel}, badge border-radius expected "10px", measured ${JSON.stringify(reading.badgeBorderRadius)}`,
+      );
+    }
+    if (reading.badgeBackgroundColor !== reading.expectedAccentBackground) {
+      violations.push(
+        `stacked-overlay: ${legLabel}, badge background-color expected ${JSON.stringify(reading.expectedAccentBackground)} (resolved --accent), measured ${JSON.stringify(reading.badgeBackgroundColor)}`,
+      );
+    }
+  }
+
+  await moveDragTo(cdp, sessionId, todoTarget);
+  await endDrag(cdp, sessionId, todoTarget);
+
+  for (const id of [
+    MSD_A_IDENTIFIER,
+    MSD_B_IDENTIFIER,
+    MSD_C_IDENTIFIER,
+    MSD_D_IDENTIFIER,
+  ]) {
+    const col = await pollUntilColumn(cdp, sessionId, id, "todo", 2000);
+    if (col !== "todo") {
+      violations.push(
+        `stacked-overlay: ${legLabel}, ${id} expected column "todo" after the harmless same-column drop, measured ${JSON.stringify(col)}`,
+      );
+    }
+  }
+}
+
+/**
+ * `stacked-overlay`: selects MSD-A/B/C (N=3, real ctrl-clicks), runs leg A (N=3, expects 2 back
+ * faces + badge "3"), adds MSD-D (N=4), runs leg B (N=4, still 2 back faces, badge "4" not "3"),
+ * then ctrl-clicks MSD-D again to return to a clean 3-selection. `legAMutateHook`/`legARestoreHook`
+ * are `runBreakStackedOverlay`'s only injection point, applied to leg A alone (leg B always runs
+ * clean, sufficient once leg A has already proven the instrument can fail).
+ */
+async function checkStackedOverlay(
+  cdp,
+  sessionId,
+  violations,
+  legAMutateHook = null,
+  legARestoreHook = null,
+) {
+  await selectCardsByIdentifier(cdp, sessionId, [
+    MSD_A_IDENTIFIER,
+    MSD_B_IDENTIFIER,
+    MSD_C_IDENTIFIER,
+  ]);
+
+  await performStackedOverlayLeg(
+    cdp,
+    sessionId,
+    violations,
+    "leg A (N=3)",
+    3,
+    2,
+    legAMutateHook,
+    legARestoreHook,
+  );
+
+  await ctrlClickCard(cdp, sessionId, "todo", MSD_D_IDENTIFIER);
+  const legBSetupText = await readSelectionText(cdp, sessionId);
+  if (legBSetupText !== "4 selected") {
+    throw new Error(
+      `checkStackedOverlay: leg B setup expected SelectionBar text "4 selected" after ctrl-clicking MSD-D, measured ${JSON.stringify(legBSetupText)}`,
+    );
+  }
+
+  await performStackedOverlayLeg(
+    cdp,
+    sessionId,
+    violations,
+    "leg B (N=4)",
+    4,
+    2,
+    null,
+    null,
+  );
+
+  await ctrlClickCard(cdp, sessionId, "todo", MSD_D_IDENTIFIER);
+  const afterText = await readSelectionText(cdp, sessionId);
+  if (afterText !== "3 selected") {
+    violations.push(
+      `stacked-overlay: cleanup, expected SelectionBar text "3 selected" after returning MSD-D to unselected, measured ${JSON.stringify(afterText)}`,
+    );
+  }
+}
+
 const CHECKS = {
+  "stacked-overlay": checkStackedOverlay,
   "single-card-unchanged": checkSingleCardUnchanged,
   "keyboard-unchanged": checkKeyboardUnchanged,
 };
