@@ -1,5 +1,5 @@
 import net from "node:net";
-import { basename, dirname } from "node:path";
+import { basename, sep } from "node:path";
 import type { Card, PreviewInfo, Session } from "../../shared/types.js";
 import {
   probePrsForBranch,
@@ -134,30 +134,58 @@ function connectOnce(
 }
 
 /**
- * The display name stamped onto every `PrInfo.repo` this tick, one entry per `repos` index.
+ * The display name to stamp onto `PrInfo.repo`, keyed by repo path, de-collided across every path
+ * given.
  *
  * @remarks
  * A bare basename is the whole identity on the wire (T-98-01) and the only thing the chip tag and
  * the panel's grouping disambiguate by, so two registered repos named `api` under different
  * parents collapsed into one: `new Set(prs.map((pr) => pr.repo)).size > 1` read false, the tag was
  * suppressed as a single-repo card, and `PrList` merged two distinct repos into one ungrouped
- * list, failing in exactly the case the tag exists for. A COLLIDING basename is therefore
- * qualified with its parent folder name, and only a colliding one: the ordinary card keeps the
- * short label the board's density budget was measured against, and no absolute path reaches the
- * wire either way.
+ * list, failing in exactly the case the tag exists for.
+ * @remarks The caller must pass every path the CARD owns across ALL its sessions, never one
+ * session's `workspace.repos`: `cardPrs` unions `card.prs` with every `sessionSummaries[].prs` and
+ * all three render sites compute their tag and their grouping over THAT union, so a per-session
+ * pass sees no duplicate for two sessions each holding one `api` and stamps both the same name.
+ * @remarks A colliding basename is qualified with as many parent segments as it takes to separate
+ * it (one usually, two for `/a/x/api` against `/b/x/api`), falling back to a numeric suffix when
+ * no depth separates two distinct paths, so the returned names are unique by construction. A
+ * non-colliding repo keeps the short basename the board's density budget was measured against, and
+ * no absolute path reaches the wire either way.
  */
-function repoDisplayNames(repos: { path: string }[]): string[] {
-  const counts = new Map<string, number>();
-  for (const repo of repos) {
-    const name = basename(repo.path);
-    counts.set(name, (counts.get(name) ?? 0) + 1);
+function repoDisplayNames(repoPaths: string[]): Map<string, string> {
+  const unique = [...new Set(repoPaths)];
+  const byBasename = new Map<string, string[]>();
+  for (const path of unique) {
+    const key = basename(path);
+    const group = byBasename.get(key);
+    if (group) group.push(path);
+    else byBasename.set(key, [path]);
   }
-  return repos.map((repo) => {
-    const name = basename(repo.path);
-    return (counts.get(name) ?? 0) > 1
-      ? `${basename(dirname(repo.path))}/${name}`
-      : name;
-  });
+  const names = new Map<string, string>();
+  for (const [key, paths] of byBasename) {
+    if (paths.length === 1) {
+      names.set(paths[0], key);
+      continue;
+    }
+    const segments = paths.map((path) =>
+      path.split(sep).filter((part) => part !== ""),
+    );
+    const maxDepth = Math.max(...segments.map((parts) => parts.length));
+    let depth = 2;
+    while (
+      depth <= maxDepth &&
+      new Set(segments.map((parts) => parts.slice(-depth).join("/"))).size <
+        paths.length
+    ) {
+      depth++;
+    }
+    paths.forEach((path, i) => {
+      const label = segments[i].slice(-Math.min(depth, maxDepth)).join("/");
+      names.set(path, depth <= maxDepth ? label : `${label} (${i + 1})`);
+    });
+  }
+  return names;
 }
 
 /**
@@ -309,7 +337,15 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
       ) {
         const branch = rec.branch;
         const repos = rec.workspace.repos;
-        const repoNames = repoDisplayNames(repos);
+        const displayNames = repoDisplayNames([
+          ...repos.map((repo) => repo.path),
+          ...(card.sessions ?? [])
+            .flatMap((s) => s.workspace?.repos ?? [])
+            .map((repo) => repo.path),
+        ]);
+        const repoNames = repos.map(
+          (repo) => displayNames.get(repo.path) ?? basename(repo.path),
+        );
         const results = await Promise.all(
           repos.map((repo, i) =>
             probePrsForBranch(repo.path, branch, repoNames[i]),
@@ -323,7 +359,19 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
         );
         // A skip is "we did not ask", never a strike toward PROBE_FAILURE_CEILING (PRLINK-05).
         const realFailures = failed.filter((f) => f.skipped !== true);
-        const finalPrs = answered.flatMap((r) => r.prs);
+        const skippedRepoNames = new Set(
+          results.flatMap((r, i) =>
+            !r.ok && r.skipped === true ? [repoNames[i]] : [],
+          ),
+        );
+        // PRLINK-05: written list is answered repos PLUS last-known-good of every SKIPPED repo.
+        // PRLINK-05: a skip spends no strike, so a sibling answering must not delete its PRs.
+        const finalPrs = [
+          ...answered.flatMap((r) => r.prs),
+          ...(rec.prs ?? []).filter(
+            (pr) => pr.repo != null && skippedRepoNames.has(pr.repo),
+          ),
+        ];
         let holdLastKnownPrs = false;
 
         if (failed.length > 0) {
