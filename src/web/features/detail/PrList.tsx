@@ -89,7 +89,9 @@ function PrListRow({ pr }: { pr: PrInfo }) {
 
 export function PrList({ card }: { card: Card }) {
   const prs = useCardPrs(card);
-  const unknown = card.prsUnknown;
+  const unknown =
+    card.prsUnknown ??
+    (card.sessionSummaries ?? []).find((s) => s.prsUnknown != null)?.prsUnknown;
   if (prs.length === 0 && unknown == null) return null;
 
   const repoOrder: string[] = [];
