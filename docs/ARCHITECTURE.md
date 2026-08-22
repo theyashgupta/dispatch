@@ -3134,7 +3134,13 @@ rate_limit`, paused until `reset` under 50 remaining), and a semaphore of four c
   contains "pid", evidence must stay off the accessible name"), and `evidence-panel`
   ("evidence-panel: PORT-MISS expected exactly 1 "cwd mismatch" segment, measured 0"). Every check
   is proven able to fail. `density-91.mjs --compare` against the Plan 03 BEFORE snapshot confirms
-  the evidence surface changes no rendered card geometry.
+  the evidence surface changes no rendered card geometry. Card geometry is not the whole DOM
+  contract, though: this phase also changed the badge's accessible NAME, from `Open preview` plus an
+  em dash plus `localhost:<port>` to the comma-separated `Open preview, localhost:<port>`, when the
+  single `label` const was split into a `title` and an `aria-label`. The announced words are
+  unchanged and no selector or a11y snapshot in this repo keys on the old name, but a screen reader
+  does announce a different string, so it is recorded here and in `99-UI-SPEC.md` rather than
+  carried as an unlogged "unchanged" (99-REVIEW WR-08).
 - **`node scripts/port-attribution-99.mjs`** (`npm run port-attribution-99`, Phase 99, PORT-01) - a
   real-tmux/real-listener sandbox harness, deliberately OUTSIDE `npm run check` (it spawns real
   tmux sessions and dev-server listeners and requires the live `com.dispatch.app` service stopped
