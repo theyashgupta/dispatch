@@ -203,6 +203,17 @@ export function Board({
     return () => clearTimeout(timer);
   }, [refusedColumn]);
 
+  const [failedMoveCount, setFailedMoveCount] = useState<number | null>(null);
+  const strandedCompensationRef = useRef(false);
+
+  useEffect(() => {
+    if (failedMoveCount == null) return;
+    const timer = setTimeout(() => {
+      if (!strandedCompensationRef.current) setFailedMoveCount(null);
+    }, 3200);
+    return () => clearTimeout(timer);
+  }, [failedMoveCount]);
+
   const justDroppedRef = useRef(false);
 
   function armClickSuppression() {
@@ -261,6 +272,73 @@ export function Board({
         ),
       );
     });
+  }
+
+  async function performGroupMove(cardIds: string[], targetColumn: ColumnId) {
+    if (blocksAgentDoneManualEntry(targetColumn)) {
+      setRefusedColumn(targetColumn);
+      return;
+    }
+
+    const snapshot = new Map(
+      cards
+        .filter((c) => cardIds.includes(c.id))
+        .map((c) => [c.id, c.column] as const),
+    );
+    const toMove = cardIds.filter((id) => snapshot.get(id) !== targetColumn);
+    if (toMove.length === 0) return;
+
+    setCards((prev) =>
+      prev.map((c) =>
+        toMove.includes(c.id) ? { ...c, column: targetColumn } : c,
+      ),
+    );
+
+    const results = await Promise.allSettled(
+      toMove.map((id) => moveCard(id, targetColumn)),
+    );
+
+    if (results.every((r) => r.status === "fulfilled")) return;
+
+    console.error(
+      "performGroupMove failed; restoring the previous columns",
+      results
+        .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+        .map((r): unknown => r.reason),
+    );
+    setCards((prev) =>
+      prev.map((c) =>
+        toMove.includes(c.id) && c.column === targetColumn
+          ? { ...c, column: snapshot.get(c.id)! }
+          : c,
+      ),
+    );
+    strandedCompensationRef.current = false;
+    setFailedMoveCount(toMove.length);
+
+    const compensationTargets = toMove.filter(
+      (_, i) => results[i].status === "fulfilled",
+    );
+    const compensationResults = await Promise.allSettled(
+      compensationTargets.map((id) => moveCard(id, snapshot.get(id)!)),
+    );
+    for (const [i, compensationResult] of compensationResults.entries()) {
+      if (compensationResult.status !== "rejected") continue;
+      const id = compensationTargets[i];
+      const originalColumn = snapshot.get(id)!;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      try {
+        await moveCard(id, originalColumn);
+      } catch (retryErr) {
+        console.error(
+          "performGroupMove compensation failed after one retry; card stranded",
+          id,
+          originalColumn,
+          retryErr,
+        );
+        strandedCompensationRef.current = true;
+      }
+    }
   }
 
   function handleDragEnd(event: DragEndEvent) {
