@@ -1185,6 +1185,12 @@ async function main() {
     process.exit(1);
   }
 
+  if (violations.length > 0) {
+    console.log(`\nFAIL: ${violations.length} violation(s)`);
+    for (const v of violations) console.log(`  ${v}`);
+    process.exit(1);
+  }
+
   if (breakName != null) {
     console.log(
       `\n--break ${breakName} summary: tripFired=${breakResult.tripFired} restoreClean=${breakResult.restoreClean}`,
@@ -1205,12 +1211,6 @@ async function main() {
       `PASS (--break ${breakName} self-check): trip leg correctly reported the expected result, restore leg re-passed clean.`,
     );
     process.exit(0);
-  }
-
-  if (violations.length > 0) {
-    console.log(`\nFAIL: ${violations.length} violation(s)`);
-    for (const v of violations) console.log(`  ${v}`);
-    process.exit(1);
   }
 
   console.log("\nPASS");
