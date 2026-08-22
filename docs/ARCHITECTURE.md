@@ -3164,6 +3164,45 @@ rate_limit`, paused until `reset` under 50 remaining), and a semaphore of four c
   silent-zero-row failure), and `cwd-failure-must-not-clear` (an inverted-polarity leg: forcing the
   cwd `lsof` call to fail must produce ZERO violations, proving a cross-check failure never removes
   an already-reachable preview).
+- **`node scripts/panel-100.mjs`** (`npm run panel-100`, Phase 100, DRAG-03/DRAG-04/DRAG-05) - a CDP
+  structural/DOM instrument, deliberately OUTSIDE `npm run check` (it boots a real sandboxed
+  dispatch server and requires the live `com.dispatch.app` service stopped for its duration). Five
+  fixture cards (`MSD-A`..`MSD-D` in `todo`, `MSD-Z` in `done`), no real tmux or ttyd needed. Seven
+  named checks: `stacked-overlay` (the deck's two back faces are pure `(4,4)`/`(8,8)` translations of
+  the front card's rect at N=3 and N=4, badge reads the full selection count), `overlay-unchanged-n1`
+  (below N=2 the overlay stays byte-for-byte today's single-card overlay), `a11y` (the deck is
+  `aria-hidden`/`inert`, the live announcer names the count, non-dragged selected cards dim while
+  `SelectionBar` stays accurate throughout), `group-modal-prefill` (dropping a 3-card selection on
+  In Progress opens the existing Start Group modal pre-filled with exactly those three tickets and
+  fires zero move requests), `atomic-rollback` (failing one of three in-flight moves rolls back every
+  card on the client and, after a full page reload, on the server, with a single alert naming the
+  batch count; a compensating call that itself fails once is saved by its own retry, proven on the
+  client and after a reload), `single-card-unchanged`, and `keyboard-unchanged` (DRAG-05's two
+  baseline checks, pinning the pre-existing single-card drag and carousel "Move to..." paths
+  unaffected). Nine named `--break <name>` legs total, each proven able to fail live and quoted
+  verbatim from the script's own header JSDoc: `single-card-unchanged`
+  (`single-card-unchanged: MSD-A expected column "done", measured "todo"`), `keyboard-unchanged`
+  (`keyboard-unchanged: MSD-B expected column "done", measured "todo"`), `stacked-overlay`
+  (`stacked-overlay: leg A (N=3), 4px back face transform expected "matrix(1, 0, 0, 1, 4, 4)",
+measured "matrix(1, 0, 0, 1, 4, 10)"`), `overlay-unchanged-n1` (`overlay-unchanged-n1: N=0 leg,
+expected exactly 1 face-level element directly under the fixed overlay node, measured 2`), `a11y`
+  (`a11y: deck container aria-hidden expected "true", measured null`), `group-modal-prefill`
+  (`group-modal-prefill: modal member identifier set expected ["MSD-A","MSD-B","MSD-C"], measured
+["MSD-B","MSD-C"]`, never "modal not found"), `atomic-rollback` (releasing all three initial move
+  requests successfully produces `atomic-rollback: trip, [role="alert"] text expected "Couldn't move
+3 tickets", measured null` and `atomic-rollback: trip, MSD-A expected column "todo" immediately
+after rollback, measured "done"`), `atomic-rollback-toast` (a `MutationObserver` removing
+  `[role="alert"]` the instant it appears, injection otherwise normal, produces `atomic-rollback: leg
+1 (clean rollback), [role="alert"] text expected "Couldn't move 3 tickets", measured null` while
+  every column assertion still passes), and `atomic-rollback-stranded-compensation` (a
+  monkey-patched `console.error` swallowing "stranded" messages plus a `MutationObserver` removing
+  the alert, layered on a real permanently-failed compensation, produces `atomic-rollback: trip
+(detection signals suppressed), expected [role="alert"] to stay visible past 3200ms for a stranded
+compensation, measured absent` and `atomic-rollback: trip (detection signals suppressed), expected
+a console.error mentioning "stranded" and card id panel100-a, none captured`, proving the alert and
+  console signals, not a column read, are what catch a permanently-stranded card).
+  `density-91.mjs --compare` against `panel-100.mjs`'s own Phase 100 BEFORE snapshot reports zero
+  deltas: nothing about a resting card's geometry changed.
 - **`phase-smoke-tester`** - the only BEHAVIORAL verification this project runs: an agent derives
   and executes smoke cases against the running app after each phase's implementation lands. This
   is the one gate above that cannot be reduced to a grep.

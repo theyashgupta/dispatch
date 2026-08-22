@@ -61,6 +61,7 @@
     "gh-reliability-98": "node scripts/gh-reliability-98.mjs",
     "panel-99": "node scripts/panel-99.mjs",
     "port-attribution-99": "node scripts/port-attribution-99.mjs",
+    "panel-100": "node scripts/panel-100.mjs",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants",
     "prepack": "npm run build"
   },
