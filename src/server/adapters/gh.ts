@@ -22,13 +22,6 @@ interface GhPrResult {
   title: string;
   state: "OPEN" | "MERGED" | "CLOSED";
   isDraft: boolean;
-  /**
-   * Null on a PR whose head commit is gone, reachable since `--state all` also returns merged and
-   * closed PRs. Nullable in the TYPE so the null can never reach {@link rollupOf}'s `.length`:
-   * that throw happens INSIDE the `try`, so one malformed PR reclassified a SUCCESSFUL lookup as
-   * `gh pr list failed`, blanked the whole repo's list and spent a `PROBE_FAILURE_CEILING` strike
-   * every tick until last-known-good was wiped.
-   */
   statusCheckRollup: GhCheckRun[] | null;
 }
 
@@ -40,6 +33,21 @@ const loggedCategories = new Set<string>();
  */
 export type PrProbeResult =
   { ok: true; prs: PrInfo[] } | { ok: false; category: ProbeFailureCategory };
+
+/**
+ * Narrow `gh`'s own `state` token to the closed {@link PrInfo} union, reading anything
+ * unrecognised as `open`.
+ *
+ * @remarks
+ * A bare cast asserted rather than validated, so an unknown token flowed all the way to
+ * `pr-style.ts`, which falls through its two `if`s to the GREEN open branch: a false green on an
+ * affordance whose whole job is to be trusted at a glance, plus a `NaN` sort comparison from a
+ * rank lookup that returned undefined.
+ */
+function stateOf(raw: string): PrInfo["state"] {
+  const s = raw.toLowerCase();
+  return s === "merged" || s === "closed" ? s : "open";
+}
 
 /**
  * Reduce a `statusCheckRollup` into the badge's single CI verdict, in fixed precedence: no checks
@@ -63,6 +71,12 @@ export type PrProbeResult =
  * shipped once. Today's `StatusState` enum happens to be fully covered, so the fallthrough was
  * latent rather than live, but a widened enum member, a lower-cased `gh` output, or a non-enum state
  * from a legacy provider would each have painted a green dot on a check that did not pass.
+ *
+ * The caller passes `pr.statusCheckRollup ?? []`, and the field is typed nullable so that coalesce
+ * cannot be dropped silently: `gh` reports `null` for a PR whose head commit is gone, which
+ * `--state all` now reaches, and a throw here lands INSIDE `listPrsForBranch`'s own `try`, which
+ * reclassifies a SUCCESSFUL lookup as `gh pr list failed`, blanks the whole repo's list and spends
+ * a `PROBE_FAILURE_CEILING` strike every tick until last-known-good is wiped.
  */
 function rollupOf(checks: GhCheckRun[]): "pass" | "fail" | "pending" | null {
   if (checks.length === 0) return null;
@@ -167,7 +181,7 @@ export async function listPrsForBranch(
         number: pr.number,
         url: pr.url,
         title: pr.title,
-        state: pr.state.toLowerCase() as PrInfo["state"],
+        state: stateOf(pr.state),
         isDraft: pr.isDraft,
         ci: rollupOf(pr.statusCheckRollup ?? []),
         repo,

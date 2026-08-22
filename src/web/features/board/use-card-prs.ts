@@ -7,9 +7,17 @@ const STATE_RANK: Record<"open" | "draft" | "merged" | "closed", number> = {
   closed: 3,
 };
 
+/**
+ * Sort rank for one PR, falling back to `closed` for a state outside the union.
+ *
+ * @remarks
+ * The fallback is not dead: `board.db` holds rows written before `gh.ts` validated the token, and
+ * an undefined rank makes every comparison `NaN`, which leaves the whole ordering
+ * implementation-defined rather than merely misplacing one row.
+ */
 function rankOf(pr: PrInfo): number {
   if (pr.isDraft) return STATE_RANK.draft;
-  return STATE_RANK[pr.state];
+  return STATE_RANK[pr.state] ?? STATE_RANK.closed;
 }
 
 /**
