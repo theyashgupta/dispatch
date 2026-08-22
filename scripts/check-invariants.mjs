@@ -51,8 +51,10 @@ const ID_RE =
  * mitigation re-freeze (`T-98-05`), see docs/ARCHITECTURE.md#exec-chokepoint.
  * @remarks Moved from 124 to 125 for the deliberate one-ID `PrInfo.repo` basename
  * mitigation re-freeze (`T-98-01`), cited in `shared/types.ts` and `adapters/gh.ts`.
+ * @remarks Moved from 127 to 128 for the deliberate one-ID `PreviewEvidence` basename
+ * mitigation re-freeze (`T-99-01`), cited in `shared/types.ts`.
  */
-const FROZEN_COUNT = 127;
+const FROZEN_COUNT = 128;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");

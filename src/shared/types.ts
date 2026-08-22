@@ -82,6 +82,24 @@ export interface PrInfo {
 }
 
 /**
+ * Why a detected dev-server port was attributed to this card's workspace. `matchedCwd` is a
+ * BASENAME produced by `repoDisplayNames`, the same de-collision helper `PrInfo.repo` already
+ * uses, never an absolute path and never `session.workspace.folder` itself (T-99-01). `pid` and
+ * `bindAddress` are non-secret, a process id and a loopback bind token, and ride the
+ * wire like the rest of `PreviewInfo`. Carries no timestamp deliberately: the preview write path
+ * is fenced by a `JSON.stringify` write-skip diff, and a per-tick value would rebroadcast the
+ * whole board on a tick where nothing about this preview changed.
+ * @see docs/ARCHITECTURE.md#security-threat-model
+ */
+export interface PreviewEvidence {
+  pid: number;
+  source: "cwd" | "pane ancestry";
+  matchedCwd?: string;
+  bindAddress: string;
+  cwdMismatch?: boolean;
+}
+
+/**
  * A dev-server port detected inside a card's session process tree. `url` is always
  * `http://localhost:${port}`, computed once server-side so no render site duplicates URL
  * construction.
@@ -89,6 +107,12 @@ export interface PrInfo {
 export interface PreviewInfo {
   port: number;
   url: string;
+  /**
+   * Attribution evidence for this port, optional only defensively, matching the `prs?`/
+   * `previews?` absent-means-nothing idiom used elsewhere on the wire, never because a live tick
+   * withholds it once a `PreviewInfo` is produced.
+   */
+  evidence?: PreviewEvidence;
 }
 
 /**
