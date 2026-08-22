@@ -397,6 +397,15 @@ async function detectCardArtifacts(backendPort: number): Promise<void> {
  * counter for every live session, latches `previewsUnknown` on the first failure, and forces
  * `previews` to `[]` once the ceiling is reached.
  *
+ * An INCONCLUSIVE cwd cross-check holds the previous tick's evidence for that port when the pid
+ * and bind address are unchanged, rather than rebuilding a degraded one. `PreviewEvidence` carries
+ * no timestamp specifically so an unchanged preview never rebroadcasts, but `source` is itself
+ * per-tick: one `lsof -d cwd` timeout, one pid that exited between the port scan and the cwd call,
+ * or one `EACCES` flipped `"cwd"` to `"pane ancestry"` and dropped `matchedCwd`, which changes the
+ * `JSON.stringify` diff and rebroadcasts the whole board, then flips back on the next tick
+ * (99-REVIEW WR-06). Holding is scoped to the inconclusive case alone: a conclusive result, in
+ * either direction, always overwrites.
+ *
  * An idle board short-circuits before any subprocess runs: with no PROBED live session (all-Done or
  * genuinely empty) there is nothing to attribute a port to, yet the tick would still spawn
  * `tmux list-panes -a` every 10s forever and — with no tmux server at all — walk the entire
@@ -611,10 +620,19 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
                 previewDisplayNames,
               )
             : null;
+        const prior = (rec.previews ?? []).find(
+          (preview) => preview.port === candidate.port,
+        )?.evidence;
+        const held =
+          matched == null &&
+          prior?.pid === candidate.pid &&
+          prior.bindAddress === candidate.bindAddress
+            ? prior
+            : null;
         return {
           port: candidate.port,
           url: `http://localhost:${candidate.port}`,
-          evidence: {
+          evidence: held ?? {
             pid: candidate.pid,
             bindAddress: candidate.bindAddress,
             source: matched?.inWorkspace === true ? "cwd" : "pane ancestry",

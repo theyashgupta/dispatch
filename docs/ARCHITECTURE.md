@@ -2221,8 +2221,17 @@ directory, and both `/tmp` and `os.tmpdir()` resolve through `/private` on macOS
 sides of the comparison are normalized through `realpathSync` before any prefix compare, and a path
 that cannot be resolved yields an inconclusive result, never a throw.
 
-**A cwd lookup failure degrades evidence only.** It drops `evidence.source` to `"pane ancestry"`
-and nothing else: it never increments `previewFailureCounts`, never clears `previews`, and never
+**An inconclusive cwd cross-check holds the previous tick's evidence.** When the cwd map has no
+entry for a pid, or the paths cannot be resolved, the port keeps the evidence it already carried,
+provided the pid and bind address are unchanged. `PreviewEvidence` carries no timestamp precisely so
+an unchanged preview never rebroadcasts, but `source` is itself per tick: one `lsof` timeout or one
+`EACCES` flipped `"cwd"` to `"pane ancestry"`, changed the write skip diff, rebroadcast the whole
+board, and flipped back on the next tick, a per 10s board rebroadcast plus a flapping tooltip for a
+preview whose port and reachability never changed. A conclusive result, in either direction, always
+overwrites.
+
+**A cwd lookup failure degrades evidence only.** For a port with no evidence to hold, it drops
+`evidence.source` to `"pane ancestry"` and nothing else: it never increments `previewFailureCounts`, never clears `previews`, and never
 sets `previewsUnknown`. The `null` versus empty array staleness contract below stays driven solely
 by the pane pid walk's own failure path.
 
