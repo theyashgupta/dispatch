@@ -138,20 +138,14 @@ async function tripBreakerIfRateLimited(): Promise<void> {
 }
 
 /**
- * Gate every `gh pr list` spawn behind a per-repo negative cache, a global rate-limit breaker and
- * a concurrency semaphore, in that order, before delegating to {@link listPrsForBranch}.
+ * The two "do not ask" gates, in order: a live negative-cache entry for this repo, then a standing
+ * breaker pause. Returns the skip result to hand back, or null when a real spawn is allowed.
  *
  * @remarks
- * A cache hit or a breaker pause returns `skipped: true` with NO spawn: "we did not ask", never
- * "we asked and it failed". Only a real spawn (step 4 below) can arm the negative cache or trip
- * the breaker, and only a real spawn's result is returned without `skipped`, which is what lets
- * the caller count it as a genuine strike.
+ * Extracted because both gates must be re-tested AFTER the semaphore hands out a slot, not only
+ * before queueing for one.
  */
-export async function probePrsForBranch(
-  repoPath: string,
-  branch: string,
-  repo: string,
-): Promise<GhProbeResult> {
+function skipReasonFor(repoPath: string): GhProbeResult | null {
   const cached = negativeCache.get(repoPath);
   if (cached != null) {
     if (Date.now() < cached.cachedUntil) {
@@ -159,14 +153,41 @@ export async function probePrsForBranch(
     }
     negativeCache.delete(repoPath);
   }
-
   if (Date.now() < pausedUntil) {
     return { ok: false, category: "gh rate limited", skipped: true };
   }
+  return null;
+}
+
+/**
+ * Gate every `gh pr list` spawn behind a per-repo negative cache, a global rate-limit breaker and
+ * a concurrency semaphore, in that order, before delegating to {@link listPrsForBranch}.
+ *
+ * @remarks
+ * A cache hit or a breaker pause returns `skipped: true` with NO spawn: "we did not ask", never
+ * "we asked and it failed". Only a real spawn can arm the negative cache or trip the breaker, and
+ * only a real spawn's result is returned without `skipped`, which is what lets the caller count it
+ * as a genuine strike.
+ *
+ * Both gates are tested TWICE, once before queueing and again once a slot is granted. With four
+ * slots and an 8s `gh` timeout a probe can wait tens of seconds in the queue, and the breaker's
+ * promise (no spawns anywhere until this epoch ms) would otherwise be false for work already
+ * queued: it would spawn unconditionally on wake even though the breaker tripped, or the same
+ * repo was negative-cached, while it waited.
+ */
+export async function probePrsForBranch(
+  repoPath: string,
+  branch: string,
+  repo: string,
+): Promise<GhProbeResult> {
+  const skip = skipReasonFor(repoPath);
+  if (skip != null) return skip;
 
   const release = await acquire();
   let result: PrProbeResult;
   try {
+    const skipNow = skipReasonFor(repoPath);
+    if (skipNow != null) return skipNow;
     result = await listPrsForBranch(repoPath, branch, repo);
   } finally {
     release();
