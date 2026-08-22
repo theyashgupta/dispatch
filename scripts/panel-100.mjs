@@ -894,17 +894,527 @@ async function dragCardToColumn(
   );
 }
 
+/** Finds a `"<n> selected"` span anywhere in the document (`SelectionBar.tsx`'s own text, which
+ * only mounts at `count >= 2`). Used to prove NOTHING in this plan's baseline checks ever
+ * constructs a selection, since every fixture card here is dragged or moved individually. */
+const FIND_SELECTION_TEXT_SRC = `
+  function panel100FindSelectionText() {
+    var spans = Array.prototype.slice.call(document.querySelectorAll("span"));
+    var match = spans.find(function (s) { return /^\\d+ selected$/.test((s.textContent || "").trim()); });
+    return match ? match.textContent : null;
+  }
+`;
+
+/** Polls `cardColumnOf` until it reads `toColumn` or `timeoutMs` elapses, returning the LAST
+ * observed value either way (never throws). Unlike `dragCardToColumn`'s own poll, this is used by
+ * checks that must report a wrong MEASURED column as a named violation rather than an exception,
+ * so a `--break` leg's trip output never degrades to an opaque "not found"/timeout message. */
+async function pollUntilColumn(
+  cdp,
+  sessionId,
+  identifier,
+  toColumn,
+  timeoutMs,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await evalValue(
+      cdp,
+      sessionId,
+      `${FIND_CARD_COLUMN_SRC}panel100CardColumnOf(${JSON.stringify(identifier)})`,
+    );
+    if (last === toColumn) return last;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return last;
+}
+
+/** Polls until `identifier`'s card renders a button whose text contains "Move to" (`CardView.tsx`,
+ * gated `isCarousel && onMoveTo`), i.e. until the narrow-viewport carousel layout has actually
+ * activated after a `Emulation.setDeviceMetricsOverride` resize. */
+async function waitForMoveToButton(cdp, sessionId, identifier) {
+  const probe = `${FIND_CARD_SRC}(function () {
+    var card = panel100FindCardRoot(${JSON.stringify(identifier)});
+    var buttons = Array.prototype.slice.call(card.querySelectorAll("button"));
+    return buttons.some(function (b) { return (b.textContent || "").indexOf("Move to") !== -1; });
+  })()`;
+  const deadline = Date.now() + RENDER_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (await evalValue(cdp, sessionId, probe)) return;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    `panel100: "Move to..." button for ${identifier} never appeared within ${RENDER_TIMEOUT_MS}ms (isCarousel may not have activated)`,
+  );
+}
+
+/** Clicks `identifier`'s "Move to..." button (a native `.click()`, so React's delegated `onClick`
+ * fires exactly as a real mouse click would, the same idiom `panel-99.mjs`'s own
+ * `clickCardByIdentifier` uses). Throws if the button cannot be found; this is a setup step, not
+ * the assertion under test. */
+async function clickMoveToButton(cdp, sessionId, identifier) {
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}(function () {
+      var card = panel100FindCardRoot(${JSON.stringify(identifier)});
+      var buttons = Array.prototype.slice.call(card.querySelectorAll("button"));
+      var btn = buttons.find(function (b) { return (b.textContent || "").indexOf("Move to") !== -1; });
+      if (!btn) throw new Error("panel100: Move to... button not found for " + ${JSON.stringify(identifier)});
+      btn.click();
+      return true;
+    })()`,
+  );
+}
+
+/** Polls until `MoveToPicker`'s own `role="group" aria-label="Move <identifier> to"` container
+ * (`MoveToPicker.tsx:85`) is present. */
+async function waitForPickerGroup(cdp, sessionId, identifier) {
+  const probe = `(function () {
+    return document.querySelector('[role="group"][aria-label="Move ' + ${JSON.stringify(identifier)} + ' to"]') != null;
+  })()`;
+  const deadline = Date.now() + RENDER_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (await evalValue(cdp, sessionId, probe)) return;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    `panel100: MoveToPicker group for ${identifier} never appeared within ${RENDER_TIMEOUT_MS}ms`,
+  );
+}
+
+/**
+ * Clicks the picker entry whose rendered text equals `columnLabel` (e.g. `"Done"`, the exact
+ * `COLUMN_LABELS` string `MoveToPicker.tsx` renders, imported from `lib/event-copy.js`) inside
+ * `identifier`'s already-open picker group. Returns `true` if the entry was found and clicked,
+ * `false` if the group or the entry is absent, NEVER throws: the `keyboard-unchanged` break
+ * deliberately detaches the "Done" entry before calling this, and the resulting check must fall
+ * through to its own column-poll (reporting a named wrong MEASURED column) rather than an opaque
+ * exception, matching `single-card-unchanged`'s own break discipline.
+ */
+async function clickPickerColumn(cdp, sessionId, identifier, columnLabel) {
+  return evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var group = document.querySelector('[role="group"][aria-label="Move ' + ${JSON.stringify(identifier)} + ' to"]');
+      if (!group) return false;
+      var buttons = Array.prototype.slice.call(group.querySelectorAll("button"));
+      var btn = buttons.find(function (b) { return (b.textContent || "").trim() === ${JSON.stringify(columnLabel)}; });
+      if (!btn) return false;
+      btn.click();
+      return true;
+    })()`,
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Checks. Empty in this plan (100-01): the two DRAG-05 baseline checks
-// (single-card-unchanged, keyboard-unchanged) and their break legs land in
-// this same file's next task. main() below already supports the full
-// --check/--break contract so later plans in this phase extend CHECKS and
-// BREAKS without touching the harness scaffold.
+// Checks. The two DRAG-05 baseline checks this plan pins: single-card drag
+// and the carousel keyboard "Move to..." path must behave exactly as they
+// do today, unaffected by every later plan in this phase. Both checks and
+// both break legs run against the UNCHANGED tree (this plan touches no
+// src/ file), so the expected outcome is already known and the break legs
+// below prove the instrument itself, not a regression.
 // ---------------------------------------------------------------------------
 
-const CHECKS = {};
+/**
+ * Shared body for `single-card-unchanged`: with no selection anywhere on the board, drags MSD-A
+ * from `todo` to `done` via the real drag primitive and asserts every DRAG-05 "unchanged" property
+ * at once. `midDragHook`, when provided, runs AFTER the mid-flight overlay measurements and BEFORE
+ * `endDrag`, letting `runBreakSingleCardUnchanged` mutate the DOM while the drag is still live
+ * without duplicating this function's own assertion logic (the same "same check function drives
+ * the break" discipline `panel-99.mjs`'s own break functions follow).
+ */
+async function performSingleCardDragCheck(
+  cdp,
+  sessionId,
+  violations,
+  midDragHook,
+) {
+  const preText = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_SELECTION_TEXT_SRC}panel100FindSelectionText()`,
+  );
+  if (preText != null) {
+    violations.push(
+      `single-card-unchanged: unexpected "${preText}" selection text present before the drag started`,
+    );
+  }
 
-const BREAKS = {};
+  const target = await columnDropPoint(cdp, sessionId, "done");
+  const point = await beginDrag(
+    cdp,
+    sessionId,
+    "todo",
+    MSD_A_IDENTIFIER,
+    target,
+  );
+  await assertDragActivated(cdp, sessionId, MSD_A_IDENTIFIER);
+
+  const midReading = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_IN_COLUMN_SRC}${FIND_OVERLAY_SRC}${FIND_SELECTION_TEXT_SRC}(function () {
+      var overlay = panel100FindOverlayNode(${JSON.stringify(MSD_A_IDENTIFIER)});
+      var source = panel100FindCardInColumn("todo", ${JSON.stringify(MSD_A_IDENTIFIER)});
+      if (!overlay) return { overlayFound: false, selectionText: panel100FindSelectionText() };
+      var overlayRect = overlay.getBoundingClientRect();
+      var sourceRect = source.getBoundingClientRect();
+      var candidates = [overlay].concat(Array.prototype.slice.call(overlay.querySelectorAll("*")));
+      var faceCount = 0;
+      candidates.forEach(function (el) {
+        var r = el.getBoundingClientRect();
+        if (getComputedStyle(el).borderRadius === "6px" && r.width > 0 && r.height > 0) faceCount++;
+      });
+      return {
+        overlayFound: true,
+        overlayWidth: overlayRect.width,
+        sourceWidth: sourceRect.width,
+        faceCount: faceCount,
+        selectionText: panel100FindSelectionText(),
+      };
+    })()`,
+  );
+
+  if (!midReading.overlayFound) {
+    violations.push(
+      `single-card-unchanged: DragOverlay node for MSD-A unexpectedly absent mid-flight (assertDragActivated should have caught this)`,
+    );
+  } else {
+    if (midReading.faceCount !== 1) {
+      violations.push(
+        `single-card-unchanged: overlay face count expected 1, measured ${midReading.faceCount}`,
+      );
+    }
+    if (Math.abs(midReading.overlayWidth - midReading.sourceWidth) > 1) {
+      violations.push(
+        `single-card-unchanged: overlay width expected within 1px of source card width ${midReading.sourceWidth}, measured ${midReading.overlayWidth}`,
+      );
+    }
+  }
+  if (midReading.selectionText != null) {
+    violations.push(
+      `single-card-unchanged: unexpected "${midReading.selectionText}" selection text present mid-drag`,
+    );
+  }
+
+  if (midDragHook) await midDragHook(cdp, sessionId);
+
+  await endDrag(cdp, sessionId, point);
+
+  const finalA = await pollUntilColumn(
+    cdp,
+    sessionId,
+    MSD_A_IDENTIFIER,
+    "done",
+    RENDER_TIMEOUT_MS,
+  );
+  if (finalA !== "done") {
+    violations.push(
+      `single-card-unchanged: MSD-A expected column "done", measured ${JSON.stringify(finalA)}`,
+    );
+  }
+  for (const id of [MSD_B_IDENTIFIER, MSD_C_IDENTIFIER, MSD_D_IDENTIFIER]) {
+    const col = await evalValue(
+      cdp,
+      sessionId,
+      `${FIND_CARD_COLUMN_SRC}panel100CardColumnOf(${JSON.stringify(id)})`,
+    );
+    if (col !== "todo") {
+      violations.push(
+        `single-card-unchanged: ${id} expected column "todo", measured ${JSON.stringify(col)}`,
+      );
+    }
+  }
+
+  const postText = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_SELECTION_TEXT_SRC}panel100FindSelectionText()`,
+  );
+  if (postText != null) {
+    violations.push(
+      `single-card-unchanged: unexpected "${postText}" selection text present after the drag ended`,
+    );
+  }
+}
+
+/** DRAG-05 baseline: dragging a single, unselected card moves exactly that card, no selection
+ * text ever appears, and the overlay stays byte-for-byte today's single-card shape (one face, the
+ * source card's own width). */
+async function checkSingleCardUnchanged(cdp, sessionId, violations) {
+  await performSingleCardDragCheck(cdp, sessionId, violations, null);
+}
+
+/**
+ * Shared body for `keyboard-unchanged`: resizes to the carousel breakpoint, opens MSD-B's "Move
+ * to..." picker, clicks its "Done" entry, and asserts MSD-B alone changed column. Snapshots
+ * MSD-A/C/D's columns BEFORE acting and compares against those exact values afterward (rather than
+ * assuming they start in `todo`), so this check stays correct regardless of whether
+ * `single-card-unchanged` already moved MSD-A to `done` earlier in the same run. `preClickHook`,
+ * when provided, runs after the picker group is confirmed open and BEFORE the "Done" entry is
+ * clicked, letting `runBreakKeyboardUnchanged` detach that entry first.
+ */
+async function performKeyboardCheckBody(
+  cdp,
+  sessionId,
+  violations,
+  preClickHook,
+) {
+  const before = {};
+  for (const id of [MSD_A_IDENTIFIER, MSD_C_IDENTIFIER, MSD_D_IDENTIFIER]) {
+    before[id] = await evalValue(
+      cdp,
+      sessionId,
+      `${FIND_CARD_COLUMN_SRC}panel100CardColumnOf(${JSON.stringify(id)})`,
+    );
+  }
+
+  await waitForMoveToButton(cdp, sessionId, MSD_B_IDENTIFIER);
+  await clickMoveToButton(cdp, sessionId, MSD_B_IDENTIFIER);
+  await waitForPickerGroup(cdp, sessionId, MSD_B_IDENTIFIER);
+
+  if (preClickHook) await preClickHook(cdp, sessionId);
+
+  await clickPickerColumn(cdp, sessionId, MSD_B_IDENTIFIER, "Done");
+
+  const finalB = await pollUntilColumn(
+    cdp,
+    sessionId,
+    MSD_B_IDENTIFIER,
+    "done",
+    RENDER_TIMEOUT_MS,
+  );
+  if (finalB !== "done") {
+    violations.push(
+      `keyboard-unchanged: MSD-B expected column "done", measured ${JSON.stringify(finalB)}`,
+    );
+  }
+  for (const id of [MSD_A_IDENTIFIER, MSD_C_IDENTIFIER, MSD_D_IDENTIFIER]) {
+    const col = await evalValue(
+      cdp,
+      sessionId,
+      `${FIND_CARD_COLUMN_SRC}panel100CardColumnOf(${JSON.stringify(id)})`,
+    );
+    if (col !== before[id]) {
+      violations.push(
+        `keyboard-unchanged: ${id} expected column ${JSON.stringify(before[id])} (unmoved), measured ${JSON.stringify(col)}`,
+      );
+    }
+  }
+}
+
+/** DRAG-05 baseline: the carousel "Move to..." keyboard-accessible path moves exactly the one
+ * card it targets, leaving every other card's column untouched. Restores the 1600x1000 viewport
+ * in a `finally` so no later check in the same run ever inherits the narrow carousel layout. */
+async function checkKeyboardUnchanged(cdp, sessionId, violations) {
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { width: 900, height: 1000, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+  try {
+    await performKeyboardCheckBody(cdp, sessionId, violations, null);
+  } finally {
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false },
+      sessionId,
+    );
+  }
+}
+
+const CHECKS = {
+  "single-card-unchanged": checkSingleCardUnchanged,
+  "keyboard-unchanged": checkKeyboardUnchanged,
+};
+
+// ---------------------------------------------------------------------------
+// Breaks. Neither break edits a file under src/: both mutate the live DOM
+// mid-flow, in a way `Board.tsx`'s own unchanged code cannot recover from,
+// proving the check reports a wrong MEASURED value rather than degrading to
+// an opaque "not found"/exception. Both drive the SAME check body the real
+// run uses, restore the captured original state, and re-confirm PASS.
+// ---------------------------------------------------------------------------
+
+/**
+ * `single-card-unchanged` break: while MSD-A's drag is live (button down, mid-flight
+ * measurements already taken), removes the `done` column's droppable container node, the exact
+ * element `useDroppable({ id: "done" })` attaches its ref to (`Column.tsx:252-256`). A same-size
+ * PLACEHOLDER div is inserted in its place first, so removing the real node causes NO layout
+ * reflow of the sibling columns, the drop point computed before the mutation stays valid and
+ * lands on inert placeholder space, never on a neighbouring column that shifted into the gap.
+ * React never reconciles this raw DOM surgery (it only observes state changes), so its own
+ * `droppableContainers` map keeps a stale reference to the now-detached `done` node; dnd-kit's
+ * collision detection reads a zero rect off a detached element and can never resolve `over` to it,
+ * so the drop silently fails and MSD-A stays in `todo`, exactly the "wrong measured column, not
+ * not found" trip this break is required to produce. The restore leg reinserts the CAPTURED node
+ * itself (never a recreated lookalike, the Dead Instrument #8 discipline) and discards the
+ * placeholder.
+ */
+async function runBreakSingleCardUnchanged(cdp, sessionId) {
+  console.log(
+    "\n--break single-card-unchanged: removing the done column's droppable container node mid-drag (placeholder holds its layout space)",
+  );
+  const tripViolations = [];
+  const midDragHook = async (cdpArg, sessionIdArg) => {
+    await evalValue(
+      cdpArg,
+      sessionIdArg,
+      `(function () {
+        var col = document.querySelector('[data-column="done"]');
+        if (!col) throw new Error("panel100 break: done column node not found");
+        var rect = col.getBoundingClientRect();
+        var computedFlex = getComputedStyle(col).flex;
+        var placeholder = document.createElement("div");
+        placeholder.setAttribute("data-panel100-break-placeholder", "true");
+        placeholder.style.cssText = "flex: " + computedFlex + "; width: " + rect.width + "px; min-width: " + rect.width + "px;";
+        col.parentNode.insertBefore(placeholder, col);
+        window.__panel100BreakDoneNode = col;
+        window.__panel100BreakDoneParent = col.parentNode;
+        window.__panel100BreakPlaceholder = placeholder;
+        col.remove();
+        return true;
+      })()`,
+    );
+  };
+  await performSingleCardDragCheck(cdp, sessionId, tripViolations, midDragHook);
+  console.log(
+    `--break single-card-unchanged TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired = tripViolations.some(
+    (v) =>
+      v.indexOf('MSD-A expected column "done"') !== -1 &&
+      v.indexOf("not found") === -1,
+  );
+
+  await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var node = window.__panel100BreakDoneNode;
+      var placeholder = window.__panel100BreakPlaceholder;
+      if (!node || !placeholder) throw new Error("panel100 break: restore state missing for done column");
+      placeholder.parentNode.insertBefore(node, placeholder);
+      placeholder.remove();
+      delete window.__panel100BreakDoneNode;
+      delete window.__panel100BreakDoneParent;
+      delete window.__panel100BreakPlaceholder;
+      return true;
+    })()`,
+  );
+  const restoreViolations = [];
+  await performSingleCardDragCheck(cdp, sessionId, restoreViolations, null);
+  console.log(
+    `--break single-card-unchanged RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
+/**
+ * `keyboard-unchanged` break: once MSD-B's `MoveToPicker` group is open, stashes and detaches its
+ * "Done" entry button before `clickPickerColumn` runs. `clickPickerColumn` finds no matching
+ * button and returns `false` without throwing, so `performKeyboardCheckBody` falls through to its
+ * own column-poll, which observes MSD-B still in its pre-click column, exactly the "wrong measured
+ * column, not not found" trip this break is required to produce. The restore leg reinserts the
+ * CAPTURED button node itself while the picker (still open at the 900px breakpoint) has not yet
+ * unmounted, then a fresh `checkKeyboardUnchanged` run re-opens the picker and re-confirms PASS.
+ */
+async function runBreakKeyboardUnchanged(cdp, sessionId) {
+  console.log(
+    "\n--break keyboard-unchanged: detaching the Done entry from MSD-B's MoveToPicker portal before the click",
+  );
+  const tripViolations = [];
+  let restoreOutcome = "not-run";
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { width: 900, height: 1000, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+  try {
+    const preClickHook = async (cdpArg, sessionIdArg) => {
+      await evalValue(
+        cdpArg,
+        sessionIdArg,
+        `(function () {
+          var group = document.querySelector('[role="group"][aria-label="Move MSD-B to"]');
+          if (!group) throw new Error("panel100 break: MoveToPicker group not found for MSD-B");
+          var buttons = Array.prototype.slice.call(group.querySelectorAll("button"));
+          var btn = buttons.find(function (b) { return (b.textContent || "").trim() === "Done"; });
+          if (!btn) throw new Error("panel100 break: Done entry not found in MoveToPicker for MSD-B");
+          window.__panel100BreakDoneBtn = btn;
+          window.__panel100BreakDoneBtnParent = btn.parentNode;
+          window.__panel100BreakDoneBtnNext = btn.nextSibling;
+          btn.remove();
+          return true;
+        })()`,
+      );
+    };
+    await performKeyboardCheckBody(
+      cdp,
+      sessionId,
+      tripViolations,
+      preClickHook,
+    );
+    console.log(
+      `--break keyboard-unchanged TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+    );
+
+    restoreOutcome = await evalValue(
+      cdp,
+      sessionId,
+      `(function () {
+        var btn = window.__panel100BreakDoneBtn;
+        var parent = window.__panel100BreakDoneBtnParent;
+        if (!btn || !parent || !document.contains(parent)) {
+          delete window.__panel100BreakDoneBtn;
+          delete window.__panel100BreakDoneBtnParent;
+          delete window.__panel100BreakDoneBtnNext;
+          return "parent-gone";
+        }
+        parent.insertBefore(btn, window.__panel100BreakDoneBtnNext || null);
+        delete window.__panel100BreakDoneBtn;
+        delete window.__panel100BreakDoneBtnParent;
+        delete window.__panel100BreakDoneBtnNext;
+        return "restored";
+      })()`,
+    );
+  } finally {
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false },
+      sessionId,
+    );
+  }
+
+  const tripFired = tripViolations.some(
+    (v) =>
+      v.indexOf('MSD-B expected column "done"') !== -1 &&
+      v.indexOf("not found") === -1,
+  );
+
+  const restoreViolations = [];
+  await checkKeyboardUnchanged(cdp, sessionId, restoreViolations);
+  console.log(
+    `--break keyboard-unchanged RESTORE leg (restoreOutcome=${restoreOutcome}): ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
+const BREAKS = {
+  "single-card-unchanged": runBreakSingleCardUnchanged,
+  "keyboard-unchanged": runBreakKeyboardUnchanged,
+};
 
 // ---------------------------------------------------------------------------
 // main
