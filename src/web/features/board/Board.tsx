@@ -8,7 +8,11 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import type { Announcements, DragEndEvent, DragStartEvent } from "@dnd-kit/core";
+import type {
+  Announcements,
+  DragEndEvent,
+  DragStartEvent,
+} from "@dnd-kit/core";
 import { COLUMNS } from "../../../shared/types.js";
 import type {
   BoardSnapshot,
