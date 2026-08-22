@@ -46,10 +46,42 @@
  *   node scripts/panel-98.mjs --check <name>         one named check only, <name> one of
  *                                                     repo-tagging | multi-session-prs |
  *                                                     group-pr-list | pr-list-detail | a11y.
+ *   node scripts/panel-98.mjs --break <name>         that check's OWN break: fires the SAME check
+ *                                                     function the real run uses against a DOM
+ *                                                     mutation, confirms it reports the violation
+ *                                                     by name, restores the captured original
+ *                                                     value, and re-confirms PASS, all inside one
+ *                                                     Chrome tab. Never edits a source file.
  *
- * Exit codes: 0 every requested check PASS. 1 a live :4700, a failed build, a sandbox safety
- * violation, a DOM node the evaluate could not resolve, any violated criterion, the real board.db
- * changing during the run, or a sandbox port still held after teardown.
+ * BREAK EVIDENCE, every check in this file has been run under `--break <name>` for real and has
+ * been observed reporting its own violation. The quoted lines below are the VERBATIM TRIP-leg
+ * output captured from that run (the product's own aria-label text embeds a real em dash and a
+ * middle dot; both are substituted below with a single plain hyphen and a period respectively, to
+ * satisfy this repo's own no-em-dash, no-double-hyphen text policy, the substitution changes no
+ * other character):
+ *   - `repo-tagging` proven able to fail: blanking one PR98-MULTI chip's repo-segment text node
+ *     produced `repo-tagging: PR98-MULTI chip PR api #7 - Open . Checks pending repo segment
+ *     text "" does not match either seeded repo`.
+ *   - `multi-session-prs` proven able to fail: hiding one PR98-MULTI chip via inline
+ *     `display: none` produced `multi-session-prs: PR98-MULTI visible chip count=1, expected
+ *     union size=2 (active session prs + sessionSummaries prs, deduped by url)` and
+ *     `multi-session-prs: PR98-MULTI chips=["PR web #5 - Open . Checks passing"] are missing the
+ *     sibling-session PR (repo api), which exists only in sessionSummaries, not card.prs`.
+ *   - `group-pr-list` proven able to fail: cloning the group PR row into a member row produced
+ *     `group-pr-list: PR98-GROUP has 2 distinct PR-row containers, expected exactly 1` and
+ *     `group-pr-list: member row PR98-GRP-MEM-1 carries 2 PR chip(s), expected 0`.
+ *   - `pr-list-detail` proven able to fail: rewriting PR98-MULTI's heading text to
+ *     `Pull Requests (0)` produced `pr-list-detail: PR98-MULTI heading expected "Pull Requests
+ *     (2)", measured "Pull Requests (0)"`.
+ *   - `a11y` proven able to fail: blanking PR98-OVER's overflow element `aria-label` produced
+ *     `a11y: PR98-OVER overflow accessible name expected "2 more pull requests", measured ""`.
+ * Every `--break <name>` run's restore leg re-confirmed PASS, and a plain `node scripts/panel-98.mjs`
+ * run immediately after all five breaks exited 0, proving no break leaked DOM state.
+ *
+ * Exit codes: 0 every requested check PASS (or, under `--break <name>`, the break correctly fired
+ * and the restore leg re-passed). 1 a live :4700, a failed build, a sandbox safety violation, a DOM
+ * node the evaluate could not resolve, any violated criterion, the real board.db changing during
+ * the run, or a sandbox port still held after teardown.
  */
 import { spawn, execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
@@ -1147,10 +1179,11 @@ async function checkMultiSessionPrs(cdp, sessionId, violations) {
     `${FIND_CARD_SRC}(function () {
       var card = panel98FindCardRoot(${JSON.stringify(MULTI_IDENTIFIER)});
       var chips = Array.prototype.slice.call(card.querySelectorAll('button[aria-label^="PR "]'));
+      var visibleChips = chips.filter(function (b) { return getComputedStyle(b).display !== "none"; });
       return {
         structurallyPresent: chips.length > 0,
-        count: chips.length,
-        labels: chips.map(function (b) { return b.getAttribute("aria-label"); }),
+        count: visibleChips.length,
+        labels: visibleChips.map(function (b) { return b.getAttribute("aria-label"); }),
       };
     })()`,
   );
@@ -1170,7 +1203,7 @@ async function checkMultiSessionPrs(cdp, sessionId, violations) {
   ]);
   if (reading.count !== expectedUnion.length) {
     violations.push(
-      `multi-session-prs: PR98-MULTI chip count=${reading.count}, expected union size=${expectedUnion.length} (active session prs + sessionSummaries prs, deduped by url)`,
+      `multi-session-prs: PR98-MULTI visible chip count=${reading.count}, expected union size=${expectedUnion.length} (active session prs + sessionSummaries prs, deduped by url)`,
     );
   }
   const hasSiblingPr = reading.labels.some((l) => l.startsWith("PR api "));
@@ -1356,6 +1389,63 @@ async function checkPrListDetail(cdp, sessionId, violations) {
   }
 }
 
+/**
+ * PR98-OVER's overflow span: exactly 3 visible chips (all carrying a repo segment), one overflow
+ * element reading "+2" with the plural accessible-name sentence. Found by its visible TEXT ("+2"),
+ * never by its own aria-label, since the aria-label is exactly the property the next task's a11y
+ * break mutates (TRAP 3), a selector keyed on it would find nothing post-mutation and report
+ * "element missing" instead of "name wrong", a different, weaker assertion. Factored out of
+ * `checkA11y` so the next task's break can fire this SAME function without also triggering
+ * `checkA11y`'s own leading `Page.reload`, which would discard the break's DOM mutation.
+ */
+async function checkOverflowAccessibleName(cdp, sessionId, violations) {
+  const overflow = await evalReport(
+    cdp,
+    sessionId,
+    violations,
+    "a11y (PR98-OVER overflow)",
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(OVER_IDENTIFIER)});
+      var chips = Array.prototype.slice.call(card.querySelectorAll('button[aria-label^="PR "]'));
+      var overflowEl = Array.prototype.slice.call(card.querySelectorAll("span")).find(function (s) {
+        return s.textContent.trim() === "+2";
+      });
+      return {
+        structurallyPresent: overflowEl != null,
+        chipCount: chips.length,
+        overflowAriaLabel: overflowEl ? overflowEl.getAttribute("aria-label") : null,
+        allChipsHaveRepo: chips.every(function (b) {
+          return Array.prototype.slice.call(b.querySelectorAll("span")).some(function (s) {
+            return getComputedStyle(s).fontFamily.toLowerCase().indexOf("mono") !== -1;
+          });
+        }),
+      };
+    })()`,
+  );
+  if (overflow == null) return;
+  if (!overflow.structurallyPresent) {
+    violations.push(
+      'a11y: PR98-OVER overflow element (text "+2") not found structurally',
+    );
+    return;
+  }
+  if (overflow.chipCount !== 3) {
+    violations.push(
+      `a11y: PR98-OVER expected 3 visible chips, measured ${overflow.chipCount}`,
+    );
+  }
+  if (overflow.overflowAriaLabel !== "2 more pull requests") {
+    violations.push(
+      `a11y: PR98-OVER overflow accessible name expected "2 more pull requests", measured ${JSON.stringify(overflow.overflowAriaLabel)}`,
+    );
+  }
+  if (!overflow.allChipsHaveRepo) {
+    violations.push(
+      "a11y: PR98-OVER, not every visible chip carries a repo segment",
+    );
+  }
+}
+
 /** KEEP-06 continuity: every PR chip is keyboard-reachable with a non-empty accessible name and a
  * visible focus ring, the overflow element's accessible name matches the plural count sentence,
  * and the detail panel's link control has a non-empty name and the themed 2px solid focus ring. */
@@ -1420,56 +1510,7 @@ async function checkA11y(cdp, sessionId, violations) {
     }
   });
 
-  const overflow = await evalReport(
-    cdp,
-    sessionId,
-    violations,
-    "a11y (PR98-OVER overflow)",
-    `${FIND_CARD_SRC}(function () {
-      var card = panel98FindCardRoot(${JSON.stringify(OVER_IDENTIFIER)});
-      var chips = Array.prototype.slice.call(card.querySelectorAll('button[aria-label^="PR "]'));
-      var overflowEl = card.querySelector('span[aria-label$="pull requests"]');
-      return {
-        structurallyPresent: overflowEl != null,
-        chipCount: chips.length,
-        overflowText: overflowEl ? overflowEl.textContent.trim() : null,
-        overflowAriaLabel: overflowEl ? overflowEl.getAttribute("aria-label") : null,
-        allChipsHaveRepo: chips.every(function (b) {
-          return Array.prototype.slice.call(b.querySelectorAll("span")).some(function (s) {
-            return getComputedStyle(s).fontFamily.toLowerCase().indexOf("mono") !== -1;
-          });
-        }),
-      };
-    })()`,
-  );
-  if (overflow != null) {
-    if (!overflow.structurallyPresent) {
-      violations.push(
-        "a11y: PR98-OVER overflow element not found structurally",
-      );
-    } else {
-      if (overflow.chipCount !== 3) {
-        violations.push(
-          `a11y: PR98-OVER expected 3 visible chips, measured ${overflow.chipCount}`,
-        );
-      }
-      if (overflow.overflowText !== "+2") {
-        violations.push(
-          `a11y: PR98-OVER overflow text expected "+2", measured ${JSON.stringify(overflow.overflowText)}`,
-        );
-      }
-      if (overflow.overflowAriaLabel !== "2 more pull requests") {
-        violations.push(
-          `a11y: PR98-OVER overflow accessible name expected "2 more pull requests", measured ${JSON.stringify(overflow.overflowAriaLabel)}`,
-        );
-      }
-      if (!overflow.allChipsHaveRepo) {
-        violations.push(
-          "a11y: PR98-OVER, not every visible chip carries a repo segment",
-        );
-      }
-    }
-  }
+  await checkOverflowAccessibleName(cdp, sessionId, violations);
 
   await openCardDetail(cdp, sessionId, MULTI_IDENTIFIER);
   const linkName = await readAccessibleName(
@@ -1519,6 +1560,344 @@ const CHECKS = {
 };
 
 // ---------------------------------------------------------------------------
+// Breaks. One per check, each firing the SAME check function the real run
+// uses: capture the verbatim FAIL output, revert via the CAPTURED value
+// (never a bare removal, Dead Instrument #8), and re-confirm PASS in the
+// same tab. Never edits a source file; every mutation is a DOM change inside
+// this one Chrome tab. No selector below keys on the property it is about to
+// mutate (TRAP 3): each capture/mutate/restore step locates its target by
+// role/text/ordinal, and the property under test only.
+// ---------------------------------------------------------------------------
+
+/** `repo-tagging` break: blanks one PR98-MULTI chip's rendered repo-segment TEXT NODE (never its
+ * aria-label), so `repoSpanText` stops matching "web"/"api" and the check reports the mismatch. */
+async function runBreakRepoTagging(cdp, sessionId) {
+  console.log(
+    "\n--break repo-tagging: blanking one PR98-MULTI chip's repo-segment text",
+  );
+  const original = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(MULTI_IDENTIFIER)});
+      var chip = card.querySelector('button[aria-label^="PR "]');
+      var repoSpan = Array.prototype.slice.call(chip.querySelectorAll("span")).find(function (s) {
+        return getComputedStyle(s).fontFamily.toLowerCase().indexOf("mono") !== -1;
+      });
+      if (!repoSpan) throw new Error("panel98 break: repo segment span not found on PR98-MULTI's first chip");
+      return repoSpan.firstChild ? repoSpan.firstChild.nodeValue : null;
+    })()`,
+  );
+  console.log(
+    `--break repo-tagging: captured original repo-segment text = ${JSON.stringify(original)}`,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(MULTI_IDENTIFIER)});
+      var chip = card.querySelector('button[aria-label^="PR "]');
+      var repoSpan = Array.prototype.slice.call(chip.querySelectorAll("span")).find(function (s) {
+        return getComputedStyle(s).fontFamily.toLowerCase().indexOf("mono") !== -1;
+      });
+      repoSpan.firstChild.nodeValue = "";
+      return true;
+    })()`,
+  );
+  const tripViolations = [];
+  await checkRepoTagging(cdp, sessionId, tripViolations);
+  console.log(
+    `--break repo-tagging TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired = tripViolations.some(
+    (v) => v.indexOf("repo segment text") !== -1,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(MULTI_IDENTIFIER)});
+      var chip = card.querySelector('button[aria-label^="PR "]');
+      var repoSpan = Array.prototype.slice.call(chip.querySelectorAll("span")).find(function (s) {
+        return getComputedStyle(s).fontFamily.toLowerCase().indexOf("mono") !== -1;
+      });
+      repoSpan.firstChild.nodeValue = ${JSON.stringify(original)};
+      return true;
+    })()`,
+  );
+  const restoreViolations = [];
+  await checkRepoTagging(cdp, sessionId, restoreViolations);
+  console.log(
+    `--break repo-tagging RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
+/** `multi-session-prs` break: hides one PR98-MULTI chip via an inline `display: none`, captured
+ * from its EXISTING inline value (`PrBadge` sets `display: "inline-flex"` inline) before mutating,
+ * so the visible-chip-count assertion fires. */
+async function runBreakMultiSessionPrs(cdp, sessionId) {
+  console.log(
+    "\n--break multi-session-prs: hiding one PR98-MULTI chip via inline display:none",
+  );
+  const original = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(MULTI_IDENTIFIER)});
+      var chip = card.querySelector('button[aria-label^="PR "]');
+      return chip.style.getPropertyValue("display");
+    })()`,
+  );
+  console.log(
+    `--break multi-session-prs: captured original inline display = ${JSON.stringify(original)}`,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(MULTI_IDENTIFIER)});
+      var chip = card.querySelector('button[aria-label^="PR "]');
+      chip.style.setProperty("display", "none");
+      return true;
+    })()`,
+  );
+  const tripViolations = [];
+  await checkMultiSessionPrs(cdp, sessionId, tripViolations);
+  console.log(
+    `--break multi-session-prs TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired = tripViolations.some(
+    (v) => v.indexOf("visible chip count=") !== -1,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(MULTI_IDENTIFIER)});
+      var chip = card.querySelector('button[aria-label^="PR "]');
+      chip.style.setProperty("display", ${JSON.stringify(original)});
+      return true;
+    })()`,
+  );
+  const restoreViolations = [];
+  await checkMultiSessionPrs(cdp, sessionId, restoreViolations);
+  console.log(
+    `--break multi-session-prs RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
+/** `group-pr-list` break: clones the group's own PR-row node into a member row subtree (tagged
+ * with a harness-only marker attribute for a clean removal), so the "zero PR chips under a member
+ * row" assertion fires, then removes the clone. */
+async function runBreakGroupPrList(cdp, sessionId) {
+  console.log(
+    "\n--break group-pr-list: cloning the group PR row into a member row subtree",
+  );
+  await expandGroupCard(cdp, sessionId, GROUP_IDENTIFIER);
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(GROUP_IDENTIFIER)});
+      var divs = Array.prototype.slice.call(card.querySelectorAll("div"));
+      var titleEl = divs.find(function (d) { return d.children.length === 0 && d.textContent.trim() === ${JSON.stringify(GROUP_TITLE)}; });
+      if (!titleEl) throw new Error("panel98 break: PR98-GROUP title node not found");
+      var groupPrRowEl = titleEl.nextElementSibling;
+      if (!groupPrRowEl) throw new Error("panel98 break: PR98-GROUP has no PR row after the title");
+      var memberMatches = Array.prototype.filter.call(card.querySelectorAll("div"), function (d) {
+        return d.textContent.indexOf(${JSON.stringify(GROUP_MEMBER1_IDENTIFIER)}) !== -1;
+      });
+      memberMatches.sort(function (a, b) { return a.querySelectorAll("*").length - b.querySelectorAll("*").length; });
+      var memberRow = memberMatches[0];
+      if (!memberRow) throw new Error("panel98 break: member row ${GROUP_MEMBER1_IDENTIFIER} not found");
+      var clone = groupPrRowEl.cloneNode(true);
+      clone.setAttribute("data-panel98-break-clone", "true");
+      memberRow.appendChild(clone);
+      return true;
+    })()`,
+  );
+  const tripViolations = [];
+  await checkGroupPrList(cdp, sessionId, tripViolations);
+  console.log(
+    `--break group-pr-list TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired = tripViolations.some(
+    (v) => v.indexOf("carries") !== -1 && v.indexOf("expected 0") !== -1,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var clone = document.querySelector('[data-panel98-break-clone="true"]');
+      if (clone) clone.remove();
+      return true;
+    })()`,
+  );
+  const restoreViolations = [];
+  await checkGroupPrList(cdp, sessionId, restoreViolations);
+  console.log(
+    `--break group-pr-list RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
+/** `pr-list-detail` break: rewrites PR98-MULTI's `Pull Requests (N)` heading TEXT NODE to
+ * `Pull Requests (0)` (captured first), so the row-count-vs-heading assertion fires. Re-selecting
+ * an already-selected card is a no-op re-render (`setSelectedCardId` bails on an unchanged id), so
+ * the SAME `checkPrListDetail` the real run uses reads this mutation without a fresh navigation
+ * erasing it first. */
+async function runBreakPrListDetail(cdp, sessionId) {
+  console.log(
+    "\n--break pr-list-detail: rewriting PR98-MULTI's heading text to Pull Requests (0)",
+  );
+  await openCardDetail(cdp, sessionId, MULTI_IDENTIFIER);
+  const original = await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+      var spans = Array.prototype.slice.call(aside.querySelectorAll("span"));
+      var heading = spans.find(function (s) { return /^Pull Requests \\(\\d+\\)$/.test(s.textContent.trim()); });
+      if (!heading) throw new Error("panel98 break: Pull Requests heading not found on PR98-MULTI's panel");
+      return heading.firstChild.nodeValue;
+    })()`,
+  );
+  console.log(
+    `--break pr-list-detail: captured original heading text = ${JSON.stringify(original)}`,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+      var spans = Array.prototype.slice.call(aside.querySelectorAll("span"));
+      var heading = spans.find(function (s) { return /^Pull Requests \\(\\d+\\)$/.test(s.textContent.trim()); });
+      heading.firstChild.nodeValue = "Pull Requests (0)";
+      return true;
+    })()`,
+  );
+  const tripViolations = [];
+  await checkPrListDetail(cdp, sessionId, tripViolations);
+  console.log(
+    `--break pr-list-detail TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired = tripViolations.some(
+    (v) => v.indexOf("PR98-MULTI heading expected") !== -1,
+  );
+  await openCardDetail(cdp, sessionId, MULTI_IDENTIFIER);
+  await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+      var spans = Array.prototype.slice.call(aside.querySelectorAll("span"));
+      var heading = spans.find(function (s) { return s.textContent.trim() === "Pull Requests (0)"; });
+      if (heading) heading.firstChild.nodeValue = ${JSON.stringify(original)};
+      return true;
+    })()`,
+  );
+  const restoreViolations = [];
+  await checkPrListDetail(cdp, sessionId, restoreViolations);
+  console.log(
+    `--break pr-list-detail RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
+/** `a11y` break: blanks the PR98-OVER overflow element's `aria-label` (captured first), firing the
+ * SAME `checkOverflowAccessibleName` sub-check `checkA11y` itself calls, never the full `checkA11y`
+ * orchestrator, which reloads the page first and would discard the mutation before it could be
+ * read. */
+async function runBreakA11y(cdp, sessionId) {
+  console.log(
+    "\n--break a11y: blanking PR98-OVER's overflow element aria-label",
+  );
+  const original = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(OVER_IDENTIFIER)});
+      var overflowEl = Array.prototype.slice.call(card.querySelectorAll("span")).find(function (s) {
+        return s.textContent.trim() === "+2";
+      });
+      if (!overflowEl) throw new Error("panel98 break: PR98-OVER overflow element (text \\"+2\\") not found");
+      return overflowEl.getAttribute("aria-label");
+    })()`,
+  );
+  console.log(
+    `--break a11y: captured original overflow aria-label = ${JSON.stringify(original)}`,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(OVER_IDENTIFIER)});
+      var overflowEl = Array.prototype.slice.call(card.querySelectorAll("span")).find(function (s) {
+        return s.textContent.trim() === "+2";
+      });
+      overflowEl.setAttribute("aria-label", "");
+      return true;
+    })()`,
+  );
+  const tripViolations = [];
+  await checkOverflowAccessibleName(cdp, sessionId, tripViolations);
+  console.log(
+    `--break a11y TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired = tripViolations.some(
+    (v) => v.indexOf("overflow accessible name expected") !== -1,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(OVER_IDENTIFIER)});
+      var overflowEl = Array.prototype.slice.call(card.querySelectorAll("span")).find(function (s) {
+        return s.textContent.trim() === "+2";
+      });
+      overflowEl.setAttribute("aria-label", ${JSON.stringify(original)});
+      return true;
+    })()`,
+  );
+  const restoreViolations = [];
+  await checkOverflowAccessibleName(cdp, sessionId, restoreViolations);
+  console.log(
+    `--break a11y RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
+const BREAKS = {
+  "repo-tagging": runBreakRepoTagging,
+  "multi-session-prs": runBreakMultiSessionPrs,
+  "group-pr-list": runBreakGroupPrList,
+  "pr-list-detail": runBreakPrListDetail,
+  a11y: runBreakA11y,
+};
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -1528,6 +1907,13 @@ async function main() {
   if (checkName != null && !CHECKS[checkName]) {
     console.error(
       `unknown check "${checkName}", valid: ${Object.keys(CHECKS).join(", ")}`,
+    );
+    process.exit(1);
+  }
+  const breakName = readFlag(argv, "--break");
+  if (breakName != null && !BREAKS[breakName]) {
+    console.error(
+      `unknown break "${breakName}", valid: ${Object.keys(BREAKS).join(", ")}`,
     );
     process.exit(1);
   }
@@ -1545,6 +1931,7 @@ async function main() {
   let chromeChild = null;
   let cdp = null;
   let portsHeld = false;
+  let breakResult = null;
 
   try {
     const pathPrefix = writeStubClaudeBinary(home);
@@ -1599,21 +1986,25 @@ async function main() {
     await waitForBoardRootLoaded(cdp, sessionId, TOP_LEVEL_IDENTIFIERS);
     console.log("standup: board painted, all five fixture identifiers present");
 
-    const names = checkName != null ? [checkName] : Object.keys(CHECKS);
-    for (const n of names) {
-      console.log(`\n=== running check: ${n} ===`);
-      const before = violations.length;
-      try {
-        await CHECKS[n](cdp, sessionId, violations);
-      } catch (err) {
-        violations.push(
-          `${n}: run failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+    if (breakName != null) {
+      breakResult = await BREAKS[breakName](cdp, sessionId);
+    } else {
+      const names = checkName != null ? [checkName] : Object.keys(CHECKS);
+      for (const n of names) {
+        console.log(`\n=== running check: ${n} ===`);
+        const before = violations.length;
+        try {
+          await CHECKS[n](cdp, sessionId, violations);
+        } catch (err) {
+          violations.push(
+            `${n}: run failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+          );
+        }
+        const added = violations.length - before;
+        console.log(
+          added === 0 ? `PASS (${n})` : `FAIL (${n}): ${added} violation(s)`,
         );
       }
-      const added = violations.length - before;
-      console.log(
-        added === 0 ? `PASS (${n})` : `FAIL (${n}): ${added} violation(s)`,
-      );
     }
   } finally {
     if (cdp) cdp.close();
@@ -1645,6 +2036,28 @@ async function main() {
       "\nFAIL: a sandbox resource (port) was still held after teardown",
     );
     process.exit(1);
+  }
+
+  if (breakName != null) {
+    console.log(
+      `\n--break ${breakName} summary: tripFired=${breakResult.tripFired} restoreClean=${breakResult.restoreClean}`,
+    );
+    if (!breakResult.tripFired) {
+      console.log(
+        `FAIL (self-check): the trip leg did NOT report the expected violation for "${breakName}", the check is a dead instrument.`,
+      );
+      process.exit(1);
+    }
+    if (!breakResult.restoreClean) {
+      console.log(
+        `FAIL (self-check): the restore leg for "${breakName}" still reports a violation after restoring the captured original value.`,
+      );
+      process.exit(1);
+    }
+    console.log(
+      `PASS (--break ${breakName} self-check): trip leg correctly reported the violation, restore leg re-passed clean.`,
+    );
+    process.exit(0);
   }
 
   if (violations.length > 0) {
