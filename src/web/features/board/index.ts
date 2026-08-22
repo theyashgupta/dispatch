@@ -12,3 +12,4 @@ export {
   type PinnedCard,
 } from "./pinned-card.js";
 export { stubToCard } from "./search-stub.js";
+export { useCardPrs } from "./use-card-prs.js";
