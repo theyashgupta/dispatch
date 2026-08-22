@@ -82,7 +82,7 @@ case "$SUB1" in
       exit 1
     fi
     if [ -n "${GH_SHIM_DELAY_MS:-}" ] && [ "${GH_SHIM_DELAY_MS:-0}" != "0" ]; then
-      sleep "$(awk "BEGIN { printf \"%.3f\", ${GH_SHIM_DELAY_MS}/1000 }")"
+      sleep "$(awk -v ms="$GH_SHIM_DELAY_MS" 'BEGIN { printf "%.3f", ms/1000 }')"
     fi
     case "$MODE" in
       not-authenticated)
