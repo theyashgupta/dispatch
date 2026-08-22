@@ -1410,6 +1410,34 @@ async function ctrlClickCard(cdp, sessionId, column, identifier) {
   await sleep(120);
 }
 
+/** A real `Escape` keydown/keyup pair via CDP (`Board.tsx`'s own `window.addEventListener("keydown",
+ * ...)` handler turns this into `setSelectedIds(new Set())`), never a direct state write. */
+async function clearSelectionViaEscape(cdp, sessionId) {
+  await cdp.send(
+    "Input.dispatchKeyEvent",
+    {
+      type: "keyDown",
+      key: "Escape",
+      code: "Escape",
+      windowsVirtualKeyCode: 27,
+      nativeVirtualKeyCode: 27,
+    },
+    sessionId,
+  );
+  await cdp.send(
+    "Input.dispatchKeyEvent",
+    {
+      type: "keyUp",
+      key: "Escape",
+      code: "Escape",
+      windowsVirtualKeyCode: 27,
+      nativeVirtualKeyCode: 27,
+    },
+    sessionId,
+  );
+  await sleep(150);
+}
+
 /**
  * Ctrl-clicks every identifier in column "todo" in order, THROWS (never records a violation and
  * continues, per T-100-16) unless the resulting `SelectionBar` text is exactly `"<identifiers.length>
@@ -1675,8 +1703,214 @@ async function checkStackedOverlay(
   }
 }
 
+/**
+ * `overlay-unchanged-n1` leg body: drags MSD-A toward `done` (release always lands back on `todo`,
+ * harmless), and while the button is down asserts the overlay is exactly today's byte-for-byte
+ * single-card shape via `FIND_FIXED_OVERLAY_SRC` (the TRUE dnd-kit fixed-position node, one level
+ * outside this phase's own `aria-hidden`/`inert` node): exactly one direct child, that child IS the
+ * bare `CardView` root (no intervening deck wrapper), no absolutely-positioned inset:0 descendant (a
+ * leaked back face) and no badge-shaped descendant anywhere in the overlay's subtree, and the
+ * overlay's own card face has the same descendant-element count as the RESTING MSD-A card root read
+ * in the same page state. `mutateHook`/`restoreHook` mirror `performStackedOverlayLeg`'s own
+ * discipline.
+ */
+async function performOverlayUnchangedLeg(
+  cdp,
+  sessionId,
+  violations,
+  legLabel,
+  mutateHook,
+  restoreHook,
+) {
+  const doneTarget = await columnDropPoint(cdp, sessionId, "done");
+  const todoTarget = await columnDropPoint(cdp, sessionId, "todo");
+  await beginDrag(cdp, sessionId, "todo", MSD_A_IDENTIFIER, doneTarget);
+  await assertDragActivated(cdp, sessionId, MSD_A_IDENTIFIER);
+
+  if (mutateHook) await mutateHook(cdp, sessionId);
+
+  const reading = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_IN_COLUMN_SRC}${FIND_FIXED_OVERLAY_SRC}(function () {
+      var fixedNode = panel100FindFixedOverlayNode(${JSON.stringify(MSD_A_IDENTIFIER)});
+      if (!fixedNode) throw new Error("panel100: fixed overlay node not found for MSD-A");
+      var kids = Array.prototype.slice.call(fixedNode.children);
+      var child0 = kids[0];
+      var child0Style = child0 ? getComputedStyle(child0) : null;
+      var descendants = Array.prototype.slice.call(fixedNode.querySelectorAll("*"));
+      var hasAbsoluteInsetZero = descendants.some(function (el) {
+        var s = getComputedStyle(el);
+        return s.position === "absolute" && s.top === "0px" && s.right === "0px" && s.bottom === "0px" && s.left === "0px";
+      });
+      var hasBadgeLike = descendants.some(function (el) {
+        var s = getComputedStyle(el);
+        var text = (el.textContent || "").trim();
+        return s.position === "absolute" && /^\\d+$/.test(text);
+      });
+      var restingCard = panel100FindCardInColumn("todo", ${JSON.stringify(MSD_A_IDENTIFIER)});
+      // Board.tsx's overlay CardView (both the N<=1 branch and the deck branch's front face) has
+      // never wired a "multiSelected" prop, pre-existing and byte-for-byte unchanged by this phase
+      // (100-03-SUMMARY.md's own diff), so the resting card's checkmark badge
+      // (CardView.tsx:222-244, position:absolute borderRadius:50% 14x14) is the ONE legitimate,
+      // out-of-scope descendant-count asymmetry the N=1 leg can hit (MSD-A selected alone). Excluded
+      // from BOTH sides identically so a genuine deck/badge intrusion (a DIFFERENT shape, see
+      // hasAbsoluteInsetZero/hasBadgeLike above) still trips this comparison.
+      function countExcludingMultiSelectedBadge(cardRoot) {
+        var count = cardRoot.querySelectorAll("*").length;
+        var kids2 = Array.prototype.slice.call(cardRoot.children);
+        var badge = kids2.find(function (el) {
+          var s = getComputedStyle(el);
+          return s.position === "absolute" && s.borderRadius === "50%" && s.width === "14px" && s.height === "14px";
+        });
+        if (badge) count -= 1 + badge.querySelectorAll("*").length;
+        return count;
+      }
+      return {
+        childCount: kids.length,
+        child0IsCardRoot: !!(
+          child0Style &&
+          child0Style.position === "relative" &&
+          child0Style.borderRadius === "6px" &&
+          child0.textContent.indexOf(${JSON.stringify(MSD_A_IDENTIFIER)}) !== -1
+        ),
+        hasAbsoluteInsetZero: hasAbsoluteInsetZero,
+        hasBadgeLike: hasBadgeLike,
+        overlayCardDescCount: child0 ? countExcludingMultiSelectedBadge(child0) : null,
+        restingDescCount: countExcludingMultiSelectedBadge(restingCard),
+        totalFixedNodeDescCount: descendants.length,
+      };
+    })()`,
+  );
+
+  if (restoreHook) await restoreHook(cdp, sessionId);
+
+  if (reading.childCount !== 1) {
+    violations.push(
+      `overlay-unchanged-n1: ${legLabel}, expected exactly 1 face-level element directly under the fixed overlay node, measured ${reading.childCount}`,
+    );
+  }
+  if (!reading.child0IsCardRoot) {
+    violations.push(
+      `overlay-unchanged-n1: ${legLabel}, the overlay's single child is not the bare CardView root (expected no intervening wrapper)`,
+    );
+  }
+  if (reading.hasAbsoluteInsetZero) {
+    violations.push(
+      `overlay-unchanged-n1: ${legLabel}, found an unexpected absolutely-positioned inset:0 descendant (a deck back face) inside the N<=1 overlay`,
+    );
+  }
+  if (reading.hasBadgeLike) {
+    violations.push(
+      `overlay-unchanged-n1: ${legLabel}, found an unexpected badge-shaped descendant (absolute position, bare-integer text) inside the N<=1 overlay`,
+    );
+  }
+  if (reading.overlayCardDescCount !== reading.restingDescCount) {
+    violations.push(
+      `overlay-unchanged-n1: ${legLabel}, overlay card descendant-element count expected ${reading.restingDescCount} (same as the resting MSD-A card root in todo), measured ${reading.overlayCardDescCount}`,
+    );
+  }
+  const expectedFixedNodeTotal = 1 + reading.overlayCardDescCount;
+  if (reading.totalFixedNodeDescCount !== expectedFixedNodeTotal) {
+    violations.push(
+      `overlay-unchanged-n1: ${legLabel}, fixed overlay node's own descendant-element count expected ${expectedFixedNodeTotal} (the card root itself plus its own subtree, nothing else), measured ${reading.totalFixedNodeDescCount}`,
+    );
+  }
+
+  await moveDragTo(cdp, sessionId, todoTarget);
+  await endDrag(cdp, sessionId, todoTarget);
+  const col = await pollUntilColumn(
+    cdp,
+    sessionId,
+    MSD_A_IDENTIFIER,
+    "todo",
+    2000,
+  );
+  if (col !== "todo") {
+    violations.push(
+      `overlay-unchanged-n1: ${legLabel}, MSD-A expected column "todo" after the harmless same-column drop, measured ${JSON.stringify(col)}`,
+    );
+  }
+}
+
+/**
+ * `overlay-unchanged-n1`: clears any selection (real `Escape`), runs the N=0 leg (no selection at
+ * all), ctrl-clicks MSD-A alone (N=1, `dragSelectionIds` returns `null` at `size < 2`, the exact
+ * off-by-one boundary this check pins), runs the N=1 leg, then clears selection again so the next
+ * check (`a11y`) starts clean. `leg0MutateHook`/`leg0RestoreHook` are `runBreakOverlayUnchangedN1`'s
+ * only injection point, applied to the simpler N=0 leg alone.
+ */
+async function checkOverlayUnchangedN1(
+  cdp,
+  sessionId,
+  violations,
+  leg0MutateHook = null,
+  leg0RestoreHook = null,
+) {
+  await clearSelectionViaEscape(cdp, sessionId);
+  const clearedText = await readSelectionText(cdp, sessionId);
+  if (clearedText != null) {
+    violations.push(
+      `overlay-unchanged-n1: setup, expected no SelectionBar text after Escape, measured ${JSON.stringify(clearedText)}`,
+    );
+  }
+
+  await performOverlayUnchangedLeg(
+    cdp,
+    sessionId,
+    violations,
+    "N=0 leg",
+    leg0MutateHook,
+    leg0RestoreHook,
+  );
+
+  await ctrlClickCard(cdp, sessionId, "todo", MSD_A_IDENTIFIER);
+  const n1Text = await readSelectionText(cdp, sessionId);
+  if (n1Text != null) {
+    violations.push(
+      `overlay-unchanged-n1: setup, expected no SelectionBar text at N=1 (SelectionBar mounts only at count >= 2), measured ${JSON.stringify(n1Text)}`,
+    );
+  }
+
+  await performOverlayUnchangedLeg(
+    cdp,
+    sessionId,
+    violations,
+    "N=1 leg",
+    null,
+    null,
+  );
+
+  for (const id of [
+    MSD_A_IDENTIFIER,
+    MSD_B_IDENTIFIER,
+    MSD_C_IDENTIFIER,
+    MSD_D_IDENTIFIER,
+  ]) {
+    const col = await evalValue(
+      cdp,
+      sessionId,
+      `${FIND_CARD_COLUMN_SRC}panel100CardColumnOf(${JSON.stringify(id)})`,
+    );
+    if (col !== "todo") {
+      violations.push(
+        `overlay-unchanged-n1: after check, ${id} expected column "todo", measured ${JSON.stringify(col)}`,
+      );
+    }
+  }
+
+  await clearSelectionViaEscape(cdp, sessionId);
+  const finalText = await readSelectionText(cdp, sessionId);
+  if (finalText != null) {
+    violations.push(
+      `overlay-unchanged-n1: after check, unexpected ${JSON.stringify(finalText)} selection text still present`,
+    );
+  }
+}
+
 const CHECKS = {
   "stacked-overlay": checkStackedOverlay,
+  "overlay-unchanged-n1": checkOverlayUnchangedN1,
   "single-card-unchanged": checkSingleCardUnchanged,
   "keyboard-unchanged": checkKeyboardUnchanged,
 };
