@@ -30,11 +30,21 @@ const PROBE_HOSTS_FOR_BIND = new Map<string, string[]>([
 
 /**
  * One discovered listening port plus the loopback host(s) a reachability probe must dial for it,
- * derived from the bind address `lsof` reported rather than assumed to be IPv4.
+ * derived from the bind address `lsof` reported rather than assumed to be IPv4. `pid` and
+ * `bindAddress` are retained (not newly discovered) from the same parse loop that already builds
+ * `probeHosts`.
+ * @remarks When more than one `lsof` record maps to the same port (e.g. dual-stack, one listener
+ * per family), `pid`/`bindAddress` are chosen by numerically LOWEST pid, tie-broken by the
+ * lexicographically smallest raw bind token, never by parse/insertion order: the preview write
+ * path is a `JSON.stringify` diff, so an order-dependent pid would rebroadcast the whole board on
+ * a tick where nothing actually changed.
  */
 export interface DiscoveredPort {
   port: number;
   probeHosts: string[];
+  pid: number;
+  /** Raw lsof-reported bind token (the `PROBE_HOSTS_FOR_BIND` lookup key), for evidence display. */
+  bindAddress: string;
 }
 
 /**
@@ -137,6 +147,10 @@ export async function listeningPortsBySession(
   }
 
   const hostsByPort = new Map<string, Map<number, Set<string>>>();
+  const attribByPort = new Map<
+    string,
+    Map<number, { pid: number; bindAddress: string }>
+  >();
   let currentPid: number | null = null;
   for (const line of lsofOut.split("\n")) {
     if (line.startsWith("p")) {
@@ -154,15 +168,36 @@ export async function listeningPortsBySession(
       const hosts = byPort.get(port) ?? new Set<string>();
       for (const host of probeHosts) hosts.add(host);
       byPort.set(port, hosts);
+
+      const bindAddress = m[1];
+      const attrib =
+        attribByPort.get(session) ??
+        new Map<number, { pid: number; bindAddress: string }>();
+      attribByPort.set(session, attrib);
+      const existing = attrib.get(port);
+      if (
+        existing == null ||
+        currentPid < existing.pid ||
+        (currentPid === existing.pid && bindAddress < existing.bindAddress)
+      ) {
+        attrib.set(port, { pid: currentPid, bindAddress });
+      }
     }
   }
 
   for (const [session, byPort] of hostsByPort) {
+    const attrib = attribByPort.get(session);
     result.set(
       session,
       [...byPort.entries()]
         .sort(([a], [b]) => a - b)
-        .map(([port, hosts]) => ({ port, probeHosts: [...hosts] })),
+        .map(([port, hosts]) => {
+          const { pid, bindAddress } = attrib?.get(port) as {
+            pid: number;
+            bindAddress: string;
+          };
+          return { port, probeHosts: [...hosts], pid, bindAddress };
+        }),
     );
   }
   return result;
