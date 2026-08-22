@@ -45,18 +45,41 @@
  * must stay untouched by this flag's presence in argv; see `docs/BASELINES.md`'s Phase 96 section for
  * why the two legs are never conflated.
  *
+ * `--pr-failing` (Plan 98-09, PRLINK-05 / Pitfall 5): an ADDITIVE, off-by-default sustained-failure
+ * leg, structurally separate from the `--done`/`--runs`/`--sessions-per-card` byte-measurement
+ * pipeline above (no Chrome, no CDP, no median-of-N). Present, it seeds `--done` real, tmux-backed
+ * fixture cards outside the Done column, each carrying the flat `tmuxSession`/`branch`/`workspace`
+ * fields `artifact-detect.ts`'s PR fan-out requires, plants `scripts/fixtures/gh-shim-98.sh` as `gh`
+ * on the CHILD server's own PATH with `GH_SHIM_MODE=pr-list-failed` (the TRANSIENT category, since a
+ * deterministic one negative-caches after one tick and would measure almost nothing), and holds one
+ * `/api/stream` connection open for a fixed 150-second window, counting every unnamed board frame
+ * broadcast in that window (the write-skip-diff-bounded `checkedAt` cost, see Pitfall 5). A real
+ * tmux session is required behind every fixture, exactly as `gh-reliability-98.mjs`'s own header
+ * documents: `reconcileSessions()` runs at every boot and marks any session whose `tmuxSession` is
+ * not in a real `tmux list-sessions` as lost, which would silently repair a store-only fixture
+ * before the fan-out this leg exists to measure ever ran.
+ *
  * Prints one stderr line per run, then a machine-parsable summary:
  *   PERF-BOARD mode=<prod|dev> done=<n> initialBytes=<n> initialCards=<n> sseFrameBytes=<n> loadCommits=<n> commits=<n>
  *   PERF-BOARD-MULTI mode=<prod|dev> done=<n> sessionsPerCard=<n> initialBytes=<n> initialCards=<n> sseFrameBytes=<n> loadCommits=<n> commits=<n>
- *     (only when --sessions-per-card=N is passed — a distinct label so this leg's numbers can never
+ *     (only when --sessions-per-card=N is passed, a distinct label so this leg's numbers can never
  *     be mistaken for a baseline PERF-BOARD line when grepped out of docs/BASELINES.md)
+ *   PERF-BOARD-PRFAIL mode=<prod|dev> done=<n> failingCards=<n> windowMs=<n> sseFrames=<n> sseFrameBytes=<n>
+ *     (only when --pr-failing is passed, its own label, never mistaken for a baseline line)
  *
  * Exit codes: 0 success. 1 setup/teardown/build error. 2 production hook never fired (rerun is
- * pointless — --dev is unsupported, so this is a hard failure, not a retry signal).
+ * pointless, --dev is unsupported, so this is a hard failure, not a retry signal).
  */
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -142,6 +165,11 @@ function readSessionsPerCardFlag(argv) {
   return n;
 }
 
+/** Read `--pr-failing` off argv (Plan 98-09). Absent by default, the leg's own off switch. */
+function readPrFailingFlag(argv) {
+  return argv.includes("--pr-failing");
+}
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -189,7 +217,16 @@ const FAKE_LINEAR_API_KEY = "perf-board-harness-fake-key-never-real";
  * directly via node:sqlite, so it never reads the real `~/.dispatch/config.json` and never needs,
  * touches, or transmits a real Linear key.
  */
-function makeSandboxHome(label) {
+/**
+ * @param {boolean} withLinearKey Defaults true (every existing leg needs the client-side "needs a
+ * Linear key" gate cleared so the board renders). `--pr-failing` (Plan 98-09) passes `false`: that
+ * leg never loads the web app, and an armed key starts `startPoller` (`config.linearApiKey`
+ * truthy), whose fake-key poll failure calls `store.setSyncUnreachable` with NO write-skip guard
+ * (`board.store.ts`'s own JSDoc: "unlike setPollInterval/setEditors") every `pollIntervalMs` (60s
+ * default), broadcasting an unrelated SSE frame that would silently inflate this leg's own
+ * `checkedAt` frame count with noise this phase did not introduce.
+ */
+function makeSandboxHome(label, withLinearKey = true) {
   const home = join(tmpdir(), `${SANDBOX_PREFIX}${label}-${process.pid}`);
   assertSandboxSafe(home);
   const dispatchDir = join(home, ".dispatch");
@@ -202,7 +239,9 @@ function makeSandboxHome(label) {
         workspaceRoot: join(home, "workspaces"),
         statusChannel: "auto",
         updateCheck: false,
-        sources: { linear: { apiKey: FAKE_LINEAR_API_KEY } },
+        sources: {
+          linear: { apiKey: withLinearKey ? FAKE_LINEAR_API_KEY : "" },
+        },
       },
       null,
       2,
@@ -367,26 +406,35 @@ async function waitForDoneBadge(cdp, sessionId, expectedCount, timeoutMs) {
 }
 
 /**
- * Boot the harness's own server against `home`. `--dev` is refused here (see the file header) —
+ * Boot the harness's own server against `home`. `--dev` is refused here (see the file header),
  * this function only ever spawns the production build, never the tsx/vite fallback.
+ * @param {Record<string,string>} envOverrides Additive env entries layered on top of
+ * `process.env` (Plan 98-09's `--pr-failing` leg uses this for a PATH-prepended `gh` shim and
+ * `GH_SHIM_MODE`); every other call site omits it and behaves exactly as before this parameter
+ * existed.
  */
-function bootServer(home, dev) {
+function bootServer(home, dev, envOverrides = {}) {
   if (dev) {
     console.error(
       "perf-board.mjs does not support --dev: the dev-mode frontend proxy target is hardcoded " +
         "in vite.config.ts to the user's real, live dispatch port, and this harness's " +
         "sandbox-safety guarantee forbids ever binding that port from a second instance. Only " +
-        "the production build can be measured by this script — run `npm run build` and rerun " +
+        "the production build can be measured by this script, run `npm run build` and rerun " +
         "without --dev.",
     );
     process.exit(1);
   }
   if (!existsSync(DIST_ENTRY)) {
-    console.error(`Missing ${DIST_ENTRY} — run \`npm run build\` first.`);
+    console.error(`Missing ${DIST_ENTRY}, run \`npm run build\` first.`);
     process.exit(1);
   }
   return spawn("node", [DIST_ENTRY], {
-    env: { ...process.env, HOME: home, NODE_ENV: "production" },
+    env: {
+      ...process.env,
+      HOME: home,
+      NODE_ENV: "production",
+      ...envOverrides,
+    },
     stdio: ["ignore", "ignore", "ignore"],
   });
 }
@@ -553,6 +601,181 @@ async function measureSseFrameBytes(port) {
     return Buffer.byteLength(`${mutationFrame}\n\n`, "utf8");
   } finally {
     await reader.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// --pr-failing leg (Plan 98-09, PRLINK-05 / Pitfall 5). See the file header for the full
+// rationale. Structurally separate from the byte-measurement pipeline above: one fixed-window
+// SSE-frame count, no Chrome, no median-of-N.
+// ---------------------------------------------------------------------------
+
+const PR_FAIL_WINDOW_MS = 150_000;
+const PR_FAIL_TMUX_PREFIX = "dsp-pbf98-";
+const GH_SHIM_SOURCE = join(REPO_ROOT, "scripts", "fixtures", "gh-shim-98.sh");
+
+/** `tmux new-session -d -s <name> -c <cwd>` running a trivial long-lived shell loop, matching
+ * `gh-reliability-98.mjs`'s own precedent (never `claude`, no worktrees, no repo mutation). */
+async function tmuxNewSession(name, cwd) {
+  await execFileP("tmux", [
+    "new-session",
+    "-d",
+    "-s",
+    name,
+    "-c",
+    cwd,
+    "sh",
+    "-c",
+    "while true; do sleep 3600; done",
+  ]);
+}
+
+async function tmuxKillSession(name) {
+  try {
+    await execFileP("tmux", ["kill-session", "-t", name]);
+  } catch {
+    // already gone, idempotent teardown
+  }
+}
+
+/**
+ * One `--pr-failing` fixture card: one session, one repo, seeded outside Done so
+ * `probedSessions()` fans it out, carrying the flat `tmuxSession`/`branch`/`workspace` fields
+ * `runArtifactDetection` reads (never `card.branch`, which is only the active session's
+ * projection, so both the session record AND its flat mirror are set here, matching
+ * `setActiveSession`'s own convention).
+ */
+function buildPrFailingCard(i, repoPath) {
+  const tmuxSession = `${PR_FAIL_TMUX_PREFIX}${process.pid}-${i}`;
+  const branch = `perf-pr-failing/${i}`;
+  const now = new Date().toISOString();
+  const session = {
+    id: `perf-prfail-session-${i}`,
+    createdAt: now,
+    updatedAt: now,
+    tmuxSession,
+    branch,
+    workspace: { folder: repoPath, repos: [{ path: repoPath, base: "main" }] },
+  };
+  const card = {
+    id: `perf-prfail-${i}`,
+    issueId: `perf-prfail-issue-${i}`,
+    identifier: `PERF-PRFAIL-${i}`,
+    title: `Seeded standing-failure PR fixture ${i} for the checkedAt broadcast-cost leg`,
+    description: null,
+    priority: 3,
+    column: "in_progress",
+    updatedAt: now,
+    sessions: [session],
+    activeSessionId: session.id,
+    tmuxSession,
+    branch,
+    workspace: session.workspace,
+  };
+  return { card, tmuxSession };
+}
+
+/**
+ * TWO-BOOT seeding, matching {@link seedDoneCards}'s own pattern: boot once so `board-db.ts`
+ * creates the real schema, kill it, then insert `count` real, tmux-backed fixture cards directly
+ * via node:sqlite. Returns the tmux session names the caller must spawn before the real
+ * (measured) boot, and tear down afterward.
+ */
+async function seedPrFailingCards(home, count, repoPath) {
+  const warmup = bootServer(home, false);
+  try {
+    await waitForReady(SANDBOX_PORT);
+  } finally {
+    await killAndWait(warmup);
+  }
+
+  const dbPath = join(home, ".dispatch", "board.db");
+  const db = new DatabaseSync(dbPath);
+  const tmuxNames = [];
+  try {
+    const insert = db.prepare(
+      `INSERT INTO cards (id, data) VALUES (?, ?)
+       ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
+    );
+    db.exec("BEGIN");
+    for (let i = 0; i < count; i++) {
+      const { card, tmuxSession } = buildPrFailingCard(i, repoPath);
+      tmuxNames.push(tmuxSession);
+      insert.run(card.id, JSON.stringify(card));
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  } finally {
+    db.close();
+  }
+  return tmuxNames;
+}
+
+/**
+ * Runs the whole `--pr-failing` leg: seed `failingCards` real tmux-backed fixtures outside Done,
+ * plant `scripts/fixtures/gh-shim-98.sh` as `gh` on the CHILD server's own PATH (never this
+ * harness process's own PATH) with `GH_SHIM_MODE=pr-list-failed`, hold one `/api/stream`
+ * connection open for a fixed {@link PR_FAIL_WINDOW_MS} window discarding the initial connect
+ * resync frame first (matching {@link measureSseFrameBytes}'s own discard-then-measure shape),
+ * and count every subsequent unnamed board frame. Tears down the server, every tmux session, and
+ * the sandbox home in every case.
+ */
+async function runPrFailingLeg(failingCards) {
+  const home = makeSandboxHome("prfail", false);
+  const repoPath = join(home, "workspaces", "prfail-repo");
+  mkdirSync(repoPath, { recursive: true });
+  const binDir = join(home, "gh-shim-bin");
+  mkdirSync(binDir, { recursive: true });
+  copyFileSync(GH_SHIM_SOURCE, join(binDir, "gh"));
+  chmodSync(join(binDir, "gh"), 0o755);
+
+  const tmuxNames = await seedPrFailingCards(home, failingCards, repoPath);
+
+  let server = null;
+  let reader = null;
+  try {
+    for (const name of tmuxNames) {
+      await tmuxNewSession(name, repoPath);
+    }
+
+    server = bootServer(home, false, {
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      GH_SHIM_MODE: "pr-list-failed",
+    });
+    await waitForReady(SANDBOX_PORT);
+
+    const res = await fetch(`http://127.0.0.1:${SANDBOX_PORT}/api/stream`);
+    reader = makeFrameReader(res);
+    await reader.nextBoardFrame(); // discard the initial connect resync frame
+
+    const deadline = Date.now() + PR_FAIL_WINDOW_MS;
+    let sseFrames = 0;
+    let sseFrameBytes = 0;
+    for (;;) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      const outcome = await Promise.race([
+        reader.nextBoardFrame().then((raw) => ({ raw })),
+        sleep(remaining).then(() => ({ timedOut: true })),
+      ]);
+      if (outcome.timedOut) break;
+      sseFrames++;
+      if (sseFrameBytes === 0) {
+        sseFrameBytes = Buffer.byteLength(`${outcome.raw}\n\n`, "utf8");
+      }
+    }
+
+    console.error(
+      `PERF-BOARD-PRFAIL mode=prod done=${failingCards} failingCards=${failingCards} ` +
+        `windowMs=${PR_FAIL_WINDOW_MS} sseFrames=${sseFrames} sseFrameBytes=${sseFrameBytes}`,
+    );
+  } finally {
+    if (reader) await reader.close();
+    await killAndWait(server);
+    for (const name of tmuxNames) await tmuxKillSession(name);
+    rmSync(home, { recursive: true, force: true });
   }
 }
 
@@ -741,6 +964,16 @@ async function main() {
   }
 
   const doneCount = readDoneFlag(argv);
+  const prFailing = readPrFailingFlag(argv);
+  if (prFailing) {
+    try {
+      await runPrFailingLeg(doneCount);
+    } finally {
+      await warnIfPortsHeld();
+    }
+    return;
+  }
+
   const runs = readRunsFlag(argv);
   const sessionsPerCard = readSessionsPerCardFlag(argv);
 

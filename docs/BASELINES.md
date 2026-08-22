@@ -760,3 +760,108 @@ window's byte accounting, not a second cause).
 **Environment:** `com.dispatch.app` confirmed stopped and `:4700` refusing throughout; no
 `dispatch-perf-board-*` directory or stray listener remained after either run; real
 `~/.dispatch/board.db` unchanged (`27d52060517adea9fe81712f9abe1da0`, `28672` bytes) throughout.
+
+### Phase 98, Plan 09, checkedAt standing-failure broadcast cost and wire re-measurement
+
+- **Date:** 2026-08-22
+- **Git SHA measured:** working tree with plans 98-01 through 98-08 landed (this measurement adds
+  only an additive, off-by-default `--pr-failing` leg to `scripts/perf-board.mjs`, no other `src/`
+  or `scripts/` file changed by it).
+- **Machine:** Apple Silicon, local (Node v22.23.1).
+
+**Threshold correction, stated explicitly (98-01's own finding, repeated here because this is the
+gate reader for this phase).** Plan 98-09's own `<interfaces>` pointer cites
+`initialBytes<=15029`/`sseFrameBytes<=15274` (the `6d2549f` / Phase 86 entry above), a stale number
+from before this phase started. `98-01-SUMMARY.md`'s own BEFORE capture for this phase (the correct
+starting point) measured `initialBytes=17410`/`sseFrameBytes=17655`, one byte above this file's
+`96-11` entry (`17409`/`17654`) directly above, already identified by 98-01 as ordinary run-to-run
+noise, not a regression this phase caused. The correct comparison for this phase's own gate is
+therefore against `98-01`'s own BEFORE numbers, `17410`/`17655`, not the older, superseded
+`15029`/`15274` numbers.
+
+**Wire re-measurement at N=1, single-session leg, same exact command:**
+`node scripts/perf-board.mjs --done=500 --runs=3`
+
+```
+run=1 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=6
+run=2 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=5 commits=7
+run=3 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=7
+
+PERF-BOARD mode=prod done=500 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=7
+```
+
+`initialBytes=17410` and `sseFrameBytes=17655`, BYTE-IDENTICAL to `98-01-SUMMARY.md`'s own BEFORE
+capture for this phase (`17410`/`17655`), zero delta. Both are ABOVE the older `15029`/`15274`
+numbers by the same, already-documented, out-of-scope `ActiveSessionWire` residual (98-01), a fact
+about the codebase before this phase started, not something this phase introduced. No regression:
+this phase's `PrInfo.repo` field and `useCardPrs` client hook cost zero wire bytes at N=1, since
+`PrInfo.repo` only appears on cards that carry a PR, and none of these 500 seeded Done cards do.
+
+**Wire re-measurement at N=1, multi-session leg, same exact command:**
+`node scripts/perf-board.mjs --done=500 --runs=3 --sessions-per-card=3`
+
+```
+run=1 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=8 commits=5
+run=2 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=7 commits=5
+run=3 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=8 commits=5
+
+PERF-BOARD-MULTI mode=prod done=500 sessionsPerCard=3 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=8 commits=5
+```
+
+`20844` to `20845` and `21089` to `21090`, the same 1-byte noise band against `98-01-SUMMARY.md`'s
+own BEFORE capture for this leg (`20844`/`21089`, itself matching the `96-11` post-fix numbers
+directly above within noise). No regression.
+
+**Standing-failure `checkedAt` broadcast cost (PRLINK-05, Pitfall 5).**
+
+Command: `node scripts/perf-board.mjs --done=<N> --runs=1 --pr-failing`. Shim mode:
+`GH_SHIM_MODE=pr-list-failed` (`gh: unexpected error talking to github.com`), the TRANSIENT
+`"gh pr list failed"` category, deliberately not one of the four deterministic categories (98-04's
+negative cache never engages for it, so every fixture retries under the existing exponential
+backoff, `10s, 20s, 40s, 60s capped`, the worst realistic standing-failure case for the `checkedAt`
+write, a deterministic category would negative-cache after one tick and prove almost nothing). Every
+fixture carries one real, live tmux session (`sh -c "while true; do sleep 3600; done"`, matching
+`gh-reliability-98.mjs`'s own precedent) and one repo, matching the fan-out shape
+`artifact-detect.ts` reads; without a real tmux session `reconcileSessions()` would mark the fixture
+lost at boot and the fan-out this leg measures would never run.
+
+Two scales recorded:
+
+```
+PERF-BOARD-PRFAIL mode=prod done=2 failingCards=2 windowMs=150000 sseFrames=6 sseFrameBytes=1724
+PERF-BOARD-PRFAIL mode=prod done=50 failingCards=50 windowMs=150000 sseFrames=150 sseFrameBytes=35884
+```
+
+Derived frames-per-failing-card-per-minute (`sseFrames / failingCards / (windowMs / 60000)`):
+
+- `done=2`: `6 / 2 / 2.5 = 1.2`
+- `done=50`: `150 / 50 / 2.5 = 1.2`
+
+Both are AT or BELOW 1.5 and close to the 1-broadcast-per-failing-card-per-minute bound plan 98-04's
+minute-truncated `checkedAt` write claims. The mechanism: a session that fails every tick backs off
+exponentially (real `gh pr list` retries land at roughly `t=0, 20s, 60s, 120s` inside the 150s
+window, not every 10s), and the minute-truncated `checkedAt` write-skip guard
+(`rec.prsUnknown?.category !== category || rec.prsUnknown.checkedAt !== checkedAt`) suppresses any
+retry landing inside an already-broadcast minute. In this window that yields 3 real broadcasts per
+card (the initial category-set write, plus one at each of the two minute boundaries the backoff
+schedule crosses), giving `3 / 2.5 = 1.2` broadcasts per card per minute, independent of how many
+cards are failing (`done=2` and `done=50` measured the identical per-card figure).
+
+**Harness confound found and fixed before this measurement was recorded.** `--pr-failing` initially
+reused `makeSandboxHome`'s existing fake Linear API key (needed by every OTHER leg to clear the
+client-side "needs a Linear key" first-run gate so the board renders for the Chrome-driven commit
+leg). This leg never loads the web app, so the key is unnecessary, and an armed key starts
+`startPoller` (`config.linearApiKey` truthy), whose fake-key poll failure calls
+`store.setSyncUnreachable` on every `pollIntervalMs` (60s default) with NO write-skip guard
+(`board.store.ts`'s own JSDoc for `setSyncUnreachable`: "unlike setPollInterval/setEditors"), adding
+an SSE broadcast unrelated to `checkedAt` roughly once a minute. A `done=2` run with the key armed
+measured `sseFrames=9` (`1.8` per card per minute, ABOVE the 1.5 bound); disarming the key
+(`makeSandboxHome` gained a `withLinearKey` parameter, `--pr-failing` passes `false`) dropped the
+SAME run to `sseFrames=6` (`1.2` per card per minute), confirming the extra 3 frames were unrelated
+poller noise, not `checkedAt` cost. Recorded here rather than rounded away, per this file's own
+honesty standard.
+
+**Environment:** `com.dispatch.app` confirmed stopped and `:4700` refusing throughout every run
+above; every `dispatch-perf-board-*` sandbox directory, every `dsp-pbf98-*` tmux session, and port
+`47820` were confirmed gone after each run; real `~/.dispatch/board.db` remained absent throughout
+(this machine has no live install, matching Phase 97's own recorded diagnosis).
