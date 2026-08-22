@@ -21,7 +21,6 @@ export function previewBadgeTitle(preview: PreviewInfo): string {
 
 /**
  * Evidence readout for the detail panel's preview row, one mono line.
- * @public wired into PreviewRow.tsx in the next task of this same plan.
  */
 export function previewEvidenceLine(evidence: PreviewEvidence): string {
   return evidence.source === "cwd"
