@@ -233,6 +233,25 @@ function safeRealpath(p: string): string | null {
 }
 
 /**
+ * Whether `cwd` IS `base` or sits under it, compared case-insensitively off Linux.
+ * @remarks `realpath(3)` resolves symlinks but does not canonicalize case on a case-insensitive
+ * volume, which macOS and Windows both default to. `lsof` reports the kernel's on-disk case while
+ * `workspaceRoot` is a user-typed string in `~/.dispatch/config.json`, so a user who writes
+ * `/Users/x/Dispatch-Workspaces` for a directory created as `dispatch-workspaces` made both sides
+ * realpath to different strings and every preview render a positive `cwdMismatch` from a
+ * comparison that simply could not decide (99-REVIEW WR-02). The residual, two sibling directories
+ * differing only in case on a case-SENSITIVE volume, would read as a match here; that is the
+ * strictly safer direction, since the pane-pid walk stays the primary attribution either way.
+ */
+function pathIsWithin(cwd: string, base: string): boolean {
+  const fold = (s: string): string =>
+    process.platform === "linux" ? s : s.toLowerCase();
+  const a = fold(cwd);
+  const b = fold(base);
+  return a === b || a.startsWith(b + sep);
+}
+
+/**
  * Whether `rawCwd` resolves inside `workspacePath`, the cwd cross-check for the pane-pid walk's
  * attribution.
  *
@@ -273,14 +292,14 @@ function matchWorkspace(
     const worktree = safeRealpath(worktreeDirFor(workspacePath, repo.path));
     if (worktree == null) continue;
     anyWorktreeResolved = true;
-    if (cwd === worktree || cwd.startsWith(worktree + sep)) {
+    if (pathIsWithin(cwd, worktree)) {
       return { inWorkspace: true, repoBasename: displayNames.get(repo.path) };
     }
   }
 
   const root = safeRealpath(workspacePath);
   if (root == null || !anyWorktreeResolved) return null;
-  return { inWorkspace: cwd === root || cwd.startsWith(root + sep) };
+  return { inWorkspace: pathIsWithin(cwd, root) };
 }
 
 /**
