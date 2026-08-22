@@ -2178,12 +2178,49 @@ and drops one cosmetic stamp, self-healing on the next event.
 
 ### Dev-Server Preview Detection
 
-Detecting a dev server running inside a session's process tree is a three-call chain, all
+Detecting a dev server running inside a session's process tree is a four-call chain, all
 batched: `tmux list-panes -a` returns every live pane's PID grouped by session in ONE call, then
 one system-wide `ps -axo pid=,ppid=` builds a ppid→children index, then one PID-scoped
 `lsof -a -p <pids> -iTCP -sTCP:LISTEN -Fpn` resolves every discovered pid's listening ports in
-ONE call. Regardless of how many sessions are live or how deep their process trees run, this is
-exactly three subprocess calls per detection tick — never a per-session or per-pid loop.
+ONE call, then a fourth PID-scoped `lsof -a -p <pids> -d cwd -Fpn` call resolves the working
+directory of only the pids the third call already confirmed listening. Regardless of how many
+sessions are live or how deep their process trees run, this is exactly four subprocess calls per
+detection tick, never a per-session or per-pid loop.
+
+**The fourth call cannot be merged into the third.** `lsof`'s `-a` flag ANDs every selection
+option per file descriptor, not per process, so a single combined
+`-iTCP -sTCP:LISTEN -d cwd` call selects only descriptors that are simultaneously a listening
+socket AND the cwd pseudo descriptor. No descriptor is ever both, so the combined call returns
+zero cwd rows while still exiting 0, a silent, confident "no cwd data" that reads identically to
+"nothing is listening here". This is exactly the single-call design the milestone level STACK.md
+research proposed, and it fails without ever raising an error, so the fourth call has to stand on
+its own.
+
+**The cwd call is scoped to confirmed candidates, not the full walk.** It is issued only for the
+pids that already produced a confirmed, reachable, non excluded candidate on the third call, never
+the full BFS visited pid set, so it is usually one pid wide for a single session and is not issued
+at all when nothing is reachable.
+
+**Ordering is load bearing: exclusion first, reachability second, attribution last.** The per-tick
+exclusion set and `PROBE_HOSTS_FOR_BIND` are unchanged by this cwd cross-check; it runs strictly
+after a candidate has already survived both.
+
+**The realpath rule is not a macOS curiosity.** `lsof` reports the realpath of a process's working
+directory, and both `/tmp` and `os.tmpdir()` resolve through `/private` on macOS while
+`workspaceRoot` is user configurable, so any symlinked volume reopens this gap in production. Both
+sides of the comparison are normalized through `realpathSync` before any prefix compare, and a path
+that cannot be resolved yields an inconclusive result, never a throw.
+
+**A cwd lookup failure degrades evidence only.** It drops `evidence.source` to `"pane ancestry"`
+and nothing else: it never increments `previewFailureCounts`, never clears `previews`, and never
+sets `previewsUnknown`. The `null` versus empty array staleness contract below stays driven solely
+by the pane pid walk's own failure path.
+
+**Evidence rides the wire as a small, non secret object per confirmed preview (`T-99-01`):** pid,
+source (`"cwd"` or `"pane ancestry"`), an optional `matchedCwd` that is a `repoDisplayNames`
+basename and never an absolute path, the raw `lsof`-reported bind token, and an optional
+`cwdMismatch` flag present only when the two attribution paths disagree. `previewsUnknown` stamps
+the same minute truncated `checkedAt` the PR path already does, on the identical terms.
 
 **`-a` is mandatory.** `lsof` ORs `-p` against `-i`/`-s` by default; omitting `-a` returns every
 listening socket on the machine from any process, attributing a foreign process's port to a
@@ -2868,6 +2905,27 @@ that the Vite dev port is surfaced as a preview on some OTHER card's board entry
 process tree happens to include it — accepted and recorded here rather than silently claimed
 excluded.
 
+### A re-parented dev server is not discovered by the cwd cross-check (`T-99-12`)
+
+The cwd cross-check added to [Dev-Server Preview Detection](#dev-server-preview-detection)
+CONFIRMS a candidate the pane-pid walk already found; it never independently discovers a port. A
+dev server whose ppid was reassigned away from its pane (reparented to pid 1, or started under a
+wrapper the BFS walk cannot reach) still produces no walk candidate at all, and with no candidate
+the fourth `lsof -d cwd` call is never issued for that pid, since it is scoped to pids the third
+call already confirmed listening. That server's port is simply never seen, exactly as it was
+before this phase.
+
+Independent discovery was considered and rejected: it would need an unfiltered, machine wide
+`lsof -iTCP -sTCP:LISTEN` scan rather than the `-p` scoped one this codebase deliberately uses,
+reopening the same "unrelated sockets attributed to the wrong session" hazard the `-p` scoping
+exists to avoid, at a materially larger blast radius than a single missed preview. It also brushes
+against the explicitly deferred idea of replacing the pane-pid walk outright with cwd based
+attribution, a larger architectural change this phase's own scope excludes.
+
+Accepted and owned by a later phase, not this one. The bounded consequence: a re-parented dev
+server shows no preview badge, the same honest "no badge" outcome an unattributable port already
+produces today, never a wrong or misleading one.
+
 ### `GET /api/cards/:id` answers a group parent's real membership directly, independent of windowing
 
 `App.tsx`'s `selectedCardMembers` derivation branches on whether the selected card is genuinely
@@ -3051,6 +3109,36 @@ switch-sockets` (a pid-scoped, `ESTABLISHED`-only, bounded poll-to-zero proof th
 rate_limit`, paused until `reset` under 50 remaining), and a semaphore of four concurrent spawns.
     A skipped probe (a cache hit or a breaker pause) deliberately does not advance the session's
     `PROBE_FAILURE_CEILING`, only a real spawn that fails counts as a strike.
+- **`node scripts/panel-99.mjs`** (`npm run panel-99`, Phase 99, PORT-02) - a CDP structural/DOM
+  instrument, deliberately OUTSIDE `npm run check` (it boots a real sandboxed dispatch server and
+  requires the live `com.dispatch.app` service stopped for its duration). Three fixture cards
+  (`PORT-CWD`, `PORT-WALK`, `PORT-MISS`), no real tmux or ttyd needed. Two named checks:
+  `evidence-hover` (the preview badge's `title` carries the attribution string while `aria-label`
+  stays evidence free) and `evidence-panel` (the detail panel's preview row carries the same
+  readout, with a separately coloured `cwd mismatch` segment on disagreement). Each has its own
+  `--break <name>`, proven able to fail live, quoted verbatim from the script's own header JSDoc:
+  `evidence-hover` ("evidence-hover: PORT-CWD title expected "Detected via cwd match (api), pid
+  40101, bound 127.0.0.1", measured "Open preview, localhost:41001""), `evidence-hover-wrong-subject`
+  (four violations proving evidence never leaks into the accessible name, including "evidence-hover:
+  PORT-CWD aria-label "Detected via cwd match (api), pid 40101, bound 127.0.0.1" unexpectedly
+  contains "pid", evidence must stay off the accessible name"), and `evidence-panel`
+  ("evidence-panel: PORT-MISS expected exactly 1 "cwd mismatch" segment, measured 0"). Every check
+  is proven able to fail. `density-91.mjs --compare` against the Plan 03 BEFORE snapshot confirms
+  the evidence surface changes no rendered card geometry.
+- **`node scripts/port-attribution-99.mjs`** (`npm run port-attribution-99`, Phase 99, PORT-01) - a
+  real-tmux/real-listener sandbox harness, deliberately OUTSIDE `npm run check` (it spawns real
+  tmux sessions and dev-server listeners and requires the live `com.dispatch.app` service stopped
+  for its duration). Two live workspaces, two real dev servers on different ports, one bound to
+  `::1` and one to `127.0.0.1`. One named check, `port-attribution`, asserting six groups per card:
+  detection, no-cross-attribution, dual-stack bind token, `evidence.source === "cwd"`, no path
+  leaked on the wire, and pid. Three named `--break <name>` legs, each editing `src/` directly,
+  rebuilding, running, and reverting to the exact original bytes, proven able to fail live and
+  quoted verbatim from the script's own header JSDoc: `realpath` (removing `realpathSync` from
+  `matchWorkspace`'s comparison degrades `evidence.source` to `"pane ancestry"` for both cards),
+  `combined-lsof` (folding `-iTCP -sTCP:LISTEN` into the same `-d cwd` call reproduces the identical
+  silent-zero-row failure), and `cwd-failure-must-not-clear` (an inverted-polarity leg: forcing the
+  cwd `lsof` call to fail must produce ZERO violations, proving a cross-check failure never removes
+  an already-reachable preview).
 - **`phase-smoke-tester`** - the only BEHAVIORAL verification this project runs: an agent derives
   and executes smoke cases against the running app after each phase's implementation lands. This
   is the one gate above that cannot be reduced to a grep.

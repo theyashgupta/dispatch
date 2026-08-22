@@ -55,8 +55,10 @@ const ID_RE =
  * mitigation re-freeze (`T-99-01`), cited in `shared/types.ts`.
  * @remarks Moved from 128 to 129 for the deliberate one-ID `cwdByPids` argv-only
  * mitigation re-freeze (`T-99-02`), cited in `adapters/dev-server.ts`.
+ * @remarks Moved from 129 to 130 for the deliberate one-ID re-parented dev server
+ * residual re-freeze (`T-99-12`), see docs/ARCHITECTURE.md#known-residuals.
  */
-const FROZEN_COUNT = 129;
+const FROZEN_COUNT = 130;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");
