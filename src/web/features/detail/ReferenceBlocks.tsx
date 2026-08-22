@@ -37,9 +37,7 @@ export function ReferenceBlocks({
               member={member}
               dense={false}
               actionable={membersActionable}
-              groupPr={c.prs}
               groupPreviews={c.previews}
-              groupPrsUnknown={c.prsUnknown}
               groupPreviewsUnknown={c.previewsUnknown}
             />
           ))}

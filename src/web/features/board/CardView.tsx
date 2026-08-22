@@ -698,9 +698,7 @@ export function CardView({
                 key={member.id}
                 member={member}
                 actionable={true}
-                groupPr={card.prs}
                 groupPreviews={card.previews}
-                groupPrsUnknown={card.prsUnknown}
                 groupPreviewsUnknown={card.previewsUnknown}
               />
             ))}
