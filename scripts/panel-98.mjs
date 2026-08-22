@@ -701,30 +701,813 @@ function readFlag(argv, name) {
 }
 
 // ---------------------------------------------------------------------------
-// Checks, stubs only in this task. `CHECKS` is the named-check dispatch idiom
-// copied from `session-liveness-v3.mjs`'s own `CHECKS`/`--check` table. Every
-// real check body lands in the next task; wiring these as `not implemented`
-// throws proves the boot/seed/dispatch/teardown lifecycle on its own first.
+// Navigation and DOM-lookup helpers, shared by every check and (in the next
+// task) every break. `FIND_CARD_SRC` is this file's ONE card-lookup idiom,
+// generalized from `density-91.mjs`'s own single `document.querySelector`
+// scoping rule: every column's `.scroll-stable-y` direct DIV children are
+// exactly the rendered `<Card>` roots (confirmed by source read of
+// `Column.tsx`), so a card is found by scanning every `[data-column]` region
+// for the ONE direct-child card root whose text contains the identifier.
+// Every selector below keys on aria-label, role, or fixture text, never on a
+// style/attribute value a check or the next task's break is about to mutate
+// (TRAP 3).
 // ---------------------------------------------------------------------------
 
-async function checkRepoTagging() {
-  throw new Error("not implemented");
+const FIND_CARD_SRC = `
+  function panel98FindCardRoot(identifier) {
+    var root = document.getElementById("root");
+    if (!root) throw new Error("panel98: board root #root not found");
+    var columns = Array.prototype.slice.call(root.querySelectorAll("[data-column]"));
+    var matches = [];
+    columns.forEach(function (col) {
+      var scrollContainer = col.querySelector(":scope > .scroll-stable-y");
+      if (!scrollContainer) return;
+      var cardRoots = Array.prototype.filter.call(scrollContainer.children, function (el) {
+        return el.tagName === "DIV";
+      });
+      cardRoots.forEach(function (el) {
+        if (el.textContent.indexOf(identifier) !== -1) matches.push(el);
+      });
+    });
+    if (matches.length === 0) throw new Error("panel98: card " + identifier + " not found on board");
+    if (matches.length > 1) throw new Error("panel98: identifier " + identifier + " matched " + matches.length + " card roots");
+    return matches[0];
+  }
+`;
+
+/** Click a card's root by fixture identifier, native `.click()` so React's delegated `onClick`
+ * (`Card.tsx`'s `domProps.onClick`) fires exactly as a real mouse click would. */
+async function clickCardByIdentifier(cdp, sessionId, identifier) {
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}panel98FindCardRoot(${JSON.stringify(identifier)}).click()`,
+  );
 }
 
-async function checkMultiSessionPrs() {
-  throw new Error("not implemented");
+/** Opens the detail panel for `identifier` by clicking its card, then polls
+ * `aside[aria-label="Ticket detail"]` for that identifier's own text. */
+async function openCardDetail(cdp, sessionId, identifier) {
+  await clickCardByIdentifier(cdp, sessionId, identifier);
+  const probe = `(function () {
+    var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+    return aside != null && aside.textContent.indexOf(${JSON.stringify(identifier)}) !== -1;
+  })()`;
+  const deadline = Date.now() + RENDER_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (await evalValue(cdp, sessionId, probe)) return;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    `panel98: detail panel never showed ${identifier} within ${RENDER_TIMEOUT_MS}ms`,
+  );
 }
 
-async function checkGroupPrList() {
-  throw new Error("not implemented");
+/** Expands a group card's member list (idempotent: a no-op if already expanded) by clicking its
+ * "Show members" `IconButton`, polling for the resulting "Hide members" toggle state. */
+async function expandGroupCard(cdp, sessionId, identifier) {
+  const already = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(identifier)});
+      return card.querySelector('button[aria-label="Hide members"]') != null;
+    })()`,
+  );
+  if (already) return;
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(identifier)});
+      var btn = card.querySelector('button[aria-label="Show members"]');
+      if (!btn) throw new Error("panel98: Show members button not found for ${identifier}");
+      btn.click();
+      return true;
+    })()`,
+  );
+  const probe = `${FIND_CARD_SRC}(function () {
+    var card = panel98FindCardRoot(${JSON.stringify(identifier)});
+    return card.querySelector('button[aria-label="Hide members"]') != null;
+  })()`;
+  const deadline = Date.now() + RENDER_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (await evalValue(cdp, sessionId, probe)) return;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    `panel98: ${identifier} never expanded within ${RENDER_TIMEOUT_MS}ms`,
+  );
 }
 
-async function checkPrListDetail() {
-  throw new Error("not implemented");
+async function dispatchTab(cdp, sessionId) {
+  await cdp.send(
+    "Input.dispatchKeyEvent",
+    { type: "rawKeyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
+    sessionId,
+  );
+  await cdp.send(
+    "Input.dispatchKeyEvent",
+    { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
+    sessionId,
+  );
 }
 
-async function checkA11y() {
-  throw new Error("not implemented");
+async function blurActiveElement(cdp, sessionId) {
+  await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      if (document.activeElement && document.activeElement !== document.body) {
+        document.activeElement.blur();
+      }
+      return true;
+    })()`,
+  );
+}
+
+async function readActiveOutline(cdp, sessionId) {
+  return evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var s = getComputedStyle(document.activeElement);
+      return { outlineWidth: s.outlineWidth, outlineStyle: s.outlineStyle };
+    })()`,
+  );
+}
+
+/**
+ * Reads the BROWSER-COMPUTED accessible name via the CDP `Accessibility` domain (not a DOM
+ * attribute read), the `panel-96.mjs` idiom, since a DOM `aria-label` read and the browser's own
+ * name computation can disagree. `returnByValue: false` yields an `objectId`;
+ * `Accessibility.queryAXTree` resolves the accessibility node straight from that JS object
+ * reference, sidestepping the `DOM.requestNode` hop panel-96.mjs's own header records as
+ * unreliable for an element only ever touched via `Runtime.evaluate`.
+ */
+async function readAccessibleName(cdp, sessionId, expression) {
+  await cdp.send("DOM.enable", {}, sessionId);
+  await cdp.send("Accessibility.enable", {}, sessionId);
+  const { result, exceptionDetails } = await cdp.send(
+    "Runtime.evaluate",
+    { expression, returnByValue: false, awaitPromise: false },
+    sessionId,
+  );
+  if (exceptionDetails) {
+    throw new Error(
+      `readAccessibleName eval failed: ${exceptionDetails.text}\n--- expression ---\n${expression}`,
+    );
+  }
+  if (!result.objectId) {
+    return {
+      name: null,
+      role: null,
+      error: "expression did not resolve to an element",
+    };
+  }
+  const { nodes } = await cdp.send(
+    "Accessibility.queryAXTree",
+    { objectId: result.objectId },
+    sessionId,
+  );
+  const node = nodes && nodes[0];
+  return { name: node?.name?.value ?? null, role: node?.role?.value ?? null };
+}
+
+/** Dedupes PRs by `url` exactly as `useCardPrs` does, computed by the HARNESS from the fixture it
+ * seeded rather than hardcoded, so `multi-session-prs` cannot pass vacuously when both source
+ * arrays happen to be empty. */
+function dedupeByUrl(prLists) {
+  const seen = new Set();
+  const merged = [];
+  for (const list of prLists) {
+    for (const pr of list) {
+      if (seen.has(pr.url)) continue;
+      seen.add(pr.url);
+      merged.push(pr);
+    }
+  }
+  return merged;
+}
+
+/** Reads the currently-open detail panel's `PrList` block: the `Pull Requests (N)` heading (a
+ * plain `Field` `<span>`, distinguished from the `Members (N)` heading by its own text), every PR
+ * row (found via its `Open PR #<n> in GitHub` link control, never by row index), each row's CI dot
+ * (5x5 circular span), the set of repo sub-labels rendered, and any probe-failure diagnostic line. */
+async function measurePrListDetail(cdp, sessionId) {
+  return evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+      if (!aside) return { asideFound: false };
+      var spans = Array.prototype.slice.call(aside.querySelectorAll("span"));
+      var heading = spans.find(function (s) { return /^Pull Requests \\(\\d+\\)$/.test(s.textContent.trim()); });
+      if (!heading) return { asideFound: true, headingFound: false };
+      var container = heading.parentElement;
+      var openButtons = Array.prototype.slice.call(container.querySelectorAll('button[aria-label^="Open PR #"]'));
+      var rows = openButtons.map(function (btn) {
+        var row = btn.parentElement;
+        var m = /Open PR #(\\d+) in GitHub/.exec(btn.getAttribute("aria-label") || "");
+        var ciDot = Array.prototype.slice.call(row.querySelectorAll("span")).find(function (s) {
+          var cs = getComputedStyle(s);
+          return cs.width === "5px" && cs.height === "5px" && cs.borderRadius === "50%";
+        });
+        return {
+          number: m ? parseInt(m[1], 10) : null,
+          ariaLabel: btn.getAttribute("aria-label"),
+          rowText: row.textContent,
+          hasCiDot: ciDot != null,
+        };
+      });
+      var repoLabels = [];
+      ["web", "api"].forEach(function (r) {
+        var found = Array.prototype.slice.call(container.querySelectorAll("span")).some(function (s) {
+          return s.textContent.trim() === r;
+        });
+        if (found) repoLabels.push(r);
+      });
+      var diagEls = Array.prototype.filter.call(container.querySelectorAll("div"), function (d) {
+        return d.children.length === 0 && d.textContent.indexOf("Could not check") !== -1;
+      });
+      return {
+        asideFound: true,
+        headingFound: true,
+        headingText: heading.textContent.trim(),
+        rowCount: rows.length,
+        rows: rows,
+        repoLabels: repoLabels,
+        diagnosticCount: diagEls.length,
+        diagnosticText: diagEls.length > 0 ? diagEls[0].textContent : null,
+      };
+    })()`,
+  );
+}
+
+function assertPrListDetailReading(label, reading, expected, violations) {
+  if (reading == null || !reading.asideFound || !reading.headingFound) {
+    violations.push(
+      `pr-list-detail: ${label}, PrList block not found (${JSON.stringify(reading)})`,
+    );
+    return;
+  }
+  const expectedHeading = `Pull Requests (${expected.expectedCount})`;
+  if (reading.headingText !== expectedHeading) {
+    violations.push(
+      `pr-list-detail: ${label} heading expected ${JSON.stringify(expectedHeading)}, measured ${JSON.stringify(reading.headingText)}`,
+    );
+  }
+  if (reading.rowCount !== expected.expectedCount) {
+    violations.push(
+      `pr-list-detail: ${label} expected ${expected.expectedCount} PR rows, measured ${reading.rowCount}`,
+    );
+  }
+  const measuredNumbers = reading.rows
+    .map((r) => r.number)
+    .sort((a, b) => a - b);
+  const wantNumbers = [...expected.expectedNumbers].sort((a, b) => a - b);
+  if (JSON.stringify(measuredNumbers) !== JSON.stringify(wantNumbers)) {
+    violations.push(
+      `pr-list-detail: ${label} expected PR numbers ${JSON.stringify(wantNumbers)}, measured ${JSON.stringify(measuredNumbers)}`,
+    );
+  }
+  for (const row of reading.rows) {
+    if (row.ariaLabel == null || row.ariaLabel.trim() === "") {
+      violations.push(
+        `pr-list-detail: ${label} row #${row.number} has an empty link-control accessible name`,
+      );
+    }
+    const wantLabel = expected.stateLabels[row.number];
+    if (wantLabel != null && row.rowText.indexOf(wantLabel) === -1) {
+      violations.push(
+        `pr-list-detail: ${label} row #${row.number} expected state label ${JSON.stringify(wantLabel)} somewhere in row text, measured ${JSON.stringify(row.rowText)}`,
+      );
+    }
+    const expectedCiDot = expected.expectedCiDotNumbers.includes(row.number);
+    if (row.hasCiDot !== expectedCiDot) {
+      violations.push(
+        `pr-list-detail: ${label} row #${row.number} CI dot presence measured ${row.hasCiDot}, expected ${expectedCiDot}`,
+      );
+    }
+  }
+  if (reading.repoLabels.length !== expected.expectedRepoLabelCount) {
+    violations.push(
+      `pr-list-detail: ${label} expected ${expected.expectedRepoLabelCount} repo sub-label(s), measured ${reading.repoLabels.length} (${JSON.stringify(reading.repoLabels)})`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Checks. `CHECKS` is the named-check dispatch idiom copied from
+// `session-liveness-v3.mjs`'s own `CHECKS`/`--check` table. Every check pushes
+// violation strings naming the fixture, the criterion, and both the measured
+// and expected value, per an empty return meaning PASS. Every DOM read pairs
+// a geometry/count assertion with an independent structural existence
+// assertion on the same node (TRAP 1).
+// ---------------------------------------------------------------------------
+
+/** PRLINK-01: the repo tag renders only when a card's full PR set spans 2+ repos, matches height
+ * with a bare (no-tag) chip, and the board never shows a "PR unknown"/"PR check incomplete" badge
+ * (PRLINK-04's board half, asserted here on the DOM since the wire half is plan 98-08's). */
+async function checkRepoTagging(cdp, sessionId, violations) {
+  const chipReadExpr = (identifier) => `${FIND_CARD_SRC}(function () {
+    var card = panel98FindCardRoot(${JSON.stringify(identifier)});
+    var chips = Array.prototype.slice.call(card.querySelectorAll('button[aria-label^="PR "]'));
+    return {
+      structurallyPresent: chips.length > 0,
+      count: chips.length,
+      chips: chips.map(function (b) {
+        var repoSpan = Array.prototype.slice.call(b.querySelectorAll("span")).find(function (s) {
+          return getComputedStyle(s).fontFamily.toLowerCase().indexOf("mono") !== -1;
+        });
+        var r = b.getBoundingClientRect();
+        return {
+          ariaLabel: b.getAttribute("aria-label"),
+          hasRepoSpan: repoSpan != null,
+          repoSpanText: repoSpan ? repoSpan.textContent.trim() : null,
+          height: r.height,
+        };
+      }),
+    };
+  })()`;
+
+  const solo = await evalReport(
+    cdp,
+    sessionId,
+    violations,
+    "repo-tagging (PR98-SOLO)",
+    chipReadExpr(SOLO_IDENTIFIER),
+  );
+  let soloChipHeight = null;
+  if (solo == null) return;
+  if (!solo.structurallyPresent) {
+    violations.push("repo-tagging: PR98-SOLO chips not found structurally");
+    return;
+  }
+  if (solo.count !== 2) {
+    violations.push(
+      `repo-tagging: PR98-SOLO expected 2 chips, measured ${solo.count}`,
+    );
+  }
+  for (const c of solo.chips) {
+    if (c.hasRepoSpan) {
+      violations.push(
+        `repo-tagging: PR98-SOLO chip ${c.ariaLabel} unexpectedly carries a repo segment on a single-repo card`,
+      );
+    }
+    if (!/^PR #\d/.test(c.ariaLabel ?? "")) {
+      violations.push(
+        `repo-tagging: PR98-SOLO chip aria-label ${JSON.stringify(c.ariaLabel)} expected the bare "PR #<n>..." form (no repo prefix)`,
+      );
+    }
+    soloChipHeight = c.height;
+  }
+
+  const multi = await evalReport(
+    cdp,
+    sessionId,
+    violations,
+    "repo-tagging (PR98-MULTI)",
+    chipReadExpr(MULTI_IDENTIFIER),
+  );
+  if (multi == null) return;
+  if (!multi.structurallyPresent) {
+    violations.push("repo-tagging: PR98-MULTI chips not found structurally");
+    return;
+  }
+  if (multi.count !== 2) {
+    violations.push(
+      `repo-tagging: PR98-MULTI expected 2 chips, measured ${multi.count}`,
+    );
+  }
+  const seenRepos = new Set();
+  for (const c of multi.chips) {
+    if (!c.hasRepoSpan) {
+      violations.push(
+        `repo-tagging: PR98-MULTI chip ${c.ariaLabel} is missing its repo segment on a card spanning 2+ repos`,
+      );
+    } else {
+      seenRepos.add(c.repoSpanText);
+      if (c.repoSpanText !== "web" && c.repoSpanText !== "api") {
+        violations.push(
+          `repo-tagging: PR98-MULTI chip ${c.ariaLabel} repo segment text ${JSON.stringify(c.repoSpanText)} does not match either seeded repo`,
+        );
+      }
+    }
+    if (
+      soloChipHeight != null &&
+      Math.abs(c.height - soloChipHeight) > PX_TOLERANCE
+    ) {
+      violations.push(
+        `repo-tagging: PR98-MULTI chip ${c.ariaLabel} height=${c.height}px does not match PR98-SOLO's bare-chip height=${soloChipHeight}px (the repo tag must not change chip height)`,
+      );
+    }
+  }
+  if (seenRepos.size !== 2) {
+    violations.push(
+      `repo-tagging: PR98-MULTI chips carried repo segments ${JSON.stringify([...seenRepos])}, expected exactly "web" and "api"`,
+    );
+  }
+
+  const fail = await evalReport(
+    cdp,
+    sessionId,
+    violations,
+    "repo-tagging (PR98-FAIL)",
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(FAIL_IDENTIFIER)});
+      var offenders = Array.prototype.filter.call(card.querySelectorAll("[aria-label], [title]"), function (el) {
+        var al = el.getAttribute("aria-label") || "";
+        var t = el.getAttribute("title") || "";
+        return al.indexOf("PR unknown") === 0 || al.indexOf("PR check incomplete") === 0 ||
+          t.indexOf("PR unknown") === 0 || t.indexOf("PR check incomplete") === 0;
+      });
+      return {
+        structurallyPresent: true,
+        offenderCount: offenders.length,
+        offenders: offenders.map(function (e) { return e.getAttribute("aria-label") || e.getAttribute("title"); }),
+      };
+    })()`,
+  );
+  if (fail != null && fail.offenderCount > 0) {
+    violations.push(
+      `repo-tagging: PR98-FAIL card subtree contains ${fail.offenderCount} element(s) with a PR-unknown accessible name/title: ${JSON.stringify(fail.offenders)}`,
+    );
+  }
+}
+
+/** PRLINK-02: a sibling session's PR (existing only in `sessionSummaries`, never in `card.prs`)
+ * reaches the board chip row, and the chip count equals the harness-computed union size. */
+async function checkMultiSessionPrs(cdp, sessionId, violations) {
+  const reading = await evalReport(
+    cdp,
+    sessionId,
+    violations,
+    "multi-session-prs",
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(MULTI_IDENTIFIER)});
+      var chips = Array.prototype.slice.call(card.querySelectorAll('button[aria-label^="PR "]'));
+      return {
+        structurallyPresent: chips.length > 0,
+        count: chips.length,
+        labels: chips.map(function (b) { return b.getAttribute("aria-label"); }),
+      };
+    })()`,
+  );
+  if (reading == null) return;
+  if (!reading.structurallyPresent) {
+    violations.push(
+      "multi-session-prs: PR98-MULTI chips not found structurally",
+    );
+    return;
+  }
+  const seed = buildMultiCard();
+  const expectedUnion = dedupeByUrl([
+    seed.prs,
+    ...seed.sessions
+      .filter((s) => s.id !== seed.activeSessionId)
+      .map((s) => s.prs),
+  ]);
+  if (reading.count !== expectedUnion.length) {
+    violations.push(
+      `multi-session-prs: PR98-MULTI chip count=${reading.count}, expected union size=${expectedUnion.length} (active session prs + sessionSummaries prs, deduped by url)`,
+    );
+  }
+  const hasSiblingPr = reading.labels.some((l) => l.startsWith("PR api "));
+  if (!hasSiblingPr) {
+    violations.push(
+      `multi-session-prs: PR98-MULTI chips=${JSON.stringify(reading.labels)} are missing the sibling-session PR (repo api), which exists only in sessionSummaries, not card.prs`,
+    );
+  }
+}
+
+/** PRLINK-03: exactly one PR row on a group card, sitting between the title and the session-chip
+ * row, and zero PR chips inside any expanded member row (which must still carry its own member
+ * affordance, so "zero PR chips" cannot pass because the member row itself vanished). */
+async function checkGroupPrList(cdp, sessionId, violations) {
+  await expandGroupCard(cdp, sessionId, GROUP_IDENTIFIER);
+  const reading = await evalReport(
+    cdp,
+    sessionId,
+    violations,
+    "group-pr-list",
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(GROUP_IDENTIFIER)});
+      var divs = Array.prototype.slice.call(card.querySelectorAll("div"));
+      var titleEl = divs.find(function (d) { return d.children.length === 0 && d.textContent.trim() === ${JSON.stringify(GROUP_TITLE)}; });
+      if (!titleEl) return { titleFound: false };
+      var groupPrRowEl = titleEl.nextElementSibling;
+      var afterGroupPrRow = groupPrRowEl ? groupPrRowEl.nextElementSibling : null;
+      var groupPrRowChips = groupPrRowEl
+        ? Array.prototype.slice.call(groupPrRowEl.querySelectorAll(':scope > button[aria-label^="PR "]'))
+        : [];
+      var allChips = Array.prototype.slice.call(card.querySelectorAll('button[aria-label^="PR "]'));
+      var uniqueParents = [];
+      allChips.forEach(function (b) {
+        if (uniqueParents.indexOf(b.parentElement) === -1) uniqueParents.push(b.parentElement);
+      });
+      var memberIdentifiers = ${JSON.stringify([GROUP_MEMBER1_IDENTIFIER, GROUP_MEMBER2_IDENTIFIER])};
+      var memberRows = memberIdentifiers.map(function (mid) {
+        var matches = Array.prototype.filter.call(card.querySelectorAll("div"), function (d) {
+          return d.textContent.indexOf(mid) !== -1;
+        });
+        matches.sort(function (a, b) { return a.querySelectorAll("*").length - b.querySelectorAll("*").length; });
+        var rowEl = matches.length > 0 ? matches[0] : null;
+        return {
+          id: mid,
+          found: rowEl != null,
+          prChipCount: rowEl ? rowEl.querySelectorAll('button[aria-label^="PR "]').length : null,
+          hasSourceAffordance: rowEl ? rowEl.textContent.indexOf("Linear") !== -1 : false,
+        };
+      });
+      return {
+        titleFound: true,
+        groupPrRowPresent: groupPrRowEl != null,
+        groupPrRowChipCount: groupPrRowChips.length,
+        sessionRowAfterGroupPrRow: afterGroupPrRow != null,
+        uniquePrRowContainerCount: uniqueParents.length,
+        memberRows: memberRows,
+      };
+    })()`,
+  );
+  if (reading == null) return;
+  if (!reading.titleFound) {
+    violations.push("group-pr-list: PR98-GROUP title node not found");
+    return;
+  }
+  if (!reading.groupPrRowPresent || reading.groupPrRowChipCount === 0) {
+    violations.push(
+      `group-pr-list: PR98-GROUP has no PR row directly after the title node (measured chip count ${reading.groupPrRowChipCount})`,
+    );
+  }
+  if (!reading.sessionRowAfterGroupPrRow) {
+    violations.push(
+      "group-pr-list: PR98-GROUP has no node after the PR row (expected the session-chip row)",
+    );
+  }
+  if (reading.uniquePrRowContainerCount !== 1) {
+    violations.push(
+      `group-pr-list: PR98-GROUP has ${reading.uniquePrRowContainerCount} distinct PR-row containers, expected exactly 1`,
+    );
+  }
+  for (const m of reading.memberRows) {
+    if (!m.found) {
+      violations.push(
+        `group-pr-list: member row ${m.id} not found inside PR98-GROUP's expanded subtree`,
+      );
+      continue;
+    }
+    if (m.prChipCount !== 0) {
+      violations.push(
+        `group-pr-list: member row ${m.id} carries ${m.prChipCount} PR chip(s), expected 0`,
+      );
+    }
+    if (!m.hasSourceAffordance) {
+      violations.push(
+        `group-pr-list: member row ${m.id} lost its own member affordance (SourceBadge), zero PR chips must not mean the row itself vanished`,
+      );
+    }
+  }
+}
+
+/** PRLINK-06: the detail panel's `PrList` block, for a single ticket, a group, and the probe-
+ * failure diagnostic line, on the same component that serves both surfaces. */
+async function checkPrListDetail(cdp, sessionId, violations) {
+  await openCardDetail(cdp, sessionId, MULTI_IDENTIFIER);
+  const multi = await measurePrListDetail(cdp, sessionId);
+  assertPrListDetailReading(
+    "PR98-MULTI",
+    multi,
+    {
+      expectedCount: 2,
+      expectedNumbers: [5, 7],
+      expectedCiDotNumbers: [5, 7],
+      expectedRepoLabelCount: 2,
+      stateLabels: { 5: "Open", 7: "Open" },
+    },
+    violations,
+  );
+
+  await openCardDetail(cdp, sessionId, GROUP_IDENTIFIER);
+  const group = await measurePrListDetail(cdp, sessionId);
+  assertPrListDetailReading(
+    "PR98-GROUP",
+    group,
+    {
+      expectedCount: 2,
+      expectedNumbers: [21, 22],
+      expectedCiDotNumbers: [21],
+      expectedRepoLabelCount: 0,
+      stateLabels: { 21: "Open", 22: "Draft" },
+    },
+    violations,
+  );
+
+  await openCardDetail(cdp, sessionId, SOLO_IDENTIFIER);
+  const solo = await measurePrListDetail(cdp, sessionId);
+  assertPrListDetailReading(
+    "PR98-SOLO",
+    solo,
+    {
+      expectedCount: 2,
+      expectedNumbers: [1, 2],
+      expectedCiDotNumbers: [1],
+      expectedRepoLabelCount: 0,
+      stateLabels: { 1: "Open", 2: "Merged" },
+    },
+    violations,
+  );
+
+  await openCardDetail(cdp, sessionId, FAIL_IDENTIFIER);
+  const fail = await measurePrListDetail(cdp, sessionId);
+  if (fail == null || !fail.asideFound || !fail.headingFound) {
+    violations.push(
+      `pr-list-detail: PR98-FAIL, PrList block not found (${JSON.stringify(fail)})`,
+    );
+  } else {
+    if (fail.rowCount !== 0) {
+      violations.push(
+        `pr-list-detail: PR98-FAIL expected 0 PR rows, measured ${fail.rowCount}`,
+      );
+    }
+    if (fail.diagnosticCount !== 1) {
+      violations.push(
+        `pr-list-detail: PR98-FAIL expected exactly 1 diagnostic line, measured ${fail.diagnosticCount}`,
+      );
+    }
+    const expectedDetail =
+      "Could not check — this repo is not visible to the signed-in gh account, or the remote no longer exists";
+    if (
+      fail.diagnosticText == null ||
+      fail.diagnosticText.indexOf(expectedDetail) === -1
+    ) {
+      violations.push(
+        `pr-list-detail: PR98-FAIL diagnostic text ${JSON.stringify(fail.diagnosticText)} does not contain the expected unknownProbeCopy sentence ${JSON.stringify(expectedDetail)}`,
+      );
+    }
+    if (
+      fail.diagnosticText == null ||
+      fail.diagnosticText.indexOf("Last checked") === -1
+    ) {
+      violations.push(
+        `pr-list-detail: PR98-FAIL diagnostic text ${JSON.stringify(fail.diagnosticText)} is missing "Last checked"`,
+      );
+    }
+  }
+}
+
+/** KEEP-06 continuity: every PR chip is keyboard-reachable with a non-empty accessible name and a
+ * visible focus ring, the overflow element's accessible name matches the plural count sentence,
+ * and the detail panel's link control has a non-empty name and the themed 2px solid focus ring. */
+async function checkA11y(cdp, sessionId, violations) {
+  await cdp.send("Page.reload", { ignoreCache: true }, sessionId);
+  await waitForBoardRootLoaded(cdp, sessionId, TOP_LEVEL_IDENTIFIERS);
+  await blurActiveElement(cdp, sessionId);
+
+  let reached = false;
+  for (let i = 0; i < 150; i++) {
+    await dispatchTab(cdp, sessionId);
+    const hit = await evalValue(
+      cdp,
+      sessionId,
+      `${FIND_CARD_SRC}(function () {
+        var card = panel98FindCardRoot(${JSON.stringify(SOLO_IDENTIFIER)});
+        var chip = card.querySelector('button[aria-label^="PR "]');
+        return chip != null && document.activeElement === chip;
+      })()`,
+    );
+    if (hit) {
+      reached = true;
+      break;
+    }
+  }
+  if (!reached) {
+    violations.push(
+      "a11y: Tab traversal never reached PR98-SOLO's first PR chip within 150 tabs",
+    );
+  } else {
+    const outline = await readActiveOutline(cdp, sessionId);
+    if (outline.outlineStyle === "none" || outline.outlineWidth === "0px") {
+      violations.push(
+        `a11y: PR98-SOLO chip 1 has no visible focus ring on keyboard focus, measured ${JSON.stringify(outline)}`,
+      );
+    }
+    const name = await readAccessibleName(
+      cdp,
+      sessionId,
+      `${FIND_CARD_SRC}panel98FindCardRoot(${JSON.stringify(SOLO_IDENTIFIER)}).querySelector('button[aria-label^="PR "]')`,
+    );
+    if (name.name == null || name.name.trim() === "") {
+      violations.push(
+        `a11y: PR98-SOLO chip 1 accessible name is empty, measured ${JSON.stringify(name)}`,
+      );
+    }
+  }
+
+  const chipLabels = await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var chips = Array.prototype.slice.call(document.querySelectorAll('button[aria-label^="PR "]'));
+      return chips.map(function (b) { return b.getAttribute("aria-label"); });
+    })()`,
+  );
+  chipLabels.forEach((label, i) => {
+    if (label == null || label.trim() === "") {
+      violations.push(
+        `a11y: PR chip #${i} on the board has an empty aria-label`,
+      );
+    }
+  });
+
+  const overflow = await evalReport(
+    cdp,
+    sessionId,
+    violations,
+    "a11y (PR98-OVER overflow)",
+    `${FIND_CARD_SRC}(function () {
+      var card = panel98FindCardRoot(${JSON.stringify(OVER_IDENTIFIER)});
+      var chips = Array.prototype.slice.call(card.querySelectorAll('button[aria-label^="PR "]'));
+      var overflowEl = card.querySelector('span[aria-label$="pull requests"]');
+      return {
+        structurallyPresent: overflowEl != null,
+        chipCount: chips.length,
+        overflowText: overflowEl ? overflowEl.textContent.trim() : null,
+        overflowAriaLabel: overflowEl ? overflowEl.getAttribute("aria-label") : null,
+        allChipsHaveRepo: chips.every(function (b) {
+          return Array.prototype.slice.call(b.querySelectorAll("span")).some(function (s) {
+            return getComputedStyle(s).fontFamily.toLowerCase().indexOf("mono") !== -1;
+          });
+        }),
+      };
+    })()`,
+  );
+  if (overflow != null) {
+    if (!overflow.structurallyPresent) {
+      violations.push(
+        "a11y: PR98-OVER overflow element not found structurally",
+      );
+    } else {
+      if (overflow.chipCount !== 3) {
+        violations.push(
+          `a11y: PR98-OVER expected 3 visible chips, measured ${overflow.chipCount}`,
+        );
+      }
+      if (overflow.overflowText !== "+2") {
+        violations.push(
+          `a11y: PR98-OVER overflow text expected "+2", measured ${JSON.stringify(overflow.overflowText)}`,
+        );
+      }
+      if (overflow.overflowAriaLabel !== "2 more pull requests") {
+        violations.push(
+          `a11y: PR98-OVER overflow accessible name expected "2 more pull requests", measured ${JSON.stringify(overflow.overflowAriaLabel)}`,
+        );
+      }
+      if (!overflow.allChipsHaveRepo) {
+        violations.push(
+          "a11y: PR98-OVER, not every visible chip carries a repo segment",
+        );
+      }
+    }
+  }
+
+  await openCardDetail(cdp, sessionId, MULTI_IDENTIFIER);
+  const linkName = await readAccessibleName(
+    cdp,
+    sessionId,
+    `document.querySelector('aside[aria-label="Ticket detail"] button[aria-label^="Open PR #"]')`,
+  );
+  if (linkName.name == null || linkName.name.trim() === "") {
+    violations.push(
+      `a11y: detail panel PR link control has an empty accessible name, measured ${JSON.stringify(linkName)}`,
+    );
+  }
+  await blurActiveElement(cdp, sessionId);
+  let linkReached = false;
+  for (let i = 0; i < 150; i++) {
+    await dispatchTab(cdp, sessionId);
+    const hit = await evalValue(
+      cdp,
+      sessionId,
+      `document.activeElement === document.querySelector('aside[aria-label="Ticket detail"] button[aria-label^="Open PR #"]')`,
+    );
+    if (hit) {
+      linkReached = true;
+      break;
+    }
+  }
+  if (!linkReached) {
+    violations.push(
+      "a11y: Tab traversal never reached the detail panel's Open PR link control within 150 tabs",
+    );
+  } else {
+    const outline = await readActiveOutline(cdp, sessionId);
+    if (outline.outlineWidth !== "2px" || outline.outlineStyle !== "solid") {
+      violations.push(
+        `a11y: detail panel PR link control expected a visible 2px solid focus ring (IconButton's themed focusRing()), measured ${JSON.stringify(outline)}`,
+      );
+    }
+  }
 }
 
 const CHECKS = {
