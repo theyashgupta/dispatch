@@ -71,10 +71,12 @@
  *
  * Usage:
  *   node scripts/panel-100.mjs                       every registered check, exits non-zero on any
- *                                                       violation. With zero checks registered (this
- *                                                       plan's own state before plan 03 lands
- *                                                       `atomic-rollback`), stands up and tears down
- *                                                       cleanly and exits 0.
+ *                                                       violation. This plan (100-01) registers two:
+ *                                                       single-card-unchanged | keyboard-unchanged.
+ *                                                       Later plans in this phase (stacked-overlay,
+ *                                                       group-modal-prefill, atomic-rollback, a11y)
+ *                                                       extend CHECKS/BREAKS without touching this
+ *                                                       scaffold.
  *   node scripts/panel-100.mjs --check <name>         one named check only.
  *   node scripts/panel-100.mjs --break <name>         that check's OWN break: fires the SAME check
  *                                                       function the real run uses against a DOM
@@ -83,8 +85,29 @@
  *                                                       and re-confirms PASS, all inside one Chrome
  *                                                       tab. Never edits a source file.
  *
- * BREAK EVIDENCE, TO BE FILLED (plan 01 task 3 fills this in with the verbatim trip-leg output of
- * `single-card-unchanged` and `keyboard-unchanged`'s own `--break` runs, once those checks exist).
+ * BREAK EVIDENCE, both checks run under `--break <name>` for real and observed reporting their own
+ * violation. The quoted lines below are the VERBATIM TRIP-leg output captured from those runs:
+ *   - `single-card-unchanged` proven able to fail: removing the `done` column's droppable DOM node
+ *     (behind a same-size placeholder so no sibling column reflows) BEFORE the drag starts produced
+ *     `single-card-unchanged: MSD-A expected column "done", measured "todo"`.
+ *   - `keyboard-unchanged` proven able to fail: detaching MSD-B's MoveToPicker "Done" entry before
+ *     the click produced `keyboard-unchanged: MSD-B expected column "done", measured "todo"`.
+ * Both `--break <name>` runs' restore legs re-confirmed PASS (`tripFired=true restoreClean=true`
+ * for each), and a plain `node scripts/panel-100.mjs` run immediately after both breaks exited 0,
+ * proving no break leaked DOM state.
+ *
+ * TIMING FINDING, load-bearing for the `single-card-unchanged` break specifically, and worth
+ * recording since it corrects this plan's own `<interfaces>` block: dnd-kit caches a droppable's
+ * rect at drag activation (`handleDragStart`) and does not re-measure a droppable removed AFTER
+ * that point. A first draft of this break removed the `done` column's node MID-DRAG (matching the
+ * `<interfaces>` block's literal wording, "before the drop"), and the drop SILENTLY SUCCEEDED
+ * server-side anyway (verified via a direct `fetch("/api/board")` read from the page: MSD-A's
+ * server-side `column` read `"done"`), because collision detection reused the STALE pre-removal
+ * rect. The resulting React commit into the now-detached `done` subtree left the whole page stuck
+ * (`DragOverlay` never cleared, MSD-A vanished from every attached column, `over` never resolving
+ * clean). Removing `done` BEFORE `beginDrag`'s `mousedown` instead means dnd-kit's very first
+ * measurement of that droppable reads a detached node's `getBoundingClientRect()` (all zeros in
+ * every browser), so no drop point can ever intersect it and `over` correctly resolves to nothing.
  *
  * Exit codes: 0 every requested check PASS (or, under `--break <name>`, the break correctly fired
  * and the restore leg re-passed). 1 a live :4700, a failed build, a sandbox safety violation, a DOM
@@ -1021,16 +1044,22 @@ async function clickPickerColumn(cdp, sessionId, identifier, columnLabel) {
 /**
  * Shared body for `single-card-unchanged`: with no selection anywhere on the board, drags MSD-A
  * from `todo` to `done` via the real drag primitive and asserts every DRAG-05 "unchanged" property
- * at once. `midDragHook`, when provided, runs AFTER the mid-flight overlay measurements and BEFORE
- * `endDrag`, letting `runBreakSingleCardUnchanged` mutate the DOM while the drag is still live
- * without duplicating this function's own assertion logic (the same "same check function drives
- * the break" discipline `panel-99.mjs`'s own break functions follow).
+ * at once. `preDragHook`, when provided, runs AFTER the drop-target point is captured but BEFORE
+ * `beginDrag` (i.e. before `mousedown`), letting `runBreakSingleCardUnchanged` remove the `done`
+ * droppable's DOM node before dnd-kit ever measures it. This timing is load-bearing, empirically
+ * proven by this file's own diagnostic run: dnd-kit caches each droppable's rect at
+ * `handleDragStart` and does not re-measure a node it removed AFTER activation, so a mid-drag
+ * removal (the timing this plan's own interfaces block first described) leaves the CACHED
+ * pre-removal rect live for collision purposes and the drop silently SUCCEEDS server-side, a false
+ * negative for this break. Removing the node before the drag starts means dnd-kit's very first
+ * measurement reads a detached node's `getBoundingClientRect()`, which browsers return as an
+ * all-zero rect, so no drop point can ever intersect it.
  */
 async function performSingleCardDragCheck(
   cdp,
   sessionId,
   violations,
-  midDragHook,
+  preDragHook,
 ) {
   const preText = await evalValue(
     cdp,
@@ -1044,6 +1073,9 @@ async function performSingleCardDragCheck(
   }
 
   const target = await columnDropPoint(cdp, sessionId, "done");
+
+  if (preDragHook) await preDragHook(cdp, sessionId);
+
   const point = await beginDrag(
     cdp,
     sessionId,
@@ -1099,8 +1131,6 @@ async function performSingleCardDragCheck(
       `single-card-unchanged: unexpected "${midReading.selectionText}" selection text present mid-drag`,
     );
   }
-
-  if (midDragHook) await midDragHook(cdp, sessionId);
 
   await endDrag(cdp, sessionId, point);
 
@@ -1240,26 +1270,34 @@ const CHECKS = {
 // ---------------------------------------------------------------------------
 
 /**
- * `single-card-unchanged` break: while MSD-A's drag is live (button down, mid-flight
- * measurements already taken), removes the `done` column's droppable container node, the exact
- * element `useDroppable({ id: "done" })` attaches its ref to (`Column.tsx:252-256`). A same-size
- * PLACEHOLDER div is inserted in its place first, so removing the real node causes NO layout
- * reflow of the sibling columns, the drop point computed before the mutation stays valid and
- * lands on inert placeholder space, never on a neighbouring column that shifted into the gap.
+ * `single-card-unchanged` break: BEFORE the drag starts (mousedown never yet dispatched), removes
+ * the `done` column's droppable container node, the exact element `useDroppable({ id: "done" })`
+ * attaches its ref to (`Column.tsx:252-256`). A same-size PLACEHOLDER div is inserted in its place
+ * first, so removing the real node causes NO layout reflow of the sibling columns and the
+ * already-captured drop point stays geometrically valid, landing on inert placeholder space, never
+ * on a neighbouring column that shifted into the gap.
+ *
+ * TIMING IS LOAD-BEARING, proven by this file's own instrumented diagnostic run: dnd-kit caches
+ * each droppable's rect at `handleDragStart` (drag activation) and does not re-measure a node
+ * removed AFTER that point, so removing `done` MID-DRAG (the first shape this break was written
+ * against) leaves the STALE pre-removal rect live for collision purposes, the drop SILENTLY
+ * SUCCEEDS server-side, and the resulting React commit into the now-detached `done` subtree leaves
+ * the whole page visibly stuck (`DragOverlay` never clears, `MSD-A` vanishes from every attached
+ * column). Removing `done` BEFORE the drag starts means dnd-kit's very first measurement reads a
+ * detached node's `getBoundingClientRect()`, which browsers return as an all-zero rect, so no drop
+ * point can ever intersect it and `over` correctly resolves to nothing.
+ *
  * React never reconciles this raw DOM surgery (it only observes state changes), so its own
- * `droppableContainers` map keeps a stale reference to the now-detached `done` node; dnd-kit's
- * collision detection reads a zero rect off a detached element and can never resolve `over` to it,
- * so the drop silently fails and MSD-A stays in `todo`, exactly the "wrong measured column, not
- * not found" trip this break is required to produce. The restore leg reinserts the CAPTURED node
- * itself (never a recreated lookalike, the Dead Instrument #8 discipline) and discards the
- * placeholder.
+ * `droppableContainers` map keeps a stale reference to the now-detached `done` node throughout.
+ * The restore leg reinserts the CAPTURED node itself (never a recreated lookalike, the Dead
+ * Instrument #8 discipline) and discards the placeholder.
  */
 async function runBreakSingleCardUnchanged(cdp, sessionId) {
   console.log(
-    "\n--break single-card-unchanged: removing the done column's droppable container node mid-drag (placeholder holds its layout space)",
+    "\n--break single-card-unchanged: removing the done column's droppable container node before the drag starts (placeholder holds its layout space)",
   );
   const tripViolations = [];
-  const midDragHook = async (cdpArg, sessionIdArg) => {
+  const preDragHook = async (cdpArg, sessionIdArg) => {
     await evalValue(
       cdpArg,
       sessionIdArg,
@@ -1280,7 +1318,7 @@ async function runBreakSingleCardUnchanged(cdp, sessionId) {
       })()`,
     );
   };
-  await performSingleCardDragCheck(cdp, sessionId, tripViolations, midDragHook);
+  await performSingleCardDragCheck(cdp, sessionId, tripViolations, preDragHook);
   console.log(
     `--break single-card-unchanged TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
   );
@@ -1487,6 +1525,7 @@ async function main() {
     });
     await cdp.send("Page.enable", {}, sessionId);
     await cdp.send("Runtime.enable", {}, sessionId);
+    await cdp.send("Console.enable", {}, sessionId);
     await cdp.send(
       "Emulation.setDeviceMetricsOverride",
       { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false },
@@ -1495,6 +1534,11 @@ async function main() {
 
     cdp.ws.addEventListener("message", (event) => {
       const msg = JSON.parse(event.data);
+      if (msg.method === "Runtime.consoleAPICalled") {
+        console.error(
+          `DEBUG console.${msg.params.type}: ${JSON.stringify(msg.params.args)}`,
+        );
+      }
       if (msg.method === "Runtime.exceptionThrown") {
         console.error(
           `page exception: ${JSON.stringify(msg.params.exceptionDetails)}`,
