@@ -139,6 +139,12 @@ function connectOnce(
 }
 
 /**
+ * The most segments a de-collided repo label may carry: the basename plus one parent, so no
+ * wire-bound label can ever hold more than one path separator.
+ */
+const QUALIFIED_LABEL_MAX_SEGMENTS = 2;
+
+/**
  * The display name to stamp onto `PrInfo.repo`, keyed by repo path, de-collided across every path
  * given.
  *
@@ -152,11 +158,15 @@ function connectOnce(
  * session's `workspace.repos`: `cardPrs` unions `card.prs` with every `sessionSummaries[].prs` and
  * all three render sites compute their tag and their grouping over THAT union, so a per-session
  * pass sees no duplicate for two sessions each holding one `api` and stamps both the same name.
- * @remarks A colliding basename is qualified with as many parent segments as it takes to separate
- * it (one usually, two for `/a/x/api` against `/b/x/api`), falling back to a numeric suffix when
- * no depth separates two distinct paths, so the returned names are unique by construction. A
- * non-colliding repo keeps the short basename the board's density budget was measured against, and
- * no absolute path reaches the wire either way.
+ * @remarks A colliding basename is qualified with ONE parent segment at most
+ * ({@link QUALIFIED_LABEL_MAX_SEGMENTS}), falling back to a numeric suffix whenever that single
+ * segment does not separate the paths, so the returned names stay unique by construction. The cap
+ * is load-bearing, not cosmetic: without it, two paths that normalize to the same segment list
+ * (`/Users/x/code/api` and `/Users/x/code/api/`, both of which the start route accepts) exhausted
+ * the loop and emitted the whole path minus its leading slash, putting the home directory and the
+ * username on the wire through `PrInfo.repo` and `PreviewEvidence.matchedCwd`, the exact leak both
+ * T-98-01 and T-99-01 forbid (99-REVIEW WR-05). A non-colliding repo keeps the short basename the
+ * board's density budget was measured against, and no absolute path reaches the wire either way.
  */
 function repoDisplayNames(repoPaths: string[]): Map<string, string> {
   const unique = [...new Set(repoPaths)];
@@ -185,9 +195,10 @@ function repoDisplayNames(repoPaths: string[]): Map<string, string> {
     ) {
       depth++;
     }
+    const cap = Math.min(maxDepth, QUALIFIED_LABEL_MAX_SEGMENTS);
     paths.forEach((path, i) => {
-      const label = segments[i].slice(-Math.min(depth, maxDepth)).join("/");
-      names.set(path, depth <= maxDepth ? label : `${label} (${i + 1})`);
+      const label = segments[i].slice(-Math.min(depth, cap)).join("/");
+      names.set(path, depth <= cap ? label : `${label} (${i + 1})`);
     });
   }
   return names;

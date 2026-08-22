@@ -614,12 +614,15 @@ async function bootFreshAndAssert(ctx, fn) {
 // ---------------------------------------------------------------------------
 
 /** Every string leaf under `previews` (outside the `url` field) must carry no sandbox home path,
- * no `/private`, and no path separator at all: `matchedCwd` is a basename, `source`/`bindAddress`
- * are closed-vocabulary tokens, none of which legitimately contains `/`. */
+ * no `/private`, and no path separator: `source`/`bindAddress` are closed-vocabulary tokens and
+ * `matchedCwd` is a `repoDisplayNames` label. That label carries ONE separator in the legitimate
+ * two-repo collision case (`acme/api`), so `matchedCwd` alone is allowed a single `/` and anything
+ * past that is still a leak (99-REVIEW WR-05). */
 function scanForLeakedPaths(value, keyPath, home, violations, identifier) {
   if (value == null) return;
   if (typeof value === "string") {
     if (keyPath.endsWith(".url") || keyPath === "url") return;
+    const slashBudget = keyPath.endsWith(".matchedCwd") ? 1 : 0;
     if (value.includes(home)) {
       violations.push(
         `port-attribution: no-path-on-wire: ${identifier}.${keyPath} contains the sandbox home path: ${JSON.stringify(value)}`,
@@ -630,9 +633,9 @@ function scanForLeakedPaths(value, keyPath, home, violations, identifier) {
         `port-attribution: no-path-on-wire: ${identifier}.${keyPath} contains "/private": ${JSON.stringify(value)}`,
       );
     }
-    if (value.includes("/")) {
+    if ((value.match(/\//g) ?? []).length > slashBudget) {
       violations.push(
-        `port-attribution: no-path-on-wire: ${identifier}.${keyPath} contains a path separator outside the url field: ${JSON.stringify(value)}`,
+        `port-attribution: no-path-on-wire: ${identifier}.${keyPath} carries more than ${slashBudget} path separator(s) outside the url field: ${JSON.stringify(value)}`,
       );
     }
     return;
