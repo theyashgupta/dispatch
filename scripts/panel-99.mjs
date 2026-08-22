@@ -684,6 +684,123 @@ const FIND_BADGE_SRC = `
   }
 `;
 
+/** Locates the preview row's evidence line and mismatch segment inside the detail panel's
+ * `aside`, keyed on the `localhost:${port}` leaf span (a stable rendered value no break in this
+ * file ever mutates) rather than any attribute. The evidence line is found by its own rendered
+ * TEXT PREFIX (`"pid "`), which survives the `evidence-panel` break (removing the mismatch span)
+ * untouched, so the base-line read never collapses into "row not found" when only the mismatch
+ * segment is broken. */
+const FIND_EVIDENCE_SRC = `
+  function panel99FindEvidenceReading(aside, port) {
+    var spans = Array.prototype.slice.call(aside.querySelectorAll("span"));
+    var portSpan = spans.find(function (s) { return (s.textContent || "").trim() === ("localhost:" + port); });
+    if (!portSpan) return { rowFound: false };
+    var infoCol = portSpan.parentElement;
+    var colSpans = Array.prototype.slice.call(infoCol.querySelectorAll("span"));
+    var evidenceSpan = colSpans.find(function (s) { return /^pid \\d+ /.test((s.textContent || "").trim()); });
+    var mismatchSpans = colSpans.filter(function (s) { return (s.textContent || "").trim() === "cwd mismatch"; });
+    return {
+      rowFound: true,
+      evidenceLineFound: evidenceSpan != null,
+      evidenceLineText: evidenceSpan ? evidenceSpan.textContent : null,
+      mismatchCount: mismatchSpans.length,
+      mismatchColor: mismatchSpans.length > 0 ? getComputedStyle(mismatchSpans[0]).color : null,
+    };
+  }
+`;
+
+/** Click a card's root by fixture identifier, native `.click()` so React's delegated `onClick`
+ * fires exactly as a real mouse click would. */
+async function clickCardByIdentifier(cdp, sessionId, identifier) {
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}panel99FindCardRoot(${JSON.stringify(identifier)}).click()`,
+  );
+}
+
+/** Opens the detail panel for `identifier` by clicking its card, then polls
+ * `aside[aria-label="Ticket detail"]` for that identifier's own text. */
+async function openCardDetail(cdp, sessionId, identifier) {
+  await clickCardByIdentifier(cdp, sessionId, identifier);
+  const probe = `(function () {
+    var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+    return aside != null && aside.textContent.indexOf(${JSON.stringify(identifier)}) !== -1;
+  })()`;
+  const deadline = Date.now() + RENDER_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (await evalValue(cdp, sessionId, probe)) return;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    `panel99: detail panel never showed ${identifier} within ${RENDER_TIMEOUT_MS}ms`,
+  );
+}
+
+/** Defensive parity with `panel-98.mjs`'s detail-opening convention: expands the "Details"
+ * disclosure IF one happens to be rendered and collapsed. On this file's fixture shape the button
+ * never renders at all (no fixture carries a `tmuxSession`, see header note, so `hasLiveSession`
+ * is always false), so this always resolves to a no-op; kept so a future fixture shape that DOES
+ * carry a live session stays covered without a second read of this file's own header comment. */
+async function expandDetailsIfPresent(cdp, sessionId) {
+  const state = await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var btn = Array.prototype.slice.call(document.querySelectorAll('button[aria-expanded]')).find(function (b) {
+        return (b.textContent || "").indexOf("Details") !== -1;
+      });
+      if (!btn) return "absent";
+      return btn.getAttribute("aria-expanded") === "true" ? "expanded" : "collapsed";
+    })()`,
+  );
+  if (state !== "collapsed") return;
+  await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var btn = Array.prototype.slice.call(document.querySelectorAll('button[aria-expanded]')).find(function (b) {
+        return (b.textContent || "").indexOf("Details") !== -1;
+      });
+      if (btn) btn.click();
+      return true;
+    })()`,
+  );
+  const deadline = Date.now() + RENDER_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const expanded = await evalValue(
+      cdp,
+      sessionId,
+      `(function () {
+        var btn = Array.prototype.slice.call(document.querySelectorAll('button[aria-expanded]')).find(function (b) {
+          return (b.textContent || "").indexOf("Details") !== -1;
+        });
+        return btn ? btn.getAttribute("aria-expanded") : null;
+      })()`,
+    );
+    if (expanded === "true") return;
+    await sleep(POLL_INTERVAL_MS);
+  }
+}
+
+/** Resolves a design token's CURRENT computed colour from the live document (never a hardcoded
+ * hex literal), so a token retheme does not produce a false failure. Appends a throwaway probe
+ * span, reads its computed `color`, removes it. */
+async function getResolvedTokenColor(cdp, sessionId, tokenName) {
+  return evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var el = document.createElement("span");
+      el.style.color = "var(${tokenName})";
+      document.body.appendChild(el);
+      var resolved = getComputedStyle(el).color;
+      el.remove();
+      return resolved;
+    })()`,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Checks. `CHECKS` is the named-check dispatch idiom copied from
 // `panel-98.mjs`'s own `CHECKS`/`--check` table. Every check pushes violation
@@ -745,8 +862,79 @@ async function checkEvidenceHover(cdp, sessionId, violations) {
   }
 }
 
+/** Reads and asserts ONE fixture's evidence-panel row, assuming its detail panel is ALREADY the
+ * open one (no navigation performed here). Factored out of `checkEvidencePanel` so `--break
+ * evidence-panel` can drive this SAME assertion directly against the card it already mutated,
+ * without the full loop's later `openCardDetail` calls to sibling fixtures unmounting and
+ * remounting `PreviewRow` (a fresh mount re-renders the mismatch span from unchanged `evidence`
+ * data, silently undoing the DOM-only mutation before the assertion ever ran, panel-98.mjs's own
+ * `pr-list-detail` break header comment names this exact remount trap). */
+async function assertEvidencePanelFixture(cdp, sessionId, fx, violations) {
+  const reading = await evalReport(
+    cdp,
+    sessionId,
+    violations,
+    `evidence-panel (${fx.identifier})`,
+    `${FIND_EVIDENCE_SRC}(function () {
+      var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+      if (!aside) return { asideFound: false };
+      return Object.assign({ asideFound: true }, panel99FindEvidenceReading(aside, ${fx.port}));
+    })()`,
+  );
+  if (reading == null) return;
+  if (!reading.asideFound || !reading.rowFound) {
+    violations.push(
+      `evidence-panel: ${fx.identifier} detail panel preview row not found (${JSON.stringify(reading)})`,
+    );
+    return;
+  }
+
+  const expectedLine = panel99ExpectedEvidenceLine(fx.evidence);
+  if (!reading.evidenceLineFound || reading.evidenceLineText !== expectedLine) {
+    violations.push(
+      `evidence-panel: ${fx.identifier} evidence line expected ${JSON.stringify(expectedLine)}, measured ${JSON.stringify(reading.evidenceLineText)}`,
+    );
+  }
+
+  if (fx.hasMismatch) {
+    if (reading.mismatchCount !== 1) {
+      violations.push(
+        `evidence-panel: ${fx.identifier} expected exactly 1 "cwd mismatch" segment, measured ${reading.mismatchCount}`,
+      );
+    } else {
+      const expectedColor = await getResolvedTokenColor(
+        cdp,
+        sessionId,
+        "--status-stale",
+      );
+      if (reading.mismatchColor !== expectedColor) {
+        violations.push(
+          `evidence-panel: ${fx.identifier} mismatch segment color expected ${JSON.stringify(expectedColor)} (resolved --status-stale), measured ${JSON.stringify(reading.mismatchColor)}`,
+        );
+      }
+    }
+  } else if (reading.mismatchCount !== 0) {
+    violations.push(
+      `evidence-panel: ${fx.identifier} unexpectedly has ${reading.mismatchCount} "cwd mismatch" segment(s), expected none (no cwd disagreement seeded for this fixture)`,
+    );
+  }
+}
+
+/** PORT-02's panel-evidence leg: the detail panel's preview row carries the exact evidence line
+ * per fixture, the mismatch fixture carries exactly one `cwd mismatch` segment resolved to
+ * `--status-stale`, and the agreeing fixtures carry NO such segment (the absence half of the
+ * claim, without which this check proves nothing about a mismatch that never renders). */
+async function checkEvidencePanel(cdp, sessionId, violations) {
+  for (const fx of FIXTURES) {
+    await openCardDetail(cdp, sessionId, fx.identifier);
+    await expandDetailsIfPresent(cdp, sessionId);
+    await assertEvidencePanelFixture(cdp, sessionId, fx, violations);
+  }
+}
+
 const CHECKS = {
   "evidence-hover": checkEvidenceHover,
+  "evidence-panel": checkEvidencePanel,
 };
 
 const BREAKS = {};
