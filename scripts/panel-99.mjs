@@ -53,6 +53,19 @@
  * by reinserting the CAPTURED node object itself (stashed on `window` across the two `Runtime.
  * evaluate` calls, which share one JS realm), never by re-creating a lookalike node from scratch.
  *
+ * THE REMOUNT TRAP, discovered while writing this file's own `evidence-panel` break: the first
+ * draft called the full `checkEvidencePanel` loop (which visits all three fixtures in order) from
+ * the break, and the trip leg silently reported ZERO violations even though the mismatch span had
+ * genuinely been removed. Cause: `checkEvidencePanel` navigates to PORT-CWD and PORT-WALK's detail
+ * panels FIRST, each `openCardDetail` unmounting PORT-MISS's `PreviewRow`; by the time the loop
+ * finally revisits PORT-MISS, React remounts a fresh row from unchanged `evidence` data, silently
+ * restoring the mismatch span the break had just removed, so the assertion measured the UNBROKEN
+ * DOM. `assertEvidencePanelFixture` was factored out precisely so a break can assert its own
+ * fixture directly, with no intervening navigation to a sibling card, matching the same
+ * "re-selecting an already-open card is a no-op" discipline `panel-98.mjs`'s own `pr-list-detail`
+ * break relies on for the opposite reason (there, revisiting the SAME already-open card is safe;
+ * here, visiting ANY other card first is not).
+ *
  * macOS TRAP, load-bearing here too: `dist`'s `main()` guard compares `import.meta.url` against an
  * UNRESOLVED `process.argv[1]`; `realpathSync(entry)` before spawn fixes it (see `bootServerAt`).
  *
@@ -70,8 +83,26 @@
  *                                                     one of evidence-hover |
  *                                                     evidence-hover-wrong-subject | evidence-panel.
  *
- * BREAK EVIDENCE for each `--break <name>` leg is recorded in this header once that leg's own
- * code lands (this file's own plan places every break in Task 3).
+ * BREAK EVIDENCE, every check in this file has been run under `--break <name>` for real and has
+ * been observed reporting its own violation. The quoted lines below are the VERBATIM TRIP-leg
+ * output captured from that run (the product's own copy embeds a real middle dot, kept as-is since
+ * it is not an em dash or double hyphen):
+ *   - `evidence-hover` proven able to fail: mutating PORT-CWD's badge `title` to the plain
+ *     `Open preview, localhost:41001` fallback produced `evidence-hover: PORT-CWD title expected
+ *     "Detected via cwd match (api), pid 40101, bound 127.0.0.1", measured "Open preview,
+ *     localhost:41001"`.
+ *   - `evidence-hover-wrong-subject` proven able to fail: mutating PORT-CWD's badge `aria-label` to
+ *     carry the evidence string instead of the plain form produced `evidence-hover: PORT-CWD
+ *     aria-label expected "Open preview, localhost:41001", measured "Detected via cwd match (api),
+ *     pid 40101, bound 127.0.0.1"` and `evidence-hover: PORT-CWD aria-label "Detected via cwd match
+ *     (api), pid 40101, bound 127.0.0.1" unexpectedly contains "pid", evidence must stay off the
+ *     accessible name` and two further "unexpectedly contains" violations for "bound" and "Detected
+ *     via".
+ *   - `evidence-panel` proven able to fail: removing the `cwd mismatch` span from PORT-MISS's
+ *     evidence row produced `evidence-panel: PORT-MISS expected exactly 1 "cwd mismatch" segment,
+ *     measured 0`.
+ * Every `--break <name>` run's restore leg re-confirmed PASS, and a plain `node scripts/panel-99.mjs`
+ * run immediately after all three breaks exited 0, proving no break leaked DOM state.
  *
  * Exit codes: 0 every requested check PASS (or, under `--break <name>`, the break correctly fired
  * and the restore leg re-passed). 1 a live :4700, a failed build, a sandbox safety violation, a DOM
@@ -937,7 +968,205 @@ const CHECKS = {
   "evidence-panel": checkEvidencePanel,
 };
 
-const BREAKS = {};
+// ---------------------------------------------------------------------------
+// Breaks. One per check plus the extra `evidence-hover-wrong-subject` leg,
+// each firing the SAME check function the real run uses: capture the
+// verbatim FAIL output, revert via the CAPTURED value (or the captured node
+// itself for the span-removal break, Dead Instrument #8), and re-confirm
+// PASS in the same tab. Never edits a source file; every mutation is a DOM
+// change inside this one Chrome tab.
+// ---------------------------------------------------------------------------
+
+/** `evidence-hover` break: mutates PORT-CWD's badge `title` to the plain
+ * `Open preview, localhost:${port}` fallback, the exact shape of the real regression, an
+ * evidence field that never reaches the title, while leaving `aria-label` untouched, proving the
+ * check reads the title and not the label. */
+async function runBreakEvidenceHover(cdp, sessionId) {
+  console.log(
+    "\n--break evidence-hover: mutating PORT-CWD badge title to the plain evidence-free fallback",
+  );
+  const fx = FIXTURES.find((f) => f.identifier === CWD_IDENTIFIER);
+  const original = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}${FIND_BADGE_SRC}(function () {
+      var card = panel99FindCardRoot(${JSON.stringify(fx.identifier)});
+      var badge = panel99FindBadge(card, ${fx.port});
+      return badge.getAttribute("title");
+    })()`,
+  );
+  console.log(
+    `--break evidence-hover: captured original title = ${JSON.stringify(original)}`,
+  );
+  const fallback = `Open preview, localhost:${fx.port}`;
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}${FIND_BADGE_SRC}(function () {
+      var card = panel99FindCardRoot(${JSON.stringify(fx.identifier)});
+      var badge = panel99FindBadge(card, ${fx.port});
+      badge.setAttribute("title", ${JSON.stringify(fallback)});
+      return true;
+    })()`,
+  );
+  const tripViolations = [];
+  await checkEvidenceHover(cdp, sessionId, tripViolations);
+  console.log(
+    `--break evidence-hover TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired = tripViolations.some(
+    (v) => v.indexOf(`${fx.identifier} title expected`) !== -1,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}${FIND_BADGE_SRC}(function () {
+      var card = panel99FindCardRoot(${JSON.stringify(fx.identifier)});
+      var badge = panel99FindBadge(card, ${fx.port});
+      badge.setAttribute("title", ${JSON.stringify(original)});
+      return true;
+    })()`,
+  );
+  const restoreViolations = [];
+  await checkEvidenceHover(cdp, sessionId, restoreViolations);
+  console.log(
+    `--break evidence-hover RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
+/** `evidence-hover-wrong-subject` break: mutates PORT-CWD's badge `aria-label` to carry the
+ * evidence string instead of the plain form. Without this leg, `evidence-hover` could pass with
+ * the title and label collapsed back into one shared string, precisely the pre-change state this
+ * phase replaces (`PreviewBadge.tsx`'s prior single `label` const). */
+async function runBreakEvidenceHoverWrongSubject(cdp, sessionId) {
+  console.log(
+    "\n--break evidence-hover-wrong-subject: mutating PORT-CWD badge aria-label to carry the evidence string",
+  );
+  const fx = FIXTURES.find((f) => f.identifier === CWD_IDENTIFIER);
+  const original = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}${FIND_BADGE_SRC}(function () {
+      var card = panel99FindCardRoot(${JSON.stringify(fx.identifier)});
+      var badge = panel99FindBadge(card, ${fx.port});
+      return badge.getAttribute("aria-label");
+    })()`,
+  );
+  console.log(
+    `--break evidence-hover-wrong-subject: captured original aria-label = ${JSON.stringify(original)}`,
+  );
+  const evidenceString = panel99ExpectedBadgeTitle(fx.evidence, fx.port);
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}${FIND_BADGE_SRC}(function () {
+      var card = panel99FindCardRoot(${JSON.stringify(fx.identifier)});
+      var badge = panel99FindBadge(card, ${fx.port});
+      badge.setAttribute("aria-label", ${JSON.stringify(evidenceString)});
+      return true;
+    })()`,
+  );
+  const tripViolations = [];
+  await checkEvidenceHover(cdp, sessionId, tripViolations);
+  console.log(
+    `--break evidence-hover-wrong-subject TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired = tripViolations.some(
+    (v) => v.indexOf(`${fx.identifier} aria-label expected`) !== -1,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}${FIND_BADGE_SRC}(function () {
+      var card = panel99FindCardRoot(${JSON.stringify(fx.identifier)});
+      var badge = panel99FindBadge(card, ${fx.port});
+      badge.setAttribute("aria-label", ${JSON.stringify(original)});
+      return true;
+    })()`,
+  );
+  const restoreViolations = [];
+  await checkEvidenceHover(cdp, sessionId, restoreViolations);
+  console.log(
+    `--break evidence-hover-wrong-subject RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
+/** `evidence-panel` break: removes the `cwd mismatch` span from PORT-MISS's evidence row. The
+ * removed node is stashed on `window` (both `Runtime.evaluate` calls below share one JS realm) so
+ * the restore leg reinserts the CAPTURED node itself, never a recreated lookalike (Dead Instrument
+ * #8). */
+async function runBreakEvidencePanel(cdp, sessionId) {
+  console.log(
+    "\n--break evidence-panel: removing the cwd mismatch span from PORT-MISS's evidence row",
+  );
+  const fx = FIXTURES.find((f) => f.identifier === MISS_IDENTIFIER);
+  await openCardDetail(cdp, sessionId, fx.identifier);
+  await expandDetailsIfPresent(cdp, sessionId);
+  await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+      if (!aside) throw new Error("panel99 break: detail panel aside not found for PORT-MISS");
+      var spans = Array.prototype.slice.call(aside.querySelectorAll("span"));
+      var span = spans.find(function (s) { return (s.textContent || "").trim() === "cwd mismatch"; });
+      if (!span) throw new Error("panel99 break: cwd mismatch span not found for PORT-MISS");
+      window.__panel99BreakNode = span;
+      window.__panel99BreakParent = span.parentNode;
+      window.__panel99BreakNext = span.nextSibling;
+      span.remove();
+      return true;
+    })()`,
+  );
+  const tripViolations = [];
+  await assertEvidencePanelFixture(cdp, sessionId, fx, tripViolations);
+  console.log(
+    `--break evidence-panel TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired = tripViolations.some(
+    (v) => v.indexOf(`${fx.identifier} expected exactly 1 "cwd mismatch" segment`) !== -1,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var node = window.__panel99BreakNode;
+      var parent = window.__panel99BreakParent;
+      if (!node || !parent) throw new Error("panel99 break: restore state missing for PORT-MISS");
+      parent.insertBefore(node, window.__panel99BreakNext || null);
+      delete window.__panel99BreakNode;
+      delete window.__panel99BreakParent;
+      delete window.__panel99BreakNext;
+      return true;
+    })()`,
+  );
+  const restoreViolations = [];
+  await assertEvidencePanelFixture(cdp, sessionId, fx, restoreViolations);
+  console.log(
+    `--break evidence-panel RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
+const BREAKS = {
+  "evidence-hover": runBreakEvidenceHover,
+  "evidence-hover-wrong-subject": runBreakEvidenceHoverWrongSubject,
+  "evidence-panel": runBreakEvidencePanel,
+};
 
 // ---------------------------------------------------------------------------
 // main
