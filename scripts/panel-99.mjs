@@ -445,7 +445,15 @@ const TOP_LEVEL_IDENTIFIERS = [
 ];
 
 /** The three fixtures this file measures, `evidence` shapes locked by `99-04-PLAN.md`'s own
- * <interfaces> block; `hasMismatch` drives which checks expect the `cwd mismatch` segment. */
+ * <interfaces> block; `hasMismatch` drives which checks expect the `cwd mismatch` segment.
+ *
+ * `expectedTitle` and `expectedLine` are LITERALS transcribed from the locked `99-UI-SPEC.md`
+ * Copywriting Contract rows, never computed. A previous version of this file reimplemented
+ * `previewBadgeTitle`/`previewEvidenceLine` here and claimed independence, but the two bodies were
+ * byte-for-byte copies of the module under test, so any edit pasted from one into the other kept
+ * both sides agreeing while both drifted away from the spec, exactly the tautology the claim said
+ * it had closed (99-REVIEW WR-07). Three fixed fixtures need three fixed strings; when the spec
+ * changes, these change with it and the diff is visible in review. */
 const FIXTURES = [
   {
     id: CWD_ID,
@@ -458,6 +466,8 @@ const FIXTURES = [
       bindAddress: "127.0.0.1",
     },
     hasMismatch: false,
+    expectedTitle: "Detected via cwd match (api), pid 40101, bound 127.0.0.1",
+    expectedLine: "pid 40101 · cwd api · 127.0.0.1",
   },
   {
     id: WALK_ID,
@@ -469,6 +479,8 @@ const FIXTURES = [
       bindAddress: "::1",
     },
     hasMismatch: false,
+    expectedTitle: "Detected via pane ancestry, pid 40202, bound ::1",
+    expectedLine: "pid 40202 · pane ancestry · ::1",
   },
   {
     id: MISS_ID,
@@ -481,37 +493,11 @@ const FIXTURES = [
       cwdMismatch: true,
     },
     hasMismatch: true,
+    expectedTitle:
+      "Detected via pane ancestry, pid 40303, bound *; cwd points elsewhere, verify",
+    expectedLine: "pid 40303 · pane ancestry · *",
   },
 ];
-
-/**
- * Reimplements `previewBadgeTitle`'s contract independently of
- * `src/web/features/badges/preview-evidence.ts`, the module under test, so the check does not
- * become tautological against its own subject. Mirrors the locked `99-UI-SPEC.md` copy contract,
- * the same "harness computes independently" idiom `panel-98.mjs`'s `dedupeByUrl` established.
- */
-function panel99ExpectedBadgeTitle(evidence, port) {
-  if (evidence == null) return `Open preview, localhost:${port}`;
-  const base =
-    evidence.source === "cwd"
-      ? evidence.matchedCwd != null
-        ? `Detected via cwd match (${evidence.matchedCwd}), pid ${evidence.pid}, bound ${evidence.bindAddress}`
-        : `Detected via cwd match, pid ${evidence.pid}, bound ${evidence.bindAddress}`
-      : `Detected via pane ancestry, pid ${evidence.pid}, bound ${evidence.bindAddress}`;
-  return evidence.cwdMismatch === true
-    ? `${base}; cwd points elsewhere, verify`
-    : base;
-}
-
-/** Independent reimplementation of `previewEvidenceLine`'s contract, same rationale as
- * `panel99ExpectedBadgeTitle` above. */
-function panel99ExpectedEvidenceLine(evidence) {
-  return evidence.source === "cwd"
-    ? evidence.matchedCwd != null
-      ? `pid ${evidence.pid} · cwd ${evidence.matchedCwd} · ${evidence.bindAddress}`
-      : `pid ${evidence.pid} · cwd match · ${evidence.bindAddress}`
-    : `pid ${evidence.pid} · pane ancestry · ${evidence.bindAddress}`;
-}
 
 function baseCardFields(id, identifier, title) {
   return {
@@ -852,7 +838,7 @@ async function getResolvedTokenColor(cdp, sessionId, tokenName) {
  * `Detected via` fragment, and the mismatch fixture's title carries the "verify" suffix. */
 async function checkEvidenceHover(cdp, sessionId, violations) {
   for (const fx of FIXTURES) {
-    const expectedTitle = panel99ExpectedBadgeTitle(fx.evidence, fx.port);
+    const { expectedTitle } = fx;
     const expectedAriaLabel = `Open preview, localhost:${fx.port}`;
     const reading = await evalReport(
       cdp,
@@ -928,7 +914,7 @@ async function assertEvidencePanelFixture(cdp, sessionId, fx, violations) {
     return;
   }
 
-  const expectedLine = panel99ExpectedEvidenceLine(fx.evidence);
+  const { expectedLine } = fx;
   if (!reading.evidenceLineFound || reading.evidenceLineText !== expectedLine) {
     violations.push(
       `evidence-panel: ${fx.identifier} evidence line expected ${JSON.stringify(expectedLine)}, measured ${JSON.stringify(reading.evidenceLineText)}`,
@@ -1068,7 +1054,7 @@ async function runBreakEvidenceHoverWrongSubject(cdp, sessionId) {
   console.log(
     `--break evidence-hover-wrong-subject: captured original aria-label = ${JSON.stringify(original)}`,
   );
-  const evidenceString = panel99ExpectedBadgeTitle(fx.evidence, fx.port);
+  const evidenceString = fx.expectedTitle;
   await evalValue(
     cdp,
     sessionId,
