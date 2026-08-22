@@ -2314,6 +2314,12 @@ class BoardStore extends EventEmitter {
    * `markSessionLost` cannot resolve it either, so it degrades to its documented undefined-target
    * default and derives the card-level loss flag — the pre-Phase-91 behaviour — rather than
    * clearing some unrelated sibling's fields.
+   * @remarks The synthetic record also carries the four ARTIFACT fields (`prs`, `prsUnknown`,
+   * `previews`, `previewsUnknown`) off the same flat mirror. `artifact-detect.ts` reads them off
+   * this record to decide whether a tick actually CHANGED anything, so omitting them made every
+   * diff miss: `prsUnknown` read as undefined and `prs` as `[]` on every tick, so a standing
+   * failure re-broadcast a full SSE board snapshot every 10s for this card class, the exact cost
+   * those write-skip diffs exist to avoid.
    * @returns Pairs whose `session.tmuxSession` is carried in the TYPE, so consumers narrow without
    * a runtime guard the iteration source has already made unreachable (`IN-01`).
    */
@@ -2355,6 +2361,10 @@ class BoardStore extends EventEmitter {
           workspace: card.workspace,
           lastMarker: card.lastMarker,
           hookRoutedAt: card.hookRoutedAt,
+          prs: card.prs,
+          prsUnknown: card.prsUnknown,
+          previews: card.previews,
+          previewsUnknown: card.previewsUnknown,
         },
       });
     }
