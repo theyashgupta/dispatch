@@ -438,7 +438,11 @@ const MISS_ID = "panel99-miss";
 const MISS_IDENTIFIER = "PORT-MISS";
 const MISS_PORT = 41003;
 
-const TOP_LEVEL_IDENTIFIERS = [CWD_IDENTIFIER, WALK_IDENTIFIER, MISS_IDENTIFIER];
+const TOP_LEVEL_IDENTIFIERS = [
+  CWD_IDENTIFIER,
+  WALK_IDENTIFIER,
+  MISS_IDENTIFIER,
+];
 
 /** The three fixtures this file measures, `evidence` shapes locked by `99-04-PLAN.md`'s own
  * <interfaces> block; `hasMismatch` drives which checks expect the `cwd mismatch` segment. */
@@ -528,7 +532,11 @@ function baseCardFields(id, identifier, title) {
  * ever paints), matching `panel-98.mjs`'s own `buildSoloCard`/`buildMultiCard` precedent. */
 function buildFixtureCard(fx) {
   return {
-    ...baseCardFields(fx.id, fx.identifier, `panel-99 ${fx.identifier} fixture card`),
+    ...baseCardFields(
+      fx.id,
+      fx.identifier,
+      `panel-99 ${fx.identifier} fixture card`,
+    ),
     previews: [
       {
         port: fx.port,
@@ -1134,7 +1142,10 @@ async function runBreakEvidencePanel(cdp, sessionId) {
     `--break evidence-panel TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
   );
   const tripFired = tripViolations.some(
-    (v) => v.indexOf(`${fx.identifier} expected exactly 1 "cwd mismatch" segment`) !== -1,
+    (v) =>
+      v.indexOf(
+        `${fx.identifier} expected exactly 1 "cwd mismatch" segment`,
+      ) !== -1,
   );
   await evalValue(
     cdp,
@@ -1255,7 +1266,9 @@ async function main() {
     });
 
     await waitForBoardRootLoaded(cdp, sessionId, TOP_LEVEL_IDENTIFIERS);
-    console.log("standup: board painted, all three fixture identifiers present");
+    console.log(
+      "standup: board painted, all three fixture identifiers present",
+    );
 
     if (breakName != null) {
       breakResult = await BREAKS[breakName](cdp, sessionId);
