@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -25,6 +26,7 @@ import { COLUMN_LABELS } from "../../lib/event-copy.js";
 import { DECK_BACK_OFFSETS_PX, dragSelectionIds } from "./drag-selection.js";
 import { Column } from "./Column.js";
 import { CardView } from "./CardView.js";
+import { Notice } from "../../primitives/Notice.js";
 import { SearchBox } from "./SearchBox.js";
 import { StatusPillSwitcher } from "./StatusPillSwitcher.js";
 import { SelectionBar } from "./SelectionBar.js";
@@ -347,6 +349,16 @@ export function Board({
     const { active, over } = event;
     if (!over || !isColumn(over.id)) return;
 
+    const ids = dragSelectionIds(String(active.id), selectedIds);
+    if (ids != null) {
+      if (over.id === "in_progress") {
+        setGroupModalMembers(cards.filter((c) => selectedIds.has(c.id)));
+        return;
+      }
+      void performGroupMove(ids, over.id);
+      return;
+    }
+
     performMove(String(active.id), over.id);
   }
 
@@ -544,6 +556,30 @@ export function Board({
         }
         onClear={() => setSelectedIds(new Set())}
       />
+      {failedMoveCount != null && (
+        <div
+          role="alert"
+          style={{
+            position: "fixed",
+            top: "var(--space-lg)",
+            right: "var(--space-lg)",
+            zIndex: 20,
+            background: "var(--surface-card)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius)",
+            boxShadow: "var(--shadow-float)",
+            padding: "var(--space-sm) var(--space-lg)",
+          }}
+        >
+          <Notice
+            tone="destructive"
+            icon={
+              <AlertTriangle size={14} strokeWidth={2} aria-hidden="true" />
+            }
+            label={`Couldn't move ${failedMoveCount} tickets`}
+          />
+        </div>
+      )}
       {groupModalMembers != null && (
         <GroupStartModal
           members={groupModalMembers}
