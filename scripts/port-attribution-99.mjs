@@ -264,7 +264,10 @@ function killAndWait(child) {
 function rebuildServer() {
   const startedAt = Date.now();
   try {
-    execFileSync("npm", ["run", BUILD_SCRIPT], { cwd: REPO_ROOT, stdio: "pipe" });
+    execFileSync("npm", ["run", BUILD_SCRIPT], {
+      cwd: REPO_ROOT,
+      stdio: "pipe",
+    });
   } catch (err) {
     const detail = [err.stdout?.toString(), err.stderr?.toString()]
       .filter(Boolean)
@@ -648,11 +651,19 @@ function scanForLeakedPaths(value, keyPath, home, violations, identifier) {
  *      itself spawned for that workspace's listener
  */
 function assertPortAttributionForCard(ctx, board, violations, spec) {
-  const { identifier, expectedPort, otherPort, expectedBind, expectedBasename, expectedPid } =
-    spec;
+  const {
+    identifier,
+    expectedPort,
+    otherPort,
+    expectedBind,
+    expectedBasename,
+    expectedPid,
+  } = spec;
   const card = findCard(board, identifier);
   if (card == null) {
-    violations.push(`port-attribution: detection: ${identifier} not found on wire`);
+    violations.push(
+      `port-attribution: detection: ${identifier} not found on wire`,
+    );
     return;
   }
   const previews = card.previews ?? [];
@@ -695,7 +706,10 @@ function assertPortAttributionForCard(ctx, board, violations, spec) {
       `port-attribution: cwd-source: ${identifier} expected evidence.matchedCwd ${JSON.stringify(expectedBasename)}, measured ${JSON.stringify(evidence?.matchedCwd)}`,
     );
   }
-  if (typeof evidence?.matchedCwd === "string" && evidence.matchedCwd.includes("/")) {
+  if (
+    typeof evidence?.matchedCwd === "string" &&
+    evidence.matchedCwd.includes("/")
+  ) {
     violations.push(
       `port-attribution: cwd-source: ${identifier} matchedCwd must be a basename with no path separator, measured ${JSON.stringify(evidence.matchedCwd)}`,
     );
@@ -820,7 +834,15 @@ const CWD_FAIL_REPLACEMENT = `    ({ stdout: cwdOut } = await run(
  */
 async function runSrcEditBreak(
   ctx,
-  { name, targetPath, anchor, replacement, assertBroken, assertRestored, invertTrip = false },
+  {
+    name,
+    targetPath,
+    anchor,
+    replacement,
+    assertBroken,
+    assertRestored,
+    invertTrip = false,
+  },
 ) {
   const original = readFileSync(targetPath, "utf8");
   if (!original.includes(anchor)) {
@@ -888,8 +910,10 @@ async function breakRealpath(ctx) {
     targetPath: ARTIFACT_DETECT_PATH,
     anchor: REALPATH_ANCHOR,
     replacement: REALPATH_REPLACEMENT,
-    assertBroken: (board, violations) => assertPortAttribution(ctx, board, violations),
-    assertRestored: (board, violations) => assertPortAttribution(ctx, board, violations),
+    assertBroken: (board, violations) =>
+      assertPortAttribution(ctx, board, violations),
+    assertRestored: (board, violations) =>
+      assertPortAttribution(ctx, board, violations),
   });
 }
 
@@ -899,8 +923,10 @@ async function breakCombinedLsof(ctx) {
     targetPath: DEV_SERVER_PATH,
     anchor: CWD_LSOF_CALL_ANCHOR,
     replacement: COMBINED_LSOF_REPLACEMENT,
-    assertBroken: (board, violations) => assertPortAttribution(ctx, board, violations),
-    assertRestored: (board, violations) => assertPortAttribution(ctx, board, violations),
+    assertBroken: (board, violations) =>
+      assertPortAttribution(ctx, board, violations),
+    assertRestored: (board, violations) =>
+      assertPortAttribution(ctx, board, violations),
   });
 }
 
@@ -966,7 +992,8 @@ async function breakCwdFailureMustNotClear(ctx) {
     anchor: CWD_LSOF_CALL_ANCHOR,
     replacement: CWD_FAIL_REPLACEMENT,
     assertBroken: (board, violations) => assertSurvival(ctx, board, violations),
-    assertRestored: (board, violations) => assertPortAttribution(ctx, board, violations),
+    assertRestored: (board, violations) =>
+      assertPortAttribution(ctx, board, violations),
     invertTrip: true,
   });
 }
@@ -1047,7 +1074,12 @@ async function main() {
   try {
     await tmuxNewListenerSession(tmuxA, worktreeA, LISTENER_PORT_V6, "::1");
     tmuxSpawned.push(tmuxA);
-    await tmuxNewListenerSession(tmuxB, worktreeB, LISTENER_PORT_V4, "127.0.0.1");
+    await tmuxNewListenerSession(
+      tmuxB,
+      worktreeB,
+      LISTENER_PORT_V4,
+      "127.0.0.1",
+    );
     tmuxSpawned.push(tmuxB);
     console.log(
       `standup: 2 real tmux sessions live, each running a real dual-stack listener: ${tmuxSpawned.join(", ")}`,
