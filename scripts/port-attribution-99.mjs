@@ -606,13 +606,25 @@ function scanForLeakedPaths(value, keyPath, home, violations, identifier) {
 }
 
 /**
- * Groups 1 and 2 of the port-attribution check: detection (this workspace's own port, and only
- * that port) and no-cross-attribution (the OTHER workspace's port must never appear), asserted as
- * two separately named violations per the plan's own instruction, so a report can distinguish
- * "did not find it" from "found the wrong one".
+ * The full six-assertion-group port-attribution check, run once per card:
+ *   1. detection: this workspace's own port, and only that port
+ *   2. no-cross-attribution: the OTHER workspace's port must never appear, a SEPARATELY named
+ *      violation from group 1 so a report can distinguish "did not find it" from "found the wrong
+ *      one"
+ *   3. dual-stack: `evidence.bindAddress` is the loopback token `lsof` actually reported for THIS
+ *      card's family, both measured values are logged so a future reader can see what the
+ *      platform produced
+ *   4. cwd-source: `evidence.source === "cwd"` (the load-bearing assertion of this whole file,
+ *      99-RESEARCH.md Pitfall 2), `matchedCwd` equals the workspace's own repo basename and
+ *      contains no path separator
+ *   5. no-path-on-wire: no string anywhere under `previews` (outside `url`) carries the sandbox
+ *      home, `/private`, or a path separator
+ *   6. pid: `evidence.pid` is a positive integer, cross-checked against the pid this harness
+ *      itself spawned for that workspace's listener
  */
 function assertPortAttributionForCard(ctx, board, violations, spec) {
-  const { identifier, expectedPort, otherPort } = spec;
+  const { identifier, expectedPort, otherPort, expectedBind, expectedBasename, expectedPid } =
+    spec;
   const card = findCard(board, identifier);
   if (card == null) {
     violations.push(`port-attribution: detection: ${identifier} not found on wire`);
@@ -631,6 +643,52 @@ function assertPortAttributionForCard(ctx, board, violations, spec) {
       `port-attribution: no-cross-attribution: ${identifier} carries port ${otherPort}, which belongs to the OTHER workspace`,
     );
   }
+
+  scanForLeakedPaths(previews, "previews", ctx.home, violations, identifier);
+
+  const preview = previews.find((p) => p.port === expectedPort);
+  if (preview == null) return;
+  const evidence = preview.evidence;
+
+  console.log(
+    `port-attribution: ${identifier} measured evidence = ${JSON.stringify(evidence)}`,
+  );
+
+  if (evidence?.bindAddress !== expectedBind) {
+    violations.push(
+      `port-attribution: dual-stack: ${identifier} expected evidence.bindAddress ${JSON.stringify(expectedBind)} (the lsof-reported bind token), measured ${JSON.stringify(evidence?.bindAddress)}`,
+    );
+  }
+
+  if (evidence?.source !== "cwd") {
+    violations.push(
+      `port-attribution: cwd-source: ${identifier} expected evidence.source "cwd" (the cwd cross-check must genuinely confirm this candidate), measured ${JSON.stringify(evidence?.source)}`,
+    );
+  }
+  if (evidence?.matchedCwd !== expectedBasename) {
+    violations.push(
+      `port-attribution: cwd-source: ${identifier} expected evidence.matchedCwd ${JSON.stringify(expectedBasename)}, measured ${JSON.stringify(evidence?.matchedCwd)}`,
+    );
+  }
+  if (typeof evidence?.matchedCwd === "string" && evidence.matchedCwd.includes("/")) {
+    violations.push(
+      `port-attribution: cwd-source: ${identifier} matchedCwd must be a basename with no path separator, measured ${JSON.stringify(evidence.matchedCwd)}`,
+    );
+  }
+
+  if (
+    typeof evidence?.pid !== "number" ||
+    !Number.isInteger(evidence.pid) ||
+    evidence.pid <= 0
+  ) {
+    violations.push(
+      `port-attribution: pid: ${identifier} expected evidence.pid to be a positive integer, measured ${JSON.stringify(evidence?.pid)}`,
+    );
+  } else if (evidence.pid !== expectedPid) {
+    violations.push(
+      `port-attribution: pid: ${identifier} expected evidence.pid ${expectedPid} (the harness's own spawned listener pid), measured ${evidence.pid}`,
+    );
+  }
 }
 
 async function assertPortAttribution(ctx, board, violations) {
@@ -638,11 +696,17 @@ async function assertPortAttribution(ctx, board, violations) {
     identifier: API_IDENTIFIER,
     expectedPort: LISTENER_PORT_V6,
     otherPort: LISTENER_PORT_V4,
+    expectedBind: "[::1]",
+    expectedBasename: "api",
+    expectedPid: ctx.apiPanePid,
   });
   assertPortAttributionForCard(ctx, board, violations, {
     identifier: WEB_IDENTIFIER,
     expectedPort: LISTENER_PORT_V4,
     otherPort: LISTENER_PORT_V6,
+    expectedBind: "127.0.0.1",
+    expectedBasename: "web",
+    expectedPid: ctx.webPanePid,
   });
 }
 
@@ -653,7 +717,9 @@ async function checkPortAttribution(ctx, violations) {
   });
   if (violations.length === start) {
     console.log(
-      "port-attribution: PASS, detection and no-cross-attribution confirmed for both PORTATTR99-API and PORTATTR99-WEB",
+      "port-attribution: PASS, all six assertion groups confirmed for both PORTATTR99-API and " +
+        "PORTATTR99-WEB: detection, no-cross-attribution, dual-stack, cwd-source, " +
+        "no-path-on-wire, pid",
     );
   }
 }
