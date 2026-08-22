@@ -38,8 +38,33 @@
  * check asserting only "the badge appears" would still pass with the cwd cross-check completely
  * dead, because the pane-pid walk alone already attributes the port.
  *
- * BREAK EVIDENCE: recorded once all three break legs have been run for real (see plan Task 3);
- * this header is amended with the verbatim trip-leg output in that commit.
+ * BREAK EVIDENCE, every leg below has been run for real and the quoted lines are the VERBATIM
+ * trip-leg output captured from that run:
+ *   - `realpath` proven able to fail: removing `realpathSync` from `matchWorkspace`'s comparison
+ *     produced `port-attribution: cwd-source: PORTATTR99-API expected evidence.source "cwd" (the
+ *     cwd cross-check must genuinely confirm this candidate), measured "pane ancestry"` and the
+ *     matching `matchedCwd "api", measured undefined` line, with the SAME pair repeated for
+ *     PORTATTR99-WEB. The previews themselves still appeared (`bindAddress`/`pid` both intact);
+ *     `evidence.source` degraded to `"pane ancestry"` for BOTH cards, exactly as predicted, and
+ *     `cwdMismatch: true` was also observed (the naive unresolved-path comparison reads as a
+ *     genuine mismatch, not merely an inconclusive one, a stronger failure than the minimum this
+ *     leg needed to prove).
+ *   - `combined-lsof` proven able to fail: folding `-iTCP -sTCP:LISTEN` into the same `-d cwd` call
+ *     produced the identical `cwd-source` violation pair for both cards, with NO subprocess error
+ *     anywhere in the run and no `cwdMismatch` (the cwd map was genuinely empty, not merely wrong),
+ *     exactly the silent-zero-row failure Pitfall 1 warns about.
+ *   - `cwd-failure-must-not-clear` proven able to fail (in the OPPOSITE sense, a survival
+ *     assertion the leg expects to hold): forcing `cwdByPids`'s own `lsof` call to a genuinely
+ *     unresolvable binary name produced ZERO violations, both previews stayed present and
+ *     reachable, confirming the leg's own inverted trip condition (`invertTrip: true`) is itself
+ *     exercised, not vacuous, since the restore leg (the same assertion re-run against a
+ *     DELIBERATELY reverted, fully-working lookup) is what this file's own development run first
+ *     caught failing when `assertSurvival` was reused for the restore leg (source becomes `"cwd"`
+ *     again once the lookup genuinely works, which the strict `"pane ancestry"`-only assertion
+ *     wrongly rejected), the reason the restore leg below reuses `assertPortAttribution` instead.
+ * Every leg's restore run re-confirmed a clean PASS, and a plain `node scripts/port-attribution-99.mjs`
+ * run immediately after all three breaks exited 0 with `port-attribution` PASS, proving no break
+ * leaked state into the sandbox or into `src/`.
  *
  * Usage:
  *   node scripts/port-attribution-99.mjs                          the port-attribution check,
@@ -728,7 +753,229 @@ const CHECKS = {
   "port-attribution": checkPortAttribution,
 };
 
-const BREAKS = {};
+// ---------------------------------------------------------------------------
+// Break legs. Two require a temporary `src/` edit because the behaviour under
+// test IS the source logic (`realpath`, `combined-lsof`); the third proves
+// Pitfall 4 (a cwd-lookup FAILURE must not clear an already-reachable
+// preview) against the current, already-correct code, so its own edit only
+// forces the lsof call itself to fail, never the evidence-assembly logic.
+// Every leg reverts its own edit and rebuilds before the run ends, including
+// on the failure path, and asserts `git status --porcelain` reports nothing
+// under `src/` afterward.
+// ---------------------------------------------------------------------------
+
+const ARTIFACT_DETECT_PATH = join(
+  REPO_ROOT,
+  "src",
+  "server",
+  "adapters",
+  "artifact-detect.ts",
+);
+const DEV_SERVER_PATH = join(
+  REPO_ROOT,
+  "src",
+  "server",
+  "adapters",
+  "dev-server.ts",
+);
+
+const REALPATH_ANCHOR = `function safeRealpath(p: string): string | null {
+  try {
+    return realpathSync(p);
+  } catch {
+    return null;
+  }
+}`;
+const REALPATH_REPLACEMENT = `function safeRealpath(p: string): string | null {
+  return p;
+}`;
+
+const CWD_LSOF_CALL_ANCHOR = `    ({ stdout: cwdOut } = await run(
+      "lsof",
+      ["-a", "-p", pids.join(","), "-d", "cwd", "-Fpn"],
+      { timeout: 5000 },
+    ));`;
+/** T-99-11 leg: folds the port-scan's own selectors into the cwd call, exactly the design
+ * STACK.md's milestone research wrongly proposed and 99-RESEARCH.md Pitfall 1 live-corrected. */
+const COMBINED_LSOF_REPLACEMENT = `    ({ stdout: cwdOut } = await run(
+      "lsof",
+      ["-a", "-p", pids.join(","), "-d", "cwd", "-iTCP", "-sTCP:LISTEN", "-Fpn"],
+      { timeout: 5000 },
+    ));`;
+/** Pitfall 4 leg: a genuinely unresolvable binary name for THIS call only, so `cwdByPids` fails
+ * with a real ENOENT while the port scan's own separate `lsof` call is untouched and keeps
+ * working, isolating the failure to the cross-check alone. */
+const CWD_FAIL_REPLACEMENT = `    ({ stdout: cwdOut } = await run(
+      "lsof-portattr99-force-enoent",
+      ["-a", "-p", pids.join(","), "-d", "cwd", "-Fpn"],
+      { timeout: 5000 },
+    ));`;
+
+/**
+ * Patch `targetPath` at `anchor`, rebuild, run `assertBroken` against a fresh boot, revert (always,
+ * even on a thrown error), rebuild, run `assertRestored` against a fresh boot, then assert
+ * `git status --porcelain` reports nothing under `src/`. `invertTrip` flips the trip-fired polarity
+ * for the `cwd-failure-must-not-clear` leg, whose "trip" IS a clean survival assertion, the
+ * opposite of the other two legs' "trip" (a reported violation).
+ */
+async function runSrcEditBreak(
+  ctx,
+  { name, targetPath, anchor, replacement, assertBroken, assertRestored, invertTrip = false },
+) {
+  const original = readFileSync(targetPath, "utf8");
+  if (!original.includes(anchor)) {
+    throw new Error(
+      `--break ${name}: anchor text not found in ${targetPath}; source has drifted, update this break's anchor`,
+    );
+  }
+  const patched = original.replace(anchor, replacement);
+  const tripViolations = [];
+  try {
+    writeFileSync(targetPath, patched);
+    rebuildServer();
+    await bootFreshAndAssert(ctx, async (board) => {
+      await assertBroken(board, tripViolations);
+    });
+  } finally {
+    writeFileSync(targetPath, original);
+    rebuildServer();
+  }
+  const tripFired = invertTrip
+    ? tripViolations.length === 0
+    : tripViolations.length > 0;
+  const tripLabel = invertTrip
+    ? tripFired
+      ? "trip leg correctly confirmed survival, no violation"
+      : "trip leg FAILED, expected a clean survival assertion but got a violation"
+    : tripFired
+      ? "trip leg correctly reported a violation"
+      : "trip leg FAILED, expected a violation but got none, the check is a dead instrument";
+  console.log(
+    `--break ${name}: ${tripLabel}. Captured output:\n` +
+      (tripViolations.length > 0
+        ? tripViolations.map((v) => `  ${v}`).join("\n")
+        : "  (no violations)"),
+  );
+
+  const restoreViolations = [];
+  await bootFreshAndAssert(ctx, async (board) => {
+    await assertRestored(board, restoreViolations);
+  });
+  let restoreClean = restoreViolations.length === 0;
+  if (!restoreClean) {
+    console.log(
+      `--break ${name}: restore leg still reports violations:\n${restoreViolations.map((v) => `  ${v}`).join("\n")}`,
+    );
+  }
+
+  const porcelain = execFileSync("git", ["status", "--porcelain", "src"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  }).trim();
+  if (porcelain !== "") {
+    restoreClean = false;
+    console.log(
+      `--break ${name}: git status --porcelain reports src/ is NOT clean after revert:\n${porcelain}`,
+    );
+  }
+
+  return { tripFired, restoreClean, tripViolations, restoreViolations };
+}
+
+async function breakRealpath(ctx) {
+  return runSrcEditBreak(ctx, {
+    name: "realpath",
+    targetPath: ARTIFACT_DETECT_PATH,
+    anchor: REALPATH_ANCHOR,
+    replacement: REALPATH_REPLACEMENT,
+    assertBroken: (board, violations) => assertPortAttribution(ctx, board, violations),
+    assertRestored: (board, violations) => assertPortAttribution(ctx, board, violations),
+  });
+}
+
+async function breakCombinedLsof(ctx) {
+  return runSrcEditBreak(ctx, {
+    name: "combined-lsof",
+    targetPath: DEV_SERVER_PATH,
+    anchor: CWD_LSOF_CALL_ANCHOR,
+    replacement: COMBINED_LSOF_REPLACEMENT,
+    assertBroken: (board, violations) => assertPortAttribution(ctx, board, violations),
+    assertRestored: (board, violations) => assertPortAttribution(ctx, board, violations),
+  });
+}
+
+/**
+ * Asserts the SURVIVAL invariant Pitfall 4 requires: a cwd cross-check FAILURE must degrade
+ * evidence to `source: "pane ancestry"` only, and must never clear an already-reachable preview or
+ * set `previewsUnknown`. Deliberately does not require `source === "cwd"`, `matchedCwd`, or
+ * `cwdMismatch`, this is a different, narrower claim than `assertPortAttribution`'s.
+ */
+function assertSurvival(ctx, board, violations) {
+  for (const { identifier, expectedPort } of [
+    { identifier: API_IDENTIFIER, expectedPort: LISTENER_PORT_V6 },
+    { identifier: WEB_IDENTIFIER, expectedPort: LISTENER_PORT_V4 },
+  ]) {
+    const card = findCard(board, identifier);
+    if (card == null) {
+      violations.push(
+        `cwd-failure-must-not-clear: ${identifier} not found on wire`,
+      );
+      continue;
+    }
+    const previews = card.previews ?? [];
+    if (previews.length !== 1 || previews[0].port !== expectedPort) {
+      violations.push(
+        `cwd-failure-must-not-clear: ${identifier} expected exactly one preview on port ${expectedPort} to survive a cwd-lookup failure, measured ${JSON.stringify(previews)}`,
+      );
+      continue;
+    }
+    const evidence = previews[0].evidence;
+    if (evidence?.source !== "pane ancestry") {
+      violations.push(
+        `cwd-failure-must-not-clear: ${identifier} expected evidence.source "pane ancestry" (the cross-check is inconclusive on a forced lsof failure, never a mismatch), measured ${JSON.stringify(evidence?.source)}`,
+      );
+    }
+    if (evidence != null && "matchedCwd" in evidence) {
+      violations.push(
+        `cwd-failure-must-not-clear: ${identifier} expected no matchedCwd on a failed cross-check, measured ${JSON.stringify(evidence.matchedCwd)}`,
+      );
+    }
+    if (evidence != null && "cwdMismatch" in evidence) {
+      violations.push(
+        `cwd-failure-must-not-clear: ${identifier} expected no cwdMismatch on a failed cross-check (inconclusive is not a mismatch), measured ${JSON.stringify(evidence.cwdMismatch)}`,
+      );
+    }
+    if (card.previewsUnknown != null) {
+      violations.push(
+        `cwd-failure-must-not-clear: ${identifier} expected previewsUnknown absent (a cross-check failure must never touch it), measured ${JSON.stringify(card.previewsUnknown)}`,
+      );
+    }
+  }
+}
+
+/**
+ * Restoring this leg's edit puts the cwd lookup fully back in working order, so the correct
+ * post-restore state is the FULL six-group pass (`source: "cwd"`, `matchedCwd` present), not the
+ * degraded-survival shape the trip leg deliberately forces. Reusing `assertPortAttribution` here
+ * is a strictly stronger restore assertion than re-running `assertSurvival` would be.
+ */
+async function breakCwdFailureMustNotClear(ctx) {
+  return runSrcEditBreak(ctx, {
+    name: "cwd-failure-must-not-clear",
+    targetPath: DEV_SERVER_PATH,
+    anchor: CWD_LSOF_CALL_ANCHOR,
+    replacement: CWD_FAIL_REPLACEMENT,
+    assertBroken: (board, violations) => assertSurvival(ctx, board, violations),
+    assertRestored: (board, violations) => assertPortAttribution(ctx, board, violations),
+    invertTrip: true,
+  });
+}
+
+const BREAKS = {
+  realpath: breakRealpath,
+  "combined-lsof": breakCombinedLsof,
+  "cwd-failure-must-not-clear": breakCwdFailureMustNotClear,
+};
 
 // ---------------------------------------------------------------------------
 // Main
