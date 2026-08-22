@@ -1,11 +1,15 @@
 /**
  * Phase 99 plan 05 server-side instrument (PORT-01, dev/ops tooling, NOT test code): no test
  * framework, no assertion library, lives outside src/, the same category as gh-reliability-98.mjs
- * and panel-92 through panel-99.mjs. It proves PORT-01 against REAL processes, never a fixture:
- * two live workspaces, two real dev servers on different ports, one bound to `::1` and one bound
- * to `127.0.0.1`, each attributed to its own workspace with no cross attribution, and evidence
- * proving the cwd cross-check genuinely ran (`evidence.source === "cwd"`) rather than merely not
- * having broken the pane-pid walk it sits on top of.
+ * and panel-92 through panel-99.mjs. It proves PORT-01 against REAL processes and REAL tmux panes,
+ * never a simulated process tree: two live workspaces, two real dev servers on different ports, one
+ * bound to `::1` and one bound to `127.0.0.1`, each attributed to its own workspace with no cross
+ * attribution, and evidence proving the cwd cross-check genuinely ran (`evidence.source === "cwd"`,
+ * with no `cwdMismatch`) rather than merely not having broken the pane-pid walk it sits on top of.
+ * The two seeded CARDS are fixtures, and their directory layout is the product's own (see the
+ * Fixtures section: source folder and per-ticket `workspacePath` are disjoint trees), because a
+ * fixture shaped to the code's assumption rather than to the product's layout is what let the
+ * `cwd-source` group pass against a broken cross-check (99-REVIEW CR-02).
  *
  * SAFETY, copied verbatim in substance from this project's own precedent (gh-reliability-98.mjs,
  * panel-92 through panel-99.mjs headers). Booting ANY dispatch server sweeps `ttyd` processes
@@ -461,10 +465,16 @@ function readFlag(argv, name) {
 }
 
 // ---------------------------------------------------------------------------
-// Fixtures. Two workspaces, each a real directory tree matching the product
-// layout: a workspace folder plus one repo worktree directory under it named
-// by the repo basename ("api"/"web"), so `worktreePath(folder, repoPath)`
-// resolves to a real directory a real tmux pane's own cwd is set to.
+// Fixtures. Two workspaces, each a real directory tree in the PRODUCT's own
+// layout, which is two DISJOINT trees (99-REVIEW CR-02): the user-picked
+// source folder holding the original checkouts (`workspace.folder`, with
+// every `workspace.repos[].path` genuinely under it), and the per-ticket
+// `workspacePath` under `config.workspaceRoot` holding the worktrees
+// `services/orchestration/steps.ts` creates, one per repo basename. The real
+// tmux pane's cwd is the WORKTREE, i.e. `worktreePath(workspacePath,
+// repoPath)`, never anything under `folder`, so a cross-check that compares
+// against `folder` can only report a mismatch here, exactly as it does in
+// production.
 // ---------------------------------------------------------------------------
 
 function baseCardFields(id, identifier, title) {
@@ -483,24 +493,37 @@ function baseCardFields(id, identifier, title) {
 /** No `branch` field: the PR fan-out block in `artifact-detect.ts` is gated on
  * `rec.branch != null`, so omitting it entirely skips that block and this harness never needs a
  * `gh` binary at all. */
-function makeSession(tmuxSession, folder, repoPath) {
+function makeSession(tmuxSession, workspacePath, folder, repoPath) {
   const now = new Date().toISOString();
   return {
     id: randomUUID(),
     createdAt: now,
     updatedAt: now,
     tmuxSession,
+    workspacePath,
     workspace: { folder, repos: [{ path: repoPath, base: "main" }] },
   };
 }
 
-function buildCard(id, identifier, title, tmuxSession, folder, repoPath) {
-  const session = makeSession(tmuxSession, folder, repoPath);
+/** `workspacePath` is projected onto the card as well as the session, one of the six flat fields
+ * `setActiveSession` mirrors from the active session, so this fixture carries the same shape a
+ * real start flow leaves behind. */
+function buildCard(
+  id,
+  identifier,
+  title,
+  tmuxSession,
+  workspacePath,
+  folder,
+  repoPath,
+) {
+  const session = makeSession(tmuxSession, workspacePath, folder, repoPath);
   const card = {
     ...baseCardFields(id, identifier, title),
     sessions: [session],
     activeSessionId: session.id,
     tmuxSession,
+    workspacePath,
     workspace: session.workspace,
   };
   return { card, session };
@@ -644,7 +667,9 @@ function scanForLeakedPaths(value, keyPath, home, violations, identifier) {
  *      platform produced
  *   4. cwd-source: `evidence.source === "cwd"` (the load-bearing assertion of this whole file,
  *      99-RESEARCH.md Pitfall 2), `matchedCwd` equals the workspace's own repo basename and
- *      contains no path separator
+ *      contains no path separator, and `cwdMismatch` is absent entirely: a correctly attributed
+ *      preview whose pane cwd IS its own worktree may never carry a positive mismatch flag
+ *      (99-REVIEW CR-02, the assertion that fails when the cross-check compares the wrong tree)
  *   5. no-path-on-wire: no string anywhere under `previews` (outside `url`) carries the sandbox
  *      home, `/private`, or a path separator
  *   6. pid: `evidence.pid` is a positive integer, cross-checked against the pid this harness
@@ -704,6 +729,11 @@ function assertPortAttributionForCard(ctx, board, violations, spec) {
   if (evidence?.matchedCwd !== expectedBasename) {
     violations.push(
       `port-attribution: cwd-source: ${identifier} expected evidence.matchedCwd ${JSON.stringify(expectedBasename)}, measured ${JSON.stringify(evidence?.matchedCwd)}`,
+    );
+  }
+  if (evidence?.cwdMismatch !== undefined) {
+    violations.push(
+      `port-attribution: cwd-source: ${identifier} expected NO cwdMismatch on a correctly attributed preview, measured ${JSON.stringify(evidence.cwdMismatch)}`,
     );
   }
   if (
@@ -1038,14 +1068,16 @@ async function main() {
   let portsHeld = false;
   let breakResult = null;
 
-  const workspacesDir = join(home, "workspaces");
+  const workspaceRoot = join(home, "workspaces");
   const reposSourceDir = join(home, "repo-sources");
-  const folderA = join(workspacesDir, "ws-api");
-  const folderB = join(workspacesDir, "ws-web");
   const repoPathA = join(reposSourceDir, "api");
   const repoPathB = join(reposSourceDir, "web");
-  const worktreeA = join(folderA, "api");
-  const worktreeB = join(folderB, "web");
+  const workspacePathA = join(workspaceRoot, "dsp-portattr99-api");
+  const workspacePathB = join(workspaceRoot, "dsp-portattr99-web");
+  const worktreeA = join(workspacePathA, "api");
+  const worktreeB = join(workspacePathB, "web");
+  mkdirSync(repoPathA, { recursive: true });
+  mkdirSync(repoPathB, { recursive: true });
   mkdirSync(worktreeA, { recursive: true });
   mkdirSync(worktreeB, { recursive: true });
 
@@ -1057,7 +1089,8 @@ async function main() {
     API_IDENTIFIER,
     "port-attribution-99 workspace A (::1)",
     tmuxA,
-    folderA,
+    workspacePathA,
+    reposSourceDir,
     repoPathA,
   );
   const { card: webCard } = buildCard(
@@ -1065,7 +1098,8 @@ async function main() {
     WEB_IDENTIFIER,
     "port-attribution-99 workspace B (127.0.0.1)",
     tmuxB,
-    folderB,
+    workspacePathB,
+    reposSourceDir,
     repoPathB,
   );
 
