@@ -767,6 +767,29 @@ const FIND_CARD_SRC = `
   }
 `;
 
+/** Structural PR-affordance locators, deliberately keyed on ROLE and RENDERED TEXT rather than on
+ * `aria-label`: every a11y assertion below is ABOUT the accessible name, and a selector that keys
+ * on the name reports "element missing" instead of "name empty" the moment it is stripped (TRAP 3,
+ * the same lesson `checkOverflowAccessibleName` already learned). A PR chip is a leaf `button`
+ * carrying `PrBadge`'s `#<number>`; a `PrList` row is the leaf `div` that holds both a `#<number>`
+ * and its own link control. */
+const PR_AFFORDANCE_SRC = `
+  function panel98PrChips(root) {
+    return Array.prototype.filter.call(root.querySelectorAll("button"), function (b) {
+      return b.querySelector("button") === null && /#\\d+/.test((b.textContent || "").trim());
+    });
+  }
+  function panel98PrListRows(root) {
+    return Array.prototype.filter.call(root.querySelectorAll("div"), function (d) {
+      return d.querySelector("div") === null && d.querySelector("button") !== null &&
+        /#\\d+/.test(d.textContent || "");
+    });
+  }
+  function panel98PrListLinks(root) {
+    return panel98PrListRows(root).map(function (row) { return row.querySelector("button"); });
+  }
+`;
+
 /** Click a card's root by fixture identifier, native `.click()` so React's delegated `onClick`
  * (`Card.tsx`'s `domProps.onClick`) fires exactly as a real mouse click would. */
 async function clickCardByIdentifier(cdp, sessionId, identifier) {
@@ -930,17 +953,19 @@ async function measurePrListDetail(cdp, sessionId) {
   return evalValue(
     cdp,
     sessionId,
-    `(function () {
+    `${PR_AFFORDANCE_SRC}(function () {
       var aside = document.querySelector('aside[aria-label="Ticket detail"]');
       if (!aside) return { asideFound: false };
       var spans = Array.prototype.slice.call(aside.querySelectorAll("span"));
       var heading = spans.find(function (s) { return /^Pull Requests \\(\\d+\\)$/.test(s.textContent.trim()); });
       if (!heading) return { asideFound: true, headingFound: false };
       var container = heading.parentElement;
-      var openButtons = Array.prototype.slice.call(container.querySelectorAll('button[aria-label^="Open PR #"]'));
-      var rows = openButtons.map(function (btn) {
-        var row = btn.parentElement;
-        var m = /Open PR #(\\d+) in GitHub/.exec(btn.getAttribute("aria-label") || "");
+      var rows = panel98PrListRows(container).map(function (row) {
+        var btn = row.querySelector("button");
+        var numSpan = Array.prototype.slice.call(row.querySelectorAll("span")).find(function (sp) {
+          return /^#\\d+$/.test((sp.textContent || "").trim());
+        });
+        var m = numSpan ? /^#(\\d+)$/.exec(numSpan.textContent.trim()) : null;
         var ciDot = Array.prototype.slice.call(row.querySelectorAll("span")).find(function (s) {
           var cs = getComputedStyle(s);
           return cs.width === "5px" && cs.height === "5px" && cs.borderRadius === "50%";
@@ -1454,6 +1479,36 @@ async function checkOverflowAccessibleName(cdp, sessionId, violations) {
   }
 }
 
+/** Every board PR chip carries a non-empty accessible name. Located STRUCTURALLY (a leaf button
+ * carrying `PrBadge`'s `#<number>`) rather than by an `aria-label` prefix, so a stripped label
+ * reports "name empty" instead of silently matching nothing: the old selector could not match a
+ * chip whose `aria-label` was blank, which made the loop body unreachable. Extracted so the break
+ * can drive it without `checkA11y`'s leading `Page.reload` discarding the mutation. */
+async function checkBoardChipAccessibleNames(cdp, sessionId, violations) {
+  const chips = await evalValue(
+    cdp,
+    sessionId,
+    `${PR_AFFORDANCE_SRC}(function () {
+      var chips = panel98PrChips(document.getElementById("root"));
+      return chips.map(function (b) {
+        return { label: b.getAttribute("aria-label"), text: (b.textContent || "").trim() };
+      });
+    })()`,
+  );
+  if (chips.length === 0) {
+    violations.push(
+      "a11y: no PR chips found on the board at all, the accessible-name scan would pass vacuously",
+    );
+  }
+  chips.forEach((chip, i) => {
+    if (chip.label == null || chip.label.trim() === "") {
+      violations.push(
+        `a11y: board PR chip #${i} (rendering ${JSON.stringify(chip.text)}) has an empty aria-label`,
+      );
+    }
+  });
+}
+
 /** KEEP-06 continuity: every PR chip is keyboard-reachable with a non-empty accessible name and a
  * visible focus ring, the overflow element's accessible name matches the plural count sentence,
  * and the detail panel's link control has a non-empty name and the themed 2px solid focus ring. */
@@ -1493,7 +1548,7 @@ async function checkA11y(cdp, sessionId, violations) {
     const name = await readAccessibleName(
       cdp,
       sessionId,
-      `${FIND_CARD_SRC}panel98FindCardRoot(${JSON.stringify(SOLO_IDENTIFIER)}).querySelector('button[aria-label^="PR "]')`,
+      `${FIND_CARD_SRC}${PR_AFFORDANCE_SRC}panel98PrChips(panel98FindCardRoot(${JSON.stringify(SOLO_IDENTIFIER)}))[0]`,
     );
     if (name.name == null || name.name.trim() === "") {
       violations.push(
@@ -1502,21 +1557,7 @@ async function checkA11y(cdp, sessionId, violations) {
     }
   }
 
-  const chipLabels = await evalValue(
-    cdp,
-    sessionId,
-    `(function () {
-      var chips = Array.prototype.slice.call(document.querySelectorAll('button[aria-label^="PR "]'));
-      return chips.map(function (b) { return b.getAttribute("aria-label"); });
-    })()`,
-  );
-  chipLabels.forEach((label, i) => {
-    if (label == null || label.trim() === "") {
-      violations.push(
-        `a11y: PR chip #${i} on the board has an empty aria-label`,
-      );
-    }
-  });
+  await checkBoardChipAccessibleNames(cdp, sessionId, violations);
 
   await checkOverflowAccessibleName(cdp, sessionId, violations);
 
@@ -1524,7 +1565,7 @@ async function checkA11y(cdp, sessionId, violations) {
   const linkName = await readAccessibleName(
     cdp,
     sessionId,
-    `document.querySelector('aside[aria-label="Ticket detail"] button[aria-label^="Open PR #"]')`,
+    `${PR_AFFORDANCE_SRC}panel98PrListLinks(document.querySelector('aside[aria-label="Ticket detail"]'))[0]`,
   );
   if (linkName.name == null || linkName.name.trim() === "") {
     violations.push(
@@ -1538,7 +1579,7 @@ async function checkA11y(cdp, sessionId, violations) {
     const hit = await evalValue(
       cdp,
       sessionId,
-      `document.activeElement === document.querySelector('aside[aria-label="Ticket detail"] button[aria-label^="Open PR #"]')`,
+      `${PR_AFFORDANCE_SRC}document.activeElement === panel98PrListLinks(document.querySelector('aside[aria-label="Ticket detail"]'))[0]`,
     );
     if (hit) {
       linkReached = true;
@@ -1939,10 +1980,58 @@ async function runBreakA11y(cdp, sessionId) {
   console.log(
     `--break a11y RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
   );
+
+  // Second leg: the board chip-name scan used to select on the very `aria-label` it then asserted
+  // was non-empty, so a blanked label matched nothing and the loop body was unreachable. Blanking
+  // one real chip's label proves the structural locator now reports "name empty" instead.
+  console.log("\n--break a11y: blanking PR98-SOLO's first PR chip aria-label");
+  const chipOriginal = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}${PR_AFFORDANCE_SRC}(function () {
+      var chip = panel98PrChips(panel98FindCardRoot(${JSON.stringify(SOLO_IDENTIFIER)}))[0];
+      if (!chip) throw new Error("panel98 break: PR98-SOLO has no PR chip");
+      return chip.getAttribute("aria-label");
+    })()`,
+  );
+  console.log(
+    `--break a11y: captured original chip aria-label = ${JSON.stringify(chipOriginal)}`,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}${PR_AFFORDANCE_SRC}(function () {
+      panel98PrChips(panel98FindCardRoot(${JSON.stringify(SOLO_IDENTIFIER)}))[0].setAttribute("aria-label", "");
+      return true;
+    })()`,
+  );
+  const chipTripViolations = [];
+  await checkBoardChipAccessibleNames(cdp, sessionId, chipTripViolations);
+  console.log(
+    `--break a11y (board chip name) TRIP leg FAIL output:\n${chipTripViolations.join("\n")}`,
+  );
+  const chipTripFired = chipTripViolations.some(
+    (v) => v.indexOf("has an empty aria-label") !== -1,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}${PR_AFFORDANCE_SRC}(function () {
+      panel98PrChips(panel98FindCardRoot(${JSON.stringify(SOLO_IDENTIFIER)}))[0].setAttribute("aria-label", ${JSON.stringify(chipOriginal)});
+      return true;
+    })()`,
+  );
+  const chipRestoreViolations = [];
+  await checkBoardChipAccessibleNames(cdp, sessionId, chipRestoreViolations);
+  console.log(
+    `--break a11y (board chip name) RESTORE leg: ${chipRestoreViolations.length === 0 ? "PASS" : `FAIL:\n${chipRestoreViolations.join("\n")}`}`,
+  );
+
   return {
-    tripFired,
-    restoreClean: restoreViolations.length === 0,
-    tripViolations,
+    tripFired: tripFired && chipTripFired,
+    restoreClean:
+      restoreViolations.length === 0 && chipRestoreViolations.length === 0,
+    tripViolations: [...tripViolations, ...chipTripViolations],
   };
 }
 
