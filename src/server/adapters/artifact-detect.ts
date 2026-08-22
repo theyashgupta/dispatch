@@ -8,7 +8,11 @@ import {
   type GhProbeResult,
 } from "./gh-reliability.js";
 import { panePidsBySession } from "./tmux.js";
-import { listeningPortsBySession, type DiscoveredPort } from "./dev-server.js";
+import {
+  cwdByPids,
+  listeningPortsBySession,
+  type DiscoveredPort,
+} from "./dev-server.js";
 import { store } from "../store/board.store.js";
 
 /**
@@ -232,10 +236,8 @@ function safeRealpath(p: string): string | null {
  * sessions, the same scope `repoDisplayNames` already requires for `PrInfo.repo`, never one
  * session's own `workspace.repos` alone (the 98-REVIEW WR-04 defect).
  * @see docs/ARCHITECTURE.md#dev-server-preview-detection
- * @public This wave lands the cross-check only; the evidence-assembly task in this same plan
- * wires the call site.
  */
-export function matchWorkspace(
+function matchWorkspace(
   rawCwd: string,
   workspace: { folder: string; repos: { path: string; base: string }[] },
   displayNames: Map<string, string>,
@@ -529,9 +531,42 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
       const reachable = await Promise.all(
         candidates.map((candidate) => confirmReachable(candidate)),
       );
-      const next: PreviewInfo[] = candidates
-        .filter((_candidate, i) => reachable[i])
-        .map(({ port }) => ({ port, url: `http://localhost:${port}` }));
+      const confirmedCandidates = candidates.filter(
+        (_candidate, i) => reachable[i],
+      );
+      const cwdByPid = await cwdByPids(
+        confirmedCandidates.map((candidate) => candidate.pid),
+      );
+      const previewWorkspace = rec.workspace;
+      const previewDisplayNames =
+        previewWorkspace != null
+          ? repoDisplayNames([
+              ...previewWorkspace.repos.map((repo) => repo.path),
+              ...(card.sessions ?? [])
+                .flatMap((s) => s.workspace?.repos ?? [])
+                .map((repo) => repo.path),
+            ])
+          : new Map<string, string>();
+      const next: PreviewInfo[] = confirmedCandidates.map((candidate) => {
+        const rawCwd = cwdByPid.get(candidate.pid);
+        const matched =
+          rawCwd != null && previewWorkspace != null
+            ? matchWorkspace(rawCwd, previewWorkspace, previewDisplayNames)
+            : null;
+        return {
+          port: candidate.port,
+          url: `http://localhost:${candidate.port}`,
+          evidence: {
+            pid: candidate.pid,
+            bindAddress: candidate.bindAddress,
+            source: matched?.inWorkspace === true ? "cwd" : "pane ancestry",
+            ...(matched?.inWorkspace === true && matched.repoBasename != null
+              ? { matchedCwd: matched.repoBasename }
+              : {}),
+            ...(matched?.inWorkspace === false ? { cwdMismatch: true } : {}),
+          },
+        };
+      });
       if (JSON.stringify(rec.previews ?? []) === JSON.stringify(next)) return;
       await store.setPreviewsIfSession(card.id, session, next);
     }),
