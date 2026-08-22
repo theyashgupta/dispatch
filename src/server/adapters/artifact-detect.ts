@@ -165,7 +165,7 @@ const QUALIFIED_LABEL_MAX_SEGMENTS = 2;
  * (`/Users/x/code/api` and `/Users/x/code/api/`, both of which the start route accepts) exhausted
  * the loop and emitted the whole path minus its leading slash, putting the home directory and the
  * username on the wire through `PrInfo.repo` and `PreviewEvidence.matchedCwd`, the exact leak both
- * T-98-01 and T-99-01 forbid (99-REVIEW WR-05). A non-colliding repo keeps the short basename the
+ * T-98-01 and T-99-01 forbid. A non-colliding repo keeps the short basename the
  * board's density budget was measured against, and no absolute path reaches the wire either way.
  */
 function repoDisplayNames(repoPaths: string[]): Map<string, string> {
@@ -239,7 +239,7 @@ function safeRealpath(p: string): string | null {
  * `workspaceRoot` is a user-typed string in `~/.dispatch/config.json`, so a user who writes
  * `/Users/x/Dispatch-Workspaces` for a directory created as `dispatch-workspaces` made both sides
  * realpath to different strings and every preview render a positive `cwdMismatch` from a
- * comparison that simply could not decide (99-REVIEW WR-02). The residual, two sibling directories
+ * comparison that simply could not decide. The residual, two sibling directories
  * differing only in case on a case-SENSITIVE volume, would read as a match here; that is the
  * strictly safer direction, since the pane-pid walk stays the primary attribution either way.
  */
@@ -261,8 +261,9 @@ function pathIsWithin(cwd: string, base: string): boolean {
  * picked in the start modal and holds the ORIGINAL checkouts. The two trees are disjoint under the
  * default configuration, so comparing against `folder` stamped `cwdMismatch` on every correctly
  * attributed preview and reported a cwd match for a process sitting in a DIFFERENT ticket's source
- * checkout under the same registered folder (99-REVIEW CR-01). A session carrying no
- * `workspacePath` at all is inconclusive at the call site, never a mismatch.
+ * checkout under the same registered folder. A session carrying no `workspacePath` at all is
+ * inconclusive at the call site, never a mismatch.
+ *
  * Both sides are realpath-normalized before comparison: macOS resolves `/tmp` and
  * `os.tmpdir()` through `/private/...`, `lsof` reports the realpath, and `workspaceRoot` is
  * user-configurable, so a naive string-prefix compare would fail on any symlinked path
@@ -271,10 +272,9 @@ function pathIsWithin(cwd: string, base: string): boolean {
  * pane-ancestry evidence, never synthesize a mismatch from an unresolved path. That covers the
  * case where NO worktree path resolves at all (a worktree removed mid-cleanup, an `EACCES` on a
  * path component, an ejected volume): falling through to the workspace-root check there would
- * turn a transient filesystem state into a positive "this process runs somewhere else" claim
- * (99-REVIEW WR-01). `displayNames`
- * is a PARAMETER: the caller must compute it over every repo path the CARD owns across all its
- * sessions, the same scope `repoDisplayNames` already requires for `PrInfo.repo`, never one
+ * turn a transient filesystem state into a positive "this process runs somewhere else" claim.
+ * `displayNames` is a PARAMETER: the caller must compute it over every repo path the CARD owns
+ * across all its sessions, the same scope `repoDisplayNames` already requires for `PrInfo.repo`, never one
  * session's own `workspace.repos` alone (the 98-REVIEW WR-04 defect).
  * @see docs/ARCHITECTURE.md#dev-server-preview-detection
  */
@@ -402,9 +402,9 @@ async function detectCardArtifacts(backendPort: number): Promise<void> {
  * no timestamp specifically so an unchanged preview never rebroadcasts, but `source` is itself
  * per-tick: one `lsof -d cwd` timeout, one pid that exited between the port scan and the cwd call,
  * or one `EACCES` flipped `"cwd"` to `"pane ancestry"` and dropped `matchedCwd`, which changes the
- * `JSON.stringify` diff and rebroadcasts the whole board, then flips back on the next tick
- * (99-REVIEW WR-06). Holding is scoped to the inconclusive case alone: a conclusive result, in
- * either direction, always overwrites.
+ * `JSON.stringify` diff and rebroadcasts the whole board, then flips back on the next tick.
+ * Holding is scoped to the inconclusive case alone: a conclusive result, in either direction,
+ * always overwrites.
  *
  * An idle board short-circuits before any subprocess runs: with no PROBED live session (all-Done or
  * genuinely empty) there is nothing to attribute a port to, yet the tick would still spawn
