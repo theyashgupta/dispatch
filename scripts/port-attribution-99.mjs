@@ -861,6 +861,12 @@ const CWD_FAIL_REPLACEMENT = `    ({ stdout: cwdOut } = await run(
  * `git status --porcelain` reports nothing under `src/`. `invertTrip` flips the trip-fired polarity
  * for the `cwd-failure-must-not-clear` leg, whose "trip" IS a clean survival assertion, the
  * opposite of the other two legs' "trip" (a reported violation).
+ *
+ * `finally` does not run on a signal, and Ctrl-C is the normal way a human aborts a leg that boots
+ * four servers and rebuilds twice, so SIGINT and SIGTERM handlers restore the file and exit
+ * (130/143) for the whole patched window; both are removed again in the `finally`. `src/` is also
+ * asserted clean BEFORE the patch, so an already dirty tree fails fast instead of surfacing as a
+ * confusing "not clean after revert" at the end of the leg (99-REVIEW WR-04).
  */
 async function runSrcEditBreak(
   ctx,
@@ -880,15 +886,46 @@ async function runSrcEditBreak(
       `--break ${name}: anchor text not found in ${targetPath}; source has drifted, update this break's anchor`,
     );
   }
+  const dirtyBefore = execFileSync("git", ["status", "--porcelain", "src"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  }).trim();
+  if (dirtyBefore !== "") {
+    throw new Error(
+      `--break ${name}: src/ is already dirty before this leg patches it, refusing to run so a ` +
+        `pre-existing edit can never be mistaken for a leaked patch afterward:\n${dirtyBefore}`,
+    );
+  }
   const patched = original.replace(anchor, replacement);
   const tripViolations = [];
+  const restoreOnSignal = (signal, code) => () => {
+    try {
+      writeFileSync(targetPath, original);
+      console.error(
+        `\n--break ${name}: ${signal} received, ${targetPath} restored. dist/ still holds the ` +
+          `patched build, rerun "npm run build:server" before trusting it.`,
+      );
+    } catch {
+      console.error(
+        `\n--break ${name}: ${signal} received but restoring ${targetPath} FAILED. Run "git ` +
+          `checkout src" before doing anything else.`,
+      );
+    }
+    process.exit(code);
+  };
+  const onSigint = restoreOnSignal("SIGINT", 130);
+  const onSigterm = restoreOnSignal("SIGTERM", 143);
   try {
+    process.once("SIGINT", onSigint);
+    process.once("SIGTERM", onSigterm);
     writeFileSync(targetPath, patched);
     rebuildServer();
     await bootFreshAndAssert(ctx, async (board) => {
       await assertBroken(board, tripViolations);
     });
   } finally {
+    process.off("SIGINT", onSigint);
+    process.off("SIGTERM", onSigterm);
     writeFileSync(targetPath, original);
     rebuildServer();
   }
