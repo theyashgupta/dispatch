@@ -147,6 +147,8 @@ const GROUP_MEMBER2_ID = "panel98-group-m2";
 const GROUP_MEMBER2_IDENTIFIER = "PR98-GRP-MEM-2";
 const FAIL_ID = "panel98-fail";
 const FAIL_IDENTIFIER = "PR98-FAIL";
+const LOST_ID = "panel98-lost";
+const LOST_IDENTIFIER = "PR98-LOST";
 /** Board-visible identifiers only, group members render nowhere at top level until expanded. */
 const TOP_LEVEL_IDENTIFIERS = [
   SOLO_IDENTIFIER,
@@ -154,6 +156,7 @@ const TOP_LEVEL_IDENTIFIERS = [
   OVER_IDENTIFIER,
   GROUP_IDENTIFIER,
   FAIL_IDENTIFIER,
+  LOST_IDENTIFIER,
 ];
 
 function sleep(ms) {
@@ -596,6 +599,50 @@ function buildFailCard() {
   };
 }
 
+/**
+ * The WR-01 regression fixture: a card whose SIBLING session holds a frozen `prsUnknown` while the
+ * card's own probe stands clean (no `card.prsUnknown`), plus one live PR so the `PrList` block
+ * still mounts.
+ *
+ * @remarks
+ * `redactCard` derives `lost` from `tmuxSession == null` alone, and no fixture in this harness
+ * carries a `tmuxSession` (this instrument boots no tmux at all), so BOTH sessions here read as
+ * lost on the wire, which is exactly the state the fix must ignore: `markSessionLost` never clears
+ * a dead session's artifact fields, nothing probes it again, so the stale record would otherwise
+ * pin "Could not check ... Last checked 3 days ago" under a healthy, freshly-fetched PR list
+ * forever. The 3-day-old `checkedAt` is what makes the pre-fix render unmistakable in the
+ * measured text.
+ */
+function buildLostCard() {
+  const now = Date.now();
+  const livePr = makePr({ number: 11, repo: "web", state: "open", ci: "pass" });
+  const s1 = {
+    id: randomUUID(),
+    createdAt: new Date(now - 9000).toISOString(),
+    updatedAt: new Date(now - 9000).toISOString(),
+    prs: [livePr],
+  };
+  const s2 = {
+    id: randomUUID(),
+    createdAt: new Date(now - 4000).toISOString(),
+    updatedAt: new Date(now - 4000).toISOString(),
+    prsUnknown: {
+      category: "gh repo not accessible",
+      checkedAt: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+  };
+  return {
+    ...baseCardFields(
+      LOST_ID,
+      LOST_IDENTIFIER,
+      "panel-98 lost-sibling fixture card",
+    ),
+    sessions: [s1, s2],
+    activeSessionId: s1.id,
+    prs: s1.prs,
+  };
+}
+
 function allFixtureCards() {
   return [
     buildSoloCard(),
@@ -603,6 +650,7 @@ function allFixtureCards() {
     buildOverCard(),
     ...buildGroupCards(),
     buildFailCard(),
+    buildLostCard(),
   ];
 }
 
@@ -947,8 +995,10 @@ function dedupeByUrl(prLists) {
 
 /** Reads the currently-open detail panel's `PrList` block: the `Pull Requests (N)` heading (a
  * plain `Field` `<span>`, distinguished from the `Members (N)` heading by its own text), every PR
- * row (found via its `Open PR #<n> in GitHub` link control, never by row index), each row's CI dot
- * (5x5 circular span), the set of repo sub-labels rendered, and any probe-failure diagnostic line. */
+ * row (found STRUCTURALLY via `panel98PrListRows`, a leaf `div` holding both a `#<n>` span and its
+ * own link control, never by row index and never by the `aria-label` these rows are asserted on),
+ * each row's number read off that `#<n>` span, each row's CI dot (5x5 circular span), the set of
+ * repo sub-labels rendered, and any probe-failure diagnostic line. */
 async function measurePrListDetail(cdp, sessionId) {
   return evalValue(
     cdp,
@@ -1067,9 +1117,11 @@ function assertPrListDetailReading(label, reading, expected, violations) {
  * with a bare (no-tag) chip, and the board never shows a "PR unknown"/"PR check incomplete" badge
  * (PRLINK-04's board half, asserted here on the DOM since the wire half is plan 98-08's). */
 async function checkRepoTagging(cdp, sessionId, violations) {
-  const chipReadExpr = (identifier) => `${FIND_CARD_SRC}(function () {
+  const chipReadExpr = (
+    identifier,
+  ) => `${FIND_CARD_SRC}${PR_AFFORDANCE_SRC}(function () {
     var card = panel98FindCardRoot(${JSON.stringify(identifier)});
-    var chips = Array.prototype.slice.call(card.querySelectorAll('button[aria-label^="PR "]'));
+    var chips = panel98PrChips(card);
     return {
       structurallyPresent: chips.length > 0,
       count: chips.length,
@@ -1209,9 +1261,9 @@ async function checkMultiSessionPrs(cdp, sessionId, violations) {
     sessionId,
     violations,
     "multi-session-prs",
-    `${FIND_CARD_SRC}(function () {
+    `${FIND_CARD_SRC}${PR_AFFORDANCE_SRC}(function () {
       var card = panel98FindCardRoot(${JSON.stringify(MULTI_IDENTIFIER)});
-      var chips = Array.prototype.slice.call(card.querySelectorAll('button[aria-label^="PR "]'));
+      var chips = panel98PrChips(card);
       var visibleChips = chips.filter(function (b) { return getComputedStyle(b).display !== "none"; });
       return {
         structurallyPresent: chips.length > 0,
@@ -1420,6 +1472,27 @@ async function checkPrListDetail(cdp, sessionId, violations) {
       );
     }
   }
+
+  await openCardDetail(cdp, sessionId, LOST_IDENTIFIER);
+  const lost = await measurePrListDetail(cdp, sessionId);
+  if (lost == null || !lost.asideFound || !lost.headingFound) {
+    violations.push(
+      `pr-list-detail: PR98-LOST, PrList block not found (${JSON.stringify(lost)})`,
+    );
+  } else {
+    // TRAP 1 pairing: the zero-diagnostic claim below is only meaningful if the block really
+    // mounted and really rendered the live session's PR, so the row count is asserted first.
+    if (lost.rowCount !== 1) {
+      violations.push(
+        `pr-list-detail: PR98-LOST expected 1 PR row (the live session's #11), measured ${lost.rowCount}`,
+      );
+    }
+    if (lost.diagnosticCount !== 0) {
+      violations.push(
+        `pr-list-detail: PR98-LOST carries no card-level prsUnknown and every session holding one is LOST, so the panel must render NO probe-failure diagnostic: measured ${lost.diagnosticCount} line(s), first reading ${JSON.stringify(lost.diagnosticText)}`,
+      );
+    }
+  }
 }
 
 /**
@@ -1429,7 +1502,10 @@ async function checkPrListDetail(cdp, sessionId, violations) {
  * break mutates (TRAP 3), a selector keyed on it would find nothing post-mutation and report
  * "element missing" instead of "name wrong", a different, weaker assertion. Factored out of
  * `checkA11y` so the next task's break can fire this SAME function without also triggering
- * `checkA11y`'s own leading `Page.reload`, which would discard the break's DOM mutation.
+ * `checkA11y`'s own leading `Page.reload`, which would discard the break's DOM mutation. The CHIP
+ * locator beside it obeys the same rule: `panel98PrChips` keys on the leaf `button` carrying
+ * `PrBadge`'s `#<number>`, so stripping an `aria-label` still measures 3 chips and lets the name
+ * assertion below report the real fault instead of "measured 0 chips".
  */
 async function checkOverflowAccessibleName(cdp, sessionId, violations) {
   const overflow = await evalReport(
@@ -1437,9 +1513,9 @@ async function checkOverflowAccessibleName(cdp, sessionId, violations) {
     sessionId,
     violations,
     "a11y (PR98-OVER overflow)",
-    `${FIND_CARD_SRC}(function () {
+    `${FIND_CARD_SRC}${PR_AFFORDANCE_SRC}(function () {
       var card = panel98FindCardRoot(${JSON.stringify(OVER_IDENTIFIER)});
-      var chips = Array.prototype.slice.call(card.querySelectorAll('button[aria-label^="PR "]'));
+      var chips = panel98PrChips(card);
       var overflowEl = Array.prototype.slice.call(card.querySelectorAll("span")).find(function (s) {
         return s.textContent.trim() === "+2";
       });

@@ -171,6 +171,10 @@ const MISSING_ID = "ghrel98-missing";
 const MISSING_IDENTIFIER = "GHR98-MISSING";
 const SHARED_ID = "ghrel98-shared";
 const SHARED_IDENTIFIER = "GHR98-SHARED";
+const MIXED_ID = "ghrel98-mixed";
+const MIXED_IDENTIFIER = "GHR98-MIXED";
+const COLLIDE_ID = "ghrel98-collide";
+const COLLIDE_IDENTIFIER = "GHR98-COLLIDE";
 const TOP_LEVEL_IDENTIFIERS = [
   ONE_IDENTIFIER,
   KNOWN_IDENTIFIER,
@@ -734,11 +738,13 @@ function makeSession({
   tmuxSession,
   branch,
   repoPath,
+  repoPaths,
   repoBase = "main",
   prs,
   prsUnknown,
 }) {
   const now = new Date().toISOString();
+  const paths = repoPaths ?? [repoPath];
   return {
     id: randomUUID(),
     createdAt: now,
@@ -746,8 +752,8 @@ function makeSession({
     tmuxSession,
     branch,
     workspace: {
-      folder: repoPath,
-      repos: [{ path: repoPath, base: repoBase }],
+      folder: paths[0],
+      repos: paths.map((path) => ({ path, base: repoBase })),
     },
     ...(prs != null ? { prs } : {}),
     ...(prsUnknown != null ? { prsUnknown } : {}),
@@ -897,6 +903,92 @@ function buildSharedCard(reposDir) {
     workspace: session.workspace,
   };
   return { card, tmuxNames: [tmuxSession] };
+}
+
+/**
+ * GHR98-MIXED: ONE session holding TWO repos, one of them GHR98-MISSING's own nonexistent path
+ * (so the same negative-cache key), the other a real directory the shim answers for. Seeded with
+ * one last-known-good PR stamped for the missing repo.
+ *
+ * @remarks
+ * This is the ONLY fixture shape that reaches the mixed skipped-plus-ok arm on a repo's FIRST
+ * probe: the card is parked in `done` while GHR98-MISSING arms the cache for the shared path, so
+ * when it is moved in, its `missing-nonexistent` repo is served a cached SKIP (zero strikes spent)
+ * in the same tick its `mixed-ok` sibling answers. Reaching that arm through a real failure
+ * instead would spend a strike first and measure the ceiling, not the skip.
+ */
+function buildMixedCard(home, reposDir) {
+  const missingPath = join(home, "repos", "missing-nonexistent");
+  const okPath = ensureRepoDir(reposDir, "mixed-ok");
+  const tmuxSession = `${TMUX_PREFIX}mixed`;
+  const session = makeSession({
+    tmuxSession,
+    branch: "ghrel98/mixed",
+    repoPaths: [missingPath, okPath],
+    prs: [
+      makePr({
+        number: 41,
+        repo: "missing-nonexistent",
+        state: "open",
+        ci: "pass",
+      }),
+    ],
+  });
+  const card = {
+    ...baseCardFields(
+      MIXED_ID,
+      MIXED_IDENTIFIER,
+      "gh-reliability-98 mixed skip-plus-ok fixture card",
+    ),
+    sessions: [session],
+    activeSessionId: session.id,
+    tmuxSession,
+    branch: session.branch,
+    workspace: session.workspace,
+    prs: session.prs,
+  };
+  return { card, tmuxNames: [tmuxSession] };
+}
+
+/**
+ * GHR98-COLLIDE: two sessions whose single repos share the basename `api` under different parents,
+ * the cross-session basename collision `repoDisplayNames` must de-collide.
+ *
+ * @remarks
+ * The collision is only reachable ACROSS sessions: each session's own `workspace.repos` holds one
+ * entry, so a per-session de-collision pass sees no duplicate and stamps both `api`, while every
+ * render site computes its repo tag and its `PrList` grouping over the CROSS-SESSION union, where
+ * the two are then indistinguishable. Asserted per session on the wire rather than on the union,
+ * because the shim returns one fixed PR url for every repo and the union dedupes by url.
+ */
+function buildCollideCard(reposDir) {
+  const repoPathA = ensureRepoDir(reposDir, join("collide-a", "api"));
+  const repoPathB = ensureRepoDir(reposDir, join("collide-b", "api"));
+  const tmuxA = `${TMUX_PREFIX}collide-a`;
+  const tmuxB = `${TMUX_PREFIX}collide-b`;
+  const sessionA = makeSession({
+    tmuxSession: tmuxA,
+    branch: "ghrel98/collide-a",
+    repoPath: repoPathA,
+  });
+  const sessionB = makeSession({
+    tmuxSession: tmuxB,
+    branch: "ghrel98/collide-b",
+    repoPath: repoPathB,
+  });
+  const card = {
+    ...baseCardFields(
+      COLLIDE_ID,
+      COLLIDE_IDENTIFIER,
+      "gh-reliability-98 cross-session repo-name collision fixture card",
+    ),
+    sessions: [sessionA, sessionB],
+    activeSessionId: sessionA.id,
+    tmuxSession: tmuxA,
+    branch: sessionA.branch,
+    workspace: sessionA.workspace,
+  };
+  return { card, tmuxNames: [tmuxA, tmuxB] };
 }
 
 /**
@@ -1437,6 +1529,46 @@ async function checkNegativeCache(ctx, violations) {
   await withLeg(
     ctx,
     {
+      label: "negative-cache:mixed-skip-keeps-last-known-good",
+      cards: [
+        ctx.cardsByName.missing,
+        { ...ctx.cardsByName.mixed, column: "done" },
+      ],
+      shimEnv: { GH_SHIM_MODE: "ok" },
+    },
+    async (h) => {
+      await h.waitTicks(1);
+      const armed = findCard(await h.readBoard(), MISSING_IDENTIFIER);
+      if (armed?.prsUnknown?.category !== "repo path missing") {
+        violations.push(
+          `negative-cache: mixed-skip leg never armed the cache, ${MISSING_IDENTIFIER} prsUnknown measured ${JSON.stringify(armed?.prsUnknown)}`,
+        );
+      }
+      await h.moveCard(MIXED_ID, "in_progress");
+      await h.waitTicks(2);
+      const mixed = findCard(await h.readBoard(), MIXED_IDENTIFIER);
+      const repos = (mixed?.prs ?? []).map((pr) => pr.repo);
+      if (!repos.includes("missing-nonexistent")) {
+        violations.push(
+          `negative-cache: ${MIXED_IDENTIFIER}'s "missing-nonexistent" repo was served a cached SKIP on its first probe, spending zero strikes against the ${PROBE_FAILURE_CEILING}-strike ceiling, so its seeded last-known-good PR #41 must survive the tick its "mixed-ok" sibling answered: measured repos ${JSON.stringify(repos)}`,
+        );
+      }
+      if (!repos.includes("mixed-ok")) {
+        violations.push(
+          `negative-cache: ${MIXED_IDENTIFIER} expected the answering "mixed-ok" repo's freshly fetched PR on the wire, measured repos ${JSON.stringify(repos)}`,
+        );
+      }
+      if (mixed?.prsUnknown?.category !== "repo path missing") {
+        violations.push(
+          `negative-cache: ${MIXED_IDENTIFIER} must still read as UNKNOWN so the preserved list is QUALIFIED rather than presented as complete: expected prsUnknown category "repo path missing", measured ${JSON.stringify(mixed?.prsUnknown)}`,
+        );
+      }
+    },
+  );
+
+  await withLeg(
+    ctx,
+    {
       label: "negative-cache:transient-contrast",
       cards: [ctx.cardsByName.one],
       shimEnv: { GH_SHIM_MODE: "pr-list-failed" },
@@ -1560,6 +1692,62 @@ async function checkBreakerPause(ctx, violations) {
           `breaker-pause: malformed rate_limit body contrast leg expected "pr list" spawns to keep growing (a parse failure must never wedge probing), measured ${prListAfterTick1} after tick 1 and ${prListAfterTick4} after 3 more ticks`,
         );
       }
+      // The never-trips-a-pause case, the one the standing-pause guard cannot cover: a malformed
+      // body leaves `pausedUntil` untouched, so without a cooldown on the CHECK itself every
+      // rate-limited `pr list` in every tick spawns another `gh api rate_limit`, unmeasured and
+      // outside the semaphore. Bounded, not zero: the first failure of the window is entitled to
+      // ask once.
+      const rateLimitCalls = h.spawnCount("api rate_limit");
+      if (rateLimitCalls > 1) {
+        violations.push(
+          `breaker-pause: malformed rate_limit body contrast leg expected at most 1 "api rate_limit" spawn across 4 ticks (a body that trips no pause must not re-ask once per failing probe), measured ${rateLimitCalls} across ${prListAfterTick4} rate-limited "pr list" failures`,
+        );
+      }
+    },
+  );
+}
+
+/**
+ * The cross-session repo-name assertion, extracted so the break drives the EXACT comparison the
+ * real check makes. TRAP 1 pairing: the distinctness count is only meaningful once the structural
+ * claim (one stamped PR per session actually reached the wire) is confirmed on the same nodes.
+ */
+function assertRepoNameCollision(card, violations) {
+  const summaries = card?.sessionSummaries ?? [];
+  const stamped = summaries.flatMap((sum) =>
+    (sum.prs ?? []).map((pr) => pr.repo),
+  );
+  if (stamped.length !== 2) {
+    violations.push(
+      `repo-name-collision: expected 1 stamped PR per ${COLLIDE_IDENTIFIER} session (2 total) on the wire, measured ${stamped.length}: ${JSON.stringify(stamped)}`,
+    );
+    return;
+  }
+  if (new Set(stamped).size !== 2) {
+    violations.push(
+      `repo-name-collision: ${COLLIDE_IDENTIFIER}'s two sessions hold DIFFERENT repos that share the basename "api", so their wire repo names must differ, else every render site's own "new Set(prs.map(pr => pr.repo)).size > 1" reads 1 over the cross-session union, the repo tag is suppressed and PrList merges two repos into one ungrouped list: measured ${JSON.stringify(stamped)}`,
+    );
+  }
+}
+
+/**
+ * PRLINK-01: two sessions of ONE card holding two different repos that share the basename `api`
+ * must reach the wire under two different names. Per-session de-collision cannot see this
+ * collision at all (each session's `workspace.repos` holds a single entry), while every consumer
+ * computes over the cross-session union.
+ */
+async function checkRepoNameCollision(ctx, violations) {
+  await withLeg(
+    ctx,
+    {
+      label: "repo-name-collision",
+      cards: [ctx.cardsByName.collide],
+      shimEnv: { GH_SHIM_MODE: "ok" },
+    },
+    async (h) => {
+      await h.waitTicks(2);
+      const card = findCard(await h.readBoard(), COLLIDE_IDENTIFIER);
+      assertRepoNameCollision(card, violations);
     },
   );
 }
@@ -1628,6 +1816,7 @@ const CHECKS = {
   "last-known-good": checkLastKnownGood,
   "breaker-pause": checkBreakerPause,
   "call-count-parity": checkCallCountParity,
+  "repo-name-collision": checkRepoNameCollision,
 };
 
 /** The two checks that need a headless Chrome/CDP connection at all. */
@@ -2019,6 +2208,71 @@ async function runBreakCallCountParity(ctx) {
   };
 }
 
+/**
+ * `repo-name-collision` break: re-seeds GHR98-COLLIDE with BOTH sessions pointing at session A's
+ * own repo path, a fixture mutation driven entirely from outside the product. Two sessions on ONE
+ * repo legitimately stamp ONE name, so the trip leg proves the assertion can actually MEASURE a
+ * single distinct name rather than passing on any two-element array; the restore leg puts the two
+ * distinct paths back and re-confirms 2.
+ */
+async function runBreakRepoNameCollision(ctx) {
+  const pristine = ctx.cardsByName.collide;
+  const collided = {
+    ...pristine,
+    sessions: pristine.sessions.map((sess) => ({
+      ...sess,
+      workspace: pristine.sessions[0].workspace,
+    })),
+  };
+
+  const tripResult = await withLeg(
+    ctx,
+    {
+      label: "break:repo-name-collision:trip",
+      cards: [collided],
+      shimEnv: { GH_SHIM_MODE: "ok" },
+    },
+    async (h) => {
+      await h.waitTicks(2);
+      const card = findCard(await h.readBoard(), COLLIDE_IDENTIFIER);
+      const tripViolations = [];
+      assertRepoNameCollision(card, tripViolations);
+      return { tripFired: tripViolations.length > 0, tripViolations };
+    },
+  );
+  console.log(
+    `\n--break repo-name-collision TRIP leg output:\n${tripResult.tripViolations.join("\n")}`,
+  );
+
+  const restoreResult = await withLeg(
+    ctx,
+    {
+      label: "break:repo-name-collision:restore",
+      cards: [pristine],
+      shimEnv: { GH_SHIM_MODE: "ok" },
+    },
+    async (h) => {
+      await h.waitTicks(2);
+      const card = findCard(await h.readBoard(), COLLIDE_IDENTIFIER);
+      const restoreViolations = [];
+      assertRepoNameCollision(card, restoreViolations);
+      return {
+        restoreClean: restoreViolations.length === 0,
+        restoreViolations,
+      };
+    },
+  );
+  console.log(
+    `--break repo-name-collision RESTORE leg: ${restoreResult.restoreClean ? "PASS" : `FAIL: ${restoreResult.restoreViolations.join("\n")}`}`,
+  );
+
+  return {
+    tripFired: tripResult.tripFired,
+    restoreClean: restoreResult.restoreClean,
+    tripViolations: tripResult.tripViolations,
+  };
+}
+
 const BREAKS = {
   "no-failure-chip": runBreakNoFailureChip,
   "diagnostic-line": runBreakDiagnosticLine,
@@ -2026,6 +2280,7 @@ const BREAKS = {
   "last-known-good": runBreakLastKnownGood,
   "breaker-pause": runBreakBreakerPause,
   "call-count-parity": runBreakCallCountParity,
+  "repo-name-collision": runBreakRepoNameCollision,
 };
 
 // ---------------------------------------------------------------------------
@@ -2070,6 +2325,8 @@ async function main() {
   const pair = buildPairCard(reposDir);
   const missing = buildMissingCard(home);
   const shared = buildSharedCard(reposDir);
+  const mixed = buildMixedCard(home, reposDir);
+  const collide = buildCollideCard(reposDir);
 
   const allBaseCards = [
     one.card,
@@ -2077,6 +2334,8 @@ async function main() {
     pair.card,
     missing.card,
     shared.card,
+    mixed.card,
+    collide.card,
   ];
   const allTmuxNames = [
     ...one.tmuxNames,
@@ -2084,6 +2343,8 @@ async function main() {
     ...pair.tmuxNames,
     ...missing.tmuxNames,
     ...shared.tmuxNames,
+    ...mixed.tmuxNames,
+    ...collide.tmuxNames,
   ];
 
   const binDirWithGh = join(home, "bin-with-gh");
@@ -2120,6 +2381,8 @@ async function main() {
       pair: pair.card,
       missing: missing.card,
       shared: shared.card,
+      mixed: mixed.card,
+      collide: collide.card,
     },
     pairMeta: {
       sessionCount: pair.sessionCount,
