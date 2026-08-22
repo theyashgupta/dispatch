@@ -24,11 +24,14 @@ function rankOf(pr: PrInfo): number {
  * Derives a card's full, deduped PR list from data already on the wire.
  *
  * @remarks
+ * A plain derivation, deliberately NOT named `use*`: it calls no React hook, so the `use` prefix
+ * only subjected every call site to the rules-of-hooks lint for no benefit while implying a
+ * memoisation that does not exist.
  * `card.prs` only ever mirrors the active session; sibling sessions' PRs already ride
  * `sessionSummaries[].prs` unread. Unioning client-side here means neither a server aggregate
  * nor a second fetch path is needed, both would re-probe `gh` for data the board already has.
  */
-export function useCardPrs(card: Card): PrInfo[] {
+export function cardPrs(card: Card): PrInfo[] {
   const seen = new Set<string>();
   const merged: PrInfo[] = [];
   for (const pr of [

@@ -1,6 +1,6 @@
 import { ExternalLink } from "lucide-react";
 import type { Card, PrInfo } from "../../../shared/types.js";
-import { useCardPrs } from "../board/index.js";
+import { cardPrs } from "../board/index.js";
 import { unknownProbeCopy } from "../badges/index.js";
 import { prCiDotColor, prStateLabel, prStyleFor } from "../badges/pr-style.js";
 import { formatAge, nowMs } from "../../lib/format-age.js";
@@ -88,7 +88,7 @@ function PrListRow({ pr }: { pr: PrInfo }) {
 }
 
 export function PrList({ card }: { card: Card }) {
-  const prs = useCardPrs(card);
+  const prs = cardPrs(card);
   const unknown =
     card.prsUnknown ??
     (card.sessionSummaries ?? []).find((s) => s.prsUnknown != null)?.prsUnknown;

@@ -1,6 +1,6 @@
 import type { Card } from "../../../shared/types.js";
 import { PrBadge } from "../badges/index.js";
-import { useCardPrs } from "./use-card-prs.js";
+import { cardPrs } from "./card-prs.js";
 
 const chipStyle: React.CSSProperties = {
   display: "inline-flex",
@@ -16,9 +16,9 @@ const chipStyle: React.CSSProperties = {
 };
 
 export function GroupPrRow({ card }: { card: Card }) {
-  const cardPrs = useCardPrs(card);
-  if (card.source !== "group" || cardPrs.length === 0) return null;
-  const showRepo = new Set(cardPrs.map((pr) => pr.repo)).size > 1;
+  const prs = cardPrs(card);
+  if (card.source !== "group" || prs.length === 0) return null;
+  const showRepo = new Set(prs.map((pr) => pr.repo)).size > 1;
   return (
     <div
       style={{
@@ -28,20 +28,20 @@ export function GroupPrRow({ card }: { card: Card }) {
         flexWrap: "wrap",
       }}
     >
-      {cardPrs.slice(0, 3).map((pr) => (
+      {prs.slice(0, 3).map((pr) => (
         <PrBadge key={pr.url} pr={pr} showRepo={showRepo} />
       ))}
-      {cardPrs.length > 3 && (
+      {prs.length > 3 && (
         <span
           style={{
             ...chipStyle,
             border: "1px solid var(--border)",
             color: "var(--text-muted)",
           }}
-          title={`${cardPrs.length - 3} more pull request${cardPrs.length - 3 === 1 ? "" : "s"}`}
-          aria-label={`${cardPrs.length - 3} more pull request${cardPrs.length - 3 === 1 ? "" : "s"}`}
+          title={`${prs.length - 3} more pull request${prs.length - 3 === 1 ? "" : "s"}`}
+          aria-label={`${prs.length - 3} more pull request${prs.length - 3 === 1 ? "" : "s"}`}
         >
-          {`+${cardPrs.length - 3}`}
+          {`+${prs.length - 3}`}
         </span>
       )}
     </div>

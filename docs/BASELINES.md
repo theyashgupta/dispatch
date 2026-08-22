@@ -794,7 +794,7 @@ PERF-BOARD mode=prod done=500 initialBytes=17410 initialCards=50 sseFrameBytes=1
 capture for this phase (`17410`/`17655`), zero delta. Both are ABOVE the older `15029`/`15274`
 numbers by the same, already-documented, out-of-scope `ActiveSessionWire` residual (98-01), a fact
 about the codebase before this phase started, not something this phase introduced. No regression:
-this phase's `PrInfo.repo` field and `useCardPrs` client hook cost zero wire bytes at N=1, since
+this phase's `PrInfo.repo` field and `cardPrs` client hook cost zero wire bytes at N=1, since
 `PrInfo.repo` only appears on cards that carry a PR, and none of these 500 seeded Done cards do.
 
 **Wire re-measurement at N=1, multi-session leg, same exact command:**

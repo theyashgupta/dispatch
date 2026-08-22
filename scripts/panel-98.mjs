@@ -518,7 +518,7 @@ function buildMultiCard() {
 
 /**
  * The cap-and-honesty case (UI-SPEC item 12): five PRs, four `repo: "web"` and one `repo: "api"`.
- * All five states rank equal (`open`), so `useCardPrs`'s number-descending sort places them in
+ * All five states rank equal (`open`), so `cardPrs`'s number-descending sort places them in
  * NUMBER order, the `api` PR (#97) is deliberately the fourth-highest number, so it sorts to
  * index 3, one past the 3-chip cap, letting the harness catch a `showRepo` computed over the
  * sliced array instead of the full one.
@@ -929,7 +929,7 @@ async function readAccessibleName(cdp, sessionId, expression) {
   return { name: node?.name?.value ?? null, role: node?.role?.value ?? null };
 }
 
-/** Dedupes PRs by `url` exactly as `useCardPrs` does, computed by the HARNESS from the fixture it
+/** Dedupes PRs by `url` exactly as `cardPrs` does, computed by the HARNESS from the fixture it
  * seeded rather than hardcoded, so `multi-session-prs` cannot pass vacuously when both source
  * arrays happen to be empty. */
 function dedupeByUrl(prLists) {
