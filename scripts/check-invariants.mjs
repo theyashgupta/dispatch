@@ -53,8 +53,10 @@ const ID_RE =
  * mitigation re-freeze (`T-98-01`), cited in `shared/types.ts` and `adapters/gh.ts`.
  * @remarks Moved from 127 to 128 for the deliberate one-ID `PreviewEvidence` basename
  * mitigation re-freeze (`T-99-01`), cited in `shared/types.ts`.
+ * @remarks Moved from 128 to 129 for the deliberate one-ID `cwdByPids` argv-only
+ * mitigation re-freeze (`T-99-02`), cited in `adapters/dev-server.ts`.
  */
-const FROZEN_COUNT = 128;
+const FROZEN_COUNT = 129;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");

@@ -202,3 +202,53 @@ export async function listeningPortsBySession(
   }
   return result;
 }
+
+/**
+ * Working directory for each of the given pids, as `lsof` reports it, keyed by pid. Returns an
+ * empty Map for an empty input (no subprocess spawned) or on a genuine `lsof` failure, never
+ * `null`: this is a cross-check on top of the pane-pid walk, and its own failure must degrade a
+ * preview's evidence to `source: "pane ancestry"` only, never touch `previewFailureCounts`, and
+ * never clear `previews` (T-99-02).
+ * @remarks A GENUINELY SEPARATE `lsof` call from the port scan, never a flag added to it: `-a`
+ * ANDs selection options per file descriptor, and no descriptor is both a listening socket and
+ * the cwd pseudo-descriptor, so a combined call would exit 0 with zero cwd rows (live-verified,
+ * `99-RESEARCH.md` Pitfall 1). The argv array is fixed and `-a` is mandatory here exactly as it
+ * is on the port scan: omitting it turned a single-pid query into 884 machine-wide rows when
+ * live-probed. The only interpolated values are `Number`-typed pids already held in memory, never
+ * a shell string and never client input (T-99-02). Reuses the port scan's exit-code-1-tolerant
+ * discriminator verbatim in shape: a pid can exit between the port scan and this call, so a
+ * non-zero exit with a numeric `.code` still carries valid `stdout` for the pids that survived.
+ * @see docs/ARCHITECTURE.md#dev-server-preview-detection
+ * @public This wave lands the contract only; `adapters/artifact-detect.ts` becomes the consumer
+ * in the evidence-assembly plan that follows.
+ */
+export async function cwdByPids(pids: number[]): Promise<Map<number, string>> {
+  const result = new Map<number, string>();
+  if (pids.length === 0) return result;
+
+  let cwdOut: string;
+  try {
+    ({ stdout: cwdOut } = await run(
+      "lsof",
+      ["-a", "-p", pids.join(","), "-d", "cwd", "-Fpn"],
+      { timeout: 5000 },
+    ));
+  } catch (err) {
+    const code = (err as { code?: unknown }).code;
+    if (typeof code === "number") {
+      cwdOut = ((err as { stdout?: string }).stdout as string) ?? "";
+    } else {
+      return result;
+    }
+  }
+
+  let currentPid: number | null = null;
+  for (const line of cwdOut.split("\n")) {
+    if (line.startsWith("p")) {
+      currentPid = Number(line.slice(1));
+    } else if (line.startsWith("n") && currentPid !== null) {
+      if (!result.has(currentPid)) result.set(currentPid, line.slice(1));
+    }
+  }
+  return result;
+}
