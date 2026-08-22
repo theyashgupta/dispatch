@@ -3017,6 +3017,38 @@ switch-sockets` (a pid-scoped, `ESTABLISHED`-only, bounded poll-to-zero proof th
   server's own pid, which stays constant across a real remount and is demonstrated dead by its own
   `--dead-signal-demo` mode). Covers all five forbidden mount events plus the newly-named
   card-switch-while-open case, and the one legitimate re-point (session switch).
-- **`phase-smoke-tester`** — the only BEHAVIORAL verification this project runs: an agent derives
+- **`node scripts/panel-98.mjs`** (`npm run panel-98`, Phase 98, PRLINK-01/02/03/06) - a CDP
+  structural/DOM instrument, deliberately OUTSIDE `npm run check` (it boots a real sandboxed
+  dispatch server and requires the live `com.dispatch.app` service stopped for its duration). Five
+  named checks against five fixture cards seeded directly via `node:sqlite`, no real tmux/ttyd
+  needed: `repo-tagging`, `multi-session-prs`, `group-pr-list`, `pr-list-detail`, and `a11y` (the
+  KEEP-06 leg every prior panel harness in this family carries). Each has its own `--break <name>`,
+  proven able to fail live, quoted verbatim from the script's own header JSDoc: `repo-tagging`
+  ("repo-tagging: PR98-MULTI chip PR api #7 - Open . Checks pending repo segment text "" does not
+  match either seeded repo"), `multi-session-prs` ("multi-session-prs: PR98-MULTI visible chip
+  count=1, expected union size=2"), `group-pr-list` ("group-pr-list: PR98-GROUP has 2 distinct
+  PR-row containers, expected exactly 1"), `pr-list-detail` ("pr-list-detail: PR98-MULTI heading
+  expected "Pull Requests (2)", measured "Pull Requests (0)""), and `a11y` ("a11y: PR98-OVER
+  overflow accessible name expected "2 more pull requests", measured """). Every check is proven
+  able to fail.
+- **`node scripts/gh-reliability-98.mjs`** (`npm run gh-reliability-98`, Phase 98, PRLINK-02/04/05)
+  - a real-tmux-backed sandbox harness, deliberately OUTSIDE `npm run check` (it boots a real
+    dispatch server, spawns real (fake-workload) tmux sessions, and requires the live
+    `com.dispatch.app` service stopped for its duration). Six named checks: `no-failure-chip`,
+    `diagnostic-line`, `negative-cache`, `last-known-good`, `breaker-pause`, and
+    `call-count-parity`. Each has its own `--break <name>`, proven able to fail live, quoted verbatim
+    from the script's own header JSDoc: `no-failure-chip` ("no-failure-chip: GHR98-ONE card DOM
+    subtree carries 1 failure-badge element(s)"), `negative-cache` ("negative-cache: deterministic
+    leg expected exactly 1 "pr list" spawn across 4 ticks (10-minute cache should suppress every
+    repeat), measured 0"), `last-known-good` ("last-known-good: expected 2 seeded PRs still present
+    on GHR98-KNOWN after 5 ticks past the 3-strike ceiling, measured 0"), and `breaker-pause`
+    ("breaker-pause: "pr list" spawn count grew from 3 (after tick 1) to 6 (after 3 more ticks),
+    expected it to stop growing once the breaker tripped"). Every check is proven able to fail.
+    The PR probe now sits behind three gates in front of every `gh pr list` spawn: a per-repo
+    10-minute negative cache (deterministic categories only), a global rate-limit breaker (`gh api
+rate_limit`, paused until `reset` under 50 remaining), and a semaphore of four concurrent spawns.
+    A skipped probe (a cache hit or a breaker pause) deliberately does not advance the session's
+    `PROBE_FAILURE_CEILING`, only a real spawn that fails counts as a strike.
+- **`phase-smoke-tester`** - the only BEHAVIORAL verification this project runs: an agent derives
   and executes smoke cases against the running app after each phase's implementation lands. This
   is the one gate above that cannot be reduced to a grep.
