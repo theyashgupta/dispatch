@@ -169,6 +169,8 @@ const PAIR_ID = "ghrel98-pair";
 const PAIR_IDENTIFIER = "GHR98-PAIR";
 const MISSING_ID = "ghrel98-missing";
 const MISSING_IDENTIFIER = "GHR98-MISSING";
+const SHARED_ID = "ghrel98-shared";
+const SHARED_IDENTIFIER = "GHR98-SHARED";
 const TOP_LEVEL_IDENTIFIERS = [
   ONE_IDENTIFIER,
   KNOWN_IDENTIFIER,
@@ -654,6 +656,24 @@ async function readBoard(port) {
   return res.json();
 }
 
+/**
+ * Moves one card between columns through the product's own `/api/cards/:id/move` route, never a
+ * direct sqlite write: the store is already loaded in memory by the time a leg runs, so a row
+ * rewritten underneath it would never reach `probedSessions()`.
+ */
+async function moveCard(port, id, column) {
+  const res = await fetch(`http://127.0.0.1:${port}/api/cards/${id}/move`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ column }),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `ghrel98: moving ${id} to ${column} failed with HTTP ${res.status}: ${await res.text()}`,
+    );
+  }
+}
+
 function findCard(board, identifier) {
   return (board?.cards ?? []).find((c) => c.identifier === identifier);
 }
@@ -837,6 +857,38 @@ function buildMissingCard(home) {
       MISSING_ID,
       MISSING_IDENTIFIER,
       "gh-reliability-98 repo-path-missing fixture card",
+    ),
+    sessions: [session],
+    activeSessionId: session.id,
+    tmuxSession,
+    branch: session.branch,
+    workspace: session.workspace,
+  };
+  return { card, tmuxNames: [tmuxSession] };
+}
+
+/**
+ * GHR98-SHARED: a SECOND card whose session points at GHR98-ONE's own repo directory, the shape
+ * two cards started from one registered folder really have (`workspace.repos[].path` is the
+ * folder's source repo, never a per-session worktree, so both cards share one negative-cache
+ * key). Deliberately carries no `prs` and no `prsUnknown`: the shared-repo leg parks it in `done`
+ * for the first tick so its very first probe happens only AFTER GHR98-ONE's real failure has
+ * armed the cache, which is the only way to observe a cache HIT on a card that never experienced
+ * the failure itself.
+ */
+function buildSharedCard(reposDir) {
+  const repoPath = ensureRepoDir(reposDir, "one-repo");
+  const tmuxSession = `${TMUX_PREFIX}shared`;
+  const session = makeSession({
+    tmuxSession,
+    branch: "ghrel98/shared",
+    repoPath,
+  });
+  const card = {
+    ...baseCardFields(
+      SHARED_ID,
+      SHARED_IDENTIFIER,
+      "gh-reliability-98 shared-repo fixture card",
     ),
     sessions: [session],
     activeSessionId: session.id,
@@ -1125,6 +1177,7 @@ async function withLeg(ctx, opts, fn) {
       spawnCount: (sub) => spawnCount(logPath, sub),
       peakConcurrency: (sub) => peakConcurrency(logPath, sub),
       readBoard: () => readBoard(SANDBOX_PORT),
+      moveCard: (id, column) => moveCard(SANDBOX_PORT, id, column),
     };
     return await fn(helpers);
   } finally {
@@ -1318,6 +1371,14 @@ async function checkDiagnosticLine(ctx, violations) {
  * category (`gh pr list failed`) spawns at least twice over the same window (never cached). The
  * transient contrast leg is what stops the deterministic leg's pass being caused by a fan-out
  * that stopped running at all.
+ *
+ * The shared-repo leg covers the honesty half of the same cache: the cache key is the SOURCE repo
+ * path every card started from one registered folder shares, so a card that never experienced the
+ * failure itself gets a skip on its very first probe. A skip means "not checked", so that card
+ * must carry `prsUnknown`; an empty `prs` with no unknown state would state, with full confidence,
+ * that the ticket has no PR while `gh` was never asked for it. Asserted on the wire rather than in
+ * the DOM: `diagnostic-line` already proves `prsUnknown` is what the panel's diagnostic renders
+ * from, and this leg needs no Chrome of its own to make its point.
  */
 async function checkNegativeCache(ctx, violations) {
   await withLeg(
@@ -1333,6 +1394,41 @@ async function checkNegativeCache(ctx, violations) {
       if (count !== 1) {
         violations.push(
           `negative-cache: deterministic leg expected exactly 1 "pr list" spawn across 4 ticks (10-minute cache should suppress every repeat), measured ${count}`,
+        );
+      }
+    },
+  );
+
+  await withLeg(
+    ctx,
+    {
+      label: "negative-cache:shared-repo-skip",
+      cards: [
+        ctx.cardsByName.one,
+        { ...ctx.cardsByName.shared, column: "done" },
+      ],
+      shimEnv: { GH_SHIM_MODE: "repo-not-accessible" },
+    },
+    async (h) => {
+      await h.waitTicks(1);
+      const armed = findCard(await h.readBoard(), ONE_IDENTIFIER);
+      if (armed?.prsUnknown?.category !== "gh repo not accessible") {
+        violations.push(
+          `negative-cache: shared-repo leg never armed the cache, ${ONE_IDENTIFIER} prsUnknown measured ${JSON.stringify(armed?.prsUnknown)}`,
+        );
+      }
+      await h.moveCard(SHARED_ID, "in_progress");
+      await h.waitTicks(2);
+      const shared = findCard(await h.readBoard(), SHARED_IDENTIFIER);
+      const count = h.spawnCount("pr list");
+      if (count !== 1) {
+        violations.push(
+          `negative-cache: shared-repo leg expected exactly 1 "pr list" spawn total (${SHARED_IDENTIFIER}'s first probe must be served by the cache ${ONE_IDENTIFIER} armed, never a fresh ask), measured ${count}`,
+        );
+      }
+      if (shared?.prsUnknown?.category !== "gh repo not accessible") {
+        violations.push(
+          `negative-cache: ${SHARED_IDENTIFIER} shares ${ONE_IDENTIFIER}'s repo folder and was served a cached skip on its FIRST probe, so it must read as UNKNOWN, never as a confident "no PRs": expected prsUnknown category "gh repo not accessible", measured ${JSON.stringify(shared?.prsUnknown)}`,
         );
       }
     },
@@ -1933,13 +2029,21 @@ async function main() {
   const known = buildKnownCard(reposDir);
   const pair = buildPairCard(reposDir);
   const missing = buildMissingCard(home);
+  const shared = buildSharedCard(reposDir);
 
-  const allBaseCards = [one.card, known.card, pair.card, missing.card];
+  const allBaseCards = [
+    one.card,
+    known.card,
+    pair.card,
+    missing.card,
+    shared.card,
+  ];
   const allTmuxNames = [
     ...one.tmuxNames,
     ...known.tmuxNames,
     ...pair.tmuxNames,
     ...missing.tmuxNames,
+    ...shared.tmuxNames,
   ];
 
   const binDirWithGh = join(home, "bin-with-gh");
@@ -1975,6 +2079,7 @@ async function main() {
       known: known.card,
       pair: pair.card,
       missing: missing.card,
+      shared: shared.card,
     },
     pairMeta: {
       sessionCount: pair.sessionCount,
@@ -1995,7 +2100,9 @@ async function main() {
     );
 
     await seedFixtureCards(home, allBaseCards);
-    console.log("standup: four fixture cards seeded via node:sqlite");
+    console.log(
+      `standup: ${allBaseCards.length} fixture cards seeded via node:sqlite`,
+    );
 
     const names =
       breakName != null

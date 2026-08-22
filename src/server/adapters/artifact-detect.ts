@@ -208,6 +208,15 @@ async function detectCardArtifacts(backendPort: number): Promise<void> {
  * the backoff expires — `prsUnknown` is deliberately left standing while skipping, since nothing
  * has been re-checked.
  *
+ * A tick whose failures were ALL skips (`gh-reliability.ts` served a negative-cache hit or a
+ * breaker pause, so no `gh` ran) spends no strike and arms no backoff, but still writes
+ * `prsUnknown`. The negative cache is keyed by the SOURCE repo path that every card started from
+ * one registered folder shares, so a card that never experienced the failure itself is served a
+ * skip on its very first probe; without this write it would render an empty, unqualified PR list,
+ * stating with full confidence that the ticket has no PR while `gh` was never asked. `checkedAt`
+ * is carried over from the standing record rather than re-stamped, precisely because nothing was
+ * re-checked.
+ *
  * Preview exclusion (F-09) is a `Set<number>` built ONCE per tick — `backendPort` plus EVERY live
  * session's `ttydPort`, across every card, not only a probed one's own field — so a stale, freed
  * ttyd port picked up moments later by a DIFFERENT session's real dev server can no longer leak
@@ -322,7 +331,13 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
               prRetryNotBefore.delete(rec.id);
             }
           } else {
-            // Every failure was a skip: hold last-known-good, no bookkeeping map touched (PRLINK-05).
+            const checkedAt = rec.prsUnknown?.checkedAt;
+            if (rec.prsUnknown?.category !== category) {
+              await store.setPrsUnknownIfSession(card.id, session, {
+                category,
+                ...(checkedAt != null ? { checkedAt } : {}),
+              });
+            }
             holdLastKnownPrs = answered.length === 0;
           }
         } else {
