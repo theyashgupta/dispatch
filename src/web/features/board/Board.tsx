@@ -4,10 +4,11 @@ import {
   DragOverlay,
   MouseSensor,
   TouchSensor,
+  defaultAnnouncements,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
+import type { Announcements, DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import { COLUMNS } from "../../../shared/types.js";
 import type {
   BoardSnapshot,
@@ -16,6 +17,7 @@ import type {
 } from "../../../shared/types.js";
 import type { CardSearchResult } from "../../../shared/search.js";
 import { blocksAgentDoneManualEntry } from "../../../shared/column-transitions.js";
+import { COLUMN_LABELS } from "../../lib/event-copy.js";
 import { DECK_BACK_OFFSETS_PX, dragSelectionIds } from "./drag-selection.js";
 import { Column } from "./Column.js";
 import { CardView } from "./CardView.js";
@@ -274,10 +276,28 @@ export function Board({
     setActiveCardId(id);
   }
 
+  const announcements: Announcements = {
+    ...defaultAnnouncements,
+    onDragStart({ active }) {
+      const ids = dragSelectionIds(String(active.id), selectedIds);
+      if (ids == null) return defaultAnnouncements.onDragStart({ active });
+      return `Picked up ${ids.length} selected tickets.`;
+    },
+    onDragEnd({ active, over }) {
+      const ids = dragSelectionIds(String(active.id), selectedIds);
+      if (ids == null) return defaultAnnouncements.onDragEnd({ active, over });
+      if (over != null && isColumn(over.id)) {
+        return `Moved ${ids.length} tickets to ${COLUMN_LABELS[over.id]}.`;
+      }
+      return `${ids.length} tickets returned to their original position.`;
+    },
+  };
+
   return (
     <>
       <DndContext
         sensors={sensors}
+        accessibility={{ announcements }}
         onDragStart={handleDragStart}
         onDragEnd={(e) => {
           setActiveCardId(null);
