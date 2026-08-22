@@ -18,7 +18,6 @@ import { Button } from "../../primitives/Button.js";
 import { Notice } from "../../primitives/Notice.js";
 import { CardTimeline } from "./CardTimeline.js";
 import { PanelHeader } from "./PanelHeader.js";
-import { PrRow } from "./PrRow.js";
 import { PreviewRow } from "./PreviewRow.js";
 import { UnknownProbeRow } from "./UnknownProbeRow.js";
 import { ReferenceBlocks } from "./ReferenceBlocks.js";
@@ -638,9 +637,7 @@ export function DetailPanel({
                   )}
 
                   {c != null &&
-                    (c.prsUnknown != null ||
-                      c.previewsUnknown != null ||
-                      (c.prs != null && c.prs.length > 0) ||
+                    (c.previewsUnknown != null ||
                       (c.previews != null && c.previews.length > 0)) && (
                       <div
                         className="reading-surface"
@@ -651,16 +648,6 @@ export function DetailPanel({
                           borderBottom: "1px solid var(--border)",
                         }}
                       >
-                        {c.prs?.map((pr) => (
-                          <PrRow key={pr.url} pr={pr} />
-                        ))}
-                        {c.prsUnknown != null && (
-                          <UnknownProbeRow
-                            signal="pr"
-                            category={c.prsUnknown.category}
-                            partial={(c.prs?.length ?? 0) > 0}
-                          />
-                        )}
                         {c.previews?.map((preview) => (
                           <PreviewRow key={preview.port} preview={preview} />
                         ))}

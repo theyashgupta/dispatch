@@ -6,6 +6,7 @@ import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { Markdown } from "../../primitives/Markdown.js";
 import { Notice } from "../../primitives/Notice.js";
+import { PrList } from "./PrList.js";
 
 interface ReferenceBlocksProps {
   card: CardModel | null;
@@ -43,6 +44,8 @@ export function ReferenceBlocks({
           ))}
         </div>
       )}
+
+      {c != null && <PrList card={c} />}
 
       {c != null && c.description != null && c.description.trim() !== "" ? (
         <div
