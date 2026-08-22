@@ -71,12 +71,16 @@
  *
  * Usage:
  *   node scripts/panel-100.mjs                       every registered check, exits non-zero on any
- *                                                       violation. This plan (100-01) registers two:
+ *                                                       violation. Plan 01 registered two:
  *                                                       single-card-unchanged | keyboard-unchanged.
- *                                                       Later plans in this phase (stacked-overlay,
- *                                                       group-modal-prefill, atomic-rollback, a11y)
- *                                                       extend CHECKS/BREAKS without touching this
- *                                                       scaffold.
+ *                                                       Plan 05 (this revision) added three more:
+ *                                                       stacked-overlay | overlay-unchanged-n1 |
+ *                                                       a11y, registered BEFORE plan 01's two in
+ *                                                       CHECKS (see PLAN 100-05 ADDITIONS below,
+ *                                                       "CHECKS' insertion order is LOAD-BEARING").
+ *                                                       group-modal-prefill/atomic-rollback remain
+ *                                                       for a later plan to extend CHECKS/BREAKS
+ *                                                       without touching this scaffold.
  *   node scripts/panel-100.mjs --check <name>         one named check only.
  *   node scripts/panel-100.mjs --break <name>         that check's OWN break: fires the SAME check
  *                                                       function the real run uses against a DOM
@@ -85,16 +89,79 @@
  *                                                       and re-confirms PASS, all inside one Chrome
  *                                                       tab. Never edits a source file.
  *
- * BREAK EVIDENCE, both checks run under `--break <name>` for real and observed reporting their own
- * violation. The quoted lines below are the VERBATIM TRIP-leg output captured from those runs:
+ * BREAK EVIDENCE, all five checks run under `--break <name>` for real and observed reporting their
+ * own violation. The quoted lines below are the VERBATIM TRIP-leg output captured from those runs:
  *   - `single-card-unchanged` proven able to fail: removing the `done` column's droppable DOM node
  *     (behind a same-size placeholder so no sibling column reflows) BEFORE the drag starts produced
  *     `single-card-unchanged: MSD-A expected column "done", measured "todo"`.
  *   - `keyboard-unchanged` proven able to fail: detaching MSD-B's MoveToPicker "Done" entry before
  *     the click produced `keyboard-unchanged: MSD-B expected column "done", measured "todo"`.
- * Both `--break <name>` runs' restore legs re-confirmed PASS (`tripFired=true restoreClean=true`
- * for each), and a plain `node scripts/panel-100.mjs` run immediately after both breaks exited 0,
- * proving no break leaked DOM state.
+ *   - `stacked-overlay` proven able to fail (100-05): rewriting the 4px back face's inline
+ *     `transform` to `translate(4px, 10px)` mid-drag produced
+ *     `stacked-overlay: leg A (N=3), 4px back face transform expected "matrix(1, 0, 0, 1, 4, 4)",
+ *     measured "matrix(1, 0, 0, 1, 4, 10)"` AND
+ *     `stacked-overlay: leg A (N=3), 4px back face rect expected left=1365.00 top=145.00
+ *     width=206.00 height=91.19 (front rect translated by (4,4)), measured left=1365.00 top=151.00
+ *     width=206.00 height=91.19`.
+ *   - `overlay-unchanged-n1` proven able to fail (100-05): inserting an absolutely positioned
+ *     inset:0 intruder `<div>` as a sibling of the N<=1 overlay's own card root, mid-drag, produced
+ *     `overlay-unchanged-n1: N=0 leg, expected exactly 1 face-level element directly under the
+ *     fixed overlay node, measured 2`,
+ *     `overlay-unchanged-n1: N=0 leg, found an unexpected absolutely-positioned inset:0 descendant
+ *     (a deck back face) inside the N<=1 overlay`, AND
+ *     `overlay-unchanged-n1: N=0 leg, fixed overlay node's own descendant-element count expected 10
+ *     (the card root itself plus its own subtree, nothing else), measured 11`.
+ *   - `a11y` proven able to fail (100-05): removing the `aria-hidden` attribute from the deck
+ *     container mid-drag produced `a11y: deck container aria-hidden expected "true", measured null`
+ *     AND `a11y: badge's closest [aria-hidden="true"] ancestor is not the deck container, the count
+ *     is not inside the hidden subtree`.
+ * All five `--break <name>` runs' restore legs re-confirmed PASS (`tripFired=true restoreClean=true`
+ * for each), and a plain `node scripts/panel-100.mjs` run immediately after all five breaks exited 0
+ * with all five checks PASS, proving no break leaked DOM state.
+ *
+ * PLAN 100-05 ADDITIONS AND FINDINGS, load-bearing for anyone extending this file further:
+ *   - `selectCardsByIdentifier`/`ctrlClickCard` use CDP's Meta/Command modifier bit (`modifiers: 4`),
+ *     NOT Ctrl (`modifiers: 2`), for the multi-select click. Diagnosed against an isolated `data:`
+ *     URL test page on this machine's Chrome (151.0.7922.170, `--headless=new`): `modifiers: 2`
+ *     dispatches real `mousedown`/`mouseup` events but NEVER synthesizes the follow-up native
+ *     `click` event, matching macOS's own "Control+click == secondary click" convention (Chrome
+ *     routes it toward a context-menu gesture); `modifiers: 4` produces a normal `click` with
+ *     `metaKey: true`, which `Card.tsx`'s own `event.metaKey || event.ctrlKey` eligibility check
+ *     already accepts. Platform-specific; budget for it if this harness ever runs on Linux/Windows
+ *     Chrome, where plain Ctrl is very likely correct.
+ *   - `moveDragTo` (a mid-drag relocation to a DIFFERENT column than `beginDrag`'s own target,
+ *     used for every "harmless same-column drop" check in this file) MUST actually dispatch a real
+ *     `mouseMoved` to the new point before `endDrag`: dnd-kit resolves `over` from the LAST real
+ *     `mousemove` coordinates, never from `mouseReleased`'s own x/y, so releasing at a different
+ *     point than the drag's last move does not change where the drop resolves. A single move
+ *     without a settle sleep also raced dnd-kit's own collision re-measurement in this harness
+ *     (observed once: the card landed in an unrelated intermediate column); `moveDragTo` now
+ *     dispatches the move TWICE with a 150ms settle sleep after each.
+ *   - `FIND_FIXED_OVERLAY_SRC` (locates the TRUE dnd-kit `position: fixed` `DragOverlay` wrapper,
+ *     distinct from plan 01's `FIND_OVERLAY_SRC`, which keys on this phase's own `aria-hidden`/
+ *     `inert` attributes) filters candidates by cheap `textContent` string search BEFORE calling
+ *     `getComputedStyle()`, never the reverse: computing style for every element under `#root`
+ *     measurably degraded this harness under repeated drags in one long session.
+ *   - `a11y`'s own reading locates the deck container via `FIND_FIXED_OVERLAY_SRC` (its wrapper's
+ *     single child), never via `FIND_OVERLAY_SRC`'s `aria-hidden`/`inert` selector: the `a11y`
+ *     break REMOVES `aria-hidden` from that exact node, so a locator keyed on that same attribute
+ *     would go blind the instant the attribute changes and silently resolve to the wrong node (the
+ *     inner `CardView`, which also carries its own separate `aria-hidden`/`inert` pair) instead of
+ *     reporting the real violation, a live instance of the standing Trap 3 rule.
+ *   - `CDP.send()` now carries a 20s per-call timeout (default `timeoutMs`, see the class itself):
+ *     empirically, this harness's headless renderer occasionally stops responding to
+ *     `Runtime.evaluate` after several consecutive real drags in one long-lived tab (a genuine
+ *     renderer stall, not a bug traced to any one check's own JS; zero console/exception output
+ *     accompanies it). `freshBoardSession()` opens a genuinely NEW Chrome target/tab (a same-tab
+ *     `Page.navigate` reload does not recover once the renderer is already stuck, since the reload
+ *     command itself queues in the same stalled renderer) and is used both between a break's TRIP
+ *     and RESTORE legs and between successive checks in a multi-check `CHECKS` run; the very first
+ *     check in a run reuses the already-loaded standup session.
+ *   - `CHECKS`' insertion order is LOAD-BEARING: `stacked-overlay`/`overlay-unchanged-n1`/`a11y` are
+ *     registered BEFORE `single-card-unchanged`/`keyboard-unchanged`, since the latter two
+ *     PERMANENTLY drag MSD-A and MSD-B into `done` (that IS what they assert), which would make
+ *     those two cards ineligible for a later ctrl-click (`Card.tsx` requires `column === "todo"`)
+ *     if they ran first in the same full-suite invocation.
  *
  * TIMING FINDING, load-bearing for the `single-card-unchanged` break specifically, and worth
  * recording since it corrects this plan's own `<interfaces>` block: dnd-kit caches a droppable's
@@ -349,12 +416,38 @@ class CDP {
     });
   }
 
-  send(method, params = {}, sessionId) {
+  /**
+   * `timeoutMs` is a defensive bound, not a normal-path concern: every CDP round trip this file
+   * issues completes in well under a second. Its purpose is to turn a genuinely lost response (a
+   * message the renderer never sends back, observed empirically in this harness under sustained
+   * multi-drag sessions) into a diagnosable rejection instead of hanging the whole process forever,
+   * since `this.pending`'s resolve/reject pair otherwise has no other way to ever settle.
+   */
+  send(method, params = {}, sessionId, timeoutMs = 20_000) {
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
       const payload = { id, method, params };
       if (sessionId) payload.sessionId = sessionId;
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        if (this.pending.has(id)) {
+          this.pending.delete(id);
+          reject(
+            new Error(
+              `CDP.send: no response to ${method} (id ${id}) within ${timeoutMs}ms, the renderer likely stalled`,
+            ),
+          );
+        }
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        reject: (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      });
       this.ws.send(JSON.stringify(payload));
     });
   }
@@ -575,6 +668,41 @@ async function waitForBoardRootLoaded(cdp, sessionId, identifiers) {
   throw new Error(
     `initial board load never rendered every fixture identifier within ${RENDER_TIMEOUT_MS}ms`,
   );
+}
+
+/**
+ * Opens a BRAND NEW Chrome target/tab against the sandbox root, attaches to it, enables the same
+ * domains and viewport `main()` sets up on the original tab, and waits for the board to paint.
+ * Returns the NEW `sessionId`. Used between a break's TRIP leg and its RESTORE leg (both of which
+ * run a full multi-drag check a second time): empirically, this harness's headless renderer
+ * occasionally stops responding to `Runtime.evaluate` mid-check after several consecutive real
+ * drags in one long-lived page session (observed as an indefinite hang with zero further
+ * console/exception output). A same-tab `Page.navigate` reload does NOT recover from this, since by
+ * the time the renderer is unresponsive, the reload command is queued in the SAME stuck renderer
+ * and never completes either (confirmed empirically: it hits its own polling timeout). A genuinely
+ * fresh target/renderer process sidesteps whatever degraded the old one; the old (possibly stuck)
+ * tab is deliberately left open rather than torn down here (closing it risks the SAME hang this
+ * function exists to avoid), and is cleaned up regardless once `main()`'s `finally` block kills the
+ * whole Chrome process at the end of this script's run.
+ */
+async function freshBoardSession(cdp, identifiers) {
+  const { targetId } = await cdp.send("Target.createTarget", {
+    url: `http://127.0.0.1:${SANDBOX_PORT}/`,
+  });
+  const { sessionId } = await cdp.send("Target.attachToTarget", {
+    targetId,
+    flatten: true,
+  });
+  await cdp.send("Page.enable", {}, sessionId);
+  await cdp.send("Runtime.enable", {}, sessionId);
+  await cdp.send("Console.enable", {}, sessionId);
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+  await waitForBoardRootLoaded(cdp, sessionId, identifiers);
+  return sessionId;
 }
 
 function statRealBoardDb() {
@@ -1908,9 +2036,189 @@ async function checkOverlayUnchangedN1(
   }
 }
 
+/**
+ * `a11y`: selects MSD-A/B/C (N=3), samples `SelectionBar` text, drags MSD-B toward `done` (release
+ * always lands back on `todo`, harmless), and while the button is down asserts the deck container
+ * carries `aria-hidden="true"` and `inert` with the badge inside that hidden subtree, the
+ * `DndLiveRegion` announces `"Picked up 3 selected tickets."`, MSD-A/MSD-C (selected, not grabbed)
+ * are `opacity: 0.4` while MSD-D (unselected) stays `1`, and the `SelectionBar` text is still exactly
+ * `"3 selected"`. Samples a THIRD time after the drop; all three samples are reported together on any
+ * mismatch, since the checker addendum's whole point is continuous availability, not just the ends.
+ * `mutateHook`/`restoreHook` mirror the other two checks' own discipline.
+ */
+async function checkA11y(
+  cdp,
+  sessionId,
+  violations,
+  mutateHook = null,
+  restoreHook = null,
+) {
+  // dnd-kit's live region reflects only the LATEST announcement: React updates the SAME Text node's
+  // `.nodeValue` in place (the `<div>{announcement}</div>` structure never changes shape, only the
+  // string does), and the pointer's very first post-activation collision measurement resolves `over`
+  // (even to the card's OWN source column) within the SAME synchronous render/commit sequence that
+  // set "Picked up N selected tickets.", so the browser never paints the intermediate value and a
+  // plain point-in-time DOM read (or even a MutationObserver callback that reads `live.textContent`
+  // AFTER the fact) only ever observes the FINAL value. `characterDataOldValue: true` is the fix:
+  // each individual characterData MutationRecord's `oldValue` captures the value that was ACTUALLY
+  // live for that specific mutation step, letting this harness reconstruct the full sequence of
+  // values the live region held, not just whichever one happened to still be current when read.
+  await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var live = document.querySelector('div[role="status"][aria-live="assertive"][id^="DndLiveRegion"]');
+      if (!live) throw new Error("panel100: DndLiveRegion node not found to install the announcement observer");
+      window.__panel100LiveRegionHistory = [];
+      if (!window.__panel100LiveRegionObserverInstalled) {
+        var observer = new MutationObserver(function (mutations) {
+          mutations.forEach(function (m) {
+            if (m.type === "characterData" && m.oldValue != null) {
+              window.__panel100LiveRegionHistory.push(m.oldValue);
+            }
+          });
+          window.__panel100LiveRegionHistory.push(live.textContent);
+        });
+        observer.observe(live, {
+          characterData: true,
+          characterDataOldValue: true,
+          childList: true,
+          subtree: true,
+        });
+        window.__panel100LiveRegionObserverInstalled = true;
+      }
+      return true;
+    })()`,
+  );
+
+  await selectCardsByIdentifier(cdp, sessionId, [
+    MSD_A_IDENTIFIER,
+    MSD_B_IDENTIFIER,
+    MSD_C_IDENTIFIER,
+  ]);
+  const sample1 = await readSelectionText(cdp, sessionId);
+
+  const doneTarget = await columnDropPoint(cdp, sessionId, "done");
+  const todoTarget = await columnDropPoint(cdp, sessionId, "todo");
+  await beginDrag(cdp, sessionId, "todo", MSD_B_IDENTIFIER, doneTarget);
+  await assertDragActivated(cdp, sessionId, MSD_B_IDENTIFIER);
+
+  if (mutateHook) await mutateHook(cdp, sessionId);
+
+  const sample2 = await readSelectionText(cdp, sessionId);
+
+  const reading = await evalValue(
+    cdp,
+    sessionId,
+    `${FIND_CARD_SRC}${FIND_FIXED_OVERLAY_SRC}(function () {
+      // Locates the deck container via the TRUE dnd-kit fixed-position wrapper's own single child,
+      // never via the [aria-hidden="true"][inert] selector FIND_OVERLAY_SRC itself uses: this
+      // check's own break REMOVES aria-hidden from the deck container, and keying the lookup on
+      // that same attribute would make the locator itself blind the instant the attribute changes
+      // (Trap 3, the standing rule every check in this phase must honor).
+      var fixedNode = panel100FindFixedOverlayNode(${JSON.stringify(MSD_B_IDENTIFIER)});
+      if (!fixedNode) throw new Error("panel100: fixed overlay node not found for MSD-B");
+      var overlay = fixedNode.children[0];
+      if (!overlay) throw new Error("panel100: deck overlay not found for MSD-B");
+      var kids = Array.prototype.slice.call(overlay.children);
+      var badge = kids.find(function (el) {
+        var s = getComputedStyle(el);
+        var text = (el.textContent || "").trim();
+        return s.position === "absolute" && /^\\d+$/.test(text);
+      });
+      function opacityOf(identifier) {
+        var el = panel100FindCardRoot(identifier);
+        return getComputedStyle(el).opacity;
+      }
+      return {
+        deckAriaHidden: overlay.getAttribute("aria-hidden"),
+        deckInert: overlay.hasAttribute("inert"),
+        badgeFound: badge != null,
+        badgeInsideHidden: badge ? badge.closest('[aria-hidden="true"]') === overlay : false,
+        opacityA: opacityOf(${JSON.stringify(MSD_A_IDENTIFIER)}),
+        opacityC: opacityOf(${JSON.stringify(MSD_C_IDENTIFIER)}),
+        opacityD: opacityOf(${JSON.stringify(MSD_D_IDENTIFIER)}),
+        liveRegionHistory: window.__panel100LiveRegionHistory || [],
+      };
+    })()`,
+  );
+
+  if (restoreHook) await restoreHook(cdp, sessionId);
+
+  if (reading.deckAriaHidden !== "true") {
+    violations.push(
+      `a11y: deck container aria-hidden expected "true", measured ${JSON.stringify(reading.deckAriaHidden)}`,
+    );
+  }
+  if (!reading.deckInert) {
+    violations.push(
+      `a11y: deck container expected the inert attribute present, measured absent`,
+    );
+  }
+  if (!reading.badgeFound) {
+    violations.push(`a11y: count badge not found in the deck overlay`);
+  } else if (!reading.badgeInsideHidden) {
+    violations.push(
+      `a11y: badge's closest [aria-hidden="true"] ancestor is not the deck container, the count is not inside the hidden subtree`,
+    );
+  }
+  if (reading.opacityA !== "0.4") {
+    violations.push(
+      `a11y: MSD-A (selected, not grabbed) expected opacity "0.4", measured ${JSON.stringify(reading.opacityA)}`,
+    );
+  }
+  if (reading.opacityC !== "0.4") {
+    violations.push(
+      `a11y: MSD-C (selected, not grabbed) expected opacity "0.4", measured ${JSON.stringify(reading.opacityC)}`,
+    );
+  }
+  if (reading.opacityD !== "1") {
+    violations.push(
+      `a11y: MSD-D (not selected) expected opacity "1", measured ${JSON.stringify(reading.opacityD)}`,
+    );
+  }
+  const expectedLive = "Picked up 3 selected tickets.";
+  if (!reading.liveRegionHistory.includes(expectedLive)) {
+    violations.push(
+      `a11y: live region announcement history expected to include ${JSON.stringify(expectedLive)}, measured ${JSON.stringify(reading.liveRegionHistory)}`,
+    );
+  }
+
+  await moveDragTo(cdp, sessionId, todoTarget);
+  await endDrag(cdp, sessionId, todoTarget);
+
+  const sample3 = await readSelectionText(cdp, sessionId);
+  const samples = { sample1, sample2, sample3 };
+  for (const [name, value] of Object.entries(samples)) {
+    if (value !== "3 selected") {
+      violations.push(
+        `a11y: SelectionBar text mismatch, ${name} expected "3 selected", measured ${JSON.stringify(value)}; ` +
+          `all samples: sample1=${JSON.stringify(sample1)} sample2=${JSON.stringify(sample2)} sample3=${JSON.stringify(sample3)}`,
+      );
+    }
+  }
+
+  for (const id of [
+    MSD_A_IDENTIFIER,
+    MSD_B_IDENTIFIER,
+    MSD_C_IDENTIFIER,
+    MSD_D_IDENTIFIER,
+  ]) {
+    const col = await pollUntilColumn(cdp, sessionId, id, "todo", 2000);
+    if (col !== "todo") {
+      violations.push(
+        `a11y: ${id} expected column "todo" after the harmless same-column drop, measured ${JSON.stringify(col)}`,
+      );
+    }
+  }
+
+  await clearSelectionViaEscape(cdp, sessionId);
+}
+
 const CHECKS = {
   "stacked-overlay": checkStackedOverlay,
   "overlay-unchanged-n1": checkOverlayUnchangedN1,
+  a11y: checkA11y,
   "single-card-unchanged": checkSingleCardUnchanged,
   "keyboard-unchanged": checkKeyboardUnchanged,
 };
@@ -2103,7 +2411,262 @@ async function runBreakKeyboardUnchanged(cdp, sessionId) {
   };
 }
 
+/**
+ * `stacked-overlay` break: mid-drag (mouse still down, deck confirmed present via
+ * `assertDragActivated`), rewrites the 4px back face's OWN inline `transform` to
+ * `translate(4px, 10px)`, stashing the captured original value on `window`. The trip must report a
+ * named transform mismatch AND a named rect mismatch, never "face not found" (the face is still
+ * there, only its offset is wrong). The restore leg puts the captured value back on the SAME node
+ * while the drag is still active, before `endDrag`.
+ */
+async function runBreakStackedOverlay(cdp, sessionId) {
+  console.log(
+    "\n--break stacked-overlay: rewriting the 4px back face's inline transform to translate(4px, 10px) mid-drag",
+  );
+  const mutateHook = async (cdpArg, sessionIdArg) => {
+    await evalValue(
+      cdpArg,
+      sessionIdArg,
+      `${FIND_OVERLAY_SRC}(function () {
+        var overlay = panel100FindOverlayNode(${JSON.stringify(MSD_B_IDENTIFIER)});
+        if (!overlay) throw new Error("panel100 break: deck overlay not found for MSD-B");
+        var kids = Array.prototype.slice.call(overlay.children);
+        var target = kids.find(function (el) {
+          var s = getComputedStyle(el);
+          return s.position === "absolute" && s.borderRadius === "6px" && el.children.length === 0 &&
+            (el.textContent || "").trim() === "" && s.transform === "matrix(1, 0, 0, 1, 4, 4)";
+        });
+        if (!target) throw new Error("panel100 break: 4px back face not found for MSD-B");
+        window.__panel100BreakFaceNode = target;
+        window.__panel100BreakFaceOriginalTransform = target.style.transform;
+        target.style.transform = "translate(4px, 10px)";
+        return true;
+      })()`,
+    );
+  };
+  const restoreHook = async (cdpArg, sessionIdArg) => {
+    await evalValue(
+      cdpArg,
+      sessionIdArg,
+      `(function () {
+        var node = window.__panel100BreakFaceNode;
+        if (node && document.contains(node)) {
+          node.style.transform = window.__panel100BreakFaceOriginalTransform;
+        }
+        delete window.__panel100BreakFaceNode;
+        delete window.__panel100BreakFaceOriginalTransform;
+        return true;
+      })()`,
+    );
+  };
+
+  const tripViolations = [];
+  await checkStackedOverlay(
+    cdp,
+    sessionId,
+    tripViolations,
+    mutateHook,
+    restoreHook,
+  );
+  console.log(
+    `--break stacked-overlay TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired =
+    tripViolations.some(
+      (v) =>
+        v.indexOf("4px back face transform expected") !== -1 &&
+        v.indexOf('"matrix(1, 0, 0, 1, 4, 4)"') !== -1,
+    ) &&
+    tripViolations.some((v) => v.indexOf("4px back face rect expected") !== -1);
+
+  // A fresh tab before the restore leg both (a) discards checkStackedOverlay's deliberate leftover
+  // 3-selection (task 1's own "return the board to a 3-selection for the next check" cleanup, which
+  // would otherwise make the restore leg's ctrl-clicks TOGGLE MSD-A/B/C OFF instead of re-selecting
+  // them) and (b) sidesteps this harness's renderer occasionally stalling between two consecutive
+  // full multi-drag check runs in one tab, see `freshBoardSession`'s own header.
+  const restoreSessionId = await freshBoardSession(cdp, TOP_LEVEL_IDENTIFIERS);
+  const restoreViolations = [];
+  await checkStackedOverlay(
+    cdp,
+    restoreSessionId,
+    restoreViolations,
+    null,
+    null,
+  );
+  console.log(
+    `--break stacked-overlay RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
+/**
+ * `overlay-unchanged-n1` break: mid-drag (N=0 leg, deck confirmed present via `assertDragActivated`),
+ * inserts one `position: absolute` inset:0 intruder `<div>` as a SIBLING of the overlay's own card
+ * root, directly under the fixed dnd-kit overlay node (simulating a leaked back face inside the
+ * N<=1 overlay, exactly the regression shape `overlay-unchanged-n1`'s own comment calls "the N<=1
+ * overlay having drifted"). Deliberately a SIBLING, not a descendant reached by mutating INSIDE the
+ * actively-dragged `CardView` subtree: that subtree is under React's own live reconciliation for the
+ * whole duration of the drag, and an earlier draft of this break that appended a child directly
+ * inside it produced intermittent hangs/crashes (a raw DOM mutation racing a concurrent React
+ * commit). The fixed overlay node's OWN children only change at drag start/end, never per-frame, so
+ * inserting a sibling there is safe. The trip must report BOTH the absolutely-positioned inset:0
+ * descendant violation AND a descendant-element-count mismatch (the intruder is a real extra node,
+ * not a removed one, so "not found" never fires).
+ */
+async function runBreakOverlayUnchangedN1(cdp, sessionId) {
+  console.log(
+    "\n--break overlay-unchanged-n1: inserting an absolutely positioned inset:0 intruder div as a sibling of the N<=1 overlay's card root, mid-drag",
+  );
+  const mutateHook = async (cdpArg, sessionIdArg) => {
+    await evalValue(
+      cdpArg,
+      sessionIdArg,
+      `${FIND_FIXED_OVERLAY_SRC}(function () {
+        var fixedNode = panel100FindFixedOverlayNode(${JSON.stringify(MSD_A_IDENTIFIER)});
+        if (!fixedNode) throw new Error("panel100 break: fixed overlay node not found for MSD-A");
+        var intruder = document.createElement("div");
+        intruder.setAttribute("data-panel100-break-intruder", "true");
+        intruder.style.cssText = "position: absolute; top: 0; right: 0; bottom: 0; left: 0;";
+        fixedNode.appendChild(intruder);
+        window.__panel100BreakIntruder = intruder;
+        return true;
+      })()`,
+    );
+  };
+  const restoreHook = async (cdpArg, sessionIdArg) => {
+    await evalValue(
+      cdpArg,
+      sessionIdArg,
+      `(function () {
+        var node = window.__panel100BreakIntruder;
+        if (node && document.contains(node)) node.remove();
+        delete window.__panel100BreakIntruder;
+        return true;
+      })()`,
+    );
+  };
+
+  const tripViolations = [];
+  await checkOverlayUnchangedN1(
+    cdp,
+    sessionId,
+    tripViolations,
+    mutateHook,
+    restoreHook,
+  );
+  console.log(
+    `--break overlay-unchanged-n1 TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired =
+    tripViolations.some(
+      (v) =>
+        v.indexOf("N=0 leg") !== -1 &&
+        v.indexOf("absolutely-positioned inset:0 descendant") !== -1,
+    ) &&
+    tripViolations.some(
+      (v) =>
+        v.indexOf("N=0 leg") !== -1 &&
+        (v.indexOf("descendant-element count expected") !== -1 ||
+          v.indexOf("expected exactly 1 face-level element") !== -1),
+    );
+
+  // A fresh tab sidesteps this harness's renderer occasionally stalling between two consecutive
+  // full multi-drag check runs, see `freshBoardSession`'s own header.
+  const restoreSessionId = await freshBoardSession(cdp, TOP_LEVEL_IDENTIFIERS);
+  const restoreViolations = [];
+  await checkOverlayUnchangedN1(
+    cdp,
+    restoreSessionId,
+    restoreViolations,
+    null,
+    null,
+  );
+  console.log(
+    `--break overlay-unchanged-n1 RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
+/**
+ * `a11y` break: mid-drag (deck confirmed present via `assertDragActivated`), removes the
+ * `aria-hidden` attribute from the deck container, stashing the captured original value on `window`.
+ * The trip must report that the badge's closest `[aria-hidden="true"]` ancestor is no longer the
+ * deck container (the count is no longer inside the hidden subtree), never "not found" (the badge
+ * itself is untouched, only its hidden-subtree membership breaks).
+ */
+async function runBreakA11y(cdp, sessionId) {
+  console.log(
+    "\n--break a11y: removing the aria-hidden attribute from the deck container mid-drag",
+  );
+  const mutateHook = async (cdpArg, sessionIdArg) => {
+    await evalValue(
+      cdpArg,
+      sessionIdArg,
+      `${FIND_OVERLAY_SRC}(function () {
+        var overlay = panel100FindOverlayNode(${JSON.stringify(MSD_B_IDENTIFIER)});
+        if (!overlay) throw new Error("panel100 break: deck overlay not found for MSD-B");
+        window.__panel100BreakDeckNode = overlay;
+        window.__panel100BreakDeckAriaHidden = overlay.getAttribute("aria-hidden");
+        overlay.removeAttribute("aria-hidden");
+        return true;
+      })()`,
+    );
+  };
+  const restoreHook = async (cdpArg, sessionIdArg) => {
+    await evalValue(
+      cdpArg,
+      sessionIdArg,
+      `(function () {
+        var node = window.__panel100BreakDeckNode;
+        var original = window.__panel100BreakDeckAriaHidden;
+        if (node && document.contains(node) && original != null) {
+          node.setAttribute("aria-hidden", original);
+        }
+        delete window.__panel100BreakDeckNode;
+        delete window.__panel100BreakDeckAriaHidden;
+        return true;
+      })()`,
+    );
+  };
+
+  const tripViolations = [];
+  await checkA11y(cdp, sessionId, tripViolations, mutateHook, restoreHook);
+  console.log(
+    `--break a11y TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired = tripViolations.some(
+    (v) =>
+      v.indexOf("badge's closest") !== -1 &&
+      v.indexOf("not the deck container") !== -1,
+  );
+
+  // A fresh tab sidesteps this harness's renderer occasionally stalling between two consecutive
+  // full multi-drag check runs, see `freshBoardSession`'s own header.
+  const restoreSessionId = await freshBoardSession(cdp, TOP_LEVEL_IDENTIFIERS);
+  const restoreViolations = [];
+  await checkA11y(cdp, restoreSessionId, restoreViolations, null, null);
+  console.log(
+    `--break a11y RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
 const BREAKS = {
+  "stacked-overlay": runBreakStackedOverlay,
+  "overlay-unchanged-n1": runBreakOverlayUnchangedN1,
+  a11y: runBreakA11y,
   "single-card-unchanged": runBreakSingleCardUnchanged,
   "keyboard-unchanged": runBreakKeyboardUnchanged,
 };
@@ -2173,7 +2736,7 @@ async function main() {
     const { targetId } = await cdp.send("Target.createTarget", {
       url: `http://127.0.0.1:${SANDBOX_PORT}/`,
     });
-    const { sessionId } = await cdp.send("Target.attachToTarget", {
+    let { sessionId } = await cdp.send("Target.attachToTarget", {
       targetId,
       flatten: true,
     });
@@ -2207,7 +2770,15 @@ async function main() {
       breakResult = await BREAKS[breakName](cdp, sessionId);
     } else {
       const names = checkName != null ? [checkName] : Object.keys(CHECKS);
-      for (const n of names) {
+      for (let i = 0; i < names.length; i++) {
+        const n = names[i];
+        if (i > 0) {
+          // A fresh tab per check in a multi-check run sidesteps this harness's renderer
+          // occasionally stalling after several consecutive real drags in one long-lived page
+          // session (see `freshBoardSession`'s own header); the very first check reuses the
+          // already-loaded standup session, no need to pay the extra reload cost twice.
+          sessionId = await freshBoardSession(cdp, TOP_LEVEL_IDENTIFIERS);
+        }
         console.log(`\n=== running check: ${n} ===`);
         const before = violations.length;
         try {
