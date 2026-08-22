@@ -1,5 +1,6 @@
+import { realpathSync } from "node:fs";
 import net from "node:net";
-import { basename, sep } from "node:path";
+import { basename, join, sep } from "node:path";
 import type { Card, PreviewInfo, Session } from "../../shared/types.js";
 import {
   probePrsForBranch,
@@ -186,6 +187,73 @@ function repoDisplayNames(repoPaths: string[]): Map<string, string> {
     });
   }
   return names;
+}
+
+/**
+ * The worktree directory `services/domain/workspace-paths.ts`'s `worktreePath()` would compute for
+ * `repoPath` under `workspacePath`, reproduced locally rather than imported.
+ *
+ * @remarks
+ * `boundaries/dependencies` allows the `adapters` tier to import only
+ * `adapters|sources|store|shared` (`eslint.config.ts`), so importing a `services/domain` helper
+ * from this file is a lint error, not a style choice; `store/board-db.ts`'s
+ * `readWorkspaceRegistry` sets the identical "the caller owns the join" precedent for the same
+ * tier gap.
+ */
+function worktreeDirFor(workspacePath: string, repoPath: string): string {
+  return join(workspacePath, basename(repoPath));
+}
+
+/**
+ * `realpathSync`, degraded to `null` on any failure instead of throwing.
+ * @remarks A path can vanish between the `lsof` scan that reported it and this check; a single
+ * stale symlink must never throw a whole detection tick.
+ */
+function safeRealpath(p: string): string | null {
+  try {
+    return realpathSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether `rawCwd` resolves inside `workspace`, the cwd cross-check for the pane-pid walk's
+ * attribution.
+ *
+ * @remarks
+ * Both sides are realpath-normalized before comparison: macOS resolves `/tmp` and
+ * `os.tmpdir()` through `/private/...`, `lsof` reports the realpath, and `workspaceRoot` is
+ * user-configurable, so a naive string-prefix compare would fail on any symlinked path
+ * component in production, not just in this repo's own sandbox harness convention (T-99-01).
+ * Returns `null` (inconclusive) when either side fails to resolve, the caller must degrade to
+ * pane-ancestry evidence, never synthesize a mismatch from an unresolved path. `displayNames`
+ * is a PARAMETER: the caller must compute it over every repo path the CARD owns across all its
+ * sessions, the same scope `repoDisplayNames` already requires for `PrInfo.repo`, never one
+ * session's own `workspace.repos` alone (the 98-REVIEW WR-04 defect).
+ * @see docs/ARCHITECTURE.md#dev-server-preview-detection
+ * @public This wave lands the cross-check only; the evidence-assembly task in this same plan
+ * wires the call site.
+ */
+export function matchWorkspace(
+  rawCwd: string,
+  workspace: { folder: string; repos: { path: string; base: string }[] },
+  displayNames: Map<string, string>,
+): { inWorkspace: boolean; repoBasename?: string } | null {
+  const cwd = safeRealpath(rawCwd);
+  if (cwd == null) return null;
+
+  for (const repo of workspace.repos) {
+    const worktree = safeRealpath(worktreeDirFor(workspace.folder, repo.path));
+    if (worktree == null) continue;
+    if (cwd === worktree || cwd.startsWith(worktree + sep)) {
+      return { inWorkspace: true, repoBasename: displayNames.get(repo.path) };
+    }
+  }
+
+  const folder = safeRealpath(workspace.folder);
+  if (folder == null) return null;
+  return { inWorkspace: cwd === folder || cwd.startsWith(folder + sep) };
 }
 
 /**
