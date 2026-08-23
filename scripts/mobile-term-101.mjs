@@ -213,7 +213,10 @@ function assertBuilt() {
   if (headBuild !== null) return headBuild;
   const startedAt = Date.now();
   try {
-    execFileSync("npm", ["run", BUILD_SCRIPT], { cwd: REPO_ROOT, stdio: "pipe" });
+    execFileSync("npm", ["run", BUILD_SCRIPT], {
+      cwd: REPO_ROOT,
+      stdio: "pipe",
+    });
   } catch (err) {
     const detail = [err.stdout?.toString(), err.stderr?.toString()]
       .filter(Boolean)
@@ -509,7 +512,15 @@ function writeViewportFixtureBinary(home) {
  * binary itself (so its escape sequences actually reach the pane's pty) instead of a bare sleep
  * loop. */
 async function tmuxNewFixtureSession(name, cwd, binPath) {
-  await execFileP("tmux", ["new-session", "-d", "-s", name, "-c", cwd, binPath]);
+  await execFileP("tmux", [
+    "new-session",
+    "-d",
+    "-s",
+    name,
+    "-c",
+    cwd,
+    binPath,
+  ]);
 }
 
 /**
@@ -591,7 +602,9 @@ function spawnTtyd(session, sessionId) {
     });
     child.once("exit", (code) => {
       clearTimeout(timer);
-      reject(new Error(`ttyd exited early (code ${code}) for ${session}: ${buf}`));
+      reject(
+        new Error(`ttyd exited early (code ${code}) for ${session}: ${buf}`),
+      );
     });
   });
 }
@@ -730,7 +743,9 @@ async function tearDownFixture(handle) {
 
   await killAndWait(handle.server?.child);
   if (handle.server?.child && pidAlive(handle.server.child.pid)) {
-    problems.push(`server pid ${handle.server.child.pid} still alive after kill`);
+    problems.push(
+      `server pid ${handle.server.child.pid} still alive after kill`,
+    );
   }
 
   if (handle.ttyd?.child) {
@@ -757,7 +772,9 @@ async function tearDownFixture(handle) {
   );
   const liveAfter = await tmuxListSessionNames();
   if (liveAfter.includes(handle.tmuxName)) {
-    problems.push(`tmux session ${handle.tmuxName} still listed after kill-session`);
+    problems.push(
+      `tmux session ${handle.tmuxName} still listed after kill-session`,
+    );
   }
 
   if (handle.home) rmSync(handle.home, { recursive: true, force: true });
@@ -765,6 +782,255 @@ async function tearDownFixture(handle) {
   if (problems.length > 0) {
     throw new Error(`tearDownFixture: ${problems.join("; ")}`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Touch emulation, WS frame decode and the three activation self-proofs.
+// ---------------------------------------------------------------------------
+
+/** ttyd's wire protocol is binary-only, every webSocketFrameSent/Received event's payloadData
+ * arrives base64-encoded. "0" on a sent frame is INPUT, "0" on a received frame is OUTPUT, "1" sent
+ * is RESIZE, "1" received is TITLE (terminal-main.ts:12-13, :240-249). */
+function decodeTtydOp(payloadDataBase64) {
+  return String.fromCharCode(Buffer.from(payloadDataBase64, "base64")[0]);
+}
+
+/** One touchStart, `steps` touchMove events at even dy/steps intervals with a real sleep(cadenceMs)
+ * between each, then an immediate touchEnd with an empty touchPoints array. The per-move delta stays
+ * constant through the final move on purpose: a flick that decelerates into release correctly fails
+ * KINETIC.releaseWindowMs/minVelocity and never runs momentum, which would silently halve what proof
+ * C measures. */
+async function flick(cdp, sessionId, { x, y, dy, steps, cadenceMs }) {
+  await cdp.send(
+    "Input.dispatchTouchEvent",
+    { type: "touchStart", touchPoints: [{ x, y, id: 0 }] },
+    sessionId,
+  );
+  for (let i = 1; i <= steps; i++) {
+    await cdp.send(
+      "Input.dispatchTouchEvent",
+      {
+        type: "touchMove",
+        touchPoints: [{ x, y: y + (dy / steps) * i, id: 0 }],
+      },
+      sessionId,
+    );
+    await sleep(cadenceMs);
+  }
+  await cdp.send(
+    "Input.dispatchTouchEvent",
+    { type: "touchEnd", touchPoints: [] },
+    sessionId,
+  );
+}
+
+/**
+ * Harness-injected page script, zero additions to src/, installed AFTER main() has already run so
+ * attachKineticScroll's own capture-phase document listener is already registered.
+ * @remarks A bubble-phase probe cannot see this signal: attachKineticScroll's touchmove listener
+ * calls e.stopPropagation() on document in the CAPTURE phase, the instant slopPx clears, which halts
+ * the event before it ever reaches the target and therefore before it ever bubbles back up to a
+ * bubble-phase listener on the same node, live-confirmed by this harness's own first run measuring
+ * moves:0 despite 25 real INPUT frames landing on the wire. Same-node listeners in the SAME phase
+ * still fire in registration order regardless of an earlier one calling stopPropagation() (only
+ * stopImmediatePropagation prevents that), so registering this probe capture-phase on document,
+ * strictly after production's own listener, observes e.defaultPrevented correctly: production's
+ * listener runs first and may set it, this listener runs second on the same node and reads it.
+ */
+const KINETIC_PROBE_SRC = `
+  window.__kineticProbe = { moves: 0, defaultPrevented: false, cancelable: false };
+  document.addEventListener(
+    "touchmove",
+    function (e) {
+      window.__kineticProbe.moves += 1;
+      window.__kineticProbe.cancelable = e.cancelable;
+      if (e.defaultPrevented) window.__kineticProbe.defaultPrevented = true;
+    },
+    { capture: true, passive: true },
+  );
+`;
+
+/** Polls document.readyState and document.URL until the page has both reached "complete" and
+ * settled on `expectedUrl` exactly, guarding against a stale "complete" read from the about:blank
+ * target's own initial document racing a just-issued Page.navigate. */
+async function waitForPageComplete(
+  cdp,
+  sessionId,
+  expectedUrl,
+  timeoutMs = READY_TIMEOUT_MS,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = await evalValue(cdp, sessionId, "document.readyState");
+    const url = await evalValue(cdp, sessionId, "document.URL");
+    if (state === "complete" && url === expectedUrl) return url;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    `page did not reach readyState "complete" at ${expectedUrl} within ${timeoutMs}ms`,
+  );
+}
+
+/**
+ * Stands up the real tmux/ttyd fixture, drives a real headless Chrome through CDP straight to
+ * /sessions/<id>/terminal/ (Target.createTarget direct navigation, no iframe boundary, so
+ * connect()'s own WebSocket and this Network domain observation share one realm with no
+ * Target.setAutoAttach plumbing), applies mobile device/touch emulation, and runs the three
+ * activation self-proofs. `opts.skipTouchEmulation`, `opts.subSlopFlick` and `opts.wrongPage` are
+ * the three break legs, each disabling exactly one thing the real flow does.
+ */
+async function runActivationFlow(violations, opts = {}) {
+  const handle = await standUpFixture({});
+  let chromeChild = null;
+  let cdp = null;
+  const userDataDir = join(tmpdir(), `${SANDBOX_PREFIX}chrome-${process.pid}`);
+  try {
+    chromeChild = spawn(
+      findChrome(),
+      [
+        "--headless=new",
+        `--remote-debugging-port=${CDP_PORT}`,
+        `--user-data-dir=${userDataDir}`,
+        "--no-first-run",
+      ],
+      { stdio: ["ignore", "ignore", "ignore"] },
+    );
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const { targetId } = await cdp.send("Target.createTarget", {
+      url: "about:blank",
+    });
+    const { sessionId } = await cdp.send("Target.attachToTarget", {
+      targetId,
+      flatten: true,
+    });
+    await cdp.send("Page.enable", {}, sessionId);
+    await cdp.send("Runtime.enable", {}, sessionId);
+    await cdp.send("Network.enable", {}, sessionId);
+
+    const wsFrames = [];
+    cdp.ws.addEventListener("message", (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.sessionId !== sessionId) return;
+      if (msg.method === "Network.webSocketFrameSent") {
+        wsFrames.push({
+          dir: "sent",
+          payloadData: msg.params.response.payloadData,
+        });
+      } else if (msg.method === "Network.webSocketFrameReceived") {
+        wsFrames.push({
+          dir: "recv",
+          payloadData: msg.params.response.payloadData,
+        });
+      }
+    });
+
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 390, height: 844, deviceScaleFactor: 3, mobile: true },
+      sessionId,
+    );
+    if (!opts.skipTouchEmulation) {
+      await cdp.send(
+        "Emulation.setTouchEmulationEnabled",
+        { enabled: true, configuration: "mobile" },
+        sessionId,
+      );
+    }
+
+    const targetUrl = opts.wrongPage
+      ? `http://127.0.0.1:${SANDBOX_PORT}/`
+      : `http://127.0.0.1:${SANDBOX_PORT}/sessions/${handle.sessionId}/terminal/`;
+    await cdp.send("Page.navigate", { url: targetUrl }, sessionId);
+    await waitForPageComplete(cdp, sessionId, targetUrl);
+    await sleep(2500);
+
+    // Proof A: coarse pointer. Immediately after emulation setup, before the first touch dispatch.
+    // RESEARCH Assumption A1, resolved live by this run: if false, main() never called
+    // attachKineticScroll and every later number in this phase would measure dead listeners.
+    const coarse = await evalValue(
+      cdp,
+      sessionId,
+      "window.matchMedia('(pointer: coarse)').matches",
+    );
+    if (coarse !== true) {
+      violations.push(
+        `activation: (pointer: coarse) expected true, measured ${coarse}`,
+      );
+    } else {
+      console.log(`activation: (pointer: coarse) measured ${coarse}`);
+    }
+
+    // Proof B's probe must be installed before the flick.
+    await cdp.send(
+      "Runtime.evaluate",
+      { expression: KINETIC_PROBE_SRC, awaitPromise: false },
+      sessionId,
+    );
+
+    const flickDy = opts.subSlopFlick ? 4 : 300;
+    const flickSteps = opts.subSlopFlick ? 4 : 28;
+    await flick(cdp, sessionId, {
+      x: 195,
+      y: 400,
+      dy: flickDy,
+      steps: flickSteps,
+      cadenceMs: 12,
+    });
+    await sleep(1500);
+
+    // Proof B: kinetic engagement.
+    const probe = await evalValue(cdp, sessionId, "window.__kineticProbe");
+    if (!probe || probe.defaultPrevented !== true) {
+      violations.push(
+        `activation: kinetic engagement expected defaultPrevented true, measured ${probe ? probe.defaultPrevented : false}`,
+      );
+    } else {
+      console.log(`activation: kineticProbe measured ${JSON.stringify(probe)}`);
+    }
+
+    // Proof C: the flick reached the wire. A zero here with A and B green means scrollMode()
+    // returned something other than "report", which the standup check's own "1 1" precondition
+    // should already have excluded, so that combination is reported as a fixture fault.
+    const sentInput = wsFrames.filter(
+      (f) => f.dir === "sent" && decodeTtydOp(f.payloadData) === "0",
+    ).length;
+    if (sentInput < 1) {
+      violations.push(
+        `activation: sent INPUT frames expected >= 1, measured ${sentInput} (navigated ${targetUrl})`,
+      );
+    } else {
+      console.log(`activation: sent INPUT frames measured ${sentInput}`);
+    }
+  } finally {
+    if (cdp) cdp.close();
+    await killAndWait(chromeChild);
+    rmSync(userDataDir, { recursive: true, force: true });
+    await tearDownFixture(handle);
+  }
+}
+
+async function checkActivation(violations) {
+  await runActivationFlow(violations, {});
+}
+
+/** Skips the Emulation.setTouchEmulationEnabled call only. Proof A must fire. */
+async function breakNoTouchEmulation(violations) {
+  await runActivationFlow(violations, { skipTouchEmulation: true });
+}
+
+/** Runs the flick with a total dy of 4px, under KINETIC.slopPx: 8. Proof B must fire while proof A
+ * still passes, which is what makes B independent of A. */
+async function breakSubSlopFlick(violations) {
+  await runActivationFlow(violations, { subSlopFlick: true });
+}
+
+/** Navigates to the board root instead of the terminal URL. Proof C must fire, naming the URL
+ * actually loaded so a future run cannot mistake "navigated somewhere else" for "product emits no
+ * frames". */
+async function breakWrongPage(violations) {
+  await runActivationFlow(violations, { wrongPage: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -795,7 +1061,9 @@ async function checkStandup(violations) {
     const res = await fetch(url);
     await res.body?.cancel();
     if (res.status !== 200) {
-      violations.push(`standup: GET ${url} expected 200, measured ${res.status}`);
+      violations.push(
+        `standup: GET ${url} expected 200, measured ${res.status}`,
+      );
     } else {
       console.log(`standup: GET ${url} measured 200`);
     }
@@ -820,10 +1088,14 @@ async function breakViewportFixture(violations) {
 
 const CHECKS = {
   standup: checkStandup,
+  activation: checkActivation,
 };
 
 const BREAKS = {
   "viewport-fixture": breakViewportFixture,
+  "no-touch-emulation": breakNoTouchEmulation,
+  "sub-slop-flick": breakSubSlopFlick,
+  "wrong-page": breakWrongPage,
 };
 
 // ---------------------------------------------------------------------------
@@ -896,7 +1168,9 @@ async function main() {
 
   const portsHeld = await checkPortsHeld();
   if (portsHeld) {
-    console.log("\nFAIL: a sandbox resource (port) was still held after teardown");
+    console.log(
+      "\nFAIL: a sandbox resource (port) was still held after teardown",
+    );
     process.exit(1);
   }
 
@@ -907,7 +1181,9 @@ async function main() {
       );
       process.exit(1);
     }
-    console.log(`\nFAIL (expected, --break ${breakName}): ${violations.length} violation(s)`);
+    console.log(
+      `\nFAIL (expected, --break ${breakName}): ${violations.length} violation(s)`,
+    );
     for (const v of violations) console.log(`  ${v}`);
     process.exit(1);
   }
