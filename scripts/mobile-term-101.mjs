@@ -326,6 +326,7 @@ function bootServer(home, opts = {}) {
   assertBuilt();
   const env = { ...process.env, HOME: home, NODE_ENV: "production" };
   if (opts.pathPrefix) env.PATH = `${opts.pathPrefix}:${env.PATH ?? ""}`;
+  if (opts.telemetry) env.DISPATCH_TERM_TELEMETRY = "1";
   const child = spawn("node", [realpathSync(DIST_ENTRY)], {
     env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -727,6 +728,8 @@ function seedFixtureCard(home, card) {
  * pane, one card plus one session record seeded via node:sqlite, then the real boot, whose own
  * reconcileSessions() adopts the already-running ttyd by argv fingerprint. `opts.useViewportFixture`
  * plants writeViewportFixtureBinary instead, for the viewport-fixture break leg only.
+ * `opts.telemetry` forwards to the REAL boot only, never to the warmup boot it immediately kills,
+ * matching `bootServer`'s own opt-in shape.
  */
 async function standUpFixture(opts = {}) {
   const home = makeSandboxHome(`run-${process.pid}`);
@@ -806,7 +809,10 @@ async function standUpFixture(opts = {}) {
     seedFixtureCard(home, card);
     console.log("standup: one card, one session record seeded via node:sqlite");
 
-    handle.server = bootServer(home, { pathPrefix: handle.pathPrefix });
+    handle.server = bootServer(home, {
+      pathPrefix: handle.pathPrefix,
+      telemetry: opts.telemetry,
+    });
     await waitForReady(SANDBOX_PORT);
     console.log(
       `standup: sandbox server ready on :${SANDBOX_PORT}, pid=${handle.server.child.pid}`,
@@ -865,6 +871,23 @@ async function tearDownFixture(handle) {
   if (problems.length > 0) {
     throw new Error(`tearDownFixture: ${problems.join("; ")}`);
   }
+}
+
+/** The telemetry adapter derives its sink from `os.homedir()`, which the sandboxed server sees as
+ * `handle.home` (bootServer overrides `env.HOME`), so this is the one honest path to read a
+ * fixture run's own sink from, never a guess at the real user's `~/.dispatch`. */
+function telemetryPath(handle) {
+  return join(handle.home, ".dispatch", "terminal-telemetry.jsonl");
+}
+
+/** Parses every non-empty line as one telemetry record, `[]` when the file is absent so callers
+ * never have to special-case "flag was off" against "flag was on but produced nothing yet". */
+function readTelemetryRecords(path) {
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line));
 }
 
 // ---------------------------------------------------------------------------
@@ -1350,11 +1373,15 @@ async function measureOneRoundTrip(
  * `dead-listener` break's own vehicle, reused from the activation proofs per the plan's own
  * instruction: with touch emulation off, `attachKineticScroll` never attaches, so `inputFrames` is
  * driven to zero and the plausible-floor check below is proven able to fire. `opts.skipLoaf` is the
- * `loaf-blind` break's vehicle.
+ * `loaf-blind` break's vehicle. `opts.telemetry` forwards to the REAL boot only (`standUpFixture`'s
+ * own contract), the 101-04 vehicle both `--check telemetry-off` and `--break telemetry-flag-ignored`
+ * share. `opts.afterRuns`, when given, is awaited with `handle` once every run has completed and
+ * BEFORE `tearDownFixture` deletes `handle.home`, the only point at which a caller can still read
+ * a file the sandboxed server wrote under that home.
  */
 async function runRoundTripsFlow(violations, opts = {}) {
   if (opts.tunnel) await assertCloudflaredOnPath();
-  const handle = await standUpFixture({});
+  const handle = await standUpFixture({ telemetry: opts.telemetry });
   let chromeChild = null;
   let cdp = null;
   let tunnelEnabled = false;
@@ -1480,6 +1507,8 @@ async function runRoundTripsFlow(violations, opts = {}) {
         `round-trips: inputFrames median ${inputFramesMedian} below the plausible floor for a 400px flick, suspect the fixture, not the product`,
       );
     }
+
+    if (opts.afterRuns) await opts.afterRuns(handle);
 
     return { runs, inputFramesMedian };
   } finally {
@@ -1631,6 +1660,118 @@ function compareLatencyReadings(before, after, bounds) {
     );
   }
   return violations;
+}
+
+/**
+ * The real proof behind `--check telemetry-off`: read the shipped `terminal-proxy.ts` from disk,
+ * strip comment lines, and assert `telemetryOn`/`armFlickTelemetry` together appear exactly twice
+ * (the import and the one call) with the call itself matching 101-04's exact guarded line. A build
+ * in which telemetry could run unguarded fails here regardless of what any timing number says.
+ * Shared by `--check telemetry-off` and `--break telemetry-flag-ignored` so a run of either always
+ * prints the same structural evidence line, independent of the runtime (file-presence) assertion.
+ */
+const GUARDED_CALL_LINE =
+  "    if (telemetryOn) armFlickTelemetry(clientSocket, upstream);";
+
+function assertGuardedCallSite(violations) {
+  const proxySrc = readFileSync(
+    join(REPO_ROOT, "src/server/adapters/terminal-proxy.ts"),
+    "utf8",
+  );
+  const refCount = proxySrc
+    .split("\n")
+    .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+    .filter((line) => /telemetryOn|armFlickTelemetry/.test(line)).length;
+  const hasGuardLine = proxySrc.includes(GUARDED_CALL_LINE);
+  if (refCount !== 2 || !hasGuardLine) {
+    violations.push(
+      `telemetry-off: expected exactly one guarded call site (2 references, guard line present), found ${refCount} reference(s), guard line present=${hasGuardLine}`,
+    );
+    return;
+  }
+  console.log(
+    `telemetry-off: guarded call site matched: ${GUARDED_CALL_LINE.trim()}`,
+  );
+}
+
+/**
+ * Runs the file-presence half of `--check telemetry-off` / `--break telemetry-flag-ignored`: rides
+ * `runRoundTripsFlow`'s own `afterRuns` hook so the check happens while `handle.home` still exists,
+ * BEFORE `tearDownFixture` deletes it. `sleep`s past `BURST_GAP_MS` (300) plus margin first so an
+ * armed recorder's own close timer has definitely fired and flushed before the file is read.
+ */
+async function assertTelemetryFileAbsence(violations, handle) {
+  await sleep(500);
+  const p = telemetryPath(handle);
+  if (existsSync(p)) {
+    const records = readTelemetryRecords(p);
+    violations.push(
+      `telemetry-off: expected no telemetry file, found ${p} with ${records.length} record(s)`,
+    );
+    return;
+  }
+  console.log(`telemetry-off: no telemetry file at ${p}`);
+}
+
+/**
+ * Pre-telemetry loopback medians transcribed from the dated FINDINGS `## Measured numbers` table,
+ * the baseline the timing leg below compares against via `compareLatencyReadings`'s THRESHOLD
+ * comparator, never a zero-tolerance one.
+ */
+const PRE_TELEMETRY_LOOPBACK = {
+  inputFramesMedian: 29,
+  settleMsMedian: 1,
+  maxBlockingMsMedian: 0,
+};
+const TELEMETRY_OFF_TIMING_BOUNDS = {
+  maxInputFrameRatio: 1.5,
+  maxSettleMs: 50,
+  maxBlockingMs: 20,
+};
+
+/**
+ * With the flag unset, asserts the guarded call site is the sole reachable path (the proof), that
+ * one full canonical flick produces no telemetry file (the runtime half of that same proof), and
+ * runs the existing round-trips timing leg as corroboration only, explicitly labelled as such: a
+ * loopback `settleMs` of 0-1ms carries no threshold small enough to prove an absence of cost.
+ */
+async function checkTelemetryOff(violations) {
+  assertGuardedCallSite(violations);
+
+  const { runs, inputFramesMedian } = await runRoundTripsFlow(violations, {
+    afterRuns: (handle) => assertTelemetryFileAbsence(violations, handle),
+  });
+
+  const after = {
+    inputFramesMedian,
+    settleMsMedian: summarizeMetric(runs, "settleMs").median,
+    maxBlockingMsMedian: summarizeMetric(runs, "maxBlockingMs").median,
+  };
+  console.log(
+    `telemetry-off: timing leg bounds maxInputFrameRatio=${TELEMETRY_OFF_TIMING_BOUNDS.maxInputFrameRatio} maxSettleMs=${TELEMETRY_OFF_TIMING_BOUNDS.maxSettleMs} maxBlockingMs=${TELEMETRY_OFF_TIMING_BOUNDS.maxBlockingMs}`,
+  );
+  for (const v of compareLatencyReadings(
+    PRE_TELEMETRY_LOOPBACK,
+    after,
+    TELEMETRY_OFF_TIMING_BOUNDS,
+  )) {
+    violations.push(`telemetry-off: ${v}`);
+  }
+  console.log(
+    "telemetry-off: timing leg is corroboration, the guarded-call-site assertion is the proof",
+  );
+}
+
+/** Same flow as `--check telemetry-off`, but the REAL boot is armed with telemetry ON, so the
+ * file-absence assertion must trip while the structural assertion stays green, proving the two are
+ * independent and proving the OFF check is a live instrument rather than one that can only pass. */
+async function breakTelemetryFlagIgnored(violations) {
+  assertGuardedCallSite(violations);
+  await runRoundTripsFlow(violations, {
+    telemetry: true,
+    runs: 1,
+    afterRuns: (handle) => assertTelemetryFileAbsence(violations, handle),
+  });
 }
 
 /** Skips the LoAF PerformanceObserver half of the probe only, the RAF sampler still installs.
@@ -2627,6 +2768,7 @@ const CHECKS = {
   "round-trips": checkRoundTrips,
   "flick-distance": checkFlickDistance,
   tunnel: checkTunnel,
+  "telemetry-off": checkTelemetryOff,
 };
 
 const BREAKS = {
@@ -2639,6 +2781,7 @@ const BREAKS = {
   "drop-wheel-ticks": breakDropWheelTicks,
   "skip-auth": breakSkipAuth,
   "wrong-code": breakWrongCode,
+  "telemetry-flag-ignored": breakTelemetryFlagIgnored,
 };
 
 // ---------------------------------------------------------------------------
