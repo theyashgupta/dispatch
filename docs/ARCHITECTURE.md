@@ -3217,6 +3217,51 @@ permanently fails)`, which runs the same scenario in the configuration where bot
   `Board.tsx`'s whole stranded-suppression path left every run green).
   `density-91.mjs --compare` against `panel-100.mjs`'s own Phase 100 BEFORE snapshot reports zero
   deltas: nothing about a resting card's geometry changed.
+- **`node scripts/mobile-term-101.mjs`** (`npm run mobile-term-101`, Phase 101, `TERM-04`/`TERM-05`,
+  plus the tunnel criterion that the terminal stays usable over a real remote-access tunnel: output
+  renders, input lands, and pinch zoom still works, verified on a real phone) - a CDP structural
+  instrument and a real-tmux/real-ttyd sandbox harness, deliberately OUTSIDE `npm run check` (it
+  boots a real sandboxed dispatch server, spawns real tmux and ttyd processes, and requires the live
+  `com.dispatch.app` service stopped for its duration). Two hard fail-loud preconditions, neither
+  ever silently skipped: `cloudflared` must be on `PATH` for the `tunnel` check, and the fixture pane
+  must read exactly `1 1` from `tmux display-message -p '#{alternate_on} #{mouse_any_flag}'` before
+  any measurement is trusted. The fixture is a dedicated stub binary
+  (`writeMouseReportFixtureBinary`) rather than a copy of `session-liveness-v3.mjs`'s
+  `writeStubClaudeBinary`: the stub never enters the alternate screen and never enables mouse
+  tracking, so `scrollMode()` would resolve to `"viewport"` and every measurement in this phase would
+  read the wrong branch. Eight named checks: `standup` (fixture standup/teardown, no CDP),
+  `activation` (three self-proofs: coarse pointer, kinetic engagement, wire traffic), `round-trips`
+  (five per-flick numbers, median plus spread over 5 runs), `flick-distance` (summed wheel deltaY per
+  canonical flick, the v2.7.2-class geometry calibration), `tunnel` (a real Quick Tunnel, real
+  remote-auth handshake, the three tunnel-usability clauses), `telemetry-off` (the server-side
+  recorder costs nothing with the flag unset), `telemetry-on` (one real flick through the real proxy
+  produces exactly one record with no leaked string), and `telemetry-capture` (the OFFLINE validator,
+  the only check registered in `OFFLINE_CHECKS`: it reads a JSONL file already on disk and asserts
+  against it with no server, no tmux, no ttyd and no network, so a capture can be validated hours
+  later while the user's own service is running again). Kinetic engagement is proven by a
+  capture-phase observer reading `defaultPrevented` on the real listener, NOT by
+  `dsp-zoom-chip[data-visible]`, which fires on any terminal touch (a pinch, a tap) and proves only
+  that a finger landed, never that the kinetic scroller itself engaged. The emulation ceiling: CDP's
+  `Input.dispatchTouchEvent` fires Blink's real touch and fling path, but it is still host-synthesized
+  input against a shell-script fixture that echoes at the termios layer and renders nothing, so its
+  numbers are floors on real Claude Code redraw cost, never ceilings.
+
+  `src/server/adapters/terminal-telemetry.ts` is the server-side per-flick recorder `telemetry-off`
+  and `telemetry-on` prove correct: a header-only WebSocket frame scanner on the ttyd forward path
+  that records, per flick, how many mouse reports it cost, the inter-frame gaps, server turnaround,
+  settle time, and downlink backlog. It structurally cannot record terminal content: it reads RFC
+  6455 frame headers by arithmetic and never allocates or reads a payload byte, so there is no code
+  path by which a shell prompt, a file name or a passphrase could reach the sink. It is off unless
+  `DISPATCH_TERM_TELEMETRY=1` is set, read exactly once at module import, the default on every real
+  terminal session. Every value it writes is a number, `null`, or an array of numbers, never a
+  string, so a string appearing anywhere in a captured record is a schema violation to fix, not a
+  redaction failure to patch around.
+
+  Break legs proven live, quoted verbatim from `101-04-SUMMARY.md`:
+  - `--break telemetry-flag-ignored`: `telemetry-off: expected no telemetry file, found <path>/.dispatch/terminal-telemetry.jsonl with 3 record(s)`
+  - `--break telemetry-no-flick`: `telemetry-on: expected exactly one record with inputFrames >= 20, found 0`
+  - `--break telemetry-leak-planted`: `telemetry-on: string value found at record.note="leaked MOBILETERM101-c74806cd388a6035"`
+
 - **`phase-smoke-tester`** - the only BEHAVIORAL verification this project runs: an agent derives
   and executes smoke cases against the running app after each phase's implementation lands. This
   is the one gate above that cannot be reduced to a grep.

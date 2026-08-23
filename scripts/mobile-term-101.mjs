@@ -2096,6 +2096,202 @@ async function breakTelemetryLeakPlanted(violations) {
   await runTelemetryOnFlow(violations, { plantLeak: true });
 }
 
+// ---------------------------------------------------------------------------
+// telemetry-capture (101-05): the OFFLINE validator. Reads a JSONL capture
+// already on disk and asserts against it with no server, no tmux, no ttyd, no
+// sandbox and no network. Registered in OFFLINE_CHECKS below so it can run at
+// the one moment it matters: hours after the phone capture, while the user's
+// own service is back up and every other check in this file would refuse to
+// start.
+// ---------------------------------------------------------------------------
+
+/** How many `inputFrames >= TELEMETRY_CAPTURE_MIN_INPUT_FRAMES` records a capture must carry
+ * before this validator will summarise it. Fewer means the ten-second flick did not land; the
+ * honest response is to redo it, never to transcribe a thin capture into a findings file. */
+const MIN_FLICK_BURSTS = 5;
+const TELEMETRY_CAPTURE_MIN_INPUT_FRAMES = 10;
+
+/** Nearest-rank percentile, consistent with this file's own `median()` (also nearest-rank on
+ * ties). One number does not earn a stats dependency. */
+function percentile(nums, p) {
+  if (nums.length === 0) return null;
+  const sorted = [...nums].sort((a, b) => a - b);
+  const rank = Math.ceil((p / 100) * sorted.length) - 1;
+  return sorted[Math.min(sorted.length - 1, Math.max(0, rank))];
+}
+
+function printCaptureMedian(flickRecords, key) {
+  const { median: m, min, max } = summarizeMetric(flickRecords, key);
+  console.log(`telemetry-capture: ${key} median=${m} min=${min} max=${max}`);
+}
+
+/**
+ * Offline: exists, non-empty, every line parses as JSON (first bad line named), every record's key
+ * set equals the 16-key allowlist exactly, every value is a number/null/array-of-numbers (the same
+ * structural walk `--check telemetry-on` runs, never a second implementation), at least
+ * `MIN_FLICK_BURSTS` records clear the input-frame floor, and the file stays under plan 04's byte
+ * cap. Then prints, for the qualifying flick records only, the medians plan 06 transcribes: the
+ * same spread convention `printRoundTripsSummary` already uses (median/min/max), plus the pooled
+ * `gapsMs` median and 95th percentile and how many qualifying records carried a non-null
+ * `pongRttMs`.
+ */
+async function checkTelemetryCapture(violations, cliOpts = {}) {
+  console.log("telemetry-capture: offline validator, no sandbox stood up");
+
+  const path = cliOpts.filePath;
+  if (!path) {
+    violations.push("telemetry-capture: --file <path> is required");
+    return;
+  }
+  if (!existsSync(path)) {
+    violations.push(`telemetry-capture: no file at ${path}`);
+    return;
+  }
+
+  const raw = readFileSync(path, "utf8");
+  const lines = raw.split("\n").filter((line) => line.length > 0);
+  if (lines.length === 0) {
+    violations.push(`telemetry-capture: ${path} is empty, 0 records`);
+    return;
+  }
+
+  const records = [];
+  for (let i = 0; i < lines.length; i++) {
+    try {
+      records.push(JSON.parse(lines[i]));
+    } catch (err) {
+      violations.push(
+        `telemetry-capture: line ${i + 1} of ${path} did not parse as JSON: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
+  }
+  console.log(
+    `telemetry-capture: ${records.length} record(s) parsed from ${path}`,
+  );
+
+  const expectedKeySig = [...TELEMETRY_ALLOWED_KEYS].sort().join(",");
+  const mismatched = records.filter(
+    (r) => Object.keys(r).sort().join(",") !== expectedKeySig,
+  );
+  if (mismatched.length > 0) {
+    for (const r of mismatched) {
+      violations.push(
+        `telemetry-capture: record seq=${r.seq} field set does not match the allowlist, got [${Object.keys(r).sort().join(",")}]`,
+      );
+    }
+  } else {
+    console.log(
+      `telemetry-capture: field set matches the allowlist exactly (${TELEMETRY_ALLOWED_KEYS.length} keys)`,
+    );
+  }
+
+  const stringLeaks = [];
+  for (const record of records) {
+    collectNonNumericLeaves(record, "record", stringLeaks);
+  }
+  if (stringLeaks.length > 0) {
+    for (const leak of stringLeaks) {
+      violations.push(`telemetry-capture: string value found at ${leak}`);
+    }
+  } else {
+    console.log(
+      `telemetry-capture: no string value in any record, ${records.length} record(s) scanned`,
+    );
+  }
+
+  const size = statSync(path).size;
+  if (size >= TELEMETRY_FILE_CAP_BYTES) {
+    violations.push(
+      `telemetry-capture: file size ${size} at or over the ${TELEMETRY_FILE_CAP_BYTES}-byte cap`,
+    );
+  }
+
+  const flickRecords = records.filter(
+    (r) =>
+      typeof r.inputFrames === "number" &&
+      r.inputFrames >= TELEMETRY_CAPTURE_MIN_INPUT_FRAMES,
+  );
+  if (flickRecords.length < MIN_FLICK_BURSTS) {
+    violations.push(
+      `telemetry-capture: expected at least ${MIN_FLICK_BURSTS} records with inputFrames >= ${TELEMETRY_CAPTURE_MIN_INPUT_FRAMES}, found ${flickRecords.length}`,
+    );
+    return;
+  }
+  console.log(
+    `telemetry-capture: ${flickRecords.length} qualifying flick record(s) (inputFrames >= ${TELEMETRY_CAPTURE_MIN_INPUT_FRAMES})`,
+  );
+
+  for (const key of [
+    "inputFrames",
+    "turnaroundMs",
+    "settleMs",
+    "burstMs",
+    "maxOutGapMs",
+    "maxBacklogB",
+  ]) {
+    printCaptureMedian(flickRecords, key);
+  }
+
+  const pooledGaps = flickRecords.flatMap((r) =>
+    Array.isArray(r.gapsMs) ? r.gapsMs : [],
+  );
+  if (pooledGaps.length > 0) {
+    console.log(
+      `telemetry-capture: gapsMs median=${median(pooledGaps)} p95=${percentile(pooledGaps, 95)} min=${Math.min(...pooledGaps)} max=${Math.max(...pooledGaps)} (pooled n=${pooledGaps.length})`,
+    );
+  } else {
+    console.log(
+      "telemetry-capture: gapsMs pooled n=0, no gap samples across qualifying records",
+    );
+  }
+
+  const pongCount = flickRecords.filter(
+    (r) => r.pongRttMs !== null && r.pongRttMs !== undefined,
+  ).length;
+  console.log(
+    `telemetry-capture: pongRttMs non-null in ${pongCount}/${flickRecords.length} qualifying record(s)`,
+  );
+}
+
+/** `--break telemetry-capture-blind`: the offline validator's own self-proof, run the same way the
+ * real check runs, no live service required. A synthetic file carrying one record with a planted
+ * string field and zero qualifying flick bursts must trip both the no-strings assertion and the
+ * burst-count assertion, naming the offending key and the counted number respectively. A validator
+ * that cannot fail on a bad file is worse than no validator, because plan 06 will transcribe
+ * whatever it blesses. */
+async function breakTelemetryCaptureBlind(violations) {
+  const path = join(
+    tmpdir(),
+    `dispatch-mobile-term-101-capture-blind-${process.pid}.jsonl`,
+  );
+  const blindRecord = {
+    v: 1,
+    conn: 1,
+    seq: 0,
+    tsMs: Date.now(),
+    burstMs: 5,
+    inputFrames: 1,
+    inputBytes: 3,
+    gapsMs: [],
+    turnaroundMs: 2,
+    settleMs: 1,
+    outputFrames: 1,
+    outputBytes: 4,
+    maxOutGapMs: 1,
+    maxBacklogB: 0,
+    pongRttMs: null,
+    gapCloseMs: 300,
+    note: "leaked telemetry-capture-blind string",
+  };
+  writeFileSync(path, JSON.stringify(blindRecord) + "\n");
+  try {
+    await checkTelemetryCapture(violations, { filePath: path });
+  } finally {
+    rmSync(path, { force: true });
+  }
+}
+
 /** Skips the LoAF PerformanceObserver half of the probe only, the RAF sampler still installs.
  * `window.__loafEntries` must come back `undefined`, not `[]`, proving the check can tell "no
  * observer" apart from "observer installed, main thread never blocked". */
@@ -3097,6 +3293,7 @@ const CHECKS = {
   tunnel: checkTunnel,
   "telemetry-off": checkTelemetryOff,
   "telemetry-on": checkTelemetryOn,
+  "telemetry-capture": checkTelemetryCapture,
 };
 
 const BREAKS = {
@@ -3112,7 +3309,21 @@ const BREAKS = {
   "telemetry-flag-ignored": breakTelemetryFlagIgnored,
   "telemetry-no-flick": breakTelemetryNoFlick,
   "telemetry-leak-planted": breakTelemetryLeakPlanted,
+  "telemetry-capture-blind": breakTelemetryCaptureBlind,
 };
+
+/** `telemetry-capture` (101-05) is the one check that must run at the exact moment the user's own
+ * live service is back up: it skips `assertNoLiveService`/`assertSandboxPortsFree`/`assertBuilt`
+ * in `main()` below, none of which the offline validator needs since it only reads a file. Its own
+ * `--break` leg gets the same treatment, it is the same validator run against a synthetic file. */
+const OFFLINE_CHECKS = new Set(["telemetry-capture"]);
+const OFFLINE_BREAKS = new Set(["telemetry-capture-blind"]);
+
+function isOfflineRun(checkName, breakName) {
+  if (checkName != null) return OFFLINE_CHECKS.has(checkName);
+  if (breakName != null) return OFFLINE_BREAKS.has(breakName);
+  return false;
+}
 
 // ---------------------------------------------------------------------------
 // main
@@ -3138,11 +3349,14 @@ async function main() {
     jsonPath: readFlag(argv, "--json"),
     comparePath: readFlag(argv, "--compare"),
     tunnel: argv.includes("--tunnel"),
+    filePath: readFlag(argv, "--file"),
   };
 
-  await assertNoLiveService();
-  await assertSandboxPortsFree();
-  assertBuilt();
+  if (!isOfflineRun(checkName, breakName)) {
+    await assertNoLiveService();
+    await assertSandboxPortsFree();
+    assertBuilt();
+  }
 
   const realBefore = statRealBoardDb();
   console.log(`\nLIVE ${realBefore.path} BEFORE: ${fmtStat(realBefore)}`);
