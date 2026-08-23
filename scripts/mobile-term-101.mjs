@@ -3,11 +3,20 @@
  * code): lives outside src/, imports no test framework, asserts nothing via an assertion library,
  * the same category as check-invariants.mjs, session-liveness-v3.mjs and panel-100.mjs.
  *
- * This plan (101-01) builds the FOUNDATION only: a real-tmux/real-ttyd fixture whose pane carries
- * production's alternate_on=1/mouse_any_flag=1 mouse-report state, plus three self-proofs that must
- * hold before any round-trip or latency number produced by a later plan means anything: the emulated
- * coarse pointer really flipped, the emulated touch stream really engaged the real kinetic scroller,
- * and a flick really produced INPUT frames on the real ttyd WebSocket.
+ * Plan 101-01 built the FOUNDATION: a real-tmux/real-ttyd fixture whose pane carries production's
+ * alternate_on=1/mouse_any_flag=1 mouse-report state, plus three self-proofs that must hold before
+ * any round-trip or latency number means anything: the emulated coarse pointer really flipped, the
+ * emulated touch stream really engaged the real kinetic scroller, and a flick really produced INPUT
+ * frames on the real ttyd WebSocket.
+ *
+ * Plan 101-02 (this plan) turns the proven-live gesture into numbers: `--check round-trips` (five
+ * separately attributable per-flick costs: INPUT frames, OUTPUT frames, settle latency, LoAF
+ * blockingDuration, dropped frames) and `--check flick-distance` (the summed dispatched wheel
+ * deltaY one canonical flick produces, the v2.7.2-class geometry calibration this repo has never had
+ * a runnable check for). Deliberately two separate measurement surfaces with two separate
+ * comparators (THRESHOLD for the jittery latency numbers, ZERO-TOLERANCE for geometry): a fix that
+ * batches round trips is supposed to reduce the first and leave the second byte-identical.
+ * DIAGNOSIS-ONLY, no src/ file is touched by this plan.
  *
  * SAFETY IS THIS FILE'S FIRST-ORDER CONCERN, same posture as session-liveness-v3.mjs and
  * panel-100.mjs: assertNoLiveService() fails closed against the user's real :4700 service before any
@@ -20,11 +29,19 @@
  *   node scripts/mobile-term-101.mjs --check standup      the fixture standup/teardown proof, no CDP
  *   node scripts/mobile-term-101.mjs --check activation   the three activation self-proofs (coarse
  *                                                          pointer, kinetic engagement, wire traffic)
+ *   node scripts/mobile-term-101.mjs --check round-trips  five numbers per flick, median + spread
+ *                                                          over 5 runs, --json <path> supported
+ *   node scripts/mobile-term-101.mjs --check flick-distance  summed wheel deltaY per canonical
+ *                                                             flick, --json/--compare supported
  *   node scripts/mobile-term-101.mjs --break viewport-fixture     trips assertPaneModes's own "1 1"
  *                                                                  precondition
  *   node scripts/mobile-term-101.mjs --break no-touch-emulation   trips proof A
  *   node scripts/mobile-term-101.mjs --break sub-slop-flick       trips proof B, proof A stays green
  *   node scripts/mobile-term-101.mjs --break wrong-page           trips proof C, names the wrong URL
+ *   node scripts/mobile-term-101.mjs --break loaf-blind      round-trips runs blind to LoAF
+ *   node scripts/mobile-term-101.mjs --break dead-listener   round-trips against dead listeners
+ *   node scripts/mobile-term-101.mjs --break drop-wheel-ticks  flick-distance vs. a live 1-in-5
+ *                                                                dropped-wheel-tick page mutation
  *
  * Exit codes: 0 all checks PASS. 1 a safety-envelope refusal, a setup/build error, a check
  * violation, a teardown-verification failure, or the live board.db changing.
@@ -33,6 +50,7 @@ import { spawn, execFile, execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   statSync,
@@ -1034,6 +1052,416 @@ async function breakWrongPage(violations) {
 }
 
 // ---------------------------------------------------------------------------
+// Round-trips and flick-distance: turning the proven-live gesture into numbers
+// (101-02). One canonical flick, deliberately shared by both checks so a "400px
+// flick" means the same thing everywhere in this file's output.
+// ---------------------------------------------------------------------------
+
+const CANONICAL_FLICK = { x: 195, y: 600, dy: -400, steps: 25, cadenceMs: 12 };
+const RT_RUNS = 5;
+const FD_RUNS = 5;
+const QUIET_MS = 250;
+const SETTLE_POLL_MS = 50;
+const SETTLE_MAX_WAIT_MS = 4000;
+
+function median(nums) {
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0
+    ? sorted[mid]
+    : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function summarizeMetric(runs, key) {
+  const vals = runs
+    .map((r) => r[key])
+    .filter((v) => v !== null && v !== undefined);
+  if (vals.length === 0) return { median: null, min: null, max: null };
+  return {
+    median: median(vals),
+    min: Math.min(...vals),
+    max: Math.max(...vals),
+  };
+}
+
+/**
+ * Long Animation Frames observer plus a self-rescheduling requestAnimationFrame dropped-frame
+ * sampler, installed together right before touch dispatch (RESEARCH's injection pattern,
+ * `buffered: true` so an in-flight frame at install time is not missed). `--break loaf-blind`
+ * installs `RAF_ONLY_PROBE_SRC` instead, deliberately omitting the PerformanceObserver half so the
+ * check can prove it notices a genuinely absent instrument rather than silently reporting
+ * maxBlockingMs: 0.
+ */
+const LOAF_RAF_PROBE_SRC = `
+  window.__loafEntries = [];
+  new PerformanceObserver((list) => {
+    for (const e of list.getEntries()) {
+      window.__loafEntries.push({
+        startTime: e.startTime,
+        duration: e.duration,
+        blockingDuration: e.blockingDuration,
+        renderStart: e.renderStart,
+        scripts: e.scripts.map((s) => ({ name: s.name, duration: s.duration })),
+      });
+    }
+  }).observe({ type: "long-animation-frame", buffered: true });
+  window.__rafIntervals = [];
+  (function tick(prev) {
+    requestAnimationFrame(function (now) {
+      if (prev !== undefined) window.__rafIntervals.push(now - prev);
+      tick(now);
+    });
+  })(undefined);
+`;
+const RAF_ONLY_PROBE_SRC = `
+  window.__rafIntervals = [];
+  (function tick(prev) {
+    requestAnimationFrame(function (now) {
+      if (prev !== undefined) window.__rafIntervals.push(now - prev);
+      tick(now);
+    });
+  })(undefined);
+`;
+
+/**
+ * One round-trips run: a fresh page per run (distinct URL each time, avoiding
+ * `waitForPageComplete`'s same-URL race, the same trap plan 01 documented for `Page.navigate`), the
+ * coarse-pointer and kinetic-engagement proofs re-asserted per run since each fresh page re-runs
+ * `main()`, then the five numbers windowed from the touch-dispatch instant to quiescence.
+ * @remarks `settleMs` is deliberately NOT wall-clock-since-touchend: it is the gap between the
+ * LAST INPUT frame and the LAST OUTPUT frame, so it cannot be conflated with `runMomentum`'s local,
+ * network-independent decay (RESEARCH's own Pitfall on this exact naive-measurement trap).
+ */
+async function measureOneRoundTrip(
+  cdp,
+  sessionId,
+  wsFrames,
+  targetUrl,
+  runIndex,
+  opts,
+) {
+  const url = `${targetUrl}?rt=${runIndex}`;
+  wsFrames.length = 0;
+  await cdp.send("Page.navigate", { url }, sessionId);
+  await waitForPageComplete(cdp, sessionId, url);
+  await sleep(2500);
+
+  const coarse = await evalValue(
+    cdp,
+    sessionId,
+    "window.matchMedia('(pointer: coarse)').matches",
+  );
+
+  await cdp.send(
+    "Runtime.evaluate",
+    { expression: KINETIC_PROBE_SRC, awaitPromise: false },
+    sessionId,
+  );
+
+  const probeSrc = opts.skipLoaf ? RAF_ONLY_PROBE_SRC : LOAF_RAF_PROBE_SRC;
+  await cdp.send(
+    "Runtime.evaluate",
+    { expression: probeSrc, awaitPromise: false },
+    sessionId,
+  );
+
+  const touchStartPerfMs = await evalValue(cdp, sessionId, "performance.now()");
+  const touchStartWallMs = Date.now();
+  await flick(cdp, sessionId, CANONICAL_FLICK);
+
+  const deadline = Date.now() + SETTLE_MAX_WAIT_MS;
+  let lastActivityMs = Date.now();
+  let prevLen = wsFrames.length;
+  while (Date.now() < deadline) {
+    await sleep(SETTLE_POLL_MS);
+    if (wsFrames.length !== prevLen) {
+      prevLen = wsFrames.length;
+      lastActivityMs = Date.now();
+    }
+    if (Date.now() - lastActivityMs >= QUIET_MS) break;
+  }
+
+  const kineticProbe = await evalValue(cdp, sessionId, "window.__kineticProbe");
+
+  const inputFrames = wsFrames.filter(
+    (f) =>
+      f.dir === "sent" &&
+      f.wallMs >= touchStartWallMs &&
+      decodeTtydOp(f.payloadData) === "0",
+  );
+  const outputFrames = wsFrames.filter(
+    (f) =>
+      f.dir === "recv" &&
+      f.wallMs >= touchStartWallMs &&
+      decodeTtydOp(f.payloadData) === "0",
+  );
+  const lastInputMs =
+    inputFrames.length > 0
+      ? Math.max(...inputFrames.map((f) => f.wallMs))
+      : null;
+  const lastOutputMs =
+    outputFrames.length > 0
+      ? Math.max(...outputFrames.map((f) => f.wallMs))
+      : null;
+  const settleMs =
+    lastInputMs !== null && lastOutputMs !== null
+      ? lastOutputMs - lastInputMs
+      : null;
+
+  const loafEntriesRaw = await evalValue(
+    cdp,
+    sessionId,
+    "window.__loafEntries",
+  );
+  const loafAbsent = loafEntriesRaw === undefined;
+  let maxBlockingMs = 0;
+  let blockingScript = null;
+  if (!loafAbsent) {
+    for (const entry of loafEntriesRaw) {
+      if (entry.startTime < touchStartPerfMs) continue;
+      if (entry.blockingDuration > maxBlockingMs) {
+        maxBlockingMs = entry.blockingDuration;
+        blockingScript = entry.scripts?.[0]?.name ?? null;
+      }
+    }
+  }
+
+  const rafIntervals =
+    (await evalValue(cdp, sessionId, "window.__rafIntervals")) ?? [];
+  const droppedFrames = rafIntervals.filter((iv) => iv > 1.5 * 16.7).length;
+
+  return {
+    run: runIndex,
+    coarse,
+    kineticProbe,
+    inputFrames: inputFrames.length,
+    outputFrames: outputFrames.length,
+    settleMs,
+    maxBlockingMs,
+    blockingScript,
+    droppedFrames,
+    loafAbsent,
+  };
+}
+
+/**
+ * Stands up the real fixture, opens one CDP target for the whole leg, and runs `opts.runs ??
+ * RT_RUNS` fresh-page round-trip measurements against it. `opts.skipTouchEmulation` is the
+ * `dead-listener` break's own vehicle, reused from the activation proofs per the plan's own
+ * instruction: with touch emulation off, `attachKineticScroll` never attaches, so `inputFrames` is
+ * driven to zero and the plausible-floor check below is proven able to fire. `opts.skipLoaf` is the
+ * `loaf-blind` break's vehicle.
+ */
+async function runRoundTripsFlow(violations, opts = {}) {
+  const handle = await standUpFixture({});
+  let chromeChild = null;
+  let cdp = null;
+  const userDataDir = join(
+    tmpdir(),
+    `${SANDBOX_PREFIX}chrome-rt-${process.pid}`,
+  );
+  const runs = [];
+  try {
+    chromeChild = spawn(
+      findChrome(),
+      [
+        "--headless=new",
+        `--remote-debugging-port=${CDP_PORT}`,
+        `--user-data-dir=${userDataDir}`,
+        "--no-first-run",
+      ],
+      { stdio: ["ignore", "ignore", "ignore"] },
+    );
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const { targetId } = await cdp.send("Target.createTarget", {
+      url: "about:blank",
+    });
+    const { sessionId } = await cdp.send("Target.attachToTarget", {
+      targetId,
+      flatten: true,
+    });
+    await cdp.send("Page.enable", {}, sessionId);
+    await cdp.send("Runtime.enable", {}, sessionId);
+    await cdp.send("Network.enable", {}, sessionId);
+
+    const wsFrames = [];
+    cdp.ws.addEventListener("message", (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.sessionId !== sessionId) return;
+      if (msg.method === "Network.webSocketFrameSent") {
+        wsFrames.push({
+          dir: "sent",
+          payloadData: msg.params.response.payloadData,
+          wallMs: Date.now(),
+        });
+      } else if (msg.method === "Network.webSocketFrameReceived") {
+        wsFrames.push({
+          dir: "recv",
+          payloadData: msg.params.response.payloadData,
+          wallMs: Date.now(),
+        });
+      }
+    });
+
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 390, height: 844, deviceScaleFactor: 3, mobile: true },
+      sessionId,
+    );
+    if (!opts.skipTouchEmulation) {
+      await cdp.send(
+        "Emulation.setTouchEmulationEnabled",
+        { enabled: true, configuration: "mobile" },
+        sessionId,
+      );
+    }
+
+    const targetUrl = `http://127.0.0.1:${SANDBOX_PORT}/sessions/${handle.sessionId}/terminal/`;
+    const runCount = opts.runs ?? RT_RUNS;
+
+    for (let i = 0; i < runCount; i++) {
+      const result = await measureOneRoundTrip(
+        cdp,
+        sessionId,
+        wsFrames,
+        targetUrl,
+        i,
+        opts,
+      );
+      const expectedCoarse = !opts.skipTouchEmulation;
+      if (result.coarse !== expectedCoarse) {
+        violations.push(
+          `round-trips[run ${i}]: (pointer: coarse) expected ${expectedCoarse}, measured ${result.coarse}`,
+        );
+      }
+      if (!opts.skipTouchEmulation) {
+        if (
+          !result.kineticProbe ||
+          result.kineticProbe.defaultPrevented !== true
+        ) {
+          violations.push(
+            `round-trips[run ${i}]: kinetic engagement expected defaultPrevented true, measured ${result.kineticProbe ? result.kineticProbe.defaultPrevented : false}`,
+          );
+        }
+      }
+      runs.push(result);
+    }
+
+    if (opts.skipLoaf) {
+      const allAbsent = runs.every((r) => r.loafAbsent);
+      if (allAbsent) {
+        violations.push(
+          "round-trips: window.__loafEntries absent, LoAF observer never installed",
+        );
+      }
+    }
+
+    const inputFramesMedian = summarizeMetric(runs, "inputFrames").median;
+    if (inputFramesMedian < 10) {
+      violations.push(
+        `round-trips: inputFrames median ${inputFramesMedian} below the plausible floor for a 400px flick, suspect the fixture, not the product`,
+      );
+    }
+
+    return { runs, inputFramesMedian };
+  } finally {
+    if (cdp) cdp.close();
+    await killAndWait(chromeChild);
+    rmSync(userDataDir, { recursive: true, force: true });
+    await tearDownFixture(handle);
+  }
+}
+
+function printRoundTripsSummary(runs) {
+  for (const key of [
+    "inputFrames",
+    "outputFrames",
+    "settleMs",
+    "maxBlockingMs",
+    "droppedFrames",
+  ]) {
+    const { median: m, min, max } = summarizeMetric(runs, key);
+    console.log(
+      `round-trips: ${key} median=${m} min=${min} max=${max} (runs=${runs.length})`,
+    );
+  }
+  console.log(`round-trips: settle quiet window QUIET_MS=${QUIET_MS}`);
+  const topRun = runs.reduce(
+    (best, r) => (r.maxBlockingMs > (best?.maxBlockingMs ?? -1) ? r : best),
+    null,
+  );
+  if (topRun?.blockingScript) {
+    console.log(
+      `round-trips: top blocking script ${topRun.blockingScript} (run ${topRun.run})`,
+    );
+  }
+}
+
+async function checkRoundTrips(violations, cliOpts = {}) {
+  const { runs } = await runRoundTripsFlow(violations, {});
+  printRoundTripsSummary(runs);
+  if (cliOpts.jsonPath) {
+    writeFileSync(cliOpts.jsonPath, JSON.stringify({ runs }, null, 2) + "\n");
+    console.log(`round-trips: wrote readings to ${cliOpts.jsonPath}`);
+  }
+}
+
+/**
+ * THRESHOLD comparator for the jittery round-trip/latency legs, never zero-tolerance, unlike
+ * `compareFlickReadings`'s geometry check (a separate function, task 2): `bounds.maxInputFrameRatio`
+ * bounds `after.inputFramesMedian / before.inputFramesMedian`, `bounds.maxSettleMs` and
+ * `bounds.maxBlockingMs` bound the AFTER reading's own median values directly. Reports a violation
+ * only when a bound is exceeded, never on exact inequality, round trips, blockingDuration and settle
+ * latency all have real run-to-run jitter (RESEARCH's own "median plus spread" instruction).
+ */
+function compareLatencyReadings(before, after, bounds) {
+  const violations = [];
+  if (bounds.maxInputFrameRatio !== undefined && before.inputFramesMedian > 0) {
+    const ratio = after.inputFramesMedian / before.inputFramesMedian;
+    if (ratio > bounds.maxInputFrameRatio) {
+      violations.push(
+        `round-trips.inputFrameRatio: expected <= ${bounds.maxInputFrameRatio}, got ${ratio.toFixed(3)} (before=${before.inputFramesMedian}, after=${after.inputFramesMedian})`,
+      );
+    }
+  }
+  if (
+    bounds.maxSettleMs !== undefined &&
+    after.settleMsMedian !== null &&
+    after.settleMsMedian > bounds.maxSettleMs
+  ) {
+    violations.push(
+      `round-trips.settleMs: expected <= ${bounds.maxSettleMs}, got ${after.settleMsMedian}`,
+    );
+  }
+  if (
+    bounds.maxBlockingMs !== undefined &&
+    after.maxBlockingMsMedian !== null &&
+    after.maxBlockingMsMedian > bounds.maxBlockingMs
+  ) {
+    violations.push(
+      `round-trips.maxBlockingMs: expected <= ${bounds.maxBlockingMs}, got ${after.maxBlockingMsMedian}`,
+    );
+  }
+  return violations;
+}
+
+/** Skips the LoAF PerformanceObserver half of the probe only, the RAF sampler still installs.
+ * `window.__loafEntries` must come back `undefined`, not `[]`, proving the check can tell "no
+ * observer" apart from "observer installed, main thread never blocked". */
+async function breakLoafBlind(violations) {
+  await runRoundTripsFlow(violations, { skipLoaf: true, runs: 1 });
+}
+
+/** Reuses the activation proofs' own `skipTouchEmulation` vehicle: with touch emulation off,
+ * `attachKineticScroll` never attaches, driving `inputFrames` to zero and proving the plausible-
+ * floor assertion, the one check in this harness with no break per plan review, can actually fail. */
+async function breakDeadListener(violations) {
+  await runRoundTripsFlow(violations, { skipTouchEmulation: true, runs: 1 });
+}
+
+// ---------------------------------------------------------------------------
 // Checks and breaks.
 // ---------------------------------------------------------------------------
 
@@ -1089,6 +1517,7 @@ async function breakViewportFixture(violations) {
 const CHECKS = {
   standup: checkStandup,
   activation: checkActivation,
+  "round-trips": checkRoundTrips,
 };
 
 const BREAKS = {
@@ -1096,6 +1525,8 @@ const BREAKS = {
   "no-touch-emulation": breakNoTouchEmulation,
   "sub-slop-flick": breakSubSlopFlick,
   "wrong-page": breakWrongPage,
+  "loaf-blind": breakLoafBlind,
+  "dead-listener": breakDeadListener,
 };
 
 // ---------------------------------------------------------------------------
@@ -1118,6 +1549,10 @@ async function main() {
     );
     process.exit(1);
   }
+  const cliOpts = {
+    jsonPath: readFlag(argv, "--json"),
+    comparePath: readFlag(argv, "--compare"),
+  };
 
   await assertNoLiveService();
   await assertSandboxPortsFree();
@@ -1137,7 +1572,7 @@ async function main() {
       console.log(`\n=== running check: ${n} ===`);
       const before = violations.length;
       try {
-        await CHECKS[n](violations);
+        await CHECKS[n](violations, cliOpts);
       } catch (err) {
         violations.push(
           `${n}: run failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
