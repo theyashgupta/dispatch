@@ -53,6 +53,13 @@ interface BoardProps {
   overlayAboveContent?: boolean;
 }
 
+interface FailedMoveNotice {
+  id: number;
+  count: number;
+  settled: boolean;
+  stranded: boolean;
+}
+
 function isColumn(id: unknown): id is ColumnId {
   return typeof id === "string" && (COLUMNS as readonly string[]).includes(id);
 }
@@ -205,16 +212,19 @@ export function Board({
     return () => clearTimeout(timer);
   }, [refusedColumn]);
 
-  const [failedMoveCount, setFailedMoveCount] = useState<number | null>(null);
-  const strandedCompensationRef = useRef(false);
+  const [failedMove, setFailedMove] = useState<FailedMoveNotice | null>(null);
+  const failedMoveIdRef = useRef(0);
 
   useEffect(() => {
-    if (failedMoveCount == null) return;
+    if (failedMove == null || !failedMove.settled || failedMove.stranded) {
+      return;
+    }
+    const noticeId = failedMove.id;
     const timer = setTimeout(() => {
-      if (!strandedCompensationRef.current) setFailedMoveCount(null);
+      setFailedMove((prev) => (prev?.id === noticeId ? null : prev));
     }, 3200);
     return () => clearTimeout(timer);
-  }, [failedMoveCount]);
+  }, [failedMove]);
 
   const justDroppedRef = useRef(false);
 
@@ -315,8 +325,18 @@ export function Board({
           : c,
       ),
     );
-    strandedCompensationRef.current = false;
-    setFailedMoveCount(toMove.length);
+    const noticeId = ++failedMoveIdRef.current;
+    setFailedMove({
+      id: noticeId,
+      count: toMove.length,
+      settled: false,
+      stranded: false,
+    });
+    function markStranded() {
+      setFailedMove((prev) =>
+        prev?.id === noticeId ? { ...prev, stranded: true } : prev,
+      );
+    }
 
     const compensationTargets = toMove.filter(
       (_, i) => results[i].status === "fulfilled",
@@ -338,9 +358,12 @@ export function Board({
           originalColumn,
           retryErr,
         );
-        strandedCompensationRef.current = true;
+        markStranded();
       }
     }
+    setFailedMove((prev) =>
+      prev?.id === noticeId ? { ...prev, settled: true } : prev,
+    );
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -562,7 +585,7 @@ export function Board({
         }
         onClear={() => setSelectedIds(new Set())}
       />
-      {failedMoveCount != null && (
+      {failedMove != null && (
         <div
           role="alert"
           style={{
@@ -582,7 +605,7 @@ export function Board({
             icon={
               <AlertTriangle size={14} strokeWidth={2} aria-hidden="true" />
             }
-            label={`Couldn't move ${failedMoveCount} tickets`}
+            label={`Couldn't move ${failedMove.count} tickets`}
           />
         </div>
       )}
