@@ -328,6 +328,7 @@ export function Board({
         originalColumnById.has(c.id) ? { ...c, column: targetColumn } : c,
       ),
     );
+    setSelectedIds(new Set());
 
     const results = await Promise.allSettled(
       moves.map((m) => moveCard(m.id, targetColumn)),
@@ -405,6 +406,16 @@ export function Board({
     );
   }
 
+  function selectedGroupMembers() {
+    return cards.filter(
+      (c) =>
+        selectedIds.has(c.id) &&
+        c.column === "todo" &&
+        c.groupId == null &&
+        c.source !== "group",
+    );
+  }
+
   function handleDragEnd(event: DragEndEvent) {
     armClickSuppression();
 
@@ -414,7 +425,12 @@ export function Board({
     const ids = dragSelectionIds(String(active.id), selectedIds);
     if (ids != null) {
       if (over.id === "in_progress") {
-        setGroupModalMembers(cards.filter((c) => selectedIds.has(c.id)));
+        const members = selectedGroupMembers();
+        if (members.length < 2) {
+          performMove(String(active.id), over.id);
+          return;
+        }
+        setGroupModalMembers(members);
         return;
       }
       void performGroupMove(ids, over.id);
@@ -619,9 +635,7 @@ export function Board({
       </DndContext>
       <SelectionBar
         count={selectedIds.size}
-        onStartGroup={() =>
-          setGroupModalMembers(cards.filter((c) => selectedIds.has(c.id)))
-        }
+        onStartGroup={() => setGroupModalMembers(selectedGroupMembers())}
         onClear={() => setSelectedIds(new Set())}
       />
       {failedMove != null && (
