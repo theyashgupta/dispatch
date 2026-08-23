@@ -162,7 +162,18 @@
  *     detection (an alert that outlives the normal 3200ms auto-clear, plus a captured `console.error`
  *     naming the card) is what catches this failure mode, not a column read (which a real SSE resync
  *     eventually settles to the server's own un-reverted truth regardless of what this harness
- *     asserts, see PLAN 100-06 ADDITIONS below).
+ *     asserts, see PLAN 100-06 ADDITIONS below). Which of MSD-A/MSD-C is stranded is NOT
+ *     deterministic: `strandedId` is taken from whichever compensating request the CDP pause queue
+ *     delivers first out of a concurrent `Promise.allSettled`, so the card id in that message varies
+ *     run to run.
+ *     Those two assertions were DEAD until 100-REVIEW CR-02: they ran only in this break's trip leg,
+ *     where they are expected to fail, so `checkAtomicRollback` gained
+ *     `leg 3 (compensation permanently fails)`, the same scenario in the configuration where both
+ *     must pass. Run verbatim against a `Board.tsx` with `strandedCompensationRef` and its
+ *     `if (!strandedCompensationRef.current)` timer guard deleted, leg 3 reported
+ *     `atomic-rollback: leg 3 (compensation permanently fails), expected [role="alert"] to stay
+ *     visible past 3200ms for a stranded compensation, measured absent`, where every path was
+ *     previously green with the feature removed.
  * All nine `--break <name>` runs' restore legs re-confirmed PASS (`tripFired=true restoreClean=true`
  * for each), and a plain `node scripts/panel-100.mjs` run immediately after all nine breaks exited 0
  * with all seven checks PASS, proving no break leaked DOM state.
@@ -2713,19 +2724,37 @@ async function runBreakGroupModalPrefill(cdp, sessionId) {
 // ---------------------------------------------------------------------------
 
 /** Moves every `identifiers` entry currently NOT in "todo" back to "todo" via a real single-card
- * drag (`dragCardToColumn`, no selection required). Used after a break trip that let a real
- * server-side move land (`atomic-rollback`'s "release all three" leg, or a permanently-stranded
+ * drag (`dragCardToColumn`, no selection required). Used after a break trip or after `leg 3` let a
+ * real server-side move land (`atomic-rollback`'s "release all three" leg, or a permanently-stranded
  * compensation), so the following restore-verification run's own `selectCardsByIdentifier` finds
- * every fixture back in its selection-eligible column. */
+ * every fixture back in its selection-eligible column.
+ *
+ * Re-reads the card's column and re-drags up to `REPAIR_MAX_ATTEMPTS` times rather than trusting one
+ * drag: a full-board-width `done` -> `todo` drag resolves `over` from dnd-kit's own rect-intersection
+ * against droppable rects measured at activation, and was observed landing one column short
+ * (`in_progress`) after `leg 3`'s page reload. This is fixture repair, not an assertion, so
+ * converging on `todo` is the whole contract; the final failure still throws with the last observed
+ * column named. */
+const REPAIR_MAX_ATTEMPTS = 3;
+
 async function repairCardsToTodo(cdp, sessionId, identifiers) {
   for (const id of identifiers) {
-    const col = await evalValue(
-      cdp,
-      sessionId,
-      `${FIND_CARD_COLUMN_SRC}panel100CardColumnOf(${JSON.stringify(id)})`,
-    );
-    if (col != null && col !== "todo") {
-      await dragCardToColumn(cdp, sessionId, col, id, "todo");
+    for (let attempt = 1; attempt <= REPAIR_MAX_ATTEMPTS; attempt++) {
+      const col = await evalValue(
+        cdp,
+        sessionId,
+        `${FIND_CARD_COLUMN_SRC}panel100CardColumnOf(${JSON.stringify(id)})`,
+      );
+      if (col == null || col === "todo") break;
+      try {
+        await dragCardToColumn(cdp, sessionId, col, id, "todo");
+        break;
+      } catch (err) {
+        if (attempt === REPAIR_MAX_ATTEMPTS) throw err;
+        console.log(
+          `repairCardsToTodo: ${id} attempt ${attempt}/${REPAIR_MAX_ATTEMPTS} did not land in "todo", retrying: ${err.message}`,
+        );
+      }
     }
   }
 }
@@ -2990,6 +3019,16 @@ async function performAtomicRollbackLeg(
   return { strandedIdentifier };
 }
 
+/**
+ * `atomic-rollback`'s three legs. Leg 3 is 100-REVIEW CR-02's fix: before it existed, the two
+ * assertions that guard the permanently-stranded path (the alert outliving its 3200ms auto-clear,
+ * and the `console.error` naming the card) ran ONLY inside
+ * `runBreakAtomicRollbackStrandedCompensation`'s trip leg, where they are expected to FAIL, so
+ * deleting `Board.tsx`'s whole stranded-suppression path left every run green. Leg 3 runs that same
+ * scenario in the configuration where both assertions must PASS, which is what turns the break into
+ * a real self-check. It genuinely strands one card server-side, so it repairs the fixture before
+ * returning.
+ */
 async function checkAtomicRollback(cdp, sessionId, violations, opts = {}) {
   await performAtomicRollbackLeg(
     cdp,
@@ -2998,14 +3037,23 @@ async function checkAtomicRollback(cdp, sessionId, violations, opts = {}) {
     "leg 1 (clean rollback)",
     opts,
   );
-  if (!opts.releaseAllInitial) {
-    await performAtomicRollbackLeg(
-      cdp,
-      sessionId,
-      violations,
-      "leg 2 (compensation retry succeeds)",
-      { retryCompensationOnce: true },
-    );
+  if (opts.releaseAllInitial) return;
+  await performAtomicRollbackLeg(
+    cdp,
+    sessionId,
+    violations,
+    "leg 2 (compensation retry succeeds)",
+    { retryCompensationOnce: true },
+  );
+  const leg3 = await performAtomicRollbackLeg(
+    cdp,
+    sessionId,
+    violations,
+    "leg 3 (compensation permanently fails)",
+    { strandCompensation: true },
+  );
+  if (leg3.strandedIdentifier) {
+    await repairCardsToTodo(cdp, sessionId, [leg3.strandedIdentifier]);
   }
 }
 
@@ -3144,16 +3192,6 @@ async function runBreakAtomicRollbackToast(cdp, sessionId) {
 
 /**
  * `atomic-rollback-stranded-compensation` break, the plan-checker's own required additional leg.
- * Fails MSD-B's own initial move (as always), then fails the FIRST compensating request AND its
- * retry, permanently stranding that one card `done` server-side. The trip must report all three of:
- * a non-"todo" server column for the stranded card after a full page reload (proving `leg 2`'s own
- * retry-based assertion is not a dead instrument, since a permanently-failed retry correctly reads
- * as a violation there), the failure alert staying visible past its normal 3200ms auto-clear, and a
- * captured `console.error` naming the stranded card's id. The restore leg first repairs the
- * stranded card back to `todo` for real before re-running the actual `checkAtomicRollback` check.
- */
-/**
- * `atomic-rollback-stranded-compensation` break, the plan-checker's own required additional leg.
  * `Board.tsx`'s own compensation-retry logic (plan 04) already handles a permanently-stranded card
  * correctly, on purpose: this is genuinely-correct product behavior, not a bug, so a bare scenario
  * variation (failing the compensating call AND its retry) produces a clean check pass, not a
@@ -3165,6 +3203,12 @@ async function runBreakAtomicRollbackToast(cdp, sessionId) {
  * "stranded" (so this harness's own `Runtime.consoleAPICalled` capture never observes it), while
  * the underlying stranding still genuinely occurs server-side. The trip must report both the
  * missing alert and the missing console message.
+ *
+ * 100-REVIEW CR-02: this break only became a real self-check once `checkAtomicRollback` grew its own
+ * `leg 3 (compensation permanently fails)`, which runs this exact scenario in the configuration
+ * where both assertions must PASS. Before that leg existed, neither the default run nor this break
+ * exercised the stranded path in a passing configuration, so deleting `Board.tsx`'s whole
+ * `strandedCompensationRef` suppression left every path green.
  */
 async function runBreakAtomicRollbackStrandedCompensation(cdp, sessionId) {
   console.log(
