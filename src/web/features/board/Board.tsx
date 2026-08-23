@@ -214,6 +214,15 @@ export function Board({
 
   const [failedMove, setFailedMove] = useState<FailedMoveNotice | null>(null);
   const failedMoveIdRef = useRef(0);
+  const groupMoveGenerationRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (failedMove == null || !failedMove.settled || failedMove.stranded) {
@@ -300,6 +309,13 @@ export function Board({
     const toMove = cardIds.filter((id) => snapshot.get(id) !== targetColumn);
     if (toMove.length === 0) return;
 
+    const generation = ++groupMoveGenerationRef.current;
+    function superseded() {
+      return (
+        !mountedRef.current || groupMoveGenerationRef.current !== generation
+      );
+    }
+
     setCards((prev) =>
       prev.map((c) =>
         toMove.includes(c.id) ? { ...c, column: targetColumn } : c,
@@ -311,6 +327,7 @@ export function Board({
     );
 
     if (results.every((r) => r.status === "fulfilled")) return;
+    if (superseded()) return;
 
     console.error(
       "performGroupMove failed; restoring the previous columns",
@@ -341,6 +358,7 @@ export function Board({
     const compensationTargets = toMove.filter(
       (_, i) => results[i].status === "fulfilled",
     );
+    if (superseded()) return;
     const compensationResults = await Promise.allSettled(
       compensationTargets.map((id) => moveCard(id, snapshot.get(id)!)),
     );
@@ -349,6 +367,7 @@ export function Board({
       const id = compensationTargets[i];
       const originalColumn = snapshot.get(id)!;
       await new Promise((resolve) => setTimeout(resolve, 300));
+      if (superseded()) return;
       try {
         await moveCard(id, originalColumn);
       } catch (retryErr) {
