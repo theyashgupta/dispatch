@@ -811,32 +811,24 @@ async function waitForBoardRootLoaded(cdp, sessionId, identifiers) {
 }
 
 /**
- * Opens a BRAND NEW Chrome target/tab against the sandbox root, attaches to it, enables the same
- * domains and viewport `main()` sets up on the original tab, and waits for the board to paint.
- * Returns the NEW `sessionId`. Used between a break's TRIP leg and its RESTORE leg (both of which
- * run a full multi-drag check a second time): empirically, this harness's headless renderer
- * occasionally stops responding to `Runtime.evaluate` mid-check after several consecutive real
- * drags in one long-lived page session (observed as an indefinite hang with zero further
- * console/exception output). A same-tab `Page.navigate` reload does NOT recover from this, since by
- * the time the renderer is unresponsive, the reload command is queued in the SAME stuck renderer
- * and never completes either (confirmed empirically: it hits its own polling timeout). A genuinely
- * fresh target/renderer process sidesteps whatever degraded the old one; the old (possibly stuck)
- * tab is deliberately left open rather than torn down here (closing it risks the SAME hang this
- * function exists to avoid), and is cleaned up regardless once `main()`'s `finally` block kills the
- * whole Chrome process at the end of this script's run.
- */
-/**
  * Tracks the targetId of the last board tab handed out (by `main()`'s own standup `Target.
- * createTarget` call, or by a prior `freshBoardSession()`), so this call can close it once the NEW
- * target is confirmed loaded. `Target.closeTarget` is a browser-process-level command, independent
- * of whether the closed target's own renderer is responsive, so it reliably reaps even a genuinely
- * stuck tab. This plan's own `group-modal-prefill`/`atomic-rollback` checks add several more real
- * drags (and, for `atomic-rollback`, a `Page.reload`) per full-suite run than any prior plan; left
- * unclosed, the accumulating stuck tabs measurably starved the LAST fresh session in a run of
- * enough CPU to render within `RENDER_TIMEOUT_MS`, a load-bearing finding for this plan.
+ * createTarget` call, or by a prior `freshBoardSession()`), so that call can close it once the NEW
+ * target is confirmed loaded.
  */
 let lastKnownTargetId = null;
 
+/**
+ * Opens a BRAND NEW Chrome target/tab against the sandbox root, attaches to it, enables the same
+ * domains and viewport `main()` sets up on the original tab, waits for the board to paint, then
+ * closes the previous tab. Returns the NEW `sessionId`.
+ * @remarks This harness's headless renderer occasionally stops responding to `Runtime.evaluate`
+ * after several consecutive real drags in one long-lived page session, and a same-tab
+ * `Page.navigate` reload cannot recover it because the reload command queues in that same stuck
+ * renderer. Only a genuinely fresh target/renderer process does. The previous tab is reaped via
+ * `Target.closeTarget`, a browser-process-level command that works on a stuck renderer: left
+ * unclosed, accumulating stuck tabs starved the last fresh session in a full-suite run of enough
+ * CPU to render within `RENDER_TIMEOUT_MS`.
+ */
 async function freshBoardSession(cdp, identifiers) {
   const { targetId } = await cdp.send("Target.createTarget", {
     url: `http://127.0.0.1:${SANDBOX_PORT}/`,

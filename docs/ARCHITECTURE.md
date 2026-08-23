@@ -3168,16 +3168,22 @@ rate_limit`, paused until `reset` under 50 remaining), and a semaphore of four c
   structural/DOM instrument, deliberately OUTSIDE `npm run check` (it boots a real sandboxed
   dispatch server and requires the live `com.dispatch.app` service stopped for its duration). Five
   fixture cards (`MSD-A`..`MSD-D` in `todo`, `MSD-Z` in `done`), no real tmux or ttyd needed. Seven
-  named checks: `stacked-overlay` (the deck's two back faces are pure `(4,4)`/`(8,8)` translations of
-  the front card's rect at N=3 and N=4, badge reads the full selection count), `overlay-unchanged-n1`
+  named checks: `stacked-overlay` (the deck's back faces are pure `(4,4)`/`(8,8)` translations of the
+  front card's rect at N=2, N=3 and N=4, the badge reads the full selection count, each layer's
+  computed `z-index` matches `100-UI-SPEC.md`'s layer table, the deck container establishes a
+  stacking context, and `document.elementFromPoint` at the deck's centre resolves to the FRONT card
+  face, the paint-order reading that rect math alone cannot make), `overlay-unchanged-n1`
   (below N=2 the overlay stays byte-for-byte today's single-card overlay), `a11y` (the deck is
   `aria-hidden`/`inert`, the live announcer names the count, non-dragged selected cards dim while
   `SelectionBar` stays accurate throughout), `group-modal-prefill` (dropping a 3-card selection on
   In Progress opens the existing Start Group modal pre-filled with exactly those three tickets and
-  fires zero move requests), `atomic-rollback` (failing one of three in-flight moves rolls back every
-  card on the client and, after a full page reload, on the server, with a single alert naming the
-  batch count; a compensating call that itself fails once is saved by its own retry, proven on the
-  client and after a reload), `single-card-unchanged`, and `keyboard-unchanged` (DRAG-05's two
+  fires zero move requests, while a drop on the source column and a drop on the refused Agent Done
+  target open no modal, fire no request and move nothing), `atomic-rollback` (failing one of three
+  in-flight moves rolls back every card on the client and, after a full page reload, on the server,
+  with a single alert naming the batch count; a compensating call that itself fails once is saved by
+  its own retry, proven on the client and after a reload; and a compensation that fails permanently
+  keeps the alert up past its 3200ms auto-clear and logs a `console.error` naming the stranded card),
+  `single-card-unchanged`, and `keyboard-unchanged` (DRAG-05's two
   baseline checks, pinning the pre-existing single-card drag and carousel "Move to..." paths
   unaffected). Nine named `--break <name>` legs total, each proven able to fail live and quoted
   verbatim from the script's own header JSDoc: `single-card-unchanged`
@@ -3199,8 +3205,13 @@ after rollback, measured "done"`), `atomic-rollback-toast` (a `MutationObserver`
   the alert, layered on a real permanently-failed compensation, produces `atomic-rollback: trip
 (detection signals suppressed), expected [role="alert"] to stay visible past 3200ms for a stranded
 compensation, measured absent` and `atomic-rollback: trip (detection signals suppressed), expected
-a console.error mentioning "stranded" and card id panel100-a, none captured`, proving the alert and
-  console signals, not a column read, are what catch a permanently-stranded card).
+a console.error mentioning "stranded" and card id panel100-a, none captured`; the card id in that
+  message is NOT deterministic, it names whichever compensating request the CDP pause queue delivers
+  first out of a concurrent `Promise.allSettled`, so a run may quote `panel100-c` instead. Those two
+  assertions became load-bearing only once `checkAtomicRollback` grew `leg 3 (compensation
+permanently fails)`, which runs the same scenario in the configuration where both must PASS;
+  before that leg they ran only in this break's trip, where they are expected to fail, and deleting
+  `Board.tsx`'s whole stranded-suppression path left every run green).
   `density-91.mjs --compare` against `panel-100.mjs`'s own Phase 100 BEFORE snapshot reports zero
   deltas: nothing about a resting card's geometry changed.
 - **`phase-smoke-tester`** - the only BEHAVIORAL verification this project runs: an agent derives
