@@ -2030,10 +2030,16 @@ async function performStackedOverlayLeg(
 
 /**
  * `stacked-overlay`: selects MSD-A/B/C (N=3, real ctrl-clicks), runs leg A (N=3, expects 2 back
- * faces + badge "3"), adds MSD-D (N=4), runs leg B (N=4, still 2 back faces, badge "4" not "3"),
- * then ctrl-clicks MSD-D again to return to a clean 3-selection. `legAMutateHook`/`legARestoreHook`
- * are `runBreakStackedOverlay`'s only injection point, applied to leg A alone (leg B always runs
- * clean, sufficient once leg A has already proven the instrument can fail).
+ * faces + badge "3"), drops to N=2 for leg A2 (1 back face, badge "2"), returns to N=3, adds MSD-D
+ * (N=4), runs leg B (N=4, still 2 back faces, badge "4" not "3"), then ctrl-clicks MSD-D again to
+ * return to a clean 3-selection. `legAMutateHook`/`legARestoreHook` are `runBreakStackedOverlay`'s
+ * only injection point, applied to leg A alone (leg B always runs clean, sufficient once leg A has
+ * already proven the instrument can fail).
+ *
+ * Leg A2 is 100-REVIEW WR-07's fix. N=2 is the deck's ONLY conditional boundary,
+ * `DECK_BACK_OFFSETS_PX.slice(...)` in `Board.tsx`, and legs A and B both expect 2 back faces, so
+ * that branch had zero coverage and `faceExpectations`'s own `slice(expectedBackFaceCount === 2 ? 0
+ * : 1)` could never take its `1` arm: inverting the product's ternary passed the whole suite.
  */
 async function checkStackedOverlay(
   cdp,
@@ -2058,6 +2064,33 @@ async function checkStackedOverlay(
     legAMutateHook,
     legARestoreHook,
   );
+
+  await ctrlClickCard(cdp, sessionId, "todo", MSD_C_IDENTIFIER);
+  const legA2SetupText = await readSelectionText(cdp, sessionId);
+  if (legA2SetupText !== "2 selected") {
+    throw new Error(
+      `checkStackedOverlay: leg A2 setup expected SelectionBar text "2 selected" after ctrl-clicking MSD-C off, measured ${JSON.stringify(legA2SetupText)}`,
+    );
+  }
+
+  await performStackedOverlayLeg(
+    cdp,
+    sessionId,
+    violations,
+    "leg A2 (N=2)",
+    2,
+    1,
+    null,
+    null,
+  );
+
+  await ctrlClickCard(cdp, sessionId, "todo", MSD_C_IDENTIFIER);
+  const legA2RestoreText = await readSelectionText(cdp, sessionId);
+  if (legA2RestoreText !== "3 selected") {
+    throw new Error(
+      `checkStackedOverlay: leg A2 teardown expected SelectionBar text "3 selected" after ctrl-clicking MSD-C back on, measured ${JSON.stringify(legA2RestoreText)}`,
+    );
+  }
 
   await ctrlClickCard(cdp, sessionId, "todo", MSD_D_IDENTIFIER);
   const legBSetupText = await readSelectionText(cdp, sessionId);
