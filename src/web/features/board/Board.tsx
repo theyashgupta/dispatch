@@ -301,13 +301,12 @@ export function Board({
       return;
     }
 
-    const snapshot = new Map(
-      cards
-        .filter((c) => cardIds.includes(c.id))
-        .map((c) => [c.id, c.column] as const),
-    );
-    const toMove = cardIds.filter((id) => snapshot.get(id) !== targetColumn);
-    if (toMove.length === 0) return;
+    const moves = cards
+      .filter((c) => cardIds.includes(c.id) && c.column !== targetColumn)
+      .map((c) => ({ id: c.id, from: c.column }));
+    if (moves.length === 0) return;
+
+    const originalColumnById = new Map(moves.map((m) => [m.id, m.from]));
 
     const generation = ++groupMoveGenerationRef.current;
     function superseded() {
@@ -318,12 +317,12 @@ export function Board({
 
     setCards((prev) =>
       prev.map((c) =>
-        toMove.includes(c.id) ? { ...c, column: targetColumn } : c,
+        originalColumnById.has(c.id) ? { ...c, column: targetColumn } : c,
       ),
     );
 
     const results = await Promise.allSettled(
-      toMove.map((id) => moveCard(id, targetColumn)),
+      moves.map((m) => moveCard(m.id, targetColumn)),
     );
 
     if (results.every((r) => r.status === "fulfilled")) return;
@@ -336,16 +335,17 @@ export function Board({
         .map((r): unknown => r.reason),
     );
     setCards((prev) =>
-      prev.map((c) =>
-        toMove.includes(c.id) && c.column === targetColumn
-          ? { ...c, column: snapshot.get(c.id)! }
-          : c,
-      ),
+      prev.map((c) => {
+        const from = originalColumnById.get(c.id);
+        return from != null && c.column === targetColumn
+          ? { ...c, column: from }
+          : c;
+      }),
     );
     const noticeId = ++failedMoveIdRef.current;
     setFailedMove({
       id: noticeId,
-      count: toMove.length,
+      count: moves.length,
       settled: false,
       stranded: false,
     });
@@ -355,26 +355,25 @@ export function Board({
       );
     }
 
-    const compensationTargets = toMove.filter(
+    const compensationTargets = moves.filter(
       (_, i) => results[i].status === "fulfilled",
     );
     if (superseded()) return;
     const compensationResults = await Promise.allSettled(
-      compensationTargets.map((id) => moveCard(id, snapshot.get(id)!)),
+      compensationTargets.map((m) => moveCard(m.id, m.from)),
     );
     for (const [i, compensationResult] of compensationResults.entries()) {
       if (compensationResult.status !== "rejected") continue;
-      const id = compensationTargets[i];
-      const originalColumn = snapshot.get(id)!;
+      const { id, from } = compensationTargets[i];
       await new Promise((resolve) => setTimeout(resolve, 300));
       if (superseded()) return;
       try {
-        await moveCard(id, originalColumn);
+        await moveCard(id, from);
       } catch (retryErr) {
         console.error(
           "performGroupMove compensation failed after one retry; card stranded",
           id,
-          originalColumn,
+          from,
           retryErr,
         );
         markStranded();
