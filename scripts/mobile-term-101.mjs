@@ -1461,6 +1461,371 @@ async function breakDeadListener(violations) {
   await runRoundTripsFlow(violations, { skipTouchEmulation: true, runs: 1 });
 }
 
+/**
+ * Capture-phase wheel listener on `document`, NOT bubble-phase despite `emitTick`'s `bubbles: true`
+ * dispatch (`terminal-main.ts:391-402`). Accumulates the SUM OF ABSOLUTE dispatched `deltaY`, the
+ * calibrated quantity, rows of finger travel requested, not the frame count on the wire: a
+ * coalescing fix is expected to change the latter while leaving this byte-identical.
+ * @remarks Live-confirmed (same class of bug as plan 01's own kinetic-engagement probe): a
+ * bubble-phase listener on `document` measures zero ticks on every run despite `attachKineticScroll`
+ * genuinely engaging (`(pointer: coarse)` true, drag/momentum both firing). xterm's own internal
+ * wheel handling on a descendant of `term.element` calls `stopPropagation()`, halting the event
+ * before it ever bubbles back up to `document`. Capture-phase listeners on `document` fire on the
+ * way DOWN, before the event reaches that descendant, so they see the dispatch regardless of any
+ * later `stopPropagation()` call.
+ */
+const WHEEL_PROBE_SRC = `
+  window.__wheelProbe = { ticks: 0, deltaSum: 0, deltaMode: null };
+  document.addEventListener(
+    "wheel",
+    function (e) {
+      if (window.__wheelProbe.deltaMode === null) window.__wheelProbe.deltaMode = e.deltaMode;
+      window.__wheelProbe.ticks += 1;
+      window.__wheelProbe.deltaSum += Math.abs(e.deltaY);
+    },
+    { capture: true, passive: true },
+  );
+`;
+
+/** `--break drop-wheel-ticks`'s own live page mutation: patches `EventTarget.prototype.dispatchEvent`
+ * to swallow every 5th `wheel`-typed dispatch, reproducing the v2.7-class ~20% under-scroll as a page
+ * mutation with no `src/` edit and no rebuild. */
+const DROP_WHEEL_PATCH_SRC = `
+  (function () {
+    var orig = EventTarget.prototype.dispatchEvent;
+    var count = 0;
+    EventTarget.prototype.dispatchEvent = function (e) {
+      if (e && e.type === "wheel") {
+        count += 1;
+        if (count % 5 === 0) return true;
+      }
+      return orig.call(this, e);
+    };
+  })();
+`;
+
+async function measureFlickDeltaOnce(
+  cdp,
+  sessionId,
+  targetUrl,
+  runIndex,
+  opts,
+) {
+  const url = `${targetUrl}?fd=${runIndex}`;
+  await cdp.send("Page.navigate", { url }, sessionId);
+  await waitForPageComplete(cdp, sessionId, url);
+  await sleep(2500);
+
+  if (opts.dropWheelTicks) {
+    await cdp.send(
+      "Runtime.evaluate",
+      { expression: DROP_WHEEL_PATCH_SRC, awaitPromise: false },
+      sessionId,
+    );
+  }
+  await cdp.send(
+    "Runtime.evaluate",
+    { expression: WHEEL_PROBE_SRC, awaitPromise: false },
+    sessionId,
+  );
+
+  await flick(cdp, sessionId, CANONICAL_FLICK);
+  await sleep(1500);
+
+  const wheelProbe = await evalValue(cdp, sessionId, "window.__wheelProbe");
+  const rowHeightPx = await evalValue(
+    cdp,
+    sessionId,
+    `(function(){
+      var el = document.querySelector(".xterm-rows");
+      var row = el && el.children[0];
+      return row ? row.getBoundingClientRect().height : null;
+    })()`,
+  );
+  return { wheelProbe, rowHeightPx };
+}
+
+/**
+ * A second CDP target on the SAME fixture/tmux/ttyd, not a second fixture standup: fine pointer, no
+ * touch emulation, ROADMAP criterion 3's explicit desktop leg. Proves the desktop path is inert to
+ * synthetic touch (no `attachKineticScroll`, since `main()`'s coarse-pointer gate never opens) yet
+ * still alive to a real dispatched wheel (xterm's own always-on wheel listener, independent of the
+ * mobile kinetic scroller).
+ */
+async function runDesktopLeg(violations, cdp, handle) {
+  const { targetId } = await cdp.send("Target.createTarget", {
+    url: "about:blank",
+  });
+  try {
+    const { sessionId } = await cdp.send("Target.attachToTarget", {
+      targetId,
+      flatten: true,
+    });
+    await cdp.send("Page.enable", {}, sessionId);
+    await cdp.send("Runtime.enable", {}, sessionId);
+    await cdp.send("Network.enable", {}, sessionId);
+
+    const wsFrames = [];
+    const onMessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.sessionId !== sessionId) return;
+      if (msg.method === "Network.webSocketFrameSent") {
+        wsFrames.push({ payloadData: msg.params.response.payloadData });
+      }
+    };
+    cdp.ws.addEventListener("message", onMessage);
+
+    const targetUrl = `http://127.0.0.1:${SANDBOX_PORT}/sessions/${handle.sessionId}/terminal/`;
+    await cdp.send("Page.navigate", { url: targetUrl }, sessionId);
+    await waitForPageComplete(cdp, sessionId, targetUrl);
+    await sleep(2500);
+
+    const coarse = await evalValue(
+      cdp,
+      sessionId,
+      "window.matchMedia('(pointer: coarse)').matches",
+    );
+    if (coarse !== false) {
+      violations.push(
+        `flick-distance: desktop (pointer: coarse) expected false, measured ${coarse}`,
+      );
+    } else {
+      console.log(
+        `flick-distance: desktop (pointer: coarse) measured ${coarse}`,
+      );
+    }
+
+    await cdp.send(
+      "Runtime.evaluate",
+      { expression: KINETIC_PROBE_SRC, awaitPromise: false },
+      sessionId,
+    );
+    await flick(cdp, sessionId, CANONICAL_FLICK);
+    await sleep(500);
+    const probe = await evalValue(cdp, sessionId, "window.__kineticProbe");
+    const probeReading = probe
+      ? { moves: probe.moves, defaultPrevented: probe.defaultPrevented }
+      : null;
+    // `moves` is NOT proof of attachment: KINETIC_PROBE_SRC's own listener sees every dispatched
+    // touchmove regardless of matchMedia, live-confirmed (moves: 25 here even though the mobile
+    // kinetic scroller never attaches on this fine-pointer target). `defaultPrevented` IS the real
+    // proof: only `attachKineticScroll`'s own listener ever calls `preventDefault()`, and it never
+    // ran here, so `false` means no page code intercepted the gesture.
+    if (!probe || probe.defaultPrevented !== false) {
+      violations.push(
+        `flick-distance: desktop kineticProbe expected defaultPrevented false, measured ${JSON.stringify(probeReading)}`,
+      );
+    } else {
+      console.log(
+        `flick-distance: desktop kineticProbe measured ${JSON.stringify(probeReading)}`,
+      );
+    }
+
+    await cdp.send(
+      "Input.dispatchMouseEvent",
+      { type: "mouseMoved", x: 195, y: 400 },
+      sessionId,
+    );
+    await cdp.send(
+      "Input.dispatchMouseEvent",
+      { type: "mouseWheel", x: 195, y: 400, deltaX: 0, deltaY: -120 },
+      sessionId,
+    );
+    await sleep(500);
+    const nativeInputFrames = wsFrames.filter(
+      (f) => decodeTtydOp(f.payloadData) === "0",
+    ).length;
+    if (nativeInputFrames < 1) {
+      violations.push(
+        `flick-distance: desktop native wheel INPUT frames expected >= 1, measured ${nativeInputFrames}`,
+      );
+    } else {
+      console.log(
+        `flick-distance: desktop native wheel INPUT frames measured ${nativeInputFrames}`,
+      );
+    }
+    cdp.ws.removeEventListener("message", onMessage);
+  } finally {
+    await cdp.send("Target.closeTarget", { targetId }).catch(() => {});
+  }
+}
+
+/**
+ * ZERO tolerance across `deltaSum`, `ticks` and `deltaMode` (the density-91.mjs `compareReadings`
+ * shape, applied to geometry only, per PATTERNS gotcha 7). Kept a wholly separate function from
+ * `compareLatencyReadings`, which is threshold-based and covers the jittery round-trip numbers, one
+ * comparator must never cover both.
+ */
+function compareFlickReadings(before, after) {
+  const violations = [];
+  for (const field of ["deltaSum", "ticks", "deltaMode"]) {
+    if (before[field] !== after[field]) {
+      violations.push(
+        `flick-distance.${field}: expected ${before[field]}, got ${after[field]}`,
+      );
+    }
+  }
+  return violations;
+}
+
+/**
+ * Stands up the real fixture once, measures `opts.runs ?? FD_RUNS` canonical flicks (each a fresh
+ * page, MEDIAN-reduced so one stalled frame cannot drag the baseline), clears the persisted zoom key
+ * once up front so every measured run loads at the default zoom (row height scales with font size,
+ * an unpinned zoom would silently change `deltaSum` between BEFORE and AFTER), then runs the desktop
+ * leg on a second target against the same fixture unless `opts.skipDesktopLeg`.
+ */
+async function runFlickDistanceFlow(violations, opts = {}) {
+  const handle = await standUpFixture({});
+  let chromeChild = null;
+  let cdp = null;
+  const userDataDir = join(
+    tmpdir(),
+    `${SANDBOX_PREFIX}chrome-fd-${process.pid}`,
+  );
+  try {
+    chromeChild = spawn(
+      findChrome(),
+      [
+        "--headless=new",
+        `--remote-debugging-port=${CDP_PORT}`,
+        `--user-data-dir=${userDataDir}`,
+        "--no-first-run",
+      ],
+      { stdio: ["ignore", "ignore", "ignore"] },
+    );
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const { targetId } = await cdp.send("Target.createTarget", {
+      url: "about:blank",
+    });
+    const { sessionId } = await cdp.send("Target.attachToTarget", {
+      targetId,
+      flatten: true,
+    });
+    await cdp.send("Page.enable", {}, sessionId);
+    await cdp.send("Runtime.enable", {}, sessionId);
+
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 390, height: 844, deviceScaleFactor: 3, mobile: true },
+      sessionId,
+    );
+    await cdp.send(
+      "Emulation.setTouchEmulationEnabled",
+      { enabled: true, configuration: "mobile" },
+      sessionId,
+    );
+
+    const targetUrl = `http://127.0.0.1:${SANDBOX_PORT}/sessions/${handle.sessionId}/terminal/`;
+
+    await cdp.send("Page.navigate", { url: targetUrl }, sessionId);
+    await waitForPageComplete(cdp, sessionId, targetUrl);
+    await evalValue(
+      cdp,
+      sessionId,
+      "localStorage.removeItem('dsp.terminal.zoom')",
+    );
+
+    const runCount = opts.runs ?? FD_RUNS;
+    const deltaSums = [];
+    const ticksList = [];
+    const deltaModes = [];
+    const rowHeights = [];
+
+    for (let i = 0; i < runCount; i++) {
+      const { wheelProbe, rowHeightPx } = await measureFlickDeltaOnce(
+        cdp,
+        sessionId,
+        targetUrl,
+        i,
+        opts,
+      );
+      if (!wheelProbe) {
+        violations.push(
+          `flick-distance[run ${i}]: window.__wheelProbe missing`,
+        );
+        continue;
+      }
+      if (wheelProbe.deltaMode !== 1) {
+        violations.push(
+          `flick-distance[run ${i}]: deltaMode expected 1, measured ${wheelProbe.deltaMode}`,
+        );
+      }
+      deltaSums.push(wheelProbe.deltaSum);
+      ticksList.push(wheelProbe.ticks);
+      deltaModes.push(wheelProbe.deltaMode);
+      if (rowHeightPx != null) rowHeights.push(rowHeightPx);
+    }
+
+    const reading = {
+      deltaSum: median(deltaSums),
+      ticks: median(ticksList),
+      deltaMode: median(deltaModes),
+      rowHeightPx: rowHeights.length > 0 ? median(rowHeights) : null,
+      headSha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT })
+        .toString()
+        .trim(),
+      capturedAt: new Date().toISOString(),
+    };
+
+    if (!opts.skipDesktopLeg) {
+      await runDesktopLeg(violations, cdp, handle);
+    }
+
+    return { reading };
+  } finally {
+    if (cdp) cdp.close();
+    await killAndWait(chromeChild);
+    rmSync(userDataDir, { recursive: true, force: true });
+    await tearDownFixture(handle);
+  }
+}
+
+async function checkFlickDistance(violations, cliOpts = {}) {
+  const { reading } = await runFlickDistanceFlow(violations, {});
+  console.log(
+    `flick-distance: deltaSum median=${reading.deltaSum} ticks median=${reading.ticks} deltaMode=${reading.deltaMode} (runs=${FD_RUNS})`,
+  );
+
+  if (cliOpts.jsonPath) {
+    writeFileSync(cliOpts.jsonPath, JSON.stringify(reading, null, 2) + "\n");
+    console.log(`flick-distance: wrote readings to ${cliOpts.jsonPath}`);
+  }
+  if (cliOpts.comparePath) {
+    const before = JSON.parse(readFileSync(cliOpts.comparePath, "utf8"));
+    const cmp = compareFlickReadings(before, reading);
+    for (const v of cmp) violations.push(v);
+  }
+}
+
+/** The v2.7-class under-scroll reproduced live: patches `dispatchEvent` to swallow every 5th wheel
+ * tick, then compares against the on-disk pre-fix baseline, which must already exist (captured by a
+ * prior `--check flick-distance --json` run). */
+async function breakDropWheelTicks(violations) {
+  const baselinePath = join(
+    REPO_ROOT,
+    ".planning",
+    "phases",
+    "101-mobile-terminal",
+    "101-flick-before.json",
+  );
+  if (!existsSync(baselinePath)) {
+    violations.push(
+      `break drop-wheel-ticks: baseline missing at ${baselinePath}, run --check flick-distance --json ${baselinePath} first`,
+    );
+    return;
+  }
+  const before = JSON.parse(readFileSync(baselinePath, "utf8"));
+  const { reading: after } = await runFlickDistanceFlow(violations, {
+    dropWheelTicks: true,
+    skipDesktopLeg: true,
+  });
+  const cmp = compareFlickReadings(before, after);
+  for (const v of cmp) violations.push(v);
+}
+
 // ---------------------------------------------------------------------------
 // Checks and breaks.
 // ---------------------------------------------------------------------------
@@ -1518,6 +1883,7 @@ const CHECKS = {
   standup: checkStandup,
   activation: checkActivation,
   "round-trips": checkRoundTrips,
+  "flick-distance": checkFlickDistance,
 };
 
 const BREAKS = {
@@ -1527,6 +1893,7 @@ const BREAKS = {
   "wrong-page": breakWrongPage,
   "loaf-blind": breakLoafBlind,
   "dead-listener": breakDeadListener,
+  "drop-wheel-ticks": breakDropWheelTicks,
 };
 
 // ---------------------------------------------------------------------------
