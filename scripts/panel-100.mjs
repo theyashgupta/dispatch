@@ -2660,8 +2660,137 @@ async function performGroupModalPrefillLeg(
   await clearSelectionViaEscape(cdp, sessionId);
 }
 
+/**
+ * `group-modal-prefill`'s negative-routing leg (100-REVIEW WR-09): drops the SAME N=3 selection on a
+ * column that is not `in_progress` and asserts the modal does NOT open, no move request is fired, no
+ * failure alert appears, no card changes column, and the selection survives.
+ *
+ * `dropColumn: "todo"` is the source-column drop `Board.tsx` returns early on, which must be a
+ * silent no-op; `dropColumn: "agent_done"` is the refused target. Neither had any coverage: nothing
+ * asserted the modal was ABSENT after a non-`in_progress` drop, so the single happy-path leg proved
+ * only that the modal opens somewhere, never that it opens nowhere else.
+ */
+async function performGroupModalNegativeLeg(
+  cdp,
+  sessionId,
+  violations,
+  legLabel,
+  dropColumn,
+) {
+  await selectCardsByIdentifier(cdp, sessionId, [
+    MSD_A_IDENTIFIER,
+    MSD_B_IDENTIFIER,
+    MSD_C_IDENTIFIER,
+  ]);
+
+  fetchPausedQueue.length = 0;
+  await cdp.send(
+    "Fetch.enable",
+    {
+      patterns: [{ urlPattern: "*/api/cards/*/move", requestStage: "Request" }],
+    },
+    sessionId,
+  );
+
+  const target = await columnDropPoint(cdp, sessionId, dropColumn);
+  const point = await beginDrag(
+    cdp,
+    sessionId,
+    "todo",
+    MSD_B_IDENTIFIER,
+    target,
+  );
+  await assertDragActivated(cdp, sessionId, MSD_B_IDENTIFIER);
+  await endDrag(cdp, sessionId, point);
+
+  await sleep(1200);
+
+  const modalOpen = await evalValue(
+    cdp,
+    sessionId,
+    `document.querySelector('[role="dialog"][aria-label="New group"]') != null`,
+  );
+  if (modalOpen) {
+    violations.push(
+      `group-modal-prefill: ${legLabel}, the New group modal opened on a drop onto ${JSON.stringify(dropColumn)}, which is not the session-starting target`,
+    );
+    await clearSelectionViaEscape(cdp, sessionId);
+    await sleep(300);
+  }
+
+  if (fetchPausedQueue.length > 0) {
+    violations.push(
+      `group-modal-prefill: ${legLabel}, expected zero Fetch.requestPaused events on the move endpoint, measured ${fetchPausedQueue.length}`,
+    );
+    for (const paused of fetchPausedQueue.splice(0)) {
+      await cdp
+        .send(
+          "Fetch.continueRequest",
+          { requestId: paused.requestId },
+          sessionId,
+        )
+        .catch(() => {});
+    }
+  }
+
+  const alertText = await evalValue(
+    cdp,
+    sessionId,
+    `(function () { var el = document.querySelector('[role="alert"]'); return el ? el.textContent.trim() : null; })()`,
+  );
+  if (alertText != null) {
+    violations.push(
+      `group-modal-prefill: ${legLabel}, expected no [role="alert"] failure notice, measured ${JSON.stringify(alertText)}`,
+    );
+  }
+
+  const selectionText = await readSelectionText(cdp, sessionId);
+  if (selectionText !== "3 selected") {
+    violations.push(
+      `group-modal-prefill: ${legLabel}, expected the selection to survive a drop that moves nothing, SelectionBar text expected "3 selected", measured ${JSON.stringify(selectionText)}`,
+    );
+  }
+
+  for (const id of [
+    MSD_A_IDENTIFIER,
+    MSD_B_IDENTIFIER,
+    MSD_C_IDENTIFIER,
+    MSD_D_IDENTIFIER,
+  ]) {
+    const col = await pollUntilColumn(cdp, sessionId, id, "todo", 2000);
+    if (col !== "todo") {
+      violations.push(
+        `group-modal-prefill: ${legLabel}, ${id} expected column "todo", measured ${JSON.stringify(col)}`,
+      );
+    }
+  }
+
+  await cdp.send("Fetch.disable", {}, sessionId);
+  await clearSelectionViaEscape(cdp, sessionId);
+}
+
 async function checkGroupModalPrefill(cdp, sessionId, violations) {
   await performGroupModalPrefillLeg(cdp, sessionId, violations, null, null);
+  // A fresh tab per negative leg, the same discipline `main()` applies between checks: these two
+  // legs add two more real drags to a session that has already driven one, and this harness's
+  // renderer has been observed stalling on `Runtime.evaluate` after several consecutive drags in one
+  // long-lived tab (see `freshBoardSession`'s own header).
+  let legSessionId = await freshBoardSession(cdp, TOP_LEVEL_IDENTIFIERS);
+  await performGroupModalNegativeLeg(
+    cdp,
+    legSessionId,
+    violations,
+    "leg 2 (source-column drop is a silent no-op)",
+    "todo",
+  );
+  legSessionId = await freshBoardSession(cdp, TOP_LEVEL_IDENTIFIERS);
+  await performGroupModalNegativeLeg(
+    cdp,
+    legSessionId,
+    violations,
+    "leg 3 (refused Agent Done drop opens no modal)",
+    "agent_done",
+  );
 }
 
 /**
