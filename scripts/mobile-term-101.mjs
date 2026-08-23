@@ -42,6 +42,20 @@
  *   node scripts/mobile-term-101.mjs --break dead-listener   round-trips against dead listeners
  *   node scripts/mobile-term-101.mjs --break drop-wheel-ticks  flick-distance vs. a live 1-in-5
  *                                                                dropped-wheel-tick page mutation
+ *   node scripts/mobile-term-101.mjs --check tunnel        a real Quick Tunnel, real remote-auth
+ *                                                           handshake, the three TERM-06 clauses
+ *   node scripts/mobile-term-101.mjs --check round-trips --tunnel     loopback vs tunnel round
+ *                                                                      trips, same 5-run measurement
+ *   node scripts/mobile-term-101.mjs --check flick-distance --tunnel --json <path>   the tunnel-path
+ *                                                                                     geometry baseline
+ *   node scripts/mobile-term-101.mjs --break skip-auth      tunnel URL with no ?code=, proves the
+ *                                                            check can tell the code-entry page apart
+ *   node scripts/mobile-term-101.mjs --break wrong-code     tunnel URL with a wrong passphrase
+ *
+ * Plan 101-03 (this plan, the last diagnosis plan) adds the tunnel leg above: a real Cloudflare
+ * Quick Tunnel brought up through the real product route, a real `?code=` auth handshake, TERM-06's
+ * three clauses proven over it, and a `--tunnel` modifier on the round-trips/flick-distance legs so
+ * loopback and tunnel numbers exist side by side. Still DIAGNOSIS-ONLY: no `src/` file is touched.
  *
  * Exit codes: 0 all checks PASS. 1 a safety-envelope refusal, a setup/build error, a check
  * violation, a teardown-verification failure, or the live board.db changing.
@@ -102,6 +116,57 @@ function sleep(ms) {
 function readFlag(argv, name) {
   const idx = argv.indexOf(name);
   return idx >= 0 ? (argv[idx + 1] ?? null) : null;
+}
+
+// ---------------------------------------------------------------------------
+// Secret redaction (101-03, T-101-08): the tunnel leg's URL and passphrase are a
+// live, unauthenticated-until-gated public ingress. `console.log`/`console.error`
+// are patched ONCE here, at module scope, so every later log call in this file
+// (including an uncaught error's own stack/message, printed by main()'s generic
+// catch) is scrubbed automatically, never per-call-site. Deliberately never
+// cleared mid-process: this is a one-shot CLI that exits right after `main()`,
+// and an early clear is worse than a no-op, a prior version of this file
+// cleared it in a `finally` block, which wiped the registry BEFORE main()'s own
+// outer catch printed the violation message, leaking the real host. `liveSecrets`
+// simply accumulates across however many tunnels this one process brings up.
+// ---------------------------------------------------------------------------
+
+let liveSecrets = [];
+
+function registerTunnelSecret(value, redacted) {
+  if (typeof value === "string" && value.length > 0) {
+    liveSecrets.push({ value, redacted });
+  }
+}
+
+function redactString(str) {
+  let out = str;
+  for (const { value, redacted } of liveSecrets) {
+    out = out.split(value).join(redacted);
+  }
+  return out;
+}
+
+const _origConsoleLog = console.log.bind(console);
+const _origConsoleError = console.error.bind(console);
+console.log = (...args) =>
+  _origConsoleLog(
+    ...args.map((a) => (typeof a === "string" ? redactString(a) : a)),
+  );
+console.error = (...args) =>
+  _origConsoleError(
+    ...args.map((a) => (typeof a === "string" ? redactString(a) : a)),
+  );
+
+/** Registers the live tunnel URL (both the full origin and the bare hostname, since either can
+ * appear standalone in a CDP/Node error message) and passphrase for redaction. Call the instant
+ * `enableTunnelViaLoopback` resolves, before any log or error can observe them unredacted. */
+function registerTunnelSecrets(state) {
+  registerTunnelSecret(state.url, "https://***.trycloudflare.com");
+  try {
+    registerTunnelSecret(new URL(state.url).hostname, "***.trycloudflare.com");
+  } catch {}
+  registerTunnelSecret(state.code, "<redacted-passphrase>");
 }
 
 // ---------------------------------------------------------------------------
@@ -871,21 +936,56 @@ const KINETIC_PROBE_SRC = `
 /** Polls document.readyState and document.URL until the page has both reached "complete" and
  * settled on `expectedUrl` exactly, guarding against a stale "complete" read from the about:blank
  * target's own initial document racing a just-issued Page.navigate. */
-async function waitForPageComplete(
-  cdp,
-  sessionId,
-  expectedUrl,
-  timeoutMs = READY_TIMEOUT_MS,
-) {
+/**
+ * `opts.retryNavUrl`, tunnel-mode callers only: live-confirmed real gotcha, not a hypothetical, a
+ * freshly-minted `*.trycloudflare.com` subdomain can be reported `on` by cloudflared's own stderr
+ * before Chrome's resolver can reliably route to it, which manifests as the FIRST navigation
+ * landing on `chrome-error://chromewebdata/` (`net::ERR_NAME_NOT_RESOLVED`), a transient condition
+ * that a fresh re-`Page.navigate` to the same URL clears within a poll cycle or two, live-confirmed
+ * against a real tunnel. Loopback callers never pass this, so they keep the original fast-fail
+ * behavior (a loopback `chrome-error://` would be a genuine bug, never expected to self-clear).
+ */
+async function waitForPageComplete(cdp, sessionId, expectedUrl, opts = {}) {
+  const {
+    timeoutMs = READY_TIMEOUT_MS,
+    retryNavUrl = null,
+    maxRetries = 8,
+  } = opts;
   const deadline = Date.now() + timeoutMs;
+  let lastState = null;
+  let lastUrl = null;
+  let retries = 0;
   while (Date.now() < deadline) {
     const state = await evalValue(cdp, sessionId, "document.readyState");
     const url = await evalValue(cdp, sessionId, "document.URL");
+    if (state !== lastState || url !== lastUrl) {
+      if (process.env.MT101_DEBUG) {
+        console.error(`DEBUG waitForPageComplete: state=${state} url=${url}`);
+      }
+      lastState = state;
+      lastUrl = url;
+    }
     if (state === "complete" && url === expectedUrl) return url;
+    if (
+      retryNavUrl &&
+      state === "complete" &&
+      typeof url === "string" &&
+      url.startsWith("chrome-error://") &&
+      retries < maxRetries
+    ) {
+      retries++;
+      if (process.env.MT101_DEBUG) {
+        console.error(
+          `DEBUG waitForPageComplete: retry ${retries}/${maxRetries} re-navigating past chrome-error`,
+        );
+      }
+      await sleep(1000);
+      await cdp.send("Page.navigate", { url: retryNavUrl }, sessionId);
+    }
     await sleep(POLL_INTERVAL_MS);
   }
   throw new Error(
-    `page did not reach readyState "complete" at ${expectedUrl} within ${timeoutMs}ms`,
+    `page did not reach readyState "complete" at ${expectedUrl} within ${timeoutMs}ms (last observed state=${lastState} url=${lastUrl})`,
   );
 }
 
@@ -1253,9 +1353,11 @@ async function measureOneRoundTrip(
  * `loaf-blind` break's vehicle.
  */
 async function runRoundTripsFlow(violations, opts = {}) {
+  if (opts.tunnel) await assertCloudflaredOnPath();
   const handle = await standUpFixture({});
   let chromeChild = null;
   let cdp = null;
+  let tunnelEnabled = false;
   const userDataDir = join(
     tmpdir(),
     `${SANDBOX_PREFIX}chrome-rt-${process.pid}`,
@@ -1318,7 +1420,21 @@ async function runRoundTripsFlow(violations, opts = {}) {
       );
     }
 
-    const targetUrl = `http://127.0.0.1:${SANDBOX_PORT}/sessions/${handle.sessionId}/terminal/`;
+    let targetUrl;
+    if (opts.tunnel) {
+      const state = await enableTunnelViaLoopback();
+      tunnelEnabled = true;
+      registerTunnelSecrets(state);
+      console.log(`tunnel: up at ${redactTunnelHost(state.url)}`);
+      targetUrl = await authenticateOverTunnel(
+        cdp,
+        sessionId,
+        state,
+        `/sessions/${handle.sessionId}/terminal/`,
+      );
+    } else {
+      targetUrl = `http://127.0.0.1:${SANDBOX_PORT}/sessions/${handle.sessionId}/terminal/`;
+    }
     const runCount = opts.runs ?? RT_RUNS;
 
     for (let i = 0; i < runCount; i++) {
@@ -1370,11 +1486,26 @@ async function runRoundTripsFlow(violations, opts = {}) {
     if (cdp) cdp.close();
     await killAndWait(chromeChild);
     rmSync(userDataDir, { recursive: true, force: true });
+    if (tunnelEnabled) {
+      try {
+        await disableTunnelViaLoopback();
+      } catch (err) {
+        violations.push(err instanceof Error ? err.message : String(err));
+      }
+    }
     await tearDownFixture(handle);
+    if (tunnelEnabled) {
+      try {
+        await assertNoStrayCloudflared();
+      } catch (err) {
+        violations.push(err instanceof Error ? err.message : String(err));
+      }
+    }
   }
 }
 
-function printRoundTripsSummary(runs) {
+function printRoundTripsSummary(runs, label = null) {
+  const prefix = label ? `round-trips[${label}]` : "round-trips";
   for (const key of [
     "inputFrames",
     "outputFrames",
@@ -1384,26 +1515,81 @@ function printRoundTripsSummary(runs) {
   ]) {
     const { median: m, min, max } = summarizeMetric(runs, key);
     console.log(
-      `round-trips: ${key} median=${m} min=${min} max=${max} (runs=${runs.length})`,
+      `${prefix}: ${key} median=${m} min=${min} max=${max} (runs=${runs.length})`,
     );
   }
-  console.log(`round-trips: settle quiet window QUIET_MS=${QUIET_MS}`);
+  console.log(`${prefix}: settle quiet window QUIET_MS=${QUIET_MS}`);
   const topRun = runs.reduce(
     (best, r) => (r.maxBlockingMs > (best?.maxBlockingMs ?? -1) ? r : best),
     null,
   );
   if (topRun?.blockingScript) {
     console.log(
-      `round-trips: top blocking script ${topRun.blockingScript} (run ${topRun.run})`,
+      `${prefix}: top blocking script ${topRun.blockingScript} (run ${topRun.run})`,
     );
   }
 }
 
+/** setNoDelay is untested by either leg of this instrument (neither `upgradeForward` leg calls it,
+ * `terminal-proxy.ts:117-141`, confirmed by direct read), printed unconditionally so it is never
+ * silently folded into "network latency" in the findings, loopback or tunnel. */
+function printSetNoDelayOpenVariable() {
+  console.log(
+    "round-trips: setNoDelay NOT RULED OUT, upgradeForward sets it on neither leg (terminal-proxy.ts:117-141), untested by this instrument",
+  );
+}
+
+/**
+ * `--tunnel` runs the SAME 5-run measurement twice in one invocation, loopback then tunnel, so the
+ * comparison line below is never built from a stale/remembered number, every value it prints was
+ * just measured in this run. `inputFrames` is a property of the client's tick emission and should
+ * be approximately equal on both paths; a material difference means the gesture itself behaved
+ * differently and the tunnel `settleMs` is not comparable, so that case is called out explicitly
+ * rather than silently printed alongside a normal delta.
+ */
 async function checkRoundTrips(violations, cliOpts = {}) {
-  const { runs } = await runRoundTripsFlow(violations, {});
-  printRoundTripsSummary(runs);
+  if (!cliOpts.tunnel) {
+    const { runs } = await runRoundTripsFlow(violations, {});
+    printRoundTripsSummary(runs);
+    printSetNoDelayOpenVariable();
+    if (cliOpts.jsonPath) {
+      writeFileSync(cliOpts.jsonPath, JSON.stringify({ runs }, null, 2) + "\n");
+      console.log(`round-trips: wrote readings to ${cliOpts.jsonPath}`);
+    }
+    return;
+  }
+
+  console.log(
+    "round-trips: loopback pass (baseline for the tunnel comparison)",
+  );
+  const { runs: loopbackRuns } = await runRoundTripsFlow(violations, {});
+  printRoundTripsSummary(loopbackRuns, "loopback");
+
+  console.log("round-trips: tunnel pass");
+  const { runs: tunnelRuns } = await runRoundTripsFlow(violations, {
+    tunnel: true,
+  });
+  printRoundTripsSummary(tunnelRuns, "tunnel");
+
+  const lbInput = summarizeMetric(loopbackRuns, "inputFrames").median;
+  const tnInput = summarizeMetric(tunnelRuns, "inputFrames").median;
+  const lbSettle = summarizeMetric(loopbackRuns, "settleMs").median;
+  const tnSettle = summarizeMetric(tunnelRuns, "settleMs").median;
+  console.log(
+    `round-trips: loopback vs tunnel inputFrames ${lbInput} vs ${tnInput}, settleMs ${lbSettle} vs ${tnSettle}`,
+  );
+  if (lbInput > 0 && Math.abs(tnInput - lbInput) / lbInput > 0.2) {
+    console.log(
+      `round-trips: inputFrames differs materially between loopback (${lbInput}) and tunnel (${tnInput}), the gesture itself behaved differently on the tunnel path, so tunnel settleMs is NOT directly comparable to loopback settleMs`,
+    );
+  }
+  printSetNoDelayOpenVariable();
+
   if (cliOpts.jsonPath) {
-    writeFileSync(cliOpts.jsonPath, JSON.stringify({ runs }, null, 2) + "\n");
+    writeFileSync(
+      cliOpts.jsonPath,
+      JSON.stringify({ loopbackRuns, tunnelRuns }, null, 2) + "\n",
+    );
     console.log(`round-trips: wrote readings to ${cliOpts.jsonPath}`);
   }
 }
@@ -1676,9 +1862,11 @@ function compareFlickReadings(before, after) {
  * leg on a second target against the same fixture unless `opts.skipDesktopLeg`.
  */
 async function runFlickDistanceFlow(violations, opts = {}) {
+  if (opts.tunnel) await assertCloudflaredOnPath();
   const handle = await standUpFixture({});
   let chromeChild = null;
   let cdp = null;
+  let tunnelEnabled = false;
   const userDataDir = join(
     tmpdir(),
     `${SANDBOX_PREFIX}chrome-fd-${process.pid}`,
@@ -1718,10 +1906,23 @@ async function runFlickDistanceFlow(violations, opts = {}) {
       sessionId,
     );
 
-    const targetUrl = `http://127.0.0.1:${SANDBOX_PORT}/sessions/${handle.sessionId}/terminal/`;
-
-    await cdp.send("Page.navigate", { url: targetUrl }, sessionId);
-    await waitForPageComplete(cdp, sessionId, targetUrl);
+    let targetUrl;
+    if (opts.tunnel) {
+      const state = await enableTunnelViaLoopback();
+      tunnelEnabled = true;
+      registerTunnelSecrets(state);
+      console.log(`tunnel: up at ${redactTunnelHost(state.url)}`);
+      targetUrl = await authenticateOverTunnel(
+        cdp,
+        sessionId,
+        state,
+        `/sessions/${handle.sessionId}/terminal/`,
+      );
+    } else {
+      targetUrl = `http://127.0.0.1:${SANDBOX_PORT}/sessions/${handle.sessionId}/terminal/`;
+      await cdp.send("Page.navigate", { url: targetUrl }, sessionId);
+      await waitForPageComplete(cdp, sessionId, targetUrl);
+    }
     await evalValue(
       cdp,
       sessionId,
@@ -1779,19 +1980,41 @@ async function runFlickDistanceFlow(violations, opts = {}) {
     if (cdp) cdp.close();
     await killAndWait(chromeChild);
     rmSync(userDataDir, { recursive: true, force: true });
+    if (tunnelEnabled) {
+      try {
+        await disableTunnelViaLoopback();
+      } catch (err) {
+        violations.push(err instanceof Error ? err.message : String(err));
+      }
+    }
     await tearDownFixture(handle);
+    if (tunnelEnabled) {
+      try {
+        await assertNoStrayCloudflared();
+      } catch (err) {
+        violations.push(err instanceof Error ? err.message : String(err));
+      }
+    }
   }
 }
 
+/** `--tunnel` skips the desktop leg (ponytail: it proves the desktop path is inert to synthetic
+ * touch regardless of transport, already proven on loopback, add a tunnel-specific desktop leg
+ * only if a transport-dependent desktop regression is ever suspected) and reuses task 1's own
+ * `authenticateOverTunnel` bringup, never a forked copy. */
 async function checkFlickDistance(violations, cliOpts = {}) {
-  const { reading } = await runFlickDistanceFlow(violations, {});
+  const { reading } = await runFlickDistanceFlow(violations, {
+    tunnel: !!cliOpts.tunnel,
+    skipDesktopLeg: !!cliOpts.tunnel,
+  });
+  const label = cliOpts.tunnel ? "flick-distance[tunnel]" : "flick-distance";
   console.log(
-    `flick-distance: deltaSum median=${reading.deltaSum} ticks median=${reading.ticks} deltaMode=${reading.deltaMode} (runs=${FD_RUNS})`,
+    `${label}: deltaSum median=${reading.deltaSum} ticks median=${reading.ticks} deltaMode=${reading.deltaMode} (runs=${FD_RUNS})`,
   );
 
   if (cliOpts.jsonPath) {
     writeFileSync(cliOpts.jsonPath, JSON.stringify(reading, null, 2) + "\n");
-    console.log(`flick-distance: wrote readings to ${cliOpts.jsonPath}`);
+    console.log(`${label}: wrote readings to ${cliOpts.jsonPath}`);
   }
   if (cliOpts.comparePath) {
     const before = JSON.parse(readFileSync(cliOpts.comparePath, "utf8"));
@@ -1824,6 +2047,525 @@ async function breakDropWheelTicks(violations) {
   });
   const cmp = compareFlickReadings(before, after);
   for (const v of cmp) violations.push(v);
+}
+
+// ---------------------------------------------------------------------------
+// The tunnel leg (101-03): real Quick Tunnel bringup over the real product route
+// (POST /api/remote/enable, fire-and-forget, polled via GET /api/remote), the
+// real `?code=` auth handshake, and the TERM-06 assertions. `authenticateOverTunnel`
+// is the ONE auth path every tunnel-mode leg in this file goes through, including
+// task 2's `--tunnel` modifier, never forked.
+// ---------------------------------------------------------------------------
+
+const TUNNEL_POLL_INTERVAL_MS = 500;
+const TUNNEL_ENABLE_TIMEOUT_MS = 30_000;
+const TUNNEL_DISABLE_TIMEOUT_MS = 15_000;
+
+/** Live-confirmed real-world jitter: a freshly-minted Quick Tunnel subdomain has, on a bad draw,
+ * taken well over 30s for Chrome's own resolver to route to reliably. A generous budget here (a
+ * one-time cost paid once per tunnel bringup, not per measurement run) absorbs that instead of
+ * flaking. See `waitForPageComplete`'s `opts.retryNavUrl`. */
+const TUNNEL_NAV_RETRY_OPTS = { timeoutMs: 60_000, maxRetries: 40 };
+
+/** Must match cloudflared.ts's own TUNNEL_HOST_SENTINEL. Duplicated here (not imported) since
+ * this harness is plain .mjs, and importing a TS module's compiled output would tie this file to
+ * dist/'s internal module layout for one string constant. */
+const CLOUDFLARED_SENTINEL = "dispatch.invalid";
+
+/** Preflight, fail loud: RESEARCH's Environment Availability table calls for explicit handling,
+ * never a silent skip, a missing binary would let TERM-06 close on nothing. */
+async function assertCloudflaredOnPath() {
+  try {
+    await execFileP("which", ["cloudflared"]);
+  } catch {
+    throw new Error(
+      "mobile-term-101: cloudflared not on PATH, the tunnel leg is not skippable, install with 'brew install cloudflared'",
+    );
+  }
+}
+
+async function fetchTunnelState() {
+  const res = await fetch(`http://127.0.0.1:${SANDBOX_PORT}/api/remote`);
+  return res.json();
+}
+
+/** `POST /api/remote/enable` is fire-and-forget (202 while state is still "starting"): poll
+ * `GET /api/remote`, never trust the enable response, until status is "on", then read url/code off
+ * THAT polled response, never the enable response itself.
+ * @remarks A freshly-minted `*.trycloudflare.com` subdomain can report `status: "on"` before
+ * Chrome's own resolver can reliably route to it (a live-confirmed transient
+ * `net::ERR_NAME_NOT_RESOLVED` on the very first navigation). A Node-side `fetch`-based
+ * reachability pre-check was tried and reverted here: Node's `getaddrinfo` proved LESS reliable
+ * than Chrome's own resolver in this environment (persistent `ENOTFOUND` well past the point
+ * Chrome itself recovered), so the retry lives where the actual failure is observed instead, see
+ * `waitForPageComplete`'s `opts.retryNavUrl`. */
+async function enableTunnelViaLoopback() {
+  const res = await fetch(
+    `http://127.0.0.1:${SANDBOX_PORT}/api/remote/enable`,
+    { method: "POST" },
+  );
+  await res.body?.cancel().catch(() => {});
+  const deadline = Date.now() + TUNNEL_ENABLE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const state = await fetchTunnelState();
+    if (state.status === "on") return state;
+    if (state.status === "binary-missing" || state.status === "error") {
+      throw new Error(`tunnel: enable failed, state=${JSON.stringify(state)}`);
+    }
+    await sleep(TUNNEL_POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    `tunnel: did not reach status "on" within ${TUNNEL_ENABLE_TIMEOUT_MS}ms`,
+  );
+}
+
+async function disableTunnelViaLoopback() {
+  const res = await fetch(
+    `http://127.0.0.1:${SANDBOX_PORT}/api/remote/disable`,
+    { method: "POST" },
+  );
+  await res.body?.cancel().catch(() => {});
+  const deadline = Date.now() + TUNNEL_DISABLE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const state = await fetchTunnelState();
+    if (state.status !== "on") return state;
+    await sleep(TUNNEL_POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    `tunnel: status still "on" ${TUNNEL_DISABLE_TIMEOUT_MS}ms after disable`,
+  );
+}
+
+/** This is a publicly reachable, unauthenticated-until-gated ingress: never log the real host or
+ * the passphrase, only this redacted shape. */
+function redactTunnelHost(url) {
+  return url.replace(
+    /^https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/,
+    "https://***.trycloudflare.com",
+  );
+}
+
+/** Mirrors cloudflared.ts's own `sweepStrayTunnels` matching (harness-local, see
+ * `CLOUDFLARED_SENTINEL`'s own comment for why this is not imported): a stray cloudflared carrying
+ * the sentinel argv is a live, unauthenticated public ingress, never acceptable to leave running,
+ * checked as a second line of defence on top of this file's own `disable` + poll teardown. */
+async function assertNoStrayCloudflared() {
+  let out = "";
+  try {
+    ({ stdout: out } = await execFileP("ps", ["-axww", "-o", "pid=,command="]));
+  } catch {
+    return;
+  }
+  const survivors = out.split("\n").filter((line) => {
+    const m = line.match(/^\s*\d+\s+(.*)$/);
+    if (!m) return false;
+    const argv = m[1].trim().split(/\s+/);
+    return (
+      basename(argv[0]) === "cloudflared" && m[1].includes(CLOUDFLARED_SENTINEL)
+    );
+  });
+  if (survivors.length > 0) {
+    throw new Error(
+      `tunnel: ${survivors.length} stray cloudflared process(es) survived teardown:\n${survivors.join("\n")}`,
+    );
+  }
+}
+
+/** `-J` joins wrapped lines back into one logical line before printing. Live-confirmed load-
+ * bearing, not cosmetic: the mobile emulation viewport (390px) is narrow enough that a typed
+ * marker wraps mid-string across two physical pane rows, and without `-J` tmux inserts a literal
+ * newline at the wrap point, breaking a plain substring match against the unwrapped marker. */
+async function capturePane(tmuxName) {
+  const { stdout } = await execFileP("tmux", [
+    "capture-pane",
+    "-p",
+    "-J",
+    "-t",
+    `=${tmuxName}:`,
+  ]);
+  return stdout;
+}
+
+/**
+ * Navigates the CDP session's FIRST tunnel request carrying `?code=` (the shipped auto-verify
+ * branch, `remote-auth-gate.ts:341-349`), waits for the redirect that strips it, and asserts the
+ * session cookie actually landed before any caller trusts the tunnel to be authenticated. Returns
+ * the clean (code-stripped) URL every subsequent same-session navigation on this tab should reuse.
+ * The ONE auth path every tunnel-mode leg in this file goes through, task 1's own checks included.
+ */
+async function authenticateOverTunnel(cdp, sessionId, tunnelState, basePath) {
+  const cleanUrl = `${tunnelState.url}${basePath}`;
+  const navUrl = `${cleanUrl}?code=${encodeURIComponent(tunnelState.code)}`;
+  await cdp.send("Page.navigate", { url: navUrl }, sessionId);
+  await waitForPageComplete(cdp, sessionId, cleanUrl, {
+    ...TUNNEL_NAV_RETRY_OPTS,
+    retryNavUrl: navUrl,
+  });
+  await sleep(1500);
+  const cookiesResult = await cdp.send(
+    "Network.getCookies",
+    { urls: [tunnelState.url] },
+    sessionId,
+  );
+  const cookieNames = (cookiesResult.cookies ?? []).map((c) => c.name);
+  if (!cookieNames.includes("dispatch_remote_session")) {
+    throw new Error(
+      `tunnel: expected cookie dispatch_remote_session present after auth, measured absent (names=${cookieNames.join(",")})`,
+    );
+  }
+  return cleanUrl;
+}
+
+async function pollForTextInDom(cdp, sessionId, expression, needle, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const text = await evalValue(cdp, sessionId, expression);
+    if (typeof text === "string" && text.includes(needle)) return text;
+    await sleep(150);
+  }
+  return null;
+}
+
+/** Real focus (a synthesized click, mirroring a user's own tap-to-focus) then real per-character
+ * keyboard dispatch, so the marker travels the real path: browser -> xterm's onData -> WS -> proxy
+ * -> ttyd -> pty. A client-only DOM assertion could pass on a locally echoed illusion; pairing this
+ * with a server-side `tmux capture-pane` read (the caller's job) is what excludes that. */
+async function typeIntoTerminal(cdp, sessionId, x, y, text) {
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    { type: "mousePressed", x, y, button: "left", clickCount: 1 },
+    sessionId,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    { type: "mouseReleased", x, y, button: "left", clickCount: 1 },
+    sessionId,
+  );
+  await sleep(300);
+  for (const ch of text) {
+    await cdp.send(
+      "Input.dispatchKeyEvent",
+      { type: "keyDown", text: ch, unmodifiedText: ch, key: ch },
+      sessionId,
+    );
+    await cdp.send(
+      "Input.dispatchKeyEvent",
+      { type: "keyUp", key: ch },
+      sessionId,
+    );
+    await sleep(15);
+  }
+}
+
+/** Two-point pinch apart, `steps` moves (>= 6) spanning more than `ZOOM.commitFloorMs` (120ms)
+ * total, mirroring `attachZoomControl`'s own touch-point-distance pinch math
+ * (`terminal-main.ts:788-830`). */
+async function pinchApart(
+  cdp,
+  sessionId,
+  { cx, cy, startHalf, endHalf, steps, stepMs },
+) {
+  await cdp.send(
+    "Input.dispatchTouchEvent",
+    {
+      type: "touchStart",
+      touchPoints: [
+        { x: cx - startHalf, y: cy, id: 0 },
+        { x: cx + startHalf, y: cy, id: 1 },
+      ],
+    },
+    sessionId,
+  );
+  for (let i = 1; i <= steps; i++) {
+    const half = startHalf + ((endHalf - startHalf) * i) / steps;
+    await cdp.send(
+      "Input.dispatchTouchEvent",
+      {
+        type: "touchMove",
+        touchPoints: [
+          { x: cx - half, y: cy, id: 0 },
+          { x: cx + half, y: cy, id: 1 },
+        ],
+      },
+      sessionId,
+    );
+    await sleep(stepMs);
+  }
+  await cdp.send(
+    "Input.dispatchTouchEvent",
+    { type: "touchEnd", touchPoints: [] },
+    sessionId,
+  );
+}
+
+/**
+ * Stands up the real fixture, brings up a REAL Quick Tunnel through the real product route
+ * (loopback-only, the tunnel does not exist yet when this POSTs), drives one CDP tab through mobile
+ * emulation and the real auth gate, and proves TERM-06's three clauses. `opts.skipAuth` and
+ * `opts.wrongCode` are the two break legs: each navigates the tunnel URL WITHOUT going through
+ * `authenticateOverTunnel`, so the gate is exercised exactly as shipped, never weakened.
+ */
+async function runTunnelFlow(violations, opts = {}) {
+  await assertCloudflaredOnPath();
+  const handle = await standUpFixture({});
+  let chromeChild = null;
+  let cdp = null;
+  let tunnelEnabled = false;
+  const userDataDir = join(
+    tmpdir(),
+    `${SANDBOX_PREFIX}chrome-tunnel-${process.pid}`,
+  );
+  try {
+    const state = await enableTunnelViaLoopback();
+    tunnelEnabled = true;
+    registerTunnelSecrets(state);
+    console.log(`tunnel: up at ${redactTunnelHost(state.url)}`);
+
+    chromeChild = spawn(
+      findChrome(),
+      [
+        "--headless=new",
+        `--remote-debugging-port=${CDP_PORT}`,
+        `--user-data-dir=${userDataDir}`,
+        "--no-first-run",
+      ],
+      { stdio: ["ignore", "ignore", "ignore"] },
+    );
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const { targetId } = await cdp.send("Target.createTarget", {
+      url: "about:blank",
+    });
+    const { sessionId } = await cdp.send("Target.attachToTarget", {
+      targetId,
+      flatten: true,
+    });
+    await cdp.send("Page.enable", {}, sessionId);
+    await cdp.send("Runtime.enable", {}, sessionId);
+    await cdp.send("Network.enable", {}, sessionId);
+
+    const docResponses = [];
+    cdp.ws.addEventListener("message", (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.sessionId !== sessionId) return;
+      if (
+        msg.method === "Network.responseReceived" &&
+        msg.params.type === "Document"
+      ) {
+        docResponses.push({
+          url: msg.params.response.url,
+          status: msg.params.response.status,
+        });
+      }
+      if (process.env.MT101_DEBUG && msg.method === "Network.loadingFailed") {
+        console.error(
+          `DEBUG Network.loadingFailed: errorText=${msg.params.errorText} type=${msg.params.type} canceled=${msg.params.canceled}`,
+        );
+      }
+    });
+
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 390, height: 844, deviceScaleFactor: 3, mobile: true },
+      sessionId,
+    );
+    await cdp.send(
+      "Emulation.setTouchEmulationEnabled",
+      { enabled: true, configuration: "mobile" },
+      sessionId,
+    );
+
+    const basePath = `/sessions/${handle.sessionId}/terminal/`;
+    const cleanTargetUrl = `${state.url}${basePath}`;
+    let finalUrl;
+
+    if (opts.skipAuth) {
+      finalUrl = cleanTargetUrl;
+      await cdp.send("Page.navigate", { url: finalUrl }, sessionId);
+      await waitForPageComplete(cdp, sessionId, finalUrl, {
+        ...TUNNEL_NAV_RETRY_OPTS,
+        retryNavUrl: finalUrl,
+      });
+      await sleep(1500);
+    } else if (opts.wrongCode) {
+      finalUrl = `${cleanTargetUrl}?code=wrong-guess-never-right`;
+      await cdp.send("Page.navigate", { url: finalUrl }, sessionId);
+      await waitForPageComplete(cdp, sessionId, finalUrl, {
+        ...TUNNEL_NAV_RETRY_OPTS,
+        retryNavUrl: finalUrl,
+      });
+      await sleep(1500);
+    } else {
+      finalUrl = await authenticateOverTunnel(cdp, sessionId, state, basePath);
+      console.log("tunnel: cookie dispatch_remote_session present");
+    }
+
+    const lastDocStatus =
+      docResponses.length > 0
+        ? docResponses[docResponses.length - 1].status
+        : 200;
+
+    const hasTerminalMarker = await evalValue(
+      cdp,
+      sessionId,
+      "document.querySelector('#terminal .xterm-screen') !== null",
+    );
+    const hasCodeEntryMarker = await evalValue(
+      cdp,
+      sessionId,
+      "document.querySelector('form[action=\"/__remote/verify\"]') !== null",
+    );
+
+    if (opts.skipAuth) {
+      if (!hasCodeEntryMarker || hasTerminalMarker) {
+        violations.push(
+          `tunnel: break skip-auth expected the code-entry page, measured terminalMarker=${hasTerminalMarker} codeEntryMarker=${hasCodeEntryMarker}`,
+        );
+      } else {
+        violations.push(
+          `tunnel: expected the terminal page, measured the remote code-entry page (HTTP ${lastDocStatus})`,
+        );
+      }
+      return;
+    }
+    if (opts.wrongCode) {
+      const cookiesResult = await cdp.send(
+        "Network.getCookies",
+        { urls: [state.url] },
+        sessionId,
+      );
+      const cookieNames = (cookiesResult.cookies ?? []).map((c) => c.name);
+      if (cookieNames.includes("dispatch_remote_session")) {
+        violations.push(
+          "tunnel: break wrong-code expected cookie dispatch_remote_session absent, measured present",
+        );
+      } else {
+        violations.push(
+          "tunnel: expected cookie dispatch_remote_session, measured absent",
+        );
+      }
+      return;
+    }
+
+    if (!hasTerminalMarker || hasCodeEntryMarker) {
+      violations.push(
+        `tunnel: expected terminal page confirmed with code-entry marker absent, measured terminalMarker=${hasTerminalMarker} codeEntryMarker=${hasCodeEntryMarker}`,
+      );
+    } else {
+      console.log("tunnel: terminal page confirmed, code-entry marker absent");
+    }
+
+    // TERM-06 clause 1: input lands and output renders, in one gesture, proven two ways.
+    const markerId = `dsp-tunnel-${randomBytes(6).toString("hex")}`;
+    await typeIntoTerminal(cdp, sessionId, 195, 400, markerId);
+    const domText = await pollForTextInDom(
+      cdp,
+      sessionId,
+      "(document.querySelector('.xterm-rows')||{}).textContent || ''",
+      markerId,
+      5000,
+    );
+    const paneText = await capturePane(handle.tmuxName);
+    if (process.env.MT101_DEBUG) {
+      console.error(
+        `DEBUG paneText (JSON): ${JSON.stringify(paneText)}\nDEBUG domText (JSON): ${JSON.stringify(domText)}`,
+      );
+    }
+    const inDom = domText !== null;
+    const inPane = paneText.includes(markerId);
+    if (!inDom || !inPane) {
+      violations.push(
+        `tunnel: marker ${markerId} expected in xterm AND capture-pane, measured inDom=${inDom} inPane=${inPane}`,
+      );
+    } else {
+      console.log(
+        `tunnel: marker ${markerId} rendered in xterm AND present in capture-pane`,
+      );
+    }
+
+    // TERM-06 clause 2: pinch zoom commits and persists.
+    // `.xterm-rows`, not `.xterm`, live-confirmed by reading @xterm/xterm's own DomRenderer
+    // (`_injectCss`): the dynamic `font-size: <N>px` rule it writes into an injected <style> tag
+    // targets a `.xterm-rows` descendant selector, never the outer `.xterm` container itself, so
+    // `.xterm`'s own computed style just inherits the page default and never changes with zoom.
+    await evalValue(
+      cdp,
+      sessionId,
+      "localStorage.removeItem('dsp.terminal.zoom')",
+    );
+    const fontSizeBefore = await evalValue(
+      cdp,
+      sessionId,
+      "getComputedStyle(document.querySelector('.xterm-rows')).fontSize",
+    );
+    await pinchApart(cdp, sessionId, {
+      cx: 195,
+      cy: 400,
+      startHalf: 20,
+      endHalf: 120,
+      steps: 8,
+      stepMs: 30,
+    });
+    await sleep(500);
+    const fontSizeAfter = await evalValue(
+      cdp,
+      sessionId,
+      "getComputedStyle(document.querySelector('.xterm-rows')).fontSize",
+    );
+    const persistedZoomRaw = await evalValue(
+      cdp,
+      sessionId,
+      "localStorage.getItem('dsp.terminal.zoom')",
+    );
+    const persistedZoom = Number(persistedZoomRaw);
+    const zoomSteps = [0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4];
+    const zoomIncreased =
+      parseFloat(fontSizeAfter) > parseFloat(fontSizeBefore);
+    const zoomValid = zoomSteps.includes(persistedZoom) && persistedZoom > 1.0;
+    if (!zoomIncreased || !zoomValid) {
+      violations.push(
+        `tunnel: pinch zoom expected fontSize increase and dsp.terminal.zoom in ZOOM.steps strictly > starting zoom, measured ${fontSizeBefore} -> ${fontSizeAfter}, persisted=${persistedZoomRaw}`,
+      );
+    } else {
+      console.log(
+        `tunnel: pinch zoom fontSize ${fontSizeBefore} -> ${fontSizeAfter}, dsp.terminal.zoom persisted ${persistedZoom}`,
+      );
+    }
+  } finally {
+    if (cdp) cdp.close();
+    await killAndWait(chromeChild);
+    rmSync(userDataDir, { recursive: true, force: true });
+    if (tunnelEnabled) {
+      try {
+        await disableTunnelViaLoopback();
+      } catch (err) {
+        violations.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+    await tearDownFixture(handle);
+    try {
+      await assertNoStrayCloudflared();
+    } catch (err) {
+      violations.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+}
+
+async function checkTunnel(violations) {
+  await runTunnelFlow(violations, {});
+}
+
+/** Navigates the tunnel terminal URL WITHOUT `?code=`. Proves the check can tell the code-entry
+ * page apart from a loaded terminal, never weakening `src/`. */
+async function breakSkipAuth(violations) {
+  await runTunnelFlow(violations, { skipAuth: true });
+}
+
+/** Navigates the tunnel terminal URL with a deliberately wrong passphrase. Same detection as
+ * skip-auth, plus the cookie assertion must fire. */
+async function breakWrongCode(violations) {
+  await runTunnelFlow(violations, { wrongCode: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -1884,6 +2626,7 @@ const CHECKS = {
   activation: checkActivation,
   "round-trips": checkRoundTrips,
   "flick-distance": checkFlickDistance,
+  tunnel: checkTunnel,
 };
 
 const BREAKS = {
@@ -1894,6 +2637,8 @@ const BREAKS = {
   "loaf-blind": breakLoafBlind,
   "dead-listener": breakDeadListener,
   "drop-wheel-ticks": breakDropWheelTicks,
+  "skip-auth": breakSkipAuth,
+  "wrong-code": breakWrongCode,
 };
 
 // ---------------------------------------------------------------------------
@@ -1919,6 +2664,7 @@ async function main() {
   const cliOpts = {
     jsonPath: readFlag(argv, "--json"),
     comparePath: readFlag(argv, "--compare"),
+    tunnel: argv.includes("--tunnel"),
   };
 
   await assertNoLiveService();
