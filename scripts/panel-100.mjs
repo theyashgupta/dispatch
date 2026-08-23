@@ -109,6 +109,23 @@
  *     `stacked-overlay: leg A (N=3), 4px back face rect expected left=1365.00 top=145.00
  *     width=206.00 height=91.19 (front rect translated by (4,4)), measured left=1365.00 top=151.00
  *     width=206.00 height=91.19`.
+ *     `stacked-overlay` ALSO carries a PAINT-ORDER assertion added by 100-REVIEW CR-01, because
+ *     transform/rect math alone cannot see occlusion and passed against a visibly blank overlay:
+ *     the deck container's own `pointer-events`/`inert` are toggled for exactly one synchronous
+ *     `document.elementFromPoint` at the front face's centre (both attributes suppress hit testing
+ *     and neither affects painting, so the reading is unperturbed), plus a per-layer computed
+ *     `z-index` comparison against 100-UI-SPEC.md's layer table and a check that the deck container
+ *     establishes a stacking context at all. Run VERBATIM against the pre-fix build (front
+ *     `CardView` at `z-index: auto`, back faces at 1/2, deck wrapper not a stacking context) it
+ *     reported, for leg A and leg B alike:
+ *     `stacked-overlay: leg A (N=3), front CardView face z-index expected "3" (100-UI-SPEC.md layer
+ *     table), measured "auto"`,
+ *     `stacked-overlay: leg A (N=3), the deck container establishes no stacking context (isolation
+ *     "auto", z-index "auto"), so the layer table's z-indexes escape into the DragOverlay's own
+ *     stacking context and no longer order the deck`, AND
+ *     `stacked-overlay: leg A (N=3), paint order, the element painted at the deck's centre point
+ *     expected to be the front CardView face, measured the deck back face at index 1 (<div>, probe
+ *     pointer-events "auto"); front z-index "auto", back face z-indexes ["1","2"]`.
  *   - `overlay-unchanged-n1` proven able to fail (100-05): inserting an absolutely positioned
  *     inset:0 intruder `<div>` as a sibling of the N<=1 overlay's own card root, mid-drag, produced
  *     `overlay-unchanged-n1: N=0 leg, expected exactly 1 face-level element directly under the
@@ -1820,15 +1837,43 @@ async function performStackedOverlayLeg(
         var r = el.getBoundingClientRect();
         return {
           transform: getComputedStyle(el).transform,
+          zIndex: getComputedStyle(el).zIndex,
           textContent: el.textContent,
           rect: { left: r.left, top: r.top, width: r.width, height: r.height },
         };
       });
+      // The whole DragOverlay subtree inherits pointer-events:none, which makes
+      // elementFromPoint blind to it; re-enabling it on the deck container alone for the
+      // duration of this one hit test is the only way to read real paint order, and
+      // pointer-events has no effect on painting so the reading is unperturbed.
+      var restorePointerEvents = overlay.style.pointerEvents;
+      var hadInert = overlay.hasAttribute("inert");
+      overlay.style.pointerEvents = "auto";
+      if (hadInert) overlay.removeAttribute("inert");
+      var probePointerEvents = cardRoot ? getComputedStyle(cardRoot).pointerEvents : null;
+      var hit = frontRect
+        ? document.elementFromPoint(frontRect.left + frontRect.width / 2, frontRect.top + frontRect.height / 2)
+        : null;
+      if (hadInert) overlay.setAttribute("inert", "");
+      overlay.style.pointerEvents = restorePointerEvents;
+      var hitRole = "outside the deck overlay";
+      if (hit == null) hitRole = "nothing";
+      else if (hit === cardRoot || (cardRoot && cardRoot.contains(hit))) hitRole = "the front CardView face";
+      else if (backFaces.indexOf(hit) !== -1) hitRole = "the deck back face at index " + backFaces.indexOf(hit);
+      else if (hit === overlay) hitRole = "the bare deck container";
+      else if (overlay.contains(hit)) hitRole = "some other deck overlay descendant";
       return {
         cardRootFound: cardRoot != null,
         backFaceCount: backFaces.length,
         faces: faceReadings,
         frontRect: frontRect ? { left: frontRect.left, top: frontRect.top, width: frontRect.width, height: frontRect.height } : null,
+        frontOnTop: cardRoot != null && hit != null && (hit === cardRoot || cardRoot.contains(hit)),
+        frontZIndex: cardRoot ? getComputedStyle(cardRoot).zIndex : null,
+        hitRole: hitRole,
+        hitTag: hit ? hit.tagName.toLowerCase() : null,
+        probePointerEvents: probePointerEvents,
+        deckIsolation: getComputedStyle(overlay).isolation,
+        deckZIndex: getComputedStyle(overlay).zIndex,
         badgeFound: badge != null,
         badgeText: badge ? badge.textContent : null,
         badgePosition: badge ? getComputedStyle(badge).position : null,
@@ -1856,12 +1901,14 @@ async function performStackedOverlayLeg(
     {
       label: "8px back face",
       transform: "matrix(1, 0, 0, 1, 8, 8)",
+      zIndex: "1",
       dx: 8,
       dy: 8,
     },
     {
       label: "4px back face",
       transform: "matrix(1, 0, 0, 1, 4, 4)",
+      zIndex: "2",
       dx: 4,
       dy: 4,
     },
@@ -1878,6 +1925,11 @@ async function performStackedOverlayLeg(
     if (face.transform !== exp.transform) {
       violations.push(
         `stacked-overlay: ${legLabel}, ${exp.label} transform expected ${JSON.stringify(exp.transform)}, measured ${JSON.stringify(face.transform)}`,
+      );
+    }
+    if (face.zIndex !== exp.zIndex) {
+      violations.push(
+        `stacked-overlay: ${legLabel}, ${exp.label} z-index expected ${JSON.stringify(exp.zIndex)} (100-UI-SPEC.md layer table), measured ${JSON.stringify(face.zIndex)}`,
       );
     }
     if (face.textContent !== "") {
@@ -1899,6 +1951,21 @@ async function performStackedOverlayLeg(
         );
       }
     }
+  }
+  if (reading.frontZIndex !== "3") {
+    violations.push(
+      `stacked-overlay: ${legLabel}, front CardView face z-index expected "3" (100-UI-SPEC.md layer table), measured ${JSON.stringify(reading.frontZIndex)}`,
+    );
+  }
+  if (reading.deckIsolation !== "isolate" && reading.deckZIndex === "auto") {
+    violations.push(
+      `stacked-overlay: ${legLabel}, the deck container establishes no stacking context (isolation ${JSON.stringify(reading.deckIsolation)}, z-index ${JSON.stringify(reading.deckZIndex)}), so the layer table's z-indexes escape into the DragOverlay's own stacking context and no longer order the deck`,
+    );
+  }
+  if (reading.cardRootFound && !reading.frontOnTop) {
+    violations.push(
+      `stacked-overlay: ${legLabel}, paint order, the element painted at the deck's centre point expected to be the front CardView face, measured ${reading.hitRole} (<${reading.hitTag}>, probe pointer-events ${JSON.stringify(reading.probePointerEvents)}); front z-index ${JSON.stringify(reading.frontZIndex)}, back face z-indexes ${JSON.stringify(reading.faces.map((f) => f.zIndex))}`,
+    );
   }
   if (!reading.badgeFound) {
     violations.push(

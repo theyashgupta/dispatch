@@ -493,7 +493,11 @@ export function Board({
             />
           ) : null}
           {activeCard && overlayIds != null ? (
-            <div style={{ position: "relative" }} aria-hidden inert>
+            <div
+              style={{ position: "relative", isolation: "isolate" }}
+              aria-hidden
+              inert
+            >
               {DECK_BACK_OFFSETS_PX.slice(
                 Math.min(overlayIds.length, 3) === 3 ? 0 : 1,
               ).map((offset) => (
@@ -513,16 +517,18 @@ export function Board({
                   }}
                 />
               ))}
-              <CardView
-                card={activeCard}
-                members={groupMembersById.get(activeCard.id)}
-                selected={overlaySelected}
-                showDot={overlayShowDot}
-                showGone={overlayShowGone}
-                hover={false}
-                elevated
-                domProps={{ "aria-hidden": true, inert: true }}
-              />
+              <div style={{ position: "relative", zIndex: 3 }}>
+                <CardView
+                  card={activeCard}
+                  members={groupMembersById.get(activeCard.id)}
+                  selected={overlaySelected}
+                  showDot={overlayShowDot}
+                  showGone={overlayShowGone}
+                  hover={false}
+                  elevated
+                  domProps={{ "aria-hidden": true, inert: true }}
+                />
+              </div>
               <span
                 style={{
                   position: "absolute",
