@@ -2443,6 +2443,18 @@ async function checkA11y(
   await moveDragTo(cdp, sessionId, todoTarget);
   await endDrag(cdp, sessionId, todoTarget);
 
+  const endHistory = await evalValue(
+    cdp,
+    sessionId,
+    `window.__panel100LiveRegionHistory || []`,
+  );
+  const expectedEndLive = "3 tickets returned to their original position.";
+  if (!endHistory.includes(expectedEndLive)) {
+    violations.push(
+      `a11y: drag-end live region announcement expected to include ${JSON.stringify(expectedEndLive)} (this drop is a same-column no-op, nothing moved), measured ${JSON.stringify(endHistory)}`,
+    );
+  }
+
   const sample3 = await readSelectionText(cdp, sessionId);
   const samples = { sample1, sample2, sample3 };
   for (const [name, value] of Object.entries(samples)) {

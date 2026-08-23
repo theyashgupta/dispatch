@@ -458,10 +458,37 @@ export function Board({
     onDragEnd({ active, over }) {
       const ids = dragSelectionIds(String(active.id), selectedIds);
       if (ids == null) return defaultAnnouncements.onDragEnd({ active, over });
-      if (over != null && isColumn(over.id)) {
-        return `Moved ${ids.length} tickets to ${COLUMN_LABELS[over.id]}.`;
+      if (over == null || !isColumn(over.id)) {
+        return `${ids.length} tickets returned to their original position.`;
       }
-      return `${ids.length} tickets returned to their original position.`;
+      if (over.id === "in_progress") {
+        const members = selectedGroupMembers();
+        if (members.length >= 2) {
+          return `Opened the new group dialog for ${members.length} tickets.`;
+        }
+      }
+      if (blocksAgentDoneManualEntry(over.id)) {
+        return `${COLUMN_LABELS[over.id]} does not accept a manual move.`;
+      }
+      const moving = ids.filter((id) =>
+        cards.some(
+          (c) =>
+            c.id === id &&
+            c.column !== over.id &&
+            isManualMoveAllowed(c.column, over.id as ColumnId),
+        ),
+      );
+      if (moving.length === 0) {
+        return `${ids.length} tickets returned to their original position.`;
+      }
+      return `Moved ${moving.length} tickets to ${COLUMN_LABELS[over.id]}.`;
+    },
+    onDragCancel({ active, over }) {
+      const ids = dragSelectionIds(String(active.id), selectedIds);
+      if (ids == null) {
+        return defaultAnnouncements.onDragCancel({ active, over });
+      }
+      return `Dragging ${ids.length} tickets was cancelled. They returned to their original position.`;
     },
   };
 
