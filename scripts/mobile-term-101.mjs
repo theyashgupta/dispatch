@@ -62,6 +62,7 @@
  */
 import { spawn, execFile, execFileSync } from "node:child_process";
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -1774,6 +1775,327 @@ async function breakTelemetryFlagIgnored(violations) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// telemetry-on: one real flick through the real proxy, telemetry ON, proving
+// both that a flick is recorded and that no string can reach the sink (101-04).
+// ---------------------------------------------------------------------------
+
+/** The exact field set {@link TelemetryRecord} may carry, transcribed from the plan's own
+ * `<what_it_records_and_what_it_refuses_to_record>` allowlist, never guessed from a live sample. */
+const TELEMETRY_ALLOWED_KEYS = [
+  "v",
+  "conn",
+  "seq",
+  "tsMs",
+  "burstMs",
+  "inputFrames",
+  "inputBytes",
+  "gapsMs",
+  "turnaroundMs",
+  "settleMs",
+  "outputFrames",
+  "outputBytes",
+  "maxOutGapMs",
+  "maxBacklogB",
+  "pongRttMs",
+  "gapCloseMs",
+];
+const TELEMETRY_MAX_GAPS = 64;
+
+/** Mirrors `terminal-telemetry.ts`'s own `BURST_GAP_MS`: how long this check waits past the last
+ * dispatched frame before trusting a burst has closed and flushed. */
+const TELEMETRY_BURST_GAP_MS = 300;
+const TELEMETRY_FILE_CAP_BYTES = 2_097_152;
+const TELEMETRY_NONCE_PREFIX = "MOBILETERM101-";
+
+/** Recursively walks a parsed record, collecting the path of every leaf value that is neither a
+ * number nor `null`, the structural anti-leak invariant: it holds for content this check never
+ * thought to look for, unlike a nonce scan alone. */
+function collectNonNumericLeaves(value, path, out) {
+  if (value === null || typeof value === "number") return;
+  if (Array.isArray(value)) {
+    value.forEach((v, i) => collectNonNumericLeaves(v, `${path}[${i}]`, out));
+    return;
+  }
+  if (typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) {
+      collectNonNumericLeaves(v, `${path}.${k}`, out);
+    }
+    return;
+  }
+  out.push(`${path}=${JSON.stringify(value)}`);
+}
+
+/**
+ * Runs every ON-path assertion against one parsed set of records: at least one record, exactly one
+ * flick record (`inputFrames >= 20`), the 16-key allowlist matched exactly on every record, no
+ * string value anywhere (structural, not a grep), the nonce absent from the raw file bytes, timing
+ * fields populated on the flick record, and the file under its cap. Every assertion runs
+ * independently of the others so a break that trips one still prints the passing evidence for the
+ * rest.
+ */
+function assertTelemetryOnRecords(violations, records, nonce, path) {
+  console.log(`telemetry-on: ${records.length} record(s) found at ${path}`);
+  if (records.length === 0) {
+    violations.push(
+      "telemetry-on: expected at least one telemetry record, found 0",
+    );
+  }
+
+  const flickRecords = records.filter((r) => r.inputFrames >= 20);
+  if (flickRecords.length !== 1) {
+    violations.push(
+      `telemetry-on: expected exactly one record with inputFrames >= 20, found ${flickRecords.length}`,
+    );
+  } else {
+    console.log(
+      `telemetry-on: flick record ${JSON.stringify(flickRecords[0])}`,
+    );
+    const r = flickRecords[0];
+    if (r.turnaroundMs === null || r.turnaroundMs === undefined) {
+      violations.push(
+        `telemetry-on: flick record turnaroundMs expected non-null, got ${r.turnaroundMs}`,
+      );
+    }
+    if (r.settleMs === null || r.settleMs === undefined) {
+      violations.push(
+        `telemetry-on: flick record settleMs expected non-null, got ${r.settleMs}`,
+      );
+    }
+    const expectedGaps = Math.min(r.inputFrames - 1, TELEMETRY_MAX_GAPS);
+    if (!Array.isArray(r.gapsMs) || r.gapsMs.length !== expectedGaps) {
+      violations.push(
+        `telemetry-on: flick record gapsMs.length expected ${expectedGaps}, got ${Array.isArray(r.gapsMs) ? r.gapsMs.length : "missing"}`,
+      );
+    }
+  }
+
+  const expectedKeySig = [...TELEMETRY_ALLOWED_KEYS].sort().join(",");
+  const mismatched = records.filter(
+    (r) => Object.keys(r).sort().join(",") !== expectedKeySig,
+  );
+  if (mismatched.length > 0) {
+    for (const r of mismatched) {
+      violations.push(
+        `telemetry-on: record seq=${r.seq} field set does not match the allowlist, got [${Object.keys(r).sort().join(",")}]`,
+      );
+    }
+  } else if (records.length > 0) {
+    console.log(
+      `telemetry-on: field set matches the allowlist exactly (${TELEMETRY_ALLOWED_KEYS.length} keys)`,
+    );
+  }
+
+  const stringLeaks = [];
+  for (const record of records) {
+    collectNonNumericLeaves(record, "record", stringLeaks);
+  }
+  if (stringLeaks.length > 0) {
+    for (const leak of stringLeaks) {
+      violations.push(`telemetry-on: string value found at ${leak}`);
+    }
+  } else {
+    console.log(
+      `telemetry-on: no string value in any record, ${records.length} record(s) scanned`,
+    );
+  }
+
+  const rawBytes = existsSync(path) ? readFileSync(path, "utf8") : "";
+  if (rawBytes.includes(nonce)) {
+    violations.push("telemetry-on: nonce PRESENT in the telemetry file");
+  } else {
+    console.log("telemetry-on: nonce absent from the telemetry file");
+  }
+
+  if (existsSync(path)) {
+    const size = statSync(path).size;
+    if (size >= TELEMETRY_FILE_CAP_BYTES) {
+      violations.push(
+        `telemetry-on: file size ${size} at or over the ${TELEMETRY_FILE_CAP_BYTES}-byte cap`,
+      );
+    }
+  }
+}
+
+/**
+ * Stands up the real fixture with telemetry ON, drives one page session through the real proxy:
+ * activation self-proofs first (a flick that never engaged the kinetic scroller would produce an
+ * empty file this check must not read as a passing OFF-like result), then a typed nonce (the leak
+ * probe, real terminal content crossing the exact socket the recorder observes) and one canonical
+ * flick, then reads and asserts the sink BEFORE `tearDownFixture` deletes `handle.home`.
+ * `opts.skipFlick` is `--break telemetry-no-flick`'s vehicle: nonce typed, no touch stream
+ * dispatched. `opts.plantLeak` is `--break telemetry-leak-planted`'s vehicle: one crafted
+ * string-valued line containing the nonce is appended to the sink right before the assertions run.
+ */
+async function runTelemetryOnFlow(violations, opts = {}) {
+  const handle = await standUpFixture({ telemetry: true });
+  let chromeChild = null;
+  let cdp = null;
+  const userDataDir = join(
+    tmpdir(),
+    `${SANDBOX_PREFIX}chrome-tel-${process.pid}`,
+  );
+  const nonce = TELEMETRY_NONCE_PREFIX + randomBytes(8).toString("hex");
+  try {
+    chromeChild = spawn(
+      findChrome(),
+      [
+        "--headless=new",
+        `--remote-debugging-port=${CDP_PORT}`,
+        `--user-data-dir=${userDataDir}`,
+        "--no-first-run",
+      ],
+      { stdio: ["ignore", "ignore", "ignore"] },
+    );
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const { targetId } = await cdp.send("Target.createTarget", {
+      url: "about:blank",
+    });
+    const { sessionId } = await cdp.send("Target.attachToTarget", {
+      targetId,
+      flatten: true,
+    });
+    await cdp.send("Page.enable", {}, sessionId);
+    await cdp.send("Runtime.enable", {}, sessionId);
+    await cdp.send("Network.enable", {}, sessionId);
+
+    const wsFrames = [];
+    cdp.ws.addEventListener("message", (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.sessionId !== sessionId) return;
+      if (msg.method === "Network.webSocketFrameSent") {
+        wsFrames.push({
+          dir: "sent",
+          payloadData: msg.params.response.payloadData,
+        });
+      } else if (msg.method === "Network.webSocketFrameReceived") {
+        wsFrames.push({
+          dir: "recv",
+          payloadData: msg.params.response.payloadData,
+        });
+      }
+    });
+
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 390, height: 844, deviceScaleFactor: 3, mobile: true },
+      sessionId,
+    );
+    await cdp.send(
+      "Emulation.setTouchEmulationEnabled",
+      { enabled: true, configuration: "mobile" },
+      sessionId,
+    );
+
+    const targetUrl = `http://127.0.0.1:${SANDBOX_PORT}/sessions/${handle.sessionId}/terminal/`;
+    await cdp.send("Page.navigate", { url: targetUrl }, sessionId);
+    await waitForPageComplete(cdp, sessionId, targetUrl);
+    await sleep(2500);
+
+    const coarse = await evalValue(
+      cdp,
+      sessionId,
+      "window.matchMedia('(pointer: coarse)').matches",
+    );
+    if (coarse !== true) {
+      violations.push(
+        `telemetry-on: (pointer: coarse) expected true, measured ${coarse}`,
+      );
+    } else {
+      console.log(`telemetry-on: (pointer: coarse) measured ${coarse}`);
+    }
+
+    await cdp.send(
+      "Runtime.evaluate",
+      { expression: KINETIC_PROBE_SRC, awaitPromise: false },
+      sessionId,
+    );
+
+    await typeIntoTerminal(
+      cdp,
+      sessionId,
+      195,
+      400,
+      nonce,
+      TELEMETRY_BURST_GAP_MS + 50,
+    );
+    await sleep(TELEMETRY_BURST_GAP_MS + 200);
+
+    if (!opts.skipFlick) {
+      await flick(cdp, sessionId, CANONICAL_FLICK);
+    }
+    await sleep(1500 + TELEMETRY_BURST_GAP_MS + 500);
+
+    if (!opts.skipFlick) {
+      const probe = await evalValue(cdp, sessionId, "window.__kineticProbe");
+      if (!probe || probe.defaultPrevented !== true) {
+        violations.push(
+          `telemetry-on: kinetic engagement expected defaultPrevented true, measured ${probe ? probe.defaultPrevented : false}`,
+        );
+      } else {
+        console.log(
+          `telemetry-on: kineticProbe measured ${JSON.stringify(probe)}`,
+        );
+      }
+
+      const sentInput = wsFrames.filter(
+        (f) => f.dir === "sent" && decodeTtydOp(f.payloadData) === "0",
+      ).length;
+      if (sentInput < 1) {
+        violations.push(
+          `telemetry-on: sent INPUT frames expected >= 1, measured ${sentInput}`,
+        );
+      } else {
+        console.log(`telemetry-on: sent INPUT frames measured ${sentInput}`);
+      }
+    }
+
+    const path = telemetryPath(handle);
+    if (opts.plantLeak) {
+      appendFileSync(
+        path,
+        JSON.stringify({
+          v: 1,
+          conn: 0,
+          seq: 0,
+          note: `leaked ${nonce}`,
+        }) + "\n",
+      );
+    }
+
+    const records = readTelemetryRecords(path);
+    assertTelemetryOnRecords(violations, records, nonce, path);
+    console.log(
+      "telemetry-on: this fixture echoes at the termios layer and does no real rendering, so its turnaroundMs is a floor and says nothing about Claude Code's own redraw cost",
+    );
+  } finally {
+    if (cdp) cdp.close();
+    await killAndWait(chromeChild);
+    rmSync(userDataDir, { recursive: true, force: true });
+    await tearDownFixture(handle);
+  }
+}
+
+async function checkTelemetryOn(violations) {
+  await runTelemetryOnFlow(violations, {});
+}
+
+/** Identical flow, telemetry ON, nonce typed, but no touch stream dispatched. The `inputFrames >=
+ * 20` assertion must trip while the nonce-absence assertion stays green, proving the ON check is
+ * keyed to a real flick and not merely to the file existing. */
+async function breakTelemetryNoFlick(violations) {
+  await runTelemetryOnFlow(violations, { skipFlick: true });
+}
+
+/** Normal ON flow, then one crafted string-valued line planted in the sink before assertions run.
+ * Both the no-strings walk and the nonce scan must trip while the flick assertion stays green,
+ * proving the leak assertions are independent of the flick assertion. */
+async function breakTelemetryLeakPlanted(violations) {
+  await runTelemetryOnFlow(violations, { plantLeak: true });
+}
+
 /** Skips the LoAF PerformanceObserver half of the probe only, the RAF sampler still installs.
  * `window.__loafEntries` must come back `undefined`, not `[]`, proving the check can tell "no
  * observer" apart from "observer installed, main thread never blocked". */
@@ -2370,8 +2692,13 @@ async function pollForTextInDom(cdp, sessionId, expression, needle, timeoutMs) {
 /** Real focus (a synthesized click, mirroring a user's own tap-to-focus) then real per-character
  * keyboard dispatch, so the marker travels the real path: browser -> xterm's onData -> WS -> proxy
  * -> ttyd -> pty. A client-only DOM assertion could pass on a locally echoed illusion; pairing this
- * with a server-side `tmux capture-pane` read (the caller's job) is what excludes that. */
-async function typeIntoTerminal(cdp, sessionId, x, y, text) {
+ * with a server-side `tmux capture-pane` read (the caller's job) is what excludes that.
+ * @remarks `perCharMs` (default 15) is the 101-04 telemetry-on check's own vehicle: a slow cadence
+ * spaces each keystroke's own WS frame further apart than the recorder's burst-close gap, so a
+ * multi-character nonce opens and closes its own harmless one-frame bursts instead of merging into
+ * the flick's, which is structurally indistinguishable from it at the WebSocket-frame layer.
+ */
+async function typeIntoTerminal(cdp, sessionId, x, y, text, perCharMs = 15) {
   await cdp.send(
     "Input.dispatchMouseEvent",
     { type: "mousePressed", x, y, button: "left", clickCount: 1 },
@@ -2394,7 +2721,7 @@ async function typeIntoTerminal(cdp, sessionId, x, y, text) {
       { type: "keyUp", key: ch },
       sessionId,
     );
-    await sleep(15);
+    await sleep(perCharMs);
   }
 }
 
@@ -2769,6 +3096,7 @@ const CHECKS = {
   "flick-distance": checkFlickDistance,
   tunnel: checkTunnel,
   "telemetry-off": checkTelemetryOff,
+  "telemetry-on": checkTelemetryOn,
 };
 
 const BREAKS = {
@@ -2782,6 +3110,8 @@ const BREAKS = {
   "skip-auth": breakSkipAuth,
   "wrong-code": breakWrongCode,
   "telemetry-flag-ignored": breakTelemetryFlagIgnored,
+  "telemetry-no-flick": breakTelemetryNoFlick,
+  "telemetry-leak-planted": breakTelemetryLeakPlanted,
 };
 
 // ---------------------------------------------------------------------------
