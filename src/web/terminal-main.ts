@@ -232,6 +232,10 @@ function attachShiftEnterHandler(
  * immediately (its tmux target vanished while the process lingers, so `recordTtydExit` never
  * fires) would otherwise reset the budget every cycle and reconnect forever, never letting the
  * bounded budget exhaust and the server-driven error contract surface.
+ * @remarks TERM-05: `term.onData` increments the module-level `outstandingReports` on every send,
+ * and `ws.onmessage` resets it to `0` on any `OUTPUT` frame, so `attachKineticScroll`'s `drain` can
+ * throttle emission once a backlog of unacknowledged reports has built up, without `connect`
+ * threading the `socket` handle itself into that closure.
  */
 function connect(term: Terminal): void {
   let attempts = 0;
@@ -239,6 +243,7 @@ function connect(term: Terminal): void {
 
   term.onData((data) => {
     if (socket?.readyState === WebSocket.OPEN) {
+      outstandingReports += 1;
       socket.send(enc.encode("0" + data));
     }
   });
@@ -266,8 +271,10 @@ function connect(term: Terminal): void {
       const bytes = new Uint8Array(buf);
       const op = bytes[0];
       const payload = buf.slice(1);
-      if (op === OUTPUT) term.write(new Uint8Array(payload));
-      else if (op === TITLE) document.title = dec.decode(payload);
+      if (op === OUTPUT) {
+        outstandingReports = 0;
+        term.write(new Uint8Array(payload));
+      } else if (op === TITLE) document.title = dec.decode(payload);
     };
 
     ws.onclose = () => {
@@ -310,6 +317,15 @@ function mountTerminal(
     });
   }).observe(mount);
 }
+
+/**
+ * Count of mouse reports `connect`'s `term.onData` has sent since the last `OUTPUT` frame arrived,
+ * module-level because `attachKineticScroll` holds no reference to the WebSocket `connect` owns.
+ * @remarks TERM-05: reset to `0` on any `OUTPUT` frame rather than decremented per report. ttyd
+ * emits many output frames per report, so a decrementing counter has no correct pairing and could
+ * wedge the scroller permanently throttled; a reset on any output is self-healing by construction.
+ */
+let outstandingReports = 0;
 
 /**
  * Tuning for the mobile kinetic scroller. A tick is worth `reportLinesPerTick` (wheel destined for
@@ -444,6 +460,14 @@ function emitTick(term: Terminal, dir: 1 | -1, x: number, y: number): void {
  * recomputes `scrollMode(term)` on every `touchmove` rather than caching it at `touchstart` — a drag
  * lasts far longer than a flick, so a mid-drag buffer flip (`q`-ing out of a TUI) must not leave the
  * rest of the gesture calibrated against a stale mode.
+ * @remarks TERM-05: `drain`'s per-call cap drops from `KINETIC.maxTicksPerDrain` to `1` once
+ * `outstandingReports` reaches that same constant, so a backlog of unacknowledged reports paces
+ * itself down to one report per animation frame instead of continuing to burst at the calibrated
+ * rate. `KINETIC.maxTicksPerDrain` itself is never edited by this throttle, and on any connection
+ * fast enough that an `OUTPUT` frame returns before a backlog can build, the cap never drops, so the
+ * emitted tick count and geometry for a given gesture are unchanged. `outstandingReports` is reset
+ * on `touchstart`, on momentum cancellation and on gesture settle, so a dropped or errored round
+ * trip can never carry a stale backlog into the next gesture.
  */
 function attachKineticScroll(term: Terminal): void {
   let tracking = false;
@@ -471,8 +495,12 @@ function attachKineticScroll(term: Terminal): void {
       (tickMode === "report"
         ? KINETIC.reportLinesPerTick
         : KINETIC.viewportLinesPerTick);
+    const effectiveCap =
+      outstandingReports >= KINETIC.maxTicksPerDrain
+        ? 1
+        : KINETIC.maxTicksPerDrain;
     let emitted = 0;
-    while (Math.abs(accum) >= perTick && emitted < KINETIC.maxTicksPerDrain) {
+    while (Math.abs(accum) >= perTick && emitted < effectiveCap) {
       const dir = accum > 0 ? 1 : -1;
       emitTick(term, dir, x, y);
       accum -= dir * perTick;
@@ -498,6 +526,7 @@ function attachKineticScroll(term: Terminal): void {
       cancelAnimationFrame(momentumFrame);
       momentumFrame = undefined;
     }
+    outstandingReports = 0;
     settleGesture();
   };
 
@@ -552,6 +581,7 @@ function attachKineticScroll(term: Terminal): void {
       cancelMomentum();
       cancelDragFrame();
       pendingDy = 0;
+      outstandingReports = 0;
       if ((e.target as Element)?.closest?.(".dsp-zoom-chip")) {
         tracking = false;
         return;
@@ -627,6 +657,7 @@ function attachKineticScroll(term: Terminal): void {
     if (engaged && Math.abs(velocity) > KINETIC.minVelocity) {
       runMomentum();
     } else {
+      outstandingReports = 0;
       settleGesture();
     }
   };
