@@ -692,7 +692,7 @@ export function Board({
             icon={
               <AlertTriangle size={14} strokeWidth={2} aria-hidden="true" />
             }
-            label={`Couldn't move ${failedMove.count} tickets`}
+            label={`Couldn't move ${failedMove.count} ${failedMove.count === 1 ? "ticket" : "tickets"}`}
           />
           <IconButton
             aria-label="Dismiss the failed move notice"
