@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, X } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -29,6 +29,7 @@ import { COLUMN_LABELS } from "../../lib/event-copy.js";
 import { DECK_BACK_OFFSETS_PX, dragSelectionIds } from "./drag-selection.js";
 import { Column } from "./Column.js";
 import { CardView } from "./CardView.js";
+import { IconButton } from "../../primitives/IconButton.js";
 import { Notice } from "../../primitives/Notice.js";
 import { SearchBox } from "./SearchBox.js";
 import { StatusPillSwitcher } from "./StatusPillSwitcher.js";
@@ -334,8 +335,11 @@ export function Board({
       moves.map((m) => moveCard(m.id, targetColumn)),
     );
 
-    if (results.every((r) => r.status === "fulfilled")) return;
     if (superseded()) return;
+    if (results.every((r) => r.status === "fulfilled")) {
+      setFailedMove(null);
+      return;
+    }
 
     console.error(
       "performGroupMove failed; restoring the previous columns",
@@ -678,6 +682,9 @@ export function Board({
             borderRadius: "var(--radius)",
             boxShadow: "var(--shadow-float)",
             padding: "var(--space-sm) var(--space-lg)",
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--space-sm)",
           }}
         >
           <Notice
@@ -687,6 +694,12 @@ export function Board({
             }
             label={`Couldn't move ${failedMove.count} tickets`}
           />
+          <IconButton
+            aria-label="Dismiss the failed move notice"
+            onClick={() => setFailedMove(null)}
+          >
+            <X size={14} strokeWidth={2} aria-hidden="true" />
+          </IconButton>
         </div>
       )}
       {groupModalMembers != null && (
