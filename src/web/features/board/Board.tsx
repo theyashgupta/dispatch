@@ -296,15 +296,17 @@ export function Board({
   }
 
   async function performGroupMove(cardIds: string[], targetColumn: ColumnId) {
+    const candidates = cards.filter(
+      (c) => cardIds.includes(c.id) && c.column !== targetColumn,
+    );
+    if (candidates.length === 0) return;
+
     if (blocksAgentDoneManualEntry(targetColumn)) {
       setRefusedColumn(targetColumn);
       return;
     }
 
-    const moves = cards
-      .filter((c) => cardIds.includes(c.id) && c.column !== targetColumn)
-      .map((c) => ({ id: c.id, from: c.column }));
-    if (moves.length === 0) return;
+    const moves = candidates.map((c) => ({ id: c.id, from: c.column }));
 
     const originalColumnById = new Map(moves.map((m) => [m.id, m.from]));
 
