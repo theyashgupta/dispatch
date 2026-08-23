@@ -21,7 +21,10 @@ import type {
   Column as ColumnId,
 } from "../../../shared/types.js";
 import type { CardSearchResult } from "../../../shared/search.js";
-import { blocksAgentDoneManualEntry } from "../../../shared/column-transitions.js";
+import {
+  blocksAgentDoneManualEntry,
+  isManualMoveAllowed,
+} from "../../../shared/column-transitions.js";
 import { COLUMN_LABELS } from "../../lib/event-copy.js";
 import { DECK_BACK_OFFSETS_PX, dragSelectionIds } from "./drag-selection.js";
 import { Column } from "./Column.js";
@@ -306,7 +309,10 @@ export function Board({
       return;
     }
 
-    const moves = candidates.map((c) => ({ id: c.id, from: c.column }));
+    const moves = candidates
+      .filter((c) => isManualMoveAllowed(c.column, targetColumn))
+      .map((c) => ({ id: c.id, from: c.column }));
+    if (moves.length === 0) return;
 
     const originalColumnById = new Map(moves.map((m) => [m.id, m.from]));
 
@@ -357,8 +363,21 @@ export function Board({
       );
     }
 
-    const compensationTargets = moves.filter(
-      (_, i) => results[i].status === "fulfilled",
+    const moved = moves.filter((_, i) => results[i].status === "fulfilled");
+    const unrecoverable = moved.filter(
+      (m) => !isManualMoveAllowed(targetColumn, m.from),
+    );
+    if (unrecoverable.length > 0) {
+      console.error(
+        "performGroupMove cannot compensate a move the manual allowlist refuses; cards stranded",
+        unrecoverable.map((m) => m.id),
+        targetColumn,
+      );
+      markStranded();
+    }
+
+    const compensationTargets = moved.filter((m) =>
+      isManualMoveAllowed(targetColumn, m.from),
     );
     if (superseded()) return;
     const compensationResults = await Promise.allSettled(
