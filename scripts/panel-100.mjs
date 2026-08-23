@@ -2910,6 +2910,24 @@ async function performAtomicRollbackLeg(
         );
       }
     }
+    // The column half of "can a compensating call target the wrong thing?" is asserted above; this
+    // is the card half. Compensation must target exactly the two cards whose FORWARD move landed
+    // (MSD-A and MSD-C, since MSD-B's own request is the one failed above). A regression that
+    // compensated the wrong card, keying off the wrong index or building the target list from the
+    // whole selection instead of the moved subset, would emit two well-formed {"column":"todo"}
+    // bodies and pass the loop above unnoticed.
+    const expectedCompensationIds = [MSD_A_ID, MSD_C_ID];
+    const compensatedIds = compensating
+      .map((p) => (/cards\/([^/]+)\/move/.exec(p.request.url) ?? [])[1] ?? null)
+      .sort();
+    if (
+      JSON.stringify(compensatedIds) !==
+      JSON.stringify([...expectedCompensationIds].sort())
+    ) {
+      violations.push(
+        `atomic-rollback: ${legLabel}, compensating requests expected to target exactly ${JSON.stringify([...expectedCompensationIds].sort())} (the two cards whose forward move succeeded), measured ${JSON.stringify(compensatedIds)}`,
+      );
+    }
 
     if (strandCompensation || retryCompensationOnce) {
       const targeted = compensating[0];
@@ -2930,6 +2948,21 @@ async function performAtomicRollbackLeg(
       const retryPaused = await waitForNextPausedRequest(
         FETCH_PAUSE_TIMEOUT_MS,
       );
+      const retryId =
+        (/cards\/([^/]+)\/move/.exec(retryPaused.request.url) ?? [])[1] ?? null;
+      if (retryId !== strandedId) {
+        violations.push(
+          `atomic-rollback: ${legLabel}, the compensation retry expected to re-target the card whose compensating call failed (${strandedId}), measured ${JSON.stringify(retryId)}`,
+        );
+      }
+      const retryBody = retryPaused.request.postData
+        ? JSON.parse(retryPaused.request.postData)
+        : null;
+      if (!retryBody || retryBody.column !== "todo") {
+        violations.push(
+          `atomic-rollback: ${legLabel}, compensation retry body expected {"column":"todo"}, measured ${JSON.stringify(retryBody)}`,
+        );
+      }
       if (strandCompensation) {
         await cdp.send(
           "Fetch.failRequest",
