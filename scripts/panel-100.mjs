@@ -84,6 +84,8 @@
  *                                                       permanent-movers for the same reason, and
  *                                                       registered nine `--break <name>` legs
  *                                                       total (see PLAN 100-06 ADDITIONS below).
+ *                                                       100-REVIEW CR-01 added a tenth,
+ *                                                       `stacked-overlay-paint-order`.
  *                                                       This is now the phase's complete
  *                                                       seven-check harness.
  *   node scripts/panel-100.mjs --check <name>         one named check only.
@@ -94,7 +96,8 @@
  *                                                       and re-confirms PASS, all inside one Chrome
  *                                                       tab. Never edits a source file.
  *
- * BREAK EVIDENCE, all seven checks (nine registered breaks, `atomic-rollback` carries three of its
+ * BREAK EVIDENCE, all seven checks (ten registered breaks, `atomic-rollback` carries three of its
+ * own and `stacked-overlay` two, the second added by 100-REVIEW CR-01, see its own entry below and
  * own) run under `--break <name>` for real and observed reporting their own violation. The quoted
  * lines below are the VERBATIM TRIP-leg output captured from those runs:
  *   - `single-card-unchanged` proven able to fail: removing the `done` column's droppable DOM node
@@ -126,6 +129,14 @@
  *     `stacked-overlay: leg A (N=3), paint order, the element painted at the deck's centre point
  *     expected to be the front CardView face, measured the deck back face at index 1 (<div>, probe
  *     pointer-events "auto"); front z-index "auto", back face z-indexes ["1","2"]`.
+ *     That assertion carries its own registered break, `stacked-overlay-paint-order`, which raises
+ *     the 4px back face's inline z-index from 2 to 9 mid-drag, leaving its transform and rect
+ *     untouched so every pre-existing geometry assertion still passes. Its verbatim trip output:
+ *     `stacked-overlay: leg A (N=3), 4px back face z-index expected "2" (100-UI-SPEC.md layer
+ *     table), measured "9"` AND
+ *     `stacked-overlay: leg A (N=3), paint order, the element painted at the deck's centre point
+ *     expected to be the front CardView face, measured the deck back face at index 1 (<div>, probe
+ *     pointer-events "auto"); front z-index "3", back face z-indexes ["1","9"]`.
  *   - `overlay-unchanged-n1` proven able to fail (100-05): inserting an absolutely positioned
  *     inset:0 intruder `<div>` as a sibling of the N<=1 overlay's own card root, mid-drag, produced
  *     `overlay-unchanged-n1: N=0 leg, expected exactly 1 face-level element directly under the
@@ -174,8 +185,8 @@
  *     `atomic-rollback: leg 3 (compensation permanently fails), expected [role="alert"] to stay
  *     visible past 3200ms for a stranded compensation, measured absent`, where every path was
  *     previously green with the feature removed.
- * All nine `--break <name>` runs' restore legs re-confirmed PASS (`tripFired=true restoreClean=true`
- * for each), and a plain `node scripts/panel-100.mjs` run immediately after all nine breaks exited 0
+ * All `--break <name>` runs' restore legs re-confirmed PASS (`tripFired=true restoreClean=true`
+ * for each), and a plain `node scripts/panel-100.mjs` run immediately after the breaks exited 0
  * with all seven checks PASS, proving no break leaked DOM state.
  *
  * PLAN 100-05 ADDITIONS AND FINDINGS, load-bearing for anyone extending this file further:
@@ -3924,8 +3935,101 @@ async function runBreakA11y(cdp, sessionId) {
   };
 }
 
+/**
+ * `stacked-overlay-paint-order` break, 100-REVIEW CR-01's own self-check: raises the 4px back face's
+ * inline `z-index` from 2 to 9 mid-drag, which reproduces exactly the defect CR-01 found (a back
+ * face painting over the front card, so the deck renders as an empty rectangle with a badge) without
+ * touching a source file. Its transform and its rect are untouched, so the pre-existing geometry
+ * assertions all still pass: only the layer-table z-index comparison and the `elementFromPoint`
+ * paint-order reading can catch it, which is the point.
+ */
+async function runBreakStackedOverlayPaintOrder(cdp, sessionId) {
+  console.log(
+    "\n--break stacked-overlay-paint-order: raising the 4px back face's inline z-index to 9 mid-drag, geometry untouched",
+  );
+  const mutateHook = async (cdpArg, sessionIdArg) => {
+    await evalValue(
+      cdpArg,
+      sessionIdArg,
+      `${FIND_OVERLAY_SRC}(function () {
+        var overlay = panel100FindOverlayNode(${JSON.stringify(MSD_B_IDENTIFIER)});
+        if (!overlay) throw new Error("panel100 break: deck overlay not found for MSD-B");
+        var kids = Array.prototype.slice.call(overlay.children);
+        var target = kids.find(function (el) {
+          var s = getComputedStyle(el);
+          return s.position === "absolute" && s.borderRadius === "6px" && el.children.length === 0 &&
+            (el.textContent || "").trim() === "" && s.transform === "matrix(1, 0, 0, 1, 4, 4)";
+        });
+        if (!target) throw new Error("panel100 break: 4px back face not found for MSD-B");
+        window.__panel100BreakZIndexNode = target;
+        window.__panel100BreakZIndexOriginal = target.style.zIndex;
+        target.style.zIndex = "9";
+        return true;
+      })()`,
+    );
+  };
+  const restoreHook = async (cdpArg, sessionIdArg) => {
+    await evalValue(
+      cdpArg,
+      sessionIdArg,
+      `(function () {
+        var node = window.__panel100BreakZIndexNode;
+        if (node && document.contains(node)) {
+          node.style.zIndex = window.__panel100BreakZIndexOriginal;
+        }
+        delete window.__panel100BreakZIndexNode;
+        delete window.__panel100BreakZIndexOriginal;
+        return true;
+      })()`,
+    );
+  };
+
+  const tripViolations = [];
+  await checkStackedOverlay(
+    cdp,
+    sessionId,
+    tripViolations,
+    mutateHook,
+    restoreHook,
+  );
+  console.log(
+    `--break stacked-overlay-paint-order TRIP leg FAIL output:\n${tripViolations.join("\n")}`,
+  );
+  const tripFired =
+    tripViolations.some(
+      (v) =>
+        v.indexOf("paint order") !== -1 &&
+        v.indexOf("the deck back face at index") !== -1,
+    ) &&
+    tripViolations.some(
+      (v) => v.indexOf('4px back face z-index expected "2"') !== -1,
+    ) &&
+    !tripViolations.some(
+      (v) => v.indexOf("back face transform expected") !== -1,
+    );
+
+  const restoreSessionId = await freshBoardSession(cdp, TOP_LEVEL_IDENTIFIERS);
+  const restoreViolations = [];
+  await checkStackedOverlay(
+    cdp,
+    restoreSessionId,
+    restoreViolations,
+    null,
+    null,
+  );
+  console.log(
+    `--break stacked-overlay-paint-order RESTORE leg: ${restoreViolations.length === 0 ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+  return {
+    tripFired,
+    restoreClean: restoreViolations.length === 0,
+    tripViolations,
+  };
+}
+
 const BREAKS = {
   "stacked-overlay": runBreakStackedOverlay,
+  "stacked-overlay-paint-order": runBreakStackedOverlayPaintOrder,
   "overlay-unchanged-n1": runBreakOverlayUnchangedN1,
   a11y: runBreakA11y,
   "group-modal-prefill": runBreakGroupModalPrefill,

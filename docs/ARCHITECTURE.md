@@ -3185,12 +3185,15 @@ rate_limit`, paused until `reset` under 50 remaining), and a semaphore of four c
   keeps the alert up past its 3200ms auto-clear and logs a `console.error` naming the stranded card),
   `single-card-unchanged`, and `keyboard-unchanged` (DRAG-05's two
   baseline checks, pinning the pre-existing single-card drag and carousel "Move to..." paths
-  unaffected). Nine named `--break <name>` legs total, each proven able to fail live and quoted
+  unaffected). Ten named `--break <name>` legs total, each proven able to fail live and quoted
   verbatim from the script's own header JSDoc: `single-card-unchanged`
   (`single-card-unchanged: MSD-A expected column "done", measured "todo"`), `keyboard-unchanged`
   (`keyboard-unchanged: MSD-B expected column "done", measured "todo"`), `stacked-overlay`
   (`stacked-overlay: leg A (N=3), 4px back face transform expected "matrix(1, 0, 0, 1, 4, 4)",
-measured "matrix(1, 0, 0, 1, 4, 10)"`), `overlay-unchanged-n1` (`overlay-unchanged-n1: N=0 leg,
+measured "matrix(1, 0, 0, 1, 4, 10)"`), `stacked-overlay-paint-order` (raising that same face's
+  inline `z-index` to 9 mid-drag, geometry untouched, produces `stacked-overlay: leg A (N=3), paint
+order, the element painted at the deck's centre point expected to be the front CardView face,
+measured the deck back face at index 1`), `overlay-unchanged-n1` (`overlay-unchanged-n1: N=0 leg,
 expected exactly 1 face-level element directly under the fixed overlay node, measured 2`), `a11y`
   (`a11y: deck container aria-hidden expected "true", measured null`), `group-modal-prefill`
   (`group-modal-prefill: modal member identifier set expected ["MSD-A","MSD-B","MSD-C"], measured
