@@ -416,10 +416,14 @@ async function main() {
     // this control's anti-vacuity value now comes from an independent source outside the wire
     // entirely. `card` is the PRE-MIGRATION seed (no activeSessionId of its own — see
     // makeFixtureCard), so the migration mints the session id fresh; read the PERSISTED row
-    // directly off disk (never through the wire) to learn what id migration actually minted, then
-    // assert the wire's flat activeSessionId agrees with that independently-sourced ground truth,
-    // alongside the existing flat tmuxSession match.
-    const persistedDb = new DatabaseSync(dbPath);
+    // directly off disk (never through the wire, and read-only, since the sandbox server owns this
+    // file) to learn what id migration actually minted, then assert the wire's flat
+    // activeSessionId agrees with that independently-sourced ground truth, alongside the existing
+    // flat tmuxSession match. The single-record precondition is ASSERTED rather than assumed: a
+    // positional sessions[0] would silently compare against an arbitrary sibling if this fixture
+    // ever grew one, so a length other than 1 leaves mintedSessionId undefined and fails the
+    // control loudly.
+    const persistedDb = new DatabaseSync(dbPath, { readOnly: true });
     let mintedSessionId;
     try {
       const persistedRow = persistedDb
@@ -428,7 +432,10 @@ async function main() {
       const persistedCard = persistedRow
         ? JSON.parse(persistedRow.data)
         : undefined;
-      mintedSessionId = persistedCard?.sessions?.[0]?.id;
+      mintedSessionId =
+        persistedCard?.sessions?.length === 1
+          ? persistedCard.sessions[0].id
+          : undefined;
     } finally {
       persistedDb.close();
     }
