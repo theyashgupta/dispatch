@@ -2102,11 +2102,38 @@ Adding a fourth cleanup-mirror field, or a tenth writer of one of the existing t
 deliberate, human-ratified baseline re-freeze (`FROZEN_COUNT` bumped in the same commit) exactly
 like every other `NEW-`-prefixed structural fence in this file.
 
-`pruneStaleWarnedSessions(now)` prunes a warned-but-retained session record once all three hold:
+`pruneStaleWarnedSessions(now)` prunes a warned-but-retained session record once all four hold:
 `cleanupWarning` set, `tmuxSession` absent (so `noteCleanupWarning`'s still-live preflight-refusal
-records are exempt), and `now - Date.parse(session.updatedAt) >= cleanupDelayMs`. It is called from
-`startCleanupScheduler`'s `tick()`, after `runDueCleanups`, so it inherits the same one-minute
-cadence and boot catch-up sweep rather than a second timer.
+records are exempt), `workspacePath` AND `claudeSessionId` both absent, and
+`now - Date.parse(session.updatedAt) >= cleanupDelayMs`. Two card-level guards apply before any
+record is considered: the card must be on `done`, and must be mid-neither `isStarting` nor
+`isCleaningUp`. It is called from `startCleanupScheduler`'s `tick()`, after `runDueCleanups` but in
+its own `try` (the prune is the recovery path for FAILED teardowns, so it must not be gated on the
+sweep succeeding), so it inherits the same one-minute cadence and boot catch-up sweep rather than a
+second timer.
+
+Pruning is DESTRUCTIVE and is the store's only permanent record deletion outside `finishCleanup`:
+it removes the record from `card.sessions`, promotes a sibling (or clears the pointer when none
+remains), re-derives the card's flat projection and its three cleanup mirrors from whatever is
+active afterward, and returns a `cleanup` activity event so the deletion is visible in
+`GET /api/events`. Because it deletes rather than repairs, the exemption clauses are the safety
+property, not a nicety. `finishCleanup` removes a record only after a teardown SUCCEEDED, so
+nothing on disk survives it; this path removes records precisely because their teardown FAILED,
+which is exactly when `workspacePath` may still name a worktree on disk and `claudeSessionId` is
+still the `--resume` handle `recordResumeFailure` deliberately kept. Neither `moveCardManual` nor
+`recordResumeFailure` clears `cleanupWarning`, so without those two clauses a card warned, dragged
+out of Done, failed to resume and dragged back would have its only recovery affordance silently
+deleted a week later. What remains prunable is the population the rule was written for: legacy
+workspace and folder-already-removed warnings whose only remaining state IS the warning.
+
+The removal ORDER is a precondition, not a style choice. The flat projection is cleared through
+`setActiveSession` and the token through `clearHookToken` BEFORE `removeSessionRecord` runs, exactly
+as `finishCleanup` does it. Skipping that step drives `removeSessionRecord`'s pointer repair into
+`setActiveSession`'s refusing-to-project branch and persists a card holding an empty `sessions`
+array beside a live `workspacePath`, which `isAwaitingCleanup` then pins in Done forever and the
+next boot's `repairDowngradeDrift` re-mints as an anonymous phantom record. `--check
+cleanup-prune-warned` asserts against exactly this, including that the sandbox server logs no
+`refusing to project` line.
 
 ### Hooks Status Channel
 
