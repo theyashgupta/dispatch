@@ -84,7 +84,11 @@ function validateValue(
 }
 
 vaultRouter.get("/vault", async (_req, res) => {
-  res.status(200).json({ keys: await listKeys() });
+  try {
+    res.status(200).json({ keys: await listKeys() });
+  } catch {
+    res.status(500).json({ error: "vault-read-failed" });
+  }
 });
 
 vaultRouter.post("/vault", async (req, res) => {
