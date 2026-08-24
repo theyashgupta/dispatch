@@ -599,10 +599,10 @@ const CLEANUP_PRUNE_TMUX_PREFIX = `dsp102pw-${process.pid}-`;
 
 /**
  * `--check cleanup-prune-warned`'s own profile: ONE real tmux+ttyd session (`sessionKeys: ["a"]`),
- * the LIVE leg of the check's own three-record fixture. A second real session is unnecessary here,
+ * the LIVE leg of the check's own five-record fixture. A second real session is unnecessary here,
  * since the rule's `tmuxSession` clause only needs one genuinely alive session to prove it
- * load-bearing; the check seeds its other two records (STALE, FRESH) as purely synthetic siblings
- * directly into the sandbox `board.db`.
+ * load-bearing; the check seeds its other four records (STALE, STALE_ACTIVE, FRESH, RECOVERABLE)
+ * as purely synthetic siblings directly into the sandbox `board.db`.
  */
 const CLEANUP_PRUNE_FIXTURE = {
   port: CLEANUP_PRUNE_SANDBOX_PORT,
@@ -7383,9 +7383,10 @@ async function checkCleanupScheduleRestart() {
 const CLEANUP_PRUNE_DELAY_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * Margin subtracted past {@link CLEANUP_PRUNE_DELAY_MS} for the STALE and LIVE seeded
- * `updatedAt` timestamps, so neither sits exactly on the boundary a clock-skew edge case could
- * flip.
+ * Margin either side of {@link CLEANUP_PRUNE_DELAY_MS} the seeded `updatedAt` timestamps are
+ * offset by, so no record sits exactly on the boundary a clock-skew edge case could flip. STALE,
+ * STALE_ACTIVE, LIVE and RECOVERABLE are stamped one margin PAST it; FRESH one margin INSIDE it,
+ * so the two sides bracket the boundary instead of sitting a whole window apart.
  */
 const CLEANUP_PRUNE_MARGIN_MS = 60_000;
 
@@ -7397,25 +7398,60 @@ const CLEANUP_PRUNE_MARGIN_MS = 60_000;
 const CLEANUP_PRUNE_SETTLE_TIMEOUT_MS = 20_000;
 
 /**
- * `--check cleanup-prune-warned`: a three-record fixture on a `done`-column card, one real tmux
- * session (LIVE) and two purely synthetic sibling records (STALE, FRESH) seeded directly into the
- * sandbox `board.db`, so each of the prune rule's three clauses has its own subject:
+ * Ticks the sandbox server's cleanup scheduler runs at for this check, far below the product's
+ * one-minute cadence so the settle loop is a few seconds rather than a few minutes.
+ */
+const CLEANUP_PRUNE_TICK_MS = 500;
+
+/**
+ * Ticks to dwell AFTER the STALE record is observed gone, before the survivors are asserted. The
+ * settle loop breaks on first observation, so without this the survivors are checked at a single
+ * instant and a prune that removed one of them on a LATER tick would never be seen.
+ */
+const CLEANUP_PRUNE_DWELL_TICKS = 3;
+
+/**
+ * `--check cleanup-prune-warned`: a five-record fixture on a `done`-column card, one real tmux
+ * session (LIVE) plus four synthetic sibling records seeded directly into the sandbox `board.db`,
+ * so every clause of the prune rule has its own subject AND the removal sequence has one too:
  *
- *   STALE: `cleanupWarning` set, no `tmuxSession`, `updatedAt` stamped past the retention window.
- *   Must be GONE after the real scheduler's fast tick.
+ *   STALE: `cleanupWarning` set and nothing else retained, `updatedAt` stamped past the retention
+ *   window. Must be GONE after the real scheduler's fast tick.
  *
- *   FRESH: `cleanupWarning` set, no `tmuxSession`, `updatedAt` stamped inside the window. Must
- *   SURVIVE, the leg proving the rule is a window, not "prune every warned record".
+ *   STALE_ACTIVE: STALE's shape, but it is the card's `activeSessionId`. Must be GONE, and its
+ *   removal must promote LIVE, leave the card's flat projection cleanly re-derived, and re-mirror
+ *   the cleanup fields from the promoted record. This is the ONLY leg that reaches
+ *   `removeSessionRecord` past its `if (!wasActive) return`, i.e. the live-sibling preference, the
+ *   promote branch, and `setActiveSession`'s six-field re-derivation. Without it the whole
+ *   pointer-repair path is dead in this check.
  *
- *   LIVE: `cleanupWarning` set WITH a live `tmuxSession` (the `noteCleanupWarning` preflight
- *   shape), `updatedAt` as old as STALE's. Must SURVIVE, the leg proving the `tmuxSession` clause
- *   is load-bearing rather than decorative.
+ *   FRESH: `cleanupWarning` set, `updatedAt` stamped one margin INSIDE the boundary. Must SURVIVE.
+ *   Seeded to BRACKET the boundary with STALE rather than sit a full week from it, so a predicate
+ *   with the wrong unit or a much smaller window cannot pass both legs unchanged.
+ *
+ *   LIVE: `cleanupWarning` set WITH a live `tmuxSession` and no other retained state, `updatedAt`
+ *   as old as STALE's. Must SURVIVE, the leg proving the `tmuxSession` clause is load-bearing
+ *   rather than decorative. Its `workspacePath`/`claudeSessionId` are cleared at seed time
+ *   deliberately: leaving them would exempt it under the retained-state clause too and make this
+ *   leg pass whether or not the `tmuxSession` clause exists.
+ *
+ *   RECOVERABLE: `cleanupWarning` set, no `tmuxSession`, `updatedAt` as old as STALE's, but still
+ *   naming a `workspacePath`. Must SURVIVE, the leg proving the prune never permanently forgets a
+ *   worktree that a FAILED teardown may have left on disk.
  *
  * Drives the REAL scheduler with a fast `DISPATCH_CLEANUP_TICK_MS`, reads the result from the
  * wire (`GET /api/board`, via {@link fetchFixtureCard}) by `sessionCount`/`sessionSummaries` ids
  * rather than a bare array length, then kills the server and re-reads the PERSISTED record
  * through a fresh connection ({@link readCard}), so the check proves durable removal rather than
  * merely an in-memory effect.
+ * @remarks The card's flat projection is seeded to match STALE_ACTIVE exactly (every projected
+ * field absent), not LIVE, so the boot-time `repairDowngradeDrift` pass finds no drift and cannot
+ * copy flat state back onto the record the prune is meant to claim.
+ * @remarks A `refusing to project` line anywhere in the sandbox server's output is a violation on
+ * its own. It is the single cheapest tripwire for the removal-order defect: a prune that removes a
+ * record without clearing the flat projection first drives `removeSessionRecord`'s pointer repair
+ * into `setActiveSession`'s refuse branch and persists a card with an empty `sessions` array
+ * beside a live `workspacePath`.
  */
 async function checkCleanupPruneWarned(built) {
   const violations = [];
@@ -7434,16 +7470,17 @@ async function checkCleanupPruneWarned(built) {
   const oldIso = new Date(
     now - (CLEANUP_PRUNE_DELAY_MS + CLEANUP_PRUNE_MARGIN_MS),
   ).toISOString();
-  const freshIso = new Date(now).toISOString();
+  const freshIso = new Date(
+    now - (CLEANUP_PRUNE_DELAY_MS - CLEANUP_PRUNE_MARGIN_MS),
+  ).toISOString();
 
-  card.column = "done";
-  liveRecord.cleanupWarning =
+  const liveWarning =
     "cleanup-prune-warned fixture: LIVE (preflight-refusal shape)";
+  card.column = "done";
+  liveRecord.cleanupWarning = liveWarning;
   liveRecord.updatedAt = oldIso;
-  card.activeSessionId = liveRecord.id;
-  card.cleanupWarning = liveRecord.cleanupWarning;
-  card.cleanupBlocked = undefined;
-  card.cleanupDueAt = undefined;
+  liveRecord.workspacePath = undefined;
+  liveRecord.claudeSessionId = undefined;
 
   const staleId = randomUUID();
   const staleRecord = {
@@ -7452,6 +7489,13 @@ async function checkCleanupPruneWarned(built) {
     updatedAt: oldIso,
     cleanupWarning: "cleanup-prune-warned fixture: STALE",
   };
+  const staleActiveId = randomUUID();
+  const staleActiveRecord = {
+    id: staleActiveId,
+    createdAt: oldIso,
+    updatedAt: oldIso,
+    cleanupWarning: "cleanup-prune-warned fixture: STALE_ACTIVE",
+  };
   const freshId = randomUUID();
   const freshRecord = {
     id: freshId,
@@ -7459,18 +7503,46 @@ async function checkCleanupPruneWarned(built) {
     updatedAt: freshIso,
     cleanupWarning: "cleanup-prune-warned fixture: FRESH",
   };
-  card.sessions = [liveRecord, staleRecord, freshRecord];
+  const recoverableId = randomUUID();
+  const recoverablePath = join(built.home, "prune-recoverable-worktree");
+  const recoverableRecord = {
+    id: recoverableId,
+    createdAt: oldIso,
+    updatedAt: oldIso,
+    cleanupWarning: "cleanup-prune-warned fixture: RECOVERABLE",
+    workspacePath: recoverablePath,
+  };
+  card.sessions = [
+    liveRecord,
+    staleRecord,
+    staleActiveRecord,
+    freshRecord,
+    recoverableRecord,
+  ];
+
+  card.activeSessionId = staleActiveId;
+  card.tmuxSession = undefined;
+  card.ttydPort = undefined;
+  card.hookToken = undefined;
+  card.claudeSessionId = undefined;
+  card.workspacePath = undefined;
+  card.workspace = undefined;
+  card.cleanupWarning = staleActiveRecord.cleanupWarning;
+  card.cleanupBlocked = undefined;
+  card.cleanupDueAt = undefined;
 
   seedFixtureCard(built.home, card);
   console.log(
     `cleanup-prune-warned: seeded LIVE=${liveRecord.id} (tmuxSession=${liveRecord.tmuxSession}) ` +
-      `STALE=${staleId} FRESH=${freshId}, card.column=done`,
+      `STALE=${staleId} STALE_ACTIVE=${staleActiveId} (card.activeSessionId) FRESH=${freshId} ` +
+      `RECOVERABLE=${recoverableId}, card.column=done`,
   );
 
   const priorTickEnv = process.env.DISPATCH_CLEANUP_TICK_MS;
-  process.env.DISPATCH_CLEANUP_TICK_MS = "500";
+  process.env.DISPATCH_CLEANUP_TICK_MS = String(CLEANUP_PRUNE_TICK_MS);
   try {
     built.server = bootServer(built.home);
+    const logLines = built.server.logLines;
     await waitForReady(built.port);
 
     const deadline = Date.now() + CLEANUP_PRUNE_SETTLE_TIMEOUT_MS;
@@ -7479,22 +7551,33 @@ async function checkCleanupPruneWarned(built) {
     while (Date.now() < deadline) {
       wireCard = await fetchFixtureCard(built);
       const ids = new Set((wireCard?.sessionSummaries ?? []).map((s) => s.id));
-      staleGone = wireCard != null && !ids.has(staleId);
+      staleGone =
+        wireCard != null && !ids.has(staleId) && !ids.has(staleActiveId);
       if (staleGone) break;
       await sleep(POLL_INTERVAL_MS);
+    }
+    if (staleGone) {
+      await sleep(CLEANUP_PRUNE_DWELL_TICKS * CLEANUP_PRUNE_TICK_MS);
+      wireCard = await fetchFixtureCard(built);
     }
     const wireIds = new Set(
       (wireCard?.sessionSummaries ?? []).map((s) => s.id),
     );
     console.log(
       `cleanup-prune-warned: wire settle staleGone=${staleGone} sessionCount=${wireCard?.sessionCount} ` +
+        `activeSessionId=${wireCard?.activeSessionId} cleanupWarning=${JSON.stringify(wireCard?.cleanupWarning)} ` +
         `sessionSummaries ids=${JSON.stringify([...wireIds])}`,
     );
-    if (wireIds.has(staleId)) {
-      violations.push(
-        `cleanup-prune-warned: STALE session ${staleId} still present in wire sessionSummaries after ` +
-          `${CLEANUP_PRUNE_SETTLE_TIMEOUT_MS}ms, the scheduler's prune pass never removed it`,
-      );
+    for (const [label, id] of [
+      ["STALE", staleId],
+      ["STALE_ACTIVE", staleActiveId],
+    ]) {
+      if (wireIds.has(id)) {
+        violations.push(
+          `cleanup-prune-warned: ${label} session ${id} still present in wire sessionSummaries after ` +
+            `${CLEANUP_PRUNE_SETTLE_TIMEOUT_MS}ms, the scheduler's prune pass never removed it`,
+        );
+      }
     }
     if (!wireIds.has(freshId)) {
       violations.push(
@@ -7508,26 +7591,57 @@ async function checkCleanupPruneWarned(built) {
           `prune removed a record with a live tmuxSession`,
       );
     }
-    if (wireCard?.sessionCount !== 2) {
+    if (!wireIds.has(recoverableId)) {
       violations.push(
-        `cleanup-prune-warned: wire sessionCount is ${wireCard?.sessionCount}, expected 2 (LIVE and FRESH ` +
-          `survive, STALE pruned)`,
+        `cleanup-prune-warned: RECOVERABLE session ${recoverableId} missing from wire sessionSummaries, ` +
+          `the prune permanently forgot a workspacePath a failed teardown may have left on disk`,
+      );
+    }
+    if (wireCard?.sessionCount !== 3) {
+      violations.push(
+        `cleanup-prune-warned: wire sessionCount is ${wireCard?.sessionCount}, expected 3 (LIVE, FRESH ` +
+          `and RECOVERABLE survive, STALE and STALE_ACTIVE pruned)`,
+      );
+    }
+    if (wireCard?.activeSessionId !== liveRecord.id) {
+      violations.push(
+        `cleanup-prune-warned: wire activeSessionId is ${wireCard?.activeSessionId}, expected the ` +
+          `promoted LIVE sibling ${liveRecord.id} after the active STALE_ACTIVE record was pruned`,
+      );
+    }
+    if (wireCard?.cleanupWarning !== liveWarning) {
+      violations.push(
+        `cleanup-prune-warned: wire card.cleanupWarning is ${JSON.stringify(wireCard?.cleanupWarning)}, ` +
+          `expected it re-derived from the promoted LIVE record (${JSON.stringify(liveWarning)})`,
       );
     }
 
     await killAndWait(built.server.child);
+    const refusals = logLines.filter((l) => l.includes("refusing to project"));
+    if (refusals.length > 0) {
+      violations.push(
+        `cleanup-prune-warned: server logged ${refusals.length} "refusing to project" line(s), the prune ` +
+          `removed a record without clearing its flat projection first: ${refusals[0]}`,
+      );
+    }
     const persistedCard = readCard(built.dbPath, built.cardId);
     const persistedIds = new Set(
       (persistedCard?.sessions ?? []).map((s) => s.id),
     );
     console.log(
-      `cleanup-prune-warned: persisted sessions after server kill = ${JSON.stringify([...persistedIds])}`,
+      `cleanup-prune-warned: persisted sessions after server kill = ${JSON.stringify([...persistedIds])} ` +
+        `activeSessionId=${persistedCard?.activeSessionId} workspacePath=${JSON.stringify(persistedCard?.workspacePath)}`,
     );
-    if (persistedIds.has(staleId)) {
-      violations.push(
-        `cleanup-prune-warned: STALE session ${staleId} still present in the PERSISTED board.db after ` +
-          `server kill, removal was not durable`,
-      );
+    for (const [label, id] of [
+      ["STALE", staleId],
+      ["STALE_ACTIVE", staleActiveId],
+    ]) {
+      if (persistedIds.has(id)) {
+        violations.push(
+          `cleanup-prune-warned: ${label} session ${id} still present in the PERSISTED board.db after ` +
+            `server kill, removal was not durable`,
+        );
+      }
     }
     if (!persistedIds.has(freshId)) {
       violations.push(
@@ -7541,9 +7655,31 @@ async function checkCleanupPruneWarned(built) {
           `prune removed a record with a live tmuxSession`,
       );
     }
-    if (persistedIds.size !== 2) {
+    if (!persistedIds.has(recoverableId)) {
       violations.push(
-        `cleanup-prune-warned: persisted card.sessions has ${persistedIds.size} entries, expected 2`,
+        `cleanup-prune-warned: RECOVERABLE session ${recoverableId} missing from the PERSISTED board.db, ` +
+          `the prune permanently forgot a workspacePath a failed teardown may have left on disk`,
+      );
+    }
+    if (persistedIds.size !== 3) {
+      violations.push(
+        `cleanup-prune-warned: persisted card.sessions has ${persistedIds.size} entries, expected 3`,
+      );
+    }
+    if (persistedCard?.activeSessionId !== liveRecord.id) {
+      violations.push(
+        `cleanup-prune-warned: persisted activeSessionId is ${persistedCard?.activeSessionId}, expected ` +
+          `the promoted LIVE sibling ${liveRecord.id}`,
+      );
+    }
+    if (
+      persistedCard?.workspacePath != null ||
+      persistedCard?.workspace != null
+    ) {
+      violations.push(
+        `cleanup-prune-warned: persisted card kept workspacePath=${JSON.stringify(persistedCard?.workspacePath)} ` +
+          `workspace=${JSON.stringify(persistedCard?.workspace)} after the active record was pruned, the ` +
+          `corrupt sessions-projected-but-unresolvable shape`,
       );
     }
   } finally {
