@@ -1997,8 +1997,105 @@ async function breakAltScreenTerm(violations) {
 }
 
 // ---------------------------------------------------------------------------
-// --check seed / --break seed-includes-visible (101.1-01, task 3): HTTP + tmux only, no Chrome.
+// --check seed / --break seed-includes-visible / --break seed-seam-unpadded (101.1-01, task 3):
+// HTTP plus tmux for the endpoint's own body, then one real client for the attach seam.
 // ---------------------------------------------------------------------------
+
+/** One headless Chrome plus one attached tab, the exact CDP shape `runLocalScrollFlow` opens
+ * inline. `initScript` runs before any page script on every document, which is how the seam break
+ * leg neutralizes one expression in the shipped bundle without patching the build. */
+async function openChromeTab(label, { initScript } = {}) {
+  const userDataDir = join(
+    tmpdir(),
+    `${SANDBOX_PREFIX}chrome-${label}-${process.pid}`,
+  );
+  const child = spawn(
+    findChrome(),
+    [
+      "--headless=new",
+      `--remote-debugging-port=${CDP_PORT}`,
+      `--user-data-dir=${userDataDir}`,
+      "--no-first-run",
+    ],
+    { stdio: ["ignore", "ignore", "ignore"] },
+  );
+  await waitForCdpUp();
+  const cdp = await connectCDP();
+  const { targetId } = await cdp.send("Target.createTarget", {
+    url: "about:blank",
+  });
+  const { sessionId } = await cdp.send("Target.attachToTarget", {
+    targetId,
+    flatten: true,
+  });
+  await cdp.send("Page.enable", {}, sessionId);
+  await cdp.send("Runtime.enable", {}, sessionId);
+  if (initScript) {
+    await cdp.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      { source: initScript },
+      sessionId,
+    );
+  }
+  return { child, cdp, sessionId, userDataDir };
+}
+
+async function closeChromeTab(tab) {
+  if (!tab) return;
+  tab.cdp.close();
+  await killAndWait(tab.child);
+  rmSync(tab.userDataDir, { recursive: true, force: true });
+}
+
+/**
+ * True when `text` is anywhere in the CLIENT's local scrollback, `null` when the viewport could
+ * not be measured at all (a prerequisite failure, never a silent false).
+ *
+ * @remarks xterm renders only the rows at the current scroll offset and the `Terminal` instance
+ * exposes no window handle, so driving `.xterm-viewport.scrollTop` in HALF-viewport steps and
+ * reading the rendered DOM at each stop is the only honest read of the buffer. Half steps, not
+ * whole ones, so no row can fall between two stops.
+ */
+async function clientBufferHasLine(cdp, sessionId, text) {
+  const metrics = await evalValue(cdp, sessionId, VIEWPORT_METRICS_SRC);
+  if (!metrics) return null;
+  const step = Math.max(1, Math.floor(metrics.clientHeight / 2));
+  for (let top = 0; top <= metrics.scrollHeight; top += step) {
+    await evalValue(
+      cdp,
+      sessionId,
+      `document.querySelector('.xterm-viewport').scrollTop = ${top}`,
+    );
+    await sleep(80);
+    const hit = await evalValue(
+      cdp,
+      sessionId,
+      `document.querySelector('#terminal')?.innerText.includes(${JSON.stringify(text)}) ?? false`,
+    );
+    if (hit) return true;
+  }
+  return false;
+}
+
+/**
+ * Neutralizes exactly one expression in the shipped client, `"\r\n".repeat(term.rows)`, the blank
+ * screenful `seedScrollback` writes so the attach redraw's `ESC[H ESC[J` lands on blank rows
+ * instead of on the newest screenful of seeded history.
+ *
+ * @remarks Scoped to the `"\r\n"` receiver, so every other `String.prototype.repeat` caller on the
+ * page (xterm's own included) is untouched: a global stub would trip the seam assertion for
+ * reasons that have nothing to do with the padding, which is the exact failure mode `--break`
+ * legs exist to avoid. Injecting is what keeps this leg honest about the SHIPPED bundle; patching
+ * `dist/web` would falsify a build the check never runs against.
+ */
+const UNPAD_SEED_INIT_SCRIPT = `
+  (() => {
+    const realRepeat = String.prototype.repeat;
+    String.prototype.repeat = function (count) {
+      return String(this) === "\\r\\n" ? "" : realRepeat.call(this, count);
+    };
+  })();
+`;
 
 /** Every non-blank `MTMLOCAL-NNNN` line in `text`, exactly the fixture's own emitted shape. */
 function countMtmlocalLines(text) {
@@ -2047,11 +2144,22 @@ function assertNoVisibleDuplication(
 /**
  * The scrollback endpoint against a classic fixture holding 200 known lines at a 50-row pane
  * height: 200-with-body, the oldest line present, no visible-row duplication at the seam, the
- * seed+visible line counts accounting for every fixture line, and the unknown-session 404 branch.
- * No Chrome: this leg is HTTP plus tmux only.
+ * seed+visible line counts accounting for every fixture line, the unknown-session 404 branch, and
+ * finally the ATTACH SEAM through a real client.
+ *
+ * @remarks The seam assertion is the only one here that can see the class of defect the endpoint
+ * body cannot: tmux's first redraw on a freshly attached no-alt-screen client is `ESC[H ESC[J`,
+ * and xterm.js's ED0 resets viewport lines IN PLACE without pushing them to scrollback, so
+ * whatever the seed left sitting in the viewport is destroyed. The last `MTMLOCAL-NNNN` line of
+ * the endpoint body is exactly the row that sits immediately above the visible screen, that is,
+ * the first thing a user scrolling up looks at and the newest content in the seed, so its survival
+ * after the live repaint is the assertion. Shared verbatim by `--check seed` and
+ * `--break seed-seam-unpadded` (`opts.unpad`), so the break proves something about the exact
+ * assertion the check runs.
  */
-async function checkSeed(violations) {
+async function runSeedFlow(violations, opts = {}) {
   const handle = await standUpFixture({ classic: true });
+  let tab = null;
   try {
     await tmuxP(["send-keys", "-t", `=${handle.tmuxName}:`, "burst", "Enter"]);
     await waitForBurstComplete(handle.tmuxName);
@@ -2108,9 +2216,68 @@ async function checkSeed(violations) {
         `seed: GET <unknown session>/terminal/scrollback measured 404`,
       );
     }
+
+    const seamLine = body
+      .split("\n")
+      .map((l) => l.replace(/\r$/, "").trim())
+      .filter((l) => /^MTMLOCAL-\d{4}$/.test(l))
+      .at(-1);
+    if (!seamLine) {
+      violations.push(
+        "seed: prerequisite failed, the seed body carried no MTMLOCAL- line to use as the seam row",
+      );
+      return;
+    }
+
+    tab = await openChromeTab("seed", {
+      initScript: opts.unpad ? UNPAD_SEED_INIT_SCRIPT : undefined,
+    });
+    await tab.cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 390, height: 844, deviceScaleFactor: 3, mobile: true },
+      tab.sessionId,
+    );
+    const targetUrl = `http://127.0.0.1:${SANDBOX_PORT}/sessions/${handle.sessionId}/terminal/`;
+    await tab.cdp.send("Page.navigate", { url: targetUrl }, tab.sessionId);
+    await waitForPageComplete(tab.cdp, tab.sessionId, targetUrl);
+    // The live attach repaint is what destroys a badly-ordered seed, so the seam can only be read
+    // after the client has actually rendered the pane's newest row.
+    await waitForDomText(tab.cdp, tab.sessionId, "MTMLOCAL-0200");
+    await sleep(1000);
+
+    const present = await clientBufferHasLine(tab.cdp, tab.sessionId, seamLine);
+    if (present === null) {
+      violations.push(
+        "seed: prerequisite failed, .xterm-viewport not measurable after attach",
+      );
+    } else if (!present) {
+      violations.push(
+        `seed: expected the last seeded history line "${seamLine}" to survive the live attach ` +
+          `repaint in the client's scrollback, not found anywhere in the buffer`,
+      );
+    } else {
+      console.log(
+        `seed: last seeded history line "${seamLine}" survived the attach repaint`,
+      );
+    }
   } finally {
+    await closeChromeTab(tab);
     await tearDownFixture(handle);
   }
+}
+
+async function checkSeed(violations) {
+  await runSeedFlow(violations, {});
+}
+
+/**
+ * Neutralizes `seedScrollback`'s blank-screenful padding in the SHIPPED bundle via
+ * {@link UNPAD_SEED_INIT_SCRIPT} and reruns the same flow: the endpoint assertions must stay green
+ * (the body is unchanged) and the seam assertion must trip, which is what proves the padding, not
+ * the fixture or the transport, is what saves the newest screenful of history.
+ */
+async function breakSeedSeamUnpadded(violations) {
+  await runSeedFlow(violations, { unpad: true });
 }
 
 /**
@@ -4275,6 +4442,7 @@ const BREAKS = {
   "unwrapped-pane": breakUnwrappedPane,
   "alt-screen-term": breakAltScreenTerm,
   "seed-includes-visible": breakSeedIncludesVisible,
+  "seed-seam-unpadded": breakSeedSeamUnpadded,
   "no-touch-emulation": breakNoTouchEmulation,
   "sub-slop-flick": breakSubSlopFlick,
   "wrong-page": breakWrongPage,

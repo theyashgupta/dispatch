@@ -1067,7 +1067,14 @@ an OS change would otherwise kill every pane at spawn instead of merely degradin
 which calls `captureHistory()` (`adapters/tmux.ts`, `capture-pane -p -e -t <name> -S -<limit> -E
 -1`), up to 10,000 lines, fetched by the client's `seedScrollback` (`web/terminal-main.ts`) BEFORE
 the WebSocket ever opens, and written into an xterm instance whose own `scrollback` option was
-raised to the matching 10,000. All three numbers are matched to a fourth: tmux's own default
+raised to the matching 10,000. The seed is followed by one screenful of blank rows
+(`"\r\n".repeat(term.rows)`), and that padding is load-bearing: tmux's first redraw on a freshly
+attached no-alt-screen client is `ESC[H ESC[J`, and xterm.js implements ED0 as an IN-PLACE viewport
+reset that never pushes those rows into scrollback, so without the padding the attach would silently
+destroy the newest screenful of the seed, the exact rows a user scrolling up looks at first. The
+fetch is bounded by an `AbortSignal.timeout` and the capture by a `timeout` plus a 32 MiB
+`maxBuffer`, because the WebSocket opens only after the seed promise settles: unbounded, a wedged
+tmux would leave the terminal permanently dead with the reconnect budget never armed. All three numbers are matched to a fourth: tmux's own default
 `history-limit` is 2,000, so `newSession` raises it to 10,000 in the same invocation that creates
 the pane (see the tmux-invocations section) - without that the deepest seed the endpoint could
 ever return would be about 2,000 lines and the budget would be a number the system cannot reach. `-E -1` is what excludes the visible rows: tmux's own attach redraw
@@ -3372,18 +3379,23 @@ permanently fails)`, which runs the same scenario in the configuration where bot
   200-line burst grows the web client's local scrollback past its viewport, and a CDP touch flick
   moves `.xterm-viewport`'s `scrollTop` while sending zero INPUT WebSocket frames), and `seed`
   (the scrollback endpoint against a fixture holding known content, proving history-only content, no
-  visible-row duplication at the seam, an exact line-count accounting, and the unknown-session 404
-  branch). `npm run mobile-term-101.1` runs those three one at a time, never concurrently: they
+  visible-row duplication at the seam, an exact line-count accounting, the unknown-session 404
+  branch, and then, through a real headless client, that the LAST seeded history line survives the
+  live attach repaint, which is the one assertion that can see a seam the endpoint body alone
+  cannot). `npm run mobile-term-101.1` runs those three one at a time, never concurrently: they
   contend for ports, a shared tmux server, and CPU the same way the eight legs above do. Two rig
   facts a future reader needs: the fixture ttyd carries `-T tmux-256color` and the current revision
   key, because the no-alt-screen override is TERM-scoped and would otherwise never apply to the
-  fixture at all, and no leg in this trio writes any tmux server option, which is why the
-  `alt-screen-term` break leg changes the harness's own fixture `-T` value rather than the user's
-  global `terminal-overrides`. Break legs proven live, quoted verbatim from `101.1-01-SUMMARY.md`:
+  fixture at all, and the whole rig, the sandboxed server and its ttyd included, runs against its own
+  `TMUX_TMPDIR` socket directory, so the server-global `terminal-features`/`terminal-overrides`
+  entries a fixture boot writes land on a throwaway tmux server that teardown kills, never on the
+  developer's own. That isolation is asserted, not assumed: teardown fails the run if any
+  fixture-prefixed session is visible on the real server. Break legs proven live, quoted verbatim from `101.1-01-SUMMARY.md`:
   - `--break shim-markers-emptied`: `pty-shim[whole]: expected 0 marker byte sequences (1b5b3f32303236) in output, found 2`
   - `--break unwrapped-pane`: `local-scroll: expected scrollable rows >= 20 after the burst, measured 0 (scrollHeight=828 clientHeight=828 rowHeightPx=18.00)`
   - `--break alt-screen-term`: `local-scroll: expected scrollable rows >= 20 after the burst, measured 0 (scrollHeight=828 clientHeight=828 rowHeightPx=18.00)`
   - `--break seed-includes-visible`: `seed: expected 0 visible rows duplicated in the seed body, found 49, first: "MTMLOCAL-0152"`
+  - `--break seed-seam-unpadded`: `seed: expected the last seeded history line "MTMLOCAL-0151" to survive the live attach repaint in the client's scrollback, not found anywhere in the buffer`
 
 - **`phase-smoke-tester`** - the only BEHAVIORAL verification this project runs: an agent derives
   and executes smoke cases against the running app after each phase's implementation lands. This
