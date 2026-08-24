@@ -117,6 +117,53 @@ const SANDBOX_PORT = 47877;
 const CDP_PORT = 9378;
 const SANDBOX_PREFIX = "dispatch-mobile-term-101-";
 
+/**
+ * The tmux socket directory EVERY tmux this file touches runs against, including the sandboxed
+ * server's own and its ttyd's, so a fixture run never reaches the developer's real tmux server.
+ *
+ * @remarks tmux derives its socket path from `TMUX_TMPDIR`/uid, NOT from `HOME`, so `bootServer`'s
+ * sandboxed `HOME` never contained it: boot's `ensureHyperlinksTerminalFeature()` and
+ * `ensureNoAltScreenOverride()` were appending server-global `terminal-features`/
+ * `terminal-overrides` entries to the real server on every run, permanently, with nothing
+ * reverting them, which is the same class of harm `assertNoLiveService`/`assertSandboxSafe` exist
+ * to prevent. Deliberately NOT prefixed with `SANDBOX_PREFIX` and deliberately short: the socket
+ * this becomes (`<dir>/tmux-<uid>/default`) is a unix path bounded by a 104-byte `sun_path`, and
+ * the full prefix plus a 5-digit pid leaves only three bytes of headroom.
+ */
+const SANDBOX_TMUX_TMPDIR = join(tmpdir(), `mtm101-tmux-${process.pid}`);
+
+/** The sandbox tmux env, creating the socket directory on first use. `extra` wins over the
+ * override so a caller can still layer `HOME` on top. */
+function tmuxEnv(extra = {}) {
+  mkdirSync(SANDBOX_TMUX_TMPDIR, { recursive: true, mode: 0o700 });
+  return { ...process.env, TMUX_TMPDIR: SANDBOX_TMUX_TMPDIR, ...extra };
+}
+
+/** `execFileP("tmux", ...)` pinned to {@link SANDBOX_TMUX_TMPDIR}, the ONE tmux entry point this
+ * file has. A bare `execFileP("tmux", ...)` anywhere below would silently talk to the real
+ * server again; the single exception is {@link realTmuxSessionNames}, which reads it on purpose. */
+function tmuxP(args) {
+  return execFileP("tmux", args, { env: tmuxEnv() });
+}
+
+/** The DEVELOPER's own tmux server (ambient env, no `TMUX_TMPDIR` override), read for exactly one
+ * reason: to PROVE in teardown that the isolation held and no fixture session ever landed there. */
+async function realTmuxSessionNames() {
+  try {
+    const { stdout } = await execFileP("tmux", [
+      "list-sessions",
+      "-F",
+      "#{session_name}",
+    ]);
+    return stdout
+      .split("\n")
+      .map((x) => x.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 const DISPATCH_DIR_NAME = ".dispatch";
 const FAKE_LINEAR_API_KEY = "mobile-term-101-harness-fake-key-never-real";
 
@@ -347,10 +394,14 @@ function assertBuilt() {
   return headBuild;
 }
 
-/** `entry` is REALPATH'd before being handed to `node`, the macOS /var -> /private/var trap. */
+/** `entry` is REALPATH'd before being handed to `node`, the macOS /var -> /private/var trap.
+ * The env carries {@link SANDBOX_TMUX_TMPDIR} as well as the sandbox `HOME`: the booted server
+ * runs `ensureHyperlinksTerminalFeature()`/`ensureNoAltScreenOverride()`, which write SERVER-GLOBAL
+ * tmux options, and it spawns ttyd (which inherits this env and runs `tmux attach`), so without
+ * the override a fixture boot mutates the developer's own tmux server permanently. */
 function bootServer(home, opts = {}) {
   assertBuilt();
-  const env = { ...process.env, HOME: home, NODE_ENV: "production" };
+  const env = tmuxEnv({ HOME: home, NODE_ENV: "production" });
   if (opts.pathPrefix) env.PATH = `${opts.pathPrefix}:${env.PATH ?? ""}`;
   if (opts.telemetry) env.DISPATCH_TERM_TELEMETRY = "1";
   const child = spawn("node", [realpathSync(DIST_ENTRY)], {
@@ -500,11 +551,7 @@ async function waitForPortListening(port, timeoutMs = LISTEN_POLL_TIMEOUT_MS) {
 /** `tmux list-sessions -F '#{session_name}'`, tolerant of a dead/absent tmux server (empty list). */
 async function tmuxListSessionNames() {
   try {
-    const { stdout } = await execFileP("tmux", [
-      "list-sessions",
-      "-F",
-      "#{session_name}",
-    ]);
+    const { stdout } = await tmuxP(["list-sessions", "-F", "#{session_name}"]);
     return stdout
       .split("\n")
       .map((s) => s.trim())
@@ -685,7 +732,7 @@ async function waitForClassicFixtureReady(
 ) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const { stdout } = await execFileP("tmux", [
+    const { stdout } = await tmuxP([
       "capture-pane",
       "-p",
       "-t",
@@ -707,7 +754,7 @@ async function waitForBurstComplete(tmuxName, timeoutMs = READY_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
   let lastSeen = null;
   while (Date.now() < deadline) {
-    const { stdout } = await execFileP("tmux", [
+    const { stdout } = await tmuxP([
       "capture-pane",
       "-p",
       "-t",
@@ -733,7 +780,7 @@ async function waitForBurstComplete(tmuxName, timeoutMs = READY_TIMEOUT_MS) {
  * prepend the pty shim the way production's own `wrapWithPtyShim` does. `-x 200 -y 50` matches
  * production's `newSession` geometry (`tmux.ts`), load-bearing for sane capture-pane output. */
 async function tmuxNewFixtureSession(name, cwd, commandArgv) {
-  await execFileP("tmux", [
+  await tmuxP([
     "new-session",
     "-d",
     "-s",
@@ -764,7 +811,7 @@ async function assertPaneModes(
   const deadline = Date.now() + timeoutMs;
   let measured = "";
   while (Date.now() < deadline) {
-    const { stdout } = await execFileP("tmux", [
+    const { stdout } = await tmuxP([
       "display-message",
       "-p",
       "-t",
@@ -809,7 +856,7 @@ function spawnTtyd(session, sessionId, term = "tmux-256color") {
         "-t",
         `=${session}`,
       ],
-      { detached: true, stdio: ["ignore", "ignore", "pipe"] },
+      { detached: true, stdio: ["ignore", "ignore", "pipe"], env: tmuxEnv() },
     );
     let buf = "";
     const timer = setTimeout(() => {
@@ -1013,7 +1060,11 @@ async function standUpFixture(opts = {}) {
 }
 
 /** Kill server, ttyd and tmux session explicitly, then verify each is gone, never silently
- * swallowed, a leaked sandbox resource is a reported violation. */
+ * swallowed, a leaked sandbox resource is a reported violation. Ends by asserting the DEVELOPER's
+ * real tmux server holds no `SANDBOX_PREFIX` session (the isolation proof, not a formality: the
+ * boot-time server-option grants are invisible in the fixture's own output and were reaching the
+ * real server before {@link SANDBOX_TMUX_TMPDIR} existed), then kills the sandbox tmux server
+ * outright, which is what disposes of those grants. */
 async function tearDownFixture(handle) {
   const problems = [];
 
@@ -1043,15 +1094,25 @@ async function tearDownFixture(handle) {
     problems.push(`ttyd port ${handle.ttyd.port} still LISTENING after kill`);
   }
 
-  await execFileP("tmux", ["kill-session", "-t", `=${handle.tmuxName}:`]).catch(
-    () => {},
-  );
+  await tmuxP(["kill-session", "-t", `=${handle.tmuxName}:`]).catch(() => {});
   const liveAfter = await tmuxListSessionNames();
   if (liveAfter.includes(handle.tmuxName)) {
     problems.push(
       `tmux session ${handle.tmuxName} still listed after kill-session`,
     );
   }
+
+  const leaked = (await realTmuxSessionNames()).filter((n) =>
+    n.startsWith(SANDBOX_PREFIX),
+  );
+  if (leaked.length > 0) {
+    problems.push(
+      `fixture session(s) ${leaked.join(", ")} are on the DEVELOPER's tmux server, ` +
+        `TMUX_TMPDIR isolation did not hold`,
+    );
+  }
+  await tmuxP(["kill-server"]).catch(() => {});
+  rmSync(SANDBOX_TMUX_TMPDIR, { recursive: true, force: true });
 
   if (handle.home) rmSync(handle.home, { recursive: true, force: true });
 
@@ -1813,13 +1874,7 @@ async function runLocalScrollFlow(violations, opts = {}) {
       `local-scroll: before burst scrollHeight=${before.scrollHeight} clientHeight=${before.clientHeight} scrollTop=${before.scrollTop}`,
     );
 
-    await execFileP("tmux", [
-      "send-keys",
-      "-t",
-      `=${handle.tmuxName}:`,
-      "burst",
-      "Enter",
-    ]);
+    await tmuxP(["send-keys", "-t", `=${handle.tmuxName}:`, "burst", "Enter"]);
     // Confirm the SOURCE (tmux pane) actually finished writing all 200 lines, THEN confirm the
     // CLIENT has rendered the last one, before polling for scrollHeight stability below: two
     // 200ms-apart equal reads would otherwise false-positive on "settled" mid-catch-up.
@@ -1935,8 +1990,8 @@ async function breakUnwrappedPane(violations) {
 
 /** `ttydTerm: "xterm-256color"`, so the `tmux-256color:smcup@:rmcup@` TERM-scoped override does
  * not apply and this client gets normal alt-screen behavior, pinned to the visible rows. Assertion
- * 3 must trip. Proves the TERM scoping is load-bearing without writing a single tmux server
- * option. */
+ * 3 must trip. Proves the TERM scoping is load-bearing without this LEG writing a tmux server
+ * option (the boot it depends on writes two, to the sandbox tmux server only). */
 async function breakAltScreenTerm(violations) {
   await runLocalScrollFlow(violations, { ttydTerm: "xterm-256color" });
 }
@@ -1998,13 +2053,7 @@ function assertNoVisibleDuplication(
 async function checkSeed(violations) {
   const handle = await standUpFixture({ classic: true });
   try {
-    await execFileP("tmux", [
-      "send-keys",
-      "-t",
-      `=${handle.tmuxName}:`,
-      "burst",
-      "Enter",
-    ]);
+    await tmuxP(["send-keys", "-t", `=${handle.tmuxName}:`, "burst", "Enter"]);
     await waitForBurstComplete(handle.tmuxName);
 
     const url = `http://127.0.0.1:${SANDBOX_PORT}/sessions/${handle.sessionId}/terminal/scrollback`;
@@ -2026,7 +2075,7 @@ async function checkSeed(violations) {
       console.log("seed: seed body contains MTMLOCAL-0001");
     }
 
-    const { stdout: visibleRaw } = await execFileP("tmux", [
+    const { stdout: visibleRaw } = await tmuxP([
       "capture-pane",
       "-p",
       "-t",
@@ -2072,22 +2121,16 @@ async function checkSeed(violations) {
 async function breakSeedIncludesVisible(violations) {
   const handle = await standUpFixture({ classic: true });
   try {
-    await execFileP("tmux", [
-      "send-keys",
-      "-t",
-      `=${handle.tmuxName}:`,
-      "burst",
-      "Enter",
-    ]);
+    await tmuxP(["send-keys", "-t", `=${handle.tmuxName}:`, "burst", "Enter"]);
     await waitForBurstComplete(handle.tmuxName);
 
-    const { stdout: visibleRaw } = await execFileP("tmux", [
+    const { stdout: visibleRaw } = await tmuxP([
       "capture-pane",
       "-p",
       "-t",
       `=${handle.tmuxName}:`,
     ]);
-    const { stdout: badCapture } = await execFileP("tmux", [
+    const { stdout: badCapture } = await tmuxP([
       "capture-pane",
       "-p",
       "-e",
@@ -3762,7 +3805,7 @@ async function assertNoStrayCloudflared() {
  * marker wraps mid-string across two physical pane rows, and without `-J` tmux inserts a literal
  * newline at the wrap point, breaking a plain substring match against the unwrapped marker. */
 async function capturePane(tmuxName) {
-  const { stdout } = await execFileP("tmux", [
+  const { stdout } = await tmuxP([
     "capture-pane",
     "-p",
     "-J",
