@@ -2849,10 +2849,18 @@ class BoardStore extends EventEmitter {
    * happens to give the right answer here, but the finite check is written explicitly so the
    * safety is stated rather than incidental.
    * @remarks Reuses {@link sessionsDueForCleanup}'s scanner shape (skip cards not on `done`, or
-   * mid-{@link isStarting}) and copies {@link finishCleanup}'s mirror-clearing block verbatim for
-   * each qualifying record: `wasActive` is captured BEFORE {@link removeSessionRecord} runs, the
-   * matching `card.*` mirrors are cleared only under that guard, and `removeSessionRecord` is
-   * called LAST so no card can end up with a dangling `activeSessionId`.
+   * mid-{@link isStarting}) and repeats {@link finishCleanup}'s FULL removal order for every
+   * qualifying record, not merely its `card.*` mirror block: the flat projection is cleared
+   * through {@link setActiveSession} and the token through {@link clearHookToken} BEFORE the
+   * record goes, which is the precondition {@link removeSessionRecord}'s own contract names.
+   * Omitting it drives the pointer repair into `setActiveSession`'s refusing-to-project branch and
+   * leaves the card holding an empty `sessions` array beside a live `workspacePath`, the exact
+   * shape that projection chokepoint calls corrupt: `isAwaitingCleanup` then pins the card
+   * forever, manual recovery re-enters the same refusal, and the next boot's
+   * {@link repairDowngradeDrift} mints an anonymous phantom record from the orphaned flat fields.
+   * `wasActive` is captured BEFORE {@link removeSessionRecord} runs, the matching `card.*` mirrors
+   * are cleared only under that guard, and `removeSessionRecord` is called LAST so no card can end
+   * up with a dangling `activeSessionId`.
    */
   pruneStaleWarnedSessions(now: number): Promise<void> {
     return this.enqueue(() => {
@@ -2868,9 +2876,18 @@ class BoardStore extends EventEmitter {
         });
         for (const target of stale) {
           const wasActive = target.id === card.activeSessionId;
-          target.cleanupWarning = undefined;
-          target.cleanupBlocked = undefined;
-          target.cleanupDueAt = undefined;
+          this.setActiveSession(
+            card,
+            {
+              tmuxSession: undefined,
+              ttydPort: undefined,
+              workspacePath: undefined,
+              workspace: undefined,
+              claudeSessionId: undefined,
+            },
+            target.id,
+          );
+          this.clearHookToken(card, target.id);
           if (wasActive) {
             card.sessionLost = false;
             card.terminalError = null;
