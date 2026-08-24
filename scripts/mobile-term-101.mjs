@@ -51,11 +51,22 @@
  *   node scripts/mobile-term-101.mjs --break skip-auth      tunnel URL with no ?code=, proves the
  *                                                            check can tell the code-entry page apart
  *   node scripts/mobile-term-101.mjs --break wrong-code     tunnel URL with a wrong passphrase
+ *   node scripts/mobile-term-101.mjs --check pty-shim        drives the REAL installed shim
+ *                                                             directly: whole/split marker strip,
+ *                                                             byte-exact passthrough
+ *   node scripts/mobile-term-101.mjs --break shim-markers-emptied   MARKERS tuple emptied on a
+ *                                                                    copy of the installed shim
  *
- * Plan 101-03 (this plan, the last diagnosis plan) adds the tunnel leg above: a real Cloudflare
- * Quick Tunnel brought up through the real product route, a real `?code=` auth handshake, TERM-06's
- * three clauses proven over it, and a `--tunnel` modifier on the round-trips/flick-distance legs so
- * loopback and tunnel numbers exist side by side. Still DIAGNOSIS-ONLY: no `src/` file is touched.
+ * Plan 101-03 adds the tunnel leg above: a real Cloudflare Quick Tunnel brought up through the
+ * real product route, a real `?code=` auth handshake, TERM-06's three clauses proven over it, and
+ * a `--tunnel` modifier on the round-trips/flick-distance legs so loopback and tunnel numbers
+ * exist side by side. Still DIAGNOSIS-ONLY: no `src/` file is touched.
+ *
+ * Plan 101.1-01 (this plan) verifies the ARCHITECTURE that shipped after diagnosis: the
+ * `--check pty-shim` leg above, plus `--check local-scroll` and `--check seed` (both added by
+ * later tasks in this same plan). This is the first plan in this file that IS allowed to read
+ * `src/` production modules directly (`pty-shim-setup.js`'s `installPtyShim` export), never to
+ * copy their bodies.
  *
  * Exit codes: 0 all checks PASS. 1 a safety-envelope refusal, a setup/build error, a check
  * violation, a teardown-verification failure, or the live board.db changing.
@@ -73,7 +84,7 @@ import {
 } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
@@ -889,6 +900,269 @@ function readTelemetryRecords(path) {
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line) => JSON.parse(line));
+}
+
+// ---------------------------------------------------------------------------
+// --check pty-shim / --break shim-markers-emptied (101.1-01, task 1): drives the REAL installed
+// shim directly, no server/tmux/ttyd/Chrome. Never a copy of the shim body, see
+// pty-shim-setup.ts's PTY_SHIM_SCRIPT: this section installs the real file via the real
+// installPtyShim() export and pipes real child processes through it.
+// ---------------------------------------------------------------------------
+
+/** Trailing marker every shim-case script writes last, so `driveShimCase` knows the case's own
+ * output is complete without racing the pty's own buffering. Never emitted by production. */
+const SHIM_SENTINEL = "MTMSHIMEND";
+/** The 7-byte marker PREFIX shared by both `ESC[?2026h`/`ESC[?2026l`, matching
+ * pty-shim-setup.ts's own `PREFIX` constant and this task's acceptance criteria's grep pattern
+ * verbatim. Counting occurrences of this alone is sufficient: a surviving full 8-byte marker
+ * trivially contains it too. */
+const SHIM_MARKER_PREFIX_HEX = "1b5b3f32303236";
+const MARKER_OPEN = "\x1b[?2026h";
+const MARKER_PREFIX = "\x1b[?2026";
+const MARKER_CLOSE = "\x1b[?2026l";
+const SHIM_CASE_TIMEOUT_MS = 5_000;
+
+const WHOLE_PAYLOAD = "WHOLE-PAYLOAD-0123456789-ABCDEFGHIJKLMNOP";
+const SPLIT_PAYLOAD = "SPLIT-PAYLOAD-9876543210-ZYXWVUTSRQPONML";
+/** Deliberately contains a non-2026 DECSET sharing `ESC[?2026`'s first six bytes
+ * (`ESC[?2027h`), a literal `?2026` with no escape introducer, an unrelated SGR sequence, and
+ * the multi-byte UTF-8 `⏺`, all of which must survive the shim untouched: that is the only way
+ * this shim could otherwise silently corrupt a real session. */
+const PASSTHROUGH_PAYLOAD = "\x1b[?2027hSTART\x1b[31mCOLOR?2026DECOYEND⏺";
+
+/** One shell script per case, run via `sh -c` as the shim's OWN wrapped child so its escape
+ * bytes reach the pty exactly as a real pane would emit them. `split` writes the 7-byte PREFIX
+ * alone, sleeps past one full select() cycle, then completes the marker in a second write, which
+ * exercises the `pending` holdback path pty-shim-setup.ts's PTY_SHIM_SCRIPT implements for a
+ * marker split across two reads. */
+const SHIM_CASES = {
+  whole: {
+    payload: WHOLE_PAYLOAD,
+    script: () =>
+      `printf '${MARKER_OPEN}${WHOLE_PAYLOAD}${MARKER_CLOSE}${SHIM_SENTINEL}'`,
+  },
+  split: {
+    payload: SPLIT_PAYLOAD,
+    script: () =>
+      `printf '${MARKER_PREFIX}'; sleep 0.2; printf 'h${SPLIT_PAYLOAD}${MARKER_CLOSE}${SHIM_SENTINEL}'`,
+  },
+  passthrough: {
+    payload: PASSTHROUGH_PAYLOAD,
+    script: () => `printf '${PASSTHROUGH_PAYLOAD}${SHIM_SENTINEL}'`,
+  },
+};
+
+function countMarkerOccurrences(buf) {
+  const hex = buf.toString("hex");
+  let count = 0;
+  let idx = hex.indexOf(SHIM_MARKER_PREFIX_HEX);
+  while (idx !== -1) {
+    count++;
+    idx = hex.indexOf(
+      SHIM_MARKER_PREFIX_HEX,
+      idx + SHIM_MARKER_PREFIX_HEX.length,
+    );
+  }
+  return count;
+}
+
+/** Byte-exact compare reporting the first differing offset plus a short hex window around it,
+ * never a bare "mismatch": an unactionable message at 3am is as good as none. */
+function bytesEqualDetail(actual, expected) {
+  const len = Math.min(actual.length, expected.length);
+  for (let i = 0; i < len; i++) {
+    if (actual[i] !== expected[i]) {
+      return {
+        equal: false,
+        offset: i,
+        actualWindow: actual.slice(Math.max(0, i - 8), i + 8).toString("hex"),
+        expectedWindow: expected
+          .slice(Math.max(0, i - 8), i + 8)
+          .toString("hex"),
+      };
+    }
+  }
+  if (actual.length !== expected.length) {
+    return {
+      equal: false,
+      offset: len,
+      actualWindow: actual.slice(Math.max(0, len - 8)).toString("hex"),
+      expectedWindow: expected.slice(Math.max(0, len - 8)).toString("hex"),
+    };
+  }
+  return { equal: true };
+}
+
+/** Runs the real installer against a sandbox `HOME`, via the compiled `dist/` module, never a
+ * copy of `PTY_SHIM_SCRIPT` pasted into this harness. */
+async function installShimForCheck(home) {
+  const distFile = realpathSync(
+    join(REPO_ROOT, "dist", "server", "bootstrap", "pty-shim-setup.js"),
+  );
+  const fileUrl = pathToFileURL(distFile).href;
+  await execFileP(
+    "node",
+    [
+      "-e",
+      `import(${JSON.stringify(fileUrl)}).then((m) => m.installPtyShim())`,
+    ],
+    { env: { ...process.env, HOME: home } },
+  );
+}
+
+/** Spawns `<shimPath> sh -c <script>` with stdin left open, never closed: the shim `select()`s
+ * on fd 0 and breaks its loop on EOF, so a closed/`/dev/null` stdin would race the child's own
+ * output and truncate the very stream this case measures. Collects stdout until the trailing
+ * `SHIM_SENTINEL` appears, then kills the child and verifies it is gone. */
+async function driveShimCase(shimPath, caseName, script) {
+  const child = spawn(shimPath, ["sh", "-c", script], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let out = Buffer.alloc(0);
+  let stderrText = "";
+  child.stdout.on("data", (d) => {
+    out = Buffer.concat([out, d]);
+  });
+  child.stderr.on("data", (d) => {
+    stderrText += d.toString();
+  });
+  const deadline = Date.now() + SHIM_CASE_TIMEOUT_MS;
+  while (!out.includes(SHIM_SENTINEL)) {
+    if (Date.now() > deadline) {
+      child.kill("SIGKILL");
+      throw new Error(
+        `pty-shim[${caseName}]: sentinel "${SHIM_SENTINEL}" not observed within ${SHIM_CASE_TIMEOUT_MS}ms; stderr=${stderrText}`,
+      );
+    }
+    await sleep(20);
+  }
+  await sleep(50);
+  try {
+    process.kill(child.pid, "SIGTERM");
+  } catch {
+    // already gone
+  }
+  const gone = await waitForPidGone(child.pid, KILL_TIMEOUT_MS);
+  if (!gone) {
+    try {
+      process.kill(child.pid, "SIGKILL");
+    } catch {
+      // already gone
+    }
+    if (pidAlive(child.pid)) {
+      throw new Error(
+        `pty-shim[${caseName}]: shim child pid ${child.pid} still alive after SIGKILL`,
+      );
+    }
+  }
+  return out;
+}
+
+/** The one product-correctness assertion for a shim case, unconditionally: zero marker byte
+ * sequences reach stdout, and the sentinel-stripped remainder is byte-identical to PAYLOAD.
+ * Shared verbatim by `--check pty-shim` (run against the real installed shim) and `--break
+ * shim-markers-emptied` (run against a patched copy), so the break proves something about the
+ * exact assertion the check runs, never a re-implementation. */
+async function runShimCase(violations, shimPath, caseName) {
+  const { payload, script } = SHIM_CASES[caseName];
+  const out = await driveShimCase(shimPath, caseName, script());
+  const markerCount = countMarkerOccurrences(out);
+  if (markerCount !== 0) {
+    violations.push(
+      `pty-shim[${caseName}]: expected 0 marker byte sequences (${SHIM_MARKER_PREFIX_HEX}) in output, found ${markerCount}`,
+    );
+  } else {
+    console.log(
+      `pty-shim[${caseName}]: marker byte sequences (${SHIM_MARKER_PREFIX_HEX}) found 0`,
+    );
+  }
+  const expected = Buffer.concat([
+    Buffer.from(payload, "utf8"),
+    Buffer.from(SHIM_SENTINEL, "utf8"),
+  ]);
+  const cmp = bytesEqualDetail(out, expected);
+  if (!cmp.equal) {
+    violations.push(
+      `pty-shim[${caseName}]: byte mismatch at offset ${cmp.offset}, actual=${cmp.actualWindow} expected=${cmp.expectedWindow}`,
+    );
+  } else {
+    console.log(
+      `pty-shim[${caseName}]: payload byte-identical after strip (${expected.length} bytes)`,
+    );
+  }
+}
+
+async function checkPtyShim(violations) {
+  const home = makeSandboxHome("pty-shim");
+  try {
+    await installShimForCheck(home);
+    const shimPath = join(home, DISPATCH_DIR_NAME, "pty-shim.py");
+    if (!existsSync(shimPath)) {
+      violations.push(
+        `pty-shim: expected ${shimPath} to exist after installPtyShim(), python3 was unavailable ` +
+          `(installPtyShim's own run-probe failed and it removes the file on any probe failure)`,
+      );
+      return;
+    }
+    const st = statSync(shimPath);
+    if ((st.mode & 0o111) === 0) {
+      violations.push(
+        `pty-shim: ${shimPath} exists but is not executable (mode ${(st.mode & 0o777).toString(8)})`,
+      );
+      return;
+    }
+    console.log(`pty-shim: real shim installed at ${shimPath}`);
+    for (const caseName of ["whole", "split", "passthrough"]) {
+      await runShimCase(violations, shimPath, caseName);
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+/** Patches a COPY of the real installed shim (never the harness's own understanding of it) so
+ * its `MARKERS` tuple strips nothing, asserts the patch actually changed the file, then reruns
+ * the SAME `runShimCase` assertion the check uses: `whole`/`split` must trip, `passthrough` must
+ * stay green, proving the break targets the strip and not the pipe. */
+async function breakShimMarkersEmptied(violations) {
+  const home = makeSandboxHome("pty-shim-break");
+  try {
+    await installShimForCheck(home);
+    const shimPath = join(home, DISPATCH_DIR_NAME, "pty-shim.py");
+    if (!existsSync(shimPath)) {
+      violations.push(
+        `shim-markers-emptied: prerequisite failed, ${shimPath} missing after installPtyShim()`,
+      );
+      return;
+    }
+    const original = readFileSync(shimPath, "utf8");
+    const needle = "MARKERS = (b'\\x1b[?2026h', b'\\x1b[?2026l')";
+    if (!original.includes(needle)) {
+      violations.push(
+        `shim-markers-emptied: expected literal "${needle}" in the installed shim, not found, cannot mutate`,
+      );
+      return;
+    }
+    const patched = original.replace(needle, "MARKERS = ()");
+    if (patched.length === original.length) {
+      violations.push(
+        `shim-markers-emptied: MARKERS line replacement left the file length unchanged ` +
+          `(${original.length} bytes before and after), the mutation is a no-op`,
+      );
+      return;
+    }
+    const patchedPath = join(home, "pty-shim-patched.py");
+    writeFileSync(patchedPath, patched, { mode: 0o755 });
+    console.log(
+      `shim-markers-emptied: patched copy ${patchedPath}, ${original.length} -> ${patched.length} bytes`,
+    );
+
+    await runShimCase(violations, patchedPath, "whole");
+    await runShimCase(violations, patchedPath, "split");
+    await runShimCase(violations, patchedPath, "passthrough");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3294,10 +3568,12 @@ const CHECKS = {
   "telemetry-off": checkTelemetryOff,
   "telemetry-on": checkTelemetryOn,
   "telemetry-capture": checkTelemetryCapture,
+  "pty-shim": checkPtyShim,
 };
 
 const BREAKS = {
   "viewport-fixture": breakViewportFixture,
+  "shim-markers-emptied": breakShimMarkersEmptied,
   "no-touch-emulation": breakNoTouchEmulation,
   "sub-slop-flick": breakSubSlopFlick,
   "wrong-page": breakWrongPage,
