@@ -109,7 +109,7 @@ function serializeSchema(keys: VaultKeySummary[]): string {
  * since both `mkdir`'s and `write-file-atomic`'s `mode` options are create-only, so an externally
  * loosened directory or file would otherwise stay loose. Write order is values, then metadata,
  * then schema, so a crash always leaves the read-mostly schema surface stale, never the values
- * file (T-103-02).
+ * file.
  */
 async function writeStore(
   keys: VaultKeySummary[],
@@ -140,7 +140,7 @@ async function writeStore(
 
 /**
  * List every vault key's metadata, sorted by name. Opens only `vault.json`, never `values.env`,
- * so a value cannot reach this path structurally (T-103-01).
+ * so a value cannot reach this path structurally.
  * @public Consumed by `vault.route.ts`'s GET handler, wired in plan 02.
  */
 export async function listKeys(): Promise<VaultKeySummary[]> {
