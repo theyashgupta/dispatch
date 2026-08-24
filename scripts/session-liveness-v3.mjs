@@ -243,6 +243,7 @@
  */
 import { spawn, execFile, execFileSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -618,6 +619,22 @@ const CLEANUP_PRUNE_TMUX_PREFIX = `dsp102pw-${process.pid}-`;
 const CLEANUP_PRUNE_FIXTURE = {
   port: CLEANUP_PRUNE_SANDBOX_PORT,
   tmuxPrefix: CLEANUP_PRUNE_TMUX_PREFIX,
+  sessionKeys: ["a"],
+};
+
+const VAULT_SANDBOX_PORT = 47870;
+
+const VAULT_TMUX_PREFIX = `dsp103v-${process.pid}-`;
+
+/**
+ * `--check vault-perms`'s own profile: ONE real tmux+ttyd session (`sessionKeys: ["a"]`), present
+ * only because `standUpFixture` unconditionally seeds a card from `sessionKeys` and throws on an
+ * empty array. No vault check touches the seeded card or session; all four vault checks (this
+ * plan's `vault-perms` and plans 04-06's later checks) share this one profile.
+ */
+const VAULT_FIXTURE = {
+  port: VAULT_SANDBOX_PORT,
+  tmuxPrefix: VAULT_TMUX_PREFIX,
   sessionKeys: ["a"],
 };
 
@@ -14175,6 +14192,142 @@ async function checkReinstallSession(built) {
   return violations;
 }
 
+/**
+ * The vault directory for a fixture's sandbox home, built from `built.home` and never derived from
+ * the server's own path constants module, so a vault check measures the real filesystem instead of
+ * restating the constant the writer used.
+ */
+function vaultDir(built) {
+  return join(built.home, ".dispatch", "vault");
+}
+
+/**
+ * Issue a JSON request against the sandbox server's `/api/vault` surface, returning the raw
+ * response text rather than a parsed body. Raw text, not `res.json()`, because a later sentinel
+ * sweep must scan bytes a JSON parser would drop, and an error path may not return JSON at all.
+ */
+async function vaultRequest(built, method, path, body) {
+  const res = await fetch(`http://127.0.0.1:${built.port}/api${path}`, {
+    method,
+    headers: { "content-type": "application/json" },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  return { status: res.status, text };
+}
+
+/**
+ * Issue a request against `/api${path}` with `rawBody` sent verbatim (no `JSON.stringify`), for
+ * driving the malformed-body path a later plan's check needs.
+ */
+async function vaultRequestRaw(built, path, rawBody) {
+  const res = await fetch(`http://127.0.0.1:${built.port}/api${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: rawBody,
+  });
+  const text = await res.text();
+  return { status: res.status, text };
+}
+
+/**
+ * `--check vault-perms`: statSync's the real vault directory and its three files off disk after a
+ * live write, a hand-applied loosen, and a delete, proving the writer's re-asserted 0600/0700 mode
+ * is what actually lands on the filesystem rather than trusting the writer's own declared mode.
+ */
+async function checkVaultPerms(built) {
+  const violations = [];
+  const dir = vaultDir(built);
+  const valuesPath = join(dir, "values.env");
+  const metadataPath = join(dir, "vault.json");
+  const schemaPath = join(dir, "schema.keys");
+
+  function assertModes(label, expectedFileMode, expectedDirMode) {
+    let dirStat;
+    try {
+      dirStat = statSync(dir);
+    } catch {
+      violations.push(`${label}: vault directory missing at ${dir}`);
+      return;
+    }
+    const dirMode = dirStat.mode & 0o777;
+    if (dirMode !== expectedDirMode) {
+      violations.push(
+        `${label}: vault directory ${dir} mode ${dirMode.toString(8)}, expected ${expectedDirMode.toString(8)}`,
+      );
+    }
+    for (const [name, filePath] of [
+      ["values.env", valuesPath],
+      ["vault.json", metadataPath],
+      ["schema.keys", schemaPath],
+    ]) {
+      let fileStat;
+      try {
+        fileStat = statSync(filePath);
+      } catch {
+        violations.push(`${label}: ${name} missing at ${filePath}`);
+        continue;
+      }
+      const fileMode = fileStat.mode & 0o777;
+      if (fileMode !== expectedFileMode) {
+        violations.push(
+          `${label}: ${name} mode ${fileMode.toString(8)}, expected ${expectedFileMode.toString(8)}`,
+        );
+      }
+    }
+  }
+
+  // Leg 1: write then read the real modes off disk.
+  const created = await vaultRequest(built, "POST", "/vault", {
+    name: "PERM_KEY",
+    purpose: "perms leg",
+    value: "perm-value",
+  });
+  if (created.status !== 200) {
+    violations.push(
+      `leg 1: POST /vault expected 200, got ${created.status}: ${created.text}`,
+    );
+  }
+  assertModes("leg 1", 0o600, 0o700);
+
+  // Leg 2: loosen by hand, confirm the loosen took, write again, expect re-tightened.
+  chmodSync(valuesPath, 0o644);
+  chmodSync(dir, 0o755);
+  const loosenedValuesMode = statSync(valuesPath).mode & 0o777;
+  const loosenedDirMode = statSync(dir).mode & 0o777;
+  if (loosenedValuesMode !== 0o644) {
+    violations.push(
+      `leg 2: hand chmodSync(values.env, 0o644) did not take, observed ${loosenedValuesMode.toString(8)} — leg proves nothing`,
+    );
+  }
+  if (loosenedDirMode !== 0o755) {
+    violations.push(
+      `leg 2: hand chmodSync(vault dir, 0o755) did not take, observed ${loosenedDirMode.toString(8)} — leg proves nothing`,
+    );
+  }
+
+  const rotated = await vaultRequest(built, "PUT", "/vault/PERM_KEY/value", {
+    value: "perm-value-2",
+  });
+  if (rotated.status !== 200) {
+    violations.push(
+      `leg 2: PUT /vault/PERM_KEY/value expected 200, got ${rotated.status}: ${rotated.text}`,
+    );
+  }
+  assertModes("leg 2", 0o600, 0o700);
+
+  // Leg 3: delete rewrites all three files, modes must still hold on the empty-store case.
+  const deleted = await vaultRequest(built, "DELETE", "/vault/PERM_KEY");
+  if (deleted.status !== 200) {
+    violations.push(
+      `leg 3: DELETE /vault/PERM_KEY expected 200, got ${deleted.status}: ${deleted.text}`,
+    );
+  }
+  assertModes("leg 3", 0o600, 0o700);
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -14204,6 +14357,8 @@ const CHECKS = {
       checkCleanupPruneWarned,
       CLEANUP_PRUNE_FIXTURE,
     ),
+  "vault-perms": () =>
+    withFixture("vault-perms", checkVaultPerms, VAULT_FIXTURE),
   "second-session-fixture": () =>
     withFixture(
       "second-session-fixture",
