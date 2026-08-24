@@ -370,6 +370,10 @@ const TTYD_REVISION_RETAINED_KEY = readTtydRevisionRetainedKey();
  * Parse `TTYD_RUNTIME_REVISION` and `TTYD_RUNTIME_REVISION_KEY` out of `ttyd.ts` source and rebuild
  * the retained key exactly as `ttyd.ts` composes it. Throws rather than guessing, so a rename there
  * stops this harness instead of letting it spawn ttyd the sandbox server will sweep.
+ * @remarks Fails closed on the COMPOSITION as well as on the two constants. Reading the numbers and
+ * then hardcoding the `_` join would make this a third copy of a shape `ttyd.ts` already states, and
+ * a change to that shape would leave this parsing cleanly while deriving a key that no longer
+ * matches: every fixture ttyd swept at sandbox boot, surfacing only as a 404 on the proxy upgrade.
  */
 function readTtydRevisionRetainedKey() {
   const file = join(REPO_ROOT, "src", "server", "adapters", "ttyd.ts");
@@ -379,6 +383,13 @@ function readTtydRevisionRetainedKey() {
   if (!revision || !key) {
     throw new Error(
       `could not read TTYD_RUNTIME_REVISION/_KEY from ${file} — the harness cannot spawn a ttyd its own sandbox boot will adopt`,
+    );
+  }
+  const composition =
+    /const TTYD_RUNTIME_REVISION_RETAINED_KEY = `\$\{TTYD_RUNTIME_REVISION_KEY\}_\$\{TTYD_RUNTIME_REVISION\}`;/;
+  if (!composition.test(src)) {
+    throw new Error(
+      `${file} no longer composes the retained key as KEY_REVISION — this harness's derivation is stale and would spawn a ttyd its own sandbox boot sweeps`,
     );
   }
   return `${key[1]}_${revision[1]}`;
