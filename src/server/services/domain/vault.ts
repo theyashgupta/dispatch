@@ -90,6 +90,23 @@ function valueLineFor(name: string, value: string): string {
   return `${name}=${quoteEnvValue(value)}`;
 }
 
+let mutationChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * Serialize a vault mutation behind a module-level promise chain.
+ * @remarks Every mutator is a read-modify-write across three files; two interleaved calls can
+ * clobber an acknowledged write or land the files from different snapshots. A promise chain is
+ * sufficient because this single process is the only vault writer.
+ */
+function serialized<T>(fn: () => Promise<T>): Promise<T> {
+  const next = mutationChain.then(fn, fn);
+  mutationChain = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
 /** Render the Claude-readable schema surface. A key's value is never a source for this output. */
 function serializeSchema(keys: VaultKeySummary[]): string {
   const sorted = [...keys].sort((a, b) => a.name.localeCompare(b.name));
@@ -154,27 +171,29 @@ export async function createKey(input: {
   purpose: string;
   value?: string;
 }): Promise<VaultWriteResult> {
-  const now = new Date().toISOString();
-  const keys = await readMetadata();
-  if (keys.some((k) => k.name === input.name)) {
-    return { ok: false, error: "name-exists" };
-  }
+  return serialized(async () => {
+    const now = new Date().toISOString();
+    const keys = await readMetadata();
+    if (keys.some((k) => k.name === input.name)) {
+      return { ok: false, error: "name-exists" };
+    }
 
-  const key: VaultKeySummary = {
-    name: input.name,
-    purpose: input.purpose,
-    createdAt: now,
-    updatedAt: now,
-    filled: input.value !== undefined,
-  };
+    const key: VaultKeySummary = {
+      name: input.name,
+      purpose: input.purpose,
+      createdAt: now,
+      updatedAt: now,
+      filled: input.value !== undefined,
+    };
 
-  const lines = await readValueLines();
-  if (input.value !== undefined) {
-    lines.push(valueLineFor(input.name, input.value));
-  }
+    const lines = await readValueLines();
+    if (input.value !== undefined) {
+      lines.push(valueLineFor(input.name, input.value));
+    }
 
-  await writeStore([...keys, key], lines);
-  return { ok: true, key };
+    await writeStore([...keys, key], lines);
+    return { ok: true, key };
+  });
 }
 
 /**
@@ -186,28 +205,30 @@ export async function setValue(
   name: string,
   value: string,
 ): Promise<VaultWriteResult> {
-  const now = new Date().toISOString();
-  const keys = await readMetadata();
-  const index = keys.findIndex((k) => k.name === name);
-  if (index === -1) {
-    return { ok: false, error: "not-found" };
-  }
+  return serialized(async () => {
+    const now = new Date().toISOString();
+    const keys = await readMetadata();
+    const index = keys.findIndex((k) => k.name === name);
+    if (index === -1) {
+      return { ok: false, error: "not-found" };
+    }
 
-  const key: VaultKeySummary = {
-    ...keys[index],
-    filled: true,
-    updatedAt: now,
-  };
-  const nextKeys = [...keys];
-  nextKeys[index] = key;
+    const key: VaultKeySummary = {
+      ...keys[index],
+      filled: true,
+      updatedAt: now,
+    };
+    const nextKeys = [...keys];
+    nextKeys[index] = key;
 
-  const lines = (await readValueLines()).filter(
-    (line) => !line.startsWith(`${name}=`),
-  );
-  lines.push(valueLineFor(name, value));
+    const lines = (await readValueLines()).filter(
+      (line) => !line.startsWith(`${name}=`),
+    );
+    lines.push(valueLineFor(name, value));
 
-  await writeStore(nextKeys, lines);
-  return { ok: true, key };
+    await writeStore(nextKeys, lines);
+    return { ok: true, key };
+  });
 }
 
 /**
@@ -218,23 +239,25 @@ export async function editPurpose(
   name: string,
   purpose: string,
 ): Promise<VaultWriteResult> {
-  const now = new Date().toISOString();
-  const keys = await readMetadata();
-  const index = keys.findIndex((k) => k.name === name);
-  if (index === -1) {
-    return { ok: false, error: "not-found" };
-  }
+  return serialized(async () => {
+    const now = new Date().toISOString();
+    const keys = await readMetadata();
+    const index = keys.findIndex((k) => k.name === name);
+    if (index === -1) {
+      return { ok: false, error: "not-found" };
+    }
 
-  const key: VaultKeySummary = {
-    ...keys[index],
-    purpose,
-    updatedAt: now,
-  };
-  const nextKeys = [...keys];
-  nextKeys[index] = key;
+    const key: VaultKeySummary = {
+      ...keys[index],
+      purpose,
+      updatedAt: now,
+    };
+    const nextKeys = [...keys];
+    nextKeys[index] = key;
 
-  await writeStore(nextKeys, await readValueLines());
-  return { ok: true, key };
+    await writeStore(nextKeys, await readValueLines());
+    return { ok: true, key };
+  });
 }
 
 /**
@@ -242,16 +265,18 @@ export async function editPurpose(
  * sibling name such as `FOOBAR` is untouched by deleting `FOO`.
  */
 export async function deleteKey(name: string): Promise<VaultDeleteResult> {
-  const keys = await readMetadata();
-  if (!keys.some((k) => k.name === name)) {
-    return { ok: false, error: "not-found" };
-  }
+  return serialized(async () => {
+    const keys = await readMetadata();
+    if (!keys.some((k) => k.name === name)) {
+      return { ok: false, error: "not-found" };
+    }
 
-  const nextKeys = keys.filter((k) => k.name !== name);
-  const lines = (await readValueLines()).filter(
-    (line) => !line.startsWith(`${name}=`),
-  );
+    const nextKeys = keys.filter((k) => k.name !== name);
+    const lines = (await readValueLines()).filter(
+      (line) => !line.startsWith(`${name}=`),
+    );
 
-  await writeStore(nextKeys, lines);
-  return { ok: true };
+    await writeStore(nextKeys, lines);
+    return { ok: true };
+  });
 }
