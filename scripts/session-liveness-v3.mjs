@@ -14929,6 +14929,176 @@ async function checkVaultNoReadBack(built) {
   return violations;
 }
 
+/** Every `.log` file under `dir`, recursively, skipping nothing. */
+function collectLogFiles(dir, out = []) {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) collectLogFiles(full, out);
+    else if (full.endsWith(".log")) out.push(full);
+  }
+  return out;
+}
+
+/**
+ * `--check vault-log-scan`: proves criterion 4, no value reaches a log sink. Drives a nine-request
+ * set/rotate/edit/list/delete/error cycle carrying the sentinel wherever a value is accepted, then
+ * scans the full stdout+stderr capture `bootServer` installs, every `.log` file under the sandbox
+ * HOME, and `schema.keys` (a serializer-regression assertion; `values.env` is the one file this
+ * criterion expects to hold the sentinel and is deliberately never scanned). An empty capture before
+ * the cycle even starts is itself a violation, since a scan of nothing would pass for the wrong
+ * reason. Task 2's two breaks are what actually prove the capture covers the request window.
+ */
+async function checkVaultLogScan(built) {
+  const violations = [];
+  const linesBefore = built.server.logLines.length;
+  if (linesBefore === 0) {
+    violations.push(
+      `leg 0: built.server.logLines is empty before the cycle starts, a capture that never received a byte would make every later scan pass for the wrong reason`,
+    );
+  }
+
+  // Leg 1: the full cycle, every request carrying the sentinel where a value is accepted.
+  const created = await vaultRequest(built, "POST", "/vault", {
+    name: "LOG_KEY",
+    purpose: "log scan",
+    value: VAULT_SENTINEL,
+  });
+  if (created.status !== 200) {
+    violations.push(
+      `leg 1: POST /vault expected 200, got ${created.status}: ${created.text}`,
+    );
+  }
+
+  const rotated = await vaultRequest(built, "PUT", "/vault/LOG_KEY/value", {
+    value: VAULT_SENTINEL_ROTATED,
+  });
+  if (rotated.status !== 200) {
+    violations.push(
+      `leg 1: PUT /vault/LOG_KEY/value expected 200, got ${rotated.status}: ${rotated.text}`,
+    );
+  }
+
+  const edited = await vaultRequest(built, "PATCH", "/vault/LOG_KEY", {
+    purpose: "log scan edited",
+  });
+  if (edited.status !== 200) {
+    violations.push(
+      `leg 1: PATCH /vault/LOG_KEY expected 200, got ${edited.status}: ${edited.text}`,
+    );
+  }
+
+  const listed = await vaultRequest(built, "GET", "/vault");
+  if (listed.status !== 200) {
+    violations.push(
+      `leg 1: GET /vault expected 200, got ${listed.status}: ${listed.text}`,
+    );
+  }
+
+  const unknownKey = await vaultRequest(
+    built,
+    "PUT",
+    "/vault/NO_SUCH_KEY/value",
+    { value: VAULT_SENTINEL },
+  );
+  if (unknownKey.status !== 404) {
+    violations.push(
+      `leg 1: unknown key PUT /vault/NO_SUCH_KEY/value expected 404, got ${unknownKey.status}: ${unknownKey.text}`,
+    );
+  }
+
+  const duplicate = await vaultRequest(built, "POST", "/vault", {
+    name: "LOG_KEY",
+    purpose: "dupe",
+    value: VAULT_SENTINEL,
+  });
+  if (duplicate.status !== 409) {
+    violations.push(
+      `leg 1: duplicate name POST /vault expected 409, got ${duplicate.status}: ${duplicate.text}`,
+    );
+  }
+
+  const missingValue = await vaultRequest(
+    built,
+    "PUT",
+    "/vault/LOG_KEY/value",
+    {},
+  );
+  if (missingValue.status !== 400) {
+    violations.push(
+      `leg 1: missing value PUT /vault/LOG_KEY/value expected 400, got ${missingValue.status}: ${missingValue.text}`,
+    );
+  }
+
+  const malformed = await vaultRequestRaw(built, "/vault", VAULT_SENTINEL);
+  if (malformed.status !== 400) {
+    violations.push(
+      `leg 1: malformed body POST /vault expected 400, got ${malformed.status}: ${malformed.text}`,
+    );
+  }
+
+  const deleted = await vaultRequest(built, "DELETE", "/vault/LOG_KEY");
+  if (deleted.status !== 200) {
+    violations.push(
+      `leg 1: DELETE /vault/LOG_KEY expected 200, got ${deleted.status}: ${deleted.text}`,
+    );
+  }
+
+  // Leg 2: settle (capture is asynchronous), then scan the full stdout+stderr capture.
+  await sleep(500);
+  const linesProduced = built.server.logLines.length - linesBefore;
+  console.log(
+    `vault-log-scan: cycle produced ${linesProduced} captured log line(s), ${built.server.logLines.length} total in the capture`,
+  );
+  for (const [sentinelName, sentinel] of [
+    ["VAULT_SENTINEL", VAULT_SENTINEL],
+    ["VAULT_SENTINEL_ROTATED", VAULT_SENTINEL_ROTATED],
+  ]) {
+    const matches = built.server.logLines.filter((line) =>
+      line.includes(sentinel),
+    );
+    if (matches.length > 0) {
+      violations.push(
+        `leg 2: ${sentinelName} appears in ${matches.length} captured stdout/stderr line(s):\n${matches.join("\n")}`,
+      );
+    }
+  }
+
+  // Leg 3: every `.log` file under the sandbox HOME. Reported whether or not any were found, so a
+  // future file logger changes an observable number rather than silently slipping past an empty set.
+  const logFiles = collectLogFiles(built.home);
+  console.log(
+    `vault-log-scan: ${logFiles.length} .log file(s) found under the sandbox HOME`,
+  );
+  for (const file of logFiles) {
+    const text = readFileSync(file, "utf8");
+    for (const [sentinelName, sentinel] of [
+      ["VAULT_SENTINEL", VAULT_SENTINEL],
+      ["VAULT_SENTINEL_ROTATED", VAULT_SENTINEL_ROTATED],
+    ]) {
+      const count = text.split(sentinel).length - 1;
+      if (count > 0) {
+        violations.push(
+          `leg 3: ${sentinelName} appears ${count} time(s) in log file ${file}`,
+        );
+      }
+    }
+  }
+
+  // Leg 4: a serializer-regression assertion. values.env is the one file this criterion expects to
+  // hold the sentinel and is deliberately NOT asserted against here.
+  const schemaText = readFileSync(join(vaultDir(built), "schema.keys"), "utf8");
+  for (const [sentinelName, sentinel] of [
+    ["VAULT_SENTINEL", VAULT_SENTINEL],
+    ["VAULT_SENTINEL_ROTATED", VAULT_SENTINEL_ROTATED],
+  ]) {
+    if (schemaText.includes(sentinel)) {
+      violations.push(`leg 4: schema.keys contains ${sentinelName}`);
+    }
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -14968,6 +15138,8 @@ const CHECKS = {
     ),
   "vault-no-read-back": () =>
     withFixture("vault-no-read-back", checkVaultNoReadBack, VAULT_FIXTURE),
+  "vault-log-scan": () =>
+    withFixture("vault-log-scan", checkVaultLogScan, VAULT_FIXTURE),
   "second-session-fixture": () =>
     withFixture(
       "second-session-fixture",
