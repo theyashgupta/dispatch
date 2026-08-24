@@ -11,14 +11,12 @@ import {
 
 /**
  * Env-var-style key name: uppercase letters, digits and underscores, never starting with a digit.
- * @public Consumed by `vault.route.ts`'s POST validation, wired in plan 02.
  */
 export const VAULT_NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
 
 /**
  * Result union for create/set/edit, callers map each `error` to the appropriate HTTP status.
  * Never carries a value, only metadata.
- * @public Consumed by `vault.route.ts`'s status-mapping, wired in plan 02.
  */
 export type VaultWriteResult =
   | { ok: true; key: VaultKeySummary }
@@ -26,7 +24,6 @@ export type VaultWriteResult =
 
 /**
  * Result union for delete.
- * @public Consumed by `vault.route.ts`'s status-mapping, wired in plan 02.
  */
 export type VaultDeleteResult =
   { ok: true } | { ok: false; error: "not-found" };
@@ -141,7 +138,6 @@ async function writeStore(
 /**
  * List every vault key's metadata, sorted by name. Opens only `vault.json`, never `values.env`,
  * so a value cannot reach this path structurally.
- * @public Consumed by `vault.route.ts`'s GET handler, wired in plan 02.
  */
 export async function listKeys(): Promise<VaultKeySummary[]> {
   const keys = await readMetadata();
@@ -152,7 +148,6 @@ export async function listKeys(): Promise<VaultKeySummary[]> {
  * Create a new vault key. Name collisions are checked by exact match, the name regex is already
  * upper-case-only so a case-folded compare would be dead code. The directory is (re-)created here
  * since a user could delete it between boot and this call.
- * @public Consumed by `vault.route.ts`'s POST handler, wired in plan 02.
  */
 export async function createKey(input: {
   name: string;
@@ -186,7 +181,6 @@ export async function createKey(input: {
  * Set (or rotate) a key's value. Setting a value on an already-filled key IS the rotate, purpose
  * and createdAt stay untouched, only updatedAt and filled move, this is what makes set and rotate
  * the same endpoint.
- * @public Consumed by `vault.route.ts`'s PUT value handler, wired in plan 02.
  */
 export async function setValue(
   name: string,
@@ -219,7 +213,6 @@ export async function setValue(
 /**
  * Edit a key's purpose. Never touches the value lines, an edit of the purpose must never rewrite
  * a value.
- * @public Consumed by `vault.route.ts`'s PATCH handler, wired in plan 02.
  */
 export async function editPurpose(
   name: string,
@@ -247,7 +240,6 @@ export async function editPurpose(
 /**
  * Delete a key and its value line. Matches the value line by a `NAME=` prefix, so a longer
  * sibling name such as `FOOBAR` is untouched by deleting `FOO`.
- * @public Consumed by `vault.route.ts`'s DELETE handler, wired in plan 02.
  */
 export async function deleteKey(name: string): Promise<VaultDeleteResult> {
   const keys = await readMetadata();

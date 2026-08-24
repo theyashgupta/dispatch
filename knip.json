@@ -5,7 +5,7 @@
     "src/web/main.tsx",
     "src/web/index.html",
     "src/web/terminal-main.ts",
-    "src/server/services/domain/vault.ts"
+    "src/server/routes/vault.route.ts"
   ],
   "project": ["src/**/*.{ts,tsx}"],
   "ignoreExportsUsedInFile": true,
