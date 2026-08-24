@@ -12,6 +12,7 @@ import {
   DISPATCH_DIR,
   HOOK_SCRIPT_PATH,
   HOOK_SETTINGS_PATH,
+  PTY_SHIM_PATH,
   SERVICE_LABEL,
   SERVICE_PLIST_PATH,
 } from "../infra/paths.js";
@@ -117,6 +118,7 @@ export async function scanFootprint(opts: {
   const regenerables = [
     HOOK_SCRIPT_PATH,
     HOOK_SETTINGS_PATH,
+    PTY_SHIM_PATH,
     ...(servicePlistExists ? [SERVICE_PLIST_PATH] : []),
   ].filter((p) => fs.existsSync(p));
   const boardData = boardDataPaths();
