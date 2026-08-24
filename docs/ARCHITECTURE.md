@@ -3225,8 +3225,15 @@ switch-sockets` (a pid-scoped, `ESTABLISHED`-only, bounded poll-to-zero proof th
   `ttyd adopted=0`, and a wire that lost the session's `ttydPort`) and
   `DISPATCH_REINSTALL_SESSION_BREAK=skip-heal` (skips the heal call, reported as two violations: a
   `healServicePlist` outcome of `null` instead of `"rewritten"`, and an on-disk plist still pointing
-  at the corrupted path). The `phase-smoke-tester` behavioral pass runs alongside this harness, not
-  instead of it.
+  at the corrupted path). Phase 102 added a ninth mode, `--check cleanup-prune-warned`: a
+  three-record `done`-column fixture (STALE, FRESH, LIVE, see
+  [Cleanup Mirror Chokepoint](#cleanup-mirror-chokepoint)) drives the real scheduler with a fast
+  tick and asserts on wire `sessionCount`/`sessionSummaries` ids, then on the persisted record
+  after a server kill, so removal is proven durable rather than merely in-memory. Proven able to
+  fail two ways, each independently targeted at one clause of the prune rule: commenting out the
+  scheduler's prune call leaves STALE present (`sessionCount` stuck at 3), and dropping the
+  `tmuxSession` clause from the predicate wrongly prunes LIVE. The `phase-smoke-tester` behavioral
+  pass runs alongside this harness, not instead of it.
 - **`node scripts/panel-92.mjs`** (Phase 92; `--legacy`/`--compare`/`--json`) — a CDP structural-
   presence and zero-gap-geometry instrument. `--legacy` builds and boots the real `v2.9.0` git tag in
   a throwaway worktree, seeded in that release's OWN pre-`sessions[]` card shape, so `--compare` can

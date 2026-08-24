@@ -593,6 +593,23 @@ const GROUP_SESSION_FIXTURE = {
   group: true,
 };
 
+const CLEANUP_PRUNE_SANDBOX_PORT = 47869;
+
+const CLEANUP_PRUNE_TMUX_PREFIX = `dsp102pw-${process.pid}-`;
+
+/**
+ * `--check cleanup-prune-warned`'s own profile: ONE real tmux+ttyd session (`sessionKeys: ["a"]`),
+ * the LIVE leg of the check's own three-record fixture. A second real session is unnecessary here,
+ * since the rule's `tmuxSession` clause only needs one genuinely alive session to prove it
+ * load-bearing; the check seeds its other two records (STALE, FRESH) as purely synthetic siblings
+ * directly into the sandbox `board.db`.
+ */
+const CLEANUP_PRUNE_FIXTURE = {
+  port: CLEANUP_PRUNE_SANDBOX_PORT,
+  tmuxPrefix: CLEANUP_PRUNE_TMUX_PREFIX,
+  sessionKeys: ["a"],
+};
+
 /**
  * Ceiling for {@link waitForSagaSettled}'s poll of the real start saga: the stub `claude`'s own
  * REPL-ready line prints in milliseconds, but `git worktree add` on the throwaway repo plus
@@ -7357,6 +7374,187 @@ async function checkCleanupScheduleRestart() {
 }
 
 /**
+ * Wall-clock retention window this check seeds against, matching `BoardStore`'s own default
+ * `cleanupDelayMs` (`DEFAULT_CLEANUP_DELAY_DAYS`, 7 days). The sandbox's own `config.json`
+ * ({@link makeSandboxHome}) never sets `cleanupDelayDays`, so the real server this check boots
+ * resolves the same default. Duplicated here as a literal, since this harness imports nothing
+ * from `src/`, matching this file's own established shape for reproducing a product constant.
+ */
+const CLEANUP_PRUNE_DELAY_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Margin subtracted past {@link CLEANUP_PRUNE_DELAY_MS} for the STALE and LIVE seeded
+ * `updatedAt` timestamps, so neither sits exactly on the boundary a clock-skew edge case could
+ * flip.
+ */
+const CLEANUP_PRUNE_MARGIN_MS = 60_000;
+
+/**
+ * Settle ceiling for the fast-tick scheduler to observe and act on the seeded fixture, generous
+ * relative to the 500ms tick this check runs the sandbox server with, matching
+ * {@link CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}'s own reasoning.
+ */
+const CLEANUP_PRUNE_SETTLE_TIMEOUT_MS = 20_000;
+
+/**
+ * `--check cleanup-prune-warned`: a three-record fixture on a `done`-column card, one real tmux
+ * session (LIVE) and two purely synthetic sibling records (STALE, FRESH) seeded directly into the
+ * sandbox `board.db`, so each of the prune rule's three clauses has its own subject:
+ *
+ *   STALE: `cleanupWarning` set, no `tmuxSession`, `updatedAt` stamped past the retention window.
+ *   Must be GONE after the real scheduler's fast tick.
+ *
+ *   FRESH: `cleanupWarning` set, no `tmuxSession`, `updatedAt` stamped inside the window. Must
+ *   SURVIVE, the leg proving the rule is a window, not "prune every warned record".
+ *
+ *   LIVE: `cleanupWarning` set WITH a live `tmuxSession` (the `noteCleanupWarning` preflight
+ *   shape), `updatedAt` as old as STALE's. Must SURVIVE, the leg proving the `tmuxSession` clause
+ *   is load-bearing rather than decorative.
+ *
+ * Drives the REAL scheduler with a fast `DISPATCH_CLEANUP_TICK_MS`, reads the result from the
+ * wire (`GET /api/board`, via {@link fetchFixtureCard}) by `sessionCount`/`sessionSummaries` ids
+ * rather than a bare array length, then kills the server and re-reads the PERSISTED record
+ * through a fresh connection ({@link readCard}), so the check proves durable removal rather than
+ * merely an in-memory effect.
+ */
+async function checkCleanupPruneWarned(built) {
+  const violations = [];
+  await killAndWait(built.server?.child);
+
+  const card = readCard(built.dbPath, built.cardId);
+  const liveRecord = card?.sessions?.find((s) => s.id === built.sessionA?.id);
+  if (!card || !liveRecord) {
+    violations.push(
+      `cleanup-prune-warned: could not read back the fixture card/session A before seeding`,
+    );
+    return violations;
+  }
+
+  const now = Date.now();
+  const oldIso = new Date(
+    now - (CLEANUP_PRUNE_DELAY_MS + CLEANUP_PRUNE_MARGIN_MS),
+  ).toISOString();
+  const freshIso = new Date(now).toISOString();
+
+  card.column = "done";
+  liveRecord.cleanupWarning =
+    "cleanup-prune-warned fixture: LIVE (preflight-refusal shape)";
+  liveRecord.updatedAt = oldIso;
+  card.activeSessionId = liveRecord.id;
+  card.cleanupWarning = liveRecord.cleanupWarning;
+  card.cleanupBlocked = undefined;
+  card.cleanupDueAt = undefined;
+
+  const staleId = randomUUID();
+  const staleRecord = {
+    id: staleId,
+    createdAt: oldIso,
+    updatedAt: oldIso,
+    cleanupWarning: "cleanup-prune-warned fixture: STALE",
+  };
+  const freshId = randomUUID();
+  const freshRecord = {
+    id: freshId,
+    createdAt: freshIso,
+    updatedAt: freshIso,
+    cleanupWarning: "cleanup-prune-warned fixture: FRESH",
+  };
+  card.sessions = [liveRecord, staleRecord, freshRecord];
+
+  seedFixtureCard(built.home, card);
+  console.log(
+    `cleanup-prune-warned: seeded LIVE=${liveRecord.id} (tmuxSession=${liveRecord.tmuxSession}) ` +
+      `STALE=${staleId} FRESH=${freshId}, card.column=done`,
+  );
+
+  const priorTickEnv = process.env.DISPATCH_CLEANUP_TICK_MS;
+  process.env.DISPATCH_CLEANUP_TICK_MS = "500";
+  try {
+    built.server = bootServer(built.home);
+    await waitForReady(built.port);
+
+    const deadline = Date.now() + CLEANUP_PRUNE_SETTLE_TIMEOUT_MS;
+    let wireCard;
+    let staleGone = false;
+    while (Date.now() < deadline) {
+      wireCard = await fetchFixtureCard(built);
+      const ids = new Set((wireCard?.sessionSummaries ?? []).map((s) => s.id));
+      staleGone = wireCard != null && !ids.has(staleId);
+      if (staleGone) break;
+      await sleep(POLL_INTERVAL_MS);
+    }
+    const wireIds = new Set(
+      (wireCard?.sessionSummaries ?? []).map((s) => s.id),
+    );
+    console.log(
+      `cleanup-prune-warned: wire settle staleGone=${staleGone} sessionCount=${wireCard?.sessionCount} ` +
+        `sessionSummaries ids=${JSON.stringify([...wireIds])}`,
+    );
+    if (wireIds.has(staleId)) {
+      violations.push(
+        `cleanup-prune-warned: STALE session ${staleId} still present in wire sessionSummaries after ` +
+          `${CLEANUP_PRUNE_SETTLE_TIMEOUT_MS}ms, the scheduler's prune pass never removed it`,
+      );
+    }
+    if (!wireIds.has(freshId)) {
+      violations.push(
+        `cleanup-prune-warned: FRESH session ${freshId} missing from wire sessionSummaries, the prune ` +
+          `removed a record still inside its retention window`,
+      );
+    }
+    if (!wireIds.has(liveRecord.id)) {
+      violations.push(
+        `cleanup-prune-warned: LIVE session ${liveRecord.id} missing from wire sessionSummaries, the ` +
+          `prune removed a record with a live tmuxSession`,
+      );
+    }
+    if (wireCard?.sessionCount !== 2) {
+      violations.push(
+        `cleanup-prune-warned: wire sessionCount is ${wireCard?.sessionCount}, expected 2 (LIVE and FRESH ` +
+          `survive, STALE pruned)`,
+      );
+    }
+
+    await killAndWait(built.server.child);
+    const persistedCard = readCard(built.dbPath, built.cardId);
+    const persistedIds = new Set(
+      (persistedCard?.sessions ?? []).map((s) => s.id),
+    );
+    console.log(
+      `cleanup-prune-warned: persisted sessions after server kill = ${JSON.stringify([...persistedIds])}`,
+    );
+    if (persistedIds.has(staleId)) {
+      violations.push(
+        `cleanup-prune-warned: STALE session ${staleId} still present in the PERSISTED board.db after ` +
+          `server kill, removal was not durable`,
+      );
+    }
+    if (!persistedIds.has(freshId)) {
+      violations.push(
+        `cleanup-prune-warned: FRESH session ${freshId} missing from the PERSISTED board.db, the prune ` +
+          `removed a record still inside its retention window`,
+      );
+    }
+    if (!persistedIds.has(liveRecord.id)) {
+      violations.push(
+        `cleanup-prune-warned: LIVE session ${liveRecord.id} missing from the PERSISTED board.db, the ` +
+          `prune removed a record with a live tmuxSession`,
+      );
+    }
+    if (persistedIds.size !== 2) {
+      violations.push(
+        `cleanup-prune-warned: persisted card.sessions has ${persistedIds.size} entries, expected 2`,
+      );
+    }
+  } finally {
+    if (priorTickEnv === undefined) delete process.env.DISPATCH_CLEANUP_TICK_MS;
+    else process.env.DISPATCH_CLEANUP_TICK_MS = priorTickEnv;
+  }
+
+  return violations;
+}
+
+/**
  * Sorted list of every tracked-or-untracked file under `worktreePath`, `.git` excluded — the
  * "worktree file set" isolation assertions (Plan 94-05) compare before/after, so a session-2
  * creation that ever wrote into session 1's own worktree directory (a wrong-target bug, not merely
@@ -13853,6 +14051,12 @@ const CHECKS = {
   "cleanup-refusal": checkCleanupRefusal,
   "cleanup-branches": checkCleanupBranches,
   "cleanup-schedule-restart": checkCleanupScheduleRestart,
+  "cleanup-prune-warned": () =>
+    withFixture(
+      "cleanup-prune-warned",
+      checkCleanupPruneWarned,
+      CLEANUP_PRUNE_FIXTURE,
+    ),
   "second-session-fixture": () =>
     withFixture(
       "second-session-fixture",
