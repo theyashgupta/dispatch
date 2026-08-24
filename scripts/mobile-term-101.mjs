@@ -4457,6 +4457,41 @@ const BREAKS = {
   "telemetry-capture-blind": breakTelemetryCaptureBlind,
 };
 
+/**
+ * What a break leg must actually REPORT to count as a falsification: `require` patterns that must
+ * each match some violation, and `forbid` patterns that must match none.
+ *
+ * @remarks A bare `violations.length === 0` self-check green-lights a leg that tripped on its own
+ * setup, which falsifies nothing. Every leg listed here can trip that way today:
+ * `shim-markers-emptied` pushes "prerequisite failed" for a missing python3, a missing needle and
+ * a no-op patch; `unwrapped-pane`/`alt-screen-term` route through `runLocalScrollFlow`, whose
+ * early exits push "never mounted"/"not found" for a Chrome that failed to paint; the two seed
+ * legs push a "prerequisite failed" of their own. `forbid` is what enforces
+ * `shim-markers-emptied`'s three-part docstring contract, whole and split trip and passthrough
+ * stays green: a run where only `passthrough` tripped means the shim is corrupting unrelated
+ * bytes, which is a real defect being reported as a successful break. Legs from earlier phases are
+ * deliberately absent and keep the count-only self-check; adding an unverified expectation would
+ * fail runs for a pattern nobody has observed.
+ */
+const BREAK_EXPECTATIONS = {
+  "shim-markers-emptied": {
+    require: [/pty-shim\[whole\]/, /pty-shim\[split\]/],
+    forbid: [/pty-shim\[passthrough\]/],
+  },
+  "unwrapped-pane": {
+    require: [/local-scroll: expected scrollable rows >= 20/],
+  },
+  "alt-screen-term": {
+    require: [/local-scroll: expected scrollable rows >= 20/],
+  },
+  "seed-includes-visible": {
+    require: [/seed: expected 0 visible rows duplicated in the seed body/],
+  },
+  "seed-seam-unpadded": {
+    require: [/to survive the live attach repaint/],
+  },
+};
+
 /** `telemetry-capture` (101-05) is the one check that must run at the exact moment the user's own
  * live service is back up: it skips `assertNoLiveService`/`assertSandboxPortsFree`/`assertBuilt`
  * in `main()` below, none of which the offline validator needs since it only reads a file. Its own
@@ -4560,6 +4595,28 @@ async function main() {
         `\nFAIL (self-check): --break ${breakName} did not report any violation, the check is a dead instrument.`,
       );
       process.exit(1);
+    }
+    const expectation = BREAK_EXPECTATIONS[breakName];
+    if (expectation) {
+      const missing = expectation.require.filter(
+        (re) => !violations.some((v) => re.test(v)),
+      );
+      const forbidden = (expectation.forbid ?? []).flatMap((re) =>
+        violations.filter((v) => re.test(v)),
+      );
+      if (missing.length > 0 || forbidden.length > 0) {
+        console.log(
+          `\nFAIL (self-check): --break ${breakName} tripped, but NOT for the assertion under test.`,
+        );
+        for (const re of missing) {
+          console.log(`  expected a violation matching ${re}, none did`);
+        }
+        for (const v of forbidden) {
+          console.log(`  violation the leg must NOT produce: ${v}`);
+        }
+        for (const v of violations) console.log(`  reported: ${v}`);
+        process.exit(1);
+      }
     }
     console.log(
       `\nFAIL (expected, --break ${breakName}): ${violations.length} violation(s)`,
