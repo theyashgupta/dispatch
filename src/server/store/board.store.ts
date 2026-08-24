@@ -96,17 +96,14 @@ export function compareDoneOrder(a: Card, b: Card): number {
 /**
  * Strip a card's secrets before it leaves the process — the SINGLE sanctioned place a card loses
  * them. Every new read path (windowed `snapshot()`, and any future one) must call this rather than
- * duplicate the strip, so the redaction boundary can never drift. Four responsibilities:
+ * duplicate the strip, so the redaction boundary can never drift. Three responsibilities:
  * (1) remove the card's own secret field; (2) remove `sessions` outright — the full array is
- * server-side only and carries every session's own secret field; (3) resolve the ACTIVE
- * session by `card.activeSessionId` and, when one resolves, FIELD-PICK exactly the two
- * `ActiveSessionWire` keys (`id`, `ttydPort` — F-96-F narrowed this from six; the other four
- * duplicated the flat mirror below for zero reader benefit) onto `wireCard.activeSession` — never
- * spread the session object, so the secret is omitted by construction and a future field added to
- * `Session` cannot leak through this path; (4) at two or more sessions, FIELD-PICK the
- * `SessionSummary` keys per session onto
- * `wireCard.sessionSummaries`, sorted by `createdAt` ascending, following the identical
- * never-spread discipline as `activeSession` — this is the only place a non-active session's own
+ * server-side only and carries every session's own secret field (the active session's own
+ * `ttydPort`/`activeSessionId` already ride the wire unconditionally via the card's own flat
+ * mirror fields, so no separate active-session projection is needed here, Phase 102); (3) at two
+ * or more sessions, FIELD-PICK the `SessionSummary` keys per session onto
+ * `wireCard.sessionSummaries`, sorted by `createdAt` ascending, never spreading the session
+ * object — this is the only place a non-active session's own
  * `prs`/`previews`/`prsUnknown`/`previewsUnknown` become observable on the wire (`ARTIFACT-01`),
  * since `Card`'s own four fields stay a mirror of the active session only. Also resolves each
  * summary's `parentOrdinal` from `s.builtFrom` against the SAME sorted-by-`createdAt` array that
@@ -122,10 +119,6 @@ export function redactCard(card: Card): Card {
   const wireCard = { ...card };
   delete wireCard.hookToken;
   delete wireCard.sessions;
-  const active = card.sessions?.find((s) => s.id === card.activeSessionId);
-  wireCard.activeSession = active
-    ? { id: active.id, ttydPort: active.ttydPort }
-    : undefined;
   const hasMultipleSessions = (card.sessions?.length ?? 0) >= 2;
   wireCard.sessionCount = hasMultipleSessions
     ? card.sessions!.length
@@ -1036,7 +1029,7 @@ class BoardStore extends EventEmitter {
    * SECURITY: this is the single outbound chokepoint — each kept card is redacted via
    * {@link redactCard}, so the per-session hook-auth secret never rides an SSE frame or a REST
    * response, from the card OR from any session copy (only the persisted board.json carries it).
-   * `activeSession` is a field-picked projection, never a spread, so a future `Session` field
+   * `sessionSummaries` is a field-picked projection, never a spread, so a future `Session` field
    * cannot leak through it. Redact future secret-adjacent card fields there (hookRoutedAt was
    * considered and deliberately rides the wire — a non-secret timestamp).
    * @see docs/ARCHITECTURE.md#sse-transport

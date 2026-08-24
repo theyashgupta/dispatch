@@ -302,22 +302,6 @@ export interface Card {
    */
   nextSessionOrdinal?: number;
   /**
-   * Wire-only projection of the session named by `activeSessionId`, populated exclusively by the
-   * store's `redactCard` chokepoint and absent from the persisted row. The full `sessions` array is
-   * deliberately not part of the wire shape.
-   * @remarks `TerminalRegion` renders the terminal `<iframe>` on `activeSession.ttydPort`, keyed by
-   * `activeSession.id`, so `DetailPanel`'s "a terminal already exists, do not spawn" gate reads
-   * `activeSession.ttydPort` too — the ONLY two fields either client reader ever touches (F-96-F,
-   * `96-11-SUMMARY.md`). `ActiveSessionWire` field-picks exactly those two; `tmuxSession`,
-   * `claudeSessionId`, `workspacePath` and `workspace` are NOT re-projected here because the six
-   * flat fields above already carry the identical values for the SAME active session (`KEEP-02`'s
-   * own wire-parity contract requires those flat fields present regardless), so nesting them a
-   * second time was pure duplicated payload weight, not a second source of truth — confirmed a real
-   * ~35% N=1 board-payload regression by `96-10`'s baseline re-run before this fix.
-   * @see docs/ARCHITECTURE.md#session-projection-chokepoint
-   */
-  activeSession?: ActiveSessionWire;
-  /**
    * How many session records this card owns. NON-SECRET: rides `snapshot()`/`redactCard`
    * UNREDACTED, same policy class as `hookRoutedAt`/`claudeSessionId`/`prs` (an integer count
    * carries no credential and no pane content). ABSENT (never `1`) when the card owns zero or one
@@ -326,8 +310,8 @@ export interface Card {
    * more otherwise. Counts every session record the card owns INCLUDING one whose session has been
    * marked lost — `markSessionLost` clears a record's fields in place and never deletes it (cleanup
    * is a later phase), so the multiplicity signal does not silently drop when a sibling dies.
-   * Populated exclusively inside `redactCard`, `activeSession`'s own chokepoint, so it has exactly
-   * one writer like every other session-projection field.
+   * Populated exclusively inside `redactCard`, the same chokepoint `sessionSummaries` uses, so it
+   * has exactly one writer like every other session-projection field.
    * @see docs/ARCHITECTURE.md#session-projection-chokepoint
    */
   sessionCount?: number;
@@ -602,30 +586,12 @@ export interface Session {
 }
 
 /**
- * Wire-only projection of the active `Session` record, built by the store's `redactCard`
- * chokepoint via a field pick (never a spread) so the secret field is omitted BY CONSTRUCTION — a
- * future field added to `Session` cannot silently reintroduce it through this type. Never the
- * persisted shape; the full record (with the secret) is what lives on disk.
- * @remarks Deliberately narrow: `id` and `ttydPort` are the only two fields any client reader
- * touches (`TerminalRegion`, `DetailPanel`'s spawn gate). `tmuxSession`/`claudeSessionId`/
- * `workspacePath`/`workspace` were dropped by F-96-F's fix — they duplicated the six flat fields
- * `Card` already carries for the same active session, adding ~35% to the N=1 board payload for
- * data no reader ever used. See `docs/ARCHITECTURE.md#session-projection-chokepoint`.
- */
-export interface ActiveSessionWire {
-  /** Mirrors `Session.id`. */
-  id: string;
-  /** Mirrors `Session.ttydPort`. */
-  ttydPort?: number;
-}
-
-/**
  * Wire-only per-session digest for the detail panel's session switcher, built by the store's
- * `redactCard` chokepoint via a field pick (never a spread) — the same discipline
- * {@link ActiveSessionWire} already establishes, so a future `Session` field cannot silently
- * widen this array to carry a secret. Deliberately carries no `active` flag: `Card.activeSessionId`
- * is already the one field naming the active session, and a second field claiming the same fact
- * could disagree under a race; the client compares `entry.id === card.activeSessionId` instead.
+ * `redactCard` chokepoint via a field pick (never a spread) so a future `Session` field cannot
+ * silently widen this array to carry a secret. Deliberately carries no `active` flag:
+ * `Card.activeSessionId` is already the one field naming the active session, and a second field
+ * claiming the same fact could disagree under a race; the client compares
+ * `entry.id === card.activeSessionId` instead.
  * @see docs/ARCHITECTURE.md#session-projection-chokepoint
  */
 export interface SessionSummary {

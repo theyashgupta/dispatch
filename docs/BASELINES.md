@@ -934,3 +934,99 @@ No leaked tmux session, held sandbox port, or leftover sandbox directory was fou
 of the five runs above, and the real `~/.dispatch/board.db` (absent on this machine throughout,
 matching every entry above) was unaffected. No live `com.dispatch.app` service exists on this
 machine to restore.
+
+### Phase 102, Plan 01, canary removal wire re-measurement
+
+- **Date:** 2026-08-24
+- **Git SHA measured:** working tree at 102-01 Task 2 (base `48fe78c`, the nested `activeSession`
+  wire projection deleted from `redactCard`/`TerminalRegion.tsx`/`DetailPanel.tsx`/`types.ts`; no
+  other `src/` file changed since the Phase 99 entry above, confirmed by
+  `git log --oneline bad43f6..48fe78c -- src/shared/types.ts src/server/store/board.store.ts`
+  returning zero commits).
+
+**Comparison point, stated explicitly per this phase's own criterion.** This phase finally removes the `activeSession` residual Phase 98 told later phases to route around, so the
+correct comparison for THIS measurement is the original v2.9 `6d2549f` baseline (`initialBytes <=
+15029`, `sseFrameBytes <= 15274`, Phase 86 entry above), not the interim `17410`/`17655` numbers.
+
+**BEFORE leg, re-confirmed on this machine (canary still present, pristine `48fe78c`), same exact
+command:** `npm run build && node scripts/perf-board.mjs --done=500 --runs=3`
+
+```
+run=1 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=5
+run=2 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=8 commits=5
+run=3 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=5
+
+PERF-BOARD mode=prod done=500 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=5
+```
+
+Byte-identical to `98-01`/`99-06`'s own recorded numbers on this same fixture shape, confirming
+this machine reproduces the documented history exactly before any code changed.
+
+**AFTER leg, canary fully removed, same exact command:**
+`npm run build && node scripts/perf-board.mjs --done=500 --runs=3`
+
+```
+run=1 initialBytes=16170 initialCards=50 sseFrameBytes=16415 loadCommits=7 commits=5
+run=2 initialBytes=16170 initialCards=50 sseFrameBytes=16415 loadCommits=8 commits=5
+run=3 initialBytes=16170 initialCards=50 sseFrameBytes=16415 loadCommits=7 commits=5
+
+PERF-BOARD mode=prod done=500 initialBytes=16170 initialCards=50 sseFrameBytes=16415 loadCommits=7 commits=5
+```
+
+**Verdict vs. the `6d2549f` thresholds: FAIL, criterion 1 not met.** `initialBytes` `15029` to
+`16170` (**+1141, +7.59%**); `sseFrameBytes` `15274` to `16415` (**+1141, +7.47%**). Both improved
+from the `17410`/`17655` pre-removal numbers by exactly `1240` bytes (`-7.12%`), confirming the
+canary removal itself worked and recovered its own full cost, but a `1141`-byte residual remains
+against the original v2.9 target.
+
+**Field-by-field attribution of both deltas, per this phase's own requirement (not estimated,
+counted).** `scripts/perf-board.mjs`'s `AWAITING_EVERY_NTH=25` seeds exactly `20` session-bearing
+cards inside the `done=500` fixture, all of which fall inside the `DONE_PAGE_SIZE=50` page window
+(the same 20-card population `96-10`/`96-11` measured against).
+
+1. **The `1240`-byte recovery IS the canary's own cost, confirmed by direct measurement of the
+   real wire card, not inferred.** A temporary debug dump of one session-bearing card's exact JSON
+   on the pre-removal tree showed the deleted field serialized as `"activeSession":{"id":"<36-char
+uuid>"}` only, `ttydPort` absent (`undefined`, dropped by `JSON.stringify`) because this
+   fixture's single-session leg never spawns a real ttyd process, so no port is ever assigned to
+   the seeded session record. That field's own byte length is `61` content bytes plus a `1`-byte
+   comma separator, `62` bytes per card. `62 * 20 = 1240`, exactly the measured recovery. (This is
+   SMALLER than `96-10`'s own `~119` bytes/card figure because that figure's fixture shape
+   apparently carried a populated `ttydPort`; this fixture's single-session leg does not — the two
+   numbers describe the same field under different fixture conditions, not a discrepancy.)
+
+2. **The remaining `1141`-byte residual is `Card.activeSessionId`, a field with no v2.9
+   equivalent, confirmed by direct measurement, not inferred.** The same debug dump, run again on
+   the POST-removal tree, showed the session-bearing card's wire shape as `{id, issueId,
+identifier, title, description, priority, column, updatedAt, tmuxSession, workspacePath,
+activeSessionId, terminalError}` against a same-fixture non-session card's `{id, issueId,
+identifier, title, description, priority, column, updatedAt, terminalError}` — a `200`-byte
+   total delta across three fields (`tmuxSession`, `workspacePath`, `activeSessionId`). Of those
+   three, `tmuxSession` and `workspacePath` are TWO of the original six flat fields the `6d2549f`
+   baseline already carried for a session-bearing card (present in v2.9 too, not new). Only
+   `activeSessionId` is new since v2.9 — it does not exist in the `6d2549f` shape at all, since
+   v2.9 predates the session-entity architecture (Phase 90) entirely. Its own serialized content
+   (`"activeSessionId":"<36-char uuid>"`) is `56` bytes plus the `1`-byte comma, `57` bytes per
+   card. `57 * 20 = 1140`, matching the measured `1141`-byte residual within a single byte (the
+   1-byte gap is ordinary id-value noise between separately-seeded runs, not a second cause).
+
+**Why this residual is not fixable inside this plan's scope, stated rather than assumed.**
+`Card.activeSessionId` is explicitly the field decision `D-A` (`STATE.md`) and this plan's own
+`<interfaces>` block name to LEAVE ALONE: "Leave `Card.activeSessionId`, `Card.sessionCount`,
+`Card.ttydPort` and `SessionSummary` alone." It is the incremental-migration pointer the whole
+session-entity architecture is built on, read unconditionally by the client render gate
+(`c.ttydPort != null`) and the iframe src (`c.activeSessionId`) this same plan's Task 2 wired up.
+Removing it would not be a canary-removal cleanup; it would be reversing Phase 90's own
+architecture, a change several orders larger than this plan's declared scope and explicitly
+out-of-bounds per the plan's own file list and the `<threat_model>`'s disposition for this task.
+
+**Reported as a blocking finding on criterion 1**, per the plan's own instruction: the measured
+number is honestly recorded above (`16170`/`16415`, still above `15029`/`15274`), attributed field
+by field rather than estimated, and left un-passed rather than the criterion being lowered to fit.
+
+**Environment:** `com.dispatch.app` confirmed stopped and `:4700` refusing throughout every run
+above; every `dispatch-perf-board-*` sandbox directory was confirmed gone after each run; real
+`~/.dispatch/board.db` remained absent throughout (this machine has no live install, matching every
+prior entry's own recorded diagnosis). The temporary debug-dump instrumentation used for the
+field-by-field attribution above was never committed; `git diff --stat scripts/perf-board.mjs`
+after the investigation showed zero changes to that file.

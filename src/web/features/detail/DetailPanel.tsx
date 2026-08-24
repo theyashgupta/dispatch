@@ -305,7 +305,7 @@ export function DetailPanel({
       spawnedForRef.current = null;
       return;
     }
-    if (card.activeSession?.ttydPort != null) {
+    if (card.ttydPort != null) {
       spawnedForRef.current = null;
       return;
     }
@@ -332,7 +332,7 @@ export function DetailPanel({
     c.workspacePath != null;
 
   const hasLiveSession = !!(c?.tmuxSession && !c.sessionLost);
-  const activeSessionLost = c?.activeSession != null && !c.tmuxSession;
+  const activeSessionLost = c?.activeSessionId != null && !c.tmuxSession;
 
   if (!hasLiveSession && (fullscreen || detailsExpanded)) {
     setFullscreen(false);
