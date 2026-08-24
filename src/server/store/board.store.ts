@@ -2923,9 +2923,15 @@ class BoardStore extends EventEmitter {
    * shape that projection chokepoint calls corrupt: `isAwaitingCleanup` then pins the card
    * forever, manual recovery re-enters the same refusal, and the next boot's
    * {@link repairDowngradeDrift} mints an anonymous phantom record from the orphaned flat fields.
-   * `wasActive` is captured BEFORE {@link removeSessionRecord} runs, the matching `card.*` mirrors
-   * are cleared only under that guard, and `removeSessionRecord` is called LAST so no card can end
-   * up with a dangling `activeSessionId`.
+   * `wasActive` is captured BEFORE {@link removeSessionRecord} runs and the matching `card.*`
+   * mirrors are cleared only under that guard.
+   * @remarks The three cleanup mirrors are RE-DERIVED from whatever record is active after the
+   * removal, not merely cleared. {@link setActiveSession} mirrors the six projection fields only,
+   * so a bare clear would leave a card advertising "no warning, no block, no countdown" while its
+   * newly promoted session carries all three, and `CardView` renders every one of them off the
+   * card level. The same gap exists in {@link finishCleanup}, but this is the first path that
+   * reaches it on a timer with no user action, which turns a rare consequence of an explicit
+   * teardown into a background drift source.
    */
   pruneStaleWarnedSessions(now: number): Promise<void> {
     if (this.stalePrunableSessions(now).length === 0) return Promise.resolve();
@@ -2948,15 +2954,18 @@ class BoardStore extends EventEmitter {
         if (wasActive) {
           card.sessionLost = false;
           card.terminalError = null;
-          card.cleanupWarning = undefined;
-          card.cleanupBlocked = undefined;
-          card.cleanupDueAt = undefined;
           card.prs = undefined;
           card.prsUnknown = undefined;
           card.previews = undefined;
           card.previewsUnknown = undefined;
         }
         this.removeSessionRecord(card, sessionId);
+        const promoted = card.sessions?.find(
+          (s) => s.id === card.activeSessionId,
+        );
+        card.cleanupWarning = promoted?.cleanupWarning;
+        card.cleanupBlocked = promoted?.cleanupBlocked;
+        card.cleanupDueAt = promoted?.cleanupDueAt;
         events.push(
           this.event("cleanup", {
             cardId: card.id,
