@@ -150,7 +150,7 @@ const SANCTIONED_WRITERS = [
  * The three Card-mirrors-Session cleanup-lifecycle fields invariant `NEW-23` fences. Unlike
  * {@link SESSION_FIELDS}, these do NOT funnel through one chokepoint (`setActiveSession`): the
  * cleanup lifecycle writes each field from whichever step of teardown, blocking, or restoration it
- * is in, so the sanctioned-writer set below is a set of EIGHT functions, not three.
+ * is in, so the sanctioned-writer set below is a set of NINE functions, not three.
  */
 const CLEANUP_MIRROR_FIELDS = [
   "cleanupDueAt",
@@ -177,6 +177,10 @@ const CLEANUP_SANCTIONED_WRITERS = [
   { name: "clearCleanupDue", fields: ["cleanupDueAt"] },
   { name: "restoreCleanupDue", fields: ["cleanupDueAt"] },
   { name: "noteCleanupWarning", fields: ["cleanupWarning"] },
+  {
+    name: "pruneStaleWarnedSessions",
+    fields: ["cleanupWarning", "cleanupBlocked", "cleanupDueAt"],
+  },
 ];
 
 /**
@@ -821,7 +825,7 @@ function checkSessionProjectionChokepoint() {
  * Cleanup-mirror chokepoint gate (`NEW-23`). The fenced set is the three
  * {@link CLEANUP_MIRROR_FIELDS} the cleanup lifecycle mirrors onto `Card`: `cleanupDueAt`,
  * `cleanupWarning`, `cleanupBlocked`. Unlike `NEW-21`'s single-chokepoint fields, these do not
- * funnel through one function, so the sanctioned set is {@link CLEANUP_SANCTIONED_WRITERS}, eight
+ * funnel through one function, so the sanctioned set is {@link CLEANUP_SANCTIONED_WRITERS}, nine
  * functions each granted only the subset it actually writes.
  * @remarks Structurally identical two-tier check to {@link checkSessionProjectionChokepoint}:
  * Tier 1 is a repo-wide fence (any match outside `src/server/store/board.store.ts` is a violation

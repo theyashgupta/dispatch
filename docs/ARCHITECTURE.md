@@ -2083,23 +2083,30 @@ The three cleanup-lifecycle fields `Card` mirrors from its sessions, `cleanupDue
 unfenced (`NEW-23`, Phase 102). Unlike `NEW-21`'s six flat session fields, which funnel through the
 single `setActiveSession` chokepoint, these three fields are written from wherever the cleanup
 lifecycle currently is (stamping a schedule, recording a warning, clearing a schedule), so a fourth
-field or a ninth writer could otherwise be added with no gate noticing.
+field or a tenth writer could otherwise be added with no gate noticing.
 
 `scripts/check-invariants.mjs`'s `checkCleanupMirrorChokepoint` fences all three fields against
-exactly EIGHT declared writers in `src/server/store/board.store.ts`, each granted only the subset
+exactly NINE declared writers in `src/server/store/board.store.ts`, each granted only the subset
 it actually writes: `moveCardManual` (`cleanupDueAt`), `recordCleanupWarning` (`cleanupWarning`,
 `cleanupDueAt`), `finishCleanup` (all three), `recordCleanupBlocked` (`cleanupBlocked`),
 `clearCleanupBlocked` (`cleanupBlocked`), `clearCleanupDue` (`cleanupDueAt`), `restoreCleanupDue`
-(`cleanupDueAt`), and `noteCleanupWarning` (`cleanupWarning`). It reuses `NEW-21`'s own
+(`cleanupDueAt`), `noteCleanupWarning` (`cleanupWarning`), and `pruneStaleWarnedSessions` (all
+three, the warned-but-retained prune rule closing Phase 93 residual R3). It reuses `NEW-21`'s own
 `scanSessionFieldAssignments` AST walk (generalized to accept a field list, rather than duplicated
 for a second field set) and the same two-tier shape: a repo-wide fence for every file outside
 `board.store.ts`, and an in-file declaration-span check inside it. It carries the same
 missing-subject sentinel as `NEW-21`: if a sanctioned writer's declaration cannot be found (renamed
 or deleted), the check FAILS rather than silently widening the exemption to nothing.
 
-Adding a fourth cleanup-mirror field, or a ninth writer of one of the existing three, requires a
+Adding a fourth cleanup-mirror field, or a tenth writer of one of the existing three, requires a
 deliberate, human-ratified baseline re-freeze (`FROZEN_COUNT` bumped in the same commit) exactly
 like every other `NEW-`-prefixed structural fence in this file.
+
+`pruneStaleWarnedSessions(now)` prunes a warned-but-retained session record once all three hold:
+`cleanupWarning` set, `tmuxSession` absent (so `noteCleanupWarning`'s still-live preflight-refusal
+records are exempt), and `now - Date.parse(session.updatedAt) >= cleanupDelayMs`. It is called from
+`startCleanupScheduler`'s `tick()`, after `runDueCleanups`, so it inherits the same one-minute
+cadence and boot catch-up sweep rather than a second timer.
 
 ### Hooks Status Channel
 
@@ -3154,7 +3161,7 @@ mechanically-checkable question; none of them read prose for truth.
   and are deliberately not fenced; a ternary-chain or table-driven duplication is a recorded
   residue the parse cannot see. A third leg is `checkCleanupMirrorChokepoint`, reported as
   `CLEANUP MIRROR CHOKEPOINT (NEW-23)`: the same two-tier shape as `NEW-21`, fencing the three
-  cleanup-mirror fields (`cleanupDueAt`, `cleanupWarning`, `cleanupBlocked`) against exactly EIGHT
+  cleanup-mirror fields (`cleanupDueAt`, `cleanupWarning`, `cleanupBlocked`) against exactly NINE
   declared writers rather than `NEW-21`'s three, since these fields do not funnel through one
   chokepoint. See [Cleanup Mirror Chokepoint](#cleanup-mirror-chokepoint) for the full writer list
   and rationale.

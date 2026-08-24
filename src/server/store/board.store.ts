@@ -2832,6 +2832,64 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Prune stale warned-but-retained session records (Phase 93 residual R3). A warned
+   * teardown ({@link recordCleanupWarning}) deliberately keeps its record so the user can act on
+   * the warning, but nothing removed it afterward, so every failed teardown was a permanent leak
+   * in `card.sessions` until this method.
+   *
+   * The rule: a session record is pruned when all three hold: `cleanupWarning` is set,
+   * `tmuxSession` is absent, and `now - Date.parse(session.updatedAt) >= cleanupDelayMs`.
+   * @remarks `cleanupWarning` set identifies the warned-but-retained class; `tmuxSession` absent
+   * excludes {@link noteCleanupWarning}'s preflight-refusal records, whose tmux session, ttyd and
+   * hookToken are deliberately still alive and usable; and the `cleanupDelayMs` window gives the
+   * warning at least as long to be seen as the successful cleanup it replaced would itself have
+   * waited before firing.
+   * @remarks Fails closed on a bad timestamp: an absent `updatedAt`, or one `Date.parse` cannot
+   * resolve to a finite number, is never pruned. `NaN` comparisons are false in JavaScript, which
+   * happens to give the right answer here, but the finite check is written explicitly so the
+   * safety is stated rather than incidental.
+   * @remarks Reuses {@link sessionsDueForCleanup}'s scanner shape (skip cards not on `done`, or
+   * mid-{@link isStarting}) and copies {@link finishCleanup}'s mirror-clearing block verbatim for
+   * each qualifying record: `wasActive` is captured BEFORE {@link removeSessionRecord} runs, the
+   * matching `card.*` mirrors are cleared only under that guard, and `removeSessionRecord` is
+   * called LAST so no card can end up with a dangling `activeSessionId`.
+   */
+  pruneStaleWarnedSessions(now: number): Promise<void> {
+    return this.enqueue(() => {
+      for (const card of this.cards.values()) {
+        if (card.column !== "done" || this.isStarting(card.id)) continue;
+        const stale = (card.sessions ?? []).filter((session) => {
+          if (!session.cleanupWarning || session.tmuxSession != null) {
+            return false;
+          }
+          const updatedAtMs = Date.parse(session.updatedAt);
+          if (!Number.isFinite(updatedAtMs)) return false;
+          return now - updatedAtMs >= this.cleanupDelayMs;
+        });
+        for (const target of stale) {
+          const wasActive = target.id === card.activeSessionId;
+          target.cleanupWarning = undefined;
+          target.cleanupBlocked = undefined;
+          target.cleanupDueAt = undefined;
+          if (wasActive) {
+            card.sessionLost = false;
+            card.terminalError = null;
+            card.cleanupWarning = undefined;
+            card.cleanupBlocked = undefined;
+            card.cleanupDueAt = undefined;
+            card.prs = undefined;
+            card.prsUnknown = undefined;
+            card.previews = undefined;
+            card.previewsUnknown = undefined;
+          }
+          this.removeSessionRecord(card, target.id);
+        }
+      }
+      return [];
+    });
+  }
+
+  /**
    * Record a non-forced Done-cleanup refusal (PRE-01): a dirty-worktree preflight blocked teardown,
    * so set the per-repo `cleanupBlocked` list and touch NOTHING else. Unlike recordCleanupWarning
    * (which runs only AFTER teardown and clears the session fields), this fires BEFORE any

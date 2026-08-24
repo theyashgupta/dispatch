@@ -79,15 +79,21 @@ async function runDueCleanups(): Promise<void> {
  * back-edge in `docs/ARCHITECTURE.md`'s Do-Not-Change Contract #12.
  * @remarks The immediate `void tick()` below IS the boot sweep: any session whose `cleanupDueAt`
  * elapsed while the process was stopped is picked up by this first tick, so no separate catch-up
- * code path exists. A fixed-interval timer is deliberately avoided — an overlapping tick would be a
- * double-teardown-dispatch risk this loop cannot tolerate the way the cheap-store-mutation-only
+ * code path exists. A fixed-interval timer is deliberately avoided, since an overlapping tick would
+ * be a double-teardown-dispatch risk this loop cannot tolerate the way the cheap-store-mutation-only
  * marker/artifact loops can.
+ * @remarks `tick()` also runs `store.pruneStaleWarnedSessions`, in the same `try` and AFTER
+ * `runDueCleanups`, so a session cleanly torn down this tick is removed by `finishCleanup` rather
+ * than raced by the prune path, and a prune throw is logged and rescheduled exactly like a
+ * cleanup throw. It inherits the same one-minute cadence and boot catch-up as the sweep above,
+ * rather than a second timer.
  * @see docs/ARCHITECTURE.md#cleanup-lifecycle
  */
 export function startCleanupScheduler(): void {
   async function tick(): Promise<void> {
     try {
       await runDueCleanups();
+      await store.pruneStaleWarnedSessions(Date.now());
     } catch (err) {
       console.error(
         `[cleanup-scheduler] tick failed — continuing: ${(err as Error).message}`,
