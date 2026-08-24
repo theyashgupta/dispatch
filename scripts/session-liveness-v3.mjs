@@ -14306,12 +14306,12 @@ async function checkVaultPerms(built) {
   const loosenedDirMode = statSync(dir).mode & 0o777;
   if (loosenedValuesMode !== 0o644) {
     violations.push(
-      `leg 2: hand chmodSync(values.env, 0o644) did not take, observed ${loosenedValuesMode.toString(8)} — leg proves nothing`,
+      `leg 2: hand chmodSync(values.env, 0o644) did not take, observed ${loosenedValuesMode.toString(8)}, leg proves nothing`,
     );
   }
   if (loosenedDirMode !== 0o755) {
     violations.push(
-      `leg 2: hand chmodSync(vault dir, 0o755) did not take, observed ${loosenedDirMode.toString(8)} — leg proves nothing`,
+      `leg 2: hand chmodSync(vault dir, 0o755) did not take, observed ${loosenedDirMode.toString(8)}, leg proves nothing`,
     );
   }
 
