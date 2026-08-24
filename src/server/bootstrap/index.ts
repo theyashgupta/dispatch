@@ -88,10 +88,16 @@ const spaFallback: express.RequestHandler = (req, res, next) => {
  * `DENY`/`'none'`) is deliberate: the app frames its OWN same-origin terminal at
  * `/sessions/<id>/terminal/`, so a same-origin allowance must survive while every third-party
  * origin is refused — the relevant threat once Phase 74 makes the app publicly reachable.
+ * `nosniff` rides along here rather than on one route: `/sessions/:id/terminal/scrollback` serves
+ * raw, pane-derived bytes as a document-loadable same-origin `text/plain` response, and that
+ * content is transitively attacker-influenced (anything the agent echoed). Modern browsers do not
+ * sniff `text/plain; charset=utf-8` into HTML, so this is hardening rather than a live hole, but a
+ * global header costs one line and covers every future byte-serving route too.
  */
 const frameGuardHeaders: express.RequestHandler = (_req, res, next) => {
   res.setHeader("X-Frame-Options", "SAMEORIGIN");
   res.setHeader("Content-Security-Policy", "frame-ancestors 'self'");
+  res.setHeader("X-Content-Type-Options", "nosniff");
   next();
 };
 
