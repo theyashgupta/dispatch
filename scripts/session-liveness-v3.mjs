@@ -639,6 +639,15 @@ const VAULT_FIXTURE = {
 };
 
 /**
+ * `--check vault-no-read-back`'s sentinel. Split across a concatenation deliberately, so the
+ * literal string never appears whole a second time in this file and a naive repo-wide grep for
+ * it stays unambiguous. `VAULT_SENTINEL_ROTATED` proves the rotate leg's OLD value cannot survive
+ * either.
+ */
+const VAULT_SENTINEL = "s3nt1nel" + "-d0n0tl34k-" + process.pid;
+const VAULT_SENTINEL_ROTATED = VAULT_SENTINEL + "-rot";
+
+/**
  * Ceiling for {@link waitForSagaSettled}'s poll of the real start saga: the stub `claude`'s own
  * REPL-ready line prints in milliseconds, but `git worktree add` on the throwaway repo plus
  * `sendKickoff`'s real 500ms paste-settle sleep are genuine wall-clock costs this ceiling must
@@ -14608,6 +14617,318 @@ async function checkVaultMutationVisibility(built) {
   return violations;
 }
 
+/**
+ * Open a real SSE connection to `GET /api/stream`, accumulate every decoded chunk into one
+ * string, and run `during()` once the FIRST chunk has arrived so a mutation issued inside it
+ * happens with the stream already open. Waits up to `ms` for that first chunk (a stream that
+ * never yields one proves nothing, so the caller gets `neverConnected: true` instead of a
+ * vacuous empty-string pass), then waits `ms` again after `during()` so a frame provoked by the
+ * mutation has a real window to arrive, aborts, and returns everything collected. The abort
+ * rejection is swallowed, an aborted read is the expected way this loop ends, not a failure.
+ */
+async function collectSseFrames(built, ms, during) {
+  const controller = new AbortController();
+  let text = "";
+  let sawFirstChunk = false;
+
+  const readLoop = (async () => {
+    let res;
+    try {
+      res = await fetch(`http://127.0.0.1:${built.port}/api/stream`, {
+        signal: controller.signal,
+      });
+    } catch {
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        sawFirstChunk = true;
+        text += decoder.decode(value, { stream: true });
+      }
+    } catch {
+      // Expected once controller.abort() fires below.
+    }
+  })();
+
+  const firstChunkDeadline = Date.now() + ms;
+  while (!sawFirstChunk && Date.now() < firstChunkDeadline) {
+    await sleep(25);
+  }
+
+  const neverConnected = !sawFirstChunk;
+  if (!neverConnected) {
+    await during();
+    await sleep(ms);
+  }
+
+  controller.abort();
+  await readLoop;
+
+  return { text, neverConnected };
+}
+
+/**
+ * `--check vault-no-read-back`: the phase's headline check (T-103-01/T-103-03/T-103-06). Seeds one
+ * sentinel-bearing key, then sweeps every vault route, eight read-back path shapes, `GET
+ * /api/board`, a live SSE stream and all four error paths, scanning every collected response body
+ * for the sentinel and asserting the listed key object carries exactly the five allowed fields,
+ * the structural form of "never a length hint proportional to the real value".
+ */
+async function checkVaultNoReadBack(built) {
+  const violations = [];
+  const collected = [];
+
+  function record(res) {
+    collected.push(res.text);
+    return res;
+  }
+
+  function scanSentinels(bodies, label) {
+    const joined = bodies.join("\n");
+    for (const [sentinelName, sentinel] of [
+      ["VAULT_SENTINEL", VAULT_SENTINEL],
+      ["VAULT_SENTINEL_ROTATED", VAULT_SENTINEL_ROTATED],
+    ]) {
+      const count = joined.split(sentinel).length - 1;
+      if (count > 0) {
+        const idx = joined.indexOf(sentinel);
+        const context = joined.slice(
+          Math.max(0, idx - 100),
+          idx + sentinel.length + 100,
+        );
+        violations.push(
+          `${label}: ${sentinelName} appears ${count} time(s) in collected response bodies, context: ...${context}...`,
+        );
+      }
+    }
+  }
+
+  // Leg 1: seed.
+  const created = record(
+    await vaultRequest(built, "POST", "/vault", {
+      name: "SEAL_KEY",
+      purpose: "no read back",
+      value: VAULT_SENTINEL,
+    }),
+  );
+  if (created.status !== 200) {
+    violations.push(
+      `leg 1: POST /vault expected 200, got ${created.status}: ${created.text}`,
+    );
+  }
+
+  // Leg 2: the shape assertion, the structural form of "no length hint proportional to the
+  // real value". Any extra field on the listed key fails this, whatever its name.
+  const listed = record(await vaultRequest(built, "GET", "/vault"));
+  if (listed.status !== 200) {
+    violations.push(
+      `leg 2: GET /vault expected 200, got ${listed.status}: ${listed.text}`,
+    );
+  } else {
+    let parsed;
+    try {
+      parsed = JSON.parse(listed.text);
+    } catch {
+      violations.push(
+        `leg 2: GET /vault returned unparseable JSON: ${listed.text}`,
+      );
+    }
+    const entry = Array.isArray(parsed?.keys)
+      ? parsed.keys.find((k) => k.name === "SEAL_KEY")
+      : undefined;
+    if (!entry) {
+      violations.push(`leg 2: SEAL_KEY missing from listing after create`);
+    } else {
+      const observedKeysJson = JSON.stringify(Object.keys(entry).sort());
+      const expectedKeysJson =
+        '["createdAt","filled","name","purpose","updatedAt"]';
+      if (observedKeysJson !== expectedKeysJson) {
+        violations.push(
+          `leg 2: SEAL_KEY entry has fields ${observedKeysJson}, expected exactly ${expectedKeysJson}`,
+        );
+      }
+    }
+  }
+
+  // Leg 3: the read-back probe list. A 2xx on any of the first five is a violation naming the
+  // path, none of these routes should exist at all. The last three hit the real GET /vault
+  // handler (query strings the handler ignores) and are EXEMPT from the 2xx violation; they are
+  // scanned for the sentinel only, same as every other collected body.
+  const probesMustNotExist = [
+    ["GET", "/vault/SEAL_KEY"],
+    ["GET", "/vault/SEAL_KEY/value"],
+    ["GET", "/vault/SEAL_KEY/reveal"],
+    ["POST", "/vault/SEAL_KEY/reveal"],
+    ["GET", "/vault/values"],
+  ];
+  const probesFallThroughToListing = [
+    ["GET", "/vault?reveal=1"],
+    ["GET", "/vault?name=SEAL_KEY&reveal=true"],
+    ["GET", "/vault?include=value"],
+  ];
+  for (const [method, path] of probesMustNotExist) {
+    const res = record(await vaultRequest(built, method, path));
+    if (res.status >= 200 && res.status < 300) {
+      violations.push(
+        `leg 3: ${method} ${path} answered ${res.status} (2xx), this path must not exist`,
+      );
+    }
+  }
+  for (const [method, path] of probesFallThroughToListing) {
+    const res = record(await vaultRequest(built, method, path));
+    if (res.status !== 200) {
+      violations.push(
+        `leg 3: ${method} ${path} expected 200 (falls through to the ordinary listing), got ${res.status}: ${res.text}`,
+      );
+    }
+  }
+
+  // Leg 4: the remaining vault routes with the sentinel in flight.
+  const rotated = record(
+    await vaultRequest(built, "PUT", "/vault/SEAL_KEY/value", {
+      value: VAULT_SENTINEL_ROTATED,
+    }),
+  );
+  if (rotated.status !== 200) {
+    violations.push(
+      `leg 4: PUT /vault/SEAL_KEY/value expected 200, got ${rotated.status}: ${rotated.text}`,
+    );
+  }
+
+  const edited = record(
+    await vaultRequest(built, "PATCH", "/vault/SEAL_KEY", {
+      purpose: "still no read back",
+    }),
+  );
+  if (edited.status !== 200) {
+    violations.push(
+      `leg 4: PATCH /vault/SEAL_KEY expected 200, got ${edited.status}: ${edited.text}`,
+    );
+  }
+
+  const relisted = record(await vaultRequest(built, "GET", "/vault"));
+  if (relisted.status !== 200) {
+    violations.push(
+      `leg 4: GET /vault expected 200, got ${relisted.status}: ${relisted.text}`,
+    );
+  }
+
+  // Leg 5: the four error paths the criterion names.
+  const unknownKey = record(
+    await vaultRequest(built, "PUT", "/vault/NO_SUCH_KEY/value", {
+      value: VAULT_SENTINEL,
+    }),
+  );
+  if (unknownKey.status !== 404) {
+    violations.push(
+      `leg 5: unknown key PUT /vault/NO_SUCH_KEY/value expected 404, got ${unknownKey.status}: ${unknownKey.text}`,
+    );
+  }
+
+  const duplicate = record(
+    await vaultRequest(built, "POST", "/vault", {
+      name: "SEAL_KEY",
+      purpose: "dupe",
+      value: VAULT_SENTINEL,
+    }),
+  );
+  if (duplicate.status !== 409) {
+    violations.push(
+      `leg 5: duplicate name POST /vault expected 409, got ${duplicate.status}: ${duplicate.text}`,
+    );
+  }
+
+  const missingValue = record(
+    await vaultRequest(built, "PUT", "/vault/SEAL_KEY/value", {}),
+  );
+  if (missingValue.status !== 400) {
+    violations.push(
+      `leg 5: missing value PUT /vault/SEAL_KEY/value expected 400, got ${missingValue.status}: ${missingValue.text}`,
+    );
+  }
+
+  // The malformed-body leg MUST use the echoing shape: a raw non-JSON body that IS the sentinel
+  // itself. Anything else passes vacuously against a build with the parse-error handler removed.
+  const malformed = record(
+    await vaultRequestRaw(built, "/vault", VAULT_SENTINEL),
+  );
+  if (malformed.status !== 400) {
+    violations.push(
+      `leg 5: malformed body expected 400, got ${malformed.status}: ${malformed.text}`,
+    );
+  }
+  if (malformed.text !== '{"error":"malformed-body"}') {
+    violations.push(
+      `leg 5: malformed body response expected byte-exact {"error":"malformed-body"}, got: ${malformed.text}`,
+    );
+  }
+
+  // Leg 6: the board and the stream.
+  const board = record(await vaultRequest(built, "GET", "/board"));
+  if (board.status !== 200) {
+    violations.push(
+      `leg 6: GET /board expected 200, got ${board.status}: ${board.text}`,
+    );
+  }
+
+  const { text: sseText, neverConnected } = await collectSseFrames(
+    built,
+    1500,
+    async () => {
+      record(
+        await vaultRequest(built, "PUT", "/vault/SEAL_KEY/value", {
+          value: VAULT_SENTINEL,
+        }),
+      );
+    },
+  );
+  collected.push(sseText);
+  if (neverConnected) {
+    violations.push(
+      `leg 6: GET /api/stream never yielded a first chunk, the SSE leg proves nothing`,
+    );
+  }
+
+  // Leg 7: the scan. Every collected body, joined, both sentinels, zero tolerance.
+  scanSentinels(collected, "leg 7");
+
+  // Leg 8: teardown parity, the delete and the re-list get their own fresh scan.
+  const deletedKey = await vaultRequest(built, "DELETE", "/vault/SEAL_KEY");
+  if (deletedKey.status !== 200) {
+    violations.push(
+      `leg 8: DELETE /vault/SEAL_KEY expected 200, got ${deletedKey.status}: ${deletedKey.text}`,
+    );
+  }
+  const finalList = await vaultRequest(built, "GET", "/vault");
+  if (finalList.status !== 200) {
+    violations.push(
+      `leg 8: GET /vault expected 200, got ${finalList.status}: ${finalList.text}`,
+    );
+  } else {
+    let parsedFinal;
+    try {
+      parsedFinal = JSON.parse(finalList.text);
+    } catch {
+      violations.push(
+        `leg 8: GET /vault returned unparseable JSON: ${finalList.text}`,
+      );
+    }
+    const stillPresent = Array.isArray(parsedFinal?.keys)
+      ? parsedFinal.keys.some((k) => k.name === "SEAL_KEY")
+      : false;
+    if (stillPresent) {
+      violations.push(`leg 8: SEAL_KEY still present in listing after delete`);
+    }
+  }
+  scanSentinels([deletedKey.text, finalList.text], "leg 8");
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -14645,6 +14966,8 @@ const CHECKS = {
       checkVaultMutationVisibility,
       VAULT_FIXTURE,
     ),
+  "vault-no-read-back": () =>
+    withFixture("vault-no-read-back", checkVaultNoReadBack, VAULT_FIXTURE),
   "second-session-fixture": () =>
     withFixture(
       "second-session-fixture",
