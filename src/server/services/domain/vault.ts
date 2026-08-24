@@ -212,7 +212,9 @@ export async function createKey(input: {
       filled: input.value !== undefined,
     };
 
-    const lines = await readValueLines();
+    const lines = (await readValueLines()).filter(
+      (line) => !line.startsWith(`${input.name}=`),
+    );
     if (input.value !== undefined) {
       lines.push(valueLineFor(input.name, input.value));
     }
