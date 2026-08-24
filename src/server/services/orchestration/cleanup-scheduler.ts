@@ -82,21 +82,30 @@ async function runDueCleanups(): Promise<void> {
  * code path exists. A fixed-interval timer is deliberately avoided, since an overlapping tick would
  * be a double-teardown-dispatch risk this loop cannot tolerate the way the cheap-store-mutation-only
  * marker/artifact loops can.
- * @remarks `tick()` also runs `store.pruneStaleWarnedSessions`, in the same `try` and AFTER
- * `runDueCleanups`, so a session cleanly torn down this tick is removed by `finishCleanup` rather
- * than raced by the prune path, and a prune throw is logged and rescheduled exactly like a
- * cleanup throw. It inherits the same one-minute cadence and boot catch-up as the sweep above,
- * rather than a second timer.
+ * @remarks `tick()` also runs `store.pruneStaleWarnedSessions`, AFTER `runDueCleanups` but in its
+ * OWN `try`, so a session cleanly torn down this tick is removed by `finishCleanup` rather than
+ * raced by the prune path, while a throw out of the sweep no longer takes the prune down with it.
+ * The ordering is a preference; the coupling would have been a defect, since the prune is the
+ * recovery mechanism for FAILED teardowns and gating it on the sweep's success would run it least
+ * often exactly when it is needed most. Either failure is logged and both are rescheduled. The
+ * prune inherits the same one-minute cadence and boot catch-up as the sweep above, rather than a
+ * second timer.
  * @see docs/ARCHITECTURE.md#cleanup-lifecycle
  */
 export function startCleanupScheduler(): void {
   async function tick(): Promise<void> {
     try {
-      await runDueCleanups();
+      try {
+        await runDueCleanups();
+      } catch (err) {
+        console.error(
+          `[cleanup-scheduler] due-cleanup sweep failed, continuing: ${(err as Error).message}`,
+        );
+      }
       await store.pruneStaleWarnedSessions(Date.now());
     } catch (err) {
       console.error(
-        `[cleanup-scheduler] tick failed — continuing: ${(err as Error).message}`,
+        `[cleanup-scheduler] prune failed, continuing: ${(err as Error).message}`,
       );
     } finally {
       scheduleNext();
