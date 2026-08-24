@@ -14,7 +14,7 @@ const execFileP = promisify(execFile);
  * pane. The re-adoption fingerprint has only NARROWED, per the rule below.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
-const TTYD_RUNTIME_REVISION = 6;
+const TTYD_RUNTIME_REVISION = 7;
 const TTYD_RUNTIME_REVISION_KEY = "DISPATCH_TTYD_REVISION";
 
 /**
@@ -204,6 +204,8 @@ async function spawnTtyd(session: string, sessionId: string): Promise<number> {
       "0",
       "-b",
       `/sessions/${sessionId}/terminal`,
+      "-T",
+      "tmux-256color",
       "-t",
       "disableLeaveAlert=true",
       "-t",

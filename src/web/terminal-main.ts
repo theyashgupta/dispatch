@@ -150,6 +150,7 @@ function createTerminal(
   baseFontSize = theme?.fontSize ?? 15;
   const term = new Terminal({
     allowProposedApi: true,
+    scrollback: 10000,
     cursorBlink: theme?.cursorBlink ?? false,
     smoothScrollDuration: 120,
     fontSize: Math.max(ZOOM.minFontPx, baseFontSize * zoom),
@@ -215,6 +216,28 @@ function attachShiftEnterHandler(
     }
     return true;
   });
+}
+
+/**
+ * Write the pane's tmux history into the terminal before the live stream starts.
+ *
+ * @remarks TERM-05: without this, a fresh client's local scrollback begins at the attach point
+ * and touch scrolling hits a wall at the first row that was visible on connect. Failures resolve
+ * silently so a missing endpoint can never block the terminal from connecting.
+ */
+async function seedScrollback(term: Terminal): Promise<void> {
+  try {
+    const base = window.location.pathname.replace(/\/$/, "");
+    const res = await fetch(`${base}/scrollback`);
+    if (!res.ok) return;
+    const text = await res.text();
+    if (text.trim().length === 0) return;
+    await new Promise<void>((done) => {
+      term.write(text.replace(/\n/g, "\r\n") + "\x1b[0m", done);
+    });
+  } catch {
+    return;
+  }
 }
 
 /**
@@ -285,7 +308,7 @@ function connect(term: Terminal): void {
     };
   };
 
-  open();
+  void seedScrollback(term).then(open);
   attachShiftEnterHandler(term, () => socket);
 }
 

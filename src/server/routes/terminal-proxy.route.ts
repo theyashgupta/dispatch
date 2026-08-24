@@ -1,9 +1,42 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
 import {
   httpForward,
   resolveLiveTtydPort,
 } from "../adapters/terminal-proxy.js";
+import { sessionScrollback } from "../services/orchestration/terminal.js";
 import { WEB_DIST_DIR } from "../services/infra/paths.js";
+
+/**
+ * Lines of tmux history one scrollback seed may carry, matching the web client's xterm
+ * `scrollback` option: seeding more than the client buffer holds would only evict the seed's own
+ * head.
+ */
+const SCROLLBACK_SEED_LINES = 10000;
+
+/**
+ * Serve the pane's tmux HISTORY (everything above the visible screen) as raw ANSI text.
+ *
+ * @remarks TERM-05: a freshly attaching web client receives only tmux's redraw of the visible
+ * screen, so its local scrollback starts at the attach point. The terminal page fetches this
+ * BEFORE opening its WebSocket and writes it into xterm, so touch scrolling reaches content from
+ * before the attach. Registered ahead of the wildcard forward below, which would otherwise
+ * swallow the path as a static-file lookup. 404 mirrors the proxy's unknown-card behavior; a
+ * capture failure is 502 like any other upstream fault.
+ */
+function scrollbackHandler(req: Request<{ id: string }>, res: Response): void {
+  sessionScrollback(req.params.id, SCROLLBACK_SEED_LINES).then(
+    (history) => {
+      if (history == null) {
+        res.status(404).end();
+        return;
+      }
+      res.set("Cache-Control", "no-cache");
+      res.type("text/plain").send(history);
+    },
+    () => res.status(502).end(),
+  );
+}
 
 /**
  * Card.id-keyed terminal reverse-proxy, mounted as a sibling top-level path (never nested under
@@ -31,6 +64,8 @@ import { WEB_DIST_DIR } from "../services/infra/paths.js";
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 export const terminalProxyRouter = Router();
+
+terminalProxyRouter.get("/:id/terminal/scrollback", scrollbackHandler);
 
 terminalProxyRouter.all("/:id/terminal{/*rest}", (req, res) => {
   const port = resolveLiveTtydPort(req.params.id);

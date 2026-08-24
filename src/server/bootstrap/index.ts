@@ -24,7 +24,11 @@ import {
   setOrchestrationConfig,
 } from "../services/infra/config-holder.js";
 import { checkHooksCapability, installHookArtifacts } from "./hook-setup.js";
-import { ensureHyperlinksTerminalFeature } from "../adapters/tmux.js";
+import { installPtyShim } from "./pty-shim-setup.js";
+import {
+  ensureHyperlinksTerminalFeature,
+  ensureNoAltScreenOverride,
+} from "../adapters/tmux.js";
 import { unregisterHookToken } from "../services/domain/hook-tokens.js";
 import {
   reapActivityThrottle,
@@ -240,6 +244,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
 
   const statusChannel = config.statusChannel ?? "auto";
   await installHookArtifacts();
+  await installPtyShim();
   const { capable, version } = await checkHooksCapability();
   if (statusChannel === "hooks" && !capable) {
     console.warn(
@@ -265,6 +270,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
     config.cleanupDelayDays ?? DEFAULT_CLEANUP_DELAY_DAYS,
   );
   await ensureHyperlinksTerminalFeature();
+  await ensureNoAltScreenOverride();
   await reconcileSessions();
   if (isPackagedInstall()) {
     await healServicePlist({ repointNode: false }).catch((err: unknown) => {

@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { run } from "./exec.js";
 
 /**
@@ -10,7 +13,10 @@ import { run } from "./exec.js";
  * never receives the OSC 8 bytes without this terminal-feature, so xterm.js's `OscLinkProvider`
  * has nothing to resolve regardless of any browser-side patch.
  */
-const HYPERLINKS_FEATURE_ENTRY = "xterm-256color:hyperlinks";
+const HYPERLINKS_FEATURE_ENTRIES = [
+  "xterm-256color:hyperlinks",
+  "tmux-256color:hyperlinks",
+] as const;
 
 /**
  * tmux stderr signatures for "no server to talk to": `no server running on <sock>` and
@@ -22,7 +28,7 @@ const NO_SERVER_STDERR = /no server running|error connecting/;
 
 /**
  * Idempotently grant the tmux SERVER (a global, not per-session, option) the
- * {@link HYPERLINKS_FEATURE_ENTRY} terminal-feature. Checked-then-appended rather than
+ * {@link HYPERLINKS_FEATURE_ENTRIES} terminal-feature. Checked-then-appended rather than
  * unconditionally appended, because `set -ag` on an array option duplicates the entry on every
  * call and the tmux server outlives many backend boots (tmux is the app's own source of truth
  * for session survival across restarts) — an unconditional per-boot append would grow the option
@@ -50,14 +56,14 @@ export async function ensureHyperlinksTerminalFeature(): Promise<void> {
   try {
     current = (await run("tmux", ["show", "-g", "terminal-features"])).stdout;
   } catch {}
-  if (current.includes(HYPERLINKS_FEATURE_ENTRY)) return;
+  const missing = HYPERLINKS_FEATURE_ENTRIES.filter(
+    (entry) => !current.includes(entry),
+  );
+  if (missing.length === 0) return;
   try {
-    await run("tmux", [
-      "set",
-      "-ag",
-      "terminal-features",
-      HYPERLINKS_FEATURE_ENTRY,
-    ]);
+    for (const entry of missing) {
+      await run("tmux", ["set", "-ag", "terminal-features", entry]);
+    }
   } catch (err) {
     const failure = err as Error & { stderr?: string };
     if (NO_SERVER_STDERR.test(failure.stderr ?? "")) return;
@@ -65,6 +71,70 @@ export async function ensureHyperlinksTerminalFeature(): Promise<void> {
       `[tmux] could not grant xterm-256color the hyperlinks terminal-feature — Cmd+Click on real Claude Code OSC-8 links may not work: ${failure.message}`,
     );
   }
+}
+
+/**
+ * The terminal-overrides entry that stops tmux from switching Dispatch's web clients to the
+ * alternate screen.
+ *
+ * @remarks TERM-05: `tmux attach` itself owns the outer terminal's alt screen, and xterm.js
+ * keeps no scrollback there, so an attached web client could never scroll locally regardless of
+ * what the pane runs. Cancelling smcup/rmcup keeps tmux drawing on the primary screen, where
+ * linefeed scrolling feeds the client's local scrollback. Keyed to `tmux-256color`, the TERM only
+ * Dispatch's own ttyd clients attach with (ttyd.ts spawns with `-T tmux-256color`), so a user's
+ * personal tmux clients on this shared server keep normal alt-screen behavior.
+ */
+const NO_ALT_SCREEN_OVERRIDE_ENTRY = "tmux-256color:smcup@:rmcup@";
+
+/**
+ * Idempotently append {@link NO_ALT_SCREEN_OVERRIDE_ENTRY} to the server's terminal-overrides.
+ *
+ * @remarks Same shape and call sites as {@link ensureHyperlinksTerminalFeature}: server options
+ * die with the tmux server, and immediately after `new-session` (plus boot) is the only moment a
+ * live server is guaranteed.
+ */
+export async function ensureNoAltScreenOverride(): Promise<void> {
+  let current = "";
+  try {
+    current = (await run("tmux", ["show", "-g", "terminal-overrides"])).stdout;
+  } catch {}
+  if (current.includes(NO_ALT_SCREEN_OVERRIDE_ENTRY)) return;
+  try {
+    await run("tmux", [
+      "set",
+      "-ag",
+      "terminal-overrides",
+      NO_ALT_SCREEN_OVERRIDE_ENTRY,
+    ]);
+  } catch (err) {
+    const failure = err as Error & { stderr?: string };
+    if (NO_SERVER_STDERR.test(failure.stderr ?? "")) return;
+    console.warn(
+      `[tmux] could not cancel smcup/rmcup for tmux-256color clients: mobile terminal scrollback stays pinned to the visible screen: ${failure.message}`,
+    );
+  }
+}
+
+/**
+ * `~/.dispatch/pty-shim.py`, derived locally following terminal-telemetry.ts's precedent: the
+ * adapters layer may not import `services/infra/paths.ts`, so this and paths.ts's
+ * `PTY_SHIM_PATH` (the writer side, used by bootstrap) derive the same location independently.
+ */
+const PTY_SHIM_PATH = path.join(os.homedir(), ".dispatch", "pty-shim.py");
+
+/**
+ * Wraps the pane command in the ?2026-stripping pty shim boot installed under `~/.dispatch`.
+ *
+ * @remarks TERM-05: Claude Code wraps every classic-renderer frame in synchronized-output
+ * markers (DECSET 2026) because tmux answers its DECRQM probe with "supported". tmux then
+ * repaints the pane per frame instead of scrolling, so an attached web client never accumulates
+ * local scrollback. Stripping the markers restores linefeed scrolling, which is what makes
+ * zero-round-trip touch scrolling possible on the phone. File absence means boot's python3
+ * probe failed (see pty-shim-setup.ts) and the spawn degrades to unwrapped.
+ */
+function wrapWithPtyShim(commandArgv: string[]): string[] {
+  if (!existsSync(PTY_SHIM_PATH)) return commandArgv;
+  return [PTY_SHIM_PATH, ...commandArgv];
 }
 
 /**
@@ -146,6 +216,18 @@ export async function panePidsBySession(): Promise<Map<
 }
 
 /**
+ * Forces Claude Code's classic main-screen renderer inside every Dispatch pane.
+ *
+ * @remarks TERM-05: the fullscreen renderer (`tui: "fullscreen"`, the default for installs first
+ * launched on 2.1.239+) owns the alt screen with mouse tracking on, so a phone flick becomes one
+ * round-trip mouse report per row and tmux history stays at 0. The classic renderer writes the
+ * transcript to the normal buffer, where xterm.js scrolls it locally with zero round trips.
+ */
+const CLASSIC_RENDERER_ENV = {
+  CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN: "1",
+} as const;
+
+/**
  * Create a detached session running `commandArgv` in `cwd`:
  *   `tmux new-session -d -s <name> -c <cwd> -x 200 -y 50 [-e KEY=VALUE ...] <...commandArgv>`
  * The explicit -x/-y geometry is required for sane capture-pane output BEFORE any client
@@ -166,10 +248,9 @@ export async function newSession(
   commandArgv: string[],
   env?: Record<string, string>,
 ): Promise<void> {
-  const envArgs = Object.entries(env ?? {}).flatMap(([key, value]) => [
-    "-e",
-    `${key}=${value}`,
-  ]);
+  const envArgs = Object.entries({ ...CLASSIC_RENDERER_ENV, ...env }).flatMap(
+    ([key, value]) => ["-e", `${key}=${value}`],
+  );
   await run("tmux", [
     "new-session",
     "-d",
@@ -182,9 +263,10 @@ export async function newSession(
     "-y",
     "50",
     ...envArgs,
-    ...commandArgv,
+    ...wrapWithPtyShim(commandArgv),
   ]);
   await ensureHyperlinksTerminalFeature();
+  await ensureNoAltScreenOverride();
 }
 
 /**
@@ -205,6 +287,32 @@ export async function capturePane(
   if (opts.join) args.push("-J");
   args.push("-t", name);
   const { stdout } = await run("tmux", args);
+  return stdout;
+}
+
+/**
+ * Capture the pane's HISTORY, the rows above the visible screen, as colour-preserving ANSI text
+ * (`capture-pane -p -e -S -<limit> -E -1`).
+ *
+ * @remarks TERM-05: the attach-time scrollback seed. `-E -1` deliberately excludes the visible
+ * rows because tmux's attach redraw paints those; including them would duplicate one screenful at
+ * the seam between seeded history and the live stream.
+ */
+export async function captureHistory(
+  name: string,
+  limit: number,
+): Promise<string> {
+  const { stdout } = await run("tmux", [
+    "capture-pane",
+    "-p",
+    "-e",
+    "-t",
+    name,
+    "-S",
+    `-${limit}`,
+    "-E",
+    "-1",
+  ]);
   return stdout;
 }
 

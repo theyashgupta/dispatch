@@ -31,6 +31,13 @@ export const HOOK_SCRIPT_PATH = path.join(DISPATCH_DIR, "hook.sh");
 export const HOOK_SETTINGS_PATH = path.join(DISPATCH_DIR, "hook-settings.json");
 
 /**
+ * The pty shim every Dispatch tmux pane runs `claude` under (TERM-05). Regenerated at boot beside
+ * the hook artifacts; deliberately ABSENT when boot's python3 probe fails, so file existence is
+ * the capability flag `newSession` keys its unwrapped-spawn degrade on.
+ */
+export const PTY_SHIM_PATH = path.join(DISPATCH_DIR, "pty-shim.py");
+
+/**
  * The update-check cache, holding `{ lastCheckedAt, latestSeen }` so at most one anonymous
  * registry GET/day is made. A corrupt or missing file is not an error — the service just re-checks.
  */
