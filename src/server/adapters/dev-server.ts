@@ -63,9 +63,10 @@ export interface DiscoveredPort {
  * session's pane pids (visited-set guarded against a malformed/cyclic ppid chain) collects every
  * descendant, attributing each pid to the first session that reaches it; (3) one PID-scoped
  * `lsof -a -p <pids> -iTCP -sTCP:LISTEN -Fpn` resolves the whole pid set's listening ports in one
- * call. The pane pid IS the `claude` process (`newSession` launches `commandArgv` directly with
- * no interposed shell, `services/orchestration/steps.ts`), so the BFS root needs no shell-hop
- * skip.
+ * call. The pane pid is the pty shim, or `claude` itself when the shim is absent (`newSession`
+ * launches `commandArgv` directly with no interposed SHELL either way,
+ * `services/orchestration/steps.ts`); the BFS collects all descendants, so it needs no
+ * shell-hop skip in either shape.
  *
  * The literal `-a` is MANDATORY: `lsof`'s `-p` and `-i`/`-s` selectors are ORed by default, so
  * without `-a` the call returns every listening socket on the machine from any process (14

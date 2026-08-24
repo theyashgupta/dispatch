@@ -1188,16 +1188,16 @@ const SHIM_CASES = {
   },
 };
 
+/** Searches the BUFFER, never its hex STRING: a hex `indexOf` can match at an odd nibble offset,
+ * spanning two adjacent bytes, and the step past that match then continues from a misaligned
+ * position, so the same helper can both over-count and under-count. */
 function countMarkerOccurrences(buf) {
-  const hex = buf.toString("hex");
+  const needle = Buffer.from(SHIM_MARKER_PREFIX_HEX, "hex");
   let count = 0;
-  let idx = hex.indexOf(SHIM_MARKER_PREFIX_HEX);
+  let idx = buf.indexOf(needle);
   while (idx !== -1) {
     count++;
-    idx = hex.indexOf(
-      SHIM_MARKER_PREFIX_HEX,
-      idx + SHIM_MARKER_PREFIX_HEX.length,
-    );
+    idx = buf.indexOf(needle, idx + needle.length);
   }
   return count;
 }
@@ -2112,6 +2112,12 @@ function countMtmlocalLines(text) {
  * assertion the check runs, never a re-implementation. Every non-blank line currently visible in
  * `visibleCaptureRaw` must NOT appear anywhere in `historyText`; the trip message names the first
  * duplicated row verbatim and the total count found.
+ *
+ * @remarks Both sides MUST be captured with `-e`. `historyText` is the endpoint body, which is a
+ * `capture-pane -e` with colour escapes embedded, so a plain `capture-pane -p` of the visible rows
+ * could never compare equal to a coloured row even when it IS duplicated, leaving the assertion
+ * blind for exactly the content a real pane produces. It passes today only because the fixture
+ * prints monochrome `MTMLOCAL-NNNN`.
  */
 function assertNoVisibleDuplication(
   violations,
@@ -2186,6 +2192,7 @@ async function runSeedFlow(violations, opts = {}) {
     const { stdout: visibleRaw } = await tmuxP([
       "capture-pane",
       "-p",
+      "-e",
       "-t",
       `=${handle.tmuxName}:`,
     ]);
@@ -2294,6 +2301,7 @@ async function breakSeedIncludesVisible(violations) {
     const { stdout: visibleRaw } = await tmuxP([
       "capture-pane",
       "-p",
+      "-e",
       "-t",
       `=${handle.tmuxName}:`,
     ]);
