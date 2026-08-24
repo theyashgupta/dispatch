@@ -1061,7 +1061,10 @@ an OS change would otherwise kill every pane at spawn instead of merely degradin
 which calls `captureHistory()` (`adapters/tmux.ts`, `capture-pane -p -e -t <name> -S -<limit> -E
 -1`), up to 10,000 lines, fetched by the client's `seedScrollback` (`web/terminal-main.ts`) BEFORE
 the WebSocket ever opens, and written into an xterm instance whose own `scrollback` option was
-raised to the matching 10,000. `-E -1` is what excludes the visible rows: tmux's own attach redraw
+raised to the matching 10,000. All three numbers are matched to a fourth: tmux's own default
+`history-limit` is 2,000, so `newSession` raises it to 10,000 in the same invocation that creates
+the pane (see the tmux-invocations section) - without that the deepest seed the endpoint could
+ever return would be about 2,000 lines and the budget would be a number the system cannot reach. `-E -1` is what excludes the visible rows: tmux's own attach redraw
 paints them itself, and including them in the seed would duplicate one screenful at the seam. The
 route is registered ahead of the wildcard forward, which would otherwise swallow this path as a
 static-file lookup, and the request hops through a service layer because routes may not call
@@ -1464,11 +1467,21 @@ exact command shapes are machine-verified against tmux 3.6a and pinned as do-not
 three of them carry traps that a refactor must not paraphrase away.
 
 **Geometry `200×50` is MANDATORY (`NEW-01`).** `newSession` runs
-`tmux new-session -d -s <name> -c <cwd> -x 200 -y 50 <...commandArgv>`. The explicit `-x 200 -y 50`
+`tmux set -g history-limit 10000 ';' new-session -d -s <name> -c <cwd> -x 200 -y 50
+<...commandArgv>`. The explicit `-x 200 -y 50`
 geometry is required for sane `capture-pane` output BEFORE any client attaches: without it the
 detached pane has a tiny default size, the claude TUI paints into that cramped geometry, and both
 readiness detection and `DISPATCH_STATUS` marker parsing become unreliable. It is load-bearing, not
 cosmetic.
+
+**The leading `set -g history-limit` rides in the SAME invocation, and the order is load-bearing
+(`TERM-05`).** tmux allocates a pane's history buffer at pane creation, so raising the limit after
+`new-session` would not help the pane just created; and `set -g` needs a live server, which tmux's
+`exit-empty on` will not give you before the first session exists. A tmux command sequence
+(`set ... ';' new-session ...`, one process, `;` as its own argv element) is the only shape that
+satisfies both. Honest consequence, the same shared-server tradeoff the two `terminal-*` grants
+carry: `history-limit` is server-global, so every pane created on that tmux server afterwards,
+including the user's own, gets a 10,000-line buffer until the server exits.
 
 **Submit Enter is a SEPARATE send-keys AFTER the paste settles (`NEW-06`).** The kickoff prompt is
 delivered by loading it into a named tmux buffer and bracket-pasting it (`paste-buffer -p`), then

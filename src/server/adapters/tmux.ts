@@ -228,8 +228,26 @@ const CLASSIC_RENDERER_ENV = {
 } as const;
 
 /**
+ * Lines of pane history every Dispatch pane is given, matching the scrollback seed budget the
+ * endpoint and the web client's xterm buffer are both sized to.
+ *
+ * @remarks TERM-05: tmux's default is 2,000, and it allocates a pane's history buffer AT PANE
+ * CREATION, so this has to be set before `new-session` builds the window, not after it like the
+ * two `ensure*` grants. It rides in the SAME tmux invocation as `new-session` (`set ... ; ...`, a
+ * tmux command sequence) because that is the only form that works from cold: `set -g` needs a live
+ * server, and tmux's `exit-empty on` kills a sessionless one, so a separate pre-call would fail on
+ * exactly the boot where it matters. Honest shared-server consequence: `history-limit` is a
+ * server-global option, so every pane created on this tmux server afterwards, including the
+ * user's own, gets the same 10,000-line buffer (more memory per pane) until the server exits.
+ */
+const HISTORY_LIMIT = "10000";
+
+/**
  * Create a detached session running `commandArgv` in `cwd`:
- *   `tmux new-session -d -s <name> -c <cwd> -x 200 -y 50 [-e KEY=VALUE ...] <...commandArgv>`
+ *   `tmux set -g history-limit <n> ';' new-session -d -s <name> -c <cwd> -x 200 -y 50
+ *   [-e KEY=VALUE ...] <...commandArgv>`
+ * The leading `set` is a tmux command sequence, not a second process, and it MUST precede
+ * `new-session` in the same invocation (see {@link HISTORY_LIMIT}).
  * The explicit -x/-y geometry is required for sane capture-pane output BEFORE any client
  * attaches (probe-verified — without it the pane has a tiny default size and readiness
  * detection is unreliable). Trailing args become the window command. Optional `env` entries
@@ -252,6 +270,11 @@ export async function newSession(
     ([key, value]) => ["-e", `${key}=${value}`],
   );
   await run("tmux", [
+    "set",
+    "-g",
+    "history-limit",
+    HISTORY_LIMIT,
+    ";",
     "new-session",
     "-d",
     "-s",
