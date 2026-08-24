@@ -13,7 +13,7 @@
  * {@link TWO_SESSION_FIXTURE} and {@link SINGLE_SESSION_FIXTURE}.
  *
  * SAFETY IS THIS FILE'S FIRST-ORDER CONCERN. `adoptAndSweep` (`ttyd.ts`) fingerprints ttyd by ARGV
- * SHAPE — `ttyd` + `tmux attach`, the `DISPATCH_TTYD_REVISION_6` retained key, or the
+ * SHAPE — `ttyd` + `tmux attach`, the `DISPATCH_TTYD_REVISION_<n>` retained key, or the
  * `-b /sessions/<sessionId>/terminal` base path — and NEVER by tmux session name, so a harness ttyd
  * is fingerprint-indistinguishable from the user's live service's ttyd regardless of how
  * distinctly this harness names its own tmux sessions. {@link assertNoLiveService} is therefore
@@ -354,14 +354,35 @@ const SINGLE_SESSION_TMUX_PREFIX = `dsp91sp-${process.pid}-`;
 
 /**
  * The exact re-adoption fingerprint key `spawnTtyd` (`ttyd.ts`) emits via `-t
- * DISPATCH_TTYD_REVISION_6=1` — without it, boot-time `adoptAndSweep` cannot mark this harness's
- * own ttyd as `compatible` and would sweep it as an unrecognized orphan instead of adopting it.
- * Bumped 5 -> 6 in lockstep with `ttyd.ts`'s own `TTYD_RUNTIME_REVISION` (PROXY-01): a harness
- * still asserting `_5` would spawn a ttyd its OWN sandbox boot's `reconcileSessions()` sweeps as
- * incompatible before any check ever runs against it.
+ * DISPATCH_TTYD_REVISION_<n>=1` — without it, boot-time `adoptAndSweep` cannot mark this harness's
+ * own ttyd as `compatible`, and `killTtydPids` kills it as an unrecognized orphan before any check
+ * ever runs against it.
+ *
+ * @remarks Read out of `ttyd.ts` at startup rather than restated as a literal: the by-hand lockstep
+ * this used to rely on silently broke when the app bumped 6 -> 7 without the harness, which killed
+ * every fixture ttyd at sandbox boot and surfaced only as a `404` on the terminal proxy's upgrade
+ * path. Deriving it makes the next bump a no-op here, and an unparseable `ttyd.ts` fails closed.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
-const TTYD_REVISION_RETAINED_KEY = "DISPATCH_TTYD_REVISION_6";
+const TTYD_REVISION_RETAINED_KEY = readTtydRevisionRetainedKey();
+
+/**
+ * Parse `TTYD_RUNTIME_REVISION` and `TTYD_RUNTIME_REVISION_KEY` out of `ttyd.ts` source and rebuild
+ * the retained key exactly as `ttyd.ts` composes it. Throws rather than guessing, so a rename there
+ * stops this harness instead of letting it spawn ttyd the sandbox server will sweep.
+ */
+function readTtydRevisionRetainedKey() {
+  const file = join(REPO_ROOT, "src", "server", "adapters", "ttyd.ts");
+  const src = readFileSync(file, "utf8");
+  const revision = src.match(/const TTYD_RUNTIME_REVISION = (\d+);/);
+  const key = src.match(/const TTYD_RUNTIME_REVISION_KEY = "([^"]+)";/);
+  if (!revision || !key) {
+    throw new Error(
+      `could not read TTYD_RUNTIME_REVISION/_KEY from ${file} — the harness cannot spawn a ttyd its own sandbox boot will adopt`,
+    );
+  }
+  return `${key[1]}_${revision[1]}`;
+}
 
 const FAKE_LINEAR_API_KEY = "session-liveness-v3-harness-fake-key-never-real";
 
@@ -1072,8 +1093,8 @@ async function psLineFor(pid) {
 
 /**
  * Spawn one real ttyd with the EXACT argv `spawnTtyd` (`ttyd.ts`) uses — including the
- * `-t DISPATCH_TTYD_REVISION_6=1` retained key, without which boot-time `adoptAndSweep` cannot mark
- * it `compatible` for re-adoption — and resolve with its kernel-assigned port, parsed from stderr
+ * `-t DISPATCH_TTYD_REVISION_<n>=1` retained key, without which boot-time `adoptAndSweep` cannot
+ * mark it `compatible` for re-adoption — and resolve with its kernel-assigned port, parsed from stderr
  * the way the app's own `parsePort` does. `sessionId` (not `cardId`) is what the `-b` base-path
  * carries, matching production's own session-keyed base path (PROXY-01).
  * @see docs/ARCHITECTURE.md#terminal-ttyd
@@ -1136,7 +1157,7 @@ function spawnTtyd(session, sessionId) {
 
 /**
  * Spawn one REAL ttyd carrying the PRE-92 fingerprint on purpose: the retained key literal
- * `DISPATCH_TTYD_REVISION_5=1` (one revision behind {@link TTYD_REVISION_RETAINED_KEY}) and a
+ * `DISPATCH_TTYD_REVISION_5=1` (a literal predecessor of {@link TTYD_REVISION_RETAINED_KEY}) and a
  * CARD-keyed `-b` base path (`/sessions/<cardId>/terminal`, the shape every ttyd carried before
  * PROXY-01 moved the base path to a session id). Deliberately NOT a call to {@link spawnTtyd} with
  * an older argument — the whole point of `--check orphan-sweep` is a process the CURRENT build
