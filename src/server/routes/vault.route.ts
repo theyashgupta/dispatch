@@ -16,10 +16,11 @@ const MAX_VALUE_BYTES = 8192;
  * Vault CRUD routes, mounted behind the single app-level gate hoisted in `bootstrap/index.ts`
  * (never a standalone router). These routes are write-only for values: no handler, at any path,
  * ever returns a stored value, a list entry carries only name, purpose, timestamps and a `filled`
- * flag. Every mutating handler re-validates its own body independently of any client-side check
- * (the route is gated by loopback OR a valid remote session, not trust-gated), and a value is
- * accepted from a JSON request body only, never a query string or a path segment. Every unexpected
- * throw maps to a generic 500 with no stack, path or filesystem-error text.
+ * flag (T-103-01). Every mutating handler re-validates its own body independently of any
+ * client-side check (the route is gated by loopback OR a valid remote session, not trust-gated),
+ * and a value is accepted from a JSON request body only, never a query string or a path segment.
+ * Every unexpected throw maps to a generic 500 with no stack, path or filesystem-error text
+ * (T-103-04).
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
 export const vaultRouter = Router();

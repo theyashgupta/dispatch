@@ -104,9 +104,9 @@ function serializeSchema(keys: VaultKeySummary[]): string {
 /**
  * The single write chokepoint every mutator routes through. Re-asserts 0700/0600 on every call
  * since both `mkdir`'s and `write-file-atomic`'s `mode` options are create-only, so an externally
- * loosened directory or file would otherwise stay loose. Write order is values, then metadata,
- * then schema, so a crash always leaves the read-mostly schema surface stale, never the values
- * file.
+ * loosened directory or file would otherwise stay loose (T-103-02). Write order is values, then
+ * metadata, then schema, so a crash always leaves the read-mostly schema surface stale, never the
+ * values file.
  */
 async function writeStore(
   keys: VaultKeySummary[],
@@ -137,7 +137,7 @@ async function writeStore(
 
 /**
  * List every vault key's metadata, sorted by name. Opens only `vault.json`, never `values.env`,
- * so a value cannot reach this path structurally.
+ * so a value cannot reach this path structurally (T-103-01).
  */
 export async function listKeys(): Promise<VaultKeySummary[]> {
   const keys = await readMetadata();

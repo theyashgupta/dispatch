@@ -139,9 +139,9 @@ const jsonBodyErrorHandler: express.ErrorRequestHandler = (
  * so it catches a bad body before any route handler runs. Express 5's default handler renders
  * V8's `JSON.parse` error message, and for a body that is valid UTF-8 but not JSON at all, that
  * message quotes the submitted bytes back, so a client that POSTs a bare secret to any `/api`
- * route would have it reflected in the 400 body and in the server's stderr. Scoped to the whole
- * `/api` mount deliberately: every `/api` route shares the one `express.json` parser, so a
- * vault-only handler would leave the identical leak on `/api/cards` and every other route.
+ * route would have it reflected in the 400 body and in the server's stderr (T-103-03). Scoped to
+ * the whole `/api` mount deliberately: every `/api` route shares the one `express.json` parser, so
+ * a vault-only handler would leave the identical leak on `/api/cards` and every other route.
  */
 const apiJsonParseErrorHandler: express.ErrorRequestHandler = (
   err,

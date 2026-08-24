@@ -59,8 +59,11 @@ const ID_RE =
  * residual re-freeze (`T-99-12`), see docs/ARCHITECTURE.md#known-residuals.
  * @remarks Moved from 130 to 131 for the deliberate one-ID cleanup-mirror
  * chokepoint re-freeze (`NEW-23`), see docs/ARCHITECTURE.md#cleanup-mirror-chokepoint.
+ * @remarks Moved from 131 to 135 for the deliberate four-ID re-freeze ratifying the
+ * write-only vault store's guarantees (`T-103-01` through `T-103-04`), see
+ * docs/ARCHITECTURE.md#security-threat-model.
  */
-const FROZEN_COUNT = 131;
+const FROZEN_COUNT = 135;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");
