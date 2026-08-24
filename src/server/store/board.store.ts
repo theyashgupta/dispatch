@@ -2832,6 +2832,55 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Scan for warned-but-retained session records past their retention window WITHOUT mutating or
+   * enqueueing anything, so {@link pruneStaleWarnedSessions} can learn whether it has any work
+   * before it takes the single-writer queue. {@link sessionsDueForCleanup} is the in-file
+   * precedent for the shape: a plain read over `this.cards`.
+   * @remarks The pre-scan is not an optimization, it is the difference between an idle timer and a
+   * permanent one. `enqueue` has no no-op path: every call runs `backupTick`, persists the FULL
+   * card set and emits `change`, which makes `sse.route.ts` build and write a whole board snapshot
+   * to every connected client. An unconditional enqueue on the one-minute cleanup tick would
+   * charge a board write and a full SSE fan-out per minute forever to a board with nothing
+   * prunable. `runDueCleanups` already behaves this way, enqueueing only when its own scan yields
+   * work.
+   * @remarks Card guards are the same three every other cleanup dispatcher takes: `done` only,
+   * never mid-{@link isStarting} (which covers start AND resume sagas), never
+   * mid-{@link isCleaningUp}. The last one matters most here. `cleanupWorkspace` does seconds of
+   * `git worktree` work between store calls, and a prune tick landing inside that window would
+   * splice out the very record the teardown is operating on, after which every terminal cleanup
+   * mutator ({@link finishCleanup}, {@link recordCleanupWarning}, {@link recordCleanupBlocked})
+   * takes its "target does not resolve, refusing" branch and the teardown's outcome is discarded.
+   * @remarks The caller re-runs this scan INSIDE the mutator rather than trusting the pre-scan's
+   * snapshot, matching how `runDueCleanups` re-validates against a fresh `store.getCard` before it
+   * dispatches.
+   */
+  private stalePrunableSessions(
+    now: number,
+  ): { card: Card; sessionId: string }[] {
+    const out: { card: Card; sessionId: string }[] = [];
+    for (const card of this.cards.values()) {
+      if (
+        card.column !== "done" ||
+        this.isStarting(card.id) ||
+        this.isCleaningUp(card.id)
+      ) {
+        continue;
+      }
+      for (const session of card.sessions ?? []) {
+        if (!session.cleanupWarning || session.tmuxSession != null) continue;
+        if (session.workspacePath != null || session.claudeSessionId != null) {
+          continue;
+        }
+        const updatedAtMs = Date.parse(session.updatedAt);
+        if (!Number.isFinite(updatedAtMs)) continue;
+        if (now - updatedAtMs < this.cleanupDelayMs) continue;
+        out.push({ card, sessionId: session.id });
+      }
+    }
+    return out;
+  }
+
+  /**
    * Prune stale warned-but-retained session records (Phase 93 residual R3). A warned
    * teardown ({@link recordCleanupWarning}) deliberately keeps its record so the user can act on
    * the warning, but nothing removed it afterward, so every failed teardown was a permanent leak
@@ -2862,8 +2911,10 @@ class BoardStore extends EventEmitter {
    * resolve to a finite number, is never pruned. `NaN` comparisons are false in JavaScript, which
    * happens to give the right answer here, but the finite check is written explicitly so the
    * safety is stated rather than incidental.
-   * @remarks Reuses {@link sessionsDueForCleanup}'s scanner shape (skip cards not on `done`, or
-   * mid-{@link isStarting}) and repeats {@link finishCleanup}'s FULL removal order for every
+   * @remarks Selection lives in {@link stalePrunableSessions}, which is run TWICE: once before the
+   * `enqueue` so an idle tick costs no board write and no SSE frame, and once inside the mutator
+   * so the removal acts on freshly resolved state rather than the pre-scan's snapshot. The removal
+   * repeats {@link finishCleanup}'s FULL removal order for every
    * qualifying record, not merely its `card.*` mirror block: the flat projection is cleared
    * through {@link setActiveSession} and the token through {@link clearHookToken} BEFORE the
    * record goes, which is the precondition {@link removeSessionRecord}'s own contract names.
@@ -2877,60 +2928,43 @@ class BoardStore extends EventEmitter {
    * up with a dangling `activeSessionId`.
    */
   pruneStaleWarnedSessions(now: number): Promise<void> {
+    if (this.stalePrunableSessions(now).length === 0) return Promise.resolve();
     return this.enqueue(() => {
       const events: Omit<ActivityEvent, "id">[] = [];
-      for (const card of this.cards.values()) {
-        if (card.column !== "done" || this.isStarting(card.id)) continue;
-        const stale = (card.sessions ?? []).filter((session) => {
-          if (!session.cleanupWarning || session.tmuxSession != null) {
-            return false;
-          }
-          if (
-            session.workspacePath != null ||
-            session.claudeSessionId != null
-          ) {
-            return false;
-          }
-          const updatedAtMs = Date.parse(session.updatedAt);
-          if (!Number.isFinite(updatedAtMs)) return false;
-          return now - updatedAtMs >= this.cleanupDelayMs;
-        });
-        for (const target of stale) {
-          const wasActive = target.id === card.activeSessionId;
-          this.setActiveSession(
-            card,
-            {
-              tmuxSession: undefined,
-              ttydPort: undefined,
-              workspacePath: undefined,
-              workspace: undefined,
-              claudeSessionId: undefined,
-            },
-            target.id,
-          );
-          this.clearHookToken(card, target.id);
-          if (wasActive) {
-            card.sessionLost = false;
-            card.terminalError = null;
-            card.cleanupWarning = undefined;
-            card.cleanupBlocked = undefined;
-            card.cleanupDueAt = undefined;
-            card.prs = undefined;
-            card.prsUnknown = undefined;
-            card.previews = undefined;
-            card.previewsUnknown = undefined;
-          }
-          this.removeSessionRecord(card, target.id);
-          events.push(
-            this.event("cleanup", {
-              cardId: card.id,
-              fromCol: "done",
-              toCol: "done",
-              reason:
-                "Stale cleanup warning pruned after the retention window.",
-            }),
-          );
+      for (const { card, sessionId } of this.stalePrunableSessions(now)) {
+        const wasActive = sessionId === card.activeSessionId;
+        this.setActiveSession(
+          card,
+          {
+            tmuxSession: undefined,
+            ttydPort: undefined,
+            workspacePath: undefined,
+            workspace: undefined,
+            claudeSessionId: undefined,
+          },
+          sessionId,
+        );
+        this.clearHookToken(card, sessionId);
+        if (wasActive) {
+          card.sessionLost = false;
+          card.terminalError = null;
+          card.cleanupWarning = undefined;
+          card.cleanupBlocked = undefined;
+          card.cleanupDueAt = undefined;
+          card.prs = undefined;
+          card.prsUnknown = undefined;
+          card.previews = undefined;
+          card.previewsUnknown = undefined;
         }
+        this.removeSessionRecord(card, sessionId);
+        events.push(
+          this.event("cleanup", {
+            cardId: card.id,
+            fromCol: "done",
+            toCol: "done",
+            reason: "Stale cleanup warning pruned after the retention window.",
+          }),
+        );
       }
       return events;
     });
