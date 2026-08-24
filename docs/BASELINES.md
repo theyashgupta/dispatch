@@ -731,7 +731,9 @@ pre-fix `20339`, a 55.2% reduction of the regression**); `sseFrameBytes` `15274`
 +15.42%**, same -2930/55.2% recovery); `loadCommits`/`commits` unaffected (PASS, as before).
 
 **Why a residual gap remains, and why it is not further reducible inside this plan's budget.** The
-remaining ~119 bytes/session-bearing card is the cost of `activeSession: {id, ttydPort}` itself —
+remaining ~119 bytes/session-bearing card is the whole `+2380` residual divided across the 20
+session-bearing cards, which `102-01` later decomposed exactly into `activeSession`'s own `62` plus
+`activeSessionId`'s `57`. The larger share is `activeSession: {id, ttydPort}` itself —
 not duplication, but the deliberate Phase 90 "canary" design (`src/shared/types.ts`'s
 `ActiveSessionWire` JSDoc): `TerminalRegion` renders the terminal `<iframe>` keyed on
 `activeSession.id`/`.ttydPort`, and `DetailPanel`'s "don't double-spawn" gate reads the SAME nested
@@ -990,10 +992,12 @@ cards inside the `done=500` fixture, all of which fall inside the `DONE_PAGE_SIZ
 uuid>"}` only, `ttydPort` absent (`undefined`, dropped by `JSON.stringify`) because this
    fixture's single-session leg never spawns a real ttyd process, so no port is ever assigned to
    the seeded session record. That field's own byte length is `61` content bytes plus a `1`-byte
-   comma separator, `62` bytes per card. `62 * 20 = 1240`, exactly the measured recovery. (This is
-   SMALLER than `96-10`'s own `~119` bytes/card figure because that figure's fixture shape
-   apparently carried a populated `ttydPort`; this fixture's single-session leg does not — the two
-   numbers describe the same field under different fixture conditions, not a discrepancy.)
+   comma separator, `62` bytes per card. `62 * 20 = 1240`, exactly the measured recovery. (`96-11`'s
+   `~119` bytes/card figure directly above was never this field's own cost: it was that entry's
+   ENTIRE `+2380`-byte residual divided across the same 20 cards and labelled as one field. It
+   decomposes exactly into this field's `62` plus `activeSessionId`'s `57` from point 2 below:
+   `(62 + 57) * 20 = 2380`. A populated `ttydPort` could not have accounted for the gap either way,
+   since `,"ttydPort":38123` is about `16` bytes, taking this field to roughly `79`, not `119`.)
 
 2. **The remaining `1141`-byte residual is `Card.activeSessionId`, a field with no v2.9
    equivalent, confirmed by direct measurement, not inferred.** The same debug dump, run again on
@@ -1007,8 +1011,12 @@ identifier, title, description, priority, column, updatedAt, terminalError}` —
    `activeSessionId` is new since v2.9 — it does not exist in the `6d2549f` shape at all, since
    v2.9 predates the session-entity architecture (Phase 90) entirely. Its own serialized content
    (`"activeSessionId":"<36-char uuid>"`) is `56` bytes plus the `1`-byte comma, `57` bytes per
-   card. `57 * 20 = 1140`, matching the measured `1141`-byte residual within a single byte (the
-   1-byte gap is ordinary id-value noise between separately-seeded runs, not a second cause).
+   card. `57 * 20 = 1140`. The measured residual is `1141`, and the extra byte is NOT a second
+   cause and NOT id-value noise: a UUID is fixed at 36 characters, so this field costs exactly `57`
+   bytes on all 20 cards with no variance possible, and both legs here are byte-identical across
+   three runs each. It is the same 1-byte BEFORE-leg difference `98-01` already diagnosed above
+   (this phase's BEFORE leg is `17410`, `96-11`'s was `17409`, see the threshold correction at the
+   Phase 98 entry). Against `96-11`'s own baseline the arithmetic is exact: `15029 + 2380 = 17409`.
 
 **Why this residual is not fixable inside this plan's scope, stated rather than assumed.**
 `Card.activeSessionId` is explicitly the field decision `D-A` (`STATE.md`) and this plan's own
