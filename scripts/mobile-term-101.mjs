@@ -64,17 +64,23 @@
  *   node scripts/mobile-term-101.mjs --break alt-screen-term     local-scroll with ttyd's -T set to
  *                                                                 a TERM the no-alt-screen override
  *                                                                 does not cover
+ *   node scripts/mobile-term-101.mjs --check seed              scrollback endpoint: history only,
+ *                                                                oldest line present, no visible-row
+ *                                                                duplication at the seam, 404 on an
+ *                                                                unknown session
+ *   node scripts/mobile-term-101.mjs --break seed-includes-visible   scrollback fed a capture with
+ *                                                                     no -E -1, includes the seam
+ *   npm run mobile-term-101.1     the three architecture checks above, one at a time
  *
  * Plan 101-03 adds the tunnel leg above: a real Cloudflare Quick Tunnel brought up through the
  * real product route, a real `?code=` auth handshake, TERM-06's three clauses proven over it, and
  * a `--tunnel` modifier on the round-trips/flick-distance legs so loopback and tunnel numbers
  * exist side by side. Still DIAGNOSIS-ONLY: no `src/` file is touched.
  *
- * Plan 101.1-01 (this plan) verifies the ARCHITECTURE that shipped after diagnosis: the
- * `--check pty-shim` leg above, plus `--check local-scroll` and `--check seed` (both added by
- * later tasks in this same plan). This is the first plan in this file that IS allowed to read
- * `src/` production modules directly (`pty-shim-setup.js`'s `installPtyShim` export), never to
- * copy their bodies.
+ * Plan 101.1-01 (this plan) verifies the ARCHITECTURE that shipped after diagnosis: `--check
+ * pty-shim`, `--check local-scroll` and `--check seed` above. This is the first plan in this file
+ * that IS allowed to read `src/` production modules directly (`pty-shim-setup.js`'s
+ * `installPtyShim` export), never to copy their bodies.
  *
  * Exit codes: 0 all checks PASS. 1 a safety-envelope refusal, a setup/build error, a check
  * violation, a teardown-verification failure, or the live board.db changing.
@@ -612,6 +618,12 @@ function writeViewportFixtureBinary(home) {
   return binDir;
 }
 
+/** Printed once by the classic fixture right before it enters its `read` loop. Not proof by
+ * itself of `alternate_on`/`mouse_any_flag` (those default to `"0 0"` for any brand-new pane,
+ * true from t=0 regardless of whether the fixture has even started), so
+ * `waitForClassicFixtureReady` polls for this text instead of trusting `assertPaneModes` alone. */
+const CLASSIC_FIXTURE_READY_BANNER = "mtmlocal ready";
+
 /**
  * A third fixture binary, production-shaped for the classic renderer (task 2, `local-scroll`):
  * answers a `--version`/`--help` probe, prints one ready banner, then reads lines from stdin
@@ -622,6 +634,15 @@ function writeViewportFixtureBinary(home) {
  * at all would let the shim be deleted with the check still green. The pane must NOT enter the
  * alternate screen and must NOT enable mouse tracking, so this fixture reads `0 0` from
  * `tmux display-message -p '#{alternate_on} #{mouse_any_flag}'`.
+ *
+ * @remarks The `sleep 0.01` between lines is load-bearing, live-reproduced during this task's own
+ * development: a zero-delay burst arrives at tmux faster than its own client-redraw flush cycle,
+ * and tmux's redraw heuristic then collapses many off-screen lines into a single resync rather
+ * than relaying each as an incremental scroll, so the ATTACHED CLIENT's local scrollback grows by
+ * an arbitrary, timing-dependent amount even though the PANE's own history (what `--check seed`
+ * reads via `capture-pane`) is unaffected. A ~10ms per-line pace, closer to a real renderer's own
+ * output cadence, gives tmux's flush loop room to relay each line, and this is what
+ * `--check local-scroll` needs since it measures the CLIENT's buffer growth.
  */
 function writeClassicFixtureBinary(home) {
   const binDir = join(home, "bin");
@@ -635,7 +656,7 @@ function writeClassicFixtureBinary(home) {
       "    exit 0\n" +
       "    ;;\n" +
       "esac\n" +
-      "echo 'mtmlocal ready'\n" +
+      `echo '${CLASSIC_FIXTURE_READY_BANNER}'\n` +
       "while IFS= read -r line; do\n" +
       '  if [ "$line" = "burst" ]; then\n' +
       "    i=1\n" +
@@ -643,6 +664,7 @@ function writeClassicFixtureBinary(home) {
       "      printf '\\033[?2026h'\n" +
       "      printf 'MTMLOCAL-%04d\\n' \"$i\"\n" +
       "      printf '\\033[?2026l'\n" +
+      "      sleep 0.01\n" +
       "      i=$((i + 1))\n" +
       "    done\n" +
       "  fi\n" +
@@ -650,6 +672,59 @@ function writeClassicFixtureBinary(home) {
     { mode: 0o755 },
   );
   return binDir;
+}
+
+/** Polls `capture-pane` until `CLASSIC_FIXTURE_READY_BANNER` is visible, proving the wrapped
+ * fixture binary (behind the shim when present) has actually reached its `read` loop before any
+ * caller sends `burst`, closing a real race live-reproduced during this task's own development:
+ * `send-keys burst` issued the instant `assertPaneModes` returns can land before the shell's
+ * `read` starts and be silently lost. */
+async function waitForClassicFixtureReady(
+  tmuxName,
+  timeoutMs = READY_TIMEOUT_MS,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const { stdout } = await execFileP("tmux", [
+      "capture-pane",
+      "-p",
+      "-t",
+      `=${tmuxName}:`,
+    ]);
+    if (stdout.includes(CLASSIC_FIXTURE_READY_BANNER)) return;
+    await sleep(50);
+  }
+  throw new Error(
+    `standup: classic fixture ready banner "${CLASSIC_FIXTURE_READY_BANNER}" not observed within ${timeoutMs}ms`,
+  );
+}
+
+/** Polls the pane's visible content until the fixture's own last burst line is on screen, proving
+ * the burst (200 individually-wrapped `MTMLOCAL-%04d` lines) has fully landed at the SOURCE
+ * before either a DOM-side stability poll (`--check local-scroll`) or the scrollback endpoint /
+ * `capture-pane` (`--check seed`) reads it. Shared by both. */
+async function waitForBurstComplete(tmuxName, timeoutMs = READY_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  let lastSeen = null;
+  while (Date.now() < deadline) {
+    const { stdout } = await execFileP("tmux", [
+      "capture-pane",
+      "-p",
+      "-t",
+      `=${tmuxName}:`,
+    ]);
+    if (process.env.MT101_DEBUG && stdout !== lastSeen) {
+      lastSeen = stdout;
+      console.error(
+        `DEBUG waitForBurstComplete: pane now shows:\n${stdout}\n---end---`,
+      );
+    }
+    if (stdout.includes("MTMLOCAL-0200")) return;
+    await sleep(100);
+  }
+  throw new Error(
+    `burst did not complete (MTMLOCAL-0200 not visible on tmux pane ${tmuxName}) within ${timeoutMs}ms`,
+  );
 }
 
 /** Same shape as session-liveness-v3.mjs's tmuxNewSession, but the pane command is a fixture
@@ -872,6 +947,16 @@ async function standUpFixture(opts = {}) {
       expectedModes,
     );
     console.log(`standup: pane modes ${measured}`);
+
+    if (opts.classic) {
+      // "0 0" is the DEFAULT alternate_on/mouse_any_flag for any brand-new pane, true from t=0
+      // regardless of whether the wrapped fixture binary has even started yet, so it is not a
+      // proof of readiness the way the mouse-report fixture's "1 1" is. Wait for the fixture's
+      // own ready banner instead, or a `send-keys burst` racing the shell's `read` loop can land
+      // before the loop starts and be silently lost.
+      await waitForClassicFixtureReady(tmuxName);
+      console.log(`standup: classic fixture ready banner observed`);
+    }
 
     handle.ttyd = await spawnTtyd(
       tmuxName,
@@ -1593,6 +1678,30 @@ async function pollUntilStable(
   return last;
 }
 
+/** Polls the rendered DOM (never a `window` handle, the `Terminal` instance exposes none) until
+ * `text` appears inside `#terminal`'s own text content, closing the gap `waitForBurstComplete`
+ * alone leaves open: that function only proves the SOURCE (tmux pane) finished writing, not that
+ * the CLIENT has rendered the result yet, and `pollUntilStable` polled too soon can read two
+ * coincidentally-equal `scrollHeight` values mid-catch-up and settle early. */
+async function waitForDomText(
+  cdp,
+  sessionId,
+  text,
+  timeoutMs = READY_TIMEOUT_MS,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = await evalValue(
+      cdp,
+      sessionId,
+      `document.querySelector('#terminal')?.innerText.includes(${JSON.stringify(text)}) ?? false`,
+    );
+    if (found) return;
+    await sleep(100);
+  }
+  throw new Error(`DOM never showed "${text}" within ${timeoutMs}ms`);
+}
+
 /**
  * Chrome/CDP shape copied from `runActivationFlow`: stands up the classic fixture, navigates
  * straight to `/sessions/<id>/terminal/`, bursts 200 shim-wrapped lines through a real tmux
@@ -1711,6 +1820,11 @@ async function runLocalScrollFlow(violations, opts = {}) {
       "burst",
       "Enter",
     ]);
+    // Confirm the SOURCE (tmux pane) actually finished writing all 200 lines, THEN confirm the
+    // CLIENT has rendered the last one, before polling for scrollHeight stability below: two
+    // 200ms-apart equal reads would otherwise false-positive on "settled" mid-catch-up.
+    await waitForBurstComplete(handle.tmuxName);
+    await waitForDomText(cdp, sessionId, "MTMLOCAL-0200");
 
     await pollUntilStable(() =>
       evalValue(
@@ -1825,6 +1939,167 @@ async function breakUnwrappedPane(violations) {
  * option. */
 async function breakAltScreenTerm(violations) {
   await runLocalScrollFlow(violations, { ttydTerm: "xterm-256color" });
+}
+
+// ---------------------------------------------------------------------------
+// --check seed / --break seed-includes-visible (101.1-01, task 3): HTTP + tmux only, no Chrome.
+// ---------------------------------------------------------------------------
+
+/** Every non-blank `MTMLOCAL-NNNN` line in `text`, exactly the fixture's own emitted shape. */
+function countMtmlocalLines(text) {
+  return text
+    .split("\n")
+    .map((l) => l.replace(/\r$/, "").trim())
+    .filter((l) => /^MTMLOCAL-\d{4}$/.test(l)).length;
+}
+
+/**
+ * The no-duplication-at-the-seam assertion, shared verbatim by `--check seed` (fed the real
+ * scrollback-endpoint body) and `--break seed-includes-visible` (fed a deliberately
+ * over-inclusive capture with no `-E -1`), so the break proves something about the exact
+ * assertion the check runs, never a re-implementation. Every non-blank line currently visible in
+ * `visibleCaptureRaw` must NOT appear anywhere in `historyText`; the trip message names the first
+ * duplicated row verbatim and the total count found.
+ */
+function assertNoVisibleDuplication(
+  violations,
+  label,
+  historyText,
+  visibleCaptureRaw,
+) {
+  const historyLines = new Set(
+    historyText
+      .split("\n")
+      .map((l) => l.replace(/\r$/, ""))
+      .filter((l) => l.length > 0),
+  );
+  const visibleLines = visibleCaptureRaw
+    .split("\n")
+    .map((l) => l.replace(/\r$/, "").trimEnd())
+    .filter((l) => l.trim().length > 0);
+  const duplicates = visibleLines.filter((l) => historyLines.has(l));
+  if (duplicates.length > 0) {
+    violations.push(
+      `${label}: expected 0 visible rows duplicated in the seed body, found ${duplicates.length}, first: "${duplicates[0]}"`,
+    );
+  } else {
+    console.log(
+      `${label}: 0 visible rows duplicated in the seed body (${visibleLines.length} visible non-blank rows checked)`,
+    );
+  }
+}
+
+/**
+ * The scrollback endpoint against a classic fixture holding 200 known lines at a 50-row pane
+ * height: 200-with-body, the oldest line present, no visible-row duplication at the seam, the
+ * seed+visible line counts accounting for every fixture line, and the unknown-session 404 branch.
+ * No Chrome: this leg is HTTP plus tmux only.
+ */
+async function checkSeed(violations) {
+  const handle = await standUpFixture({ classic: true });
+  try {
+    await execFileP("tmux", [
+      "send-keys",
+      "-t",
+      `=${handle.tmuxName}:`,
+      "burst",
+      "Enter",
+    ]);
+    await waitForBurstComplete(handle.tmuxName);
+
+    const url = `http://127.0.0.1:${SANDBOX_PORT}/sessions/${handle.sessionId}/terminal/scrollback`;
+    const res = await fetch(url);
+    const body = await res.text();
+    if (res.status !== 200 || body.length === 0) {
+      violations.push(
+        `seed: GET ${url} expected 200 with a non-empty body, measured status=${res.status} bodyLength=${body.length}`,
+      );
+      return;
+    }
+    console.log(`seed: GET ${url} measured 200, ${body.length} bytes`);
+
+    if (!body.includes("MTMLOCAL-0001")) {
+      violations.push(
+        'seed: expected the seed body to contain "MTMLOCAL-0001" (the oldest fixture line), not found',
+      );
+    } else {
+      console.log("seed: seed body contains MTMLOCAL-0001");
+    }
+
+    const { stdout: visibleRaw } = await execFileP("tmux", [
+      "capture-pane",
+      "-p",
+      "-t",
+      `=${handle.tmuxName}:`,
+    ]);
+    assertNoVisibleDuplication(violations, "seed", body, visibleRaw);
+
+    const seedLineCount = countMtmlocalLines(body);
+    const visibleLineCount = countMtmlocalLines(visibleRaw);
+    const total = seedLineCount + visibleLineCount;
+    console.log(
+      `seed: seed line count=${seedLineCount}, non-blank visible row count=${visibleLineCount}, total=${total}`,
+    );
+    if (total !== 200) {
+      violations.push(
+        `seed: expected seed+visible MTMLOCAL- lines to total 200 (every line the fixture printed), measured ${total} (seed=${seedLineCount} visible=${visibleLineCount})`,
+      );
+    }
+
+    const unknownId = randomUUID();
+    const unknownUrl = `http://127.0.0.1:${SANDBOX_PORT}/sessions/${unknownId}/terminal/scrollback`;
+    const res404 = await fetch(unknownUrl);
+    await res404.body?.cancel();
+    if (res404.status !== 404) {
+      violations.push(
+        `seed: GET ${unknownUrl} (unknown session id) expected 404, measured ${res404.status}`,
+      );
+    } else {
+      console.log(
+        `seed: GET <unknown session>/terminal/scrollback measured 404`,
+      );
+    }
+  } finally {
+    await tearDownFixture(handle);
+  }
+}
+
+/**
+ * Feeds `assertNoVisibleDuplication` a capture taken with `-S -200` and no `-E -1`, exactly the
+ * mistake `captureHistory`'s own `-E -1` argument exists to prevent: this capture legitimately
+ * includes the visible rows verbatim, so the shared assertion must trip.
+ */
+async function breakSeedIncludesVisible(violations) {
+  const handle = await standUpFixture({ classic: true });
+  try {
+    await execFileP("tmux", [
+      "send-keys",
+      "-t",
+      `=${handle.tmuxName}:`,
+      "burst",
+      "Enter",
+    ]);
+    await waitForBurstComplete(handle.tmuxName);
+
+    const { stdout: visibleRaw } = await execFileP("tmux", [
+      "capture-pane",
+      "-p",
+      "-t",
+      `=${handle.tmuxName}:`,
+    ]);
+    const { stdout: badCapture } = await execFileP("tmux", [
+      "capture-pane",
+      "-p",
+      "-e",
+      "-t",
+      `=${handle.tmuxName}:`,
+      "-S",
+      "-200",
+    ]);
+    assertNoVisibleDuplication(violations, "seed", badCapture, visibleRaw);
+  } finally {
+    await tearDownFixture(handle);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3948,6 +4223,7 @@ const CHECKS = {
   "telemetry-capture": checkTelemetryCapture,
   "pty-shim": checkPtyShim,
   "local-scroll": checkLocalScroll,
+  seed: checkSeed,
 };
 
 const BREAKS = {
@@ -3955,6 +4231,7 @@ const BREAKS = {
   "shim-markers-emptied": breakShimMarkersEmptied,
   "unwrapped-pane": breakUnwrappedPane,
   "alt-screen-term": breakAltScreenTerm,
+  "seed-includes-visible": breakSeedIncludesVisible,
   "no-touch-emulation": breakNoTouchEmulation,
   "sub-slop-flick": breakSubSlopFlick,
   "wrong-page": breakWrongPage,
