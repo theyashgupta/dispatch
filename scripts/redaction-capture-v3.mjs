@@ -412,25 +412,39 @@ async function main() {
       parseError = err;
     }
     const wireCard = parsedBoard?.cards?.find((c) => c.id === CARD_ID);
-    // F-96-F narrowed ActiveSessionWire to {id, ttydPort} only — tmuxSession no longer rides
-    // nested inside activeSession, so this control's anti-vacuity value now comes from the flat
-    // mirror (still present, required by KEEP-02 wire parity) plus activeSession.id resolving.
-    // `card` is the PRE-MIGRATION seed (no activeSessionId of its own — see makeFixtureCard), so
-    // the nested id is checked for SELF-consistency against the wire's own flat activeSessionId
-    // pointer, not against the seed.
+    // Phase 102 deleted the nested per-session wire object F-96-F had narrowed to {id, ttydPort};
+    // this control's anti-vacuity value now comes from an independent source outside the wire
+    // entirely. `card` is the PRE-MIGRATION seed (no activeSessionId of its own — see
+    // makeFixtureCard), so the migration mints the session id fresh; read the PERSISTED row
+    // directly off disk (never through the wire) to learn what id migration actually minted, then
+    // assert the wire's flat activeSessionId agrees with that independently-sourced ground truth,
+    // alongside the existing flat tmuxSession match.
+    const persistedDb = new DatabaseSync(dbPath);
+    let mintedSessionId;
+    try {
+      const persistedRow = persistedDb
+        .prepare("SELECT data FROM cards WHERE id = ?")
+        .get(CARD_ID);
+      const persistedCard = persistedRow
+        ? JSON.parse(persistedRow.data)
+        : undefined;
+      mintedSessionId = persistedCard?.sessions?.[0]?.id;
+    } finally {
+      persistedDb.close();
+    }
     const positiveControl2 =
       parseError == null &&
       wireCard != null &&
-      wireCard.activeSession?.id != null &&
-      wireCard.activeSession.id === wireCard.activeSessionId &&
+      mintedSessionId != null &&
+      wireCard.activeSessionId === mintedSessionId &&
       wireCard.tmuxSession === card.tmuxSession;
     rows.push({
       label:
-        "POSITIVE CONTROL 2 — GET /api/board carries the seeded card id, a resolving activeSession.id AND a flat tmuxSession match (anti-vacuity)",
+        "POSITIVE CONTROL 2 — GET /api/board's activeSessionId matches the session migration actually minted on disk, plus a flat tmuxSession match (anti-vacuity)",
       pass: positiveControl2,
       detail: parseError
         ? `JSON.parse failed: ${parseError.message}`
-        : `cardFound=${wireCard != null} activeSessionIdSelfConsistent=${wireCard?.activeSession?.id === wireCard?.activeSessionId} flatTmuxSessionMatch=${wireCard?.tmuxSession === card.tmuxSession}`,
+        : `cardFound=${wireCard != null} mintedSessionId=${mintedSessionId} activeSessionIdMatchesMinted=${wireCard?.activeSessionId === mintedSessionId} flatTmuxSessionMatch=${wireCard?.tmuxSession === card.tmuxSession}`,
     });
 
     const noSessionsArray = !boardText.includes('"sessions":');

@@ -1821,10 +1821,10 @@ async function standUpParityFixtureSession1(built) {
   built.tmux.a = settled.tmuxSession;
   const settledPersisted = readCard(built.dbPath, built.cardId);
   const settledRecord = settledPersisted?.sessions?.find(
-    (s) => s.id === settled.activeSession?.id,
+    (s) => s.id === settled.activeSessionId,
   );
   built.sessionA = {
-    id: settled.activeSession?.id,
+    id: settled.activeSessionId,
     token: settledRecord?.hookToken,
   };
   built.session1WorkspacePath = join(
@@ -2462,10 +2462,10 @@ async function withFixture(label, fn, profile = TWO_SESSION_FIXTURE) {
  * Resolve the fixture card exactly as `GET /api/board` — the wire the UI itself consumes —
  * reports it: `redactCard`'s shape, never the store's own in-memory `Card`. A non-active
  * sibling's own fields are therefore NEVER visible here (`redactCard` strips `sessions` and
- * projects only `activeSession`); the `liveness` sub-check's non-active kill direction reads the
- * persisted record directly for that reason. Tolerant of a transient fetch failure (a dropped
- * connection mid-poll) — resolves `undefined` rather than throwing, so a long poll loop degrades
- * to "not yet observed" instead of crashing the check.
+ * mirrors only the active session's fields onto the card); the `liveness` sub-check's non-active
+ * kill direction reads the persisted record directly for that reason. Tolerant of a transient
+ * fetch failure (a dropped connection mid-poll) — resolves `undefined` rather than throwing, so a
+ * long poll loop degrades to "not yet observed" instead of crashing the check.
  */
 async function fetchFixtureCard(built) {
   try {
@@ -2933,8 +2933,8 @@ async function checkHookAttribution(built) {
  * self-rescheduling tick. Samples the wire's `sessionLost` on EVERY poll — not only the terminal
  * read — so a transient `true` is a violation even when the final read looks clean.
  * @remarks `kind === "active"` kills the card's ACTIVE session (A) and polls the WIRE for the
- * promotion (`card.tmuxSession`, the flat mirror, becoming B's — F-96-F narrowed `activeSession`
- * off `tmuxSession` since the flat mirror already carries it) — the wire is enough because the
+ * promotion (`card.tmuxSession`, the flat mirror, becoming B's, the field F-96-F kept and Phase
+ * 102 later removed the redundant nested projection beside) — the wire is enough because the
  * promoted-to session is, by definition, the new active one. `kind === "sibling"` kills the
  * NON-active session (B) and polls the PERSISTED record directly instead, because the wire's
  * `redactCard` projection never exposes a non-active session's own fields — the active pointer
@@ -3008,15 +3008,15 @@ async function checkLivenessDirection(kind) {
           `liveness (${kind}): wire sessionCount expected 2, actual ${lastWireCard?.sessionCount}`,
         );
       }
-      if (lastWireCard?.activeSession?.ttydPort !== built.ttyd.b.port) {
+      if (lastWireCard?.ttydPort !== built.ttyd.b.port) {
         violations.push(
-          `liveness (${kind}): wire activeSession.ttydPort expected ${built.ttyd.b.port} (survivor's port), actual ${lastWireCard?.activeSession?.ttydPort}`,
+          `liveness (${kind}): wire ttydPort expected ${built.ttyd.b.port} (survivor's port), actual ${lastWireCard?.ttydPort}`,
         );
       }
     } else {
-      if (lastWireCard?.activeSession?.id !== surviving.id) {
+      if (lastWireCard?.activeSessionId !== surviving.id) {
         violations.push(
-          `liveness (${kind}): wire activeSession.id expected the untouched active session ${surviving.id}, actual ${lastWireCard?.activeSession?.id}`,
+          `liveness (${kind}): wire activeSessionId expected the untouched active session ${surviving.id}, actual ${lastWireCard?.activeSessionId}`,
         );
       }
       if (lastWireCard?.tmuxSession !== survivingTmux) {
@@ -3278,7 +3278,7 @@ async function checkReconcileStage2(built) {
 
   const card = await fetchFixtureCard(built);
   console.log(
-    `reconcile stage2: wire sessionLost=${card?.sessionLost}, sessionCount=${card?.sessionCount}, activeSession.id=${card?.activeSession?.id}`,
+    `reconcile stage2: wire sessionLost=${card?.sessionLost}, sessionCount=${card?.sessionCount}, activeSessionId=${card?.activeSessionId}`,
   );
   if (card?.sessionLost === true) {
     violations.push(
@@ -3290,9 +3290,9 @@ async function checkReconcileStage2(built) {
       `reconcile stage2: wire sessionCount expected 2, actual ${card?.sessionCount}`,
     );
   }
-  if (card?.activeSession?.id !== built.sessionB.id) {
+  if (card?.activeSessionId !== built.sessionB.id) {
     violations.push(
-      `reconcile stage2: wire activeSession.id expected the live session ${built.sessionB.id}, actual ${card?.activeSession?.id}`,
+      `reconcile stage2: wire activeSessionId expected the live session ${built.sessionB.id}, actual ${card?.activeSessionId}`,
     );
   }
 
@@ -4322,11 +4322,11 @@ async function checkSwitchSockets(built) {
   }
   const afterSwitch = await fetchFixtureCard(built);
   console.log(
-    `switch-sockets: wire activeSession.id after switch = ${afterSwitch?.activeSession?.id} (expected ${built.sessionB.id})`,
+    `switch-sockets: wire activeSessionId after switch = ${afterSwitch?.activeSessionId} (expected ${built.sessionB.id})`,
   );
-  if (afterSwitch?.activeSession?.id !== built.sessionB.id) {
+  if (afterSwitch?.activeSessionId !== built.sessionB.id) {
     violations.push(
-      `switch-sockets: wire activeSession.id expected ${built.sessionB.id} after the switch, actual ${afterSwitch?.activeSession?.id} — refusing to claim a socket result about a switch that never actually happened`,
+      `switch-sockets: wire activeSessionId expected ${built.sessionB.id} after the switch, actual ${afterSwitch?.activeSessionId} — refusing to claim a socket result about a switch that never actually happened`,
     );
   }
 
@@ -4392,12 +4392,10 @@ async function checkSwitchSockets(built) {
  *
  * 1. 50+ concurrent switch POSTs (alternating A/B, fired with no awaiting between them) plus 50+
  *    concurrent board reads. Every read is checked against the KNOWN, FIXED values for whichever
- *    session it reports active — both the wire's `activeSession.tmuxSession`/`ttydPort` (re-derived
- *    at redaction time straight from the session record, per `redactCard`) AND the card-level flat
+ *    session `activeSessionId` reports active — the resolved id itself, plus the card-level flat
  *    mirror `tmuxSession`/`ttydPort` (`setActiveSession`'s six-field projection,
- *    `board.store.ts:579-585`) — a torn projection is exactly a flat mirror that lags the pointer,
- *    and the flat top-level fields are the ones a bypass of `setActiveSession` actually staves,
- *    since `activeSession.*` is re-derived fresh from `card.sessions` on every read regardless.
+ *    `board.store.ts:579-585`) — a torn write is exactly a flat mirror that lags the pointer, and
+ *    the flat top-level fields are the ones a bypass of `setActiveSession` actually staves.
  *    After the storm, the PERSISTED row is read directly (the wire redacts `sessions`) and asserted
  *    to have `activeSessionId` resolve to a real record, non-empty `sessions`.
  * 2. Session B's real tmux is killed, then the switch to B is fired WITHOUT awaiting the real
@@ -4457,31 +4455,26 @@ async function checkSwitchAtomicity(built) {
           const cards = Array.isArray(body?.cards) ? body.cards : [];
           const card = cards.find((c) => c.id === built.cardId);
           if (!card) return;
-          const active = card.activeSession;
-          if (active == null) {
-            readViolations.push(`read ${i}: activeSession absent`);
+          const activeId = card.activeSessionId;
+          if (activeId == null) {
+            readViolations.push(`read ${i}: activeSessionId absent`);
             return;
           }
-          if (!knownIds.has(active.id)) {
+          if (!knownIds.has(activeId)) {
             readViolations.push(
-              `read ${i}: activeSession.id "${active.id}" is not one of the two known session ids`,
+              `read ${i}: activeSessionId "${activeId}" is not one of the two known session ids`,
             );
             return;
           }
-          const known = knownSessions[active.id];
-          if (active.ttydPort !== known.ttydPort) {
-            readViolations.push(
-              `read ${i}: activeSession(${active.id}).ttydPort expected ${known.ttydPort}, actual ${JSON.stringify(active.ttydPort)} — torn nested projection`,
-            );
-          }
+          const known = knownSessions[activeId];
           if (card.tmuxSession !== known.tmuxSession) {
             readViolations.push(
-              `read ${i}: card.tmuxSession (flat mirror) expected "${known.tmuxSession}" for active session ${active.id}, actual ${JSON.stringify(card.tmuxSession)} — flat mirror lags the pointer`,
+              `read ${i}: card.tmuxSession (flat mirror) expected "${known.tmuxSession}" for active session ${activeId}, actual ${JSON.stringify(card.tmuxSession)} — flat mirror lags the pointer`,
             );
           }
           if (card.ttydPort !== known.ttydPort) {
             readViolations.push(
-              `read ${i}: card.ttydPort (flat mirror) expected ${known.ttydPort} for active session ${active.id}, actual ${JSON.stringify(card.ttydPort)} — flat mirror lags the pointer`,
+              `read ${i}: card.ttydPort (flat mirror) expected ${known.ttydPort} for active session ${activeId}, actual ${JSON.stringify(card.ttydPort)} — flat mirror lags the pointer`,
             );
           }
           if (
@@ -4552,11 +4545,11 @@ async function checkSwitchAtomicity(built) {
   );
   const deterministicCard = await fetchFixtureCard(built);
   console.log(
-    `switch-atomicity: interleaving 1 deterministic follow-up — switch to B -> ${deterministicRes.status}; wire activeSession.id=${deterministicCard?.activeSession?.id} card.tmuxSession=${JSON.stringify(deterministicCard?.tmuxSession)} card.ttydPort=${deterministicCard?.ttydPort}`,
+    `switch-atomicity: interleaving 1 deterministic follow-up — switch to B -> ${deterministicRes.status}; wire activeSessionId=${deterministicCard?.activeSessionId} card.tmuxSession=${JSON.stringify(deterministicCard?.tmuxSession)} card.ttydPort=${deterministicCard?.ttydPort}`,
   );
-  if (deterministicCard?.activeSession?.id !== deterministicTarget) {
+  if (deterministicCard?.activeSessionId !== deterministicTarget) {
     violations.push(
-      `switch-atomicity: interleaving 1 deterministic follow-up — the awaited switch to B never landed (activeSession.id=${deterministicCard?.activeSession?.id})`,
+      `switch-atomicity: interleaving 1 deterministic follow-up — the awaited switch to B never landed (activeSessionId=${deterministicCard?.activeSessionId})`,
     );
   } else {
     const known = knownSessions[deterministicTarget];
@@ -4568,11 +4561,6 @@ async function checkSwitchAtomicity(built) {
     if (deterministicCard.ttydPort !== known.ttydPort) {
       violations.push(
         `switch-atomicity: interleaving 1 deterministic follow-up — card.ttydPort (flat mirror) expected ${known.ttydPort} after an AWAITED switch to B, actual ${JSON.stringify(deterministicCard.ttydPort)} — the flat mirror lagged its pointer`,
-      );
-    }
-    if (deterministicCard.activeSession?.ttydPort !== known.ttydPort) {
-      violations.push(
-        `switch-atomicity: interleaving 1 deterministic follow-up — activeSession.ttydPort expected ${known.ttydPort}, actual ${JSON.stringify(deterministicCard.activeSession?.ttydPort)}`,
       );
     }
   }
@@ -6448,10 +6436,11 @@ async function checkCleanupBranchLegacyWorkspace(built) {
  * Branch 5 of 5, ACTIVE-WITH-SIBLING promotion case (Task 1, `T-93-26`): cleaning the card's
  * ACTIVE session on a two-session card promotes the remaining sibling in the SAME mutation. Session
  * A is `standUpFixture`'s always-first, always-active key; session B is the untouched sibling.
- * Seeds ONLY A past-due and drives the real scheduler, polling BOTH the direct store read and the
- * live wire throughout the teardown — the wire's raw `activeSessionId` (never redacted) alongside
- * its DERIVED `activeSession` lets a dangling pointer be caught the instant it would first become
- * externally observable, not just at the final settled read.
+ * Seeds ONLY A past-due and drives the real scheduler, polling the direct store read until A's
+ * record is gone, then asserts on the settled persisted record and the survivor's tmux/ttyd state.
+ * Phase 102 removed the nested per-session wire object this branch's dangling-pointer detection
+ * previously cross-checked against; `activeSessionId` is now written in the same synchronous
+ * mutation as its flat mirrors, leaving no second wire-observable derivation to tear.
  */
 async function checkCleanupBranchPromotionActiveWithSibling(built) {
   const violations = [];
@@ -6502,45 +6491,23 @@ async function checkCleanupBranchPromotionActiveWithSibling(built) {
   const deadline = Date.now() + CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS;
   let settledCard;
   let aGone = false;
-  let wireObservations = 0;
-  let observedDanglingWire = false;
   while (Date.now() < deadline) {
     settledCard = readCard(built.dbPath, built.cardId);
     aGone =
       settledCard != null &&
       !(settledCard.sessions ?? []).some((s) => s.id === built.sessionA.id);
-    const wireCard = await fetchFixtureCard(built);
-    if (wireCard) {
-      wireObservations++;
-      if (
-        wireCard.activeSessionId != null &&
-        wireCard.activeSession === undefined
-      ) {
-        observedDanglingWire = true;
-        console.log(
-          `cleanup-branches: branch 5a — WIRE OBSERVED a dangling pointer: activeSessionId=` +
-            `${wireCard.activeSessionId} but activeSession is undefined`,
-        );
-      }
-    }
     if (aGone) break;
     await sleep(POLL_INTERVAL_MS);
   }
   console.log(
     `cleanup-branches: branch 5a (ACTIVE-WITH-SIBLING) — scheduler settle: A gone=${aGone} within ` +
-      `${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms; wire observations=${wireObservations}, any dangling=${observedDanglingWire}`,
+      `${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
   );
   if (!aGone) {
     violations.push(
       `cleanup-branches: branch 5a — session A was not torn down by the real scheduler within ${CLEANUP_ISOLATION_SETTLE_TIMEOUT_MS}ms`,
     );
     return violations;
-  }
-  if (observedDanglingWire) {
-    violations.push(
-      `cleanup-branches: branch 5a — POINTER VIOLATED, the wire showed activeSessionId set with no ` +
-        `resolving activeSession at least once during the teardown`,
-    );
   }
 
   const bFinal = settledCard?.sessions?.find((s) => s.id === built.sessionB.id);
@@ -10993,7 +10960,7 @@ async function checkParityRows345(built) {
  * trap describes for a bare GET (which serves dispatch's own static bundle and never touches ttyd
  * — {@link readPaneThroughProxy}'s own WS-protocol read already avoids that trap by construction,
  * never issuing a GET). Also asserts the resolution needed nothing beyond the session's own id: the
- * wire card's `activeSession.id` IS `built.sessionA.id` directly, with no `sessionSummaries` list a
+ * wire card's `activeSessionId` IS `built.sessionA.id` directly, with no `sessionSummaries` list a
  * switcher could have consulted (already proven absent by row 1's own wire-shape assertion,
  * restated here as row 6's own precondition for its own resolution path).
  */
@@ -11011,11 +10978,11 @@ async function checkParityRow6TerminalOpen(built) {
 
   const wireCard = await fetchFixtureCard(built);
   console.log(
-    `row 6 terminal open: wire card.activeSession.id=${JSON.stringify(wireCard?.activeSession?.id)} (expected "${built.sessionA.id}", the sole session — no switcher selection); hasOwn(sessionSummaries)=${Object.hasOwn(wireCard ?? {}, "sessionSummaries")} (expected false)`,
+    `row 6 terminal open: wire card.activeSessionId=${JSON.stringify(wireCard?.activeSessionId)} (expected "${built.sessionA.id}", the sole session — no switcher selection); hasOwn(sessionSummaries)=${Object.hasOwn(wireCard ?? {}, "sessionSummaries")} (expected false)`,
   );
-  if (wireCard?.activeSession?.id !== built.sessionA.id) {
+  if (wireCard?.activeSessionId !== built.sessionA.id) {
     violations.push(
-      `row 6 terminal open: wire card.activeSession.id expected "${built.sessionA.id}" (the sole session, no switcher selection), actual ${JSON.stringify(wireCard?.activeSession?.id)}`,
+      `row 6 terminal open: wire card.activeSessionId expected "${built.sessionA.id}" (the sole session, no switcher selection), actual ${JSON.stringify(wireCard?.activeSessionId)}`,
     );
   }
   if (Object.hasOwn(wireCard ?? {}, "sessionSummaries")) {
@@ -12792,9 +12759,9 @@ async function assertGroupMirror(
         `${label}: member ${tag} carries a tmuxSession (${JSON.stringify(member.tmuxSession)}) — a group member must never own session-level fields`,
       );
     }
-    if (member.activeSession != null) {
+    if (member.activeSessionId != null) {
       violations.push(
-        `${label}: member ${tag} carries an activeSession (${JSON.stringify(member.activeSession)}) — a group member must never own session-level fields`,
+        `${label}: member ${tag} carries an activeSessionId (${JSON.stringify(member.activeSessionId)}) — a group member must never own session-level fields`,
       );
     }
     if (member.groupId !== built.cardId) {
@@ -13650,7 +13617,7 @@ function lastLine(text) {
  * real run reports `PASS (reinstall-session)` with matching pre/post ttyd pid and `ttyd adopted: 1`.
  * `kill-ttyd` was proven able to fail, reporting `FAIL (reinstall-session): 3 violation(s)`, naming
  * `step 6: ttyd port ... lsof PID changed across restart`, `step 7: [reconcile] boot line reported
- * ttyd adopted=0, expected 1`, and `step 8: wire activeSession.ttydPort expected ..., actual
+ * ttyd adopted=0, expected 1`, and `step 8: wire ttydPort expected ..., actual
  * undefined`. `skip-heal` was proven able to fail, reporting `FAIL (reinstall-session): 2
  * violation(s)`, naming `step 4: healServicePlist outcome expected "rewritten", actual null` and
  * `step 4: on-disk plist cli.js path is "/nonexistent/dispatch/dist/server/bootstrap/cli.js",
@@ -13687,16 +13654,16 @@ async function checkReinstallSession(built) {
   // Step 2: the board's own wire, before anything is touched.
   const cardBefore = await fetchFixtureCard(built);
   console.log(
-    `reinstall-session: step 2 wire activeSession.id=${cardBefore?.activeSession?.id} ttydPort=${cardBefore?.activeSession?.ttydPort} sessionLost=${cardBefore?.sessionLost}`,
+    `reinstall-session: step 2 wire activeSessionId=${cardBefore?.activeSessionId} ttydPort=${cardBefore?.ttydPort} sessionLost=${cardBefore?.sessionLost}`,
   );
-  if (cardBefore?.activeSession?.id !== built.sessionA.id) {
+  if (cardBefore?.activeSessionId !== built.sessionA.id) {
     violations.push(
-      `step 2: wire activeSession.id expected ${built.sessionA.id}, actual ${cardBefore?.activeSession?.id}`,
+      `step 2: wire activeSessionId expected ${built.sessionA.id}, actual ${cardBefore?.activeSessionId}`,
     );
   }
-  if (cardBefore?.activeSession?.ttydPort !== built.ttyd.a.port) {
+  if (cardBefore?.ttydPort !== built.ttyd.a.port) {
     violations.push(
-      `step 2: wire activeSession.ttydPort expected ${built.ttyd.a.port}, actual ${cardBefore?.activeSession?.ttydPort}`,
+      `step 2: wire ttydPort expected ${built.ttyd.a.port}, actual ${cardBefore?.ttydPort}`,
     );
   }
   if (cardBefore?.sessionLost === true) {
@@ -13821,16 +13788,16 @@ async function checkReinstallSession(built) {
   // Step 8: the board's own wire again, the session must be reported attached, not lost.
   const cardAfter = await fetchFixtureCard(built);
   console.log(
-    `reinstall-session: step 8 wire activeSession.id=${cardAfter?.activeSession?.id} ttydPort=${cardAfter?.activeSession?.ttydPort} sessionLost=${cardAfter?.sessionLost}`,
+    `reinstall-session: step 8 wire activeSessionId=${cardAfter?.activeSessionId} ttydPort=${cardAfter?.ttydPort} sessionLost=${cardAfter?.sessionLost}`,
   );
-  if (cardAfter?.activeSession?.id !== cardBefore?.activeSession?.id) {
+  if (cardAfter?.activeSessionId !== cardBefore?.activeSessionId) {
     violations.push(
-      `step 8: wire activeSession.id expected ${cardBefore?.activeSession?.id} (the same session as before the restart), actual ${cardAfter?.activeSession?.id}`,
+      `step 8: wire activeSessionId expected ${cardBefore?.activeSessionId} (the same session as before the restart), actual ${cardAfter?.activeSessionId}`,
     );
   }
-  if (cardAfter?.activeSession?.ttydPort !== built.ttyd.a.port) {
+  if (cardAfter?.ttydPort !== built.ttyd.a.port) {
     violations.push(
-      `step 8: wire activeSession.ttydPort expected ${built.ttyd.a.port}, actual ${cardAfter?.activeSession?.ttydPort}`,
+      `step 8: wire ttydPort expected ${built.ttyd.a.port}, actual ${cardAfter?.ttydPort}`,
     );
   }
   if (cardAfter?.sessionLost === true) {
