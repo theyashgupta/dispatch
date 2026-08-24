@@ -63,7 +63,6 @@ async function readMetadata(): Promise<VaultKeySummary[]> {
   return Array.isArray(keys) ? (keys as VaultKeySummary[]) : [];
 }
 
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /**
  * Read the values file as raw, unparsed `NAME=value` lines. Never splits a line on `=`, so no
  * value ever exists as a standalone variable outside the mutator that received it from its caller.
@@ -77,7 +76,6 @@ async function readValueLines(): Promise<string[]> {
   }
   return raw.split("\n").filter((line) => line.length > 0);
 }
-/* eslint-enable @typescript-eslint/no-unused-vars */
 
 /**
  * Wrap `value` as a POSIX single-quoted shell literal.
@@ -91,7 +89,6 @@ function quoteEnvValue(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function valueLineFor(name: string, value: string): string {
   return `${name}=${quoteEnvValue(value)}`;
 }
@@ -107,7 +104,6 @@ function serializeSchema(keys: VaultKeySummary[]): string {
   return [SCHEMA_HEADER, "", ...lines].join("\n") + "\n";
 }
 
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /**
  * The single write chokepoint every mutator routes through. Re-asserts 0700/0600 on every call
  * since both `mkdir`'s and `write-file-atomic`'s `mode` options are create-only, so an externally
@@ -141,7 +137,6 @@ async function writeStore(
   });
   fs.chmodSync(VAULT_SCHEMA_PATH, 0o600);
 }
-/* eslint-enable @typescript-eslint/no-unused-vars */
 
 /**
  * List every vault key's metadata, sorted by name. Opens only `vault.json`, never `values.env`,
@@ -151,4 +146,120 @@ async function writeStore(
 export async function listKeys(): Promise<VaultKeySummary[]> {
   const keys = await readMetadata();
   return [...keys].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Create a new vault key. Name collisions are checked by exact match, the name regex is already
+ * upper-case-only so a case-folded compare would be dead code. The directory is (re-)created here
+ * since a user could delete it between boot and this call.
+ * @public Consumed by `vault.route.ts`'s POST handler, wired in plan 02.
+ */
+export async function createKey(input: {
+  name: string;
+  purpose: string;
+  value?: string;
+}): Promise<VaultWriteResult> {
+  const now = new Date().toISOString();
+  const keys = await readMetadata();
+  if (keys.some((k) => k.name === input.name)) {
+    return { ok: false, error: "name-exists" };
+  }
+
+  const key: VaultKeySummary = {
+    name: input.name,
+    purpose: input.purpose,
+    createdAt: now,
+    updatedAt: now,
+    filled: input.value !== undefined,
+  };
+
+  const lines = await readValueLines();
+  if (input.value !== undefined) {
+    lines.push(valueLineFor(input.name, input.value));
+  }
+
+  await writeStore([...keys, key], lines);
+  return { ok: true, key };
+}
+
+/**
+ * Set (or rotate) a key's value. Setting a value on an already-filled key IS the rotate, purpose
+ * and createdAt stay untouched, only updatedAt and filled move, this is what makes set and rotate
+ * the same endpoint.
+ * @public Consumed by `vault.route.ts`'s PUT value handler, wired in plan 02.
+ */
+export async function setValue(
+  name: string,
+  value: string,
+): Promise<VaultWriteResult> {
+  const now = new Date().toISOString();
+  const keys = await readMetadata();
+  const index = keys.findIndex((k) => k.name === name);
+  if (index === -1) {
+    return { ok: false, error: "not-found" };
+  }
+
+  const key: VaultKeySummary = {
+    ...keys[index],
+    filled: true,
+    updatedAt: now,
+  };
+  const nextKeys = [...keys];
+  nextKeys[index] = key;
+
+  const lines = (await readValueLines()).filter(
+    (line) => !line.startsWith(`${name}=`),
+  );
+  lines.push(valueLineFor(name, value));
+
+  await writeStore(nextKeys, lines);
+  return { ok: true, key };
+}
+
+/**
+ * Edit a key's purpose. Never touches the value lines, an edit of the purpose must never rewrite
+ * a value.
+ * @public Consumed by `vault.route.ts`'s PATCH handler, wired in plan 02.
+ */
+export async function editPurpose(
+  name: string,
+  purpose: string,
+): Promise<VaultWriteResult> {
+  const now = new Date().toISOString();
+  const keys = await readMetadata();
+  const index = keys.findIndex((k) => k.name === name);
+  if (index === -1) {
+    return { ok: false, error: "not-found" };
+  }
+
+  const key: VaultKeySummary = {
+    ...keys[index],
+    purpose,
+    updatedAt: now,
+  };
+  const nextKeys = [...keys];
+  nextKeys[index] = key;
+
+  await writeStore(nextKeys, await readValueLines());
+  return { ok: true, key };
+}
+
+/**
+ * Delete a key and its value line. Matches the value line by a `NAME=` prefix, so a longer
+ * sibling name such as `FOOBAR` is untouched by deleting `FOO`.
+ * @public Consumed by `vault.route.ts`'s DELETE handler, wired in plan 02.
+ */
+export async function deleteKey(name: string): Promise<VaultDeleteResult> {
+  const keys = await readMetadata();
+  if (!keys.some((k) => k.name === name)) {
+    return { ok: false, error: "not-found" };
+  }
+
+  const nextKeys = keys.filter((k) => k.name !== name);
+  const lines = (await readValueLines()).filter(
+    (line) => !line.startsWith(`${name}=`),
+  );
+
+  await writeStore(nextKeys, lines);
+  return { ok: true };
 }
