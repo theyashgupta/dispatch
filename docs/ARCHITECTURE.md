@@ -37,6 +37,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [SSE Transport](#sse-transport)
   - [Startup Preflight](#startup-preflight)
   - [Cleanup Lifecycle](#cleanup-lifecycle)
+  - [Cleanup Mirror Chokepoint](#cleanup-mirror-chokepoint)
   - [Hooks Status Channel](#hooks-status-channel)
   - [Dev-Server Preview Detection](#dev-server-preview-detection)
   - [Design System Invariants](#design-system-invariants)
@@ -2075,6 +2076,31 @@ running repos never contend on the same git lock. Every store mutation
 fan-out, called exactly once after the results settle — one card-level outcome still produces exactly
 one SSE-visible mutation, unchanged from the pre-concurrency saga.
 
+### Cleanup Mirror Chokepoint
+
+The three cleanup-lifecycle fields `Card` mirrors from its sessions, `cleanupDueAt`,
+`cleanupWarning`, `cleanupBlocked`, are the one Card-mirrors-Session field class the v3.0 audit left
+unfenced (`NEW-23`, Phase 102). Unlike `NEW-21`'s six flat session fields, which funnel through the
+single `setActiveSession` chokepoint, these three fields are written from wherever the cleanup
+lifecycle currently is (stamping a schedule, recording a warning, clearing a schedule), so a fourth
+field or a ninth writer could otherwise be added with no gate noticing.
+
+`scripts/check-invariants.mjs`'s `checkCleanupMirrorChokepoint` fences all three fields against
+exactly EIGHT declared writers in `src/server/store/board.store.ts`, each granted only the subset
+it actually writes: `moveCardManual` (`cleanupDueAt`), `recordCleanupWarning` (`cleanupWarning`,
+`cleanupDueAt`), `finishCleanup` (all three), `recordCleanupBlocked` (`cleanupBlocked`),
+`clearCleanupBlocked` (`cleanupBlocked`), `clearCleanupDue` (`cleanupDueAt`), `restoreCleanupDue`
+(`cleanupDueAt`), and `noteCleanupWarning` (`cleanupWarning`). It reuses `NEW-21`'s own
+`scanSessionFieldAssignments` AST walk (generalized to accept a field list, rather than duplicated
+for a second field set) and the same two-tier shape: a repo-wide fence for every file outside
+`board.store.ts`, and an in-file declaration-span check inside it. It carries the same
+missing-subject sentinel as `NEW-21`: if a sanctioned writer's declaration cannot be found (renamed
+or deleted), the check FAILS rather than silently widening the exemption to nothing.
+
+Adding a fourth cleanup-mirror field, or a ninth writer of one of the existing three, requires a
+deliberate, human-ratified baseline re-freeze (`FROZEN_COUNT` bumped in the same commit) exactly
+like every other `NEW-`-prefixed structural fence in this file.
+
 ### Hooks Status Channel
 
 Claude Code hook events are a SECOND transport into the same marker protocol: a per-session hook
@@ -3126,7 +3152,12 @@ mechanically-checkable question; none of them read prose for truth.
   before it. Conjunctions that narrow ONE attention field with unrelated state (`card-badges.ts`'s
   activity dot, `DetailPanel.tsx`'s liveness, `App.tsx`'s start-eligibility) are different claims
   and are deliberately not fenced; a ternary-chain or table-driven duplication is a recorded
-  residue the parse cannot see.
+  residue the parse cannot see. A third leg is `checkCleanupMirrorChokepoint`, reported as
+  `CLEANUP MIRROR CHOKEPOINT (NEW-23)`: the same two-tier shape as `NEW-21`, fencing the three
+  cleanup-mirror fields (`cleanupDueAt`, `cleanupWarning`, `cleanupBlocked`) against exactly EIGHT
+  declared writers rather than `NEW-21`'s three, since these fields do not funnel through one
+  chokepoint. See [Cleanup Mirror Chokepoint](#cleanup-mirror-chokepoint) for the full writer list
+  and rationale.
 - **`node scripts/migration-diff-v3.mjs`** (`npm run migration-diff`) and
   **`node scripts/redaction-capture-v3.mjs`** (`npm run redaction-capture`) — sandbox harnesses
   that boot a real server against a throwaway `HOME`, so they are deliberately OUTSIDE

@@ -57,8 +57,10 @@ const ID_RE =
  * mitigation re-freeze (`T-99-02`), cited in `adapters/dev-server.ts`.
  * @remarks Moved from 129 to 130 for the deliberate one-ID re-parented dev server
  * residual re-freeze (`T-99-12`), see docs/ARCHITECTURE.md#known-residuals.
+ * @remarks Moved from 130 to 131 for the deliberate one-ID cleanup-mirror
+ * chokepoint re-freeze (`NEW-23`), see docs/ARCHITECTURE.md#cleanup-mirror-chokepoint.
  */
-const FROZEN_COUNT = 130;
+const FROZEN_COUNT = 131;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");
@@ -142,6 +144,39 @@ const SANCTIONED_WRITERS = [
   { name: "setActiveSession", fields: SESSION_FIELDS },
   { name: "migrateCardsToSessionEntity", fields: ENTITY_FIELDS },
   { name: "removeSessionRecord", fields: ENTITY_FIELDS },
+];
+
+/**
+ * The three Card-mirrors-Session cleanup-lifecycle fields invariant `NEW-23` fences. Unlike
+ * {@link SESSION_FIELDS}, these do NOT funnel through one chokepoint (`setActiveSession`): the
+ * cleanup lifecycle writes each field from whichever step of teardown, blocking, or restoration it
+ * is in, so the sanctioned-writer set below is a set of EIGHT functions, not three.
+ */
+const CLEANUP_MIRROR_FIELDS = [
+  "cleanupDueAt",
+  "cleanupWarning",
+  "cleanupBlocked",
+];
+
+/**
+ * The DECLARED writers of {@link CLEANUP_MIRROR_FIELDS}, each with the exact subset it is allowed
+ * to write. Every other write anywhere in `src/` is a violation. Deliberately NOT a reuse of
+ * {@link SANCTIONED_WRITERS}: none of `NEW-21`'s three functions writes a cleanup-mirror field, so
+ * reusing that list would make {@link checkCleanupMirrorChokepoint} fire on every legitimate
+ * existing write site on its first run.
+ */
+const CLEANUP_SANCTIONED_WRITERS = [
+  { name: "moveCardManual", fields: ["cleanupDueAt"] },
+  { name: "recordCleanupWarning", fields: ["cleanupWarning", "cleanupDueAt"] },
+  {
+    name: "finishCleanup",
+    fields: ["cleanupWarning", "cleanupBlocked", "cleanupDueAt"],
+  },
+  { name: "recordCleanupBlocked", fields: ["cleanupBlocked"] },
+  { name: "clearCleanupBlocked", fields: ["cleanupBlocked"] },
+  { name: "clearCleanupDue", fields: ["cleanupDueAt"] },
+  { name: "restoreCleanupDue", fields: ["cleanupDueAt"] },
+  { name: "noteCleanupWarning", fields: ["cleanupWarning"] },
 ];
 
 /**
@@ -591,12 +626,15 @@ function isAssignmentToken(kind) {
  * positive on the redaction chokepoint itself. Both residues are recorded here rather than left
  * implied, because an undocumented gap reads as coverage.
  * @param sourceFile Parsed file.
+ * @param fields The fenced field list to scan for — {@link SESSION_FIELDS} for `NEW-21`,
+ * {@link CLEANUP_MIRROR_FIELDS} for `NEW-23` — so the ~70-line AST walk itself is never
+ * duplicated for a second field set.
  * @returns One entry per write: 1-based line number, character offset (for the tier-2
  * span-containment check), the receiver's source text (so `ctx.workspacePath` — `SagaContext`'s
  * own unrelated field, not `card.workspacePath` — can be excluded by name), and the fenced field
  * name (so a sanctioned writer can be granted a SUBSET of the fenced fields, not all of them).
  */
-function scanSessionFieldAssignments(sourceFile) {
+function scanSessionFieldAssignments(sourceFile, fields) {
   const results = [];
   const record = (node, field, receiver) => {
     const pos = node.getStart(sourceFile);
@@ -619,13 +657,13 @@ function scanSessionFieldAssignments(sourceFile) {
     } else if (
       ts.isPropertyAccessExpression(node) &&
       ts.isIdentifier(node.name) &&
-      SESSION_FIELDS.includes(node.name.text)
+      fields.includes(node.name.text)
     ) {
       record(node, node.name.text, node.expression.getText(sourceFile));
     } else if (
       ts.isElementAccessExpression(node) &&
       ts.isStringLiteralLike(node.argumentExpression) &&
-      SESSION_FIELDS.includes(node.argumentExpression.text)
+      fields.includes(node.argumentExpression.text)
     ) {
       record(
         node,
@@ -675,7 +713,7 @@ function scanSessionFieldAssignments(sourceFile) {
             ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name)
               ? prop.name.text
               : null;
-          if (name && SESSION_FIELDS.includes(name)) {
+          if (name && fields.includes(name)) {
             record(prop, name, receiver);
           }
         }
@@ -755,6 +793,7 @@ function checkSessionProjectionChokepoint() {
     if (content === null) continue;
     for (const match of scanSessionFieldAssignments(
       parseSource(file, content),
+      SESSION_FIELDS,
     )) {
       if (file === STEPS_PATH && match.receiver === "ctx") continue;
       if (file === BOARD_STORE_PATH) {
@@ -771,6 +810,79 @@ function checkSessionProjectionChokepoint() {
       } else {
         violations.push(
           `${file}:${match.lineNumber}: retired pattern NEW-21 — \`${match.field}\` assigned outside the projection chokepoint (${BOARD_STORE_PATH}#setActiveSession)`,
+        );
+      }
+    }
+  }
+  return violations;
+}
+
+/**
+ * Cleanup-mirror chokepoint gate (`NEW-23`). The fenced set is the three
+ * {@link CLEANUP_MIRROR_FIELDS} the cleanup lifecycle mirrors onto `Card`: `cleanupDueAt`,
+ * `cleanupWarning`, `cleanupBlocked`. Unlike `NEW-21`'s single-chokepoint fields, these do not
+ * funnel through one function, so the sanctioned set is {@link CLEANUP_SANCTIONED_WRITERS}, eight
+ * functions each granted only the subset it actually writes.
+ * @remarks Structurally identical two-tier check to {@link checkSessionProjectionChokepoint}:
+ * Tier 1 is a repo-wide fence (any match outside `src/server/store/board.store.ts` is a violation
+ * by construction), and Tier 2 is an in-file slice (inside `board.store.ts`, a match is exempt
+ * only when it falls within a sanctioned writer's own declaration span AND the field it writes is
+ * in that writer's own allowed subset).
+ * @remarks Carries the same missing-subject sentinel discipline as `NEW-21`: if a sanctioned
+ * writer's declaration cannot be found (renamed, deleted), this emits a violation naming the
+ * missing subject rather than silently reporting zero violations, so widening the carve-out by
+ * deleting a writer fails loudly instead of passing vacuously.
+ * @see docs/ARCHITECTURE.md#cleanup-mirror-chokepoint
+ * @returns Violation report lines, one per illegal assignment, plus one missing-subject sentinel
+ * per sanctioned writer that cannot be located.
+ */
+function checkCleanupMirrorChokepoint() {
+  const violations = [];
+  const boardStoreContent = existsSync(BOARD_STORE_PATH)
+    ? readFileSync(BOARD_STORE_PATH, "utf8")
+    : null;
+
+  const boardStoreSpans =
+    boardStoreContent !== null
+      ? declarationSpans(parseSource(BOARD_STORE_PATH, boardStoreContent))
+      : new Map();
+
+  const writers = [];
+  for (const writer of CLEANUP_SANCTIONED_WRITERS) {
+    const slice = boardStoreSpans.get(writer.name);
+    if (slice === undefined) {
+      violations.push(
+        `${BOARD_STORE_PATH}: ${writer.name} not found, NEW-23's cleanup-mirror-chokepoint subject is missing or renamed`,
+      );
+      continue;
+    }
+    writers.push({ ...writer, slice });
+  }
+
+  for (const file of walkSrc(SRC_DIR)) {
+    const content =
+      file === BOARD_STORE_PATH
+        ? boardStoreContent
+        : readFileSync(file, "utf8");
+    if (content === null) continue;
+    for (const match of scanSessionFieldAssignments(
+      parseSource(file, content),
+      CLEANUP_MIRROR_FIELDS,
+    )) {
+      if (file === BOARD_STORE_PATH) {
+        const owner = writers.find(
+          (w) =>
+            match.charOffset >= w.slice[0] &&
+            match.charOffset <= w.slice[1] &&
+            w.fields.includes(match.field),
+        );
+        if (owner) continue;
+        violations.push(
+          `${file}:${match.lineNumber}: retired pattern NEW-23, \`${match.field}\` assigned outside the sanctioned writers (${CLEANUP_SANCTIONED_WRITERS.map((w) => w.name).join(", ")})`,
+        );
+      } else {
+        violations.push(
+          `${file}:${match.lineNumber}: retired pattern NEW-23, \`${match.field}\` assigned outside the cleanup-mirror chokepoint (${BOARD_STORE_PATH})`,
         );
       }
     }
@@ -999,6 +1111,7 @@ function run() {
   const boardReadingRhythm = checkBoardReadingRhythm();
   const terminalFence = checkTerminalFence();
   const sessionChokepoint = checkSessionProjectionChokepoint();
+  const cleanupMirrorChokepoint = checkCleanupMirrorChokepoint();
   const attentionSingleSource = checkAttentionSingleSource();
   const launchctlReadOnly = checkLaunchctlReadOnly();
 
@@ -1010,6 +1123,7 @@ function run() {
   report("BOARD READING RHYTHM (NEW-19)", boardReadingRhythm);
   report("TERMINAL FENCE (NEW-20)", terminalFence);
   report("SESSION PROJECTION CHOKEPOINT (NEW-21)", sessionChokepoint);
+  report("CLEANUP MIRROR CHOKEPOINT (NEW-23)", cleanupMirrorChokepoint);
   report("ATTENTION SINGLE SOURCE (NEW-22)", attentionSingleSource);
   report("LAUNCHCTL READ-ONLY (harnesses)", launchctlReadOnly);
 
@@ -1022,6 +1136,7 @@ function run() {
     boardReadingRhythm.length +
     terminalFence.length +
     sessionChokepoint.length +
+    cleanupMirrorChokepoint.length +
     attentionSingleSource.length +
     launchctlReadOnly.length;
   console.log(
@@ -1044,6 +1159,9 @@ function run() {
         : "") +
       (sessionChokepoint.length
         ? ` (${sessionChokepoint.length} session-projection-chokepoint violation(s))`
+        : "") +
+      (cleanupMirrorChokepoint.length
+        ? ` (${cleanupMirrorChokepoint.length} cleanup-mirror-chokepoint violation(s))`
         : "") +
       (attentionSingleSource.length
         ? ` (${attentionSingleSource.length} attention-single-source violation(s))`
