@@ -96,7 +96,22 @@ function quoteEnvValue(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+/**
+ * Assert the name invariant the file format depends on, independent of route validation.
+ * @remarks A name containing `=`, whitespace or a newline breaks the one-line `NAME=value`
+ * format and the `NAME=` prefix filters, so any future non-route caller must hit this wall too.
+ */
+function assertVaultName(name: string): void {
+  if (!VAULT_NAME_RE.test(name)) {
+    throw new Error("invalid vault key name");
+  }
+}
+
 function valueLineFor(name: string, value: string): string {
+  assertVaultName(name);
+  if (/[\r\n]/.test(value)) {
+    throw new Error("vault value must be single-line");
+  }
   return `${name}=${quoteEnvValue(value)}`;
 }
 
@@ -181,6 +196,7 @@ export async function createKey(input: {
   purpose: string;
   value?: string;
 }): Promise<VaultWriteResult> {
+  assertVaultName(input.name);
   return serialized(async () => {
     const now = new Date().toISOString();
     const keys = await readMetadata();
