@@ -22,7 +22,8 @@ const SCROLLBACK_SEED_LINES = 10000;
  * BEFORE opening its WebSocket and writes it into xterm, so touch scrolling reaches content from
  * before the attach. Registered ahead of the wildcard forward below, which would otherwise
  * swallow the path as a static-file lookup. 404 mirrors the proxy's unknown-card behavior; a
- * capture failure is 502 like any other upstream fault.
+ * capture failure is 502 like any other upstream fault, and it WARNS before answering: this is the
+ * one endpoint whose client ignores failures by design, so an unlogged 502 here is invisible.
  */
 function scrollbackHandler(req: Request<{ id: string }>, res: Response): void {
   sessionScrollback(req.params.id, SCROLLBACK_SEED_LINES).then(
@@ -34,7 +35,12 @@ function scrollbackHandler(req: Request<{ id: string }>, res: Response): void {
       res.set("Cache-Control", "no-cache");
       res.type("text/plain").send(history);
     },
-    () => res.status(502).end(),
+    (err: unknown) => {
+      console.warn(
+        `[terminal] scrollback capture failed for session ${req.params.id}, the client seeds nothing: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      res.status(502).end();
+    },
   );
 }
 

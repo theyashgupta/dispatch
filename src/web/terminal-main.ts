@@ -219,21 +219,39 @@ function attachShiftEnterHandler(
 }
 
 /**
+ * Ceiling on the pre-attach scrollback fetch, because `connect()` opens the WebSocket only after
+ * that promise settles: an unbounded fetch against a wedged tmux would leave the terminal
+ * permanently dead with the reconnect budget never armed.
+ */
+const SEED_FETCH_TIMEOUT_MS = 5000;
+
+/**
  * Write the pane's tmux history into the terminal before the live stream starts.
  *
  * @remarks TERM-05: without this, a fresh client's local scrollback begins at the attach point
- * and touch scrolling hits a wall at the first row that was visible on connect. Failures resolve
- * silently so a missing endpoint can never block the terminal from connecting.
+ * and touch scrolling hits a wall at the first row that was visible on connect. Every failure
+ * (missing endpoint, 502, or a {@link SEED_FETCH_TIMEOUT_MS} stall) resolves silently so none of
+ * them can block the terminal from connecting. The trailing `\r\n` padding is load-bearing, not
+ * cosmetic: tmux's first redraw on a freshly attached no-alt-screen client begins with
+ * `ESC[H ESC[J`, and xterm.js implements ED0 as an IN-PLACE viewport reset that never pushes those
+ * rows into scrollback, so whatever the seed left sitting in the viewport would be erased outright.
+ * Padding one full screen of blank rows scrolls the seed above the viewport first, so the redraw
+ * blanks blank rows instead of the newest screenful of real history.
  */
 async function seedScrollback(term: Terminal): Promise<void> {
   try {
     const base = window.location.pathname.replace(/\/$/, "");
-    const res = await fetch(`${base}/scrollback`);
+    const res = await fetch(`${base}/scrollback`, {
+      signal: AbortSignal.timeout(SEED_FETCH_TIMEOUT_MS),
+    });
     if (!res.ok) return;
     const text = await res.text();
     if (text.trim().length === 0) return;
     await new Promise<void>((done) => {
-      term.write(text.replace(/\n/g, "\r\n") + "\x1b[0m", done);
+      term.write(
+        text.replace(/\n/g, "\r\n") + "\r\n".repeat(term.rows) + "\x1b[0m",
+        done,
+      );
     });
   } catch {
     return;

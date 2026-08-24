@@ -291,28 +291,36 @@ export async function capturePane(
 }
 
 /**
+ * stdout ceiling for one scrollback capture, following `ttyd.ts`'s `PS_MAX_BUFFER` precedent.
+ *
+ * @remarks `run()` is `promisify(execFile)`, whose default 1 MiB ceiling REJECTS the whole call
+ * rather than truncating, so an over-budget capture answers the seed endpoint 502 and the client
+ * silently gets nothing. A colour-preserving (`-e`) capture of a 10,000-line, 200-column pane
+ * exceeds 1 MiB routinely (about 105 bytes/line is all 1 MiB buys), so the ceiling is sized to the
+ * documented budget instead of the Node default.
+ */
+const SCROLLBACK_MAX_BUFFER = 32 * 1024 * 1024;
+
+/**
  * Capture the pane's HISTORY, the rows above the visible screen, as colour-preserving ANSI text
  * (`capture-pane -p -e -S -<limit> -E -1`).
  *
  * @remarks TERM-05: the attach-time scrollback seed. `-E -1` deliberately excludes the visible
  * rows because tmux's attach redraw paints those; including them would duplicate one screenful at
- * the seam between seeded history and the live stream.
+ * the seam between seeded history and the live stream. The `timeout` is not optional hardening:
+ * the web client awaits this response BEFORE it opens its WebSocket, so a tmux server that accepts
+ * the connection and never answers would leave the terminal permanently unconnected with no
+ * reconnect path (`panePidsBySession`'s own 5s bound exists for the same tmux state).
  */
 export async function captureHistory(
   name: string,
   limit: number,
 ): Promise<string> {
-  const { stdout } = await run("tmux", [
-    "capture-pane",
-    "-p",
-    "-e",
-    "-t",
-    name,
-    "-S",
-    `-${limit}`,
-    "-E",
-    "-1",
-  ]);
+  const { stdout } = await run(
+    "tmux",
+    ["capture-pane", "-p", "-e", "-t", name, "-S", `-${limit}`, "-E", "-1"],
+    { timeout: 5000, maxBuffer: SCROLLBACK_MAX_BUFFER },
+  );
   return stdout;
 }
 
