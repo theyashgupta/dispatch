@@ -510,9 +510,8 @@ async function seedDoneCards(home, count, sessionsPerCard = 0) {
           card.sessions = sessions;
           card.activeSessionId = sessions[0].id;
           // Faithful to the real product's `setActiveSession` chokepoint (board.store.ts:606),
-          // which mirrors the active session's fields onto the card's own flat fields — the exact
-          // mechanism Task 1's finding identified as riding the wire ALONGSIDE `activeSession`.
-          // Seeding sessions[] alone (skipping this mirror) would understate the real byte cost.
+          // which mirrors the active session's fields onto the card's own flat fields. Seeding
+          // sessions[] alone (skipping this mirror) would understate the real byte cost.
           card.tmuxSession = sessions[0].tmuxSession;
           card.workspacePath = sessions[0].workspacePath;
         } else {
