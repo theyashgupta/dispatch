@@ -2837,13 +2837,27 @@ class BoardStore extends EventEmitter {
    * the warning, but nothing removed it afterward, so every failed teardown was a permanent leak
    * in `card.sessions` until this method.
    *
-   * The rule: a session record is pruned when all three hold: `cleanupWarning` is set,
-   * `tmuxSession` is absent, and `now - Date.parse(session.updatedAt) >= cleanupDelayMs`.
+   * The rule: a session record is pruned when all four hold: `cleanupWarning` is set,
+   * `tmuxSession` is absent, `workspacePath` and `claudeSessionId` are BOTH absent, and
+   * `now - Date.parse(session.updatedAt) >= cleanupDelayMs`. Every removal returns a `cleanup`
+   * activity event, so this path is auditable in `GET /api/events` like every other cleanup
+   * branch.
    * @remarks `cleanupWarning` set identifies the warned-but-retained class; `tmuxSession` absent
    * excludes {@link noteCleanupWarning}'s preflight-refusal records, whose tmux session, ttyd and
    * hookToken are deliberately still alive and usable; and the `cleanupDelayMs` window gives the
    * warning at least as long to be seen as the successful cleanup it replaced would itself have
    * waited before firing.
+   * @remarks The `workspacePath`/`claudeSessionId` clause is what keeps this from being silent
+   * amnesia. {@link finishCleanup} removes a record only after the teardown SUCCEEDED, so nothing
+   * on disk survives it; this method removes records precisely because their teardown FAILED,
+   * which is exactly when the worktree named by `workspacePath` may still exist
+   * (`cleanup.ts`'s "Cleanup incomplete - some worktrees may remain."). `claudeSessionId` is the
+   * whole `--resume` affordance {@link recordResumeFailure} deliberately keeps, and neither
+   * {@link moveCardManual} nor `recordResumeFailure` clears `cleanupWarning`, so a card warned,
+   * dragged out of Done, failed to resume and dragged back would otherwise have its only recovery
+   * handle deleted a week later. What remains prunable is the population the residual was actually
+   * about: legacy-workspace and folder-already-removed warnings whose only remaining state IS the
+   * warning.
    * @remarks Fails closed on a bad timestamp: an absent `updatedAt`, or one `Date.parse` cannot
    * resolve to a finite number, is never pruned. `NaN` comparisons are false in JavaScript, which
    * happens to give the right answer here, but the finite check is written explicitly so the
@@ -2864,10 +2878,17 @@ class BoardStore extends EventEmitter {
    */
   pruneStaleWarnedSessions(now: number): Promise<void> {
     return this.enqueue(() => {
+      const events: Omit<ActivityEvent, "id">[] = [];
       for (const card of this.cards.values()) {
         if (card.column !== "done" || this.isStarting(card.id)) continue;
         const stale = (card.sessions ?? []).filter((session) => {
           if (!session.cleanupWarning || session.tmuxSession != null) {
+            return false;
+          }
+          if (
+            session.workspacePath != null ||
+            session.claudeSessionId != null
+          ) {
             return false;
           }
           const updatedAtMs = Date.parse(session.updatedAt);
@@ -2900,9 +2921,18 @@ class BoardStore extends EventEmitter {
             card.previewsUnknown = undefined;
           }
           this.removeSessionRecord(card, target.id);
+          events.push(
+            this.event("cleanup", {
+              cardId: card.id,
+              fromCol: "done",
+              toCol: "done",
+              reason:
+                "Stale cleanup warning pruned after the retention window.",
+            }),
+          );
         }
       }
-      return [];
+      return events;
     });
   }
 
