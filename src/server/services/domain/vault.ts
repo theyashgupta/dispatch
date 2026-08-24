@@ -40,24 +40,34 @@ const SCHEMA_HEADER = `# =======================================================
 
 /**
  * Read the vault's metadata file fresh from disk on every call, no cache, so a mutation lands
- * immediately. A missing or malformed store degrades to `[]` rather than throwing, so an absent
- * vault renders an empty list instead of a 500.
+ * immediately. Only a missing file (fresh install) degrades to `[]`; a malformed file throws.
+ * @remarks Degrading a corrupt `vault.json` to `[]` would leave the intact `values.env` lines
+ * invisible in every management surface but still exported by the runner, and the next mutation
+ * would rewrite the metadata carrying those orphaned secrets forward permanently. Failing closed
+ * surfaces the corruption as a 500 instead.
  */
 async function readMetadata(): Promise<VaultKeySummary[]> {
   let raw: string;
   try {
     raw = await fsp.readFile(VAULT_METADATA_PATH, "utf8");
-  } catch {
-    return [];
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw err;
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return [];
-  }
+  const parsed: unknown = JSON.parse(raw);
   const keys = (parsed as { keys?: unknown } | null)?.keys;
-  return Array.isArray(keys) ? (keys as VaultKeySummary[]) : [];
+  if (
+    !Array.isArray(keys) ||
+    keys.some(
+      (k: unknown) =>
+        typeof (k as { name?: unknown } | null)?.name !== "string",
+    )
+  ) {
+    throw new Error("vault metadata is malformed");
+  }
+  return keys as VaultKeySummary[];
 }
 
 /**
