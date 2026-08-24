@@ -56,6 +56,14 @@
  *                                                             byte-exact passthrough
  *   node scripts/mobile-term-101.mjs --break shim-markers-emptied   MARKERS tuple emptied on a
  *                                                                    copy of the installed shim
+ *   node scripts/mobile-term-101.mjs --check local-scroll     classic-shaped pane through real
+ *                                                              tmux/ttyd/shim: local scrollback
+ *                                                              growth, zero ?2026 on the wire, a
+ *                                                              zero-round-trip touch flick
+ *   node scripts/mobile-term-101.mjs --break unwrapped-pane      local-scroll with the shim skipped
+ *   node scripts/mobile-term-101.mjs --break alt-screen-term     local-scroll with ttyd's -T set to
+ *                                                                 a TERM the no-alt-screen override
+ *                                                                 does not cover
  *
  * Plan 101-03 adds the tunnel leg above: a real Cloudflare Quick Tunnel brought up through the
  * real product route, a real `?code=` auth handshake, TERM-06's three clauses proven over it, and
@@ -108,7 +116,7 @@ const FAKE_LINEAR_API_KEY = "mobile-term-101-harness-fake-key-never-real";
 
 /** Retained fingerprint key adoptAndSweep looks for, matching production's own spawnTtyd argv
  * (ttyd.ts) and session-liveness-v3.mjs's own constant of the same name and value. */
-const TTYD_REVISION_RETAINED_KEY = "DISPATCH_TTYD_REVISION_6";
+const TTYD_REVISION_RETAINED_KEY = "DISPATCH_TTYD_REVISION_7";
 
 const POLL_INTERVAL_MS = 100;
 const READY_TIMEOUT_MS = 30_000;
@@ -604,10 +612,52 @@ function writeViewportFixtureBinary(home) {
   return binDir;
 }
 
-/** Same shape as session-liveness-v3.mjs's tmuxNewSession, but the pane command is the fixture
- * binary itself (so its escape sequences actually reach the pane's pty) instead of a bare sleep
- * loop. */
-async function tmuxNewFixtureSession(name, cwd, binPath) {
+/**
+ * A third fixture binary, production-shaped for the classic renderer (task 2, `local-scroll`):
+ * answers a `--version`/`--help` probe, prints one ready banner, then reads lines from stdin
+ * forever, responding to the literal word `burst` by printing 200 lines of the form
+ * `MTMLOCAL-%04d`, EACH ONE individually wrapped in `ESC[?2026h` ... `ESC[?2026l`. That per-frame
+ * wrapping is deliberate, it reproduces Claude Code's own classic-renderer behavior (every frame
+ * synchronized-output-wrapped per pty-shim-setup.ts's own JSDoc), so a fixture emitting no markers
+ * at all would let the shim be deleted with the check still green. The pane must NOT enter the
+ * alternate screen and must NOT enable mouse tracking, so this fixture reads `0 0` from
+ * `tmux display-message -p '#{alternate_on} #{mouse_any_flag}'`.
+ */
+function writeClassicFixtureBinary(home) {
+  const binDir = join(home, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(
+    join(binDir, "claude"),
+    "#!/bin/sh\n" +
+      'case " $* " in\n' +
+      '  *" --version "*|*" --help "*)\n' +
+      '    echo "1.0.0 (Claude Code)"\n' +
+      "    exit 0\n" +
+      "    ;;\n" +
+      "esac\n" +
+      "echo 'mtmlocal ready'\n" +
+      "while IFS= read -r line; do\n" +
+      '  if [ "$line" = "burst" ]; then\n' +
+      "    i=1\n" +
+      '    while [ "$i" -le 200 ]; do\n' +
+      "      printf '\\033[?2026h'\n" +
+      "      printf 'MTMLOCAL-%04d\\n' \"$i\"\n" +
+      "      printf '\\033[?2026l'\n" +
+      "      i=$((i + 1))\n" +
+      "    done\n" +
+      "  fi\n" +
+      "done\n",
+    { mode: 0o755 },
+  );
+  return binDir;
+}
+
+/** Same shape as session-liveness-v3.mjs's tmuxNewSession, but the pane command is a fixture
+ * binary's own argv (so its escape sequences actually reach the pane's pty) instead of a bare
+ * sleep loop, and `commandArgv` is a full argv array (never a single binary path) so a caller can
+ * prepend the pty shim the way production's own `wrapWithPtyShim` does. `-x 200 -y 50` matches
+ * production's `newSession` geometry (`tmux.ts`), load-bearing for sane capture-pane output. */
+async function tmuxNewFixtureSession(name, cwd, commandArgv) {
   await execFileP("tmux", [
     "new-session",
     "-d",
@@ -615,18 +665,27 @@ async function tmuxNewFixtureSession(name, cwd, binPath) {
     name,
     "-c",
     cwd,
-    binPath,
+    "-x",
+    "200",
+    "-y",
+    "50",
+    ...commandArgv,
   ]);
 }
 
 /**
  * Precondition, not a soft check: polls (short-lived pty startup can lag a few ms behind
  * `new-session -d` returning) until `tmux display-message -p -t "=<name>:" '#{alternate_on}
- * #{mouse_any_flag}'` reads exactly "1 1", or throws with the measured string. The trailing colon
- * on the `=` exact-match target is required, this machine's tmux reports "can't find pane" without
- * it even against a live session.
+ * #{mouse_any_flag}'` reads exactly `expected` (default `"1 1"`, the mouse-report fixture's own
+ * shape; the classic fixture passes `"0 0"`), or throws with both the expected and measured
+ * strings. The trailing colon on the `=` exact-match target is required, this machine's tmux
+ * reports "can't find pane" without it even against a live session.
  */
-async function assertPaneModes(tmuxName, timeoutMs = PANE_MODES_TIMEOUT_MS) {
+async function assertPaneModes(
+  tmuxName,
+  timeoutMs = PANE_MODES_TIMEOUT_MS,
+  expected = "1 1",
+) {
   const deadline = Date.now() + timeoutMs;
   let measured = "";
   while (Date.now() < deadline) {
@@ -638,18 +697,20 @@ async function assertPaneModes(tmuxName, timeoutMs = PANE_MODES_TIMEOUT_MS) {
       "#{alternate_on} #{mouse_any_flag}",
     ]);
     measured = stdout.trim();
-    if (measured === "1 1") return measured;
+    if (measured === expected) return measured;
     await sleep(100);
   }
   throw new Error(
-    `alternate_on/mouse_any_flag expected "1 1", measured "${measured}"`,
+    `alternate_on/mouse_any_flag expected "${expected}", measured "${measured}"`,
   );
 }
 
 /** Real ttyd against `session`, keyed by `sessionId` (never the card id, PROXY-01), carrying
  * production's exact argv shape including the retained fingerprint key adoptAndSweep needs to
- * re-adopt it. Reused verbatim in shape from session-liveness-v3.mjs's own spawnTtyd. */
-function spawnTtyd(session, sessionId) {
+ * re-adopt it, and the production `-T <term>` client terminal type (default `tmux-256color`,
+ * overridable only by the `alt-screen-term` break leg). Reused verbatim in shape from
+ * session-liveness-v3.mjs's own spawnTtyd. */
+function spawnTtyd(session, sessionId, term = "tmux-256color") {
   return new Promise((resolve, reject) => {
     const child = spawn(
       "ttyd",
@@ -661,6 +722,8 @@ function spawnTtyd(session, sessionId) {
         "0",
         "-b",
         `/sessions/${sessionId}/terminal`,
+        "-T",
+        term,
         "-t",
         "disableLeaveAlert=true",
         "-t",
@@ -742,6 +805,12 @@ function seedFixtureCard(home, card) {
  * plants writeViewportFixtureBinary instead, for the viewport-fixture break leg only.
  * `opts.telemetry` forwards to the REAL boot only, never to the warmup boot it immediately kills,
  * matching `bootServer`'s own opt-in shape.
+ *
+ * `opts.classic` (task 2) plants `writeClassicFixtureBinary` instead, expects `"0 0"` from
+ * `assertPaneModes`, and prepends the real installed `<home>/.dispatch/pty-shim.py` to the pane
+ * argv when the file exists (the warmup boot above is what installed it), mirroring production's
+ * own `wrapWithPtyShim`. `opts.skipShim` suppresses that prepend (`--break unwrapped-pane`) and
+ * `opts.ttydTerm` overrides the ttyd `-T` value (`--break alt-screen-term`), both classic-only.
  */
 async function standUpFixture(opts = {}) {
   const home = makeSandboxHome(`run-${process.pid}`);
@@ -764,18 +833,30 @@ async function standUpFixture(opts = {}) {
     await waitForReady(SANDBOX_PORT);
     await killAndWait(warmup.child);
 
-    handle.pathPrefix = opts.useViewportFixture
-      ? writeViewportFixtureBinary(home)
-      : writeMouseReportFixtureBinary(home);
+    handle.pathPrefix = opts.classic
+      ? writeClassicFixtureBinary(home)
+      : opts.useViewportFixture
+        ? writeViewportFixtureBinary(home)
+        : writeMouseReportFixtureBinary(home);
     console.log(
       `standup: fixture binary planted, ${join(handle.pathPrefix, "claude")}`,
     );
 
-    await tmuxNewFixtureSession(
-      tmuxName,
-      home,
-      join(handle.pathPrefix, "claude"),
-    );
+    const binPath = join(handle.pathPrefix, "claude");
+    let commandArgv = [binPath];
+    if (opts.classic) {
+      const shimPath = join(home, DISPATCH_DIR_NAME, "pty-shim.py");
+      if (!opts.skipShim && existsSync(shimPath)) {
+        commandArgv = [shimPath, binPath];
+        console.log(`standup: pane wrapped in ${shimPath}`);
+      } else {
+        console.log(
+          `standup: pane UNWRAPPED (${opts.skipShim ? "skipShim" : "shim absent on disk"})`,
+        );
+      }
+    }
+
+    await tmuxNewFixtureSession(tmuxName, home, commandArgv);
     const live = await tmuxListSessionNames();
     if (!live.includes(tmuxName)) {
       throw new Error(
@@ -784,10 +865,19 @@ async function standUpFixture(opts = {}) {
     }
     console.log(`standup: tmux session live, ${tmuxName}`);
 
-    const measured = await assertPaneModes(tmuxName);
+    const expectedModes = opts.classic ? "0 0" : "1 1";
+    const measured = await assertPaneModes(
+      tmuxName,
+      PANE_MODES_TIMEOUT_MS,
+      expectedModes,
+    );
     console.log(`standup: pane modes ${measured}`);
 
-    handle.ttyd = await spawnTtyd(tmuxName, sessionId);
+    handle.ttyd = await spawnTtyd(
+      tmuxName,
+      sessionId,
+      opts.ttydTerm ?? "tmux-256color",
+    );
     await waitForPortListening(handle.ttyd.port);
     console.log(`standup: ttyd LISTENING on :${handle.ttyd.port}`);
 
@@ -1447,6 +1537,294 @@ async function breakSubSlopFlick(violations) {
  * frames". */
 async function breakWrongPage(violations) {
   await runActivationFlow(violations, { wrongPage: true });
+}
+
+// ---------------------------------------------------------------------------
+// --check local-scroll / --break unwrapped-pane / --break alt-screen-term (101.1-01, task 2): a
+// classic-shaped pane through real tmux, real ttyd at the production TERM/revision, and (unless a
+// break opts out) the real installed pty shim.
+// ---------------------------------------------------------------------------
+
+const VIEWPORT_METRICS_SRC = `
+  (() => {
+    const vp = document.querySelector('.xterm-viewport');
+    if (!vp) return null;
+    return { scrollHeight: vp.scrollHeight, clientHeight: vp.clientHeight, scrollTop: vp.scrollTop };
+  })()
+`;
+
+const ROW_HEIGHT_SRC = `
+  (() => {
+    const row = document.querySelector('.xterm-rows > div');
+    return row ? row.getBoundingClientRect().height : null;
+  })()
+`;
+
+/**
+ * Empirically determined against a real classic-shaped fixture (this task's own first run,
+ * recorded verbatim in the plan's SUMMARY): a POSITIVE total `dy` (finger dragging DOWN the
+ * screen) is the direction that moves `.xterm-viewport`'s `scrollTop` toward OLDER content. The
+ * client sits at the bottom of its buffer immediately after the burst, so the opposite sign would
+ * find nothing to scroll and this assertion would fail for the wrong reason.
+ */
+const FLICK_DY_TOWARD_OLDER = 300;
+
+/** Polls `getValue()` until it reads the same value on two consecutive polls (settled), or the
+ * deadline passes, returning whatever was last measured either way. Shared by the post-burst
+ * scrollHeight settle and the post-flick scrollTop settle. */
+async function pollUntilStable(
+  getValue,
+  { intervalMs = 200, stableRounds = 2, timeoutMs = 15_000 } = {},
+) {
+  const deadline = Date.now() + timeoutMs;
+  let last = await getValue();
+  let stableCount = 0;
+  while (Date.now() < deadline) {
+    await sleep(intervalMs);
+    const cur = await getValue();
+    if (cur === last) {
+      stableCount++;
+      if (stableCount >= stableRounds) return cur;
+    } else {
+      stableCount = 0;
+    }
+    last = cur;
+  }
+  return last;
+}
+
+/**
+ * Chrome/CDP shape copied from `runActivationFlow`: stands up the classic fixture, navigates
+ * straight to `/sessions/<id>/terminal/`, bursts 200 shim-wrapped lines through a real tmux
+ * `send-keys`, and asserts (3) the client's local scrollback grew past its viewport and (5) a CDP
+ * touch flick moves `.xterm-viewport.scrollTop` while sending zero INPUT WS frames. Also
+ * REPORTS, never asserts, the count of `?2026` marker bytes reaching the client on the wire: this
+ * task's own honesty check (`--break unwrapped-pane`) found it always reads 0 regardless of shim
+ * presence, so a "> 0" assertion here would be vacuous decorative-green. Shared verbatim by
+ * `--check local-scroll` and its two break legs (`unwrapped-pane` via `opts.skipShim`,
+ * `alt-screen-term` via `opts.ttydTerm`), so a break proves something about the exact assertions
+ * the check runs, never a re-implementation.
+ */
+async function runLocalScrollFlow(violations, opts = {}) {
+  const handle = await standUpFixture({
+    classic: true,
+    skipShim: opts.skipShim,
+    ttydTerm: opts.ttydTerm,
+  });
+  let chromeChild = null;
+  let cdp = null;
+  const userDataDir = join(
+    tmpdir(),
+    `${SANDBOX_PREFIX}chrome-local-scroll-${process.pid}`,
+  );
+  try {
+    chromeChild = spawn(
+      findChrome(),
+      [
+        "--headless=new",
+        `--remote-debugging-port=${CDP_PORT}`,
+        `--user-data-dir=${userDataDir}`,
+        "--no-first-run",
+      ],
+      { stdio: ["ignore", "ignore", "ignore"] },
+    );
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const { targetId } = await cdp.send("Target.createTarget", {
+      url: "about:blank",
+    });
+    const { sessionId } = await cdp.send("Target.attachToTarget", {
+      targetId,
+      flatten: true,
+    });
+    await cdp.send("Page.enable", {}, sessionId);
+    await cdp.send("Runtime.enable", {}, sessionId);
+    await cdp.send("Network.enable", {}, sessionId);
+
+    const wsFrames = [];
+    cdp.ws.addEventListener("message", (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.sessionId !== sessionId) return;
+      if (msg.method === "Network.webSocketFrameSent") {
+        wsFrames.push({
+          dir: "sent",
+          payloadData: msg.params.response.payloadData,
+        });
+      } else if (msg.method === "Network.webSocketFrameReceived") {
+        wsFrames.push({
+          dir: "recv",
+          payloadData: msg.params.response.payloadData,
+        });
+      }
+    });
+
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 390, height: 844, deviceScaleFactor: 3, mobile: true },
+      sessionId,
+    );
+    await cdp.send(
+      "Emulation.setTouchEmulationEnabled",
+      { enabled: true, configuration: "mobile" },
+      sessionId,
+    );
+
+    const targetUrl = `http://127.0.0.1:${SANDBOX_PORT}/sessions/${handle.sessionId}/terminal/`;
+    await cdp.send("Page.navigate", { url: targetUrl }, sessionId);
+    await waitForPageComplete(cdp, sessionId, targetUrl);
+
+    const mountDeadline = Date.now() + READY_TIMEOUT_MS;
+    let mounted = false;
+    while (Date.now() < mountDeadline) {
+      mounted = await evalValue(
+        cdp,
+        sessionId,
+        "document.querySelector('#terminal .xterm-screen') !== null",
+      );
+      if (mounted) break;
+      await sleep(POLL_INTERVAL_MS);
+    }
+    if (!mounted) {
+      violations.push(
+        `local-scroll: #terminal .xterm-screen never mounted within ${READY_TIMEOUT_MS}ms at ${targetUrl}`,
+      );
+      return;
+    }
+    await sleep(1000);
+
+    const before = await evalValue(cdp, sessionId, VIEWPORT_METRICS_SRC);
+    if (!before) {
+      violations.push(
+        "local-scroll: .xterm-viewport not found before the burst",
+      );
+      return;
+    }
+    console.log(
+      `local-scroll: before burst scrollHeight=${before.scrollHeight} clientHeight=${before.clientHeight} scrollTop=${before.scrollTop}`,
+    );
+
+    await execFileP("tmux", [
+      "send-keys",
+      "-t",
+      `=${handle.tmuxName}:`,
+      "burst",
+      "Enter",
+    ]);
+
+    await pollUntilStable(() =>
+      evalValue(
+        cdp,
+        sessionId,
+        "document.querySelector('.xterm-viewport').scrollHeight",
+      ),
+    );
+    const after = await evalValue(cdp, sessionId, VIEWPORT_METRICS_SRC);
+    if (!after) {
+      violations.push(
+        "local-scroll: .xterm-viewport not found after the burst",
+      );
+      return;
+    }
+
+    const rowHeightPx = await evalValue(cdp, sessionId, ROW_HEIGHT_SRC);
+    if (!rowHeightPx) {
+      violations.push(
+        "local-scroll: could not measure a rendered row height via .xterm-rows > div",
+      );
+      return;
+    }
+
+    const scrollableRows = Math.floor(
+      (after.scrollHeight - after.clientHeight) / rowHeightPx,
+    );
+    console.log(
+      `local-scroll: after burst scrollHeight=${after.scrollHeight} clientHeight=${after.clientHeight} rowHeightPx=${rowHeightPx.toFixed(2)} scrollableRows=${scrollableRows}`,
+    );
+    if (scrollableRows < 20) {
+      violations.push(
+        `local-scroll: expected scrollable rows >= 20 after the burst, measured ${scrollableRows} (scrollHeight=${after.scrollHeight} clientHeight=${after.clientHeight} rowHeightPx=${rowHeightPx.toFixed(2)})`,
+      );
+    }
+
+    /**
+     * Reported, not asserted: the honesty check this task's own plan text requires (section D)
+     * found that `--break unwrapped-pane` measures 0 here too, tmux's client-facing redraw
+     * protocol never forwards the pane's own `?2026` control bytes literally regardless of shim
+     * presence, so no configuration reachable by this harness can make a "> 0" assertion fail.
+     * Kept as a reported measurement (SUMMARY records both configurations) rather than a
+     * decorative-green assertion. Assertions 3 and 5 are the load-bearing ones and both are
+     * proven falsifiable by the two break legs below.
+     */
+    const outputMarkerCount = wsFrames
+      .filter((f) => f.dir === "recv" && decodeTtydOp(f.payloadData) === "0")
+      .reduce(
+        (sum, f) =>
+          sum + countMarkerOccurrences(Buffer.from(f.payloadData, "base64")),
+        0,
+      );
+    console.log(
+      `local-scroll: marker byte sequences (${SHIM_MARKER_PREFIX_HEX}) across OUTPUT frames measured ${outputMarkerCount}`,
+    );
+
+    const flickStartIdx = wsFrames.length;
+    await flick(cdp, sessionId, {
+      x: 195,
+      y: 400,
+      dy: FLICK_DY_TOWARD_OLDER,
+      steps: 28,
+      cadenceMs: 12,
+    });
+    const scrollTopAfterFlick = await pollUntilStable(() =>
+      evalValue(
+        cdp,
+        sessionId,
+        "document.querySelector('.xterm-viewport').scrollTop",
+      ),
+    );
+    const flickInputFrames = wsFrames
+      .slice(flickStartIdx)
+      .filter(
+        (f) => f.dir === "sent" && decodeTtydOp(f.payloadData) === "0",
+      ).length;
+    const scrollTopDelta = Math.abs(scrollTopAfterFlick - after.scrollTop);
+    console.log(
+      `local-scroll: flick scrollTop ${after.scrollTop} -> ${scrollTopAfterFlick} (delta ${scrollTopDelta.toFixed(2)}px), INPUT frames during flick measured ${flickInputFrames}`,
+    );
+    if (scrollTopDelta < rowHeightPx * 2) {
+      violations.push(
+        `local-scroll: expected scrollTop to move at least 2 row heights (${(rowHeightPx * 2).toFixed(2)}px) during the flick, measured ${scrollTopDelta.toFixed(2)}px`,
+      );
+    }
+    if (flickInputFrames !== 0) {
+      violations.push(
+        `local-scroll: expected 0 INPUT WS frames during the local-scroll flick, measured ${flickInputFrames}`,
+      );
+    }
+  } finally {
+    if (cdp) cdp.close();
+    await killAndWait(chromeChild);
+    rmSync(userDataDir, { recursive: true, force: true });
+    await tearDownFixture(handle);
+  }
+}
+
+async function checkLocalScroll(violations) {
+  await runLocalScrollFlow(violations, {});
+}
+
+/** `skipShim: true`, tmux then receives Claude's synchronized-update markers unstripped and
+ * repaints the pane instead of linefeed-scrolling it. Assertion 3 (scrollable rows) must trip. */
+async function breakUnwrappedPane(violations) {
+  await runLocalScrollFlow(violations, { skipShim: true });
+}
+
+/** `ttydTerm: "xterm-256color"`, so the `tmux-256color:smcup@:rmcup@` TERM-scoped override does
+ * not apply and this client gets normal alt-screen behavior, pinned to the visible rows. Assertion
+ * 3 must trip. Proves the TERM scoping is load-bearing without writing a single tmux server
+ * option. */
+async function breakAltScreenTerm(violations) {
+  await runLocalScrollFlow(violations, { ttydTerm: "xterm-256color" });
 }
 
 // ---------------------------------------------------------------------------
@@ -3569,11 +3947,14 @@ const CHECKS = {
   "telemetry-on": checkTelemetryOn,
   "telemetry-capture": checkTelemetryCapture,
   "pty-shim": checkPtyShim,
+  "local-scroll": checkLocalScroll,
 };
 
 const BREAKS = {
   "viewport-fixture": breakViewportFixture,
   "shim-markers-emptied": breakShimMarkersEmptied,
+  "unwrapped-pane": breakUnwrappedPane,
+  "alt-screen-term": breakAltScreenTerm,
   "no-touch-emulation": breakNoTouchEmulation,
   "sub-slop-flick": breakSubSlopFlick,
   "wrong-page": breakWrongPage,
