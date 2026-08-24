@@ -811,6 +811,14 @@ export interface InvalidPlaybook {
   reason: string;
 }
 
+export interface VaultKeySummary {
+  name: string;
+  purpose: string;
+  createdAt: string;
+  updatedAt: string;
+  filled: boolean;
+}
+
 /**
  * Wire shape for `GET /playbooks/picker`: valid playbooks plus malformed ones (with a safe
  * reason) so the StartModal picker can render both, and the currently remembered default so

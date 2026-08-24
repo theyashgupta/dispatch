@@ -38,6 +38,29 @@ export const HOOK_SETTINGS_PATH = path.join(DISPATCH_DIR, "hook-settings.json");
 export const PTY_SHIM_PATH = path.join(DISPATCH_DIR, "pty-shim.py");
 
 /**
+ * The vault's own directory, at mode 0700, separate from `DISPATCH_DIR` so its three files
+ * (metadata, values, schema) can be reasoned about as one sealed unit.
+ */
+export const VAULT_DIR = path.join(DISPATCH_DIR, "vault");
+
+/**
+ * Vault key metadata: name, purpose, timestamps and filled state for every key. Holds no values.
+ */
+export const VAULT_METADATA_PATH = path.join(VAULT_DIR, "vault.json");
+
+/**
+ * The sealed values file, `NAME=value` lines at mode 0600. The only file in the vault a value
+ * ever lands in; never opened by the read (list) path.
+ */
+export const VAULT_VALUES_PATH = path.join(VAULT_DIR, "values.env");
+
+/**
+ * The Claude-readable schema surface, listing key names and purposes in env-vault's own format.
+ * Rewritten on every mutation; never carries a value.
+ */
+export const VAULT_SCHEMA_PATH = path.join(VAULT_DIR, "schema.keys");
+
+/**
  * The update-check cache, holding `{ lastCheckedAt, latestSeen }` so at most one anonymous
  * registry GET/day is made. A corrupt or missing file is not an error — the service just re-checks.
  */
