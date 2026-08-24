@@ -900,8 +900,11 @@ spec, are homed in [Column Transition Specification](#column-transition-specific
 manager (`adapters/ttyd.ts`) spawns, tracks, and reuses a writable, loopback-only ttyd attached to
 an existing `dsp-<identifier>` tmux session so the live `claude` REPL can be embedded in the
 detail-panel iframe (`TERM-01`). Its invocation is ONE fixed, unconditional shape — no environment
-variable selects an alternate form: `ttyd -W -i 127.0.0.1 -p 0 -b /sessions/<sessionId>/terminal -t
-disableLeaveAlert=true -t DISPATCH_TTYD_REVISION_<revision>=1 tmux -u attach -t =<session>`. The two
+variable selects an alternate form: `ttyd -W -i 127.0.0.1 -p 0 -b /sessions/<sessionId>/terminal -T
+tmux-256color -t disableLeaveAlert=true -t DISPATCH_TTYD_REVISION_<revision>=1 tmux -u attach -t
+=<session>`. `-T tmux-256color` is load-bearing, not cosmetic (`TERM-05`): it is the TERM string the
+no-alt-screen override below is scoped to, so an attaching client identifying itself as anything else
+would not get tmux's smcup/rmcup cancellation and would lose local scrollback entirely. The two
 `-t` tokens are `disableLeaveAlert` and the inert retained-key revision token — there is no
 `-I <index>`, no `-t theme=`/`fontFamily`/`fontSize`: look, font, and every interaction pattern are
 entirely client-owned (below), and the retained-key token is now the SOLE re-adoption fingerprint
@@ -928,6 +931,15 @@ had to move in lockstep with the base-path change. `--check orphan-sweep` proves
 real pre-92-fingerprinted orphan as a genuine persisted session record and watching it get swept on
 restart while the fixture's own current-revision ttyd are re-adopted (same pid) and still serve their
 own pane.
+
+**`TERM-05` bumped `TTYD_RUNTIME_REVISION` again, to 7, without changing the base path.** The
+reason is the TERM-scoped no-alt-screen override this ships alongside: a ttyd spawned before that
+change attaches with the old TERM, not `tmux-256color`, so the override does not apply to it even
+though its base path is still perfectly valid. If the revision key had stayed at 6, such a ttyd
+would be ADOPTED on the next restart, keeping its client on the wrong TERM indefinitely with no
+local scrollback and no way to self-heal. Bumping the value instead forces exactly the same
+classification the Phase 92 bump did: incompatible, swept, and respawned once on first boot after
+upgrade, so every attaching client ends up on the correct TERM.
 
 **A pre-2.7.0 ttyd is only sweepable because of the base-path arm (`TERM-05`).** The paragraph
 above understated the problem when it shipped: ttyd rewrites its own argv buffer at startup
@@ -1010,6 +1022,70 @@ iOS text inflation breaks the `charWidth ∝ fontSize` relationship the zoom / e
 feature's math depends on. The theme resolver's never-throws contract (above) is part of the same
 invariant — a themed terminal must open even when Ghostty is absent or its config fails to parse.
 
+**A phone flick is local, not a round trip, because of five cooperating pieces (`TERM-05`).**
+
+**1. The renderer is forced classic per pane.** `CLASSIC_RENDERER_ENV` (`adapters/tmux.ts`) is
+injected as `-e CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` by `newSession`. Why: Claude Code's
+fullscreen renderer, the default for any install first launched on 2.1.239 or later, owns the
+alternate screen with mouse tracking on and keeps its own scrollback inside the Claude process
+itself, so tmux's own pane history stays at zero and a phone flick becomes one round trip mouse
+report per row. The accepted cost is real and worth stating plainly: inside Dispatch, the
+fullscreen renderer's flicker-free drawing, its Ctrl+O transcript mode, and any fullscreen-only
+setting do not apply. There is deliberately NO config escape hatch back to fullscreen; the user's
+own terminals outside Dispatch keep their own `tui` setting completely untouched.
+
+**2. tmux keeps Dispatch's web clients on the primary screen.** `ensureNoAltScreenOverride`
+(`adapters/tmux.ts`) appends `tmux-256color:smcup@:rmcup@` to tmux's SERVER-global
+`terminal-overrides`. The TERM scoping is the load-bearing part: `ttyd -T tmux-256color` is the
+only TERM Dispatch's own clients ever attach with, so a user's personal tmux clients on the same
+shared server keep their normal alt-screen behavior untouched. `tmux attach` itself owns the outer
+terminal's alternate screen, and xterm.js keeps no scrollback of its own there, which is why
+cancelling smcup/rmcup is what makes local scrollback possible at all. The same call-site reasoning
+already documented for the hyperlinks grant applies here too: server options die with the tmux
+server, so this grant runs at boot AND after every `newSession`.
+
+**3. A pty shim strips DECSET 2026.** `~/.dispatch/pty-shim.py`, whose body is embedded in
+`src/server/bootstrap/pty-shim-setup.ts`, is installed at boot the same way `hook.sh` is. Why:
+tmux always answers Claude's DECRQM(2026) probe "supported", so the classic renderer wraps every
+frame it writes in synchronized-update markers, and tmux implements a synchronized update as a
+full pane repaint that never scrolls the attached client. The probe that proved this, recorded in
+`101.1-DECISION.md`: 202 buffer lines unwrapped against 78 wrapped for identical output. Two
+mechanics matter to a future editor of this file: a marker split across two reads is held back
+through the shared seven-byte prefix and re-examined once the next chunk arrives, and python3 is
+probed at boot by RUNNING it, with failure REMOVING the shim file entirely, because
+`wrapWithPtyShim` treats file existence as the wrap capability, and a stale shim left behind after
+an OS change would otherwise kill every pane at spawn instead of merely degrading scroll.
+
+**4. Attaching clients are seeded with tmux history.** `GET /sessions/:id/terminal/scrollback`
+(`routes/terminal-proxy.route.ts`) calls `sessionScrollback()` (`services/orchestration/terminal.ts`)
+which calls `captureHistory()` (`adapters/tmux.ts`, `capture-pane -p -e -t <name> -S -<limit> -E
+-1`), up to 10,000 lines, fetched by the client's `seedScrollback` (`web/terminal-main.ts`) BEFORE
+the WebSocket ever opens, and written into an xterm instance whose own `scrollback` option was
+raised to the matching 10,000. `-E -1` is what excludes the visible rows: tmux's own attach redraw
+paints them itself, and including them in the seed would duplicate one screenful at the seam. The
+route is registered ahead of the wildcard forward, which would otherwise swallow this path as a
+static-file lookup, and the request hops through a service layer because routes may not call
+subprocess adapters directly. The endpoint sits under `terminalProxyRouter`, mounted after
+`remoteAuthRouter`, so on the tunnel path it is behind the exact same auth gate as the terminal
+itself; a capture failure answers 502 like any other upstream fault, and an unknown session answers 404.
+
+**5. The report-mode path is the live degrade path, not dead code.** `scrollMode()` still returns
+`"report"` whenever mouse tracking is on, which remains true for any pane Dispatch did not force
+classic: vim with mouse on, any other mouse-tracking TUI, or a Claude pane running unwrapped
+because python3 was unavailable at boot. The `outstandingReports` in-flight throttle and the
+`"report"` and `"none"` branches in `web/terminal-main.ts` must NOT be removed. State this in the
+imperative on purpose: a reader who only sees today's forced-classic, viewport-mode world will
+otherwise mistake this path for dead code and delete a real degrade path out from under the users
+who still exercise it.
+
+**Known and accepted: two rough edges, recorded rather than fixed.** Seeded history is captured at
+the PANE's own width, so a narrower phone rewraps old lines oddly; this is cosmetic and accepted,
+not a bug to chase. A reconnect duplicates one screenful at the seam, because the seed runs once on
+attach and tmux's own redraw repaints the visible rows again after a drop; a real fix would mean
+re-seeding on every reconnect, and the cost was judged not worth it for a one-screenful, one-time
+duplication. Both are named here so a future reader finds a recorded, deliberate choice instead of
+an undiscovered bug.
+
 **Adoption is runtime-revision gated on the retained key alone.** ttyd rewrites its process title
 but retains the direct tmux command, so an inert `DISPATCH_TTYD_REVISION_<revision>` argv token
 keeps both the exact compatibility marker and existing ownership fingerprint visible in `ps`. The
@@ -1049,8 +1125,10 @@ internally (`capture-pane -e` proves the escape exists server-side) but never fo
 attached client's byte stream — xterm.js's `OscLinkProvider` then has zero cells with the extended
 `urlId` attribute to resolve, no matter how correct the client's own link handling is
 (live-discovered defect, 59-02-SUMMARY.md). `ensureHyperlinksTerminalFeature` (`adapters/tmux.ts`)
-grants `xterm-256color:hyperlinks` — the exact TERM string ttyd's spawn argv above declares —
-idempotently (`tmux show -g terminal-features` checked before `set -ag`, since it is a tmux
+grants BOTH `xterm-256color:hyperlinks` and `tmux-256color:hyperlinks` (`TERM-05`): the ttyd spawn
+argv above now declares `tmux-256color`, not `xterm-256color`, so the grant covers both TERMs
+rather than only the one ttyd actually attaches with. It runs idempotently
+(`tmux show -g terminal-features` checked before `set -ag`, since it is a tmux
 SERVER-global option that would otherwise duplicate on every backend restart across the tmux
 server's much longer lifetime) and never throws. It runs at boot AND after every successful
 `newSession`: tmux does not auto-start a server for `show`/`set`, so with no server alive (the
@@ -2785,16 +2863,21 @@ single-user-loopback-bounded risk already accepted at `T-01-05c`.
 This subsection previously claimed mobile kinetic scroll depends on the target pane having tmux
 mouse reporting on — that premise is MEASURED FALSE. With `set -g mouse off` and Claude Code
 running, the attached client still received `?1000h ?1002h ?1003h ?1006h`: tmux forwards the PANE
-APP's own mouse mode to the client regardless of tmux's own `mouse` option. `scrollMode()`
-(`TERM-03`, [Terminal ttyd](#terminal-ttyd)) therefore returns `"report"` for every dispatch user
-running Claude Code, `mouse on` or not, and with `mouse off` tmux does not run its own wheel
-bindings either — the report still reaches Claude Code. One line per report is universal, not
-config-dependent, so this deferral is CLOSED on a false premise rather than still open. The still-true
-part survives unrelated to scroll: dispatch deliberately does not set tmux `mouse on` globally,
-because that changes selection/copy behavior for every existing session — that choice simply has no
-bearing on mobile scroll. The `mouseTrackingMode` gate still makes the wheel path a silent no-op in
-the one case where reporting genuinely is off (a bare shell prompt, no app mouse mode requested), so
-that residual case degrades to "no kinetic scroll" rather than a mis-scroll — safe, not broken.
+APP's own mouse mode to the client regardless of tmux's own `mouse` option, and this held true at
+the time this subsection was written: `scrollMode()` (`TERM-03`, [Terminal ttyd](#terminal-ttyd))
+then returned `"report"` for every dispatch user running Claude Code, `mouse on` or not, because
+nothing yet forced the classic renderer. `TERM-05` changed that premise, not this subsection's
+conclusion: with the classic renderer forced per pane (see the addendum above), a Dispatch Claude
+pane carries mouse tracking OFF, so `scrollMode()` now resolves to `"viewport"` and scroll is local,
+never a report round trip. The `"report"` path remains the live degrade path for any pane the
+classic-renderer force does not reach, vim with mouse on, another mouse-tracking TUI, or a Claude
+pane running unwrapped because python3 was unavailable at boot, described in the addendum above; one
+line per report there is still universal, not config-dependent. The still-true part survives
+unrelated to scroll: dispatch deliberately does not set tmux `mouse on` globally, because that
+changes selection/copy behavior for every existing session, and that choice simply has no bearing on
+mobile scroll. The `mouseTrackingMode` gate still makes the wheel path a silent no-op in the one
+case where reporting genuinely is off (a bare shell prompt, no app mouse mode requested), so that
+residual case degrades to "no kinetic scroll" rather than a mis-scroll, safe, not broken.
 
 ### Touch selection in Claude Code REPL prompts already works
 
@@ -3261,6 +3344,27 @@ permanently fails)`, which runs the same scenario in the configuration where bot
   - `--break telemetry-flag-ignored`: `telemetry-off: expected no telemetry file, found <path>/.dispatch/terminal-telemetry.jsonl with 3 record(s)`
   - `--break telemetry-no-flick`: `telemetry-on: expected exactly one record with inputFrames >= 20, found 0`
   - `--break telemetry-leak-planted`: `telemetry-on: string value found at record.note="leaked MOBILETERM101-c74806cd388a6035"`
+
+  Phase 101.1 added three more checks proving the shipped local-scroll chain (`TERM-05`) rather
+  than the older mouse-report kinetic path above: `pty-shim` (drives the REAL installed
+  `~/.dispatch/pty-shim.py` directly, never a copy, against a whole DECSET-2026 marker strip, a
+  marker split across two reads, and byte-exact passthrough of look-alike sequences), `local-scroll`
+  (a classic-shaped pane through real tmux, real ttyd, and the real installed pty shim; asserts a
+  200-line burst grows the web client's local scrollback past its viewport, and a CDP touch flick
+  moves `.xterm-viewport`'s `scrollTop` while sending zero INPUT WebSocket frames), and `seed`
+  (the scrollback endpoint against a fixture holding known content, proving history-only content, no
+  visible-row duplication at the seam, an exact line-count accounting, and the unknown-session 404
+  branch). `npm run mobile-term-101.1` runs those three one at a time, never concurrently: they
+  contend for ports, a shared tmux server, and CPU the same way the eight legs above do. Two rig
+  facts a future reader needs: the fixture ttyd carries `-T tmux-256color` and the current revision
+  key, because the no-alt-screen override is TERM-scoped and would otherwise never apply to the
+  fixture at all, and no leg in this trio writes any tmux server option, which is why the
+  `alt-screen-term` break leg changes the harness's own fixture `-T` value rather than the user's
+  global `terminal-overrides`. Break legs proven live, quoted verbatim from `101.1-01-SUMMARY.md`:
+  - `--break shim-markers-emptied`: `pty-shim[whole]: expected 0 marker byte sequences (1b5b3f32303236) in output, found 2`
+  - `--break unwrapped-pane`: `local-scroll: expected scrollable rows >= 20 after the burst, measured 0 (scrollHeight=828 clientHeight=828 rowHeightPx=18.00)`
+  - `--break alt-screen-term`: `local-scroll: expected scrollable rows >= 20 after the burst, measured 0 (scrollHeight=828 clientHeight=828 rowHeightPx=18.00)`
+  - `--break seed-includes-visible`: `seed: expected 0 visible rows duplicated in the seed body, found 49, first: "MTMLOCAL-0152"`
 
 - **`phase-smoke-tester`** - the only BEHAVIORAL verification this project runs: an agent derives
   and executes smoke cases against the running app after each phase's implementation lands. This
