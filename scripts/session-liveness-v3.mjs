@@ -14328,6 +14328,286 @@ async function checkVaultPerms(built) {
   return violations;
 }
 
+/**
+ * `--check vault-mutation-visibility`: drives one key, `LIFECYCLE_KEY`, through create, fill,
+ * rotate, purpose-edit, schema-surface-read and delete, asserting at each step that `GET /vault`
+ * (and, for the schema leg, `schema.keys` on disk) reports exactly what the mutation should have
+ * produced. Closes with a same-run prefix-sibling delete hazard (`LIFE` vs `LIFECYCLE`). Every
+ * mutating request is preceded by `sleep(10)` so a millisecond-tied `updatedAt` compare can never
+ * pass a mutator that failed to bump the timestamp.
+ */
+async function checkVaultMutationVisibility(built) {
+  const violations = [];
+  const NAME = "LIFECYCLE_KEY";
+  const dir = vaultDir(built);
+  const schemaPath = join(dir, "schema.keys");
+  const valuesPath = join(dir, "values.env");
+
+  async function listKey(name) {
+    const res = await vaultRequest(built, "GET", "/vault");
+    if (res.status !== 200) {
+      violations.push(
+        `GET /vault expected 200, got ${res.status}: ${res.text}`,
+      );
+      return undefined;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(res.text);
+    } catch {
+      violations.push(`GET /vault returned unparseable JSON: ${res.text}`);
+      return undefined;
+    }
+    const keys = Array.isArray(parsed?.keys) ? parsed.keys : [];
+    return keys.find((k) => k.name === name);
+  }
+
+  // Step 1: create without a value.
+  await sleep(10);
+  const created = await vaultRequest(built, "POST", "/vault", {
+    name: NAME,
+    purpose: "first purpose",
+  });
+  if (created.status !== 200) {
+    violations.push(
+      `step 1: POST /vault expected 200, got ${created.status}: ${created.text}`,
+    );
+  }
+  let entry = await listKey(NAME);
+  if (!entry) {
+    violations.push(`step 1: ${NAME} missing from listing after create`);
+    return violations;
+  }
+  if (entry.filled !== false) {
+    violations.push(`step 1: filled expected false, observed ${entry.filled}`);
+  }
+  if (entry.purpose !== "first purpose") {
+    violations.push(
+      `step 1: purpose expected "first purpose", observed "${entry.purpose}"`,
+    );
+  }
+  if (entry.createdAt !== entry.updatedAt) {
+    violations.push(
+      `step 1: createdAt "${entry.createdAt}" expected to equal updatedAt "${entry.updatedAt}"`,
+    );
+  }
+  const createdAt = entry.createdAt;
+  let lastUpdatedAt = entry.updatedAt;
+
+  // Step 2: fill it.
+  await sleep(10);
+  const filled = await vaultRequest(built, "PUT", `/vault/${NAME}/value`, {
+    value: "value-one",
+  });
+  if (filled.status !== 200) {
+    violations.push(
+      `step 2: PUT /vault/${NAME}/value expected 200, got ${filled.status}: ${filled.text}`,
+    );
+  }
+  entry = await listKey(NAME);
+  if (!entry) {
+    violations.push(`step 2: ${NAME} missing from listing after fill`);
+    return violations;
+  }
+  if (entry.filled !== true) {
+    violations.push(`step 2: filled expected true, observed ${entry.filled}`);
+  }
+  if (entry.purpose !== "first purpose") {
+    violations.push(
+      `step 2: purpose expected "first purpose", observed "${entry.purpose}"`,
+    );
+  }
+  if (entry.createdAt !== createdAt) {
+    violations.push(
+      `step 2: createdAt expected "${createdAt}", observed "${entry.createdAt}"`,
+    );
+  }
+  if (!(entry.updatedAt > lastUpdatedAt)) {
+    violations.push(
+      `step 2: updatedAt expected strictly greater than "${lastUpdatedAt}", observed "${entry.updatedAt}"`,
+    );
+  }
+  lastUpdatedAt = entry.updatedAt;
+
+  // Step 3: rotate it. Purpose must not move, this is the criterion's most load-bearing leg.
+  await sleep(10);
+  const rotated = await vaultRequest(built, "PUT", `/vault/${NAME}/value`, {
+    value: "value-two",
+  });
+  if (rotated.status !== 200) {
+    violations.push(
+      `step 3: PUT /vault/${NAME}/value expected 200, got ${rotated.status}: ${rotated.text}`,
+    );
+  }
+  entry = await listKey(NAME);
+  if (!entry) {
+    violations.push(`step 3: ${NAME} missing from listing after rotate`);
+    return violations;
+  }
+  if (entry.filled !== true) {
+    violations.push(`step 3: filled expected true, observed ${entry.filled}`);
+  }
+  if (entry.purpose !== "first purpose") {
+    violations.push(
+      `step 3: purpose expected "first purpose" (a rotate must leave it untouched), observed "${entry.purpose}"`,
+    );
+  }
+  if (entry.createdAt !== createdAt) {
+    violations.push(
+      `step 3: createdAt expected "${createdAt}", observed "${entry.createdAt}"`,
+    );
+  }
+  if (!(entry.updatedAt > lastUpdatedAt)) {
+    violations.push(
+      `step 3: updatedAt expected strictly greater than "${lastUpdatedAt}", observed "${entry.updatedAt}"`,
+    );
+  }
+  lastUpdatedAt = entry.updatedAt;
+
+  // Step 4: edit the purpose.
+  await sleep(10);
+  const edited = await vaultRequest(built, "PATCH", `/vault/${NAME}`, {
+    purpose: "second purpose",
+  });
+  if (edited.status !== 200) {
+    violations.push(
+      `step 4: PATCH /vault/${NAME} expected 200, got ${edited.status}: ${edited.text}`,
+    );
+  }
+  entry = await listKey(NAME);
+  if (!entry) {
+    violations.push(`step 4: ${NAME} missing from listing after purpose edit`);
+    return violations;
+  }
+  if (entry.purpose !== "second purpose") {
+    violations.push(
+      `step 4: purpose expected "second purpose", observed "${entry.purpose}"`,
+    );
+  }
+  if (entry.filled !== true) {
+    violations.push(`step 4: filled expected true, observed ${entry.filled}`);
+  }
+  if (entry.createdAt !== createdAt) {
+    violations.push(
+      `step 4: createdAt expected "${createdAt}", observed "${entry.createdAt}"`,
+    );
+  }
+  if (!(entry.updatedAt > lastUpdatedAt)) {
+    violations.push(
+      `step 4: updatedAt expected strictly greater than "${lastUpdatedAt}", observed "${entry.updatedAt}"`,
+    );
+  }
+
+  // Step 5: the Claude-readable schema surface, measured on disk rather than through the API.
+  let schemaText = "";
+  try {
+    schemaText = readFileSync(schemaPath, "utf8");
+  } catch (err) {
+    violations.push(`step 5: could not read ${schemaPath}: ${err.message}`);
+  }
+  if (schemaText) {
+    if (!new RegExp(`^${NAME}=`, "m").test(schemaText)) {
+      violations.push(
+        `step 5: schema.keys has no line starting with "${NAME}="`,
+      );
+    }
+    if (!schemaText.includes("second purpose")) {
+      violations.push(`step 5: schema.keys does not contain "second purpose"`);
+    }
+    if (schemaText.includes("value-one")) {
+      violations.push(`step 5: schema.keys leaks "value-one"`);
+    }
+    if (schemaText.includes("value-two")) {
+      violations.push(`step 5: schema.keys leaks "value-two"`);
+    }
+  }
+
+  // Step 6: delete it.
+  const deleted = await vaultRequest(built, "DELETE", `/vault/${NAME}`);
+  if (deleted.status !== 200) {
+    violations.push(
+      `step 6: DELETE /vault/${NAME} expected 200, got ${deleted.status}: ${deleted.text}`,
+    );
+  }
+  entry = await listKey(NAME);
+  if (entry) {
+    violations.push(`step 6: ${NAME} still present in listing after delete`);
+  }
+  let schemaAfterDelete = "";
+  try {
+    schemaAfterDelete = readFileSync(schemaPath, "utf8");
+  } catch (err) {
+    violations.push(`step 6: could not read ${schemaPath}: ${err.message}`);
+  }
+  if (schemaAfterDelete.includes(NAME)) {
+    violations.push(
+      `step 6: schema.keys still contains "${NAME}" after delete`,
+    );
+  }
+  let valuesText = "";
+  try {
+    valuesText = readFileSync(valuesPath, "utf8");
+  } catch (err) {
+    violations.push(`step 6: could not read ${valuesPath}: ${err.message}`);
+  }
+  if (new RegExp(`^${NAME}=`, "m").test(valuesText)) {
+    violations.push(
+      `step 6: values.env still has a line starting with "${NAME}=" after delete`,
+    );
+  }
+  if (valuesText.includes("value-two")) {
+    violations.push(`step 6: values.env leaks "value-two" after delete`);
+  }
+
+  // Step 7: the prefix-sibling hazard. A bare-name delete filter would strip LIFECYCLE's value
+  // line while deleting LIFE, even though every leg above would have already passed.
+  const shortCreate = await vaultRequest(built, "POST", "/vault", {
+    name: "LIFE",
+    purpose: "short sibling",
+    value: "life-value",
+  });
+  if (shortCreate.status !== 200) {
+    violations.push(
+      `step 7: POST /vault (LIFE) expected 200, got ${shortCreate.status}: ${shortCreate.text}`,
+    );
+  }
+  const longCreate = await vaultRequest(built, "POST", "/vault", {
+    name: "LIFECYCLE",
+    purpose: "long sibling",
+    value: "lifecycle-value",
+  });
+  if (longCreate.status !== 200) {
+    violations.push(
+      `step 7: POST /vault (LIFECYCLE) expected 200, got ${longCreate.status}: ${longCreate.text}`,
+    );
+  }
+  const lifeDeleted = await vaultRequest(built, "DELETE", "/vault/LIFE");
+  if (lifeDeleted.status !== 200) {
+    violations.push(
+      `step 7: DELETE /vault/LIFE expected 200, got ${lifeDeleted.status}: ${lifeDeleted.text}`,
+    );
+  }
+  const lifecycleEntry = await listKey("LIFECYCLE");
+  if (!lifecycleEntry) {
+    violations.push(
+      `step 7: LIFECYCLE missing from listing after deleting LIFE`,
+    );
+  }
+  let valuesAfterSibling = "";
+  try {
+    valuesAfterSibling = readFileSync(valuesPath, "utf8");
+  } catch (err) {
+    violations.push(`step 7: could not read ${valuesPath}: ${err.message}`);
+  }
+  if (!new RegExp(`^LIFECYCLE=`, "m").test(valuesAfterSibling)) {
+    violations.push(
+      `step 7: values.env has no "LIFECYCLE=" line after deleting LIFE`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -14359,6 +14639,12 @@ const CHECKS = {
     ),
   "vault-perms": () =>
     withFixture("vault-perms", checkVaultPerms, VAULT_FIXTURE),
+  "vault-mutation-visibility": () =>
+    withFixture(
+      "vault-mutation-visibility",
+      checkVaultMutationVisibility,
+      VAULT_FIXTURE,
+    ),
   "second-session-fixture": () =>
     withFixture(
       "second-session-fixture",
