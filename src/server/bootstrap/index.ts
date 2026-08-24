@@ -135,6 +135,32 @@ const jsonBodyErrorHandler: express.ErrorRequestHandler = (
 };
 
 /**
+ * Scoped parse-error handler for the `/api` mount, placed between `express.json` and `apiRouter`
+ * so it catches a bad body before any route handler runs. Express 5's default handler renders
+ * V8's `JSON.parse` error message, and for a body that is valid UTF-8 but not JSON at all, that
+ * message quotes the submitted bytes back, so a client that POSTs a bare secret to any `/api`
+ * route would have it reflected in the 400 body and in the server's stderr. Scoped to the whole
+ * `/api` mount deliberately: every `/api` route shares the one `express.json` parser, so a
+ * vault-only handler would leave the identical leak on `/api/cards` and every other route.
+ */
+const apiJsonParseErrorHandler: express.ErrorRequestHandler = (
+  err,
+  _req,
+  res,
+  next,
+) => {
+  const shaped = err as { type?: unknown } | undefined;
+  if (
+    shaped?.type === "entity.parse.failed" ||
+    shaped?.type === "entity.too.large"
+  ) {
+    res.status(400).json({ error: "malformed-body" });
+    return;
+  }
+  next(err);
+};
+
+/**
  * The single named target for Node's raw `'upgrade'` event — Express never routes it (WS upgrades
  * are Node-level, not Express-level), so this is the one place a terminal WebSocket handshake can
  * be intercepted. The auth gate now runs FIRST, ahead of the path check: `isRequestAllowed` is the
@@ -298,7 +324,12 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   const app = express();
   app.use(frameGuardHeaders);
   app.use(remoteAuthRouter);
-  app.use("/api", express.json({ limit: "1mb" }), apiRouter);
+  app.use(
+    "/api",
+    express.json({ limit: "1mb" }),
+    apiJsonParseErrorHandler,
+    apiRouter,
+  );
   app.use("/sessions", terminalProxyRouter);
 
   if (process.env.NODE_ENV === "production") {
