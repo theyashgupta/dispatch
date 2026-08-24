@@ -1037,8 +1037,14 @@ own terminals outside Dispatch keep their own `tui` setting completely untouched
 **2. tmux keeps Dispatch's web clients on the primary screen.** `ensureNoAltScreenOverride`
 (`adapters/tmux.ts`) appends `tmux-256color:smcup@:rmcup@` to tmux's SERVER-global
 `terminal-overrides`. The TERM scoping is the load-bearing part: `ttyd -T tmux-256color` is the
-only TERM Dispatch's own clients ever attach with, so a user's personal tmux clients on the same
-shared server keep their normal alt-screen behavior untouched. `tmux attach` itself owns the outer
+TERM Dispatch's own clients attach with, which is what keeps a plain `xterm-256color` client out of
+the override's way. It is a narrowing, NOT an exclusivity guarantee, and the difference is worth
+stating plainly because this is a mutation of a server the user shares: `tmux-256color` is also the
+TERM tmux exports inside its own panes, so a nested `tmux attach` from inside any pane, and any
+client configured to that TERM, matches the override too and loses smcup/rmcup, meaning vim, less
+and man stop restoring the screen on exit for that client. Dispatch never removes the entry; like
+every tmux server option it dies only with the server. That cost is accepted deliberately in
+exchange for local scrollback on the phone. `tmux attach` itself owns the outer
 terminal's alternate screen, and xterm.js keeps no scrollback of its own there, which is why
 cancelling smcup/rmcup is what makes local scrollback possible at all. The same call-site reasoning
 already documented for the hyperlinks grant applies here too: server options die with the tmux

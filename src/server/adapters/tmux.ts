@@ -27,6 +27,29 @@ const HYPERLINKS_FEATURE_ENTRIES = [
 const NO_SERVER_STDERR = /no server running|error connecting/;
 
 /**
+ * The entries of a tmux ARRAY server option as an exact-match Set (`show -g -v <name>` prints one
+ * unquoted entry per line).
+ *
+ * @remarks Exact entries, never a substring scan of the raw `show` output: a user's own superset
+ * entry (`tmux-256color:smcup@:rmcup@:hyperlinks`) contains Dispatch's entry as a substring and
+ * would make a substring guard skip a grant that was never actually made. An empty Set on any
+ * failure is the no-server-yet state every caller already treats as "not configured".
+ */
+async function serverOptionEntries(name: string): Promise<Set<string>> {
+  try {
+    const { stdout } = await run("tmux", ["show", "-g", "-v", name]);
+    return new Set(
+      stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+/**
  * Idempotently grant the tmux SERVER (a global, not per-session, option) the
  * {@link HYPERLINKS_FEATURE_ENTRIES} terminal-feature. Checked-then-appended rather than
  * unconditionally appended, because `set -ag` on an array option duplicates the entry on every
@@ -52,12 +75,9 @@ const NO_SERVER_STDERR = /no server running|error connecting/;
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 export async function ensureHyperlinksTerminalFeature(): Promise<void> {
-  let current = "";
-  try {
-    current = (await run("tmux", ["show", "-g", "terminal-features"])).stdout;
-  } catch {}
+  const current = await serverOptionEntries("terminal-features");
   const missing = HYPERLINKS_FEATURE_ENTRIES.filter(
-    (entry) => !current.includes(entry),
+    (entry) => !current.has(entry),
   );
   if (missing.length === 0) return;
   try {
@@ -80,9 +100,14 @@ export async function ensureHyperlinksTerminalFeature(): Promise<void> {
  * @remarks TERM-05: `tmux attach` itself owns the outer terminal's alt screen, and xterm.js
  * keeps no scrollback there, so an attached web client could never scroll locally regardless of
  * what the pane runs. Cancelling smcup/rmcup keeps tmux drawing on the primary screen, where
- * linefeed scrolling feeds the client's local scrollback. Keyed to `tmux-256color`, the TERM only
- * Dispatch's own ttyd clients attach with (ttyd.ts spawns with `-T tmux-256color`), so a user's
- * personal tmux clients on this shared server keep normal alt-screen behavior.
+ * linefeed scrolling feeds the client's local scrollback. Keyed to `tmux-256color` because that is
+ * the TERM ttyd.ts spawns with (`-T tmux-256color`), which narrows the blast radius but does NOT
+ * eliminate it: `tmux-256color` is also the TERM tmux exports inside its own panes, so a nested
+ * `tmux attach` run from inside any pane on this shared server, and any user whose own terminal is
+ * configured to that TERM, matches the override too and loses smcup/rmcup (vim/less/man stop
+ * restoring the screen on exit). That is a known, accepted cost of mutating a shared server, not an
+ * exclusivity guarantee. Nothing removes the entry either; like every server option it dies only
+ * with the tmux server.
  */
 const NO_ALT_SCREEN_OVERRIDE_ENTRY = "tmux-256color:smcup@:rmcup@";
 
@@ -94,11 +119,8 @@ const NO_ALT_SCREEN_OVERRIDE_ENTRY = "tmux-256color:smcup@:rmcup@";
  * live server is guaranteed.
  */
 export async function ensureNoAltScreenOverride(): Promise<void> {
-  let current = "";
-  try {
-    current = (await run("tmux", ["show", "-g", "terminal-overrides"])).stdout;
-  } catch {}
-  if (current.includes(NO_ALT_SCREEN_OVERRIDE_ENTRY)) return;
+  const current = await serverOptionEntries("terminal-overrides");
+  if (current.has(NO_ALT_SCREEN_OVERRIDE_ENTRY)) return;
   try {
     await run("tmux", [
       "set",
