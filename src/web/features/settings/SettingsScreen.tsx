@@ -1134,9 +1134,9 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
   const [purposeFocused, setPurposeFocused] = useState(false);
 
   useEffect(() => {
+    setPurposeError(null);
     if (editingPurpose) {
       setDraftPurpose(keySummary.purpose);
-      setPurposeError(null);
     }
   }, [editingPurpose, keySummary.purpose]);
 
