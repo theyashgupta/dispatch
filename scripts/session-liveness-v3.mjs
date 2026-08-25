@@ -16834,6 +16834,7 @@ async function runBypassLeg(
     const deadline = Date.now() + timeoutMs;
     let full = sinceText;
     let scored = { state: "inconclusive", evidence: null };
+    let idleStreak = 0;
     while (Date.now() < deadline) {
       full = await captureBypassPaneFull(paneTarget);
       const fresh = full.startsWith(sinceText)
@@ -16841,6 +16842,19 @@ async function runBypassLeg(
         : full;
       scored = evaluateBypassCell(fresh, sentinel);
       if (scored.state !== "inconclusive") return { full, scored };
+      // The turn can settle back at the READY footer without ever producing a
+      // sentinel or a known refusal marker (the model declining on its own,
+      // never even attempting the tool call). Waiting out the FULL timeout in
+      // that case only burns the bounded run's own wall-clock budget for no
+      // new information, so two consecutive idle-with-content polls end this
+      // leg early, still scored `inconclusive`, never upgraded to a pass.
+      const visible = await captureBypassPaneVisible(paneTarget);
+      if (fresh.trim().length > 0 && BYPASS_READY.test(visible)) {
+        idleStreak++;
+        if (idleStreak >= 2) return { full, scored };
+      } else {
+        idleStreak = 0;
+      }
       await sleep(BYPASS_POLL_INTERVAL_MS);
     }
     return { full, scored };
