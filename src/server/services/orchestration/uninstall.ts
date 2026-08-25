@@ -313,10 +313,13 @@ export async function runUninstall(
     }
   }
 
-  if (fs.existsSync(VAULT_DIR) && fs.readdirSync(VAULT_DIR).length === 0) {
+  const purgingVault = plan.remove.includes(VAULT_METADATA_PATH);
+  if (purgingVault && fs.existsSync(VAULT_DIR)) {
     try {
-      fs.rmdirSync(VAULT_DIR);
-      removed.push(VAULT_DIR);
+      if (fs.readdirSync(VAULT_DIR).length === 0) {
+        fs.rmdirSync(VAULT_DIR);
+        removed.push(VAULT_DIR);
+      }
     } catch (err) {
       const { code, message } = err as NodeJS.ErrnoException;
       if (code !== "ENOENT") {
