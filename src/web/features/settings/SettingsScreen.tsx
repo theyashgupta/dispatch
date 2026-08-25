@@ -940,10 +940,11 @@ function useVaultTab(active: boolean): VaultTab {
   }, []);
   const closePurposeEditor = useCallback(() => setPurposeEditorFor(null), []);
 
-  const openDelete = useCallback(
-    (key: VaultKeySummary) => setDeleteTarget(key),
-    [],
-  );
+  const openDelete = useCallback((key: VaultKeySummary) => {
+    setDeleteTarget(key);
+    setValueEditorFor(null);
+    setPurposeEditorFor(null);
+  }, []);
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
 
   return {
@@ -2894,6 +2895,8 @@ export function SettingsScreen({
           onClose={vaultTab.closeDelete}
           onDeleted={() => {
             vaultTab.closeDelete();
+            vaultTab.closeValueEditor();
+            vaultTab.closePurposeEditor();
             void vaultTab.reload();
           }}
         />
