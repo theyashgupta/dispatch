@@ -16805,7 +16805,11 @@ function evaluateBypassCell(paneText, sentinel) {
       };
     }
   }
-  return { state: "inconclusive", evidence: null };
+  const trimmed = paneText.trim();
+  return {
+    state: "inconclusive",
+    evidence: trimmed.length > 0 ? trimmed.slice(-400) : null,
+  };
 }
 
 /**
