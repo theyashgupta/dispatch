@@ -371,16 +371,41 @@ export async function generatePlaybookDraft(input: {
 export type VaultMutationResult = { ok: true } | { ok: false; error: string };
 
 /**
- * List every vault key: GET /api/vault. Throws on non-2xx, mirroring `getPlaybooks`. Never carries
- * a value, `VaultKeySummary` has none.
+ * List every vault key plus env-vault import detectability: GET /api/vault. Throws on non-2xx,
+ * mirroring `getPlaybooks`. Never carries a value, `VaultKeySummary` has none.
  */
-export async function getVaultKeys(): Promise<VaultKeySummary[]> {
+export async function getVaultKeys(): Promise<{
+  keys: VaultKeySummary[];
+  envVaultAvailable: boolean;
+}> {
   const res = await fetch("/api/vault");
   if (!res.ok) {
     throw new Error(`getVaultKeys failed: ${res.status} ${res.statusText}`);
   }
-  const body = (await res.json()) as { keys: VaultKeySummary[] };
-  return body.keys;
+  return (await res.json()) as {
+    keys: VaultKeySummary[];
+    envVaultAvailable: boolean;
+  };
+}
+
+/**
+ * Import keys from the standalone `~/.claude/env-vault`: POST /api/vault/import, no body. Skips any
+ * name already present in Dispatch's store. Names and counts only, `ImportResult` has no value field.
+ */
+export async function importFromEnvVault(): Promise<
+  | { ok: true; imported: string[]; skipped: string[] }
+  | { ok: false; error: string }
+> {
+  const res = await fetch("/api/vault/import", { method: "POST" });
+  if (res.ok) {
+    const body = (await res.json()) as {
+      imported: string[];
+      skipped: string[];
+    };
+    return { ok: true, imported: body.imported, skipped: body.skipped };
+  }
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  return { ok: false, error: body.error ?? "generic" };
 }
 
 /**
