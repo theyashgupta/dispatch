@@ -17089,8 +17089,10 @@ async function checkVaultBypassGuards(built) {
     );
   } else {
     const { buildKickoff } = await loadKickoffAdapter();
-    const { VAULT_RUN_PATH: BUILT_VAULT_RUN_PATH } =
-      await loadVaultPathsAdapter();
+    const {
+      VAULT_RUN_PATH: REAL_VAULT_RUN_PATH,
+      VAULT_SCHEMA_PATH: REAL_VAULT_SCHEMA_PATH,
+    } = await loadVaultPathsAdapter();
     const contractCard = {
       id: "vault-bypass-guards-fixture-card",
       identifier: "VBG-1",
@@ -17100,7 +17102,19 @@ async function checkVaultBypassGuards(built) {
       url: "https://linear.app/example/issue/VBG-1",
       source: "linear",
     };
-    const kickoff = buildKickoff(contractCard, "", [], {});
+    // buildKickoff is loaded and called in THIS harness process, whose own os.homedir() is the
+    // real HOME, so its interpolated VAULT_RUN_PATH/VAULT_SCHEMA_PATH name the REAL user's
+    // ~/.dispatch/vault, not the sandbox one this check actually seeded. The spawned claude
+    // process's HOME is also real (the REAL_HOME branch), but every OTHER path stays sandboxed
+    // per this plan's own design, so the two real-home path strings are substituted for their
+    // sandbox equivalents before the text is ever pasted into the live pane.
+    const sandboxVaultRunPath = vaultRunPath(built);
+    const sandboxVaultSchemaPath = join(vaultDir(built), "schema.keys");
+    const kickoff = buildKickoff(contractCard, "", [], {})
+      .split(REAL_VAULT_RUN_PATH)
+      .join(sandboxVaultRunPath)
+      .split(REAL_VAULT_SCHEMA_PATH)
+      .join(sandboxVaultSchemaPath);
 
     await runBypassTurn(built, contractSession, kickoff);
     console.log(
@@ -17135,7 +17149,7 @@ async function checkVaultBypassGuards(built) {
     }
 
     const runnerAsk =
-      `Using the runner, run the command "${BUILT_VAULT_RUN_PATH} --keys ${CONTRACT_KEY} ${RUN_SEP} ${reporterPath}" ` +
+      `Using the runner, run the command "${sandboxVaultRunPath} --keys ${CONTRACT_KEY} ${RUN_SEP} ${reporterPath}" ` +
       "and show me its exact output.";
     const runnerFresh = await runBypassTurn(built, contractSession, runnerAsk);
     const wrappedLine = `${CONTRACT_KEY}=${VAULT_SENTINEL_ROTATED}`;
