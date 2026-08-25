@@ -38,6 +38,7 @@ import {
   addVaultKey,
   addWorkspaceFolder,
   deletePlaybook,
+  deleteVaultKey,
   disableRemote,
   enableRemote,
   getCleanupDelay,
@@ -806,6 +807,9 @@ interface VaultTab {
   addError: string | null;
   addPending: boolean;
   handleAdd: () => Promise<void>;
+  deleteTarget: VaultKeySummary | null;
+  openDelete: (key: VaultKeySummary) => void;
+  closeDelete: () => void;
 }
 
 const VAULT_NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
@@ -832,6 +836,9 @@ function useVaultTab(active: boolean): VaultTab {
   const [addPurpose, setAddPurpose] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
   const [addPending, setAddPending] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<VaultKeySummary | null>(
+    null,
+  );
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -885,6 +892,12 @@ function useVaultTab(active: boolean): VaultTab {
     }
   }, [addPending, addName, addPurpose, reload]);
 
+  const openDelete = useCallback(
+    (key: VaultKeySummary) => setDeleteTarget(key),
+    [],
+  );
+  const closeDelete = useCallback(() => setDeleteTarget(null), []);
+
   return {
     keys,
     loading,
@@ -897,6 +910,9 @@ function useVaultTab(active: boolean): VaultTab {
     addError,
     addPending,
     handleAdd,
+    deleteTarget,
+    openDelete,
+    closeDelete,
   };
 }
 
@@ -932,9 +948,10 @@ function VaultBadge({ filled }: { filled: boolean }) {
 
 interface VaultKeyRowProps {
   keySummary: VaultKeySummary;
+  vault: VaultTab;
 }
 
-function VaultKeyRow({ keySummary }: VaultKeyRowProps) {
+function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
   const [hover, setHover] = useState(false);
   return (
     <div
@@ -994,7 +1011,10 @@ function VaultKeyRow({ keySummary }: VaultKeyRowProps) {
       <IconButton disabled aria-label={`Edit purpose for ${keySummary.name}`}>
         <Pencil size={14} strokeWidth={2} aria-hidden="true" />
       </IconButton>
-      <IconButton disabled aria-label={`Delete ${keySummary.name}`}>
+      <IconButton
+        aria-label={`Delete ${keySummary.name}`}
+        onClick={() => vault.openDelete(keySummary)}
+      >
         <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
       </IconButton>
     </div>
@@ -1165,11 +1185,100 @@ function VaultTabSection({ vaultTab }: VaultTabSectionProps) {
       {!loading && !loadError && keys !== null && keys.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column" }}>
           {keys.map((k) => (
-            <VaultKeyRow key={k.name} keySummary={k} />
+            <VaultKeyRow key={k.name} keySummary={k} vault={vaultTab} />
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+interface VaultDeleteConfirmProps {
+  keySummary: VaultKeySummary;
+  onClose: () => void;
+  onDeleted: () => void;
+}
+
+function VaultDeleteConfirm({
+  keySummary,
+  onClose,
+  onDeleted,
+}: VaultDeleteConfirmProps) {
+  const modalRef = useRef<ModalControl>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState(false);
+
+  async function handleDelete() {
+    if (pending) return;
+    setPending(true);
+    keepRef.current?.focus();
+    setError(false);
+    try {
+      const result = await deleteVaultKey(keySummary.name);
+      if (result.ok) {
+        onDeleted();
+        return;
+      }
+      setError(true);
+    } catch (err) {
+      console.error("deleteVaultKey failed", err);
+      setError(true);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Modal
+      ariaLabel={`Delete ${keySummary.name}`}
+      onClose={onClose}
+      controlRef={modalRef}
+      initialFocusRef={keepRef}
+    >
+      <Modal.Header>{keySummary.name}</Modal.Header>
+      <Modal.Body>
+        <div
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-body)",
+            lineHeight: "var(--line-body)",
+            color: "var(--text)",
+          }}
+        >
+          Delete this key? Any command that depends on it will stop finding the
+          value. This can't be undone.
+        </div>
+        {error && (
+          <Notice tone="destructive" label="Couldn't delete key, try again." />
+        )}
+      </Modal.Body>
+      <Modal.Actions>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: "var(--space-sm)",
+            flex: "0 0 auto",
+          }}
+        >
+          <Button
+            ref={keepRef}
+            variant="secondary"
+            onClick={() => modalRef.current?.requestClose()}
+          >
+            Keep key
+          </Button>
+          <Button
+            variant="danger"
+            loading={pending}
+            onClick={() => void handleDelete()}
+          >
+            {pending ? "Deleting key..." : "Delete key"}
+          </Button>
+        </div>
+      </Modal.Actions>
+    </Modal>
   );
 }
 
@@ -2353,12 +2462,22 @@ export function SettingsScreen({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
-      if (playbooksTab.editorState || playbooksTab.deleteTarget) return;
+      if (
+        playbooksTab.editorState ||
+        playbooksTab.deleteTarget ||
+        vaultTab.deleteTarget
+      )
+        return;
       requestClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [playbooksTab.editorState, playbooksTab.deleteTarget, requestClose]);
+  }, [
+    playbooksTab.editorState,
+    playbooksTab.deleteTarget,
+    vaultTab.deleteTarget,
+    requestClose,
+  ]);
 
   const activeSection =
     SETTINGS_SECTIONS.find((section) => section.id === tab) ??
@@ -2483,6 +2602,17 @@ export function SettingsScreen({
           onDeleted={() => {
             playbooksTab.closeDelete();
             void playbooksTab.reload();
+          }}
+        />
+      )}
+
+      {vaultTab.deleteTarget && (
+        <VaultDeleteConfirm
+          keySummary={vaultTab.deleteTarget}
+          onClose={vaultTab.closeDelete}
+          onDeleted={() => {
+            vaultTab.closeDelete();
+            void vaultTab.reload();
           }}
         />
       )}

@@ -450,7 +450,6 @@ export async function editVaultPurpose(
 /**
  * Delete a vault key: DELETE /api/vault/:name. Resolves a bare `{ok}`, matching `deletePlaybook`,
  * since the delete confirm has one shared failure Notice.
- * @public wired by plan 104-02
  */
 export async function deleteVaultKey(name: string): Promise<{ ok: boolean }> {
   const res = await fetch(`/api/vault/${encodeURIComponent(name)}`, {
