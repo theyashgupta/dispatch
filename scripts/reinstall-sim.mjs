@@ -955,6 +955,14 @@ async function legUninstallKeeps() {
       join(home, ".dispatch", "hook-settings.json"),
       JSON.stringify({ seeded: true }) + "\n",
     );
+    writeFileSync(
+      join(home, ".dispatch", "vault-run"),
+      "#!/bin/sh\necho reseeded-vault-run\n",
+    );
+    writeFileSync(
+      join(home, ".dispatch", "vault-guard.mjs"),
+      "// reseeded-vault-guard\n",
+    );
     const snapBefore = snapshotDispatchDir(home);
     console.log(
       `  before uninstall: ${snapBefore.size} file(s) under ~/.dispatch`,
