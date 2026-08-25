@@ -225,6 +225,21 @@ export async function createKey(input: {
 }
 
 /**
+ * Ensure a fresh install has a working, empty vault store before the first key is ever created.
+ *
+ * @remarks Guards on `VAULT_METADATA_PATH`, not `VAULT_DIR` or a degraded `readMetadata()` call,
+ * because the directory is recreated on every mutation (not a reliable "already populated"
+ * signal) and a metadata-file read degrades a missing file to `[]` indistinguishably from a
+ * genuinely empty store, so only a direct existence check can tell "never written" from "written
+ * empty" apart. The guard runs before any write, so a store a prior boot already populated is
+ * never wiped.
+ */
+export async function ensureVaultScaffold(): Promise<void> {
+  if (fs.existsSync(VAULT_METADATA_PATH)) return;
+  await writeStore([], []);
+}
+
+/**
  * Set (or rotate) a key's value. Setting a value on an already-filled key IS the rotate, purpose
  * and createdAt stay untouched, only updatedAt and filled move, this is what makes set and rotate
  * the same endpoint.
