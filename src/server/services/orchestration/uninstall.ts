@@ -210,6 +210,11 @@ export function renderPlan(plan: UninstallPlan): string {
       `  ${plan.keep.config}  (your settings and launch args, pass --purge to delete)`,
     );
   }
+  if (plan.keep.vault) {
+    keepLines.push(
+      `  ${plan.keep.vault}  (your vault keys, pass --purge to delete)`,
+    );
+  }
   for (const p of plan.keep.boardData) {
     keepLines.push(`  ${p}  (board data, pass --purge to delete)`);
   }
