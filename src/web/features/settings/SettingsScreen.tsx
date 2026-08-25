@@ -51,6 +51,7 @@ import {
   getPlaybooks,
   getVaultKeys,
   getWorkspaceFolders,
+  importFromEnvVault,
   previewLinearFilters,
   removeWorkspaceFolder,
   saveCleanupDelay,
@@ -799,6 +800,9 @@ function PlaybooksTabSection({ playbooksTab }: PlaybooksTabSectionProps) {
   );
 }
 
+type VaultImportOutcome =
+  { ok: true; imported: string[]; skipped: string[] } | { ok: false } | null;
+
 interface VaultTab {
   keys: VaultKeySummary[] | null;
   loading: boolean;
@@ -820,6 +824,13 @@ interface VaultTab {
   deleteTarget: VaultKeySummary | null;
   openDelete: (key: VaultKeySummary) => void;
   closeDelete: () => void;
+  envVaultAvailable: boolean;
+  importConfirmOpen: boolean;
+  openImportConfirm: () => void;
+  closeImportConfirm: () => void;
+  importPending: boolean;
+  handleImport: () => Promise<void>;
+  importOutcome: VaultImportOutcome;
 }
 
 const VAULT_NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
@@ -875,13 +886,18 @@ function useVaultTab(active: boolean): VaultTab {
   const [deleteTarget, setDeleteTarget] = useState<VaultKeySummary | null>(
     null,
   );
+  const [envVaultAvailable, setEnvVaultAvailable] = useState(false);
+  const [importConfirmOpen, setImportConfirmOpen] = useState(false);
+  const [importPending, setImportPending] = useState(false);
+  const [importOutcome, setImportOutcome] = useState<VaultImportOutcome>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
     try {
-      const list = await getVaultKeys();
+      const { keys: list, envVaultAvailable: available } = await getVaultKeys();
       setKeys([...list].sort((a, b) => a.name.localeCompare(b.name)));
+      setEnvVaultAvailable(available);
     } catch (err) {
       console.error("getVaultKeys failed", err);
       setLoadError(true);
@@ -947,6 +963,37 @@ function useVaultTab(active: boolean): VaultTab {
   }, []);
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
 
+  const openImportConfirm = useCallback(() => {
+    setImportOutcome(null);
+    setImportConfirmOpen(true);
+  }, []);
+  const closeImportConfirm = useCallback(() => setImportConfirmOpen(false), []);
+
+  const handleImport = useCallback(async () => {
+    if (importPending) return;
+    setImportPending(true);
+    try {
+      const result = await importFromEnvVault();
+      setImportConfirmOpen(false);
+      if (result.ok) {
+        setImportOutcome({
+          ok: true,
+          imported: result.imported,
+          skipped: result.skipped,
+        });
+        await reload();
+        return;
+      }
+      setImportOutcome({ ok: false });
+    } catch (err) {
+      console.error("importFromEnvVault failed", err);
+      setImportConfirmOpen(false);
+      setImportOutcome({ ok: false });
+    } finally {
+      setImportPending(false);
+    }
+  }, [importPending, reload]);
+
   return {
     keys,
     loading,
@@ -968,6 +1015,13 @@ function useVaultTab(active: boolean): VaultTab {
     deleteTarget,
     openDelete,
     closeDelete,
+    envVaultAvailable,
+    importConfirmOpen,
+    openImportConfirm,
+    closeImportConfirm,
+    importPending,
+    handleImport,
+    importOutcome,
   };
 }
 
@@ -1423,6 +1477,44 @@ interface VaultTabSectionProps {
   vaultTab: VaultTab;
 }
 
+function VaultImportOutcomeNotice({
+  outcome,
+}: {
+  outcome: VaultImportOutcome;
+}) {
+  if (outcome === null) return null;
+  if (!outcome.ok) {
+    return (
+      <Notice
+        tone="destructive"
+        label="Couldn't import from env-vault, reopen settings to retry."
+      />
+    );
+  }
+  const { imported, skipped } = outcome;
+  if (imported.length === 0 && skipped.length === 0) {
+    return (
+      <Notice
+        tone="muted"
+        label="Nothing to import, all keys are already here."
+      />
+    );
+  }
+  const importedLine =
+    imported.length > 0
+      ? `Imported ${imported.length} key(s): ${imported.join(", ")}`
+      : null;
+  const skippedLine =
+    skipped.length > 0
+      ? `Skipped ${skipped.length} already here: ${skipped.join(", ")}`
+      : null;
+  return (
+    <Notice tone="muted" label={importedLine ?? skippedLine}>
+      {importedLine !== null ? skippedLine : null}
+    </Notice>
+  );
+}
+
 function VaultTabSection({ vaultTab }: VaultTabSectionProps) {
   const { keys, loading, loadError } = vaultTab;
 
@@ -1439,6 +1531,16 @@ function VaultTabSection({ vaultTab }: VaultTabSectionProps) {
       }}
     >
       <VaultAddForm vault={vaultTab} />
+
+      {vaultTab.envVaultAvailable && (
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <Button variant="secondary" onClick={vaultTab.openImportConfirm}>
+            Import from env-vault
+          </Button>
+        </div>
+      )}
+
+      <VaultImportOutcomeNotice outcome={vaultTab.importOutcome} />
 
       {loading && (
         <span
@@ -1561,6 +1663,65 @@ function VaultDeleteConfirm({
             onClick={() => void handleDelete()}
           >
             {pending ? "Deleting key..." : "Delete key"}
+          </Button>
+        </div>
+      </Modal.Actions>
+    </Modal>
+  );
+}
+
+interface VaultImportConfirmProps {
+  vault: VaultTab;
+}
+
+function VaultImportConfirm({ vault }: VaultImportConfirmProps) {
+  const modalRef = useRef<ModalControl>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  return (
+    <Modal
+      ariaLabel="Import keys from env-vault?"
+      onClose={vault.closeImportConfirm}
+      controlRef={modalRef}
+      initialFocusRef={cancelRef}
+    >
+      <Modal.Header>Import keys from env-vault?</Modal.Header>
+      <Modal.Body>
+        <div
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-body)",
+            lineHeight: "var(--line-body)",
+            color: "var(--text)",
+          }}
+        >
+          This copies key names, purposes, and values from your standalone
+          env-vault. Keys already here are skipped, never overwritten, and the
+          original files are left untouched.
+        </div>
+      </Modal.Body>
+      <Modal.Actions>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: "var(--space-sm)",
+            flex: "0 0 auto",
+          }}
+        >
+          <Button
+            ref={cancelRef}
+            variant="secondary"
+            onClick={() => modalRef.current?.requestClose()}
+          >
+            Cancel import
+          </Button>
+          <Button
+            variant="primary"
+            loading={vault.importPending}
+            onClick={() => void vault.handleImport()}
+          >
+            {vault.importPending ? "Importing keys..." : "Import keys"}
           </Button>
         </div>
       </Modal.Actions>
@@ -2753,7 +2914,8 @@ export function SettingsScreen({
         playbooksTab.deleteTarget ||
         vaultTab.deleteTarget ||
         vaultTab.valueEditorFor ||
-        vaultTab.purposeEditorFor
+        vaultTab.purposeEditorFor ||
+        vaultTab.importConfirmOpen
       )
         return;
       requestClose();
@@ -2766,6 +2928,7 @@ export function SettingsScreen({
     vaultTab.deleteTarget,
     vaultTab.valueEditorFor,
     vaultTab.purposeEditorFor,
+    vaultTab.importConfirmOpen,
     requestClose,
   ]);
 
@@ -2908,6 +3071,8 @@ export function SettingsScreen({
           }}
         />
       )}
+
+      {vaultTab.importConfirmOpen && <VaultImportConfirm vault={vaultTab} />}
     </div>
   );
 }
