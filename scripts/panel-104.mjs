@@ -1541,6 +1541,18 @@ async function runBreakQueryParam() {
 
   let tripFired = false;
 
+  /**
+   * A Ctrl-C during the minutes-long patched rebuild is the likeliest interrupt, and Node's
+   * default SIGINT/SIGTERM disposition terminates the process WITHOUT running finally blocks.
+   * Restore the captured original synchronously, then exit non-zero (128 + signal number).
+   */
+  const onSignal = (sig) => {
+    writeFileSync(API_PATH, original);
+    process.exit(sig === "SIGINT" ? 130 : 143);
+  };
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
+
   try {
     const patched = original.replace(
       ANCHOR,
@@ -1585,10 +1597,15 @@ async function runBreakQueryParam() {
       );
     }
   } finally {
-    // Unconditional, safety-critical: survives a crash, a thrown assertion, or a Ctrl-C between
-    // the patch and here. Restores from the CAPTURED string, never a whole-tree source-control
-    // revert, which would also discard any uncommitted sibling work in this file (Phase 91
-    // finding).
+    process.removeListener("SIGINT", onSignal);
+    process.removeListener("SIGTERM", onSignal);
+    /**
+     * Unconditional, safety-critical: a thrown assertion lands here, SIGINT/SIGTERM land in
+     * onSignal above. SIGKILL and power loss stay uncovered, the preflight-clean git state is
+     * the recovery path for those. Restores from the CAPTURED string, never a whole-tree
+     * source-control revert, which would also discard any uncommitted sibling work in this
+     * file (Phase 91 finding).
+     */
     writeFileSync(API_PATH, original);
     rebuild();
     // Re-run the same status --porcelain command to verify the restore landed byte-identical.
