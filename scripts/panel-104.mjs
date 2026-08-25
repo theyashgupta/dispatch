@@ -53,7 +53,17 @@
  * BREAK EVIDENCE, every break registered in this file has been run under `--break <name>` for
  * real and has been observed reporting its own violation. The quoted lines below are the VERBATIM
  * TRIP-leg output captured from that run:
- *   - (filled in by plan 05 task 2, once `--break autofill-defusal` has actually been run)
+ *   - `autofill-defusal` proven able to fail: removing `data-lpignore` from the live value input
+ *     produced `autofill-defusal: expected data-lpignore="true", measured null`, restore leg
+ *     re-confirmed PASS, and `--break autofill-defusal` reported
+ *     `tripFired=true restoreClean=true`.
+ * `crud` is not itself broken via a registered `--break` (this plan carries no `crud` entry in
+ * `BREAKS`), but was proven able to fail by a temporary, reverted source edit: removing
+ * `PANEL104_CRUD`'s own delete control immediately before step 5 produced
+ * `crud: run failed: Error: Runtime.evaluate failed: Error: panel104: no element found for
+ * [aria-label="Delete PANEL104_CRUD"]` (a NAMED `crud:`-prefixed violation citing the missing
+ * control, never an unlabelled throw), and a plain `--check crud` re-run after reverting the edit
+ * passed clean.
  * Plan 06 owns the query-param source-patching break and fills its own evidence in below this
  * line without disturbing the entries above it.
  *
