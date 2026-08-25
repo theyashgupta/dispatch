@@ -253,6 +253,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { tmpdir, homedir } from "node:os";
 import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -14240,6 +14241,47 @@ async function vaultRequestRaw(built, path, rawBody) {
 }
 
 /**
+ * A `node:http` request against `path` carrying a spoofed `Host` header.
+ *
+ * @remarks Not built on `fetch`: Node's global `fetch` (undici) implements the WHATWG
+ * forbidden-request-header list, which includes `Host`, so a spoofed `Host` passed to `fetch`
+ * is silently dropped and the request connects with the real loopback Host. A gate check written
+ * on `fetch` could therefore never trigger the gate and would pass vacuously. Disabling Node's
+ * default Host synthesis on a raw `http.request` is the whole point of this helper.
+ */
+function requestWithHost(port, method, path, hostHeader, body) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const headers = { Host: hostHeader };
+    if (body !== undefined) headers["content-type"] = "application/json";
+    const req = httpRequest(
+      {
+        host: "127.0.0.1",
+        port,
+        path,
+        method,
+        setHost: false,
+        headers,
+      },
+      (res) => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => (text += chunk));
+        res.on("end", () =>
+          resolvePromise({
+            status: res.statusCode,
+            headers: res.headers,
+            body: text,
+          }),
+        );
+      },
+    );
+    req.on("error", rejectPromise);
+    if (body !== undefined) req.write(JSON.stringify(body));
+    req.end();
+  });
+}
+
+/**
  * `--check vault-perms`: statSync's the real vault directory and its three files off disk after a
  * live write, a hand-applied loosen, and a delete, proving the writer's re-asserted 0600/0700 mode
  * is what actually lands on the filesystem rather than trusting the writer's own declared mode.
@@ -15099,6 +15141,148 @@ async function checkVaultLogScan(built) {
   return violations;
 }
 
+/**
+ * Asserts the four gate-refusal conditions shared by leg 2 and leg 3 of
+ * {@link checkVaultRemoteGate}: served (never 401/403), served as HTML (never JSON), carries the
+ * code-entry form's marker, and never leaks `sentinelName` (the value that would only be present
+ * had the gate served the real vault response instead of refusing).
+ */
+function assertGateRefusal(violations, legLabel, response, sentinelName) {
+  if (response.status !== 200) {
+    violations.push(
+      `${legLabel}: expected status 200 (the gate never returns 401/403 for a gated route), got ${response.status}`,
+    );
+  }
+  const contentType = response.headers["content-type"] ?? "";
+  if (!contentType.includes("text/html")) {
+    violations.push(
+      `${legLabel}: expected content-type text/html, got ${contentType}`,
+    );
+  }
+  if (!response.body.includes("/__remote/verify")) {
+    violations.push(
+      `${legLabel}: body did not contain the code-entry form marker /__remote/verify`,
+    );
+  }
+  if (response.body.includes(sentinelName)) {
+    violations.push(
+      `${legLabel}: body leaked ${sentinelName}, the gate served the real vault response instead of refusing`,
+    );
+  }
+}
+
+/**
+ * `--check vault-remote-gate`: proves the Vault API is refused exactly like every other settings
+ * route when the request presents a non-loopback Host and no auth cookie, with zero vault-specific
+ * gate code involved, `remoteAuthRouter` is mounted ahead of `/api`, so this exercises the shared
+ * gate, not anything this phase added. Leg 1 (loopback) runs first so the leg 2/3 refusals are
+ * proven non-vacuous; leg 3 additionally confirms a refused write never reaches `values.env` on
+ * disk.
+ */
+async function checkVaultRemoteGate(built) {
+  const violations = [];
+  const REMOTE_HOST = "fake-remote-104.trycloudflare.com";
+
+  // Leg 0: seed the subject, so the loopback control leg has something real to return.
+  const seeded = await vaultRequest(built, "POST", "/vault", {
+    name: "GATE_KEY",
+    purpose: "remote gate leg",
+    value: "gate-leg-value",
+  });
+  if (seeded.status !== 200) {
+    violations.push(
+      `leg 0: POST /vault expected 200, got ${seeded.status}: ${seeded.text}`,
+    );
+  }
+
+  // Leg 1: the loopback control, run first so the check proves the surface is reachable before
+  // it claims it is blocked.
+  const leg1Violations = [];
+  const loopback = await requestWithHost(
+    built.port,
+    "GET",
+    "/api/vault",
+    `127.0.0.1:${built.port}`,
+  );
+  if (loopback.status !== 200) {
+    leg1Violations.push(
+      `leg 1: loopback GET /api/vault expected status 200, got ${loopback.status}`,
+    );
+  }
+  const loopbackContentType = loopback.headers["content-type"] ?? "";
+  if (!loopbackContentType.includes("application/json")) {
+    leg1Violations.push(
+      `leg 1: loopback GET /api/vault expected content-type application/json, got ${loopbackContentType}`,
+    );
+  }
+  let loopbackParsed;
+  try {
+    loopbackParsed = JSON.parse(loopback.body);
+  } catch (err) {
+    leg1Violations.push(
+      `leg 1: loopback GET /api/vault body did not parse as JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const loopbackHasGateKey =
+    Array.isArray(loopbackParsed?.keys) &&
+    loopbackParsed.keys.some((k) => k.name === "GATE_KEY");
+  if (!loopbackHasGateKey) {
+    leg1Violations.push(
+      `leg 1: loopback GET /api/vault body did not report GATE_KEY`,
+    );
+  }
+  if (leg1Violations.length > 0) {
+    violations.push(
+      ...leg1Violations,
+      "leg 1 failed, leg 2's refusal assertion would be vacuous",
+    );
+    return violations;
+  }
+
+  // Leg 2: the remote refusal, a read.
+  const remoteRead = await requestWithHost(
+    built.port,
+    "GET",
+    "/api/vault",
+    REMOTE_HOST,
+  );
+  assertGateRefusal(violations, "leg 2", remoteRead, "GATE_KEY");
+
+  // Leg 3: the remote refusal, a mutating write, plus confirmation the write never landed.
+  const remoteWrite = await requestWithHost(
+    built.port,
+    "PUT",
+    "/api/vault/GATE_KEY/value",
+    REMOTE_HOST,
+    { value: "must-never-land" },
+  );
+  assertGateRefusal(violations, "leg 3", remoteWrite, "GATE_KEY");
+
+  const stillListed = await vaultRequest(built, "GET", "/vault");
+  let stillListedParsed;
+  try {
+    stillListedParsed = JSON.parse(stillListed.text);
+  } catch {
+    stillListedParsed = undefined;
+  }
+  const stillHasGateKey =
+    Array.isArray(stillListedParsed?.keys) &&
+    stillListedParsed.keys.some((k) => k.name === "GATE_KEY");
+  if (!stillHasGateKey) {
+    violations.push(
+      `leg 3: GATE_KEY missing from loopback GET /vault after the refused remote write`,
+    );
+  }
+  const valuesText = readFileSync(join(vaultDir(built), "values.env"), "utf8");
+  if (valuesText.includes("must-never-land")) {
+    violations.push(
+      `leg 3: values.env on disk contains must-never-land after the refused remote write`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -15140,6 +15324,8 @@ const CHECKS = {
     withFixture("vault-no-read-back", checkVaultNoReadBack, VAULT_FIXTURE),
   "vault-log-scan": () =>
     withFixture("vault-log-scan", checkVaultLogScan, VAULT_FIXTURE),
+  "vault-remote-gate": () =>
+    withFixture("vault-remote-gate", checkVaultRemoteGate, VAULT_FIXTURE),
   "second-session-fixture": () =>
     withFixture(
       "second-session-fixture",
