@@ -65,8 +65,11 @@ const ID_RE =
  * @remarks Moved from 135 to 139 for the deliberate four-ID re-freeze ratifying the vault
  * page's client-side guarantees (`T-104-01` through `T-104-04`), see
  * docs/ARCHITECTURE.md#security-threat-model.
+ * @remarks Moved from 139 to 145 for the deliberate six-ID re-freeze ratifying the runner
+ * (`T-105-01`, `T-105-02`), both guard layers (`T-105-03`, `T-105-04`) and the two accepted
+ * residuals (`T-105-05`, `T-105-06`), see docs/ARCHITECTURE.md#security-threat-model.
  */
-const FROZEN_COUNT = 139;
+const FROZEN_COUNT = 145;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");

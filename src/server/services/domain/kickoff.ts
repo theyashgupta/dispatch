@@ -85,8 +85,8 @@ const VAULT_FLAG_DASH = "-".repeat(2);
  *
  * @remarks This block is prompt-engineering only, not a structural guarantee, nothing stops a
  * session from ignoring it. It is deliberately paired with the `permissions.deny` rule on
- * `values.env` and the PreToolUse Bash guard (`vault-guard.mjs`), both registered in
- * `hook-setup.ts`, which hold whether or not this text is followed.
+ * `values.env` and the PreToolUse Bash guard, both registered in `hook-setup.ts` and ratified as
+ * `T-105-04` (the guard, load-bearing), which hold whether or not this text is followed.
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
 const VAULT_PROTOCOL = [

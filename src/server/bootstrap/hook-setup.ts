@@ -54,6 +54,8 @@ exit 0
  * allowing the other would be a gap. `SEP` is built from two single-hyphen assignments rather than
  * written as one literal token, so the file's own end-of-options separator never appears doubled in
  * this module's source text.
+ * @remarks Ratified as `T-105-01` (exact-key injection, invoking shell never mutated) and
+ * `T-105-02` (the refusal-before-sourcing gate), see docs/ARCHITECTURE.md#security-threat-model.
  */
 const VAULT_RUN_SCRIPT = `#!/bin/sh
 # vault-run: inject exactly the requested Dispatch vault keys into a wrapped
@@ -171,6 +173,8 @@ exec "$@"
  * a literal-path deny rule cannot see, an indirect reference built from a variable, a relative or
  * tilde-written path, or another reader entirely. The two layers are not two spellings of one
  * block; they cover two different tools.
+ * @remarks Ratified as `T-105-04`, the LOAD-BEARING enforcement layer for VLT-08 on the currently
+ * installed CLI, see docs/ARCHITECTURE.md#security-threat-model.
  */
 const VAULT_GUARD_SCRIPT = `#!/usr/bin/env node
 import { basename } from "node:path";
@@ -316,6 +320,9 @@ deny(
  * (`runtime.statusChannel === "pane"`, see `steps.ts`'s `startClaude`), or with hooks
  * env-disabled carries neither layer, leaving the runner's own refusal gate as the session's only
  * remaining protection.
+ * @remarks Ratified as `T-105-03` (the deny rule, ACCEPTED best-effort defense-in-depth, not
+ * confirmed to hold alone on the currently installed CLI) and `T-105-06` (the below-floor degrade
+ * that carries neither layer), see docs/ARCHITECTURE.md#security-threat-model.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
