@@ -428,7 +428,6 @@ export async function setVaultValue(
 
 /**
  * Edit a key's purpose: PATCH /api/vault/:name.
- * @public wired by plan 104-03
  */
 export async function editVaultPurpose(
   name: string,

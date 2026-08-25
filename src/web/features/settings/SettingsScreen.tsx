@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   Bell,
   Bot,
+  Check,
   ClipboardList,
   Copy,
   Filter,
@@ -23,6 +24,7 @@ import {
   Plus,
   RotateCcw,
   Trash2,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -40,6 +42,7 @@ import {
   deletePlaybook,
   deleteVaultKey,
   disableRemote,
+  editVaultPurpose,
   enableRemote,
   getCleanupDelay,
   getClaudeArgs,
@@ -811,6 +814,9 @@ interface VaultTab {
   valueEditorFor: string | null;
   openValueEditor: (name: string) => void;
   closeValueEditor: () => void;
+  purposeEditorFor: string | null;
+  openPurposeEditor: (name: string) => void;
+  closePurposeEditor: () => void;
   deleteTarget: VaultKeySummary | null;
   openDelete: (key: VaultKeySummary) => void;
   closeDelete: () => void;
@@ -844,6 +850,17 @@ function vaultValueErrorCopy(error: string): string {
   }
 }
 
+function vaultPurposeErrorCopy(error: string): string {
+  switch (error) {
+    case "invalid-purpose":
+      return "Enter a one-line purpose.";
+    case "not-found":
+      return "This key no longer exists, reopen settings to retry.";
+    default:
+      return "Couldn't update purpose, try again.";
+  }
+}
+
 function useVaultTab(active: boolean): VaultTab {
   const [keys, setKeys] = useState<VaultKeySummary[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -854,6 +871,7 @@ function useVaultTab(active: boolean): VaultTab {
   const [addError, setAddError] = useState<string | null>(null);
   const [addPending, setAddPending] = useState(false);
   const [valueEditorFor, setValueEditorFor] = useState<string | null>(null);
+  const [purposeEditorFor, setPurposeEditorFor] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<VaultKeySummary | null>(
     null,
   );
@@ -912,8 +930,15 @@ function useVaultTab(active: boolean): VaultTab {
 
   const openValueEditor = useCallback((name: string) => {
     setValueEditorFor(name);
+    setPurposeEditorFor(null);
   }, []);
   const closeValueEditor = useCallback(() => setValueEditorFor(null), []);
+
+  const openPurposeEditor = useCallback((name: string) => {
+    setPurposeEditorFor(name);
+    setValueEditorFor(null);
+  }, []);
+  const closePurposeEditor = useCallback(() => setPurposeEditorFor(null), []);
 
   const openDelete = useCallback(
     (key: VaultKeySummary) => setDeleteTarget(key),
@@ -936,6 +961,9 @@ function useVaultTab(active: boolean): VaultTab {
     valueEditorFor,
     openValueEditor,
     closeValueEditor,
+    purposeEditorFor,
+    openPurposeEditor,
+    closePurposeEditor,
     deleteTarget,
     openDelete,
     closeDelete,
@@ -1097,6 +1125,49 @@ interface VaultKeyRowProps {
 
 function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
   const [hover, setHover] = useState(false);
+  const editingPurpose = vault.purposeEditorFor === keySummary.name;
+  const [draftPurpose, setDraftPurpose] = useState(keySummary.purpose);
+  const [purposeError, setPurposeError] = useState<string | null>(null);
+  const [purposePending, setPurposePending] = useState(false);
+  const [purposeFocused, setPurposeFocused] = useState(false);
+
+  useEffect(() => {
+    if (editingPurpose) {
+      setDraftPurpose(keySummary.purpose);
+      setPurposeError(null);
+    }
+  }, [editingPurpose, keySummary.purpose]);
+
+  async function handleSavePurpose() {
+    if (purposePending) return;
+    const purpose = draftPurpose.trim();
+    if (
+      purpose === "" ||
+      purpose.length > 200 ||
+      purpose.includes("\n") ||
+      purpose.includes("\r")
+    ) {
+      setPurposeError(vaultPurposeErrorCopy("invalid-purpose"));
+      return;
+    }
+    setPurposePending(true);
+    setPurposeError(null);
+    try {
+      const result = await editVaultPurpose(keySummary.name, purpose);
+      if (result.ok) {
+        vault.closePurposeEditor();
+        void vault.reload();
+        return;
+      }
+      setPurposeError(vaultPurposeErrorCopy(result.error));
+    } catch (err) {
+      console.error("editVaultPurpose failed", err);
+      setPurposeError(vaultPurposeErrorCopy("fetch-failed"));
+    } finally {
+      setPurposePending(false);
+    }
+  }
+
   return (
     <>
       <div
@@ -1127,21 +1198,67 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
         >
           {keySummary.name}
         </span>
-        <span
-          style={{
-            flex: "0 1 auto",
-            minWidth: 0,
-            fontFamily: "var(--font-ui)",
-            fontSize: "var(--font-body)",
-            lineHeight: "var(--line-body)",
-            color: "var(--text-muted)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {keySummary.purpose}
-        </span>
+        {editingPurpose ? (
+          <div
+            style={{
+              flex: "0 1 auto",
+              minWidth: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--space-xs)",
+            }}
+          >
+            <input
+              type="text"
+              aria-label={`Purpose for ${keySummary.name}`}
+              value={draftPurpose}
+              onChange={(e) => setDraftPurpose(e.target.value)}
+              onFocus={() => setPurposeFocused(true)}
+              onBlur={() => setPurposeFocused(false)}
+              style={{
+                flex: "1 1 auto",
+                height: "32px",
+                padding: "0 var(--space-sm)",
+                background: "var(--surface-column)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius)",
+                color: "var(--text)",
+                fontFamily: "var(--font-ui)",
+                fontSize: "var(--font-body)",
+                lineHeight: "var(--line-body)",
+                ...focusRing(purposeFocused),
+              }}
+            />
+            <IconButton
+              aria-label={`Save purpose for ${keySummary.name}`}
+              onClick={() => void handleSavePurpose()}
+            >
+              <Check size={14} strokeWidth={2} aria-hidden="true" />
+            </IconButton>
+            <IconButton
+              aria-label={`Cancel purpose edit for ${keySummary.name}`}
+              onClick={vault.closePurposeEditor}
+            >
+              <X size={14} strokeWidth={2} aria-hidden="true" />
+            </IconButton>
+          </div>
+        ) : (
+          <span
+            style={{
+              flex: "0 1 auto",
+              minWidth: 0,
+              fontFamily: "var(--font-ui)",
+              fontSize: "var(--font-body)",
+              lineHeight: "var(--line-body)",
+              color: "var(--text-muted)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {keySummary.purpose}
+          </span>
+        )}
         <VaultBadge filled={keySummary.filled} />
         <IconButton
           aria-label={
@@ -1153,7 +1270,10 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
         >
           <Key size={14} strokeWidth={2} aria-hidden="true" />
         </IconButton>
-        <IconButton disabled aria-label={`Edit purpose for ${keySummary.name}`}>
+        <IconButton
+          aria-label={`Edit purpose for ${keySummary.name}`}
+          onClick={() => vault.openPurposeEditor(keySummary.name)}
+        >
           <Pencil size={14} strokeWidth={2} aria-hidden="true" />
         </IconButton>
         <IconButton
@@ -1163,6 +1283,19 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
           <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
         </IconButton>
       </div>
+      {purposeError !== null && (
+        <div
+          role="alert"
+          style={{
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            lineHeight: "var(--line-label)",
+            color: "var(--destructive)",
+          }}
+        >
+          {purposeError}
+        </div>
+      )}
       {vault.valueEditorFor === keySummary.name && (
         <VaultValueEditor keySummary={keySummary} vault={vault} />
       )}
