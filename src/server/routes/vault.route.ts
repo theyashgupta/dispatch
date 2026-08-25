@@ -92,7 +92,8 @@ function validateValue(
 vaultRouter.get("/vault", async (_req, res) => {
   try {
     const envVaultAvailable =
-      fs.existsSync(ENV_VAULT_SCHEMA_PATH) || fs.existsSync(ENV_VAULT_VALUES_PATH);
+      fs.existsSync(ENV_VAULT_SCHEMA_PATH) ||
+      fs.existsSync(ENV_VAULT_VALUES_PATH);
     res.status(200).json({ keys: await listKeys(), envVaultAvailable });
   } catch {
     res.status(500).json({ error: "vault-read-failed" });

@@ -310,7 +310,11 @@ export async function importFromEnvVault(): Promise<ImportResult> {
       continue;
     }
     try {
-      const result = await createKey({ name, purpose, value: values.get(name) });
+      const result = await createKey({
+        name,
+        purpose,
+        value: values.get(name),
+      });
       if (result.ok) {
         imported.push(name);
       } else {
