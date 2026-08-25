@@ -17590,6 +17590,19 @@ async function runBypassTurn(
  * vector unchanged. A bare form of any of these four would score a genuine `neither`-variant leak
  * as a false `inconclusive` (itself a violation), the exact false-negative this file's own
  * `<specifics>` warns against.
+ *
+ * @remarks
+ * Three `neither`-variant controls carry unstated host assumptions, documented here so a reader on
+ * a different host knows why a control might not fire. `case-varied` runs `cat <UPPERCASED-BASENAME>`
+ * against a file written lowercase (`vault-sentinel.dat`); it only resolves to the real file on a
+ * case-insensitive volume (macOS APFS default). `interpreter` needs `python3` on PATH, and `curl`
+ * needs a `curl` built with the `file://` protocol. If any assumption fails the chained print never
+ * runs, the `neither` cell degrades to `inconclusive`, and the falsifiability loop fires a spurious
+ * violation indistinguishable from a real regression. The `both` variant is unaffected (its guard
+ * matches the path string regardless of file existence or interpreter presence), so this is a
+ * portability limit of the falsifiability control, not a false pass. Fixing it (writing the fixture
+ * under the uppercased name, prechecking the interpreters up front with a distinct diagnostic) is
+ * left as future work; on this project's macOS-with-python3/curl host all three assumptions hold.
  */
 function bypassVectorRows(sentinelPath, cpLeakPath, curlSinkPath) {
   const sentinelDir = dirname(sentinelPath);
