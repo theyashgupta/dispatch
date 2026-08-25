@@ -15630,6 +15630,39 @@ async function checkVaultRunKeys(built) {
     );
   }
 
+  // Leg 5 (CR-03 drift regression): a name present in values.env but ABSENT from schema.keys is
+  // the store's documented crash window (values written before schema). Append one such orphan
+  // directly to the sourced file (append-only, never a read of values.env) and assert the runner,
+  // which now narrows from values.env itself rather than schema.keys, still unsets it. The orphan
+  // is named in the RUN_KEY_ namespace so the reporter's own grep would surface it if it leaked.
+  const ORPHAN_NAME = "RUN_KEY_ORPHAN";
+  const orphanSentinel = `${VAULT_SENTINEL}-orphan`;
+  writeFileSync(
+    join(vaultDir(built), "values.env"),
+    `${ORPHAN_NAME}='${orphanSentinel}'\n`,
+    { flag: "a" },
+  );
+  const leg5 = await runVaultRunner(runnerPath, NAME_ONE, [reporterPath]);
+  if (leg5.code !== 0) {
+    violations.push(
+      `leg 5: exit ${leg5.code}, expected 0, stderr=${leg5.stderr}`,
+    );
+  }
+  if (!leg5.stdout.includes(`${NAME_ONE}=${VAULT_SENTINEL}`)) {
+    violations.push(
+      `leg 5: expected ${NAME_ONE} still present with its sentinel, got: ${leg5.stdout}`,
+    );
+  }
+  if (leg5.stdout.includes(ORPHAN_NAME)) {
+    violations.push(
+      `leg 5: ${ORPHAN_NAME} present in values.env but absent from schema.keys LEAKED into the wrapped command, the runner must narrow from values.env not schema.keys (CR-03): ${leg5.stdout}`,
+    );
+  } else {
+    console.log(
+      `leg 5: schema-absent orphan ${ORPHAN_NAME} unset by the runner, values-driven narrowing is drift-safe`,
+    );
+  }
+
   return violations;
 }
 
@@ -15970,7 +16003,9 @@ function bashGuardStdin(command) {
  * file already builds for every other runner-invocation string, so this table never carries a
  * bare doubled-hyphen token.
  */
-function guardCaseRows(VALUES, SCHEMA) {
+function guardCaseRows(VALUES, SCHEMA, RUNNER) {
+  const VALUES_UPPER = join(dirname(VALUES), "VALUES.ENV");
+  const VAULT_DIR = dirname(VALUES);
   const dumperRows = [
     "env",
     "printenv",
@@ -16042,6 +16077,32 @@ function guardCaseRows(VALUES, SCHEMA) {
         `vault-run --keys KEY_ONE ${RUN_SEP} cat ${VALUES}`,
       ),
       expect: "deny",
+    },
+    {
+      label: "deny: allowlisted head chained to a read (CR-01)",
+      stdin: bashGuardStdin(`ls ${VALUES} && cat ${VALUES}`),
+      expect: "deny",
+    },
+    {
+      label:
+        "deny: case-varied values basename on a case-insensitive volume (CR-02)",
+      stdin: bashGuardStdin(`cat ${VALUES_UPPER}`),
+      expect: "deny",
+    },
+    {
+      label: "deny: cd into the vault dir then a relative read (CR-02)",
+      stdin: bashGuardStdin(`cd ${VAULT_DIR} && cat values.env`),
+      expect: "deny",
+    },
+    {
+      label: "allow: plain ls on the runner path, not a dump (WR-01)",
+      stdin: bashGuardStdin(`ls -l ${RUNNER}`),
+      expect: "allow",
+    },
+    {
+      label: "allow: chmod on the runner path, not a dump (WR-01)",
+      stdin: bashGuardStdin(`chmod +x ${RUNNER}`),
+      expect: "allow",
     },
     ...dumperRows,
     {
@@ -16135,7 +16196,8 @@ async function checkVaultGuardDecisions(built) {
 
   const VALUES = join(vaultDir(built), "values.env");
   const SCHEMA = join(vaultDir(built), "schema.keys");
-  const rows = guardCaseRows(VALUES, SCHEMA);
+  const RUNNER = vaultRunPath(built);
+  const rows = guardCaseRows(VALUES, SCHEMA, RUNNER);
   const denyCount = rows.filter((r) => r.expect === "deny").length;
   const allowCount = rows.filter((r) => r.expect === "allow").length;
   console.log(
