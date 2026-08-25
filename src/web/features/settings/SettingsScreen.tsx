@@ -17,6 +17,8 @@ import {
   Filter,
   FolderGit2,
   Globe,
+  Key,
+  KeyRound,
   Pencil,
   Plus,
   RotateCcw,
@@ -30,6 +32,7 @@ import {
   type Playbook,
   type SourceFilters,
   type TunnelState,
+  type VaultKeySummary,
 } from "../../../shared/types.js";
 import {
   addWorkspaceFolder,
@@ -41,6 +44,7 @@ import {
   getLinearFilters,
   getLinearOptions,
   getPlaybooks,
+  getVaultKeys,
   getWorkspaceFolders,
   previewLinearFilters,
   removeWorkspaceFolder,
@@ -65,6 +69,7 @@ export type SettingsTab =
   | "models"
   | "workspaces"
   | "playbooks"
+  | "vault"
   | "remote"
   | "notifications"
   | "cleanup";
@@ -784,6 +789,201 @@ function PlaybooksTabSection({ playbooksTab }: PlaybooksTabSectionProps) {
             ))}
           </div>
         )}
+    </div>
+  );
+}
+
+interface VaultTab {
+  keys: VaultKeySummary[] | null;
+  loading: boolean;
+  loadError: boolean;
+  reload: () => Promise<void>;
+}
+
+function useVaultTab(active: boolean): VaultTab {
+  const [keys, setKeys] = useState<VaultKeySummary[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [visited, setVisited] = useState(false);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const list = await getVaultKeys();
+      setKeys([...list].sort((a, b) => a.name.localeCompare(b.name)));
+    } catch (err) {
+      console.error("getVaultKeys failed", err);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!active || visited) return;
+    setVisited(true);
+    void reload();
+  }, [active, visited, reload]);
+
+  return { keys, loading, loadError, reload };
+}
+
+function VaultBadge({ filled }: { filled: boolean }) {
+  return (
+    <span
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--space-xs)",
+        flex: "0 0 auto",
+        fontFamily: "var(--font-ui)",
+        fontSize: "var(--font-micro)",
+        fontWeight: "var(--weight-semibold)",
+        lineHeight: "var(--line-label)",
+        color: filled ? "var(--status-ok)" : "var(--text-muted)",
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          width: "6px",
+          height: "6px",
+          borderRadius: "50%",
+          background: filled ? "var(--status-ok)" : "var(--text-muted)",
+          flex: "0 0 auto",
+        }}
+      />
+      {filled ? "Filled" : "Empty"}
+    </span>
+  );
+}
+
+interface VaultKeyRowProps {
+  keySummary: VaultKeySummary;
+}
+
+function VaultKeyRow({ keySummary }: VaultKeyRowProps) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--space-sm)",
+        padding: "var(--space-sm)",
+        borderRadius: "var(--radius)",
+        background: hover ? "var(--surface-card-hover)" : "transparent",
+      }}
+    >
+      <span
+        style={{
+          flex: "1 1 auto",
+          minWidth: 0,
+          fontFamily: "var(--font-mono)",
+          fontSize: "var(--font-label)",
+          fontWeight: "var(--weight-semibold)",
+          lineHeight: "var(--line-label)",
+          color: "var(--text)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {keySummary.name}
+      </span>
+      <span
+        style={{
+          flex: "0 1 auto",
+          minWidth: 0,
+          fontFamily: "var(--font-ui)",
+          fontSize: "var(--font-body)",
+          lineHeight: "var(--line-body)",
+          color: "var(--text-muted)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {keySummary.purpose}
+      </span>
+      <VaultBadge filled={keySummary.filled} />
+      <IconButton
+        disabled
+        aria-label={
+          keySummary.filled
+            ? `Rotate value for ${keySummary.name}`
+            : `Fill value for ${keySummary.name}`
+        }
+      >
+        <Key size={14} strokeWidth={2} aria-hidden="true" />
+      </IconButton>
+      <IconButton disabled aria-label={`Edit purpose for ${keySummary.name}`}>
+        <Pencil size={14} strokeWidth={2} aria-hidden="true" />
+      </IconButton>
+      <IconButton disabled aria-label={`Delete ${keySummary.name}`}>
+        <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+      </IconButton>
+    </div>
+  );
+}
+
+interface VaultTabSectionProps {
+  vaultTab: VaultTab;
+}
+
+function VaultTabSection({ vaultTab }: VaultTabSectionProps) {
+  const { keys, loading, loadError } = vaultTab;
+
+  return (
+    <div
+      className="scroll-stable-y"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-lg)",
+        flex: "1 1 auto",
+        minHeight: 0,
+        overflowY: "auto",
+      }}
+    >
+      {loading && (
+        <span
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            lineHeight: "var(--line-label)",
+            color: "var(--text-muted)",
+          }}
+        >
+          Loading…
+        </span>
+      )}
+
+      {!loading && loadError && (
+        <Notice
+          tone="destructive"
+          label="Couldn't load vault keys, reopen settings to retry."
+        />
+      )}
+
+      {!loading && !loadError && keys !== null && keys.length === 0 && (
+        <Notice tone="muted" label="No keys yet">
+          Add one above to store a secret Claude can use without ever reading
+          it.
+        </Notice>
+      )}
+
+      {!loading && !loadError && keys !== null && keys.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {keys.map((k) => (
+            <VaultKeyRow key={k.name} keySummary={k} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1755,6 +1955,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "models", label: "Models", icon: Bot },
   { id: "workspaces", label: "Workspaces", icon: FolderGit2 },
   { id: "playbooks", label: "Playbooks", icon: ClipboardList },
+  { id: "vault", label: "Vault", icon: KeyRound },
   { id: "remote", label: "Remote", icon: Globe },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "cleanup", label: "Cleanup", icon: Trash2 },
@@ -1960,6 +2161,7 @@ export function SettingsScreen({
   const modelsTab = useModelsTab(requestClose);
   const workspacesTab = useWorkspacesTab();
   const playbooksTab = usePlaybooksTab(tab === "playbooks");
+  const vaultTab = useVaultTab(tab === "vault");
   const remoteTab = useRemoteTab();
   const cleanupTab = useCleanupTab(requestClose);
 
@@ -2018,6 +2220,7 @@ export function SettingsScreen({
           {tab === "playbooks" && (
             <SettingsScreen.PlaybooksTab playbooksTab={playbooksTab} />
           )}
+          {tab === "vault" && <SettingsScreen.VaultTab vaultTab={vaultTab} />}
           {tab === "remote" && (
             <SettingsScreen.RemoteTab
               tunnelState={tunnelState}
@@ -2107,6 +2310,7 @@ SettingsScreen.FiltersTab = FiltersTabSection;
 SettingsScreen.ModelsTab = ModelsTabSection;
 SettingsScreen.WorkspacesTab = WorkspacesTabSection;
 SettingsScreen.PlaybooksTab = PlaybooksTabSection;
+SettingsScreen.VaultTab = VaultTabSection;
 SettingsScreen.RemoteTab = RemoteTabSection;
 SettingsScreen.NotificationsTab = NotificationsTabSection;
 SettingsScreen.CleanupTab = CleanupTabSection;
