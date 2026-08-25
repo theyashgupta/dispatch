@@ -16122,10 +16122,13 @@ async function checkVaultRunKeys(built) {
 /**
  * `--check vault-run-refusals` (VLT-06, T-105-02): proves every refusal class the boot-written
  * `<home>/.dispatch/vault-run` ships still ships, freezing plan 02's hand-run proof. The no-store
- * leg runs FIRST, against the real artifact, before any vault mutation in this fixture has ever
- * created `values.env`: the genuine boot-time no-store state, not a simulated one. The two break
- * legs run against relaxed COPIES only, each proving the corresponding real-artifact assertion
- * load-bearing, and the real artifact's hash is asserted unchanged at the end.
+ * leg runs FIRST, against the real artifact, and DELETES the boot-scaffolded `values.env`
+ * (`ensureVaultScaffold`, VLT-10, Phase 106) immediately before it, since that scaffold now
+ * unconditionally creates an empty `values.env` in the SAME `installHookArtifacts()` boot call
+ * that writes this runner, making the genuine "never scaffolded" precondition unreachable through
+ * this fixture's own real server boot without the delete. The two break legs run against relaxed
+ * COPIES only, each proving the corresponding real-artifact assertion load-bearing, and the real
+ * artifact's hash is asserted unchanged at the end.
  */
 async function checkVaultRunRefusals(built) {
   const violations = [];
@@ -16147,9 +16150,13 @@ async function checkVaultRunRefusals(built) {
     return result;
   }
 
-  // Leg: no store. Runs against the REAL artifact before any key is ever created in this
-  // fixture, so `values.env` genuinely does not exist yet, distinct from the seeded-but-unfilled
-  // case below.
+  // Leg: no store. `ensureVaultScaffold` (VLT-10) writes an empty `values.env` as the last step
+  // of the very `installHookArtifacts()` boot call that writes this runner, so by the time this
+  // fixture's real server has booted, `values.env` already exists (empty). Delete it here so this
+  // leg genuinely exercises the runner's "no vault configured yet" exit-1 path, distinct from the
+  // seeded-but-unfilled exit-3 case below, rather than asserting a precondition boot no longer
+  // leaves reachable.
+  rmSync(join(vaultDir(built), "values.env"), { force: true });
   const noStore = capture(await runVaultRunner(runnerPath, NAME_ONE, ["true"]));
   if (noStore.code !== 1) {
     violations.push(
