@@ -64,6 +64,7 @@
     "panel-100": "node scripts/panel-100.mjs",
     "mobile-term-101": "node scripts/mobile-term-101.mjs",
     "mobile-term-101.1": "node scripts/mobile-term-101.mjs --check pty-shim && node scripts/mobile-term-101.mjs --check local-scroll && node scripts/mobile-term-101.mjs --check seed",
+    "panel-104": "node scripts/panel-104.mjs",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants",
     "prepack": "npm run build"
   },
