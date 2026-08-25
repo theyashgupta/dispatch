@@ -1063,6 +1063,7 @@ function VaultValueEditor({ keySummary, vault }: VaultValueEditorProps) {
       <input
         type="text"
         autoComplete="new-password"
+        spellCheck={false}
         data-1p-ignore
         data-lpignore="true"
         data-bwignore="true"
