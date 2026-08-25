@@ -10,7 +10,6 @@ import {
   VAULT_RUN_PATH,
   VAULT_GUARD_PATH,
   VAULT_VALUES_PATH,
-  VAULT_SCHEMA_PATH,
 } from "../services/infra/paths.js";
 
 /**
@@ -47,7 +46,10 @@ exit 0
  * vault path constants, never a tilde and never a HOME expansion, matching `HOOK_SCRIPT_PATH`'s
  * own doc-comment rule. Ports the proven `~/.claude/scripts/with-env.sh` shape: refuse before ever
  * sourcing, source the values file wholesale (`vault.ts#quoteEnvValue` already POSIX-quotes every
- * value so no escaping happens here), then unset every vault-known name that was not requested.
+ * value so no escaping happens here), then unset every name the values file itself carries that was
+ * not requested. The narrowing enumerates the sourced file (`VALUES`), never `schema.keys`, so a key
+ * present in `values.env` but missing from a stale `schema.keys` (the store's documented crash
+ * window) is still unset rather than leaked (105-CR-03).
  * The refusal ordering IS the security property: nothing is sourced until every refusal class has
  * been decided. Six dumper basenames (env/printenv/set/export/declare/typeset) are refused, one
  * more than the five-name prototype, since `typeset` is a `declare` synonym and refusing one while
@@ -63,7 +65,6 @@ const VAULT_RUN_SCRIPT = `#!/bin/sh
 # Usage: vault-run --keys NAME[,NAME...] <the POSIX end-of-options separator> <command> [args...]
 
 VALUES="${VAULT_VALUES_PATH}"
-SCHEMA="${VAULT_SCHEMA_PATH}"
 OLD_IFS="$IFS"
 DASH="-"
 SEP="$DASH$DASH"
@@ -147,7 +148,7 @@ while IFS= read -r line; do
   if ! key_requested "$name"; then
     unset "$name"
   fi
-done < "$SCHEMA"
+done < "$VALUES"
 
 exec "$@"
 `;
@@ -177,12 +178,14 @@ exec "$@"
  * installed CLI, see docs/ARCHITECTURE.md#security-threat-model.
  */
 const VAULT_GUARD_SCRIPT = `#!/usr/bin/env node
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 import { writeSync } from "node:fs";
 import { text } from "node:stream/consumers";
 
 const VALUES_PATH = ${JSON.stringify(VAULT_VALUES_PATH)};
 const VALUES_MARKERS = [VALUES_PATH, "vault/values.env"];
+const VALUES_BASENAME = basename(VALUES_PATH).toLowerCase();
+const VAULT_DIRNAME = basename(dirname(VALUES_PATH)).toLowerCase();
 
 const READ_OUT =
   /\\b(cat|head|tail|less|more|most|grep|rg|egrep|fgrep|sed|awk|od|xxd|hexdump|strings|base64|uuencode|sort|uniq|wc|diff|cmp|cut|tr|rev|nl|pr|fold|column|paste|join|split|csplit|dd|tee|python3?|node|ruby|perl|php)\\b/;
@@ -199,8 +202,33 @@ const RUNNER_DUMPERS = new Set([
   "declare",
   "typeset",
 ]);
+const RUNNER_LAUNCHERS = new Set([
+  "time",
+  "env",
+  "sudo",
+  "nice",
+  "nohup",
+  "command",
+]);
 const DASH = "-";
 const SEP = DASH + DASH;
+
+/**
+ * Whether 'cmd' contains a shell command separator or substitution, so an allowlisted head verb
+ * cannot chain a second, unvetted operation on the same values path (105-CR-01). A single
+ * '&'/'|' catches its doubled form too; broader is safe because the only effect is to decline the
+ * single-op allowlist and fall through to the deny classes.
+ */
+function hasChaining(cmd) {
+  return (
+    cmd.includes(";") ||
+    cmd.includes("&") ||
+    cmd.includes("|") ||
+    cmd.includes("\\n") ||
+    cmd.includes("\`") ||
+    cmd.includes("$(")
+  );
+}
 
 function deny(reason) {
   writeSync(
@@ -228,19 +256,58 @@ function findRunnerIndex(tokens) {
 }
 
 /**
+ * Whether the vault-run token at 'i' sits in command-head position: either first, or preceded
+ * only by known launchers (time/env/sudo/...). A non-head occurrence is vault-run named as an
+ * argument (ls/chmod/cat on the runner file), not an invocation, so it must not be judged as a
+ * dumper wrapper (105-WR-01).
+ */
+function isRunnerHead(tokens, i) {
+  for (let j = 0; j < i; j++) {
+    if (!RUNNER_LAUNCHERS.has(basename(tokens[j]))) return false;
+  }
+  return true;
+}
+
+/**
  * Whether 'tokens' invoke vault-run wrapping a dumper basename, or invoke it in a shape too
- * ambiguous to resolve cleanly.
+ * ambiguous to resolve cleanly. A vault-run token that is not the command head is treated as a
+ * mere argument and falls through to the normal values-reference checks, not denied as a dump.
  *
- * @remarks A false deny here is safe; a false allow is not, so any unresolved shape denies too.
+ * @remarks A false deny here is safe; a false allow is not, so any unresolved invocation shape
+ * denies too.
  */
 function isRunnerMediatedDump(tokens) {
   const i = findRunnerIndex(tokens);
   if (i === -1) return false;
+  if (!isRunnerHead(tokens, i)) return false;
   if (tokens[i + 1] !== "--keys") return true;
   if (tokens[i + 3] !== SEP) return true;
   const wrapped = tokens[i + 4];
   if (wrapped === undefined) return true;
   return RUNNER_DUMPERS.has(basename(wrapped));
+}
+
+/**
+ * Whether any token's basename is the values file, compared case-insensitively so a case-variant
+ * spelling on a case-insensitive volume (macOS APFS/HFS+) still counts as a reference (105-CR-02).
+ */
+function namesValuesFile(tokens) {
+  return tokens.some((t) => basename(t).toLowerCase() === VALUES_BASENAME);
+}
+
+/**
+ * Whether the command cd/pushd-es into the vault directory and then names the values basename,
+ * the split-path shape the absolute-path and 'vault/values.env' substring markers miss
+ * (105-CR-02).
+ */
+function entersVaultThenNamesValues(cmd, tokens) {
+  const entersVault = tokens.some(
+    (t, i) =>
+      (t === "cd" || t === "pushd") &&
+      tokens[i + 1] !== undefined &&
+      basename(tokens[i + 1]).toLowerCase() === VAULT_DIRNAME,
+  );
+  return entersVault && cmd.toLowerCase().includes(VALUES_BASENAME);
 }
 
 let payload;
@@ -263,10 +330,14 @@ if (isRunnerMediatedDump(tokens)) {
   );
 }
 
-const referencesValues = VALUES_MARKERS.some((marker) => cmd.includes(marker));
+const lowerCmd = cmd.toLowerCase();
+const referencesValues =
+  VALUES_MARKERS.some((marker) => lowerCmd.includes(marker.toLowerCase())) ||
+  namesValuesFile(tokens) ||
+  entersVaultThenNamesValues(cmd, tokens);
 if (!referencesValues) process.exit(0);
 
-if (ALLOWED_ON_VALUES.test(cmd.trim())) process.exit(0);
+if (ALLOWED_ON_VALUES.test(cmd.trim()) && !hasChaining(cmd)) process.exit(0);
 
 if (findRunnerIndex(tokens) !== -1) {
   deny(
