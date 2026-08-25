@@ -83,6 +83,30 @@ export const VAULT_SCHEMA_PATH = path.join(VAULT_DIR, "schema.keys");
 export const UPDATE_CACHE_PATH = path.join(DISPATCH_DIR, "update-check.json");
 
 /**
+ * The standalone env-vault's schema file, `~/.claude/env-vault/schema.keys`. Read-only IMPORT
+ * SOURCE for the one-time migration into Dispatch's own vault store; never written to, never
+ * confused with `VAULT_SCHEMA_PATH`.
+ */
+export const ENV_VAULT_SCHEMA_PATH = path.join(
+  os.homedir(),
+  ".claude",
+  "env-vault",
+  "schema.keys",
+);
+
+/**
+ * The standalone env-vault's sealed values file, `~/.claude/env-vault/values.env`. Read-only
+ * IMPORT SOURCE, POSIX single-quoted `NAME=value` lines; never written to, never confused with
+ * `VAULT_VALUES_PATH`.
+ */
+export const ENV_VAULT_VALUES_PATH = path.join(
+  os.homedir(),
+  ".claude",
+  "env-vault",
+  "values.env",
+);
+
+/**
  * The BUILT frontend bundle root, resolving to `<project-root>/dist/web` in BOTH dev and prod
  * (this module sits 4 directory levels below the project root in each layout: `src/server/services/
  * infra/` and `dist/server/services/infra/`). Deliberately distinct from `bootstrap/index.ts`'s
