@@ -7,6 +7,8 @@ import {
   VAULT_METADATA_PATH,
   VAULT_VALUES_PATH,
   VAULT_SCHEMA_PATH,
+  ENV_VAULT_SCHEMA_PATH,
+  ENV_VAULT_VALUES_PATH,
 } from "../infra/paths.js";
 
 /**
@@ -222,6 +224,104 @@ export async function createKey(input: {
     await writeStore([...keys, key], lines);
     return { ok: true, key };
   });
+}
+
+/**
+ * Env-vault schema line shape: `NAME=` followed by a `# purpose` comment, matching
+ * `~/.claude/env-vault/schema.keys`'s own format.
+ */
+const SCHEMA_LINE_RE = /^([A-Z_][A-Z0-9_]*)=\s*#\s*(.*)$/;
+
+/** Parse the env-vault schema file's `NAME=  # purpose` lines, skipping blank and `#`-header lines. */
+function parseEnvVaultSchema(raw: string): { name: string; purpose: string }[] {
+  const out: { name: string; purpose: string }[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
+    const m = SCHEMA_LINE_RE.exec(line);
+    if (m) out.push({ name: m[1], purpose: m[2].trim() });
+  }
+  return out;
+}
+
+/**
+ * Parse the env-vault values file's `NAME='value'` lines into a name-to-value map.
+ * @remarks The exact inverse of `quoteEnvValue`: strips one leading/trailing single quote, then
+ * reverses the `'\''` embedded-quote escape.
+ */
+function parseEnvVaultValues(raw: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const line of raw.split("\n")) {
+    if (line.length === 0) continue;
+    const eq = line.indexOf("=");
+    if (eq === -1) continue;
+    const name = line.slice(0, eq);
+    let quoted = line.slice(eq + 1);
+    if (quoted.startsWith("'") && quoted.endsWith("'")) {
+      quoted = quoted.slice(1, -1);
+    }
+    out.set(name, quoted.replace(/'\\''/g, "'"));
+  }
+  return out;
+}
+
+/**
+ * Result of a one-time env-vault import. Names only, matching `VaultWriteResult`'s write-only
+ * contract; a value must never cross into this shape.
+ */
+export interface ImportResult {
+  imported: string[];
+  skipped: string[];
+}
+
+/**
+ * Copy every key from the standalone `~/.claude/env-vault` into Dispatch's own vault store, once.
+ * Reuses `createKey` per name so every VLT-01/02 invariant (naming, serialization, mode-assertion)
+ * applies unchanged; a name already present in Dispatch's store is skipped, never overwritten
+ * (Dispatch's value wins). A source key with no matching values.env line imports with
+ * `value: undefined` (filled=false), never defaulted to an empty string. Source files are only
+ * ever read here, never written. A per-line or per-key failure is logged server-side and skipped,
+ * never thrown, so one malformed source line cannot abort the whole import.
+ */
+export async function importFromEnvVault(): Promise<ImportResult> {
+  const imported: string[] = [];
+  const skipped: string[] = [];
+
+  let schemaRaw: string;
+  try {
+    schemaRaw = await fsp.readFile(ENV_VAULT_SCHEMA_PATH, "utf8");
+  } catch {
+    return { imported, skipped };
+  }
+
+  let valuesRaw: string;
+  try {
+    valuesRaw = await fsp.readFile(ENV_VAULT_VALUES_PATH, "utf8");
+  } catch {
+    valuesRaw = "";
+  }
+
+  const entries = parseEnvVaultSchema(schemaRaw);
+  const values = parseEnvVaultValues(valuesRaw);
+  const existing = new Set((await listKeys()).map((k) => k.name));
+
+  for (const { name, purpose } of entries) {
+    if (existing.has(name)) {
+      skipped.push(name);
+      continue;
+    }
+    try {
+      const result = await createKey({ name, purpose, value: values.get(name) });
+      if (result.ok) {
+        imported.push(name);
+      } else {
+        skipped.push(name);
+      }
+    } catch (err) {
+      console.error(`env-vault import failed for key ${name}`, err);
+    }
+  }
+
+  return { imported, skipped };
 }
 
 /**
