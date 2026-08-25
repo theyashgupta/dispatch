@@ -904,7 +904,7 @@ function useVaultTab(active: boolean): VaultTab {
       setAddError(vaultAddErrorCopy("invalid-name"));
       return;
     }
-    if (purpose === "" || purpose.includes("\n")) {
+    if (purpose === "" || purpose.includes("\n") || purpose.length > 200) {
       setAddError(vaultAddErrorCopy("invalid-purpose"));
       return;
     }
@@ -1197,6 +1197,7 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
           }}
+          title={keySummary.name}
         >
           {keySummary.name}
         </span>
@@ -1257,6 +1258,7 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
             }}
+            title={keySummary.purpose}
           >
             {keySummary.purpose}
           </span>
@@ -2749,7 +2751,9 @@ export function SettingsScreen({
       if (
         playbooksTab.editorState ||
         playbooksTab.deleteTarget ||
-        vaultTab.deleteTarget
+        vaultTab.deleteTarget ||
+        vaultTab.valueEditorFor ||
+        vaultTab.purposeEditorFor
       )
         return;
       requestClose();
@@ -2760,6 +2764,8 @@ export function SettingsScreen({
     playbooksTab.editorState,
     playbooksTab.deleteTarget,
     vaultTab.deleteTarget,
+    vaultTab.valueEditorFor,
+    vaultTab.purposeEditorFor,
     requestClose,
   ]);
 
