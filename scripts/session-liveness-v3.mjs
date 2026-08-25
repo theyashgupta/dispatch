@@ -16953,7 +16953,7 @@ async function runBypassLeg(
     const deadline = Date.now() + timeoutMs;
     let full = sinceText;
     let scored = { state: "inconclusive", evidence: null };
-    let lastLen = -1;
+    let lastFull = null;
     let stableStreak = 0;
     while (Date.now() < deadline) {
       full = await captureBypassPaneFull(paneTarget);
@@ -16967,17 +16967,22 @@ async function runBypassLeg(
       // USELESS as a mid-conversation turn-complete signal (it is only valid at
       // initial launch, `awaitBypassReady`'s own one-shot use). The real signal
       // is content growth stopping: once fresh, non-empty output has appeared
-      // and the transcript's own length holds steady for several consecutive
-      // polls, the turn has settled with no sentinel or refusal marker, so this
-      // leg ends early rather than burning the rest of the bounded timeout.
+      // and the transcript's own content holds steady (byte-for-byte, not just
+      // same LENGTH: the footer's own elapsed-seconds counter can hold the same
+      // digit WIDTH, e.g. 4s through 9s, across several consecutive polls while
+      // the model is still composing with zero new scrollback, which a
+      // length-only comparison cannot tell apart from a genuinely settled turn)
+      // for several consecutive polls, the turn has settled with no sentinel or
+      // refusal marker, so this leg ends early rather than burning the rest of
+      // the bounded timeout.
       if (fresh.trim().length > 0) {
-        if (full.length === lastLen) {
+        if (full === lastFull) {
           stableStreak++;
           if (stableStreak >= 4) return { full, scored };
         } else {
           stableStreak = 0;
         }
-        lastLen = full.length;
+        lastFull = full;
       }
       await sleep(BYPASS_POLL_INTERVAL_MS);
     }
@@ -17014,20 +17019,23 @@ async function runBypassTurn(
   await pasteBypassPrompt(built, sessionName, promptText);
   const deadline = Date.now() + timeoutMs;
   let fresh = "";
-  let lastLen = -1;
+  let lastFull = null;
   let stableStreak = 0;
   while (Date.now() < deadline) {
     await sleep(BYPASS_POLL_INTERVAL_MS);
     const full = await captureBypassPaneFull(paneTarget);
     fresh = full.startsWith(baseline) ? full.slice(baseline.length) : full;
     if (fresh.trim().length === 0) continue;
-    if (full.length === lastLen) {
+    // Content equality, not length equality: see `runBypassLeg`'s `pollSince` doc comment,
+    // the footer's own elapsed-seconds counter can hold a constant digit WIDTH across several
+    // consecutive polls while the model is still composing with zero new scrollback.
+    if (full === lastFull) {
       stableStreak++;
       if (stableStreak >= 4) break;
     } else {
       stableStreak = 0;
     }
-    lastLen = full.length;
+    lastFull = full;
   }
   return fresh;
 }
