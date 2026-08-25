@@ -52,6 +52,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -357,6 +358,52 @@ function seedDispatchDir(home) {
     JSON.stringify({ seeded: true }) + "\n",
   );
   return dispatchDir;
+}
+
+/**
+ * Seed a real on-disk vault store at `<home>/.dispatch/vault/`, mirroring `seedDispatchDir`'s
+ * regenerable-seeding style: dir 0700, three files 0600, one sentinel key so both a bare `Keep:`
+ * and a `--purge` `Remove:`/removal proof have real bytes to act on.
+ * @returns The seeded vault directory path.
+ */
+function seedVaultStore(home) {
+  const vaultDir = join(home, ".dispatch", "vault");
+  mkdirSync(vaultDir, { recursive: true, mode: 0o700 });
+  writeFileSync(
+    join(vaultDir, "vault.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        keys: [
+          {
+            name: "SEED_KEY",
+            purpose: "reinstall-sim seed",
+            createdAt: "2020-01-01T00:00:00.000Z",
+            updatedAt: "2020-01-01T00:00:00.000Z",
+            filled: true,
+          },
+        ],
+      },
+      null,
+      2,
+    ) + "\n",
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    join(vaultDir, "values.env"),
+    "SEED_KEY='reinstall-sim-seed-value'\n",
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    join(vaultDir, "schema.keys"),
+    "SEED_KEY=  # reinstall-sim seed\n",
+    { mode: 0o600 },
+  );
+  chmodSync(vaultDir, 0o700);
+  for (const f of ["vault.json", "values.env", "schema.keys"]) {
+    chmodSync(join(vaultDir, f), 0o600);
+  }
+  return vaultDir;
 }
 
 /**
@@ -864,8 +911,12 @@ function indent(text) {
 /**
  * PERSIST-02: prove the shipped {@link OLD_RELEASE_TAG} bug (bare uninstall deletes `config.json`)
  * reproduces, then prove the current build's bare `uninstall --yes` keeps `config.json`/board
- * data/playbooks byte-identical while removing only the dispatch-owned regenerables
- * (`hook.sh`/`hook-settings.json`), stopping neither tmux sessions nor ttyd.
+ * data/playbooks/the vault store byte-identical while removing only the dispatch-owned
+ * regenerables (`hook.sh`/`hook-settings.json`/`vault-run`/`vault-guard.mjs`), stopping neither
+ * tmux sessions nor ttyd. Then runs a REAL `uninstall --purge --yes` on the same sandbox and
+ * asserts the vault store's directory and all three files are gone from disk with no `failed`
+ * entry (VLT-10, 106-RESEARCH.md Pitfall 1's EISDIR proof: a `--dry-run` alone never exercises
+ * `runUninstall`'s directory-removal code, `cli.ts` returns before calling it).
  * @returns Violation lines, empty on PASS.
  */
 async function legUninstallKeeps() {
@@ -875,6 +926,7 @@ async function legUninstallKeeps() {
   const newPackDir = mkSandboxDir("new-pack");
   try {
     seedDispatchDir(home);
+    seedVaultStore(home);
     const oldTarball = buildOldRelease();
     installTarball(oldTarball, prefixOld, home);
     const newTarball = buildAndPack(newPackDir);
@@ -950,13 +1002,55 @@ async function legUninstallKeeps() {
       .filter(Boolean)
       .map((l) => l.split("/").pop());
     const unexpectedRemoves = removeBasenames.filter(
-      (b) => b !== "hook.sh" && b !== "hook-settings.json",
+      (b) =>
+        b !== "hook.sh" &&
+        b !== "hook-settings.json" &&
+        b !== "vault-run" &&
+        b !== "vault-guard.mjs",
     );
     if (unexpectedRemoves.length > 0) {
       violations.push(
         `current build's --dry-run Remove: section lists unexpected entries: ${unexpectedRemoves.join(", ")}`,
       );
     }
+    if (!newKeepSection.includes(join(home, ".dispatch", "vault"))) {
+      violations.push(
+        `current build's --dry-run Keep: section does not name the vault store directory`,
+      );
+    }
+    if (
+      !removeBasenames.includes("vault-run") ||
+      !removeBasenames.includes("vault-guard.mjs")
+    ) {
+      violations.push(
+        `current build's bare --dry-run Remove: section does not name both vault-run and ` +
+          `vault-guard.mjs, got: ${JSON.stringify(removeBasenames)}`,
+      );
+    }
+
+    const purgeDryRun = dispatchArgv(
+      prefixNew,
+      ["uninstall", "--purge", "--dry-run"],
+      home,
+    );
+    const purgeRemoveSection = extractSection(purgeDryRun.stdout, "Remove:");
+    console.log(
+      `  current build --purge --dry-run Remove: section:\n${indent(purgeRemoveSection)}`,
+    );
+    const purgeRemoveBasenames = purgeRemoveSection
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => l.split("/").pop());
+    for (const f of ["vault.json", "values.env", "schema.keys"]) {
+      if (!purgeRemoveBasenames.includes(f)) {
+        violations.push(
+          `current build's --purge --dry-run Remove: section does not name ${f}, got: ` +
+            `${JSON.stringify(purgeRemoveBasenames)}`,
+        );
+      }
+    }
+
     const stopHasSessionOrTtyd =
       newStopSection.includes("tmux session") ||
       newStopSection.includes("ttyd");
@@ -975,12 +1069,16 @@ async function legUninstallKeeps() {
     console.log(`  current build uninstall --yes exit=${execResult.status}`);
 
     const snapAfter = snapshotDispatchDir(home);
+    const vaultRel = (f) => join("vault", f);
     const keepChecks = [
       "config.json",
       "board.db",
       "board.db.bak.1",
       join("playbooks", "kickoff.md"),
       join("playbooks", "review.md"),
+      vaultRel("vault.json"),
+      vaultRel("values.env"),
+      vaultRel("schema.keys"),
     ];
     for (const rel of keepChecks) {
       if (snapBefore.get(rel) !== snapAfter.get(rel)) {
@@ -990,13 +1088,72 @@ async function legUninstallKeeps() {
         );
       }
     }
-    for (const rel of ["hook.sh", "hook-settings.json"]) {
+    for (const rel of [
+      "hook.sh",
+      "hook-settings.json",
+      "vault-run",
+      "vault-guard.mjs",
+    ]) {
       if (snapAfter.has(rel)) {
         violations.push(
           `${rel} still exists after uninstall --yes, it is a dispatch-owned regenerable and ` +
             `must be removed`,
         );
       }
+    }
+    console.log(
+      `  after bare uninstall --yes: vault store kept (${vaultRel("vault.json")}, ` +
+        `${vaultRel("values.env")}, ${vaultRel("schema.keys")}), vault-run/vault-guard.mjs removed`,
+    );
+
+    const purgeExecResult = dispatchArgv(
+      prefixNew,
+      ["uninstall", "--purge", "--yes"],
+      home,
+    );
+    console.log(
+      `  current build uninstall --purge --yes exit=${purgeExecResult.status}`,
+    );
+    if (purgeExecResult.status !== 0) {
+      violations.push(
+        `uninstall --purge --yes exited ${purgeExecResult.status}, expected 0: ${purgeExecResult.stderr}`,
+      );
+    }
+    if (purgeExecResult.stdout.includes("Failed to remove")) {
+      violations.push(
+        `uninstall --purge --yes reported failed removal(s), a directory-vs-file EISDIR would ` +
+          `surface here: ${purgeExecResult.stdout}`,
+      );
+    }
+    const vaultDirPath = join(home, ".dispatch", "vault");
+    if (existsSync(vaultDirPath)) {
+      violations.push(
+        `${vaultDirPath} still exists on disk after --purge --yes, expected removed`,
+      );
+    }
+    const snapAfterPurge = snapshotDispatchDir(home);
+    for (const f of ["vault.json", "values.env", "schema.keys"]) {
+      const rel = vaultRel(f);
+      if (snapAfterPurge.has(rel)) {
+        violations.push(
+          `${rel} still present after --purge --yes, expected removed`,
+        );
+      }
+      if (existsSync(join(vaultDirPath, f))) {
+        violations.push(
+          `${join(vaultDirPath, f)} still exists on disk after --purge --yes`,
+        );
+      }
+    }
+    if (
+      !existsSync(vaultDirPath) &&
+      !["vault.json", "values.env", "schema.keys"].some((f) =>
+        snapAfterPurge.has(vaultRel(f)),
+      )
+    ) {
+      console.log(
+        `  after --purge --yes: ${vaultDirPath} and its three files are absent, no EISDIR failure reported`,
+      );
     }
   } finally {
     rmSync(home, { recursive: true, force: true });

@@ -14470,6 +14470,444 @@ async function checkVaultPerms(built) {
 }
 
 /**
+ * `--check vault-boot-scaffold` (VLT-10, criterion 1): a clean-HOME boot alone, with no `/vault`
+ * call ever made, already produces a working vault store at the writer's asserted modes. Reuses
+ * `checkVaultPerms`'s statSync-mode shape directly against the fixture's own fresh boot (the
+ * fixture's `standUpFixture` warmup+real boot IS the clean-HOME boot under test), no seeded write
+ * of its own.
+ */
+async function checkVaultBootScaffold(built) {
+  const violations = [];
+  const dir = vaultDir(built);
+  const valuesPath = join(dir, "values.env");
+  const metadataPath = join(dir, "vault.json");
+  const schemaPath = join(dir, "schema.keys");
+
+  let dirStat;
+  try {
+    dirStat = statSync(dir);
+  } catch {
+    violations.push(
+      `vault-boot-scaffold: vault directory missing at ${dir} on a clean boot`,
+    );
+    return violations;
+  }
+  const dirMode = dirStat.mode & 0o777;
+  if (dirMode !== 0o700) {
+    violations.push(
+      `vault-boot-scaffold: vault directory ${dir} mode ${dirMode.toString(8)}, expected 700`,
+    );
+  }
+  for (const [name, filePath] of [
+    ["values.env", valuesPath],
+    ["vault.json", metadataPath],
+    ["schema.keys", schemaPath],
+  ]) {
+    let fileStat;
+    try {
+      fileStat = statSync(filePath);
+    } catch {
+      violations.push(
+        `vault-boot-scaffold: ${name} missing at ${filePath} on a clean boot`,
+      );
+      continue;
+    }
+    const fileMode = fileStat.mode & 0o777;
+    if (fileMode !== 0o600) {
+      violations.push(
+        `vault-boot-scaffold: ${name} mode ${fileMode.toString(8)}, expected 600`,
+      );
+    }
+  }
+  console.log(
+    `vault-boot-scaffold: dir ${dir} at ${dirMode.toString(8)}, three files present at 0600 on a clean boot`,
+  );
+  return violations;
+}
+
+/**
+ * `--check vault-regen-idempotence` (VLT-10, criterion 1): three legs against the fixture's real
+ * boot cycle. (a) delete `vault.json` ALONE, leaving `values.env` populated, reboot, assert
+ * `values.env` is byte-identical (Pitfall 2, the scaffold guard must not blindly overwrite a
+ * corrupted-but-populated store). (b) delete/corrupt `vault-run` and `vault-guard.mjs`, reboot,
+ * assert both restored byte-identical to their PRE-corruption bytes (both are regenerated
+ * unconditionally on every boot, no guard). (c) on that same fresh reboot, assert
+ * `hook-settings.json` still carries the double-leading-slash `Read(//...values.env)` deny rule
+ * and the second Bash `PreToolUse` guard entry, proving the deny-rules artifact regenerates too.
+ * The kickoff block has no on-disk artifact to delete or corrupt (built at runtime from a code
+ * constant, not written to disk), so no delete/corrupt proof applies to it here; it is already
+ * covered by `--check vault-kickoff-block` (105-04).
+ */
+async function checkVaultRegenIdempotence(built) {
+  const violations = [];
+
+  // Leg (a): the scaffold guard proof.
+  const REGEN_KEY = "REGEN_SCAFFOLD_KEY";
+  const REGEN_VALUE = "reg3n-guard-" + process.pid;
+  const created = await vaultRequest(built, "POST", "/vault", {
+    name: REGEN_KEY,
+    purpose: "regen-idempotence scaffold-guard leg",
+    value: REGEN_VALUE,
+  });
+  if (created.status !== 200) {
+    violations.push(
+      `leg (a): POST /vault expected 200, got ${created.status}: ${created.text}`,
+    );
+  }
+  const dir = vaultDir(built);
+  const valuesPath = join(dir, "values.env");
+  const metadataPath = join(dir, "vault.json");
+  const valuesBefore = readFileSync(valuesPath);
+  rmSync(metadataPath, { force: true });
+  if (existsSync(metadataPath)) {
+    violations.push(
+      `leg (a): vault.json still exists at ${metadataPath} after rmSync, this leg proves nothing`,
+    );
+  }
+
+  // Leg (b): capture the runner/guard's pre-corruption bytes, then corrupt both, one by deletion
+  // and one by overwrite, exercising both corruption shapes the criterion names.
+  const runnerPath = vaultRunPath(built);
+  const guardPath = join(built.home, ".dispatch", "vault-guard.mjs");
+  const runnerBefore = readFileSync(runnerPath);
+  const guardBefore = readFileSync(guardPath);
+  rmSync(runnerPath, { force: true });
+  writeFileSync(guardPath, "// corrupted by vault-regen-idempotence\n");
+
+  await restartServer(built);
+
+  // Leg (a) assertion: values.env survived the vault.json-alone deletion, byte-identical.
+  const valuesAfter = readFileSync(valuesPath);
+  if (!valuesBefore.equals(valuesAfter)) {
+    violations.push(
+      `leg (a): values.env changed across a vault.json-alone delete+reboot, the scaffold guard wiped it`,
+    );
+  } else {
+    console.log(
+      `leg (a): values.env byte-identical after deleting vault.json alone and rebooting (${REGEN_KEY} survived)`,
+    );
+  }
+
+  // Leg (b) assertion: both artifacts restored, byte-identical to their pre-corruption bytes.
+  const runnerAfter = readFileSync(runnerPath);
+  const guardAfter = readFileSync(guardPath);
+  if (!runnerBefore.equals(runnerAfter)) {
+    violations.push(
+      `leg (b): vault-run not restored byte-identical after delete+reboot`,
+    );
+  } else {
+    console.log(
+      `leg (b): vault-run restored byte-identical after delete+reboot`,
+    );
+  }
+  if (!guardBefore.equals(guardAfter)) {
+    violations.push(
+      `leg (b): vault-guard.mjs not restored byte-identical after corrupt+reboot`,
+    );
+  } else {
+    console.log(
+      `leg (b): vault-guard.mjs restored byte-identical after corrupt+reboot`,
+    );
+  }
+
+  // Leg (c): the deny-rules artifact, on the SAME fresh reboot leg (b) just performed.
+  const settingsPath = join(built.home, ".dispatch", "hook-settings.json");
+  const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+  const expectedDenyRule = `Read(/${valuesPath})`;
+  const denyRule = settings.permissions?.deny?.[0] ?? "";
+  if (denyRule !== expectedDenyRule) {
+    violations.push(
+      `leg (c): hook-settings.json deny rule expected ${JSON.stringify(expectedDenyRule)}, got ${JSON.stringify(denyRule)}`,
+    );
+  } else {
+    console.log(`leg (c): deny rule present in double-slash form: ${denyRule}`);
+  }
+  const bashEntry = (settings.hooks?.PreToolUse ?? []).find(
+    (e) => e.matcher === "Bash",
+  );
+  const bashCommand = bashEntry?.hooks?.[0]?.command;
+  if (bashCommand !== guardPath) {
+    violations.push(
+      `leg (c): hook-settings.json Bash PreToolUse guard entry expected command ${JSON.stringify(guardPath)}, got ${JSON.stringify(bashCommand)}`,
+    );
+  } else {
+    console.log(
+      `leg (c): Bash PreToolUse guard entry present, invoking ${bashCommand}`,
+    );
+  }
+
+  return violations;
+}
+
+/**
+ * Write a SYNTHETIC scratch `~/.claude/env-vault` source under the fixture HOME, never the real
+ * one: `schema.keys` in its `NAME=  # purpose` shape and `values.env` in its POSIX single-quoted
+ * `NAME='value'` shape, matching `vault.ts#parseEnvVaultSchema`/`parseEnvVaultValues` exactly.
+ * `schemaEntries` is `[name, purpose][]`; `valueEntries` is `[name, value][]` and may omit a name
+ * present in `schemaEntries` (Pitfall 3, the declared-but-unfilled case).
+ * @returns The scratch source's `schemaPath`/`valuesPath`.
+ */
+function writeEnvVaultScratchSource(built, schemaEntries, valueEntries) {
+  const dir = join(built.home, ".claude", "env-vault");
+  mkdirSync(dir, { recursive: true });
+  const schemaPath = join(dir, "schema.keys");
+  const valuesPath = join(dir, "values.env");
+  const schemaText =
+    schemaEntries
+      .map(([name, purpose]) => `${name}=  # ${purpose}`)
+      .join("\n") + "\n";
+  const valuesText = valueEntries
+    .map(([name, value]) => `${name}='${value.replace(/'/g, "'\\''")}'`)
+    .join("\n");
+  writeFileSync(schemaPath, schemaText);
+  writeFileSync(valuesPath, valuesText.length > 0 ? `${valuesText}\n` : "");
+  return { schemaPath, valuesPath };
+}
+
+/**
+ * `--check vault-import-skip-conflict` (VLT-11, criterion 3): rotates a key inside Dispatch, then
+ * imports a SYNTHETIC scratch source that ALSO declares that key with a different value, and
+ * confirms through the real runner (never a store read) that the DISPATCH value still wins, the
+ * scratch source files are byte-identical before/after, and a declared-but-unfilled source key
+ * imports with `filled: false`, never an empty string (Pitfall 3).
+ */
+async function checkVaultImportSkipConflict(built) {
+  const violations = [];
+  const NAME_CONFLICT = "IMPORT_CONFLICT_KEY";
+  const NAME_NEW = "IMPORT_NEW_KEY";
+  const NAME_EMPTY = "IMPORT_EMPTY_KEY";
+  const DISPATCH_INITIAL = "d1sp-1nit-" + process.pid;
+  const DISPATCH_ROTATED = "d1sp-r0tated-" + process.pid;
+  const SOURCE_VALUE = "s0urce-l0ses-" + process.pid;
+  const NEW_VALUE = "n3w-1mported-" + process.pid;
+
+  const created = await vaultRequest(built, "POST", "/vault", {
+    name: NAME_CONFLICT,
+    purpose: "import skip-conflict leg",
+    value: DISPATCH_INITIAL,
+  });
+  if (created.status !== 200) {
+    violations.push(
+      `setup: POST /vault ${NAME_CONFLICT} expected 200, got ${created.status}: ${created.text}`,
+    );
+  }
+  const rotated = await vaultRequest(
+    built,
+    "PUT",
+    `/vault/${NAME_CONFLICT}/value`,
+    { value: DISPATCH_ROTATED },
+  );
+  if (rotated.status !== 200) {
+    violations.push(
+      `setup: PUT /vault/${NAME_CONFLICT}/value expected 200, got ${rotated.status}: ${rotated.text}`,
+    );
+  }
+
+  const { schemaPath, valuesPath } = writeEnvVaultScratchSource(
+    built,
+    [
+      [NAME_CONFLICT, "conflicting key, the Dispatch value must win"],
+      [NAME_NEW, "brand-new key, must import"],
+      [NAME_EMPTY, "declared but no value line, must import with filled=false"],
+    ],
+    [
+      [NAME_CONFLICT, SOURCE_VALUE],
+      [NAME_NEW, NEW_VALUE],
+    ],
+  );
+  const schemaBefore = readFileSync(schemaPath);
+  const valuesBefore = readFileSync(valuesPath);
+
+  const importRes = await vaultRequest(built, "POST", "/vault/import");
+  if (importRes.status !== 200) {
+    violations.push(
+      `import: POST /vault/import expected 200, got ${importRes.status}: ${importRes.text}`,
+    );
+    return violations;
+  }
+  const body = JSON.parse(importRes.text);
+  if (!Array.isArray(body.skipped) || !body.skipped.includes(NAME_CONFLICT)) {
+    violations.push(
+      `import: expected ${NAME_CONFLICT} in skipped, got skipped=${JSON.stringify(body.skipped)}`,
+    );
+  }
+  if (!Array.isArray(body.imported) || !body.imported.includes(NAME_NEW)) {
+    violations.push(
+      `import: expected ${NAME_NEW} in imported, got imported=${JSON.stringify(body.imported)}`,
+    );
+  }
+  if (!body.imported.includes(NAME_EMPTY)) {
+    violations.push(
+      `import: expected ${NAME_EMPTY} in imported, got imported=${JSON.stringify(body.imported)}`,
+    );
+  }
+  console.log(
+    `import: imported=${JSON.stringify(body.imported)} skipped=${JSON.stringify(body.skipped)}`,
+  );
+
+  const schemaAfter = readFileSync(schemaPath);
+  const valuesAfter = readFileSync(valuesPath);
+  if (!schemaBefore.equals(schemaAfter)) {
+    violations.push(
+      `import: scratch source schema.keys changed across import, byte-identity broken`,
+    );
+  }
+  if (!valuesBefore.equals(valuesAfter)) {
+    violations.push(
+      `import: scratch source values.env changed across import, byte-identity broken`,
+    );
+  }
+  if (schemaBefore.equals(schemaAfter) && valuesBefore.equals(valuesAfter)) {
+    console.log(`import: scratch source files byte-identical before/after`);
+  }
+
+  // Confirm through the runner, never a store read: the Dispatch value wins.
+  const runnerPath = vaultRunPath(built);
+  const reporterPath = join(built.home, "vault-import-reporter.sh");
+  writeFileSync(
+    reporterPath,
+    ["#!/bin/sh", "env | grep -E '^IMPORT_' || true", "exit 0", ""].join("\n"),
+  );
+  chmodSync(reporterPath, 0o755);
+  const runnerResult = await runVaultRunner(runnerPath, NAME_CONFLICT, [
+    reporterPath,
+  ]);
+  if (runnerResult.code !== 0) {
+    violations.push(
+      `runner: exit ${runnerResult.code}, expected 0, stderr=${runnerResult.stderr}`,
+    );
+  }
+  if (!runnerResult.stdout.includes(`${NAME_CONFLICT}=${DISPATCH_ROTATED}`)) {
+    violations.push(
+      `runner: expected ${NAME_CONFLICT} to carry the Dispatch value ${DISPATCH_ROTATED}, got: ${runnerResult.stdout}`,
+    );
+  }
+  if (runnerResult.stdout.includes(SOURCE_VALUE)) {
+    violations.push(
+      `runner: the SOURCE value leaked through, skip-on-conflict did not hold: ${runnerResult.stdout}`,
+    );
+  }
+  if (
+    runnerResult.stdout.includes(`${NAME_CONFLICT}=${DISPATCH_ROTATED}`) &&
+    !runnerResult.stdout.includes(SOURCE_VALUE)
+  ) {
+    console.log(
+      `runner: ${NAME_CONFLICT} carries the Dispatch value through vault-run, the source value never appeared`,
+    );
+  }
+
+  // filled=false for the declared-but-unfilled import, never "".
+  const listed = await vaultRequest(built, "GET", "/vault");
+  const listedBody = JSON.parse(listed.text);
+  const emptyKey = (listedBody.keys ?? []).find((k) => k.name === NAME_EMPTY);
+  if (!emptyKey) {
+    violations.push(`listKeys: ${NAME_EMPTY} missing after import`);
+  } else if (emptyKey.filled !== false) {
+    violations.push(
+      `listKeys: ${NAME_EMPTY}.filled expected false, got ${JSON.stringify(emptyKey.filled)}`,
+    );
+  } else {
+    console.log(`listKeys: ${NAME_EMPTY}.filled === false, as expected`);
+  }
+
+  return violations;
+}
+
+/**
+ * `--check vault-import-idempotent` (VLT-11, criterion 4): a second import against the same
+ * scratch source imports nothing, reports so in `skipped`, and moves no key's `updatedAt` in the
+ * store. The second run's `importFromEnvVault` never calls `createKey` at all once every name is
+ * already present, so no write happens, not merely a write that happens to be a no-op.
+ */
+async function checkVaultImportIdempotent(built) {
+  const violations = [];
+  const NAME_ONE = "IDEMPOTENT_KEY_ONE";
+  const NAME_TWO = "IDEMPOTENT_KEY_TWO";
+  const VALUE_ONE = "1dem-one-" + process.pid;
+  const VALUE_TWO = "1dem-two-" + process.pid;
+
+  writeEnvVaultScratchSource(
+    built,
+    [
+      [NAME_ONE, "idempotent leg key one"],
+      [NAME_TWO, "idempotent leg key two"],
+    ],
+    [
+      [NAME_ONE, VALUE_ONE],
+      [NAME_TWO, VALUE_TWO],
+    ],
+  );
+
+  const first = await vaultRequest(built, "POST", "/vault/import");
+  if (first.status !== 200) {
+    violations.push(
+      `first import: expected 200, got ${first.status}: ${first.text}`,
+    );
+    return violations;
+  }
+  const firstBody = JSON.parse(first.text);
+  if (
+    !firstBody.imported.includes(NAME_ONE) ||
+    !firstBody.imported.includes(NAME_TWO)
+  ) {
+    violations.push(
+      `first import: expected both keys imported, got imported=${JSON.stringify(firstBody.imported)}`,
+    );
+  }
+
+  const beforeSecond = await vaultRequest(built, "GET", "/vault");
+  const beforeKeys = JSON.parse(beforeSecond.text).keys ?? [];
+  const timestampsBefore = new Map(
+    beforeKeys.map((k) => [k.name, k.updatedAt]),
+  );
+
+  const second = await vaultRequest(built, "POST", "/vault/import");
+  if (second.status !== 200) {
+    violations.push(
+      `second import: expected 200, got ${second.status}: ${second.text}`,
+    );
+    return violations;
+  }
+  const secondBody = JSON.parse(second.text);
+  if (secondBody.imported.length !== 0) {
+    violations.push(
+      `second import: expected nothing imported, got imported=${JSON.stringify(secondBody.imported)}`,
+    );
+  }
+  if (
+    !secondBody.skipped.includes(NAME_ONE) ||
+    !secondBody.skipped.includes(NAME_TWO)
+  ) {
+    violations.push(
+      `second import: expected both keys reported skipped, got skipped=${JSON.stringify(secondBody.skipped)}`,
+    );
+  }
+  console.log(
+    `second import: imported=${JSON.stringify(secondBody.imported)} skipped=${JSON.stringify(secondBody.skipped)}`,
+  );
+
+  const afterSecond = await vaultRequest(built, "GET", "/vault");
+  const afterKeys = JSON.parse(afterSecond.text).keys ?? [];
+  let anyTimestampMoved = false;
+  for (const key of afterKeys) {
+    const before = timestampsBefore.get(key.name);
+    if (before !== undefined && before !== key.updatedAt) {
+      anyTimestampMoved = true;
+      violations.push(
+        `second import: ${key.name}.updatedAt changed from ${before} to ${key.updatedAt}, expected no store timestamp movement`,
+      );
+    }
+  }
+  if (!anyTimestampMoved) {
+    console.log(
+      `second import: no key's updatedAt moved, the store timestamp is untouched`,
+    );
+  }
+
+  return violations;
+}
+
+/**
  * `--check vault-mutation-visibility`: drives one key, `LIFECYCLE_KEY`, through create, fill,
  * rotate, purpose-edit, schema-surface-read and delete, asserting at each step that `GET /vault`
  * (and, for the schema leg, `schema.keys` on disk) reports exactly what the mutation should have
@@ -17465,6 +17903,26 @@ const CHECKS = {
     ),
   "vault-perms": () =>
     withFixture("vault-perms", checkVaultPerms, VAULT_FIXTURE),
+  "vault-boot-scaffold": () =>
+    withFixture("vault-boot-scaffold", checkVaultBootScaffold, VAULT_FIXTURE),
+  "vault-regen-idempotence": () =>
+    withFixture(
+      "vault-regen-idempotence",
+      checkVaultRegenIdempotence,
+      VAULT_FIXTURE,
+    ),
+  "vault-import-skip-conflict": () =>
+    withFixture(
+      "vault-import-skip-conflict",
+      checkVaultImportSkipConflict,
+      VAULT_FIXTURE,
+    ),
+  "vault-import-idempotent": () =>
+    withFixture(
+      "vault-import-idempotent",
+      checkVaultImportIdempotent,
+      VAULT_FIXTURE,
+    ),
   "vault-mutation-visibility": () =>
     withFixture(
       "vault-mutation-visibility",

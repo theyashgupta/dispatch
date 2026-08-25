@@ -335,11 +335,16 @@ export async function importFromEnvVault(): Promise<ImportResult> {
  * because the directory is recreated on every mutation (not a reliable "already populated"
  * signal) and a metadata-file read degrades a missing file to `[]` indistinguishably from a
  * genuinely empty store, so only a direct existence check can tell "never written" from "written
- * empty" apart. The guard runs before any write, so a store a prior boot already populated is
- * never wiped.
+ * empty" apart. Also skips the write when either sibling file exists without `vault.json`
+ * (a corrupted or partially deleted store, Pitfall 2): `writeStore([], [])` is a full overwrite,
+ * not a merge, so scaffolding over a populated `values.env` would silently destroy it. The guard
+ * runs before any write, so a store a prior boot already populated is never wiped.
  */
 export async function ensureVaultScaffold(): Promise<void> {
   if (fs.existsSync(VAULT_METADATA_PATH)) return;
+  if (fs.existsSync(VAULT_VALUES_PATH) || fs.existsSync(VAULT_SCHEMA_PATH)) {
+    return;
+  }
   await writeStore([], []);
 }
 
