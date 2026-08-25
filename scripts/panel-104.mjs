@@ -408,15 +408,6 @@ async function evalValue(cdp, sessionId, expression) {
   return result.value;
 }
 
-async function evalReport(cdp, sessionId, violations, label, expr) {
-  try {
-    return await evalValue(cdp, sessionId, expr);
-  } catch (err) {
-    violations.push(`${label}: ${err.message}`);
-    return null;
-  }
-}
-
 async function isPortListening(port) {
   try {
     await execFileP("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"]);
