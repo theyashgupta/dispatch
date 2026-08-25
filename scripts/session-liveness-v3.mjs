@@ -15425,23 +15425,15 @@ async function checkVaultRunKeys(built) {
     );
   }
 
-  // A reporter that names, for each of the three keys, whether the NAME is present in its own
-  // environment (not merely whether its value is non-empty) and, when present, that value.
+  // A reporter that names ONLY the keys genuinely present in its own environment, one
+  // `NAME=value` line per present key, via `env` filtered to the run-keys namespace. An absent
+  // key therefore never appears in the output at all, so a later `.includes(name)` check on the
+  // output is a true name-level presence test, not merely a value-level one: a name present with
+  // an empty value would still show up here and still count as a leak.
   const reporterPath = join(built.home, "vault-run-keys-reporter.sh");
   writeFileSync(
     reporterPath,
-    [
-      "#!/bin/sh",
-      `for name in ${NAME_ONE} ${NAME_TWO} ${NAME_THREE}; do`,
-      '  eval "v=\\${$name+x}"',
-      '  if [ -n "$v" ]; then',
-      '    eval "echo \\"$name=present:\\$$name\\""',
-      "  else",
-      '    echo "$name=absent"',
-      "  fi",
-      "done",
-      "",
-    ].join("\n"),
+    ["#!/bin/sh", "env | grep -E '^RUN_KEY_' || true", "exit 0", ""].join("\n"),
   );
   chmodSync(reporterPath, 0o755);
 
@@ -15452,7 +15444,7 @@ async function checkVaultRunKeys(built) {
       `leg 1: exit ${leg1.code}, expected 0, stderr=${leg1.stderr}`,
     );
   }
-  if (!leg1.stdout.includes(`${NAME_ONE}=present:${VAULT_SENTINEL}`)) {
+  if (!leg1.stdout.includes(`${NAME_ONE}=${VAULT_SENTINEL}`)) {
     violations.push(
       `leg 1: expected ${NAME_ONE} present with its sentinel, got: ${leg1.stdout}`,
     );
@@ -15494,12 +15486,12 @@ async function checkVaultRunKeys(built) {
       `leg 3: exit ${leg3.code}, expected 0, stderr=${leg3.stderr}`,
     );
   }
-  if (!leg3.stdout.includes(`${NAME_ONE}=present:${VAULT_SENTINEL}`)) {
+  if (!leg3.stdout.includes(`${NAME_ONE}=${VAULT_SENTINEL}`)) {
     violations.push(
       `leg 3: expected ${NAME_ONE} present with its sentinel, got: ${leg3.stdout}`,
     );
   }
-  if (!leg3.stdout.includes(`${NAME_TWO}=present:${VAULT_SENTINEL_ROTATED}`)) {
+  if (!leg3.stdout.includes(`${NAME_TWO}=${VAULT_SENTINEL_ROTATED}`)) {
     violations.push(
       `leg 3: expected ${NAME_TWO} present with its sentinel, got: ${leg3.stdout}`,
     );
@@ -15525,9 +15517,7 @@ async function checkVaultRunKeys(built) {
   );
   if (copyPath) {
     const relaxed = await runVaultRunner(copyPath, NAME_ONE, [reporterPath]);
-    if (
-      !relaxed.stdout.includes(`${NAME_TWO}=present:${VAULT_SENTINEL_ROTATED}`)
-    ) {
+    if (!relaxed.stdout.includes(`${NAME_TWO}=${VAULT_SENTINEL_ROTATED}`)) {
       violations.push(
         `leg 4: relaxed copy did NOT leak ${NAME_TWO}, the check's own narrowing assertion is proving nothing: ${relaxed.stdout}`,
       );
