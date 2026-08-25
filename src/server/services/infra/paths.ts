@@ -38,6 +38,22 @@ export const HOOK_SETTINGS_PATH = path.join(DISPATCH_DIR, "hook-settings.json");
 export const PTY_SHIM_PATH = path.join(DISPATCH_DIR, "pty-shim.py");
 
 /**
+ * The boot-generated per-command secrets runner, `~/.dispatch/vault-run`. Regenerated at every
+ * boot by the same `installHookArtifacts()` channel as `hook.sh`; never hand-edited. Sits beside
+ * `hook.sh` and `PTY_SHIM_PATH`, not inside `VAULT_DIR`, because it is a general-purpose executable
+ * artifact rather than a vault-store file the store's own read/write chokepoints reason about.
+ */
+export const VAULT_RUN_PATH = path.join(DISPATCH_DIR, "vault-run");
+
+/**
+ * The boot-generated PreToolUse Bash guard, `~/.dispatch/vault-guard.mjs`. Regenerated at every
+ * boot beside `vault-run`. Its consumer is the generated `--settings` layer's PreToolUse matcher
+ * entry; unused until a later plan wires that entry, kept here now so that plan needs no second
+ * edit to this file.
+ */
+export const VAULT_GUARD_PATH = path.join(DISPATCH_DIR, "vault-guard.mjs");
+
+/**
  * The vault's own directory, at mode 0700, separate from `DISPATCH_DIR` so its three files
  * (metadata, values, schema) can be reasoned about as one sealed unit.
  */

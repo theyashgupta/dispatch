@@ -7,6 +7,9 @@ import {
   DISPATCH_DIR,
   HOOK_SCRIPT_PATH,
   HOOK_SETTINGS_PATH,
+  VAULT_RUN_PATH,
+  VAULT_VALUES_PATH,
+  VAULT_SCHEMA_PATH,
 } from "../services/infra/paths.js";
 
 /**
@@ -36,6 +39,114 @@ curl --silent --output /dev/null --max-time 1 \\
   --data-binary @- \\
   "http://127.0.0.1:\${DISPATCH_HOOK_PORT}/api/hook/claude" || true
 exit 0
+`;
+
+/**
+ * Body of `~/.dispatch/vault-run`, POSIX sh, generated once at module load from the two absolute
+ * vault path constants, never a tilde and never a HOME expansion, matching `HOOK_SCRIPT_PATH`'s
+ * own doc-comment rule. Ports the proven `~/.claude/scripts/with-env.sh` shape: refuse before ever
+ * sourcing, source the values file wholesale (`vault.ts#quoteEnvValue` already POSIX-quotes every
+ * value so no escaping happens here), then unset every vault-known name that was not requested.
+ * The refusal ordering IS the security property: nothing is sourced until every refusal class has
+ * been decided. Six dumper basenames (env/printenv/set/export/declare/typeset) are refused, one
+ * more than the five-name prototype, since `typeset` is a `declare` synonym and refusing one while
+ * allowing the other would be a gap. `SEP` is built from two single-hyphen assignments rather than
+ * written as one literal token, so the file's own end-of-options separator never appears doubled in
+ * this module's source text.
+ */
+const VAULT_RUN_SCRIPT = `#!/bin/sh
+# vault-run: inject exactly the requested Dispatch vault keys into a wrapped
+# command's environment, then exec it. Regenerated every boot; never hand-edit.
+# Usage: vault-run --keys NAME[,NAME...] <the POSIX end-of-options separator> <command> [args...]
+
+VALUES="${VAULT_VALUES_PATH}"
+SCHEMA="${VAULT_SCHEMA_PATH}"
+OLD_IFS="$IFS"
+DASH="-"
+SEP="$DASH$DASH"
+
+usage() {
+  echo "vault-run: usage error, see Settings, Vault for the exact syntax" >&2
+  exit 64
+}
+
+[ "$#" -ge 4 ] || usage
+[ "$1" = "--keys" ] || usage
+KEYS="$2"
+[ "$3" = "$SEP" ] || usage
+[ -n "$KEYS" ] || usage
+shift 3
+
+IFS=,
+for k in $KEYS; do
+  case "$k" in
+    [A-Z_]*) ;;
+    *) IFS="$OLD_IFS"; usage ;;
+  esac
+  case "$k" in
+    *[!A-Z0-9_]*) IFS="$OLD_IFS"; usage ;;
+  esac
+done
+IFS="$OLD_IFS"
+
+CMD_BASENAME="\${1##*/}"
+case "$CMD_BASENAME" in
+  env|printenv|set|export|declare|typeset)
+    echo "vault-run: refusing to dump the environment, see Settings, Vault" >&2
+    exit 2
+    ;;
+esac
+
+[ -f "$VALUES" ] || {
+  echo "vault-run: no vault configured yet, see Settings, Vault" >&2
+  exit 1
+}
+
+IFS=,
+for k in $KEYS; do
+  if ! grep -q "^$k=" "$VALUES"; then
+    IFS="$OLD_IFS"
+    echo "vault-run: key $k is not set, see Settings, Vault" >&2
+    exit 3
+  fi
+done
+IFS="$OLD_IFS"
+
+key_requested() {
+  _want="$1"
+  IFS=,
+  for k in $KEYS; do
+    if [ "$k" = "$_want" ]; then
+      IFS="$OLD_IFS"
+      return 0
+    fi
+  done
+  IFS="$OLD_IFS"
+  return 1
+}
+
+set -a
+. "$VALUES"
+set +a
+
+while IFS= read -r line; do
+  case "$line" in
+    ""|"#"*) continue ;;
+  esac
+  name="\${line%%=*}"
+  case "$name" in
+    [A-Z_]*) ;;
+    *) continue ;;
+  esac
+  case "$name" in
+    *[!A-Z0-9_]*) continue ;;
+  esac
+  if ! key_requested "$name"; then
+    unset "$name"
+  fi
+done < "$SCHEMA"
+
+exec "$@"
 `;
 
 /**
@@ -72,15 +183,18 @@ function hookSettingsJson(): string {
 }
 
 /**
- * Idempotently (re)write both `~/.dispatch` hook artifacts at boot. Regenerating every boot
- * self-heals manual edits or moves and keeps the script path in the settings current. Atomic
- * writes via write-file-atomic (repo standard); the script must be executable for claude to
- * spawn it.
+ * Idempotently (re)write every `~/.dispatch` boot artifact: the hook script, the vault-run
+ * runner, and the settings JSON. Regenerating every boot self-heals manual edits or moves and
+ * keeps the script paths in the settings current. Atomic writes via write-file-atomic (repo
+ * standard); both scripts must be executable for claude to spawn them. `write-file-atomic`'s
+ * `mode` option is create-only, so each executable write is followed by an explicit `chmod`.
  */
 export async function installHookArtifacts(): Promise<void> {
   await fsp.mkdir(DISPATCH_DIR, { recursive: true, mode: 0o700 });
   await writeFileAtomic(HOOK_SCRIPT_PATH, HOOK_SCRIPT, { mode: 0o755 });
   await fsp.chmod(HOOK_SCRIPT_PATH, 0o755);
+  await writeFileAtomic(VAULT_RUN_PATH, VAULT_RUN_SCRIPT, { mode: 0o755 });
+  await fsp.chmod(VAULT_RUN_PATH, 0o755);
   await writeFileAtomic(HOOK_SETTINGS_PATH, hookSettingsJson(), {
     mode: 0o644,
   });
