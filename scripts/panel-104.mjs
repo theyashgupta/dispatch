@@ -71,8 +71,19 @@
  * [aria-label="Delete PANEL104_CRUD"]` (a NAMED `crud:`-prefixed violation citing the missing
  * control, never an unlabelled throw), and a plain `--check crud` re-run after reverting the edit
  * passed clean.
- * Plan 06 owns the query-param source-patching break and fills its own evidence in below this
- * line without disturbing the entries above it.
+ * Plan 06's `query-param` break, proven against a real build: patching
+ * `src/web/lib/api.ts#setVaultValue` to append `?value=${encodeURIComponent(value)}` to the PUT
+ * url, then rebuilding, produced (verbatim):
+ *   `no-query-param: expected zero VALUE_SENTINEL occurrences in the url of PUT
+ *   http://127.0.0.1:47878/api/vault/PANEL104_QP/value?value=p104-s3nt1nel-7ac91f2b, measured
+ *   raw=1 decoded=1`
+ *   (plus two more `no-query-param` violations for the rotated sentinel, and one corroborating
+ *   `sentinel-capture` violation: `sentinel-capture: expected the sentinel to occur exactly once
+ *   across the whole capture, measured 2.`). Restore leg (writing back the captured original
+ *   string) re-confirmed PASS on both checks, `--break query-param` reported
+ *   `tripFired=true restoreClean=true`, `git status --porcelain src/web/lib/api.ts` was empty
+ *   afterward, and a plain `node scripts/panel-104.mjs` (all four checks) exited 0 on the restored
+ *   tree.
  *
  * Exit codes: 0 every requested check PASS (or, under `--break <name>`, the break correctly fired
  * and the restore leg re-passed). 1 a live :4700, a failed build, a sandbox safety violation, a DOM
@@ -84,6 +95,7 @@ import { promisify } from "node:util";
 import {
   existsSync,
   mkdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   statSync,
@@ -1476,7 +1488,157 @@ async function runBreakAutofillDefusal(cdp, sessionId) {
   };
 }
 
-const BREAKS = { "autofill-defusal": runBreakAutofillDefusal };
+/** Defeats `assertBuilt`'s `headBuild` memo deliberately: a normal run builds once, but this
+ * break must rebuild three times in one process (patch, restore, restore-verify). */
+function rebuild() {
+  headBuild = null;
+  assertBuilt();
+}
+
+/**
+ * `query-param` break: the only break in this phase that patches a real source file. Patches
+ * `src/web/lib/api.ts#setVaultValue` to append the value as a query parameter, rebuilds, proves
+ * `checkNoQueryParam` (and, corroborating, `checkSentinelCapture`) fail against the real built
+ * bundle, then restores the captured original unconditionally and proves both checks pass again.
+ *
+ * Stands its OWN sandbox up and down (never shares `main()`'s), since it tears down, patches,
+ * rebuilds, and stands up again mid-run, which is why `standUp`/`tearDown` are separate top-level
+ * functions rather than inlined into `main()`.
+ */
+async function runBreakQueryParam() {
+  const REL_PATH = join("src", "web", "lib", "api.ts");
+  const API_PATH = join(REPO_ROOT, REL_PATH);
+  const ANCHOR = "/api/vault/${encodeURIComponent(name)}/value";
+
+  // Preflight `git status --porcelain` on this one file: a dirty file means the restore below
+  // cannot be verified by the same command later, and this break must never be the reason
+  // uncommitted work is lost.
+  const preflightStatus = execFileSync(
+    "git",
+    ["status", "--porcelain", REL_PATH],
+    { cwd: REPO_ROOT, encoding: "utf8" },
+  );
+  if (preflightStatus.trim() !== "") {
+    throw new Error(
+      `panel104: refusing to run --break query-param, ${REL_PATH} is not clean before the break ` +
+        `(git status --porcelain reports):\n${preflightStatus}`,
+    );
+  }
+
+  const original = readFileSync(API_PATH, "utf8");
+  const anchorCount = countOccurrences(original, ANCHOR);
+  if (anchorCount !== 1) {
+    throw new Error(
+      `panel104: refusing to patch ${REL_PATH}, expected the anchor ${JSON.stringify(ANCHOR)} to ` +
+        `occur exactly once, measured ${anchorCount}. A missed anchor would rebuild an unpatched ` +
+        `tree and report a false "the check cannot fail".`,
+    );
+  }
+
+  // Baseline build of the still-unpatched tree, so a pre-existing build failure is caught here
+  // rather than being confused for one this break caused.
+  assertBuilt();
+
+  let tripFired = false;
+
+  try {
+    const patched = original.replace(
+      ANCHOR,
+      ANCHOR + "?value=${encodeURIComponent(value)}",
+    );
+    writeFileSync(API_PATH, patched);
+    rebuild();
+
+    const tripCtx = await standUp();
+    const tripQpViolations = [];
+    const tripSentinelViolations = [];
+    try {
+      await checkNoQueryParam(tripCtx.cdp, tripCtx.sessionId, tripQpViolations);
+      await checkSentinelCapture(
+        tripCtx.cdp,
+        tripCtx.sessionId,
+        tripSentinelViolations,
+      );
+    } finally {
+      await tearDown(tripCtx);
+    }
+
+    console.log(
+      `\n--break query-param TRIP leg no-query-param output:\n${tripQpViolations.join("\n") || "(no violations)"}`,
+    );
+    console.log(
+      `--break query-param TRIP leg sentinel-capture output:\n${tripSentinelViolations.join("\n") || "(no violations)"}`,
+    );
+
+    const qpNamesUrlOccurrence = tripQpViolations.some((v) =>
+      v.includes("occurrences in the url"),
+    );
+    tripFired =
+      tripQpViolations.length > 0 &&
+      tripSentinelViolations.length > 0 &&
+      qpNamesUrlOccurrence;
+    if (!tripFired) {
+      console.log(
+        `--break query-param TRIP leg WARNING: expected both checks to fail with a url-naming ` +
+          `no-query-param violation, measured no-query-param=${tripQpViolations.length} ` +
+          `sentinel-capture=${tripSentinelViolations.length} urlNamed=${qpNamesUrlOccurrence}`,
+      );
+    }
+  } finally {
+    // Unconditional, safety-critical: survives a crash, a thrown assertion, or a Ctrl-C between
+    // the patch and here. Restores from the CAPTURED string, never a whole-tree source-control
+    // revert, which would also discard any uncommitted sibling work in this file (Phase 91
+    // finding).
+    writeFileSync(API_PATH, original);
+    rebuild();
+    // Re-run the same status --porcelain command to verify the restore landed byte-identical.
+    const restoreStatus = execFileSync(
+      "git",
+      ["status", "--porcelain", REL_PATH],
+      { cwd: REPO_ROOT, encoding: "utf8" },
+    );
+    if (restoreStatus.trim() !== "") {
+      console.error(
+        `PANEL-104-RESTORE-FAILED: ${REL_PATH} is not clean after restoring the captured ` +
+          `original:\n${restoreStatus}`,
+      );
+    }
+  }
+
+  const restoreCtx = await standUp();
+  const restoreQpViolations = [];
+  const restoreSentinelViolations = [];
+  try {
+    await checkNoQueryParam(
+      restoreCtx.cdp,
+      restoreCtx.sessionId,
+      restoreQpViolations,
+    );
+    await checkSentinelCapture(
+      restoreCtx.cdp,
+      restoreCtx.sessionId,
+      restoreSentinelViolations,
+    );
+  } finally {
+    await tearDown(restoreCtx);
+  }
+  const restoreClean =
+    restoreQpViolations.length === 0 && restoreSentinelViolations.length === 0;
+  console.log(
+    `--break query-param RESTORE leg: ${
+      restoreClean
+        ? "PASS"
+        : `FAIL:\n${[...restoreQpViolations, ...restoreSentinelViolations].join("\n")}`
+    }`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+const BREAKS = {
+  "autofill-defusal": runBreakAutofillDefusal,
+  "query-param": runBreakQueryParam,
+};
 
 // ---------------------------------------------------------------------------
 // main
@@ -1507,26 +1669,35 @@ async function main() {
   let portsHeld = false;
   let breakResult = null;
 
+  // "query-param" stands its own sandbox up and down (possibly several times, to rebuild between
+  // a patched and a restored source tree), so it must never share this function's own
+  // standUp()/tearDown() pair, doing so would try to bind the same sandbox ports twice.
+  const selfManagedBreak = breakName === "query-param";
+
   try {
-    ctx = await standUp();
-    if (breakName != null) {
-      breakResult = await BREAKS[breakName](ctx.cdp, ctx.sessionId);
+    if (selfManagedBreak) {
+      breakResult = await runBreakQueryParam();
     } else {
-      const names = checkName != null ? [checkName] : Object.keys(CHECKS);
-      for (const n of names) {
-        console.log(`\n=== running check: ${n} ===`);
-        const before = violations.length;
-        try {
-          await CHECKS[n](ctx.cdp, ctx.sessionId, violations);
-        } catch (err) {
-          violations.push(
-            `${n}: run failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+      ctx = await standUp();
+      if (breakName != null) {
+        breakResult = await BREAKS[breakName](ctx.cdp, ctx.sessionId);
+      } else {
+        const names = checkName != null ? [checkName] : Object.keys(CHECKS);
+        for (const n of names) {
+          console.log(`\n=== running check: ${n} ===`);
+          const before = violations.length;
+          try {
+            await CHECKS[n](ctx.cdp, ctx.sessionId, violations);
+          } catch (err) {
+            violations.push(
+              `${n}: run failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+            );
+          }
+          const added = violations.length - before;
+          console.log(
+            added === 0 ? `PASS (${n})` : `FAIL (${n}): ${added} violation(s)`,
           );
         }
-        const added = violations.length - before;
-        console.log(
-          added === 0 ? `PASS (${n})` : `FAIL (${n}): ${added} violation(s)`,
-        );
       }
     }
   } finally {
