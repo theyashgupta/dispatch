@@ -408,7 +408,8 @@ export async function addVaultKey(input: {
 /**
  * Set or rotate a key's value: PUT /api/vault/:name/value.
  * @remarks Set and rotate are the same endpoint; the value is interpolated only into
- * `JSON.stringify({ value })`, never into the URL, which is built from `name` alone.
+ * `JSON.stringify({ value })`, never into the URL, which is built from `name` alone. See
+ * `T-104-01`, docs/ARCHITECTURE.md#security-threat-model.
  */
 export async function setVaultValue(
   name: string,

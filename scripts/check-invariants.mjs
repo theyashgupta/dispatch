@@ -62,8 +62,11 @@ const ID_RE =
  * @remarks Moved from 131 to 135 for the deliberate four-ID re-freeze ratifying the
  * write-only vault store's guarantees (`T-103-01` through `T-103-04`), see
  * docs/ARCHITECTURE.md#security-threat-model.
+ * @remarks Moved from 135 to 139 for the deliberate four-ID re-freeze ratifying the vault
+ * page's client-side guarantees (`T-104-01` through `T-104-04`), see
+ * docs/ARCHITECTURE.md#security-threat-model.
  */
-const FROZEN_COUNT = 135;
+const FROZEN_COUNT = 139;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");
