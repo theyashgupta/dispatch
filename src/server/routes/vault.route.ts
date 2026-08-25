@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { Router } from "express";
 import {
   VAULT_NAME_RE,
@@ -6,7 +7,12 @@ import {
   setValue,
   editPurpose,
   deleteKey,
+  importFromEnvVault,
 } from "../services/domain/vault.js";
+import {
+  ENV_VAULT_SCHEMA_PATH,
+  ENV_VAULT_VALUES_PATH,
+} from "../services/infra/paths.js";
 
 const MAX_NAME_LEN = 64;
 const MAX_PURPOSE_LEN = 200;
@@ -85,9 +91,20 @@ function validateValue(
 
 vaultRouter.get("/vault", async (_req, res) => {
   try {
-    res.status(200).json({ keys: await listKeys() });
+    const envVaultAvailable =
+      fs.existsSync(ENV_VAULT_SCHEMA_PATH) || fs.existsSync(ENV_VAULT_VALUES_PATH);
+    res.status(200).json({ keys: await listKeys(), envVaultAvailable });
   } catch {
     res.status(500).json({ error: "vault-read-failed" });
+  }
+});
+
+vaultRouter.post("/vault/import", async (_req, res) => {
+  try {
+    const { imported, skipped } = await importFromEnvVault();
+    res.status(200).json({ imported, skipped });
+  } catch {
+    res.status(500).json({ error: "vault-import-failed" });
   }
 });
 
