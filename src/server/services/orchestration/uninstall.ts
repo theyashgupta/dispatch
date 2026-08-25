@@ -15,6 +15,12 @@ import {
   PTY_SHIM_PATH,
   SERVICE_LABEL,
   SERVICE_PLIST_PATH,
+  VAULT_DIR,
+  VAULT_GUARD_PATH,
+  VAULT_METADATA_PATH,
+  VAULT_RUN_PATH,
+  VAULT_SCHEMA_PATH,
+  VAULT_VALUES_PATH,
 } from "../infra/paths.js";
 import { worktreePath } from "../domain/workspace-paths.js";
 import { run } from "../../adapters/exec.js";
@@ -37,6 +43,7 @@ export interface UninstallPlan {
   stop: { sessions: string[]; ttydPids: number[]; service: boolean };
   keep: {
     config: string | null;
+    vault: string | null;
     boardData: string[];
     playbooks: string | null;
     sessions: string[];
@@ -119,6 +126,8 @@ export async function scanFootprint(opts: {
     HOOK_SCRIPT_PATH,
     HOOK_SETTINGS_PATH,
     PTY_SHIM_PATH,
+    VAULT_RUN_PATH,
+    VAULT_GUARD_PATH,
     ...(servicePlistExists ? [SERVICE_PLIST_PATH] : []),
   ].filter((p) => fs.existsSync(p));
   const boardData = boardDataPaths();
@@ -127,12 +136,16 @@ export async function scanFootprint(opts: {
     .filter((s) => s.startsWith("dsp-"))
     .sort();
   const configExists = fs.existsSync(CONFIG_PATH);
+  const vaultDirExists = fs.existsSync(VAULT_DIR);
 
   return {
     remove: opts.purge
       ? [
           ...regenerables,
           ...(configExists ? [CONFIG_PATH] : []),
+          ...(vaultDirExists
+            ? [VAULT_METADATA_PATH, VAULT_VALUES_PATH, VAULT_SCHEMA_PATH]
+            : []),
           ...boardData,
           ...boardSidecarPaths(),
         ]
@@ -144,6 +157,7 @@ export async function scanFootprint(opts: {
     },
     keep: {
       config: !opts.purge && configExists ? CONFIG_PATH : null,
+      vault: !opts.purge && vaultDirExists ? VAULT_DIR : null,
       boardData: opts.purge ? [] : boardData,
       playbooks: fs.existsSync(playbooks) ? playbooks : null,
       sessions: opts.purge ? [] : sessions,
@@ -244,9 +258,12 @@ function hasStopWork(plan: UninstallPlan): boolean {
  * was ACTUALLY removed alongside the plan as it now stands, so the caller can re-render the Keep /
  * worktree report through the one renderer without claiming a failed delete succeeded.
  * @remarks Three invariants make this command safe to run, and each is load-bearing:
- * (1) it deletes ONLY the exact, constant paths the scan collected, one `rmSync(p)` per file — never
+ * (1) it deletes ONLY the exact, constant paths the scan collected, one `rmSync(p)` per file, never
  * `{ recursive: true }`, never a directory, never a glob, and never `~/.dispatch` itself, which still
- * holds the user's playbooks;
+ * holds the user's playbooks. The one named exception is `VAULT_DIR`: its three files are enumerated
+ * into `plan.remove` like any other file, and only once they are gone does a separate, narrowly-scoped
+ * `fs.rmdirSync(VAULT_DIR)` step remove the now-empty directory, the generic loop below never sees a
+ * directory;
  * (2) tmux targets come only from the `dsp-` filter AND are passed as `=<name>`, tmux's EXACT-match
  * prefix (mirroring cleanup.ts) — without the `=`, tmux prefix-matches and could kill a user session;
  * (3) git worktrees are listed for the user, NEVER removed, because they may hold uncommitted agent
@@ -288,6 +305,18 @@ export async function runUninstall(
       const { code, message } = err as NodeJS.ErrnoException;
       if (code === "ENOENT") continue;
       failed.push({ path: target, reason: code ?? message });
+    }
+  }
+
+  if (fs.existsSync(VAULT_DIR) && fs.readdirSync(VAULT_DIR).length === 0) {
+    try {
+      fs.rmdirSync(VAULT_DIR);
+      removed.push(VAULT_DIR);
+    } catch (err) {
+      const { code, message } = err as NodeJS.ErrnoException;
+      if (code !== "ENOENT") {
+        failed.push({ path: VAULT_DIR, reason: code ?? message });
+      }
     }
   }
 
