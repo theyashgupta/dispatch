@@ -53,6 +53,7 @@ import {
   saveCleanupDelay,
   saveClaudeArgs,
   saveLinearFilters,
+  setVaultValue,
 } from "../../lib/api.js";
 import { playChime } from "../../lib/chime.js";
 import { Button } from "../../primitives/Button.js";
@@ -807,6 +808,9 @@ interface VaultTab {
   addError: string | null;
   addPending: boolean;
   handleAdd: () => Promise<void>;
+  valueEditorFor: string | null;
+  openValueEditor: (name: string) => void;
+  closeValueEditor: () => void;
   deleteTarget: VaultKeySummary | null;
   openDelete: (key: VaultKeySummary) => void;
   closeDelete: () => void;
@@ -827,6 +831,19 @@ function vaultAddErrorCopy(error: string): string {
   }
 }
 
+function vaultValueErrorCopy(error: string): string {
+  switch (error) {
+    case "missing-value":
+      return "Enter a value.";
+    case "invalid-value":
+      return "Value must be a single line, under 8KB.";
+    case "not-found":
+      return "This key no longer exists, reopen settings to retry.";
+    default:
+      return "Couldn't save value, try again.";
+  }
+}
+
 function useVaultTab(active: boolean): VaultTab {
   const [keys, setKeys] = useState<VaultKeySummary[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -836,6 +853,7 @@ function useVaultTab(active: boolean): VaultTab {
   const [addPurpose, setAddPurpose] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
   const [addPending, setAddPending] = useState(false);
+  const [valueEditorFor, setValueEditorFor] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<VaultKeySummary | null>(
     null,
   );
@@ -892,6 +910,11 @@ function useVaultTab(active: boolean): VaultTab {
     }
   }, [addPending, addName, addPurpose, reload]);
 
+  const openValueEditor = useCallback((name: string) => {
+    setValueEditorFor(name);
+  }, []);
+  const closeValueEditor = useCallback(() => setValueEditorFor(null), []);
+
   const openDelete = useCallback(
     (key: VaultKeySummary) => setDeleteTarget(key),
     [],
@@ -910,6 +933,9 @@ function useVaultTab(active: boolean): VaultTab {
     addError,
     addPending,
     handleAdd,
+    valueEditorFor,
+    openValueEditor,
+    closeValueEditor,
     deleteTarget,
     openDelete,
     closeDelete,
@@ -946,6 +972,124 @@ function VaultBadge({ filled }: { filled: boolean }) {
   );
 }
 
+interface VaultValueEditorProps {
+  keySummary: VaultKeySummary;
+  vault: VaultTab;
+}
+
+function VaultValueEditor({ keySummary, vault }: VaultValueEditorProps) {
+  const [draftValue, setDraftValue] = useState("");
+  const [valueError, setValueError] = useState<string | null>(null);
+  const [savePending, setSavePending] = useState(false);
+  const [focused, setFocused] = useState(false);
+
+  async function handleSaveValue() {
+    if (savePending) return;
+    const value = draftValue.trim();
+    if (value === "") {
+      setValueError(vaultValueErrorCopy("missing-value"));
+      return;
+    }
+    if (
+      value.includes("\n") ||
+      value.includes("\r") ||
+      new TextEncoder().encode(value).length > 8192
+    ) {
+      setValueError(vaultValueErrorCopy("invalid-value"));
+      return;
+    }
+    setSavePending(true);
+    setValueError(null);
+    try {
+      const result = await setVaultValue(keySummary.name, value);
+      if (result.ok) {
+        setDraftValue("");
+        vault.closeValueEditor();
+        void vault.reload();
+        return;
+      }
+      setValueError(vaultValueErrorCopy(result.error));
+    } catch (err) {
+      console.error("setVaultValue failed", err);
+      setValueError(vaultValueErrorCopy("fetch-failed"));
+    } finally {
+      setSavePending(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-sm)",
+        padding: "var(--space-sm)",
+        marginLeft: "var(--space-sm)",
+        background: "var(--surface-column)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+      }}
+    >
+      <Field>Value</Field>
+      <input
+        type="text"
+        autoComplete="new-password"
+        data-1p-ignore
+        data-lpignore="true"
+        data-bwignore="true"
+        value={draftValue}
+        onChange={(e) => setDraftValue(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        aria-label={`Value for ${keySummary.name}`}
+        style={{
+          height: "32px",
+          padding: "0 var(--space-sm)",
+          background: "var(--surface-card)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius)",
+          color: "var(--text)",
+          fontFamily: "var(--font-mono)",
+          fontSize: "var(--font-body)",
+          lineHeight: "var(--line-body)",
+          ...focusRing(focused),
+        }}
+      />
+      {valueError !== null && (
+        <div
+          role="alert"
+          style={{
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            lineHeight: "var(--line-label)",
+            color: "var(--destructive)",
+          }}
+        >
+          {valueError}
+        </div>
+      )}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          gap: "var(--space-sm)",
+        }}
+      >
+        <Button variant="secondary" onClick={vault.closeValueEditor}>
+          Cancel edit
+        </Button>
+        <Button
+          variant="primary"
+          loading={savePending}
+          onClick={() => void handleSaveValue()}
+        >
+          {savePending ? "Saving value..." : "Save value"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 interface VaultKeyRowProps {
   keySummary: VaultKeySummary;
   vault: VaultTab;
@@ -954,70 +1098,75 @@ interface VaultKeyRowProps {
 function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
   const [hover, setHover] = useState(false);
   return (
-    <div
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "var(--space-sm)",
-        padding: "var(--space-sm)",
-        borderRadius: "var(--radius)",
-        background: hover ? "var(--surface-card-hover)" : "transparent",
-      }}
-    >
-      <span
+    <>
+      <div
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
         style={{
-          flex: "1 1 auto",
-          minWidth: 0,
-          fontFamily: "var(--font-mono)",
-          fontSize: "var(--font-label)",
-          fontWeight: "var(--weight-semibold)",
-          lineHeight: "var(--line-label)",
-          color: "var(--text)",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--space-sm)",
+          padding: "var(--space-sm)",
+          borderRadius: "var(--radius)",
+          background: hover ? "var(--surface-card-hover)" : "transparent",
         }}
       >
-        {keySummary.name}
-      </span>
-      <span
-        style={{
-          flex: "0 1 auto",
-          minWidth: 0,
-          fontFamily: "var(--font-ui)",
-          fontSize: "var(--font-body)",
-          lineHeight: "var(--line-body)",
-          color: "var(--text-muted)",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {keySummary.purpose}
-      </span>
-      <VaultBadge filled={keySummary.filled} />
-      <IconButton
-        disabled
-        aria-label={
-          keySummary.filled
-            ? `Rotate value for ${keySummary.name}`
-            : `Fill value for ${keySummary.name}`
-        }
-      >
-        <Key size={14} strokeWidth={2} aria-hidden="true" />
-      </IconButton>
-      <IconButton disabled aria-label={`Edit purpose for ${keySummary.name}`}>
-        <Pencil size={14} strokeWidth={2} aria-hidden="true" />
-      </IconButton>
-      <IconButton
-        aria-label={`Delete ${keySummary.name}`}
-        onClick={() => vault.openDelete(keySummary)}
-      >
-        <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
-      </IconButton>
-    </div>
+        <span
+          style={{
+            flex: "1 1 auto",
+            minWidth: 0,
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            lineHeight: "var(--line-label)",
+            color: "var(--text)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {keySummary.name}
+        </span>
+        <span
+          style={{
+            flex: "0 1 auto",
+            minWidth: 0,
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-body)",
+            lineHeight: "var(--line-body)",
+            color: "var(--text-muted)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {keySummary.purpose}
+        </span>
+        <VaultBadge filled={keySummary.filled} />
+        <IconButton
+          aria-label={
+            keySummary.filled
+              ? `Rotate value for ${keySummary.name}`
+              : `Fill value for ${keySummary.name}`
+          }
+          onClick={() => vault.openValueEditor(keySummary.name)}
+        >
+          <Key size={14} strokeWidth={2} aria-hidden="true" />
+        </IconButton>
+        <IconButton disabled aria-label={`Edit purpose for ${keySummary.name}`}>
+          <Pencil size={14} strokeWidth={2} aria-hidden="true" />
+        </IconButton>
+        <IconButton
+          aria-label={`Delete ${keySummary.name}`}
+          onClick={() => vault.openDelete(keySummary)}
+        >
+          <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+        </IconButton>
+      </div>
+      {vault.valueEditorFor === keySummary.name && (
+        <VaultValueEditor keySummary={keySummary} vault={vault} />
+      )}
+    </>
   );
 }
 
