@@ -17990,6 +17990,36 @@ async function checkVaultBypassGuards(built) {
   return violations;
 }
 
+/**
+ * `--check vault-audit` (VLT-12): the one entry point composing the four VLT-12-named sub-checks
+ * with the widened live-session catalogue into a single flat violations array, all against ONE
+ * shared fixture (one server boot, one sandbox home), never gated on `--check all` (CARRY-03 is
+ * open and unrelated).
+ *
+ * @remarks
+ * Composition order is NOT arbitrary. {@link checkVaultRunRefusals}'s own first leg ("no store")
+ * asserts the real runner refuses BEFORE `values.env` has ever been written in this fixture,
+ * distinguishing that state from the later seeded-but-unfilled case; any sub-check that runs
+ * first and creates a key (checkVaultNoReadBack's `SEAL_KEY`, checkVaultImportSkipConflict's
+ * `IMPORT_*` keys, or this file's own `checkVaultBypassGuards`, which seeds
+ * `BYPASS_RUNNER_DUMP_KEY` before its live matrix) would make that leg observe an
+ * already-populated store and falsely fail. checkVaultRunRefusals therefore runs FIRST, not in
+ * the order the sub-checks are named in this file. Every other ordering is safe: each remaining
+ * sub-check's downstream assertions are `includes()`/`find()`-style lookups by its own
+ * namespaced key names (`SEAL_KEY`, `IMPORT_*`, `IDEMPOTENT_*`, `RUN_KEY_*`, `BYPASS_*`, verified
+ * by reading every sub-check's own assertions), never exact-set equality over the full key list,
+ * so accumulated state from earlier sub-checks is inert to a later one's own checks.
+ */
+async function checkVaultAudit(built) {
+  const violations = [];
+  violations.push(...(await checkVaultRunRefusals(built)));
+  violations.push(...(await checkVaultNoReadBack(built)));
+  violations.push(...(await checkVaultImportSkipConflict(built)));
+  violations.push(...(await checkVaultImportIdempotent(built)));
+  violations.push(...(await checkVaultBypassGuards(built)));
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -18069,6 +18099,8 @@ const CHECKS = {
     withFixture("vault-residual-demo", checkVaultResidualDemo, VAULT_FIXTURE),
   "vault-bypass-guards": () =>
     withFixture("vault-bypass-guards", checkVaultBypassGuards, VAULT_FIXTURE),
+  "vault-audit": () =>
+    withFixture("vault-audit", checkVaultAudit, VAULT_FIXTURE),
   "second-session-fixture": () =>
     withFixture(
       "second-session-fixture",
