@@ -35,6 +35,7 @@ import {
   type VaultKeySummary,
 } from "../../../shared/types.js";
 import {
+  addVaultKey,
   addWorkspaceFolder,
   deletePlaybook,
   disableRemote,
@@ -798,6 +799,28 @@ interface VaultTab {
   loading: boolean;
   loadError: boolean;
   reload: () => Promise<void>;
+  addName: string;
+  setAddName: (v: string) => void;
+  addPurpose: string;
+  setAddPurpose: (v: string) => void;
+  addError: string | null;
+  addPending: boolean;
+  handleAdd: () => Promise<void>;
+}
+
+const VAULT_NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
+
+function vaultAddErrorCopy(error: string): string {
+  switch (error) {
+    case "invalid-name":
+      return "Use uppercase letters, digits and underscores only, starting with a letter or underscore.";
+    case "name-exists":
+      return "A key with this name already exists.";
+    case "invalid-purpose":
+      return "Enter a one-line purpose.";
+    default:
+      return "Couldn't add key, try again.";
+  }
 }
 
 function useVaultTab(active: boolean): VaultTab {
@@ -805,6 +828,10 @@ function useVaultTab(active: boolean): VaultTab {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [visited, setVisited] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addPurpose, setAddPurpose] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addPending, setAddPending] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -826,7 +853,51 @@ function useVaultTab(active: boolean): VaultTab {
     void reload();
   }, [active, visited, reload]);
 
-  return { keys, loading, loadError, reload };
+  const handleAdd = useCallback(async () => {
+    if (addPending) return;
+    const name = addName.trim();
+    const purpose = addPurpose.trim();
+    if (!VAULT_NAME_RE.test(name)) {
+      setAddError(vaultAddErrorCopy("invalid-name"));
+      return;
+    }
+    if (purpose === "" || purpose.includes("\n")) {
+      setAddError(vaultAddErrorCopy("invalid-purpose"));
+      return;
+    }
+    setAddPending(true);
+    setAddError(null);
+    try {
+      const result = await addVaultKey({ name, purpose });
+      if (result.ok) {
+        setAddName("");
+        setAddPurpose("");
+        setAddError(null);
+        await reload();
+        return;
+      }
+      setAddError(vaultAddErrorCopy(result.error));
+    } catch (err) {
+      console.error("addVaultKey failed", err);
+      setAddError(vaultAddErrorCopy("fetch-failed"));
+    } finally {
+      setAddPending(false);
+    }
+  }, [addPending, addName, addPurpose, reload]);
+
+  return {
+    keys,
+    loading,
+    loadError,
+    reload,
+    addName,
+    setAddName,
+    addPurpose,
+    setAddPurpose,
+    addError,
+    addPending,
+    handleAdd,
+  };
 }
 
 function VaultBadge({ filled }: { filled: boolean }) {
@@ -930,6 +1001,118 @@ function VaultKeyRow({ keySummary }: VaultKeyRowProps) {
   );
 }
 
+interface VaultAddFormProps {
+  vault: VaultTab;
+}
+
+function VaultAddForm({ vault }: VaultAddFormProps) {
+  const [nameFocused, setNameFocused] = useState(false);
+  const [purposeFocused, setPurposeFocused] = useState(false);
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-sm)",
+        padding: "var(--space-lg)",
+        background: "var(--surface-card)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+      }}
+    >
+      <div style={{ display: "flex", gap: "var(--space-sm)" }}>
+        <div
+          style={{
+            flex: "1 1 auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-xs)",
+          }}
+        >
+          <Field>Name</Field>
+          <input
+            type="text"
+            aria-label="New key name"
+            placeholder="API_KEY"
+            spellCheck={false}
+            value={vault.addName}
+            onChange={(e) => vault.setAddName(e.target.value)}
+            onFocus={() => setNameFocused(true)}
+            onBlur={() => setNameFocused(false)}
+            style={{
+              height: "32px",
+              padding: "0 var(--space-sm)",
+              background: "var(--surface-column)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              color: "var(--text)",
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--font-body)",
+              lineHeight: "var(--line-body)",
+              ...focusRing(nameFocused),
+            }}
+          />
+        </div>
+        <div
+          style={{
+            flex: "1 1 auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-xs)",
+          }}
+        >
+          <Field>Purpose</Field>
+          <input
+            type="text"
+            aria-label="New key purpose"
+            placeholder="One-line purpose"
+            value={vault.addPurpose}
+            onChange={(e) => vault.setAddPurpose(e.target.value)}
+            onFocus={() => setPurposeFocused(true)}
+            onBlur={() => setPurposeFocused(false)}
+            style={{
+              height: "32px",
+              padding: "0 var(--space-sm)",
+              background: "var(--surface-column)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              color: "var(--text)",
+              fontFamily: "var(--font-ui)",
+              fontSize: "var(--font-body)",
+              lineHeight: "var(--line-body)",
+              ...focusRing(purposeFocused),
+            }}
+          />
+        </div>
+      </div>
+      {vault.addError !== null && (
+        <div
+          role="alert"
+          style={{
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            lineHeight: "var(--line-label)",
+            color: "var(--destructive)",
+          }}
+        >
+          {vault.addError}
+        </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <Button
+          variant="primary"
+          loading={vault.addPending}
+          onClick={() => void vault.handleAdd()}
+        >
+          <Plus size={14} strokeWidth={2} aria-hidden="true" />
+          {vault.addPending ? "Adding..." : "Add key"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 interface VaultTabSectionProps {
   vaultTab: VaultTab;
 }
@@ -949,6 +1132,8 @@ function VaultTabSection({ vaultTab }: VaultTabSectionProps) {
         overflowY: "auto",
       }}
     >
+      <VaultAddForm vault={vaultTab} />
+
       {loading && (
         <span
           style={{

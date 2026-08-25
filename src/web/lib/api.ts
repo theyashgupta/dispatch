@@ -388,7 +388,6 @@ export async function getVaultKeys(): Promise<VaultKeySummary[]> {
  * per the locked decision that creation never takes a value. The server's error string
  * (`invalid-name`/`name-exists`/`invalid-purpose`/`vault-write-failed`) passes through verbatim so
  * the add form's copy table can key directly off it.
- * @public wired by plan 104-02
  */
 export async function addVaultKey(input: {
   name: string;
