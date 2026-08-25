@@ -3,6 +3,7 @@ import writeFileAtomic from "write-file-atomic";
 import { run } from "../adapters/exec.js";
 import { resolveBinaryPath } from "../adapters/resolve-binary.js";
 import { PAUSE_TOOL_NAMES } from "../services/domain/hook-events.js";
+import { ensureVaultScaffold } from "../services/domain/vault.js";
 import {
   DISPATCH_DIR,
   HOOK_SCRIPT_PATH,
@@ -423,11 +424,11 @@ function hookSettingsJson(): string {
 
 /**
  * Idempotently (re)write every `~/.dispatch` boot artifact: the hook script, the vault-run
- * runner, the vault-guard PreToolUse hook, and the settings JSON. Regenerating every boot
- * self-heals manual edits or moves and keeps the script paths in the settings current. Atomic
- * writes via write-file-atomic (repo standard); all three scripts must be executable for claude
- * to spawn them. `write-file-atomic`'s `mode` option is create-only, so each executable write is
- * followed by an explicit `chmod`.
+ * runner, the vault-guard PreToolUse hook, the settings JSON, and the vault store scaffold.
+ * Regenerating every boot self-heals manual edits or moves and keeps the script paths in the
+ * settings current. Atomic writes via write-file-atomic (repo standard); all three scripts must
+ * be executable for claude to spawn them. `write-file-atomic`'s `mode` option is create-only, so
+ * each executable write is followed by an explicit `chmod`.
  */
 export async function installHookArtifacts(): Promise<void> {
   await fsp.mkdir(DISPATCH_DIR, { recursive: true, mode: 0o700 });
@@ -440,6 +441,7 @@ export async function installHookArtifacts(): Promise<void> {
   await writeFileAtomic(HOOK_SETTINGS_PATH, hookSettingsJson(), {
     mode: 0o644,
   });
+  await ensureVaultScaffold();
 }
 
 /**
