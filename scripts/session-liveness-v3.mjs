@@ -16834,7 +16834,8 @@ async function runBypassLeg(
     const deadline = Date.now() + timeoutMs;
     let full = sinceText;
     let scored = { state: "inconclusive", evidence: null };
-    let idleStreak = 0;
+    let lastLen = -1;
+    let stableStreak = 0;
     while (Date.now() < deadline) {
       full = await captureBypassPaneFull(paneTarget);
       const fresh = full.startsWith(sinceText)
@@ -16842,18 +16843,22 @@ async function runBypassLeg(
         : full;
       scored = evaluateBypassCell(fresh, sentinel);
       if (scored.state !== "inconclusive") return { full, scored };
-      // The turn can settle back at the READY footer without ever producing a
-      // sentinel or a known refusal marker (the model declining on its own,
-      // never even attempting the tool call). Waiting out the FULL timeout in
-      // that case only burns the bounded run's own wall-clock budget for no
-      // new information, so two consecutive idle-with-content polls end this
-      // leg early, still scored `inconclusive`, never upgraded to a pass.
-      const visible = await captureBypassPaneVisible(paneTarget);
-      if (fresh.trim().length > 0 && BYPASS_READY.test(visible)) {
-        idleStreak++;
-        if (idleStreak >= 2) return { full, scored };
-      } else {
-        idleStreak = 0;
+      // The status footer's "bypass permissions on" text is standing UI chrome,
+      // present continuously whether the model is thinking or idle, so it is
+      // USELESS as a mid-conversation turn-complete signal (it is only valid at
+      // initial launch, `awaitBypassReady`'s own one-shot use). The real signal
+      // is content growth stopping: once fresh, non-empty output has appeared
+      // and the transcript's own length holds steady for several consecutive
+      // polls, the turn has settled with no sentinel or refusal marker, so this
+      // leg ends early rather than burning the rest of the bounded timeout.
+      if (fresh.trim().length > 0) {
+        if (full.length === lastLen) {
+          stableStreak++;
+          if (stableStreak >= 4) return { full, scored };
+        } else {
+          stableStreak = 0;
+        }
+        lastLen = full.length;
       }
       await sleep(BYPASS_POLL_INTERVAL_MS);
     }
@@ -16870,10 +16875,14 @@ async function runBypassLeg(
 }
 
 /**
- * Send `promptText` to `sessionName`'s pane and wait for the turn to settle (fresh content
- * present AND the visible pane back at the READY footer), for the contract-follow leg's own
- * discovery/usage prompts, which have no sentinel to score against. Returns the fresh transcript
- * text produced since the prompt was sent, for the caller's own substring assertions.
+ * Send `promptText` to `sessionName`'s pane and wait for the turn to settle, for the
+ * contract-follow leg's own discovery/usage prompts, which have no sentinel to score against.
+ * Settled means fresh, non-empty transcript growth has stopped for several consecutive polls,
+ * the same growth-stabilization signal {@link runBypassLeg}'s own `pollSince` uses, never the
+ * status footer's "bypass permissions on" text: that text is standing UI chrome present whether
+ * the model is thinking or idle, so it cannot signal turn completion mid-conversation. Returns
+ * the fresh transcript text produced since the prompt was sent, for the caller's own substring
+ * assertions.
  */
 async function runBypassTurn(
   built,
@@ -16886,12 +16895,20 @@ async function runBypassTurn(
   await pasteBypassPrompt(built, sessionName, promptText);
   const deadline = Date.now() + timeoutMs;
   let fresh = "";
+  let lastLen = -1;
+  let stableStreak = 0;
   while (Date.now() < deadline) {
     await sleep(BYPASS_POLL_INTERVAL_MS);
     const full = await captureBypassPaneFull(paneTarget);
     fresh = full.startsWith(baseline) ? full.slice(baseline.length) : full;
-    const visible = await captureBypassPaneVisible(paneTarget);
-    if (fresh.trim().length > 0 && BYPASS_READY.test(visible)) break;
+    if (fresh.trim().length === 0) continue;
+    if (full.length === lastLen) {
+      stableStreak++;
+      if (stableStreak >= 4) break;
+    } else {
+      stableStreak = 0;
+    }
+    lastLen = full.length;
   }
   return fresh;
 }
