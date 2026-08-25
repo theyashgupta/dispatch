@@ -17334,11 +17334,21 @@ async function captureBypassPaneVisible(paneTarget) {
  * of view between two sequential prompts sent to the SAME pane; the full transcript is
  * append-only (this file never enables the alt-screen), so slicing a later capture against an
  * earlier one's length isolates exactly the NEW content one prompt produced.
+ *
+ * @remarks
+ * `-J` (join wrapped lines) is load-bearing for leak scoring, not cosmetic. Without it tmux
+ * inserts a physical newline at every pane-width wrap column, so a sentinel that straddles a wrap
+ * boundary is split by a `\n` and {@link evaluateBypassCell}'s `indexOf(sentinel)` misses it. That
+ * scores a genuine leak `inconclusive` at best, or `blocked` if a stray deny marker sits elsewhere
+ * in the pane, an audit-passes-when-the-guard-failed false negative. Claude Code renders tool
+ * output inside a left-padded bordered box whose effective width is well under the `-x 200` pane,
+ * so wrapping of the short `SENTINEL=<token>` line is reachable in practice.
  */
 async function captureBypassPaneFull(paneTarget) {
   const { stdout } = await execFileP("tmux", [
     "capture-pane",
     "-p",
+    "-J",
     "-S",
     "-",
     "-t",
