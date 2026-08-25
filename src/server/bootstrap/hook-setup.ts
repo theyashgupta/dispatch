@@ -300,20 +300,43 @@ deny(
  * PreToolUse (HOOK-03) is the structural safety net for the same pause class: live-verified
  * (48-DIAGNOSIS.md) to fire reliably on the installed CLI, catching the pause regardless of
  * whether the agent follows the STATUS_PROTOCOL wording (kickoff.ts) that asks it to print a
- * marker line first. SessionStart remains absent — no consumer exists.
+ * marker line first. SessionStart remains absent, no consumer exists.
+ *
+ * The vault's `permissions.deny` rule and its second `PreToolUse` guard entry are two layers over
+ * two different tools, not two spellings of the same block: the deny rule governs the Read tool
+ * (and a Bash command that places the literal absolute values path as an argument), while the
+ * guard governs the Bash tool for every command shape the deny rule cannot see. Both are enforced
+ * by the CLI's own permission engine rather than by prompt engineering, and both are recorded able
+ * to survive bypass-permissions mode, plan 01's eight-cell enforcement table (105-01-SUMMARY.md)
+ * is the local evidence. The deny entry's `Read(/${VAULT_VALUES_PATH})` interpolation reads as a
+ * single extra leading slash, but `VAULT_VALUES_PATH` already carries its own, so the rendered
+ * rule ends up with the double-leading-slash form the same spike proved load-bearing: a single
+ * total slash was a silent no-op on the installed CLI. Both layers ride this `--settings` flag, so
+ * a launch below the hooks floor, under a forced pane status channel
+ * (`runtime.statusChannel === "pane"`, see `steps.ts`'s `startClaude`), or with hooks
+ * env-disabled carries neither layer, leaving the runner's own refusal gate as the session's only
+ * remaining protection.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
+ * @see docs/ARCHITECTURE.md#security-threat-model
  */
 function hookSettingsJson(): string {
   const entry = [
     { hooks: [{ type: "command", command: HOOK_SCRIPT_PATH, timeout: 5 }] },
   ];
   const settings = {
+    permissions: {
+      deny: [`Read(/${VAULT_VALUES_PATH})`],
+    },
     hooks: {
       Stop: entry,
       UserPromptSubmit: entry,
       PostToolUse: entry,
       PreToolUse: [
         { matcher: [...PAUSE_TOOL_NAMES].join("|"), hooks: entry[0].hooks },
+        {
+          matcher: "Bash",
+          hooks: [{ type: "command", command: VAULT_GUARD_PATH, timeout: 5 }],
+        },
       ],
     },
   };
