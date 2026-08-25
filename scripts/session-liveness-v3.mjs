@@ -244,6 +244,7 @@
 import { spawn, execFile, execFileSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -258,7 +259,7 @@ import { tmpdir, homedir } from "node:os";
 import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 const execFileP = promisify(execFile);
@@ -15283,6 +15284,579 @@ async function checkVaultRemoteGate(built) {
   return violations;
 }
 
+/**
+ * The runner's own POSIX end-of-options separator, built from two single-hyphen string literals
+ * rather than one adjacent-hyphen token, matching `VAULT_RUN_SCRIPT`'s own `SEP="$DASH$DASH"`
+ * workaround in `hook-setup.ts` so this file's own source text never carries the token either.
+ */
+const RUN_SEP = "-" + "-";
+
+/**
+ * The absolute path to the boot-written runner under a fixture's sandbox home, built from
+ * `built.home` the same way {@link vaultDir} is, never from the server's own path constants
+ * module, so `vault-run-keys`/`vault-run-refusals` exercise the real filesystem artifact rather
+ * than restating the constant the writer used.
+ */
+function vaultRunPath(built) {
+  return join(built.home, ".dispatch", "vault-run");
+}
+
+/**
+ * Spawn `runnerPath` with a `--keys` selection, the real POSIX end-of-options separator, and a
+ * wrapped command, capturing exit code and both streams. `execFile` rejects on a non-zero exit,
+ * so the rejection's own `code`/`stdout`/`stderr` are normalized into the same shape as a
+ * resolved call, and every caller can read one consistent record regardless of outcome.
+ */
+async function runVaultRunner(runnerPath, keysArg, commandArgs) {
+  try {
+    const { stdout, stderr } = await execFileP(runnerPath, [
+      "--keys",
+      keysArg,
+      RUN_SEP,
+      ...commandArgs,
+    ]);
+    return { code: 0, stdout, stderr };
+  } catch (err) {
+    return {
+      code: typeof err.code === "number" ? err.code : -1,
+      stdout: typeof err.stdout === "string" ? err.stdout : "",
+      stderr: typeof err.stderr === "string" ? err.stderr : "",
+    };
+  }
+}
+
+/**
+ * Run `runnerPath` with a raw argv (no `--keys`/separator/command normalization), for the two
+ * usage legs whose whole point is a malformed argument shape.
+ */
+async function runVaultRunnerRaw(runnerPath, argv) {
+  try {
+    const { stdout, stderr } = await execFileP(runnerPath, argv);
+    return { code: 0, stdout, stderr };
+  } catch (err) {
+    return {
+      code: typeof err.code === "number" ? err.code : -1,
+      stdout: typeof err.stdout === "string" ? err.stdout : "",
+      stderr: typeof err.stderr === "string" ? err.stderr : "",
+    };
+  }
+}
+
+/**
+ * Copy `runnerPath` to a scratch sibling inside the fixture's sandbox home, apply exactly one
+ * source-text relaxation and re-chmod it executable, returning the copy's path. Pushes a
+ * violation and returns `null` instead of relaxing anything if `from` does not appear in the
+ * runner's source exactly once, since a break leg run against an unmodified or over-modified copy
+ * proves nothing about the real gate.
+ */
+function makeRelaxedCopy(
+  built,
+  runnerPath,
+  copyName,
+  from,
+  to,
+  violations,
+  label,
+) {
+  const copyPath = join(built.home, copyName);
+  copyFileSync(runnerPath, copyPath);
+  const source = readFileSync(copyPath, "utf8");
+  const occurrences = source.split(from).length - 1;
+  if (occurrences !== 1) {
+    violations.push(
+      `${label}: expected the relaxation target to appear exactly once in the runner's source, found ${occurrences}, this leg proves nothing`,
+    );
+    rmSync(copyPath, { force: true });
+    return null;
+  }
+  writeFileSync(copyPath, source.replace(from, to));
+  chmodSync(copyPath, 0o755);
+  return copyPath;
+}
+
+/**
+ * `--check vault-run-keys` (VLT-05, T-105-01): proves the boot-written `<home>/.dispatch/vault-run`
+ * injects exactly the requested vault keys into a wrapped command's environment and leaves the
+ * invoking shell carrying none of them. Legs 1 to 3 spawn the shipped artifact directly, never a
+ * copy and never the generator. Leg 4 falsifies the narrowing assertion on a relaxed COPY only
+ * (the real gate's own `if ! key_requested "$name"; then unset "$name"; fi` line disabled), then
+ * confirms the real artifact's bytes are unchanged by a SHA-256 comparison taken before and after.
+ */
+async function checkVaultRunKeys(built) {
+  const violations = [];
+  const runnerPath = vaultRunPath(built);
+  if (!existsSync(runnerPath)) {
+    violations.push(`vault-run-keys: runner missing at ${runnerPath}`);
+    return violations;
+  }
+  console.log(`vault-run-keys: spawning ${runnerPath}`);
+
+  const NAME_ONE = "RUN_KEY_ONE";
+  const NAME_TWO = "RUN_KEY_TWO";
+  const NAME_THREE = "RUN_KEY_THREE";
+
+  const createdOne = await vaultRequest(built, "POST", "/vault", {
+    name: NAME_ONE,
+    purpose: "run-keys leg 1/3",
+    value: VAULT_SENTINEL,
+  });
+  if (createdOne.status !== 200) {
+    violations.push(
+      `setup: POST /vault ${NAME_ONE} expected 200, got ${createdOne.status}: ${createdOne.text}`,
+    );
+  }
+  const createdTwo = await vaultRequest(built, "POST", "/vault", {
+    name: NAME_TWO,
+    purpose: "run-keys leg 3",
+    value: VAULT_SENTINEL_ROTATED,
+  });
+  if (createdTwo.status !== 200) {
+    violations.push(
+      `setup: POST /vault ${NAME_TWO} expected 200, got ${createdTwo.status}: ${createdTwo.text}`,
+    );
+  }
+  const createdThree = await vaultRequest(built, "POST", "/vault", {
+    name: NAME_THREE,
+    purpose: "run-keys unfilled",
+  });
+  if (createdThree.status !== 200) {
+    violations.push(
+      `setup: POST /vault ${NAME_THREE} expected 200, got ${createdThree.status}: ${createdThree.text}`,
+    );
+  }
+
+  // A reporter that names, for each of the three keys, whether the NAME is present in its own
+  // environment (not merely whether its value is non-empty) and, when present, that value.
+  const reporterPath = join(built.home, "vault-run-keys-reporter.sh");
+  writeFileSync(
+    reporterPath,
+    [
+      "#!/bin/sh",
+      `for name in ${NAME_ONE} ${NAME_TWO} ${NAME_THREE}; do`,
+      '  eval "v=\\${$name+x}"',
+      '  if [ -n "$v" ]; then',
+      '    eval "echo \\"$name=present:\\$$name\\""',
+      "  else",
+      '    echo "$name=absent"',
+      "  fi",
+      "done",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(reporterPath, 0o755);
+
+  // Leg 1: exact keys, name-level absence for the other two.
+  const leg1 = await runVaultRunner(runnerPath, NAME_ONE, [reporterPath]);
+  if (leg1.code !== 0) {
+    violations.push(
+      `leg 1: exit ${leg1.code}, expected 0, stderr=${leg1.stderr}`,
+    );
+  }
+  if (!leg1.stdout.includes(`${NAME_ONE}=present:${VAULT_SENTINEL}`)) {
+    violations.push(
+      `leg 1: expected ${NAME_ONE} present with its sentinel, got: ${leg1.stdout}`,
+    );
+  }
+  if (leg1.stdout.includes(NAME_TWO)) {
+    violations.push(
+      `leg 1: ${NAME_TWO}'s NAME leaked into the reporter's output, expected total absence: ${leg1.stdout}`,
+    );
+  }
+  if (leg1.stdout.includes(NAME_THREE)) {
+    violations.push(
+      `leg 1: ${NAME_THREE}'s NAME leaked into the reporter's output, expected total absence: ${leg1.stdout}`,
+    );
+  }
+
+  // Leg 2: the invoking shell stays clean, captured by a command run OUTSIDE the runner.
+  const before = await execFileP("env", []);
+  await runVaultRunner(runnerPath, NAME_ONE, [reporterPath]);
+  const after = await execFileP("env", []);
+  for (const name of [NAME_ONE, NAME_TWO, NAME_THREE]) {
+    if (before.stdout.includes(name)) {
+      violations.push(
+        `leg 2: ${name} present in the invoking shell's env BEFORE the runner ran`,
+      );
+    }
+    if (after.stdout.includes(name)) {
+      violations.push(
+        `leg 2: ${name} present in the invoking shell's env AFTER the runner ran`,
+      );
+    }
+  }
+
+  // Leg 3: multiple keys in one comma list.
+  const leg3 = await runVaultRunner(runnerPath, `${NAME_ONE},${NAME_TWO}`, [
+    reporterPath,
+  ]);
+  if (leg3.code !== 0) {
+    violations.push(
+      `leg 3: exit ${leg3.code}, expected 0, stderr=${leg3.stderr}`,
+    );
+  }
+  if (!leg3.stdout.includes(`${NAME_ONE}=present:${VAULT_SENTINEL}`)) {
+    violations.push(
+      `leg 3: expected ${NAME_ONE} present with its sentinel, got: ${leg3.stdout}`,
+    );
+  }
+  if (!leg3.stdout.includes(`${NAME_TWO}=present:${VAULT_SENTINEL_ROTATED}`)) {
+    violations.push(
+      `leg 3: expected ${NAME_TWO} present with its sentinel, got: ${leg3.stdout}`,
+    );
+  }
+  if (leg3.stdout.includes(NAME_THREE)) {
+    violations.push(
+      `leg 3: ${NAME_THREE}'s NAME leaked into the reporter's output, expected total absence: ${leg3.stdout}`,
+    );
+  }
+
+  // Leg 4: the falsifiability leg, on a COPY only, never the real artifact.
+  const hashBefore = createHash("sha256")
+    .update(readFileSync(runnerPath))
+    .digest("hex");
+  const copyPath = makeRelaxedCopy(
+    built,
+    runnerPath,
+    "vault-run-relaxed-unset-pass",
+    'if ! key_requested "$name"; then',
+    "if false; then",
+    violations,
+    "leg 4",
+  );
+  if (copyPath) {
+    const relaxed = await runVaultRunner(copyPath, NAME_ONE, [reporterPath]);
+    if (
+      !relaxed.stdout.includes(`${NAME_TWO}=present:${VAULT_SENTINEL_ROTATED}`)
+    ) {
+      violations.push(
+        `leg 4: relaxed copy did NOT leak ${NAME_TWO}, the check's own narrowing assertion is proving nothing: ${relaxed.stdout}`,
+      );
+    } else {
+      console.log(
+        `leg 4: relaxed copy observed to leak ${NAME_TWO}'s sentinel, the narrowing assertion (leg 1/leg 3) is load-bearing`,
+      );
+    }
+    rmSync(copyPath, { force: true });
+  }
+  const hashAfter = createHash("sha256")
+    .update(readFileSync(runnerPath))
+    .digest("hex");
+  if (hashBefore !== hashAfter) {
+    violations.push(
+      `leg 4: real artifact hash changed across the break leg, before=${hashBefore} after=${hashAfter}`,
+    );
+  } else {
+    console.log(
+      `leg 4: real artifact hash unchanged across the break leg (${hashAfter})`,
+    );
+  }
+
+  return violations;
+}
+
+/**
+ * `--check vault-run-refusals` (VLT-06, T-105-02): proves every refusal class the boot-written
+ * `<home>/.dispatch/vault-run` ships still ships, freezing plan 02's hand-run proof. The no-store
+ * leg runs FIRST, against the real artifact, before any vault mutation in this fixture has ever
+ * created `values.env`: the genuine boot-time no-store state, not a simulated one. The two break
+ * legs run against relaxed COPIES only, each proving the corresponding real-artifact assertion
+ * load-bearing, and the real artifact's hash is asserted unchanged at the end.
+ */
+async function checkVaultRunRefusals(built) {
+  const violations = [];
+  const runnerPath = vaultRunPath(built);
+  if (!existsSync(runnerPath)) {
+    violations.push(`vault-run-refusals: runner missing at ${runnerPath}`);
+    return violations;
+  }
+  console.log(`vault-run-refusals: spawning ${runnerPath}`);
+
+  const NAME_ONE = "RUN_KEY_ONE";
+  const NAME_TWO = "RUN_KEY_TWO";
+  const NAME_THREE = "RUN_KEY_THREE";
+  const NAME_NEVER = "RUN_KEY_NEVER";
+
+  const capturedStreams = [];
+  function capture(result) {
+    capturedStreams.push(result.stdout, result.stderr);
+    return result;
+  }
+
+  // Leg: no store. Runs against the REAL artifact before any key is ever created in this
+  // fixture, so `values.env` genuinely does not exist yet, distinct from the seeded-but-unfilled
+  // case below.
+  const noStore = capture(await runVaultRunner(runnerPath, NAME_ONE, ["true"]));
+  if (noStore.code !== 1) {
+    violations.push(
+      `no store: exit ${noStore.code}, expected 1, stderr=${noStore.stderr}`,
+    );
+  }
+  if (!noStore.stderr.includes("Vault")) {
+    violations.push(
+      `no store: stderr does not name the Vault page: ${noStore.stderr}`,
+    );
+  }
+  const noStoreMessage = noStore.stderr.trim();
+
+  // Seed the same three-key shape used by vault-run-keys.
+  const createdOne = await vaultRequest(built, "POST", "/vault", {
+    name: NAME_ONE,
+    purpose: "run-refusals leg",
+    value: VAULT_SENTINEL,
+  });
+  if (createdOne.status !== 200) {
+    violations.push(
+      `setup: POST /vault ${NAME_ONE} expected 200, got ${createdOne.status}: ${createdOne.text}`,
+    );
+  }
+  const createdTwo = await vaultRequest(built, "POST", "/vault", {
+    name: NAME_TWO,
+    purpose: "run-refusals leg",
+    value: VAULT_SENTINEL_ROTATED,
+  });
+  if (createdTwo.status !== 200) {
+    violations.push(
+      `setup: POST /vault ${NAME_TWO} expected 200, got ${createdTwo.status}: ${createdTwo.text}`,
+    );
+  }
+  const createdThree = await vaultRequest(built, "POST", "/vault", {
+    name: NAME_THREE,
+    purpose: "run-refusals unfilled",
+  });
+  if (createdThree.status !== 200) {
+    violations.push(
+      `setup: POST /vault ${NAME_THREE} expected 200, got ${createdThree.status}: ${createdThree.text}`,
+    );
+  }
+
+  // Legs: six dumper basenames, each in its own directory so the wrapped command's basename is
+  // exactly the dumper name regardless of where the file lives.
+  const dumperNames = [
+    "env",
+    "printenv",
+    "set",
+    "export",
+    "declare",
+    "typeset",
+  ];
+  const dumperDir = join(built.home, "vault-run-dumper-bins");
+  mkdirSync(dumperDir, { recursive: true });
+  for (const dumperName of dumperNames) {
+    const dumperPath = join(dumperDir, dumperName);
+    writeFileSync(dumperPath, "#!/bin/sh\necho SHOULD-NOT-RUN\n");
+    chmodSync(dumperPath, 0o755);
+    const result = capture(
+      await runVaultRunner(runnerPath, NAME_ONE, [dumperPath]),
+    );
+    if (result.code !== 2) {
+      violations.push(
+        `dumper ${dumperName}: exit ${result.code}, expected 2, stderr=${result.stderr}`,
+      );
+    }
+    if (result.stdout !== "") {
+      violations.push(
+        `dumper ${dumperName}: stdout expected empty, got: ${result.stdout}`,
+      );
+    }
+    if (!result.stderr.includes("Vault")) {
+      violations.push(
+        `dumper ${dumperName}: stderr does not name the Vault page: ${result.stderr}`,
+      );
+    }
+    console.log(`dumper ${dumperName}: exit ${result.code}`);
+  }
+
+  // Leg: unfilled key.
+  const unfilled = capture(
+    await runVaultRunner(runnerPath, NAME_THREE, ["true"]),
+  );
+  if (unfilled.code !== 3) {
+    violations.push(
+      `unfilled: exit ${unfilled.code}, expected 3, stderr=${unfilled.stderr}`,
+    );
+  }
+  if (
+    !unfilled.stderr.includes(NAME_THREE) ||
+    !unfilled.stderr.includes("Vault")
+  ) {
+    violations.push(
+      `unfilled: stderr does not name both the key and the Vault page: ${unfilled.stderr}`,
+    );
+  }
+
+  // Leg: unknown key, same refusal class as unfilled.
+  const unknown = capture(
+    await runVaultRunner(runnerPath, NAME_NEVER, ["true"]),
+  );
+  if (unknown.code !== 3) {
+    violations.push(
+      `unknown: exit ${unknown.code}, expected 3, stderr=${unknown.stderr}`,
+    );
+  }
+  if (
+    !unknown.stderr.includes(NAME_NEVER) ||
+    !unknown.stderr.includes("Vault")
+  ) {
+    violations.push(
+      `unknown: stderr does not name both the key and the Vault page: ${unknown.stderr}`,
+    );
+  }
+
+  // Legs: three usage shapes, each exit 64.
+  const usageOmittedKeys = capture(
+    await runVaultRunnerRaw(runnerPath, [NAME_ONE, RUN_SEP, "true"]),
+  );
+  if (usageOmittedKeys.code !== 64) {
+    violations.push(
+      `usage (omitted --keys): exit ${usageOmittedKeys.code}, expected 64, stderr=${usageOmittedKeys.stderr}`,
+    );
+  }
+
+  const usageCommandBeforeSep = capture(
+    await runVaultRunnerRaw(runnerPath, ["--keys", NAME_ONE, "true", RUN_SEP]),
+  );
+  if (usageCommandBeforeSep.code !== 64) {
+    violations.push(
+      `usage (command before separator): exit ${usageCommandBeforeSep.code}, expected 64, stderr=${usageCommandBeforeSep.stderr}`,
+    );
+  }
+
+  const usageMetacharacter = capture(
+    await runVaultRunner(runnerPath, `${NAME_ONE};id`, ["true"]),
+  );
+  if (usageMetacharacter.code !== 64) {
+    violations.push(
+      `usage (metacharacter in requested name): exit ${usageMetacharacter.code}, expected 64, stderr=${usageMetacharacter.stderr}`,
+    );
+  }
+
+  // No leak: across every refusal leg above, neither seeded sentinel appears in either stream.
+  const combined = capturedStreams.join("\n");
+  const sentinelHits =
+    combined.split(VAULT_SENTINEL).length -
+    1 +
+    (combined.split(VAULT_SENTINEL_ROTATED).length - 1);
+  if (sentinelHits !== 0) {
+    violations.push(
+      `no leak: ${sentinelHits} sentinel occurrence(s) found across the captured refusal streams, expected 0`,
+    );
+  }
+  console.log(
+    `no leak: ${sentinelHits} sentinel occurrence(s) across ${capturedStreams.length} captured stream(s)`,
+  );
+
+  // Break A: the dumper case removed, on a COPY, observed to actually dump via printenv.
+  const hashBeforeBreaks = createHash("sha256")
+    .update(readFileSync(runnerPath))
+    .digest("hex");
+  const dumperCopyPath = makeRelaxedCopy(
+    built,
+    runnerPath,
+    "vault-run-relaxed-dumper-check",
+    "env|printenv|set|export|declare|typeset)",
+    "__disabled_dumper_check__)",
+    violations,
+    "break A",
+  );
+  if (dumperCopyPath) {
+    const relaxedDump = await runVaultRunner(dumperCopyPath, NAME_ONE, [
+      "printenv",
+    ]);
+    const realDump = await runVaultRunner(runnerPath, NAME_ONE, ["printenv"]);
+    if (relaxedDump.code === realDump.code) {
+      violations.push(
+        `break A: relaxed copy behaved the SAME as the real artifact (both exit ${relaxedDump.code}), the dumper refusal is not load-bearing`,
+      );
+    } else {
+      console.log(
+        `break A: relaxed copy exit ${relaxedDump.code} (dumped) vs real artifact exit ${realDump.code} (refused)`,
+      );
+    }
+    if (!relaxedDump.stdout.includes(`${NAME_ONE}=`)) {
+      violations.push(
+        `break A: relaxed copy's printenv did not actually dump ${NAME_ONE}: ${relaxedDump.stdout}`,
+      );
+    }
+    rmSync(dumperCopyPath, { force: true });
+  }
+
+  // Break B: the missing-value resolution removed, on a COPY, observed to let the unfilled key
+  // reach the wrapped command unset instead of refusing.
+  const unfilledCopyPath = makeRelaxedCopy(
+    built,
+    runnerPath,
+    "vault-run-relaxed-missing-value-check",
+    'if ! grep -q "^$k=" "$VALUES"; then',
+    "if false; then",
+    violations,
+    "break B",
+  );
+  if (unfilledCopyPath) {
+    const reporterPath = join(built.home, "vault-run-refusals-reporter.sh");
+    writeFileSync(
+      reporterPath,
+      [
+        "#!/bin/sh",
+        'eval "v=\\${' + NAME_THREE + '+x}"',
+        'if [ -n "$v" ]; then',
+        '  eval "echo \\"' + NAME_THREE + "=present:\\$" + NAME_THREE + '\\""',
+        "else",
+        `  echo "${NAME_THREE}=absent"`,
+        "fi",
+        "",
+      ].join("\n"),
+    );
+    chmodSync(reporterPath, 0o755);
+    const relaxedUnfilled = await runVaultRunner(unfilledCopyPath, NAME_THREE, [
+      reporterPath,
+    ]);
+    const realUnfilled = await runVaultRunner(runnerPath, NAME_THREE, [
+      reporterPath,
+    ]);
+    if (relaxedUnfilled.code === realUnfilled.code) {
+      violations.push(
+        `break B: relaxed copy behaved the SAME as the real artifact (both exit ${relaxedUnfilled.code}), the missing-value refusal is not load-bearing`,
+      );
+    } else {
+      console.log(
+        `break B: relaxed copy exit ${relaxedUnfilled.code} (let it through, ${NAME_THREE} unset) vs real artifact exit ${realUnfilled.code} (refused)`,
+      );
+    }
+    if (!relaxedUnfilled.stdout.includes(`${NAME_THREE}=absent`)) {
+      violations.push(
+        `break B: relaxed copy did not reach the wrapped command with ${NAME_THREE} unset: ${relaxedUnfilled.stdout}`,
+      );
+    }
+    rmSync(unfilledCopyPath, { force: true });
+  }
+
+  const hashAfterBreaks = createHash("sha256")
+    .update(readFileSync(runnerPath))
+    .digest("hex");
+  if (hashBeforeBreaks !== hashAfterBreaks) {
+    violations.push(
+      `break legs: real artifact hash changed, before=${hashBeforeBreaks} after=${hashAfterBreaks}`,
+    );
+  } else {
+    console.log(
+      `break legs: real artifact hash unchanged (${hashAfterBreaks})`,
+    );
+  }
+
+  // No-store vs unfilled: distinct wording, asserted directly.
+  if (noStoreMessage === unfilled.stderr.trim()) {
+    violations.push(
+      `no store vs unfilled: messages are identical ("${noStoreMessage}"), expected distinct wording`,
+    );
+  } else {
+    console.log(
+      `no store vs unfilled: messages differ ("${noStoreMessage}" vs "${unfilled.stderr.trim()}")`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -15326,6 +15900,10 @@ const CHECKS = {
     withFixture("vault-log-scan", checkVaultLogScan, VAULT_FIXTURE),
   "vault-remote-gate": () =>
     withFixture("vault-remote-gate", checkVaultRemoteGate, VAULT_FIXTURE),
+  "vault-run-keys": () =>
+    withFixture("vault-run-keys", checkVaultRunKeys, VAULT_FIXTURE),
+  "vault-run-refusals": () =>
+    withFixture("vault-run-refusals", checkVaultRunRefusals, VAULT_FIXTURE),
   "second-session-fixture": () =>
     withFixture(
       "second-session-fixture",
