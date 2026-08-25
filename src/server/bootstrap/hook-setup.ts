@@ -8,6 +8,7 @@ import {
   HOOK_SCRIPT_PATH,
   HOOK_SETTINGS_PATH,
   VAULT_RUN_PATH,
+  VAULT_GUARD_PATH,
   VAULT_VALUES_PATH,
   VAULT_SCHEMA_PATH,
 } from "../services/infra/paths.js";
@@ -150,6 +151,143 @@ exec "$@"
 `;
 
 /**
+ * Body of `~/.dispatch/vault-guard.mjs`, Node ESM, generated once at module load from
+ * `VAULT_VALUES_PATH`, the absolute path baked in as a literal so the generated file itself never
+ * expands a home directory or shell variable. Ports `~/.claude/hooks/env-vault-guard.py`'s proven
+ * deny classes (read-out, copy/exfiltration, raw source or dot-sourcing) plus its file-management
+ * allowlist, with one addition beyond the prototype: a runner-mediated-dump check, since
+ * `vault-run`'s `--keys NAME[,NAME...]` flag plus its own end-of-options separator has no
+ * equivalent in the prototype's simpler positional `with-env.sh env` form. Node, not Python:
+ * `pty-shim.py` is Python because it interposes on PTY bytes and carries its own boot-time
+ * interpreter probe; this hook only parses JSON and runs regexes, so a second interpreter
+ * dependency would add an unnecessary failure mode.
+ *
+ * The schema file is deliberately outside every check here: the kickoff block tells every session
+ * to read it directly, and it never carries a value, only names and purposes.
+ *
+ * Tool-coverage boundary, from plan 01's recorded observation: the generated settings'
+ * `permissions.deny` rule governs the Read tool and a Bash command that places the literal
+ * absolute values path as an argument. This guard governs only the Bash tool, for command shapes
+ * a literal-path deny rule cannot see, an indirect reference built from a variable, a relative or
+ * tilde-written path, or another reader entirely. The two layers are not two spellings of one
+ * block; they cover two different tools.
+ */
+const VAULT_GUARD_SCRIPT = `#!/usr/bin/env node
+import { basename } from "node:path";
+import { writeSync } from "node:fs";
+import { text } from "node:stream/consumers";
+
+const VALUES_PATH = ${JSON.stringify(VAULT_VALUES_PATH)};
+const VALUES_MARKERS = [VALUES_PATH, "vault/values.env"];
+
+const READ_OUT =
+  /\\b(cat|head|tail|less|more|most|grep|rg|egrep|fgrep|sed|awk|od|xxd|hexdump|strings|base64|uuencode|sort|uniq|wc|diff|cmp|cut|tr|rev|nl|pr|fold|column|paste|join|split|csplit|dd|tee|python3?|node|ruby|perl|php)\\b/;
+const COPY_OUT =
+  /\\b(cp|mv|rsync|scp|install|ln|zip|tar|gzip|curl|wget|nc|mail)\\b/;
+const RAW_SOURCE = /(\\bsource\\b|(^|[;&|]\\s*)\\.\\s)/;
+const ALLOWED_ON_VALUES =
+  /^\\s*(open\\b|code\\b|codium\\b|subl\\b|ls\\b|stat\\b|chmod\\b|touch\\b|mkdir\\b|file\\b|du\\b)/;
+const RUNNER_DUMPERS = new Set([
+  "env",
+  "printenv",
+  "set",
+  "export",
+  "declare",
+  "typeset",
+]);
+const DASH = "-";
+const SEP = DASH + DASH;
+
+function deny(reason) {
+  writeSync(
+    1,
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: reason,
+      },
+    }),
+  );
+  process.exit(0);
+}
+
+function tokenize(cmd) {
+  return cmd.split(/\\s+/).filter((t) => t.length > 0);
+}
+
+function findRunnerIndex(tokens) {
+  for (let i = 0; i < tokens.length; i++) {
+    if (basename(tokens[i]) === "vault-run") return i;
+  }
+  return -1;
+}
+
+/**
+ * Whether 'tokens' invoke vault-run wrapping a dumper basename, or invoke it in a shape too
+ * ambiguous to resolve cleanly.
+ *
+ * @remarks A false deny here is safe; a false allow is not, so any unresolved shape denies too.
+ */
+function isRunnerMediatedDump(tokens) {
+  const i = findRunnerIndex(tokens);
+  if (i === -1) return false;
+  if (tokens[i + 1] !== "--keys") return true;
+  if (tokens[i + 3] !== SEP) return true;
+  const wrapped = tokens[i + 4];
+  if (wrapped === undefined) return true;
+  return RUNNER_DUMPERS.has(basename(wrapped));
+}
+
+let payload;
+try {
+  payload = JSON.parse(await text(process.stdin));
+} catch {
+  process.exit(0);
+}
+
+if (payload.tool_name !== "Bash") process.exit(0);
+const cmd = payload.tool_input?.command ?? "";
+if (!cmd) process.exit(0);
+
+const tokens = tokenize(cmd);
+if (isRunnerMediatedDump(tokens)) {
+  deny(
+    "vault-guard: vault-run must wrap a real command, never an environment dump " +
+      "(env/printenv/set/export/declare/typeset). That would print every secret in the vault. " +
+      "Run the actual command instead.",
+  );
+}
+
+const referencesValues = VALUES_MARKERS.some((marker) => cmd.includes(marker));
+if (!referencesValues) process.exit(0);
+
+if (ALLOWED_ON_VALUES.test(cmd.trim())) process.exit(0);
+
+if (findRunnerIndex(tokens) !== -1) {
+  deny(
+    "vault-guard: commands must not reference values.env directly, even alongside vault-run. " +
+      "Use vault-run --keys NAME[,NAME...] to select values; it loads the vault internally, so " +
+      "naming the path again is not needed.",
+  );
+}
+
+if (READ_OUT.test(cmd) || COPY_OUT.test(cmd) || RAW_SOURCE.test(cmd)) {
+  deny(
+    "vault-guard: values.env is sealed. Its contents are never read, printed, copied, or sourced " +
+      "directly. To use the variables, run vault-run --keys NAME[,NAME...], then the wrapped " +
+      "command. To let the user edit the file, open Settings, Vault.",
+  );
+}
+
+deny(
+  "vault-guard: unrecognized operation on values.env. Allowed: vault-run to use the variables, " +
+    "file management (ls/stat/chmod/open/code/file/du), or Settings, Vault to edit. Everything " +
+    "else on this file is blocked.",
+);
+`;
+
+/**
  * The `--settings` layer content: Stop + UserPromptSubmit + PostToolUse (unmatched, catch-all)
  * plus a matched `PreToolUse` entry whose matcher is derived from {@link PAUSE_TOOL_NAMES} —
  * the single source of truth shared with hook-events' enter/flip-back branches, so extending the
@@ -184,10 +322,11 @@ function hookSettingsJson(): string {
 
 /**
  * Idempotently (re)write every `~/.dispatch` boot artifact: the hook script, the vault-run
- * runner, and the settings JSON. Regenerating every boot self-heals manual edits or moves and
- * keeps the script paths in the settings current. Atomic writes via write-file-atomic (repo
- * standard); both scripts must be executable for claude to spawn them. `write-file-atomic`'s
- * `mode` option is create-only, so each executable write is followed by an explicit `chmod`.
+ * runner, the vault-guard PreToolUse hook, and the settings JSON. Regenerating every boot
+ * self-heals manual edits or moves and keeps the script paths in the settings current. Atomic
+ * writes via write-file-atomic (repo standard); all three scripts must be executable for claude
+ * to spawn them. `write-file-atomic`'s `mode` option is create-only, so each executable write is
+ * followed by an explicit `chmod`.
  */
 export async function installHookArtifacts(): Promise<void> {
   await fsp.mkdir(DISPATCH_DIR, { recursive: true, mode: 0o700 });
@@ -195,6 +334,8 @@ export async function installHookArtifacts(): Promise<void> {
   await fsp.chmod(HOOK_SCRIPT_PATH, 0o755);
   await writeFileAtomic(VAULT_RUN_PATH, VAULT_RUN_SCRIPT, { mode: 0o755 });
   await fsp.chmod(VAULT_RUN_PATH, 0o755);
+  await writeFileAtomic(VAULT_GUARD_PATH, VAULT_GUARD_SCRIPT, { mode: 0o755 });
+  await fsp.chmod(VAULT_GUARD_PATH, 0o755);
   await writeFileAtomic(HOOK_SETTINGS_PATH, hookSettingsJson(), {
     mode: 0o644,
   });
