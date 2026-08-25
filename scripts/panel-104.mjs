@@ -42,13 +42,20 @@
  *   node scripts/panel-104.mjs                       every registered check, exits non-zero on
  *                                                     any violation.
  *   node scripts/panel-104.mjs --check <name>         one named check only, <name> one of
- *                                                     crud | autofill-defusal.
+ *                                                     crud | autofill-defusal | sentinel-capture |
+ *                                                     no-query-param.
  *   node scripts/panel-104.mjs --break <name>         that check's OWN break: fires the SAME check
  *                                                     function the real run uses against a DOM
  *                                                     mutation, confirms it reports the violation
  *                                                     by name, restores the captured original
  *                                                     value, and re-confirms PASS, all inside one
  *                                                     Chrome tab. Never edits a source file.
+ *                                                     <name> one of autofill-defusal | query-param.
+ *                                                     `query-param` is the one exception: it edits
+ *                                                     a real source file (`src/web/lib/api.ts`),
+ *                                                     stands its own sandbox up and down (never
+ *                                                     shares main()'s), and restores the captured
+ *                                                     original unconditionally.
  *
  * BREAK EVIDENCE, every break registered in this file has been run under `--break <name>` for
  * real and has been observed reporting its own violation. The quoted lines below are the VERBATIM
@@ -110,8 +117,34 @@ const CHROME_CANDIDATES = [
 
 const FAKE_LINEAR_API_KEY = "panel-104-harness-fake-key-never-real";
 
+/**
+ * The sentinel-capture and no-query-param checks' shared sentinel. Split across a concatenation
+ * deliberately, so the literal string never appears whole a second time in this file and a naive
+ * repo-wide grep for it stays unambiguous, matching `session-liveness-v3.mjs`'s own
+ * `VAULT_SENTINEL` idiom. A fixed string, not pid-derived, so a human can reproduce a grep by hand
+ * after a failure. `VALUE_SENTINEL_ROTATED` proves the rotate leg's OLD value cannot survive
+ * either.
+ */
+const VALUE_SENTINEL = "p104" + "-s3nt1nel-" + "7ac91f2b";
+const VALUE_SENTINEL_ROTATED = VALUE_SENTINEL + "-rot";
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Counts every occurrence of `needle` in `haystack`, never just presence: criterion 2 requires
+ * the sentinel to appear EXACTLY once, so a second copy inside the same body must be visible as
+ * 2, not merely "found". */
+function countOccurrences(haystack, needle) {
+  if (!haystack) return 0;
+  let count = 0;
+  let from = 0;
+  for (;;) {
+    const idx = haystack.indexOf(needle, from);
+    if (idx === -1) return count;
+    count += 1;
+    from = idx + needle.length;
+  }
 }
 
 /** Fail-closed: throw (never degrade) if anything answers on the user's real dispatch port. */
@@ -1000,7 +1033,379 @@ async function checkAutofillDefusal(cdp, sessionId, violations) {
   assertAutofillReading(reading, violations);
 }
 
-const CHECKS = { crud: checkCrud, "autofill-defusal": checkAutofillDefusal };
+/**
+ * Wire-level capture of every request the tab issues, via `Network.requestWillBeSent`, never a
+ * same-page fetch-wrapping shim: the page under test must not be the source of its own evidence.
+ * `postData` is filled in eagerly when CDP inlines it; `resolvePending` must be awaited before any
+ * assertion runs, since CDP omits `postData` for some request bodies even when `hasPostData` is
+ * true (Pitfall 4).
+ */
+async function startNetworkCapture(cdp, sessionId) {
+  await cdp.send("Network.enable", {}, sessionId);
+  const entries = [];
+  const listener = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.sessionId !== sessionId) return;
+    if (msg.method === "Network.requestWillBeSent") {
+      const { requestId, request } = msg.params;
+      entries.push({
+        requestId,
+        url: request.url,
+        method: request.method,
+        postData: request.postData ?? null,
+        hasPostData: request.hasPostData === true,
+      });
+    }
+  };
+  cdp.ws.addEventListener("message", listener);
+  return {
+    entries,
+    stop() {
+      cdp.ws.removeEventListener("message", listener);
+    },
+    /** Fills in `postData` for every entry CDP didn't inline it for. An entry whose body could not
+     * be retrieved (the body may have been evicted) is marked `"<unretrievable>"` rather than
+     * silently treated as empty, an unreadable body is an unmeasured body, not a clean one. */
+    async resolvePending(cdpArg, sessionIdArg) {
+      for (const entry of entries) {
+        if (entry.hasPostData === true && entry.postData == null) {
+          try {
+            const { postData } = await cdpArg.send(
+              "Network.getRequestPostData",
+              { requestId: entry.requestId },
+              sessionIdArg,
+            );
+            entry.postData = postData ?? "";
+          } catch {
+            entry.postData = "<unretrievable>";
+          }
+        }
+      }
+    },
+  };
+}
+
+/** One `Runtime.evaluate` reading every persistent surface a round-tripped value could sit in.
+ * `outerHTML` does not serialise a live input's current value, so `inputValues` is not redundant
+ * with `html`, it is the load-bearing half; the two storage dumps close the "the page stashed it
+ * for later" path. */
+async function readPageSurfaces(cdp, sessionId) {
+  const expr = `(function () {
+    return {
+      html: document.documentElement.outerHTML,
+      inputValues: Array.prototype.slice.call(document.querySelectorAll("input,textarea")).map(function (el) { return el.value; }),
+      localStorage: JSON.stringify(localStorage),
+      sessionStorage: JSON.stringify(sessionStorage),
+    };
+  })()`;
+  return evalValue(cdp, sessionId, expr);
+}
+
+/** Per-surface occurrence counts of `sentinel` across a `readPageSurfaces` reading, so a
+ * violation can name exactly which surface carried it and how many times. */
+function countSentinelAcrossSurfaces(surfaces, sentinel) {
+  const inputTotal = surfaces.inputValues.reduce(
+    (sum, v) => sum + countOccurrences(v, sentinel),
+    0,
+  );
+  return {
+    html: countOccurrences(surfaces.html, sentinel),
+    inputValues: inputTotal,
+    localStorage: countOccurrences(surfaces.localStorage, sentinel),
+    sessionStorage: countOccurrences(surfaces.sessionStorage, sentinel),
+  };
+}
+
+function assertSurfacesClean(surfaces, sentinel, label, violations) {
+  const counts = countSentinelAcrossSurfaces(surfaces, sentinel);
+  for (const [surface, count] of Object.entries(counts)) {
+    if (count !== 0) {
+      violations.push(
+        `sentinel-capture: ${label} expected zero sentinel occurrences in ${surface}, measured ${count}`,
+      );
+    }
+  }
+}
+
+/**
+ * Measures criterion 2: across a save and a reload, the sentinel appears exactly once in the
+ * whole capture, in the outbound PUT body, and zero times in the DOM, any input value, or either
+ * storage dump.
+ */
+async function checkSentinelCapture(cdp, sessionId, violations) {
+  const NAME = "PANEL104_SENT";
+  await openVaultTab(cdp, sessionId);
+  await typeInto(cdp, sessionId, "New key name", NAME);
+  await typeInto(cdp, sessionId, "New key purpose", "sentinel leg");
+  await clickByText(cdp, sessionId, "button", "Add key");
+  await waitForExpr(
+    cdp,
+    sessionId,
+    `document.querySelector(${JSON.stringify(ariaLabelSelector(`Delete ${NAME}`))}) != null`,
+    `the ${NAME} row to appear`,
+  );
+
+  const capture = await startNetworkCapture(cdp, sessionId);
+
+  await clickByAriaLabel(cdp, sessionId, `Fill value for ${NAME}`);
+  await waitForExpr(
+    cdp,
+    sessionId,
+    `document.querySelector(${JSON.stringify(ariaLabelSelector(`Value for ${NAME}`))}) != null`,
+    `the value editor for ${NAME} to open`,
+  );
+  await typeInto(cdp, sessionId, `Value for ${NAME}`, VALUE_SENTINEL);
+  await clickByText(cdp, sessionId, "button", "Save value");
+  await waitForExpr(
+    cdp,
+    sessionId,
+    `document.querySelector(${JSON.stringify(ariaLabelSelector(`Value for ${NAME}`))}) == null`,
+    `the value editor for ${NAME} to collapse after save`,
+  );
+
+  const postSave = await readPageSurfaces(cdp, sessionId);
+  assertSurfacesClean(postSave, VALUE_SENTINEL, "post-save", violations);
+
+  await cdp.send("Page.reload", { ignoreCache: true }, sessionId);
+  await waitForExpr(
+    cdp,
+    sessionId,
+    `document.querySelector('button[aria-label="Sync filters"]') != null`,
+    "the SPA shell to repaint after reload",
+  );
+  await openVaultTab(cdp, sessionId);
+  await waitForExpr(
+    cdp,
+    sessionId,
+    `document.querySelector(${JSON.stringify(ariaLabelSelector(`Delete ${NAME}`))}) != null`,
+    `the ${NAME} row to reappear after reload`,
+  );
+
+  const editorClosed = await evalValue(
+    cdp,
+    sessionId,
+    `document.querySelector(${JSON.stringify(ariaLabelSelector(`Value for ${NAME}`))}) == null`,
+  );
+  if (!editorClosed) {
+    violations.push(
+      `sentinel-capture: expected the value editor for ${NAME} to be closed after reload, it was open`,
+    );
+  }
+
+  await clickByAriaLabel(cdp, sessionId, `Rotate value for ${NAME}`);
+  await waitForExpr(
+    cdp,
+    sessionId,
+    `document.querySelector(${JSON.stringify(ariaLabelSelector(`Value for ${NAME}`))}) != null`,
+    `the value editor for ${NAME} to reopen for rotate`,
+  );
+  const reopenedValue = await evalValue(
+    cdp,
+    sessionId,
+    `document.querySelector(${JSON.stringify(ariaLabelSelector(`Value for ${NAME}`))}).value`,
+  );
+  if (reopenedValue !== "") {
+    violations.push(
+      `sentinel-capture: expected the reopened value editor for ${NAME} to be empty (a round-trip), measured length ${reopenedValue.length}`,
+    );
+  }
+  const rowState = await readVaultRowState(cdp, sessionId, NAME);
+  if (!rowState.found || rowState.badgeText !== "Filled") {
+    violations.push(
+      `sentinel-capture: expected ${NAME}'s badge to read "Filled" after reload, measured ${JSON.stringify(rowState)}`,
+    );
+  }
+  const apiState = await apiGet("/api/vault");
+  const apiKey = apiState.keys?.find((k) => k.name === NAME);
+  if (apiKey == null || apiKey.filled !== true) {
+    violations.push(
+      `sentinel-capture: expected apiGet to report filled:true for ${NAME} after reload, measured ${JSON.stringify(apiKey)}`,
+    );
+  }
+  await clickByText(cdp, sessionId, "button", "Cancel edit");
+  await waitForExpr(
+    cdp,
+    sessionId,
+    `document.querySelector(${JSON.stringify(ariaLabelSelector(`Value for ${NAME}`))}) == null`,
+    `the value editor for ${NAME} to close after cancel`,
+  );
+
+  const postReload = await readPageSurfaces(cdp, sessionId);
+  assertSurfacesClean(postReload, VALUE_SENTINEL, "post-reload", violations);
+
+  await capture.resolvePending(cdp, sessionId);
+  capture.stop();
+
+  if (capture.entries.length === 0) {
+    violations.push(
+      "sentinel-capture: network capture recorded no requests, the measurement did not happen",
+    );
+    return;
+  }
+
+  for (const entry of capture.entries) {
+    if (entry.postData === "<unretrievable>") {
+      violations.push(
+        `sentinel-capture: request body for ${entry.method} ${entry.url} could not be retrieved (getRequestPostData threw), an unreadable body is an unmeasured body`,
+      );
+    }
+  }
+
+  let total = 0;
+  const offending = [];
+  let putBodyEntry = null;
+  for (const entry of capture.entries) {
+    const urlCount = countOccurrences(entry.url, VALUE_SENTINEL);
+    const bodyCount =
+      entry.postData != null && entry.postData !== "<unretrievable>"
+        ? countOccurrences(entry.postData, VALUE_SENTINEL)
+        : 0;
+    if (urlCount + bodyCount > 0) {
+      offending.push({
+        method: entry.method,
+        url: entry.url,
+        bodyLength: entry.postData?.length ?? 0,
+      });
+      if (bodyCount > 0 && urlCount === 0) putBodyEntry = entry;
+    }
+    total += urlCount + bodyCount;
+  }
+
+  if (total !== 1) {
+    violations.push(
+      `sentinel-capture: expected the sentinel to occur exactly once across the whole capture, measured ${total}. Offending entries: ${JSON.stringify(offending)}`,
+    );
+  } else {
+    const isCorrectShape =
+      putBodyEntry != null &&
+      putBodyEntry.method === "PUT" &&
+      putBodyEntry.url.endsWith(`/api/vault/${NAME}/value`);
+    if (!isCorrectShape) {
+      violations.push(
+        `sentinel-capture: expected the single sentinel occurrence to sit in the postData of a PUT to /api/vault/${NAME}/value, measured entry ${JSON.stringify({ method: putBodyEntry?.method, url: putBodyEntry?.url })}`,
+      );
+    }
+  }
+}
+
+/**
+ * Measures criterion 3: no request issued during a save or a rotate carries the value in a URL, a
+ * query string or a GET, raw or percent-decoded, and every vault mutation carries a real body.
+ */
+async function checkNoQueryParam(cdp, sessionId, violations) {
+  const NAME = "PANEL104_QP";
+  await openVaultTab(cdp, sessionId);
+  await typeInto(cdp, sessionId, "New key name", NAME);
+  await typeInto(cdp, sessionId, "New key purpose", "query param leg");
+  await clickByText(cdp, sessionId, "button", "Add key");
+  await waitForExpr(
+    cdp,
+    sessionId,
+    `document.querySelector(${JSON.stringify(ariaLabelSelector(`Delete ${NAME}`))}) != null`,
+    `the ${NAME} row to appear`,
+  );
+
+  const capture = await startNetworkCapture(cdp, sessionId);
+
+  await clickByAriaLabel(cdp, sessionId, `Fill value for ${NAME}`);
+  await waitForExpr(
+    cdp,
+    sessionId,
+    `document.querySelector(${JSON.stringify(ariaLabelSelector(`Value for ${NAME}`))}) != null`,
+    `the value editor for ${NAME} to open`,
+  );
+  await typeInto(cdp, sessionId, `Value for ${NAME}`, VALUE_SENTINEL);
+  await clickByText(cdp, sessionId, "button", "Save value");
+  await waitForExpr(
+    cdp,
+    sessionId,
+    `document.querySelector(${JSON.stringify(ariaLabelSelector(`Value for ${NAME}`))}) == null`,
+    `the value editor for ${NAME} to collapse after save`,
+  );
+
+  await clickByAriaLabel(cdp, sessionId, `Rotate value for ${NAME}`);
+  await waitForExpr(
+    cdp,
+    sessionId,
+    `document.querySelector(${JSON.stringify(ariaLabelSelector(`Value for ${NAME}`))}) != null`,
+    `the value editor for ${NAME} to reopen for rotate`,
+  );
+  await typeInto(cdp, sessionId, `Value for ${NAME}`, VALUE_SENTINEL_ROTATED);
+  await clickByText(cdp, sessionId, "button", "Save value");
+  await waitForExpr(
+    cdp,
+    sessionId,
+    `document.querySelector(${JSON.stringify(ariaLabelSelector(`Value for ${NAME}`))}) == null`,
+    `the value editor for ${NAME} to collapse after rotate`,
+  );
+
+  await capture.resolvePending(cdp, sessionId);
+  capture.stop();
+
+  if (capture.entries.length === 0) {
+    violations.push(
+      "no-query-param: network capture recorded no requests, the measurement did not happen",
+    );
+    return;
+  }
+
+  for (const entry of capture.entries) {
+    if (entry.postData === "<unretrievable>") {
+      violations.push(
+        `no-query-param: request body for ${entry.method} ${entry.url} could not be retrieved (getRequestPostData threw), an unreadable body is an unmeasured body`,
+      );
+    }
+  }
+
+  const sentinels = [
+    ["VALUE_SENTINEL", VALUE_SENTINEL],
+    ["VALUE_SENTINEL_ROTATED", VALUE_SENTINEL_ROTATED],
+  ];
+
+  for (const entry of capture.entries) {
+    let decodedUrl = entry.url;
+    try {
+      decodedUrl = decodeURIComponent(entry.url);
+    } catch {
+      // a malformed percent-sequence in an unrelated request is not this check's concern
+    }
+    for (const [label, sentinel] of sentinels) {
+      const rawUrlCount = countOccurrences(entry.url, sentinel);
+      const decodedUrlCount = countOccurrences(decodedUrl, sentinel);
+      if (rawUrlCount !== 0 || decodedUrlCount !== 0) {
+        violations.push(
+          `no-query-param: expected zero ${label} occurrences in the url of ${entry.method} ${entry.url}, measured raw=${rawUrlCount} decoded=${decodedUrlCount}`,
+        );
+      }
+      if (entry.method === "GET") {
+        const bodyCount =
+          entry.postData != null && entry.postData !== "<unretrievable>"
+            ? countOccurrences(entry.postData, sentinel)
+            : 0;
+        if (rawUrlCount !== 0 || bodyCount !== 0) {
+          violations.push(
+            `no-query-param: expected a GET request to carry zero ${label} occurrences in its url or body, measured url=${rawUrlCount} body=${bodyCount} for ${entry.url}`,
+          );
+        }
+      }
+    }
+    const isVaultMutation =
+      entry.url.includes("/api/vault") &&
+      ["POST", "PUT", "PATCH"].includes(entry.method);
+    if (isVaultMutation && entry.hasPostData !== true) {
+      violations.push(
+        `no-query-param: expected ${entry.method} ${entry.url} (a vault mutation) to carry a request body, hasPostData was false`,
+      );
+    }
+  }
+}
+
+const CHECKS = {
+  crud: checkCrud,
+  "autofill-defusal": checkAutofillDefusal,
+  "sentinel-capture": checkSentinelCapture,
+  "no-query-param": checkNoQueryParam,
+};
 
 // ---------------------------------------------------------------------------
 // Breaks. Fires the SAME check function the real run uses against a DOM
