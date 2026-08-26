@@ -95,7 +95,8 @@ export type PushEnableResult =
  * @remarks
  * The only function in the app that may prompt, and only because it is called from a click
  * handler. `pushManager.subscribe()` triggers the browser's native permission prompt itself
- * when permission is still `"default"`.
+ * when permission is still `"default"`. Every failure after `pushManager.subscribe()` unwinds
+ * the browser-side subscription, so the browser never keeps one the server did not store.
  */
 export async function enablePush(): Promise<PushEnableResult> {
   try {
@@ -107,23 +108,28 @@ export async function enablePush(): Promise<PushEnableResult> {
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(publicKey),
     });
-    const res = await fetch("/api/push/subscribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(subscription.toJSON()),
-    });
-    if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as {
-        error?: string;
-      };
-      await subscription.unsubscribe();
-      return {
-        ok: false,
-        error:
-          body.error === "too-many-subscriptions"
-            ? "too-many-subscriptions"
-            : "generic",
-      };
+    try {
+      const res = await fetch("/api/push/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(subscription.toJSON()),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        await subscription.unsubscribe();
+        return {
+          ok: false,
+          error:
+            body.error === "too-many-subscriptions"
+              ? "too-many-subscriptions"
+              : "generic",
+        };
+      }
+    } catch {
+      await subscription.unsubscribe().catch(() => {});
+      return { ok: false, error: "generic" };
     }
     writeMarker(true);
     return { ok: true };
