@@ -72,6 +72,15 @@
  *     booted sandbox server. A clean run reported `push-table-schema: observed columns =
  *     endpoint, p256dh, auth, origin, created_at`, machine-verifying the table's exact shape and
  *     that `cards`/`meta`/`events` remain present.
+ *   - `subscribe-unsubscribe` proven able to fail (Plan 05): replacing the built
+ *     `dist/server/routes/push.route.js`'s single
+ *     `removePushSubscription(endpointResult.endpoint)` call with a sentinel-endpoint call
+ *     produced `subscribe-unsubscribe: first POST /push/unsubscribe expected {removed:true}, got
+ *     {"ok":true,"removed":false}` followed by `subscribe-unsubscribe: row still present after
+ *     unsubscribe (1 remaining, expected 0)` against a real booted sandbox server driving the
+ *     full HTTP lifecycle. A clean run reported 1 row after subscribe, 1 row (refreshed keys)
+ *     after re-subscribe, 1 row unchanged after two malformed-body rejections, then 0 rows after
+ *     unsubscribe, machine-verifying roadmap success criterion 2.
  */
 
 import {
@@ -904,6 +913,265 @@ async function runBreakPushTableSchema() {
 }
 
 // ---------------------------------------------------------------------------
+// subscribe-unsubscribe (Plan 05): boots a sandbox server and drives the full
+// subscribe/unsubscribe row lifecycle over real HTTP, cross-checking against
+// an independent DatabaseSync read of the sandbox board.db so a route that
+// answers 200 without persisting cannot pass.
+// ---------------------------------------------------------------------------
+
+async function postJson(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  let json;
+  try {
+    json = text ? JSON.parse(text) : undefined;
+  } catch {
+    json = undefined;
+  }
+  return { status: res.status, json };
+}
+
+function readPushRows(dbPath) {
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    return db.prepare("SELECT * FROM push_subscriptions").all();
+  } finally {
+    db.close();
+  }
+}
+
+async function checkSubscribeUnsubscribe(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("subunsub");
+  let child;
+  try {
+    child = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    const base = `http://127.0.0.1:${SANDBOX_PORT}/api`;
+    const dbPath = join(home, ".dispatch", "board.db");
+    const endpoint = "https://push.example.test/subscription/panel-108";
+
+    const keyRes = await fetch(`${base}/push/public-key`);
+    const keyJson = await keyRes.json();
+    if (keyRes.status !== 200) {
+      violations.push(
+        `subscribe-unsubscribe: GET /push/public-key expected 200, got ${keyRes.status}`,
+      );
+      return;
+    }
+    const point = Buffer.from(keyJson.publicKey, "base64url");
+    if (point.length !== 65 || point[0] !== 0x04) {
+      violations.push(
+        `subscribe-unsubscribe: public key point expected 65 bytes starting 0x04, got ` +
+          `${point.length} bytes starting 0x${(point[0] ?? 0).toString(16)}`,
+      );
+    }
+
+    const sub1 = await postJson(`${base}/push/subscribe`, {
+      endpoint,
+      keys: { p256dh: "p256dh-value-1", auth: "auth-value-1" },
+    });
+    if (sub1.status !== 200 || sub1.json?.ok !== true) {
+      violations.push(
+        `subscribe-unsubscribe: POST /push/subscribe expected 200 {ok:true}, got ` +
+          `${sub1.status} ${JSON.stringify(sub1.json)}`,
+      );
+      return;
+    }
+
+    let rows = readPushRows(dbPath);
+    if (rows.length !== 1) {
+      violations.push(
+        `subscribe-unsubscribe: expected exactly 1 row after subscribe, got ${rows.length}`,
+      );
+      return;
+    }
+    let row = rows[0];
+    if (
+      row.endpoint !== endpoint ||
+      row.p256dh !== "p256dh-value-1" ||
+      row.auth !== "auth-value-1"
+    ) {
+      violations.push(
+        `subscribe-unsubscribe: row values mismatch after first subscribe: ${JSON.stringify(row)}`,
+      );
+    }
+    if (typeof row.origin !== "string" || row.origin === "") {
+      violations.push(
+        `subscribe-unsubscribe: expected non-empty origin, got ${JSON.stringify(row.origin)}`,
+      );
+    }
+    if (Number.isNaN(Date.parse(row.created_at))) {
+      violations.push(
+        `subscribe-unsubscribe: created_at does not parse as a valid date: ${JSON.stringify(row.created_at)}`,
+      );
+    }
+    console.log(
+      `subscribe-unsubscribe: after first subscribe, 1 row, endpoint=${row.endpoint} origin=${row.origin}`,
+    );
+
+    const sub2 = await postJson(`${base}/push/subscribe`, {
+      endpoint,
+      keys: { p256dh: "p256dh-value-2", auth: "auth-value-2" },
+    });
+    if (sub2.status !== 200 || sub2.json?.ok !== true) {
+      violations.push(
+        `subscribe-unsubscribe: second POST /push/subscribe expected 200 {ok:true}, got ` +
+          `${sub2.status} ${JSON.stringify(sub2.json)}`,
+      );
+      return;
+    }
+    rows = readPushRows(dbPath);
+    if (rows.length !== 1) {
+      violations.push(
+        `subscribe-unsubscribe: expected exactly 1 row after re-subscribe (upsert), got ${rows.length}`,
+      );
+      return;
+    }
+    row = rows[0];
+    if (row.p256dh !== "p256dh-value-2" || row.auth !== "auth-value-2") {
+      violations.push(
+        `subscribe-unsubscribe: expected refreshed key values after re-subscribe, got ${JSON.stringify(row)}`,
+      );
+    }
+    console.log(
+      `subscribe-unsubscribe: after re-subscribe, still 1 row, keys refreshed to ` +
+        `${row.p256dh}/${row.auth}`,
+    );
+
+    const badKeys = await postJson(`${base}/push/subscribe`, {
+      endpoint,
+      keys: { p256dh: "p256dh-value-3" },
+    });
+    if (badKeys.status !== 400 || badKeys.json?.error !== "invalid-keys") {
+      violations.push(
+        `subscribe-unsubscribe: malformed keys body expected 400 {error:"invalid-keys"}, got ` +
+          `${badKeys.status} ${JSON.stringify(badKeys.json)}`,
+      );
+    }
+    rows = readPushRows(dbPath);
+    if (rows.length !== 1) {
+      violations.push(
+        `subscribe-unsubscribe: expected row count unchanged at 1 after malformed keys body, got ${rows.length}`,
+      );
+    }
+
+    const badEndpoint = await postJson(`${base}/push/subscribe`, {
+      endpoint: "http://not-https.test/x",
+      keys: { p256dh: "a", auth: "b" },
+    });
+    if (
+      badEndpoint.status !== 400 ||
+      badEndpoint.json?.error !== "invalid-endpoint"
+    ) {
+      violations.push(
+        `subscribe-unsubscribe: non-https endpoint expected 400 {error:"invalid-endpoint"}, got ` +
+          `${badEndpoint.status} ${JSON.stringify(badEndpoint.json)}`,
+      );
+    }
+    rows = readPushRows(dbPath);
+    if (rows.length !== 1) {
+      violations.push(
+        `subscribe-unsubscribe: expected row count unchanged at 1 after non-https endpoint, got ${rows.length}`,
+      );
+    }
+    console.log(
+      "subscribe-unsubscribe: malformed bodies rejected with 400, row count stayed at 1",
+    );
+
+    const unsub1 = await postJson(`${base}/push/unsubscribe`, { endpoint });
+    if (unsub1.status !== 200) {
+      violations.push(
+        `subscribe-unsubscribe: first POST /push/unsubscribe expected 200, got ` +
+          `${unsub1.status} ${JSON.stringify(unsub1.json)}`,
+      );
+      return;
+    }
+    if (unsub1.json?.removed !== true) {
+      violations.push(
+        `subscribe-unsubscribe: first POST /push/unsubscribe expected {removed:true}, got ` +
+          `${JSON.stringify(unsub1.json)}`,
+      );
+    }
+    rows = readPushRows(dbPath);
+    if (rows.length !== 0) {
+      violations.push(
+        `subscribe-unsubscribe: row still present after unsubscribe (${rows.length} remaining, expected 0)`,
+      );
+      return;
+    }
+
+    const unsub2 = await postJson(`${base}/push/unsubscribe`, { endpoint });
+    if (unsub2.status !== 200 || unsub2.json?.removed !== false) {
+      violations.push(
+        `subscribe-unsubscribe: second POST /push/unsubscribe expected 200 {removed:false}, got ` +
+          `${unsub2.status} ${JSON.stringify(unsub2.json)}`,
+      );
+    }
+    console.log(
+      "subscribe-unsubscribe: unsubscribe removed the row, second unsubscribe reported removed=false",
+    );
+  } finally {
+    await stopServer(child);
+    cleanupSandboxHome(home);
+  }
+}
+
+/** `--break subscribe-unsubscribe`: patches the BUILT `dist/server/routes/push.route.js`,
+ * replacing the single `removePushSubscription(endpointResult.endpoint)` call with a sentinel
+ * endpoint so the real unsubscribe deletes the wrong row, requires the SAME check function the
+ * real run uses to report the surviving-row violation by name (TRIP leg), restores the captured
+ * bytes unconditionally in a `finally`, then re-runs the same check and requires a clean pass
+ * (RESTORE leg). `assertBuilt()` is called once before the mutation so its memoized `headBuild`
+ * short-circuits the check's own internal `assertBuilt()` call and never rebuilds over the
+ * mutated file. */
+async function runBreakSubscribeUnsubscribe() {
+  assertBuilt();
+  const distPath = join(REPO_ROOT, "dist", "server", "routes", "push.route.js");
+  const original = readFileSync(distPath, "utf8");
+  const target = "removePushSubscription(endpointResult.endpoint)";
+  const occurrences = original.split(target).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `refusing to break subscribe-unsubscribe: expected exactly 1 occurrence of ${JSON.stringify(target)} in ${distPath}, found ${occurrences}`,
+    );
+  }
+
+  const tripViolations = [];
+  try {
+    const mutated = original.replace(
+      target,
+      'removePushSubscription("panel-108-break-sentinel")',
+    );
+    writeFileSync(distPath, mutated);
+
+    await checkSubscribeUnsubscribe(tripViolations);
+  } finally {
+    writeFileSync(distPath, original);
+  }
+  console.log(
+    `\n--break subscribe-unsubscribe TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+  );
+  const tripFired = tripViolations.some((v) =>
+    v.includes("row still present after unsubscribe"),
+  );
+
+  const restoreViolations = [];
+  await checkSubscribeUnsubscribe(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break subscribe-unsubscribe RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS registries. Every later plan in this phase appends here.
 // ---------------------------------------------------------------------------
 
@@ -913,6 +1181,8 @@ const CHECKS = {
   "sw-dev-no-cache": (violations) => checkSwDevNoCache(violations),
   "vapid-persists": (violations) => checkVapidPersists(violations),
   "push-table-schema": (violations) => checkPushTableSchema(violations),
+  "subscribe-unsubscribe": (violations) =>
+    checkSubscribeUnsubscribe(violations),
 };
 
 const BREAKS = {
@@ -921,6 +1191,7 @@ const BREAKS = {
   "sw-dev-no-cache": runBreakSwDevNoCache,
   "vapid-persists": runBreakVapidPersists,
   "push-table-schema": runBreakPushTableSchema,
+  "subscribe-unsubscribe": runBreakSubscribeUnsubscribe,
 };
 
 // ---------------------------------------------------------------------------
