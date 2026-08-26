@@ -101,6 +101,35 @@
  *     calls `Notification.requestPermission()` once, unconditionally, on every mount, for desktop
  *     notifications. legB instead compares that call's COUNT immediately before vs. after the
  *     dispatched click, proving the click-driven subscribe path itself adds zero new calls.
+ *   - `ios-guidance-branch` proven able to fail (Plan 06): neutering `isIOSDevice` in `push.ts` to
+ *     unconditionally `return false`, rebuilding, and re-running the same check against a real
+ *     booted sandbox server and real headless Chrome produced, verbatim:
+ *     `ios-guidance-branch: leg1 (iPhone) expected labelText exactly "Add to your Home Screen to
+ *     enable push", got "Push notifications (this device)"`
+ *     `ios-guidance-branch: leg1 (iPhone) expected listItems exactly [...four steps...], got []`
+ *     `ios-guidance-branch: leg1 (iPhone) expected zero buttons, got ["Enable push
+ *     notifications"]`
+ *     `ios-guidance-branch: leg2 (iPad masquerade) expected labelText exactly "Add to your Home
+ *     Screen to enable push", got "Push notifications (this device)"`
+ *     `ios-guidance-branch: leg2 (iPad masquerade) expected listItems exactly [...four steps...],
+ *     got []`
+ *     `ios-guidance-branch: leg2 (iPad masquerade) expected zero buttons, got ["Enable push
+ *     notifications"]`
+ *     Under-detecting BOTH the real iPhone UA and the iPadOS desktop-UA masquerade fell through to
+ *     the normal enable control on a device that cannot actually subscribe, exactly the silent
+ *     failure PUSH-07 forbids. The RESTORE leg re-ran clean (`--break ios-guidance-branch RESTORE
+ *     leg: PASS`) and `git diff --quiet` on `push.ts` confirmed a byte-identical restore. NOTE:
+ *     legs 1 and 2 assert only the absence of "register"/"subscribe" from `window.__pushCalls`,
+ *     not "requestPermission", for the identical `useTransitionNotifications` reason noted above
+ *     for `push-prompt-on-click-only`. NOTE: leg 3's standalone state is seeded by stubbing
+ *     `navigator.standalone = true` via an init script, not
+ *     `Emulation.setEmulatedMedia({ features: [{ name: "display-mode", value: "standalone" }] })`
+ *     as this plan's interfaces named - that CDP call was tried first and confirmed (against a
+ *     working `prefers-color-scheme` override through the same endpoint) to accept the
+ *     `display-mode` feature without error while never actually changing
+ *     `matchMedia("(display-mode: standalone)").matches` on this Chrome build. Stubbing
+ *     `navigator.standalone`, the other half of the shipped hook's own OR'd boolean, is a faithful
+ *     substitute for the same real-device signal, not a weaker one.
  *
  * ASSUMPTION EVIDENCE (Plan 03). `node scripts/panel-109.mjs --probe fcm-egress` was run 13 times
  * against headless Chrome with a real, unmocked network path while authoring and hardening this
@@ -566,8 +595,20 @@ async function pollUntilTruthy(cdp, sessionId, expression, timeoutMs) {
  * navigation so it runs ahead of every app script. Returns the new `sessionId`.
  * @remarks Navigates from `about:blank` rather than passing the sandbox URL to
  * `Target.createTarget` directly, since `Page.addScriptToEvaluateOnNewDocument` must be installed
- * on the target before the real navigation starts. */
-async function seedPage(cdp, { permission, initScript }) {
+ * on the target before the real navigation starts. `userAgent`/`platform` and `touchEmulation` are
+ * optional device-shape overrides (Plan 06's iOS/iPad legs), applied before `Page.navigate` so
+ * `navigator.userAgent`/`platform`/`maxTouchPoints` already report the emulated shape on first
+ * paint. `Emulation.setEmulatedMedia({ features: [{ name: "display-mode", ... }] })` was tried and
+ * rejected for the standalone leg: verified against this Chrome build that it accepts the call
+ * without error but never changes `matchMedia("(display-mode: standalone)").matches` (confirmed
+ * `prefers-color-scheme` DOES apply via the same endpoint, isolating this to `display-mode`
+ * specifically not being a supported override feature) - the standalone leg instead stubs
+ * `navigator.standalone` via `initScript`, the other half of the same OR'd boolean the shipped
+ * hook already reads. */
+async function seedPage(
+  cdp,
+  { permission, initScript, userAgent, platform, touchEmulation },
+) {
   const origin = `http://127.0.0.1:${SANDBOX_PORT}`;
   const { targetId } = await cdp.send("Target.createTarget", {
     url: "about:blank",
@@ -583,6 +624,20 @@ async function seedPage(cdp, { permission, initScript }) {
     { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false },
     sessionId,
   );
+  if (userAgent) {
+    await cdp.send(
+      "Emulation.setUserAgentOverride",
+      { userAgent, platform },
+      sessionId,
+    );
+  }
+  if (touchEmulation) {
+    await cdp.send(
+      "Emulation.setTouchEmulationEnabled",
+      { enabled: true, maxTouchPoints: 5 },
+      sessionId,
+    );
+  }
   await cdp.send("Browser.setPermission", {
     origin,
     permission: { name: "notifications" },
@@ -1940,6 +1995,259 @@ async function runBreakSubscribeRoundTrip() {
 }
 
 // ---------------------------------------------------------------------------
+// ios-guidance-branch (Plan 06): proves the `ios-needs-install` branch renders
+// on every device shape that reaches it - a real iPhone UA, AND the iPadOS
+// desktop-UA masquerade a plain regex silently misses - and that the same
+// device in standalone mode takes the normal enable-control branch instead.
+// ---------------------------------------------------------------------------
+
+const IOS_GUIDANCE_LABEL = "Add to your Home Screen to enable push";
+const IOS_GUIDANCE_STEPS = [
+  "1. Tap the Share icon in Safari's toolbar.",
+  '2. Tap "Add to Home Screen".',
+  "3. Open Dispatch from your Home Screen.",
+  "4. Enable push notifications from Settings there.",
+];
+const IPHONE_USER_AGENT =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
+const IPAD_MASQUERADE_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15";
+
+/** Installed via `Page.addScriptToEvaluateOnNewDocument` for leg 3: defines the iOS-Safari-only
+ * `navigator.standalone` property `usePushSubscription`'s own `standalone` boolean ORs against.
+ * @remarks `Emulation.setEmulatedMedia({ features: [{ name: "display-mode", value: "standalone"
+ * }] })`, the CDP mechanism named in this plan's interfaces, was tried first and rejected: it
+ * accepts the call without error but leaves `matchMedia("(display-mode: standalone)").matches`
+ * unchanged on this Chrome build (`prefers-color-scheme` DOES apply through the identical
+ * endpoint, isolating the gap to `display-mode` specifically). Stubbing the real iOS API this
+ * exact branch also reads is a faithful substitute, not a weaker one. */
+const NAVIGATOR_STANDALONE_INIT_SCRIPT = `
+(() => {
+  Object.defineProperty(navigator, "standalone", {
+    value: true,
+    configurable: true,
+  });
+})();
+`;
+
+/** Shared assertion set for leg 1 (real iPhone) and leg 2 (iPad masquerade): the guidance label
+ * and four numbered steps render byte exact, zero buttons render (there is nothing to click on a
+ * device that cannot subscribe), and neither `register` nor `subscribe` was recorded, proving the
+ * branch is reached without ever touching a push call that could not succeed on this device
+ * anyway.
+ * @remarks Deliberately does not assert `requestPermission` absent: the pre-existing, unrelated
+ * `useTransitionNotifications` hook (ATTN-01, v0.2 phase 08) calls
+ * `Notification.requestPermission()` once, unconditionally, on every mount for desktop
+ * notifications, matching the same scoping `push-prompt-on-click-only` (Plan 05) already
+ * established for this exact recorder. */
+function assertIosGuidanceLeg(violations, legName, row, pushCalls) {
+  if (!row.found) {
+    violations.push(
+      `ios-guidance-branch: ${legName} - the push row was never found`,
+    );
+    return;
+  }
+  if (row.labelText !== IOS_GUIDANCE_LABEL) {
+    violations.push(
+      `ios-guidance-branch: ${legName} expected labelText exactly ${JSON.stringify(IOS_GUIDANCE_LABEL)}, got ${JSON.stringify(row.labelText)}`,
+    );
+  }
+  if (JSON.stringify(row.listItems) !== JSON.stringify(IOS_GUIDANCE_STEPS)) {
+    violations.push(
+      `ios-guidance-branch: ${legName} expected listItems exactly ${JSON.stringify(IOS_GUIDANCE_STEPS)}, got ${JSON.stringify(row.listItems)}`,
+    );
+  }
+  if (row.buttons.length !== 0) {
+    violations.push(
+      `ios-guidance-branch: ${legName} expected zero buttons, got ${JSON.stringify(row.buttons)}`,
+    );
+  }
+  const pushApiCalls = Array.isArray(pushCalls)
+    ? pushCalls.filter((c) => c === "register" || c === "subscribe")
+    : pushCalls;
+  if (!Array.isArray(pushCalls) || pushApiCalls.length !== 0) {
+    violations.push(
+      `ios-guidance-branch: ${legName} expected no "register" or "subscribe" call recorded, got ${JSON.stringify(pushCalls)}`,
+    );
+  }
+}
+
+async function checkIosGuidanceBranch(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("ios-guidance");
+  let server;
+  let chromeChild;
+  let cdp;
+  try {
+    server = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+    chromeChild = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    // Leg 1: a real iPhone outside standalone mode.
+    const sessionId1 = await seedPage(cdp, {
+      permission: "prompt",
+      initScript: PUSH_CALL_RECORDER_INIT_SCRIPT,
+      userAgent: IPHONE_USER_AGENT,
+      platform: "iPhone",
+    });
+    await openSettingsNotifications(cdp, sessionId1);
+    const row1 = await readPushRow(cdp, sessionId1);
+    const calls1 = await evalValue(cdp, sessionId1, `window.__pushCalls`);
+    console.log(
+      `ios-guidance-branch: leg1 (iPhone) labelText=${JSON.stringify(row1.labelText)} ` +
+        `listItems=${JSON.stringify(row1.listItems)} buttons=${JSON.stringify(row1.buttons)} ` +
+        `pushCalls=${JSON.stringify(calls1)}`,
+    );
+    assertIosGuidanceLeg(violations, "leg1 (iPhone)", row1, calls1);
+
+    // Leg 2: the iPadOS default desktop-UA masquerade, distinguished only by
+    // navigator.platform === "MacIntel" plus multi-touch capability.
+    const sessionId2 = await seedPage(cdp, {
+      permission: "prompt",
+      initScript: PUSH_CALL_RECORDER_INIT_SCRIPT,
+      userAgent: IPAD_MASQUERADE_USER_AGENT,
+      platform: "MacIntel",
+      touchEmulation: true,
+    });
+    const platform2 = await evalValue(cdp, sessionId2, `navigator.platform`);
+    const maxTouchPoints2 = await evalValue(
+      cdp,
+      sessionId2,
+      `navigator.maxTouchPoints`,
+    );
+    console.log(
+      `ios-guidance-branch: leg2 (iPad masquerade) emulation control navigator.platform=${JSON.stringify(platform2)} ` +
+        `navigator.maxTouchPoints=${maxTouchPoints2}`,
+    );
+    if (platform2 !== "MacIntel") {
+      violations.push(
+        `ios-guidance-branch: leg2 (iPad masquerade) emulation control failed, expected ` +
+          `navigator.platform exactly "MacIntel", got ${JSON.stringify(platform2)}`,
+      );
+    }
+    if (!(maxTouchPoints2 > 1)) {
+      violations.push(
+        `ios-guidance-branch: leg2 (iPad masquerade) emulation control failed, expected ` +
+          `navigator.maxTouchPoints > 1, got ${maxTouchPoints2}`,
+      );
+    }
+    await openSettingsNotifications(cdp, sessionId2);
+    const row2 = await readPushRow(cdp, sessionId2);
+    const calls2 = await evalValue(cdp, sessionId2, `window.__pushCalls`);
+    console.log(
+      `ios-guidance-branch: leg2 (iPad masquerade) labelText=${JSON.stringify(row2.labelText)} ` +
+        `listItems=${JSON.stringify(row2.listItems)} buttons=${JSON.stringify(row2.buttons)} ` +
+        `pushCalls=${JSON.stringify(calls2)}`,
+    );
+    assertIosGuidanceLeg(violations, "leg2 (iPad masquerade)", row2, calls2);
+
+    // Leg 3: the same iPhone shape, but installed (navigator.standalone true) -
+    // proving the guidance is a branch, not a permanent dead end.
+    const sessionId3 = await seedPage(cdp, {
+      permission: "prompt",
+      userAgent: IPHONE_USER_AGENT,
+      platform: "iPhone",
+      initScript: NAVIGATOR_STANDALONE_INIT_SCRIPT,
+    });
+    await openSettingsNotifications(cdp, sessionId3);
+    const row3 = await readPushRow(cdp, sessionId3);
+    console.log(
+      `ios-guidance-branch: leg3 (installed standalone) labelText=${JSON.stringify(row3.labelText)} ` +
+        `buttons=${JSON.stringify(row3.buttons)}`,
+    );
+    if (!row3.found) {
+      violations.push(
+        "ios-guidance-branch: leg3 (installed standalone) - the push row was never found",
+      );
+    } else {
+      if (row3.labelText !== "Push notifications (this device)") {
+        violations.push(
+          `ios-guidance-branch: leg3 (installed standalone) expected labelText exactly ` +
+            `"Push notifications (this device)", got ${JSON.stringify(row3.labelText)}`,
+        );
+      }
+      if (
+        JSON.stringify(row3.buttons) !==
+        JSON.stringify(["Enable push notifications"])
+      ) {
+        violations.push(
+          `ios-guidance-branch: leg3 (installed standalone) expected buttons exactly ` +
+            `["Enable push notifications"], got ${JSON.stringify(row3.buttons)}`,
+        );
+      }
+    }
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chromeChild);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await stopServer(server);
+    cleanupSandboxHome(home);
+  }
+}
+
+/** `--break ios-guidance-branch`: neuters `isIOSDevice` to unconditionally `return false`,
+ * rebuilds via `resetBuildCache()`, and requires BOTH leg 1 (real iPhone UA) and leg 2 (iPad
+ * masquerade) to report the missing-guidance violation by name - an under-detecting device check
+ * is exactly what makes an iOS user see a toggle that cannot work. Restores the captured bytes in
+ * a `finally` unconditionally. */
+async function runBreakIosGuidanceBranch() {
+  assertBuilt();
+  const pushTsPath = join(REPO_ROOT, "src/web/lib/push.ts");
+  const TARGET = `export function isIOSDevice(): boolean {
+  const ua = navigator.userAgent;
+  if (/iPad|iPhone|iPod/.test(ua)) return true;
+  return navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+}`;
+  const REPLACEMENT = `export function isIOSDevice(): boolean {
+  return false;
+}`;
+  const original = readFileSync(pushTsPath, "utf8");
+  const occurrences = original.split(TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel109: refusing to run --break ios-guidance-branch, expected the isIOSDevice function ` +
+        `body to occur exactly once in ${pushTsPath}, measured ${occurrences}. A miscounted anchor ` +
+        `would mutate the wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  try {
+    writeFileSync(pushTsPath, original.replace(TARGET, REPLACEMENT));
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkIosGuidanceBranch(tripViolations);
+    console.log(
+      `\n--break ios-guidance-branch TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    const leg1Tripped = tripViolations.some(
+      (v) => v.includes("leg1 (iPhone)") && v.includes("expected labelText"),
+    );
+    const leg2Tripped = tripViolations.some(
+      (v) =>
+        v.includes("leg2 (iPad masquerade)") &&
+        v.includes("expected labelText"),
+    );
+    tripFired = leg1Tripped && leg2Tripped;
+  } finally {
+    writeFileSync(pushTsPath, original);
+    resetBuildCache();
+  }
+
+  const restoreViolations = [];
+  await checkIosGuidanceBranch(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break ios-guidance-branch RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS registries. Every later plan in this phase appends here.
 // ---------------------------------------------------------------------------
 
@@ -1952,6 +2260,7 @@ const CHECKS = {
   "push-prompt-on-click-only": (violations) =>
     checkPushPromptOnClickOnly(violations),
   "subscribe-round-trip": (violations) => checkSubscribeRoundTrip(violations),
+  "ios-guidance-branch": (violations) => checkIosGuidanceBranch(violations),
 };
 
 const BREAKS = {
@@ -1960,6 +2269,7 @@ const BREAKS = {
   "denied-state-no-button": runBreakDeniedStateNoButton,
   "push-prompt-on-click-only": runBreakPushPromptOnClickOnly,
   "subscribe-round-trip": runBreakSubscribeRoundTrip,
+  "ios-guidance-branch": runBreakIosGuidanceBranch,
 };
 
 // ---------------------------------------------------------------------------
