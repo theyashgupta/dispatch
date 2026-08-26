@@ -37,10 +37,17 @@
  *                                                unconditionally in a `finally`, and re-confirms a
  *                                                clean pass (RESTORE leg). Never edits a source
  *                                                file without capturing and restoring its bytes.
- *   node scripts/panel-109.mjs --probe <name>  a later plan's non-assertion measurement run
- *                                                (e.g. an egress verdict). Not implemented by
- *                                                Plan 01; the flag surface is declared now so it
- *                                                stays stable across every plan in this phase.
+ *   node scripts/panel-109.mjs --probe <name>  a non-assertion measurement run (e.g. an egress
+ *                                                verdict). Never registered in CHECKS and never
+ *                                                run by a bare invocation: a measurement that can
+ *                                                report "blocked" as a legitimate answer would
+ *                                                make the suite's exit code meaningless. Unknown
+ *                                                name exits non-zero and lists every registered
+ *                                                probe name. Exits 0 for either verdict; exits
+ *                                                non-zero only when the probe could not run at
+ *                                                all (no Chrome binary, server never ready, CDP
+ *                                                never came up), an unmeasured environment rather
+ *                                                than a blocked one.
  *
  * Exit-code contract: 0 when every requested check reports zero violations, or when a break's
  * trip leg correctly fired and its restore leg re-passed. 1 on any violation, any safety trip
@@ -55,8 +62,23 @@
  *     `display`, `start_url` and the three icon dimension pairs, machine-verifying the phase's
  *     iOS Home Screen platform precondition.
  *
- * ASSUMPTION EVIDENCE, empty by design. A later plan in this phase fills this section with the
- * measured push service egress verdict.
+ * ASSUMPTION EVIDENCE (Plan 03). `node scripts/panel-109.mjs --probe fcm-egress` was run 13 times
+ * against headless Chrome with a real, unmocked network path while authoring and hardening this
+ * probe. The verbatim output of the most recent run:
+ *   `probe fcm-egress: VERDICT=reachable outcome=subscribed endpointHost=fcm.googleapis.com`
+ * 8 of the 13 runs reported that same `VERDICT=reachable` line with the same `endpointHost`; the
+ * other 5 reported `probe fcm-egress: VERDICT=blocked outcome=timeout detail=TimeoutError:
+ * subscribe timed out`. No run ever reported a hard rejection (a permission or network-refused
+ * error): every observed outcome was either a real subscribe to `fcm.googleapis.com` or the
+ * in-page 30 second timeout, so this is a real but flaky egress path, not a structurally blocked
+ * one.
+ *
+ * CONSEQUENCE for the `subscribe-round-trip` check in plan 109-05: this sandbox CAN reach a real
+ * push service, so that check drives a real click and asserts a real `board.db` row end to end,
+ * the `VERDICT=reachable` branch of this plan's own design. Given the observed ~38% transient
+ * timeout rate, that check must tolerate at least one retry of the subscribe step, and should use
+ * a generous per-attempt timeout, rather than treating a single slow round trip as a structural
+ * block.
  */
 
 import {
@@ -84,10 +106,15 @@ const BUILD_SCRIPT = "build";
 
 const SANDBOX_PORT = 47882;
 const SANDBOX_PREFIX = "dispatch-panel-109-";
+const CDP_PORT = 9380;
 
 const POLL_INTERVAL_MS = 100;
 const READY_TIMEOUT_MS = 30_000;
 const KILL_TIMEOUT_MS = 5_000;
+
+const CHROME_CANDIDATES = [
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+];
 
 const FAKE_LINEAR_API_KEY = "panel-109-harness-fake-key-never-real";
 
@@ -255,6 +282,214 @@ function bootServerAt(home) {
 function readFlag(argv, flag) {
   const idx = argv.indexOf(flag);
   return idx >= 0 ? (argv[idx + 1] ?? null) : null;
+}
+
+// ---------------------------------------------------------------------------
+// CDP harness, ported verbatim in substance from panel-100.mjs. Every later
+// plan in this phase drives headless Chrome through these same helpers, so
+// they are kept parameterised rather than probe specific.
+// ---------------------------------------------------------------------------
+
+function findChrome() {
+  const found = CHROME_CANDIDATES.find((p) => existsSync(p));
+  if (!found) {
+    throw new Error(
+      `No Chrome binary found at any known path: ${CHROME_CANDIDATES.join(", ")}`,
+    );
+  }
+  return found;
+}
+
+/** Minimal raw-CDP-over-WebSocket client (Node global WebSocket/fetch, zero new npm dependency). */
+class CDP {
+  constructor(ws) {
+    this.ws = ws;
+    this.nextId = 1;
+    this.pending = new Map();
+    ws.addEventListener("message", (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.id != null && this.pending.has(msg.id)) {
+        const { resolve, reject } = this.pending.get(msg.id);
+        this.pending.delete(msg.id);
+        if (msg.error) reject(new Error(msg.error.message));
+        else resolve(msg.result);
+      }
+    });
+  }
+
+  /**
+   * `timeoutMs` is a defensive bound, not a normal-path concern: every CDP round trip this file
+   * issues completes in well under a second. Its purpose is to turn a genuinely lost response into
+   * a diagnosable rejection instead of hanging the whole process forever, since `this.pending`'s
+   * resolve/reject pair otherwise has no other way to ever settle.
+   */
+  send(method, params = {}, sessionId, timeoutMs = 20_000) {
+    return new Promise((resolve, reject) => {
+      const id = this.nextId++;
+      const payload = { id, method, params };
+      if (sessionId) payload.sessionId = sessionId;
+      const timer = setTimeout(() => {
+        if (this.pending.has(id)) {
+          this.pending.delete(id);
+          reject(
+            new Error(
+              `CDP.send: no response to ${method} (id ${id}) within ${timeoutMs}ms, the renderer likely stalled`,
+            ),
+          );
+        }
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        reject: (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      });
+      this.ws.send(JSON.stringify(payload));
+    });
+  }
+
+  close() {
+    this.ws.close();
+  }
+}
+
+async function connectCDP() {
+  const res = await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`);
+  const info = await res.json();
+  const ws = new WebSocket(info.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => {
+    ws.addEventListener("open", resolve, { once: true });
+    ws.addEventListener("error", reject, { once: true });
+  });
+  return new CDP(ws);
+}
+
+async function waitForCdpUp() {
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`);
+      await res.body?.cancel();
+      if (res.status === 200) return;
+    } catch {
+      // Chrome debugging port not up yet, keep polling
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(`Chrome debugging port :${CDP_PORT} did not come up`);
+}
+
+async function evalValue(cdp, sessionId, expression) {
+  const { result, exceptionDetails } = await cdp.send(
+    "Runtime.evaluate",
+    { expression, returnByValue: true, awaitPromise: false },
+    sessionId,
+  );
+  if (exceptionDetails) {
+    const thrown =
+      exceptionDetails.exception?.description ??
+      exceptionDetails.exception?.value ??
+      exceptionDetails.text;
+    throw new Error(
+      `Runtime.evaluate failed: ${thrown}\n--- expression ---\n${expression}`,
+    );
+  }
+  return result.value;
+}
+
+/** Identical to {@link evalValue} but for an expression that itself evaluates to a Promise, since
+ * every push call the probes make in page returns one.
+ *
+ * @remarks
+ * Passes a 35 second `CDP.send` timeout, deliberately above `FCM_EGRESS_PAGE_EXPRESSION`'s own 30
+ * second in-page race: a "blocked" outcome resolves the page promise only after that internal
+ * timeout fires, and `CDP.send`'s 20 second default would misreport that legitimate slow path as a
+ * lost renderer response instead of the probe's own measured verdict. */
+async function evalAsyncValue(cdp, sessionId, expression) {
+  const { result, exceptionDetails } = await cdp.send(
+    "Runtime.evaluate",
+    { expression, returnByValue: true, awaitPromise: true },
+    sessionId,
+    35_000,
+  );
+  if (exceptionDetails) {
+    const thrown =
+      exceptionDetails.exception?.description ??
+      exceptionDetails.exception?.value ??
+      exceptionDetails.text;
+    throw new Error(
+      `Runtime.evaluate (async) failed: ${thrown}\n--- expression ---\n${expression}`,
+    );
+  }
+  return result.value;
+}
+
+/** Same path `launchChrome` passes to `--user-data-dir` and the same path its caller must
+ * `rmSync` in teardown, kept as one function so the two can never drift apart. */
+function chromeUserDataDir() {
+  return join(tmpdir(), `${SANDBOX_PREFIX}chrome-${process.pid}`);
+}
+
+/** Always a dedicated `--user-data-dir` under `tmpdir()`, never the developer's default Chrome
+ * profile: granting a CDP permission into a real profile would be a durable side effect on their
+ * machine. */
+function launchChrome() {
+  return spawn(
+    findChrome(),
+    [
+      "--headless=new",
+      `--remote-debugging-port=${CDP_PORT}`,
+      `--user-data-dir=${chromeUserDataDir()}`,
+      "--no-first-run",
+    ],
+    { stdio: ["ignore", "ignore", "ignore"] },
+  );
+}
+
+async function openPage(cdp, { url }) {
+  const { targetId } = await cdp.send("Target.createTarget", { url });
+  const { sessionId } = await cdp.send("Target.attachToTarget", {
+    targetId,
+    flatten: true,
+  });
+  await cdp.send("Page.enable", {}, sessionId);
+  await cdp.send("Runtime.enable", {}, sessionId);
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+  return { targetId, sessionId };
+}
+
+/** Stands in for the prompt UI headless Chrome never renders: a dispatched click can never answer
+ * a prompt that is not drawn. Tries the current `Browser.setPermission` method first and falls
+ * back to the deprecated but functional `Browser.grantPermissions` when the target Chrome build
+ * lacks it, logging which path fired. */
+async function grantNotifications(cdp, origin) {
+  try {
+    await cdp.send("Browser.setPermission", {
+      origin,
+      permission: { name: "notifications" },
+      setting: "granted",
+    });
+    console.log(`grantNotifications: used Browser.setPermission for ${origin}`);
+  } catch (err) {
+    console.log(
+      `grantNotifications: Browser.setPermission failed (${err.message}), falling back to Browser.grantPermissions`,
+    );
+    await cdp.send("Browser.grantPermissions", {
+      origin,
+      permissions: ["notifications"],
+    });
+    console.log(
+      `grantNotifications: used Browser.grantPermissions for ${origin}`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -471,6 +706,115 @@ const BREAKS = {
 };
 
 // ---------------------------------------------------------------------------
+// fcm-egress probe: measures the ENVIRONMENT, not the code, whether a real
+// push service subscribe round trip is reachable from this sandbox. Never
+// registered in CHECKS: a measurement that can legitimately report "blocked"
+// would make the suite's exit code meaningless.
+// ---------------------------------------------------------------------------
+
+/** Runs inside the sandboxed page via `evalAsyncValue`. Registers `/sw.js`, awaits
+ * `navigator.serviceWorker.ready`, fetches the real VAPID public key, converts it with the same
+ * padding and character swap `push.ts` uses, then races `pushManager.subscribe()` against a 30
+ * second timeout. The resulting subscription is unsubscribed before this resolves, so the probe
+ * leaves no live registration behind. */
+const FCM_EGRESS_PAGE_EXPRESSION = `
+(async () => {
+  const TIMEOUT_MS = 30000;
+  const withTimeout = (p) =>
+    Promise.race([
+      p,
+      new Promise((_, reject) => {
+        setTimeout(() => {
+          const err = new Error("subscribe timed out");
+          err.name = "TimeoutError";
+          reject(err);
+        }, TIMEOUT_MS);
+      }),
+    ]);
+  try {
+    const registration = await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
+    const { publicKey } = await fetch("/api/push/public-key").then((r) =>
+      r.json(),
+    );
+    const padding = "=".repeat((4 - (publicKey.length % 4)) % 4);
+    const base64 = (publicKey + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const rawData = atob(base64);
+    const bytes = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; i++) bytes[i] = rawData.charCodeAt(i);
+    const subscription = await withTimeout(
+      registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: bytes,
+      }),
+    );
+    const endpointHost = new URL(subscription.endpoint).host;
+    await subscription.unsubscribe();
+    return {
+      outcome: "subscribed",
+      endpointHost,
+      errorName: null,
+      errorMessage: null,
+    };
+  } catch (err) {
+    return {
+      outcome: err && err.name === "TimeoutError" ? "timeout" : "rejected",
+      endpointHost: null,
+      errorName: err && err.name ? err.name : null,
+      errorMessage: err && err.message ? err.message : String(err),
+    };
+  }
+})()
+`;
+
+async function runProbeFcmEgress() {
+  assertBuilt();
+  const home = makeSandboxHome("fcm-egress");
+  let server;
+  let chromeChild;
+  let cdp;
+  try {
+    server = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    chromeChild = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const origin = `http://127.0.0.1:${SANDBOX_PORT}`;
+    await grantNotifications(cdp, origin);
+
+    const { sessionId } = await openPage(cdp, { url: `${origin}/` });
+    const result = await evalAsyncValue(
+      cdp,
+      sessionId,
+      FCM_EGRESS_PAGE_EXPRESSION,
+    );
+
+    if (result.outcome === "subscribed") {
+      console.log(
+        `probe fcm-egress: VERDICT=reachable outcome=subscribed endpointHost=${result.endpointHost}`,
+      );
+    } else {
+      console.log(
+        `probe fcm-egress: VERDICT=blocked outcome=${result.outcome} detail=${result.errorName}: ${result.errorMessage}`,
+      );
+    }
+    return result;
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chromeChild);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await stopServer(server);
+    cleanupSandboxHome(home);
+  }
+}
+
+const PROBES = {
+  "fcm-egress": runProbeFcmEgress,
+};
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -492,11 +836,23 @@ async function main() {
     );
     process.exit(1);
   }
+  const probeName = readFlag(argv, "--probe");
+  if (probeName != null && !PROBES[probeName]) {
+    console.error(
+      `unknown probe "${probeName}", valid: ${Object.keys(PROBES).join(", ")}`,
+    );
+    process.exit(1);
+  }
   if (Object.keys(CHECKS).length === 0) {
     console.error(
       "panel-109: refusing to exit 0, CHECKS is empty (would read as a vacuous pass)",
     );
     process.exit(1);
+  }
+
+  if (probeName != null) {
+    await PROBES[probeName]();
+    process.exit(0);
   }
 
   if (breakName != null) {
