@@ -86,6 +86,21 @@
  *     Dropping the blocked branch fell through to the default branch's dead-button-free "Enable
  *     push notifications" control, exactly the failure the requirement bans. The RESTORE leg
  *     re-ran clean and `git diff --quiet` confirmed a byte-identical restore.
+ *   - `push-prompt-on-click-only` proven able to fail (Plan 05): rewriting `push.ts`'s load-time
+ *     refresh guard clause `Notification.permission !== "granted"` to `false`, rebuilding, and
+ *     re-running the same check against a real booted sandbox server and real headless Chrome
+ *     produced, verbatim:
+ *     `push-prompt-on-click-only: legC expected no "register" or "subscribe" call recorded for a
+ *     stale marker with non-granted permission, got ["register","requestPermission","subscribe"]`
+ *     A stale "on" marker with permission still "prompt" now called `register` and `subscribe` on
+ *     page load, exactly the drift the guard exists to prevent. The RESTORE leg re-ran clean
+ *     (`--break push-prompt-on-click-only RESTORE leg: PASS`) and `git diff --quiet` on `push.ts`
+ *     confirmed a byte-identical restore. NOTE: legA and legC deliberately assert only the
+ *     absence of "register"/"subscribe", not a blanket "requestPermission never recorded": the
+ *     pre-existing, unrelated `useTransitionNotifications` hook (ATTN-01, v0.2 phase 08) also
+ *     calls `Notification.requestPermission()` once, unconditionally, on every mount, for desktop
+ *     notifications. legB instead compares that call's COUNT immediately before vs. after the
+ *     dispatched click, proving the click-driven subscribe path itself adds zero new calls.
  *
  * ASSUMPTION EVIDENCE (Plan 03). `node scripts/panel-109.mjs --probe fcm-egress` was run 13 times
  * against headless Chrome with a real, unmocked network path while authoring and hardening this
@@ -724,6 +739,55 @@ async function readPushRow(cdp, sessionId) {
   );
 }
 
+/** Locates a button anywhere in the document by exact trimmed `textContent` and returns its
+ * bounding-rect center, or `null` if no such button is currently rendered. Shared by every real
+ * `Input.dispatchMouseEvent` click plans 109-05 and 109-06 issue. */
+async function findButtonRect(cdp, sessionId, label) {
+  return evalValue(
+    cdp,
+    sessionId,
+    `(() => {
+      const btn = [...document.querySelectorAll("button")].find(
+        (b) => b.textContent.trim() === ${JSON.stringify(label)},
+      );
+      if (!btn) return null;
+      const r = btn.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`,
+  );
+}
+
+/** Real `Input.dispatchMouseEvent` press then release at `point`, the one real-input click
+ * primitive this phase uses (`panel-100.mjs`'s own press/move/release recipe, without the
+ * intermediate moves a plain click needs none of), reserved for the Enable/Disable push buttons
+ * whose click-driven-only trust boundary this phase exists to prove. */
+async function dispatchRealClick(cdp, sessionId, point) {
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mousePressed",
+      x: point.x,
+      y: point.y,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseReleased",
+      x: point.x,
+      y: point.y,
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+}
+
 /** Installed via `Page.addScriptToEvaluateOnNewDocument` for the "live subscription" leg: stubs
  * only `navigator.serviceWorker.getRegistration`, the one browser API boundary
  * `readPushSubscription` reads, and nothing in the app's own hook, derivation or render path. */
@@ -1272,6 +1336,287 @@ async function runBreakDeniedStateNoButton() {
 }
 
 // ---------------------------------------------------------------------------
+// push-prompt-on-click-only (Plan 05): proves PUSH-01's negative half. Three
+// legs, all against real wrapped browser push APIs: a fresh visitor's load
+// calls nothing, a real dispatched click reaches register then subscribe and
+// never requestPermission, and a stale "on" marker with a non-granted
+// permission still calls nothing on load.
+// ---------------------------------------------------------------------------
+
+/** Installed via `Page.addScriptToEvaluateOnNewDocument` on every target this check opens.
+ * WRAPS (never replaces) the three browser push APIs whose call site is the entire PUSH-01
+ * negative claim: capture the original, push a label onto `window.__pushCalls`, then delegate to
+ * the original. A stub that swallowed the call instead of delegating would make every leg of this
+ * check vacuous, since the app's own subscribe flow would silently stop working underneath it. */
+const PUSH_CALL_RECORDER_INIT_SCRIPT = `
+(() => {
+  window.__pushCalls = [];
+  const origRequestPermission = Notification.requestPermission.bind(Notification);
+  Notification.requestPermission = function (...args) {
+    window.__pushCalls.push("requestPermission");
+    return origRequestPermission(...args);
+  };
+  const origRegister = ServiceWorkerContainer.prototype.register;
+  ServiceWorkerContainer.prototype.register = function (...args) {
+    window.__pushCalls.push("register");
+    return origRegister.apply(this, args);
+  };
+  const origSubscribe = PushManager.prototype.subscribe;
+  PushManager.prototype.subscribe = function (...args) {
+    window.__pushCalls.push("subscribe");
+    return origSubscribe.apply(this, args);
+  };
+})();
+`;
+
+/** Leg C's init script: the call recorder above, plus writing the exact "previously enabled"
+ * marker `enablePush` itself writes (`dsp.push` = `"on"`), before any app script runs, so the app
+ * mounts believing push was already on while the seeded permission is `"prompt"`, not `"granted"`,
+ * the drift case where a marker-only load guard would wrongly re-subscribe. */
+const PUSH_STALE_MARKER_INIT_SCRIPT = `
+${PUSH_CALL_RECORDER_INIT_SCRIPT}
+localStorage.setItem("dsp.push", "on");
+`;
+
+const PUSH_CALL_SETTLE_MS = 750;
+const PUSH_CALL_POLL_TIMEOUT_MS = 15_000;
+
+async function checkPushPromptOnClickOnly(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("prompt-click");
+  let server;
+  let chromeChild;
+  let cdp;
+  try {
+    server = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+    chromeChild = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+    const origin = `http://127.0.0.1:${SANDBOX_PORT}`;
+
+    // Leg A: fresh visitor, no marker, permission "prompt" -> nothing calls a push API.
+    const sessionId = await seedPage(cdp, {
+      permission: "prompt",
+      initScript: PUSH_CALL_RECORDER_INIT_SCRIPT,
+    });
+    const shellReadyA = await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `!!document.querySelector('[aria-label="Sync filters"]')`,
+      SETTINGS_NAV_TIMEOUT_MS,
+    );
+    if (!shellReadyA) {
+      violations.push(
+        "push-prompt-on-click-only: legA - the app shell never rendered",
+      );
+      return;
+    }
+    await sleep(PUSH_CALL_SETTLE_MS);
+    await openSettingsNotifications(cdp, sessionId);
+    const rowA = await readPushRow(cdp, sessionId);
+    const callsA = await evalValue(cdp, sessionId, `window.__pushCalls`);
+    const registrationsA = await evalAsyncValue(
+      cdp,
+      sessionId,
+      `navigator.serviceWorker.getRegistrations().then((regs) => regs.length)`,
+    );
+    const permissionA = await evalValue(
+      cdp,
+      sessionId,
+      `Notification.permission`,
+    );
+    console.log(
+      `push-prompt-on-click-only: legA observed calls=${JSON.stringify(callsA)} ` +
+        `registrations=${registrationsA} permission=${JSON.stringify(permissionA)} ` +
+        `buttons=${JSON.stringify(rowA.buttons)}`,
+    );
+    if (
+      !Array.isArray(callsA) ||
+      callsA.includes("register") ||
+      callsA.includes("subscribe")
+    ) {
+      violations.push(
+        `push-prompt-on-click-only: legA expected no "register" or "subscribe" call recorded on a ` +
+          `fresh load, got ${JSON.stringify(callsA)}`,
+      );
+    }
+    if (registrationsA !== 0) {
+      violations.push(
+        `push-prompt-on-click-only: legA expected zero service worker registrations, got ${registrationsA}`,
+      );
+    }
+    if (permissionA !== "default") {
+      violations.push(
+        `push-prompt-on-click-only: legA expected Notification.permission exactly "default", got ${JSON.stringify(permissionA)}`,
+      );
+    }
+    if (
+      !rowA.found ||
+      JSON.stringify(rowA.buttons) !==
+        JSON.stringify(["Enable push notifications"])
+    ) {
+      violations.push(
+        `push-prompt-on-click-only: legA (positive control) expected the row's buttons exactly ` +
+          `["Enable push notifications"], got ${rowA.found ? JSON.stringify(rowA.buttons) : "(row not found)"}`,
+      );
+    }
+
+    // Leg B: the real click, same page/session as leg A. The grant is applied only now, after
+    // leg A already observed Notification.permission === "default", so the ordering claim rests
+    // on an observation taken before the grant, never on the grant itself.
+    //
+    // requestPermission's COUNT (not its mere presence) is what legB compares before vs. after
+    // the click: this app's pre-existing, unrelated useTransitionNotifications hook (ATTN-01, a
+    // desktop-notification feature from v0.2 phase 08) also calls Notification.requestPermission
+    // once, unconditionally, on every mount, independent of push and out of this plan's scope to
+    // change. A blanket "never recorded" ban would false-positive against that legitimate call on
+    // every single leg; comparing the count immediately before the click to the count after still
+    // proves the actual claim this leg exists for, that the click-driven subscribe path itself
+    // never triggers an ADDITIONAL requestPermission call of its own.
+    const requestPermissionCountBeforeClick = (
+      Array.isArray(callsA) ? callsA : []
+    ).filter((c) => c === "requestPermission").length;
+    await grantNotifications(cdp, origin);
+    const enableRect = await findButtonRect(
+      cdp,
+      sessionId,
+      "Enable push notifications",
+    );
+    if (!enableRect) {
+      violations.push(
+        "push-prompt-on-click-only: legB - the Enable push notifications button was not found before dispatching the click",
+      );
+    } else {
+      await dispatchRealClick(cdp, sessionId, enableRect);
+      const deadline = Date.now() + PUSH_CALL_POLL_TIMEOUT_MS;
+      let callsB = null;
+      while (Date.now() < deadline) {
+        callsB = await evalValue(cdp, sessionId, `window.__pushCalls`);
+        if (callsB.includes("register") && callsB.includes("subscribe")) break;
+        await sleep(POLL_INTERVAL_MS);
+      }
+      console.log(
+        `push-prompt-on-click-only: legB observed calls=${JSON.stringify(callsB)} ` +
+          `(requestPermission count before click: ${requestPermissionCountBeforeClick})`,
+      );
+      if (
+        !Array.isArray(callsB) ||
+        !callsB.includes("register") ||
+        !callsB.includes("subscribe")
+      ) {
+        violations.push(
+          `push-prompt-on-click-only: legB expected window.__pushCalls to contain both "register" ` +
+            `and "subscribe" within ${PUSH_CALL_POLL_TIMEOUT_MS}ms of the click, got ${JSON.stringify(callsB)}`,
+        );
+      } else {
+        if (callsB.indexOf("register") > callsB.indexOf("subscribe")) {
+          violations.push(
+            `push-prompt-on-click-only: legB expected "register" to be recorded before "subscribe", got ${JSON.stringify(callsB)}`,
+          );
+        }
+        const requestPermissionCountAfterClick = callsB.filter(
+          (c) => c === "requestPermission",
+        ).length;
+        if (
+          requestPermissionCountAfterClick !== requestPermissionCountBeforeClick
+        ) {
+          violations.push(
+            `push-prompt-on-click-only: legB expected the click-driven subscribe path to add zero ` +
+              `NEW "requestPermission" calls (before: ${requestPermissionCountBeforeClick}, after: ` +
+              `${requestPermissionCountAfterClick}), got ${JSON.stringify(callsB)}`,
+          );
+        }
+      }
+    }
+
+    // Leg C: fresh target, stale "on" marker, permission still "prompt" -> the drift case.
+    const sessionIdC = await seedPage(cdp, {
+      permission: "prompt",
+      initScript: PUSH_STALE_MARKER_INIT_SCRIPT,
+    });
+    const shellReadyC = await pollUntilTruthy(
+      cdp,
+      sessionIdC,
+      `!!document.querySelector('[aria-label="Sync filters"]')`,
+      SETTINGS_NAV_TIMEOUT_MS,
+    );
+    if (!shellReadyC) {
+      violations.push(
+        "push-prompt-on-click-only: legC - the app shell never rendered",
+      );
+      return;
+    }
+    await sleep(PUSH_CALL_SETTLE_MS);
+    const callsC = await evalValue(cdp, sessionIdC, `window.__pushCalls`);
+    console.log(
+      `push-prompt-on-click-only: legC observed calls=${JSON.stringify(callsC)}`,
+    );
+    if (
+      !Array.isArray(callsC) ||
+      callsC.includes("register") ||
+      callsC.includes("subscribe")
+    ) {
+      violations.push(
+        `push-prompt-on-click-only: legC expected no "register" or "subscribe" call recorded for a ` +
+          `stale marker with non-granted permission, got ${JSON.stringify(callsC)}`,
+      );
+    }
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chromeChild);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await stopServer(server);
+    cleanupSandboxHome(home);
+  }
+}
+
+/** `--break push-prompt-on-click-only`: mutates `push.ts`'s load-time refresh guard clause
+ * (`Notification.permission !== "granted"` -> `false`), rebuilds via `resetBuildCache()`, and
+ * requires leg C's violation by name (calls recorded on a load with a stale marker but no live
+ * permission). Restores the captured bytes in a `finally` unconditionally. */
+async function runBreakPushPromptOnClickOnly() {
+  assertBuilt();
+  const pushTsPath = join(REPO_ROOT, "src/web/lib/push.ts");
+  const TARGET = 'Notification.permission !== "granted"';
+  const REPLACEMENT = "false";
+  const original = readFileSync(pushTsPath, "utf8");
+  const occurrences = original.split(TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel109: refusing to run --break push-prompt-on-click-only, expected ${JSON.stringify(TARGET)} ` +
+        `to occur exactly once in ${pushTsPath}, measured ${occurrences}. A miscounted anchor would ` +
+        `mutate the wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  try {
+    writeFileSync(pushTsPath, original.replace(TARGET, REPLACEMENT));
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkPushPromptOnClickOnly(tripViolations);
+    console.log(
+      `\n--break push-prompt-on-click-only TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) => v.includes("legC"));
+  } finally {
+    writeFileSync(pushTsPath, original);
+    resetBuildCache();
+  }
+
+  const restoreViolations = [];
+  await checkPushPromptOnClickOnly(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break push-prompt-on-click-only RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS registries. Every later plan in this phase appends here.
 // ---------------------------------------------------------------------------
 
@@ -1281,12 +1626,15 @@ const CHECKS = {
     checkPushRowStateMachine(violations),
   "denied-state-no-button": (violations) =>
     checkDeniedStateNoButton(violations),
+  "push-prompt-on-click-only": (violations) =>
+    checkPushPromptOnClickOnly(violations),
 };
 
 const BREAKS = {
   "pwa-manifest-assets": runBreakPwaManifestAssets,
   "push-row-state-machine": runBreakPushRowStateMachine,
   "denied-state-no-button": runBreakDeniedStateNoButton,
+  "push-prompt-on-click-only": runBreakPushPromptOnClickOnly,
 };
 
 // ---------------------------------------------------------------------------
