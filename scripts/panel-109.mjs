@@ -61,6 +61,20 @@
  *     "browser"` against a real booted sandbox server. A clean run reported the observed
  *     `display`, `start_url` and the three icon dimension pairs, machine-verifying the phase's
  *     iOS Home Screen platform precondition.
+ *   - `push-row-state-machine` proven able to fail (Plan 04): rewriting `SettingsScreen.tsx`'s
+ *     enabled-state comparison from `hasSubscription === true` to `hasSubscription === false`,
+ *     rebuilding, and re-running the same check against a real booted sandbox server and real
+ *     headless Chrome produced, verbatim:
+ *     `push-row-state-machine: leg2 (enabled) expected buttons exactly ["Disable push
+ *     notifications"], got ["Enable push notifications"]`
+ *     `push-row-state-machine: leg2 (enabled) expected statusText exactly "Push enabled - this
+ *     device will get a push notification when a card needs your input, even with the tab
+ *     closed.", got null`
+ *     `push-row-state-machine: leg2 (enabled) expected statusColor exactly "var(--status-ok)",
+ *     got null`
+ *     The RESTORE leg re-ran clean (`--break push-row-state-machine RESTORE leg: PASS`) after the
+ *     captured bytes were restored, and `git diff --quiet` on `SettingsScreen.tsx` confirmed a
+ *     byte-identical restore.
  *
  * ASSUMPTION EVIDENCE (Plan 03). `node scripts/panel-109.mjs --probe fcm-egress` was run 13 times
  * against headless Chrome with a real, unmocked network path while authoring and hardening this
@@ -493,6 +507,244 @@ async function grantNotifications(cdp, origin) {
 }
 
 // ---------------------------------------------------------------------------
+// Settings > Notifications navigation and row reading helpers, reused by
+// plans 109-05 and 109-06 in addition to this plan's two checks.
+// ---------------------------------------------------------------------------
+
+/** Tracks the targetId of the last page `seedPage` handed out, so the NEXT `seedPage` call can
+ * close it once the new target has confirmed navigation, matching `panel-100.mjs`'s
+ * fresh-target-per-scenario pattern. */
+let lastSeededTargetId = null;
+
+/** Polls `expression` via {@link evalValue} until it is truthy, swallowing evaluate errors so a
+ * transient stale execution context (e.g. immediately after `Page.navigate`) reads as "not ready
+ * yet" instead of aborting the poll. Returns `null` on timeout rather than throwing, so callers
+ * can attach their own diagnostic message. */
+async function pollUntilTruthy(cdp, sessionId, expression, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const value = await evalValue(cdp, sessionId, expression);
+      if (value) return value;
+    } catch {
+      // transient (e.g. navigation in flight), keep polling
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return null;
+}
+
+/** Opens a fresh page at the sandbox root, closing the previously seeded target, applying the
+ * requested notification permission, and, when `initScript` is given, installing it BEFORE
+ * navigation so it runs ahead of every app script. Returns the new `sessionId`.
+ * @remarks Navigates from `about:blank` rather than passing the sandbox URL to
+ * `Target.createTarget` directly, since `Page.addScriptToEvaluateOnNewDocument` must be installed
+ * on the target before the real navigation starts. */
+async function seedPage(cdp, { permission, initScript }) {
+  const origin = `http://127.0.0.1:${SANDBOX_PORT}`;
+  const { targetId } = await cdp.send("Target.createTarget", {
+    url: "about:blank",
+  });
+  const { sessionId } = await cdp.send("Target.attachToTarget", {
+    targetId,
+    flatten: true,
+  });
+  await cdp.send("Page.enable", {}, sessionId);
+  await cdp.send("Runtime.enable", {}, sessionId);
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+  await cdp.send("Browser.setPermission", {
+    origin,
+    permission: { name: "notifications" },
+    setting: permission,
+  });
+  if (initScript) {
+    await cdp.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      { source: initScript },
+      sessionId,
+    );
+  }
+  await cdp.send("Page.navigate", { url: `${origin}/` }, sessionId);
+  const loaded = await pollUntilTruthy(
+    cdp,
+    sessionId,
+    `document.readyState === "complete"`,
+    READY_TIMEOUT_MS,
+  );
+  if (!loaded) {
+    throw new Error(
+      `seedPage: navigation to ${origin}/ never reached document.readyState "complete" within ${READY_TIMEOUT_MS}ms`,
+    );
+  }
+  if (lastSeededTargetId != null) {
+    await cdp
+      .send("Target.closeTarget", { targetId: lastSeededTargetId })
+      .catch(() => {});
+  }
+  lastSeededTargetId = targetId;
+  return sessionId;
+}
+
+const SETTINGS_NAV_TIMEOUT_MS = 15_000;
+
+/** Clicks through Settings > Notifications on an already-seeded page: the Settings trigger, then
+ * the "Notifications" section nav button, then waits for the push row's label span to exist.
+ * Throws with the last observed DOM state on timeout. Both clicks are synthetic `.click()` calls
+ * deliberately: this path only navigates and depends on no trusted user activation, reserving real
+ * input dispatch for the Enable button a later plan drives. */
+async function openSettingsNotifications(cdp, sessionId) {
+  const domSnapshot = async () => {
+    try {
+      return await evalValue(
+        cdp,
+        sessionId,
+        `document.body ? document.body.innerHTML.slice(0, 2000) : "(no body)"`,
+      );
+    } catch (err) {
+      return `(could not read DOM: ${err instanceof Error ? err.message : String(err)})`;
+    }
+  };
+
+  const trigger = await pollUntilTruthy(
+    cdp,
+    sessionId,
+    `!!document.querySelector('[aria-label="Sync filters"]')`,
+    SETTINGS_NAV_TIMEOUT_MS,
+  );
+  if (!trigger) {
+    throw new Error(
+      `openSettingsNotifications: Settings trigger [aria-label="Sync filters"] never appeared ` +
+        `within ${SETTINGS_NAV_TIMEOUT_MS}ms. Last observed DOM:\n${await domSnapshot()}`,
+    );
+  }
+  await evalValue(
+    cdp,
+    sessionId,
+    `document.querySelector('[aria-label="Sync filters"]').click()`,
+  );
+
+  const dialog = await pollUntilTruthy(
+    cdp,
+    sessionId,
+    `!!document.querySelector('div[role="dialog"][aria-label="Settings"]')`,
+    SETTINGS_NAV_TIMEOUT_MS,
+  );
+  if (!dialog) {
+    throw new Error(
+      `openSettingsNotifications: Settings dialog never appeared within ${SETTINGS_NAV_TIMEOUT_MS}ms ` +
+        `after clicking the trigger. Last observed DOM:\n${await domSnapshot()}`,
+    );
+  }
+
+  const navClicked = await evalValue(
+    cdp,
+    sessionId,
+    `(() => {
+      const btn = [...document.querySelectorAll('nav[aria-label="Settings sections"] button')]
+        .find((b) => b.textContent.trim() === "Notifications");
+      if (!btn) return false;
+      btn.click();
+      return true;
+    })()`,
+  );
+  if (!navClicked) {
+    const navLabels = await evalValue(
+      cdp,
+      sessionId,
+      `[...document.querySelectorAll('nav[aria-label="Settings sections"] button')].map((b) => b.textContent.trim())`,
+    );
+    throw new Error(
+      `openSettingsNotifications: no Settings section nav button with trimmed text ` +
+        `"Notifications" was found. Observed nav button labels: ${JSON.stringify(navLabels)}`,
+    );
+  }
+
+  const rowLabel = await pollUntilTruthy(
+    cdp,
+    sessionId,
+    `!!([...document.querySelectorAll("span")].find((s) =>
+      s.textContent === "Push notifications (this device)" ||
+      s.textContent === "Add to your Home Screen to enable push"
+    ))`,
+    SETTINGS_NAV_TIMEOUT_MS,
+  );
+  if (!rowLabel) {
+    throw new Error(
+      `openSettingsNotifications: the push row's label span never appeared within ` +
+        `${SETTINGS_NAV_TIMEOUT_MS}ms after navigating to Notifications. Last observed DOM:\n${await domSnapshot()}`,
+    );
+  }
+}
+
+/** Scrapes the rendered push row into a plain object. Returns `{ found: false }` rather than
+ * throwing when the row is absent, so a check can report a named violation instead of a stack
+ * trace. */
+async function readPushRow(cdp, sessionId) {
+  return evalValue(
+    cdp,
+    sessionId,
+    `
+    (() => {
+      const label = [...document.querySelectorAll("span")].find((s) =>
+        s.textContent === "Push notifications (this device)" ||
+        s.textContent === "Add to your Home Screen to enable push"
+      );
+      if (!label) return { found: false };
+      const row = label.parentElement;
+      const statusEl = row.querySelector('[role="status"]');
+      const alertEl = row.querySelector('[role="alert"]');
+      const dot = statusEl ? statusEl.querySelector('span[aria-hidden="true"]') : null;
+      return {
+        found: true,
+        labelText: label.textContent,
+        text: row.innerText,
+        buttons: [...row.querySelectorAll("button")].map((b) => b.textContent.trim()),
+        statusText: statusEl ? statusEl.textContent.trim() : null,
+        statusColor: dot ? dot.style.background : null,
+        alertText: alertEl ? alertEl.textContent.trim() : null,
+        listItems: [...row.querySelectorAll("li")].map((li) => li.textContent),
+      };
+    })()
+    `,
+  );
+}
+
+/** Installed via `Page.addScriptToEvaluateOnNewDocument` for the "live subscription" leg: stubs
+ * only `navigator.serviceWorker.getRegistration`, the one browser API boundary
+ * `readPushSubscription` reads, and nothing in the app's own hook, derivation or render path. */
+const ENABLED_SUBSCRIPTION_INIT_SCRIPT = `
+(() => {
+  const subscription = {
+    endpoint: "https://example.invalid/panel-109-state",
+    unsubscribe: async () => true,
+    toJSON: () => ({
+      endpoint: "https://example.invalid/panel-109-state",
+      keys: { p256dh: "x", auth: "y" },
+    }),
+  };
+  const registration = {
+    pushManager: {
+      getSubscription: async () => subscription,
+    },
+  };
+  navigator.serviceWorker.getRegistration = async () => registration;
+})();
+`;
+
+/** Installed via `Page.addScriptToEvaluateOnNewDocument` for the "push unsupported" leg: deletes
+ * `window.PushManager` while leaving `Notification` in place, so `isPushSupported()` reads false
+ * for the real reason (no PushManager) rather than a fabricated one. */
+const UNSUPPORTED_INIT_SCRIPT = `
+(() => {
+  delete window.PushManager;
+})();
+`;
+
+// ---------------------------------------------------------------------------
 // pwa-manifest-assets: boots a real sandbox production server and asserts,
 // over real HTTP, the parsed manifest field values and the four served
 // files' actual bytes, never file presence alone.
@@ -694,15 +946,198 @@ async function runBreakPwaManifestAssets() {
 }
 
 // ---------------------------------------------------------------------------
+// push-row-state-machine: pins the row's default, enabled and unsupported
+// branches to the real rendered DOM of a real build in real headless Chrome.
+// ---------------------------------------------------------------------------
+
+const PUSH_ROW_DEFAULT_COPY =
+  "Get a push notification when a card needs your input, even with the tab closed.";
+const PUSH_ROW_ENABLED_STATUS =
+  "Push enabled - this device will get a push notification when a card needs your input, even with the tab closed.";
+
+async function checkPushRowStateMachine(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("push-row-state");
+  let server;
+  let chromeChild;
+  let cdp;
+  try {
+    server = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+    chromeChild = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    // Leg 1: nothing subscribed, permission prompt -> the "default" branch.
+    const sessionId1 = await seedPage(cdp, { permission: "prompt" });
+    await openSettingsNotifications(cdp, sessionId1);
+    const row1 = await readPushRow(cdp, sessionId1);
+    console.log(
+      `push-row-state-machine: leg1 (default) observed buttons=${JSON.stringify(row1.buttons)} ` +
+        `statusText=${JSON.stringify(row1.statusText)} statusColor=${JSON.stringify(row1.statusColor)}`,
+    );
+    if (!row1.found) {
+      violations.push(
+        "push-row-state-machine: leg1 (default) - the push row was never found",
+      );
+    } else {
+      if (
+        JSON.stringify(row1.buttons) !==
+        JSON.stringify(["Enable push notifications"])
+      ) {
+        violations.push(
+          `push-row-state-machine: leg1 (default) expected buttons exactly ["Enable push notifications"], got ${JSON.stringify(row1.buttons)}`,
+        );
+      }
+      if (!row1.text.includes(PUSH_ROW_DEFAULT_COPY)) {
+        violations.push(
+          `push-row-state-machine: leg1 (default) expected row text to contain ${JSON.stringify(PUSH_ROW_DEFAULT_COPY)}, got ${JSON.stringify(row1.text)}`,
+        );
+      }
+      if (row1.statusText !== null) {
+        violations.push(
+          `push-row-state-machine: leg1 (default) expected statusText null, got ${JSON.stringify(row1.statusText)}`,
+        );
+      }
+      if (row1.alertText !== null) {
+        violations.push(
+          `push-row-state-machine: leg1 (default) expected alertText null, got ${JSON.stringify(row1.alertText)}`,
+        );
+      }
+    }
+
+    // Leg 2: live subscription, permission granted -> the "enabled" branch.
+    const sessionId2 = await seedPage(cdp, {
+      permission: "granted",
+      initScript: ENABLED_SUBSCRIPTION_INIT_SCRIPT,
+    });
+    await openSettingsNotifications(cdp, sessionId2);
+    const row2 = await readPushRow(cdp, sessionId2);
+    console.log(
+      `push-row-state-machine: leg2 (enabled) observed buttons=${JSON.stringify(row2.buttons)} ` +
+        `statusText=${JSON.stringify(row2.statusText)} statusColor=${JSON.stringify(row2.statusColor)}`,
+    );
+    if (!row2.found) {
+      violations.push(
+        "push-row-state-machine: leg2 (enabled) - the push row was never found",
+      );
+    } else {
+      if (
+        JSON.stringify(row2.buttons) !==
+        JSON.stringify(["Disable push notifications"])
+      ) {
+        violations.push(
+          `push-row-state-machine: leg2 (enabled) expected buttons exactly ["Disable push notifications"], got ${JSON.stringify(row2.buttons)}`,
+        );
+      }
+      if (row2.statusText !== PUSH_ROW_ENABLED_STATUS) {
+        violations.push(
+          `push-row-state-machine: leg2 (enabled) expected statusText exactly ${JSON.stringify(PUSH_ROW_ENABLED_STATUS)}, got ${JSON.stringify(row2.statusText)}`,
+        );
+      }
+      if (row2.statusColor !== "var(--status-ok)") {
+        violations.push(
+          `push-row-state-machine: leg2 (enabled) expected statusColor exactly "var(--status-ok)", got ${JSON.stringify(row2.statusColor)}`,
+        );
+      }
+    }
+
+    // Leg 3: push unsupported (window.PushManager deleted) -> the "unsupported" branch.
+    const sessionId3 = await seedPage(cdp, {
+      permission: "prompt",
+      initScript: UNSUPPORTED_INIT_SCRIPT,
+    });
+    await openSettingsNotifications(cdp, sessionId3);
+    const row3 = await readPushRow(cdp, sessionId3);
+    console.log(
+      `push-row-state-machine: leg3 (unsupported) observed text=${JSON.stringify(row3.text)} buttons=${JSON.stringify(row3.buttons)}`,
+    );
+    if (!row3.found) {
+      violations.push(
+        "push-row-state-machine: leg3 (unsupported) - the push row was never found",
+      );
+    } else {
+      if (!row3.text.includes("Not supported in this browser.")) {
+        violations.push(
+          `push-row-state-machine: leg3 (unsupported) expected row text to contain "Not supported in this browser.", got ${JSON.stringify(row3.text)}`,
+        );
+      }
+      if (row3.buttons.length !== 0) {
+        violations.push(
+          `push-row-state-machine: leg3 (unsupported) expected zero buttons, got ${JSON.stringify(row3.buttons)}`,
+        );
+      }
+    }
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chromeChild);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await stopServer(server);
+    cleanupSandboxHome(home);
+  }
+}
+
+/** `--break push-row-state-machine`: mutates `SettingsScreen.tsx`'s enabled-state comparison
+ * (`hasSubscription === true` -> `hasSubscription === false`), rebuilds via `resetBuildCache()`,
+ * and requires leg 2's violation by name. Restores the captured bytes in a `finally`
+ * unconditionally, so a thrown check error still leaves the source untouched. */
+async function runBreakPushRowStateMachine() {
+  assertBuilt();
+  const settingsPath = join(
+    REPO_ROOT,
+    "src/web/features/settings/SettingsScreen.tsx",
+  );
+  const TARGET = "hasSubscription === true";
+  const REPLACEMENT = "hasSubscription === false";
+  const original = readFileSync(settingsPath, "utf8");
+  const occurrences = original.split(TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel109: refusing to run --break push-row-state-machine, expected ${JSON.stringify(TARGET)} ` +
+        `to occur exactly once in ${settingsPath}, measured ${occurrences}. A miscounted anchor ` +
+        `would mutate the wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  try {
+    writeFileSync(settingsPath, original.replace(TARGET, REPLACEMENT));
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkPushRowStateMachine(tripViolations);
+    console.log(
+      `\n--break push-row-state-machine TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) => v.includes("leg2 (enabled)"));
+  } finally {
+    writeFileSync(settingsPath, original);
+    resetBuildCache();
+  }
+
+  const restoreViolations = [];
+  await checkPushRowStateMachine(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break push-row-state-machine RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS registries. Every later plan in this phase appends here.
 // ---------------------------------------------------------------------------
 
 const CHECKS = {
   "pwa-manifest-assets": (violations) => checkPwaManifestAssets(violations),
+  "push-row-state-machine": (violations) =>
+    checkPushRowStateMachine(violations),
 };
 
 const BREAKS = {
   "pwa-manifest-assets": runBreakPwaManifestAssets,
+  "push-row-state-machine": runBreakPushRowStateMachine,
 };
 
 // ---------------------------------------------------------------------------
