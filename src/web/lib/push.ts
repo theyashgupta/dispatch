@@ -139,20 +139,26 @@ export async function enablePush(): Promise<PushEnableResult> {
 }
 
 /**
- * Unsubscribe this device from push.
+ * Unsubscribe this device from push, resolving `false` when the unsubscribe fails.
  *
  * @remarks
- * Never touches the browser permission: it cannot be revoked programmatically, and stays
- * granted by design. The blocked/denied row state is a separate branch.
+ * Never rejects: `unsubscribe()` may reject when the push service is unreachable, and a
+ * rejection here would strand the caller's pending UI state forever. Never touches the browser
+ * permission: it cannot be revoked programmatically, and stays granted by design.
  */
-export async function disablePush(): Promise<void> {
+export async function disablePush(): Promise<boolean> {
   const subscription = await readPushSubscription();
   if (subscription == null) {
     writeMarker(false);
-    return;
+    return true;
   }
   const endpoint = subscription.endpoint;
-  await subscription.unsubscribe();
+  try {
+    await subscription.unsubscribe();
+  } catch {
+    writeMarker(false);
+    return false;
+  }
   try {
     await fetch("/api/push/unsubscribe", {
       method: "POST",
@@ -161,6 +167,7 @@ export async function disablePush(): Promise<void> {
     });
   } catch {}
   writeMarker(false);
+  return true;
 }
 
 /**

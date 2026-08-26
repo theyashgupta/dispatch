@@ -2099,11 +2099,12 @@ function usePushSubscription(): {
   const disable = useCallback(() => {
     setPending("disabling");
     setError(null);
-    void disablePush().then(() => {
+    void disablePush().then((ok) => {
       void readPushSubscription().then((subscription) => {
         setHasSubscription(subscription != null);
       });
       setPending(null);
+      if (!ok) setError("generic");
     });
   }, []);
 
