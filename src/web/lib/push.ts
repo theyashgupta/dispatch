@@ -177,7 +177,9 @@ export async function disablePush(): Promise<boolean> {
  * Guards on the marker AND the live granted permission before touching any push API. A
  * marker-only guard would re-subscribe a user who revoked permission outside the app, which on
  * some browsers re-triggers the native prompt on page load, PUSH-01's exact failure condition.
- * Every failure here is swallowed silently: this is a background refresh, not a user action.
+ * Transient failures are swallowed silently (a background refresh, not a user action), but a
+ * refused subscribe POST (e.g. the subscription cap) is terminal: the subscription is unwound
+ * and the marker cleared so the Settings row stops claiming push is on.
  */
 export async function refreshPushSubscription(): Promise<void> {
   if (
@@ -196,10 +198,14 @@ export async function refreshPushSubscription(): Promise<void> {
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(publicKey),
     });
-    await fetch("/api/push/subscribe", {
+    const subscribeRes = await fetch("/api/push/subscribe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(subscription.toJSON()),
     });
+    if (!subscribeRes.ok) {
+      await subscription.unsubscribe().catch(() => {});
+      writeMarker(false);
+    }
   } catch {}
 }
