@@ -339,6 +339,42 @@ function resetBuildCache() {
   headBuild = null;
 }
 
+/**
+ * Break runs mutate real tracked files for minutes (a full rebuild plus Chrome-driven legs)
+ * before their `finally` restore runs, and Node's default SIGINT/SIGTERM handling terminates
+ * the process without unwinding those in-flight async frames, silently leaving the sabotage
+ * bytes on disk. Every break runner registers its captured original here BEFORE mutating and
+ * unregisters AFTER its `finally` restore, so a Ctrl-C mid-break still restores the bytes.
+ */
+const pendingRestores = new Map();
+
+function restoreOnSignal() {
+  for (const [path, bytes] of pendingRestores) {
+    try {
+      writeFileSync(path, bytes);
+    } catch {
+      // best effort: an unwritable path here has no further recovery
+    }
+  }
+  process.exit(1);
+}
+
+function registerRestore(path, bytes) {
+  if (pendingRestores.size === 0) {
+    process.on("SIGINT", restoreOnSignal);
+    process.on("SIGTERM", restoreOnSignal);
+  }
+  pendingRestores.set(path, bytes);
+}
+
+function unregisterRestore(path) {
+  pendingRestores.delete(path);
+  if (pendingRestores.size === 0) {
+    process.off("SIGINT", restoreOnSignal);
+    process.off("SIGTERM", restoreOnSignal);
+  }
+}
+
 /** `entry` is REALPATH'd before being handed to `node`, the macOS /var -> /private/var trap. */
 function bootServerAt(home) {
   assertBuilt();
@@ -1051,6 +1087,7 @@ async function runBreakPwaManifestAssets() {
   }
 
   let tripFired = false;
+  registerRestore(distManifestPath, original);
   try {
     writeFileSync(distManifestPath, original.replace(TARGET, REPLACEMENT));
 
@@ -1064,6 +1101,7 @@ async function runBreakPwaManifestAssets() {
     );
   } finally {
     writeFileSync(distManifestPath, original);
+    unregisterRestore(distManifestPath);
   }
 
   const restoreViolations = [];
@@ -1231,6 +1269,7 @@ async function runBreakPushRowStateMachine() {
   }
 
   let tripFired = false;
+  registerRestore(settingsPath, original);
   try {
     writeFileSync(settingsPath, original.replace(TARGET, REPLACEMENT));
     resetBuildCache();
@@ -1244,6 +1283,7 @@ async function runBreakPushRowStateMachine() {
   } finally {
     writeFileSync(settingsPath, original);
     resetBuildCache();
+    unregisterRestore(settingsPath);
   }
 
   const restoreViolations = [];
@@ -1360,6 +1400,7 @@ async function runBreakDeniedStateNoButton() {
   }
 
   let tripFired = false;
+  registerRestore(settingsPath, original);
   try {
     writeFileSync(settingsPath, original.replace(TARGET, REPLACEMENT));
     resetBuildCache();
@@ -1379,6 +1420,7 @@ async function runBreakDeniedStateNoButton() {
   } finally {
     writeFileSync(settingsPath, original);
     resetBuildCache();
+    unregisterRestore(settingsPath);
   }
 
   const restoreViolations = [];
@@ -1647,6 +1689,7 @@ async function runBreakPushPromptOnClickOnly() {
   }
 
   let tripFired = false;
+  registerRestore(pushTsPath, original);
   try {
     writeFileSync(pushTsPath, original.replace(TARGET, REPLACEMENT));
     resetBuildCache();
@@ -1660,6 +1703,7 @@ async function runBreakPushPromptOnClickOnly() {
   } finally {
     writeFileSync(pushTsPath, original);
     resetBuildCache();
+    unregisterRestore(pushTsPath);
   }
 
   const restoreViolations = [];
@@ -1967,6 +2011,7 @@ async function runBreakSubscribeRoundTrip() {
   }
 
   let tripFired = false;
+  registerRestore(pushTsPath, original);
   try {
     writeFileSync(pushTsPath, original.replace(TARGET, REPLACEMENT));
     resetBuildCache();
@@ -1982,6 +2027,7 @@ async function runBreakSubscribeRoundTrip() {
   } finally {
     writeFileSync(pushTsPath, original);
     resetBuildCache();
+    unregisterRestore(pushTsPath);
   }
 
   const restoreViolations = [];
@@ -2214,6 +2260,7 @@ async function runBreakIosGuidanceBranch() {
   }
 
   let tripFired = false;
+  registerRestore(pushTsPath, original);
   try {
     writeFileSync(pushTsPath, original.replace(TARGET, REPLACEMENT));
     resetBuildCache();
@@ -2235,6 +2282,7 @@ async function runBreakIosGuidanceBranch() {
   } finally {
     writeFileSync(pushTsPath, original);
     resetBuildCache();
+    unregisterRestore(pushTsPath);
   }
 
   const restoreViolations = [];
