@@ -75,6 +75,21 @@
  *     The RESTORE leg re-ran clean (`--break needs-input-trigger-fires RESTORE leg: PASS`) after
  *     the captured bytes were restored, and `git diff --quiet` on `parse.ts` confirmed a
  *     byte-identical restore.
+ *   - `push-envelope-decrypts` proven able to fail (Plan 04): removing the `dsaEncoding:
+ *     "ieee-p1363"` option from `signVapidJwt`'s `sign()` call inside
+ *     `src/server/services/domain/push-send.ts`, rebuilding, and re-running the same check
+ *     against a real booted sandbox server, a real detached tmux pane, and the real stub push
+ *     service produced, verbatim:
+ *     `push-envelope-decrypts: expected exactly 1 stub push request within 15000ms, observed 0`
+ *     `push-envelope-decrypts: no stub push request observed, cannot check its headers or body`
+ *     `push-envelope-decrypts: sandbox server log never contained a line matching "[push] send
+ *     201"`
+ *     `signVapidJwt`'s own `signature.length !== 64` assertion throws before the request is ever
+ *     sent once the signature reverts to Node's DER default (70-72 bytes, never 64), and the
+ *     per-row `try/catch` in `sendPushForCard` swallows that throw and logs `[push]
+ *     send-failed`, so the stub never observes a request at all. The RESTORE leg re-ran clean
+ *     (`--break push-envelope-decrypts RESTORE leg: PASS`) after the captured bytes were
+ *     restored, and `git diff --quiet` on `push-send.ts` confirmed a byte-identical restore.
  */
 
 import {
@@ -1244,6 +1259,233 @@ async function runBreakNeedsInputTriggerFires() {
   return { tripFired, restoreClean };
 }
 
+const PUSH_ENVELOPE_TICK_SLACK_MS = 15_000;
+const PUSH_LOG_TICK_SLACK_MS = 5_000;
+
+/** Makes a sandbox home, generates subscriber keys, starts the stub push service, seeds one card
+ * with a real tmux session and one subscription row pointed at the stub's `/ok/` path (`origin`
+ * set to the sandbox loopback host and port), boots the real server, drives a real `NEEDS_INPUT`
+ * marker with a unique reason, and asserts the resulting push request's headers, VAPID token and
+ * decrypted envelope against an independent RFC 8291/8292 receive-side implementation. Tears down
+ * the stub, the tmux pane, the server and the sandbox home in a `finally`. */
+async function checkPushEnvelopeDecrypts(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("push-envelope-decrypts");
+  const cardId = "panel-110-push-envelope-decrypts";
+  const identifier = "PANEL-110-04";
+  const sessionId = randomUUID();
+  const tmuxName = `${SANDBOX_PREFIX}push-pane-${process.pid}`;
+  const reason = `panel-110-push-reason-${process.pid}-${Date.now()}`;
+  const sandboxOrigin = `127.0.0.1:${SANDBOX_PORT}`;
+  const endpoint = `http://127.0.0.1:${STUB_PUSH_PORT}/ok/panel-110-${process.pid}`;
+  const keys = makeSubscriberKeys();
+
+  let stub;
+  let boot;
+  try {
+    stub = await startStubPushService();
+    await startTmuxPane(tmuxName);
+    await seedNeedsInputCard(home, {
+      cardId,
+      identifier,
+      sessionId,
+      tmuxSession: tmuxName,
+    });
+    seedSubscriptionRow(home, { endpoint, keys, origin: sandboxOrigin });
+    boot = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    await driveMarker(tmuxName, "NEEDS_INPUT", reason);
+
+    const requests = await stub.waitForRequests(1, PUSH_ENVELOPE_TICK_SLACK_MS);
+    if (requests.length !== 1) {
+      violations.push(
+        `push-envelope-decrypts: expected exactly 1 stub push request within ` +
+          `${PUSH_ENVELOPE_TICK_SLACK_MS}ms, observed ${requests.length}`,
+      );
+    }
+    const req = requests[0];
+
+    if (req == null) {
+      violations.push(
+        "push-envelope-decrypts: no stub push request observed, cannot check its headers or body",
+      );
+    } else {
+      if (req.method !== "POST") {
+        violations.push(
+          `push-envelope-decrypts: request method was ${JSON.stringify(req.method)}, expected "POST"`,
+        );
+      }
+      if (req.headers["content-encoding"] !== "aes128gcm") {
+        violations.push(
+          `push-envelope-decrypts: content-encoding header was ` +
+            `${JSON.stringify(req.headers["content-encoding"])}, expected "aes128gcm"`,
+        );
+      }
+      if (req.headers.ttl == null) {
+        violations.push("push-envelope-decrypts: ttl header is missing");
+      }
+
+      const authProblems = verifyVapidAuthorization(
+        req.headers.authorization,
+        `http://127.0.0.1:${STUB_PUSH_PORT}`,
+      );
+      for (const problem of authProblems) {
+        violations.push(`push-envelope-decrypts: ${problem}`);
+      }
+
+      try {
+        const payload = decryptPushBody(req.body, keys);
+        if (!("cardId" in payload)) {
+          violations.push(
+            "push-envelope-decrypts: decrypted payload is missing a cardId field",
+          );
+        } else if (payload.cardId !== cardId) {
+          violations.push(
+            `push-envelope-decrypts: decrypted cardId was ${JSON.stringify(payload.cardId)}, ` +
+              `expected ${JSON.stringify(cardId)}`,
+          );
+        }
+        if (
+          typeof payload.body !== "string" ||
+          !payload.body.includes(reason)
+        ) {
+          violations.push(
+            `push-envelope-decrypts: decrypted body ${JSON.stringify(payload.body)} does not ` +
+              `contain the reason text ${JSON.stringify(reason)}`,
+          );
+        }
+        if (
+          typeof payload.title !== "string" ||
+          !payload.title.includes(identifier)
+        ) {
+          violations.push(
+            `push-envelope-decrypts: decrypted title ${JSON.stringify(payload.title)} does not ` +
+              `contain the seeded card identifier ${JSON.stringify(identifier)}`,
+          );
+        }
+        let url = null;
+        try {
+          url = new URL(payload.url);
+        } catch {
+          // handled by the null check below
+        }
+        if (
+          url == null ||
+          url.origin !== `http://${sandboxOrigin}` ||
+          url.searchParams.get("card") !== cardId
+        ) {
+          violations.push(
+            `push-envelope-decrypts: decrypted url ${JSON.stringify(payload.url)} is not an ` +
+              `absolute URL on origin ${JSON.stringify(`http://${sandboxOrigin}`)} carrying a ` +
+              `"card" query param equal to ${JSON.stringify(cardId)}`,
+          );
+        }
+      } catch (err) {
+        violations.push(
+          `push-envelope-decrypts: decryptPushBody failed: ${err.message}`,
+        );
+      }
+    }
+
+    const logDeadline = Date.now() + PUSH_LOG_TICK_SLACK_MS;
+    let sawSendLog = false;
+    while (Date.now() < logDeadline) {
+      if (/\[push\] send 201/.test(boot.log())) {
+        sawSendLog = true;
+        break;
+      }
+      await sleep(POLL_INTERVAL_MS);
+    }
+    if (!sawSendLog) {
+      violations.push(
+        "push-envelope-decrypts: sandbox server log never contained a line matching " +
+          '"[push] send 201"',
+      );
+    }
+
+    const rows = readPushDbRows(join(home, ".dispatch", "board.db"));
+    if (!rows.some((row) => row.endpoint === endpoint)) {
+      violations.push(
+        "push-envelope-decrypts: subscription row was pruned after a 201, expected it to still " +
+          "exist in push_subscriptions",
+      );
+    }
+  } finally {
+    if (stub) await stub.close();
+    await killTmuxPane(tmuxName);
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const PUSH_SEND_TS_PATH = join(
+  REPO_ROOT,
+  "src/server/services/domain/push-send.ts",
+);
+const PUSH_SEND_BREAK_TARGET = '\n    dsaEncoding: "ieee-p1363",';
+
+/** `--break push-envelope-decrypts`: removes the `dsaEncoding: "ieee-p1363"` option from
+ * `signVapidJwt`'s `sign()` call, so the VAPID signature reverts to Node's DER default, rebuilds
+ * via `resetBuildCache()`, and requires the SAME check function to report the resulting violation
+ * (trip leg). Restores the captured bytes unconditionally in a `finally`, rebuilds, and requires a
+ * clean pass (restore leg).
+ * @remarks `signVapidJwt` itself already asserts `signature.length !== 64` and throws before ever
+ * sending, so this break's observed failure mode is "no stub push request arrived" (the per-row
+ * `try/catch` in `sendPushForCard` swallows the throw and logs `[push] send-failed`), not a
+ * signature-verification mismatch on the wire. Both are valid proof the check is not a dead
+ * instrument: either shape means the un-encoded signature never reaches a state this check would
+ * silently accept. */
+async function runBreakPushEnvelopeDecrypts() {
+  assertBuilt();
+  const original = readFileSync(PUSH_SEND_TS_PATH, "utf8");
+  const occurrences = original.split(PUSH_SEND_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel110: refusing to run --break push-envelope-decrypts, expected ` +
+        `${JSON.stringify(PUSH_SEND_BREAK_TARGET)} to occur exactly once in ${PUSH_SEND_TS_PATH}, ` +
+        `measured ${occurrences}. A miscounted anchor would mutate the wrong spot and report a ` +
+        `false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(PUSH_SEND_TS_PATH, original);
+  try {
+    writeFileSync(
+      PUSH_SEND_TS_PATH,
+      original.replace(PUSH_SEND_BREAK_TARGET, ""),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkPushEnvelopeDecrypts(tripViolations);
+    console.log(
+      `\n--break push-envelope-decrypts TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some(
+      (v) =>
+        v.includes("signature is") ||
+        v.includes("did not verify against k=") ||
+        v.includes("no stub push request observed") ||
+        v.includes("expected exactly 1 stub push request"),
+    );
+  } finally {
+    writeFileSync(PUSH_SEND_TS_PATH, original);
+    resetBuildCache();
+    unregisterRestore(PUSH_SEND_TS_PATH);
+  }
+
+  const restoreViolations = [];
+  await checkPushEnvelopeDecrypts(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break push-envelope-decrypts RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
 // ---------------------------------------------------------------------------
 // CHECKS / BREAKS / PROBES registries. Every later plan in this phase
 // appends here.
@@ -1252,10 +1494,13 @@ async function runBreakNeedsInputTriggerFires() {
 const CHECKS = {
   "needs-input-trigger-fires": (violations) =>
     checkNeedsInputTriggerFires(violations),
+  "push-envelope-decrypts": (violations) =>
+    checkPushEnvelopeDecrypts(violations),
 };
 
 const BREAKS = {
   "needs-input-trigger-fires": runBreakNeedsInputTriggerFires,
+  "push-envelope-decrypts": runBreakPushEnvelopeDecrypts,
 };
 
 const PROBES = {};
