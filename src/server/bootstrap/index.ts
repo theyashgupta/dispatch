@@ -19,6 +19,8 @@ import {
   terminalProxyUpgrade,
 } from "../adapters/terminal-proxy.js";
 import { probePreflight } from "../services/infra/preflight.js";
+import { loadOrCreateVapidKeys } from "../services/infra/push-keys.js";
+import { VAPID_KEYS_PATH } from "../services/infra/paths.js";
 import {
   setHooksRuntime,
   setOrchestrationConfig,
@@ -284,6 +286,8 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   const config = loadConfig();
   setOrchestrationConfig(config);
   buildRegistry(config);
+  loadOrCreateVapidKeys();
+  console.log(`[push] VAPID keypair loaded from ${VAPID_KEYS_PATH}`);
 
   const statusChannel = config.statusChannel ?? "auto";
   await installHookArtifacts();
