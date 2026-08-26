@@ -126,6 +126,17 @@
  *     The RESTORE leg re-ran clean (`--break per-origin-deep-link RESTORE leg: PASS`) after the
  *     captured bytes were restored, and `git diff --quiet` on `push-send.ts` confirmed a
  *     byte-identical restore.
+ *   - `deep-link-param-opens-card` proven able to fail (Plan 06): changing the parameter name the
+ *     sole `params.get("card")` call site in `App.tsx`'s cold-open effect reads to a name the
+ *     check never sends, rebuilding, and re-running the same check against a real booted sandbox
+ *     server and real headless Chrome produced, verbatim:
+ *     `deep-link-param-opens-card: detail panel never rendered the target card's identifier
+ *     "PANEL-110-06b-B" within 20000ms`
+ *     `deep-link-param-opens-card: window.location.search still contains "card" after the
+ *     deep-link effect ran: "?card=panel-110-deep-link-card-b"`
+ *     The RESTORE leg re-ran clean (`--break deep-link-param-opens-card RESTORE leg: PASS`) after
+ *     the captured bytes were restored, and `git diff --quiet` on `App.tsx` confirmed a
+ *     byte-identical restore.
  */
 
 import {
@@ -1466,6 +1477,8 @@ const PUSH_SEND_TS_PATH = join(
 );
 const PUSH_SEND_BREAK_TARGET = '\n    dsaEncoding: "ieee-p1363",';
 
+const APP_TSX_PATH = join(REPO_ROOT, "src/web/App.tsx");
+
 /** `--break push-envelope-decrypts`: removes the `dsaEncoding: "ieee-p1363"` option from
  * `signVapidJwt`'s `sign()` call, so the VAPID signature reverts to Node's DER default, rebuilds
  * via `resetBuildCache()`, and requires the SAME check function to report the resulting violation
@@ -2098,6 +2111,177 @@ async function runBreakPerOriginDeepLink() {
 // appends here.
 // ---------------------------------------------------------------------------
 
+const DEEP_LINK_PARAM_RENDER_TIMEOUT_MS = 20_000;
+
+function deepLinkFixtureCard(id, identifier) {
+  return {
+    id,
+    issueId: `${id}-issue`,
+    identifier,
+    title: `panel-110 ${identifier} fixture card`,
+    description: null,
+    priority: 3,
+    column: "todo",
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/** Seeds two fixture cards (so the target card is distinguishable from a default selection),
+ * opens headless Chrome directly at the sandbox board URL carrying `?card=<second card's id>`,
+ * and asserts the detail panel (`[aria-label="Ticket detail"]`, the same aside App.tsx docks
+ * regardless of selection per the PANEL-03 never-remount invariant) ends up showing the target
+ * card's identifier and NOT the other fixture card's identifier, that `window.location.search` no
+ * longer contains `card` once the effect has run, and that `window.location.pathname` is
+ * unchanged. Always tears down Chrome and its user-data directory in a `finally`. */
+async function checkDeepLinkParamOpensCard(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("deep-link-param-opens-card");
+  const cardAId = "panel-110-deep-link-card-a";
+  const cardAIdentifier = "PANEL-110-06b-A";
+  const cardBId = "panel-110-deep-link-card-b";
+  const cardBIdentifier = "PANEL-110-06b-B";
+
+  let boot;
+  let chrome;
+  let cdp;
+  try {
+    await seedFixtureCards(home, [
+      deepLinkFixtureCard(cardAId, cardAIdentifier),
+      deepLinkFixtureCard(cardBId, cardBIdentifier),
+    ]);
+    boot = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const url = `http://127.0.0.1:${SANDBOX_PORT}/?card=${encodeURIComponent(cardBId)}`;
+    const { sessionId } = await openPage(cdp, { url });
+
+    const detailPanelTextProbe = `
+      (function () {
+        var panel = document.querySelector('[aria-label="Ticket detail"]');
+        return panel ? panel.textContent : null;
+      })()
+    `;
+    const deadline = Date.now() + DEEP_LINK_PARAM_RENDER_TIMEOUT_MS;
+    let panelText = null;
+    while (Date.now() < deadline) {
+      try {
+        const value = await evalValue(cdp, sessionId, detailPanelTextProbe);
+        if (typeof value === "string" && value.includes(cardBIdentifier)) {
+          panelText = value;
+          break;
+        }
+      } catch {
+        // page mid-navigation, keep polling
+      }
+      await sleep(POLL_INTERVAL_MS);
+    }
+    if (panelText == null) {
+      violations.push(
+        `deep-link-param-opens-card: detail panel never rendered the target card's identifier ` +
+          `${JSON.stringify(cardBIdentifier)} within ${DEEP_LINK_PARAM_RENDER_TIMEOUT_MS}ms`,
+      );
+    } else if (panelText.includes(cardAIdentifier)) {
+      violations.push(
+        `deep-link-param-opens-card: detail panel also rendered the non-target card's ` +
+          `identifier ${JSON.stringify(cardAIdentifier)}, expected only ` +
+          `${JSON.stringify(cardBIdentifier)}`,
+      );
+    }
+
+    const search = await evalValue(cdp, sessionId, "window.location.search");
+    if (typeof search !== "string" || search.includes("card")) {
+      violations.push(
+        `deep-link-param-opens-card: window.location.search still contains "card" after the ` +
+          `deep-link effect ran: ${JSON.stringify(search)}`,
+      );
+    }
+    const pathname = await evalValue(
+      cdp,
+      sessionId,
+      "window.location.pathname",
+    );
+    if (pathname !== "/") {
+      violations.push(
+        `deep-link-param-opens-card: window.location.pathname changed to ` +
+          `${JSON.stringify(pathname)}, expected it unchanged ("/")`,
+      );
+    }
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chrome);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const DEEP_LINK_PARAM_BREAK_TARGET = 'params.get("card")';
+const DEEP_LINK_PARAM_BREAK_REPLACEMENT =
+  'params.get("panel110-break-never-sent-param")';
+
+/** `--break deep-link-param-opens-card`: changes the parameter name App.tsx's cold-open effect
+ * reads from `card` to a name the check never sends (replaces the sole `params.get("card")` call
+ * site), rebuilds via `resetBuildCache()`, and requires the SAME check function to report the
+ * resulting "detail panel never rendered" violation (trip leg). Restores the captured bytes
+ * unconditionally in a `finally`, rebuilds, and requires a clean pass (restore leg). */
+async function runBreakDeepLinkParamOpensCard() {
+  assertBuilt();
+  const original = readFileSync(APP_TSX_PATH, "utf8");
+  const occurrences = original.split(DEEP_LINK_PARAM_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel110: refusing to run --break deep-link-param-opens-card, expected ` +
+        `${JSON.stringify(DEEP_LINK_PARAM_BREAK_TARGET)} to occur exactly once in ` +
+        `${APP_TSX_PATH}, measured ${occurrences}. A miscounted anchor would mutate the wrong ` +
+        `spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(APP_TSX_PATH, original);
+  try {
+    writeFileSync(
+      APP_TSX_PATH,
+      original.replace(
+        DEEP_LINK_PARAM_BREAK_TARGET,
+        DEEP_LINK_PARAM_BREAK_REPLACEMENT,
+      ),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkDeepLinkParamOpensCard(tripViolations);
+    console.log(
+      `\n--break deep-link-param-opens-card TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes("detail panel never rendered the target card's identifier"),
+    );
+  } finally {
+    writeFileSync(APP_TSX_PATH, original);
+    resetBuildCache();
+    unregisterRestore(APP_TSX_PATH);
+  }
+
+  const restoreViolations = [];
+  await checkDeepLinkParamOpensCard(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break deep-link-param-opens-card RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
+// CHECKS / BREAKS / PROBES registries. Every later plan in this phase
+// appends here.
+// ---------------------------------------------------------------------------
+
 const CHECKS = {
   "needs-input-trigger-fires": (violations) =>
     checkNeedsInputTriggerFires(violations),
@@ -2106,6 +2290,8 @@ const CHECKS = {
   "agent-done-no-push": (violations) => checkAgentDoneNoPush(violations),
   "multi-device-prune": (violations) => checkMultiDevicePrune(violations),
   "per-origin-deep-link": (violations) => checkPerOriginDeepLink(violations),
+  "deep-link-param-opens-card": (violations) =>
+    checkDeepLinkParamOpensCard(violations),
 };
 
 const BREAKS = {
@@ -2114,6 +2300,7 @@ const BREAKS = {
   "agent-done-no-push": runBreakAgentDoneNoPush,
   "multi-device-prune": runBreakMultiDevicePrune,
   "per-origin-deep-link": runBreakPerOriginDeepLink,
+  "deep-link-param-opens-card": runBreakDeepLinkParamOpensCard,
 };
 
 const PROBES = {};
