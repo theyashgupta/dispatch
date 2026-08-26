@@ -18,6 +18,8 @@ export const BACKUP_SLOTS = 5;
 
 const HOUR_MS = 3_600_000;
 
+const MAX_PUSH_SUBSCRIPTIONS = 20;
+
 /**
  * Swallow ONLY node:sqlite's `ExperimentalWarning` — never any other warning — so normal
  * boot/CLI output stays clean while genuine deprecations still surface.
@@ -129,12 +131,16 @@ export interface BoardDb {
   /**
    * Upsert a subscription row, keyed by `endpoint`. A re-subscribe from the same device refreshes
    * `p256dh`/`auth`/`origin` in place rather than accumulating a duplicate row.
+   * @returns Whether the row was stored; `false` means the table is at
+   * {@link MAX_PUSH_SUBSCRIPTIONS} and the endpoint is new. The cap guard and the upsert are one
+   * statement so an existing endpoint always refreshes even at the cap, and no count-then-insert
+   * window exists.
    * @remarks Safe outside the `persist` write queue: `push_subscriptions` shares no rows with the
    * card/meta/event write path, this runs on the same single `DatabaseSync` handle with
    * `busy_timeout = 5000`, and it is a single statement, never part of a multi-statement
    * transaction.
    */
-  addPushSubscription(sub: PushSubscriptionRow): void;
+  addPushSubscription(sub: PushSubscriptionRow): boolean;
   /**
    * Delete a subscription row by endpoint.
    * @returns Whether a row was actually deleted, so the caller can answer honestly instead of
@@ -496,7 +502,9 @@ export function openBoardDb(): BoardDb {
   );
   const upsertPushSubscription = db.prepare(
     `INSERT INTO push_subscriptions (endpoint, p256dh, auth, origin, created_at)
-     VALUES (@endpoint, @p256dh, @auth, @origin, @createdAt)
+     SELECT @endpoint, @p256dh, @auth, @origin, @createdAt
+     WHERE (SELECT COUNT(*) FROM push_subscriptions) < ${MAX_PUSH_SUBSCRIPTIONS}
+        OR EXISTS (SELECT 1 FROM push_subscriptions WHERE endpoint = @endpoint)
      ON CONFLICT(endpoint) DO UPDATE SET
        p256dh = excluded.p256dh, auth = excluded.auth, origin = excluded.origin`,
   );
@@ -617,13 +625,14 @@ export function openBoardDb(): BoardDb {
       }
     },
     addPushSubscription(sub) {
-      upsertPushSubscription.run({
+      const info = upsertPushSubscription.run({
         endpoint: sub.endpoint,
         p256dh: sub.p256dh,
         auth: sub.auth,
         origin: sub.origin,
         createdAt: sub.createdAt,
       });
+      return Number(info.changes) > 0;
     },
     removePushSubscription(endpoint) {
       const info = deletePushSubscription.run(endpoint);

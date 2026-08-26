@@ -110,13 +110,17 @@ pushRouter.post("/push/subscribe", (req, res) => {
   }
 
   try {
-    store.addPushSubscription({
+    const stored = store.addPushSubscription({
       endpoint,
       p256dh,
       auth,
       origin,
       createdAt: new Date().toISOString(),
     });
+    if (!stored) {
+      res.status(400).json({ error: "too-many-subscriptions" });
+      return;
+    }
     res.status(200).json({ ok: true });
   } catch (err) {
     console.error("[push] subscribe failed:", (err as Error).message);

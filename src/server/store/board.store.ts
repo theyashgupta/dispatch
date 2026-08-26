@@ -1191,9 +1191,11 @@ class BoardStore extends EventEmitter {
   /**
    * Upsert a push subscription row. A pure synchronous write delegated to the BoardDb surface
    * (listEvents precedent) so the route never imports node:sqlite; not enqueued.
+   * @returns Whether the row was stored; `false` means the subscription cap refused a new
+   * endpoint.
    */
-  addPushSubscription(sub: PushSubscriptionRow): void {
-    this.db.addPushSubscription(sub);
+  addPushSubscription(sub: PushSubscriptionRow): boolean {
+    return this.db.addPushSubscription(sub);
   }
 
   /**
