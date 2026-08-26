@@ -89,14 +89,14 @@ function encryptPayload(sub: PushSubscriptionRow, plaintext: Buffer): Buffer {
     key: { kty: "EC", crv: "P-256", x, y },
     format: "jwk",
   });
-  const authSecret = Buffer.from(sub.auth, "base64url");
+  const auth = Buffer.from(sub.auth, "base64url");
 
   const ephemeralKeys = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
   const ephemeralJwk = ephemeralKeys.publicKey.export({ format: "jwk" });
   const ephemeralRawPoint = rawPoint(ephemeralJwk);
   const uaRawPoint = Buffer.from(sub.p256dh, "base64url");
 
-  const ecdhSecret = diffieHellman({
+  const ecdh = diffieHellman({
     privateKey: ephemeralKeys.privateKey,
     publicKey: uaPublicKey,
   });
@@ -106,7 +106,7 @@ function encryptPayload(sub: PushSubscriptionRow, plaintext: Buffer): Buffer {
     uaRawPoint,
     ephemeralRawPoint,
   ]);
-  const prk = Buffer.from(hkdfSync("sha256", ecdhSecret, authSecret, keyInfo, 32));
+  const prk = Buffer.from(hkdfSync("sha256", ecdh, auth, keyInfo, 32));
 
   const recordSalt = randomBytes(16);
   const cekInfo = Buffer.from("Content-Encoding: aes128gcm\0");
