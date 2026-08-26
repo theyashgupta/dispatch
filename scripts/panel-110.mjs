@@ -137,6 +137,22 @@
  *     The RESTORE leg re-ran clean (`--break deep-link-param-opens-card RESTORE leg: PASS`) after
  *     the captured bytes were restored, and `git diff --quiet` on `App.tsx` confirmed a
  *     byte-identical restore.
+ *   - `tag-renotify-replace` proven able to fail (Plan 07): replacing the sole `tag: data.cardId,`
+ *     call site in `sw.js`'s push handler with a per-message unique tag, rebuilding, and
+ *     re-running the same check against a real booted sandbox server, real headless Chrome, and
+ *     a real `ServiceWorker.deliverPushMessage` delivery produced, verbatim:
+ *     `tag-renotify-replace: expected exactly 1 notification tagged
+ *     "panel-110-tag-renotify-card-a" after the first delivery, observed 0 ([{"tag":"panel110-
+ *     break-unique-1787781270024-0.16439874646661834","title":"panel-110
+ *     tag-renotify","body":"first delivery"}])`
+ *     `tag-renotify-replace: expected exactly 1 notification tagged
+ *     "panel-110-tag-renotify-card-a" after the second delivery (replace, not stack), observed 0
+ *     (two distinctly-tagged notifications instead of one replaced notification)`
+ *     `tag-renotify-replace: expected 2 notifications after delivering a DIFFERENT card (the
+ *     positive control proving notifications can actually appear at all), observed 3`
+ *     The RESTORE leg re-ran clean (`--break tag-renotify-replace RESTORE leg: PASS`) after the
+ *     captured bytes were restored, and `git diff --quiet` on `sw.js` confirmed a byte-identical
+ *     restore.
  */
 
 import {
@@ -821,6 +837,27 @@ async function readServiceWorkerNotifications(cdp, sessionId) {
     })()`,
   );
   return Array.isArray(notifications) ? notifications : [];
+}
+
+/** Polls {@link readServiceWorkerNotifications} until `predicate` holds or `timeoutMs` elapses,
+ * returning whichever list was last observed either way. `showNotification()` inside the push
+ * handler's `event.waitUntil()` resolves asynchronously, so a caller reading immediately after
+ * `deliverPushToServiceWorker` can observe the notification list before it updates; polling turns
+ * that race into a bounded wait instead of a flaky read. */
+async function pollServiceWorkerNotifications(
+  cdp,
+  sessionId,
+  predicate,
+  timeoutMs,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let last = await readServiceWorkerNotifications(cdp, sessionId);
+  while (Date.now() < deadline) {
+    if (predicate(last)) return last;
+    await sleep(POLL_INTERVAL_MS);
+    last = await readServiceWorkerNotifications(cdp, sessionId);
+  }
+  return last;
 }
 
 /** Finds and attaches to the CDP target of type `service_worker` whose URL is `${origin}/sw.js`,
@@ -2442,6 +2479,204 @@ async function runBreakDeepLinkParamOpensCard() {
   return { tripFired, restoreClean };
 }
 
+const SW_PATH = join(REPO_ROOT, "src/web/public/sw.js");
+const NOTIF_TIMEOUT_MS = 20_000;
+
+/** Boots the sandbox, seeds one fixture card, launches Chrome, grants notifications, makes the
+ * service worker ready, and drives three real `deliverPushToServiceWorker` calls: card A, card A
+ * again with a different body (must REPLACE, not stack), then card B (the positive control
+ * proving the count assertion isn't passing because notifications never appear at all). Also
+ * greps the SERVED sw.js (the built asset the sandbox server actually answers with, not the repo
+ * file, so a build that silently drops the option is caught) for `renotify: true`. */
+async function checkTagRenotifyReplace(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("tag-renotify-replace");
+  const cardAId = "panel-110-tag-renotify-card-a";
+  const cardAIdentifier = "PANEL-110-07-TAG-A";
+  const cardBId = "panel-110-tag-renotify-card-b";
+  const origin = `http://127.0.0.1:${SANDBOX_PORT}`;
+
+  let boot;
+  let chrome;
+  let cdp;
+  try {
+    await seedFixtureCards(home, [
+      deepLinkFixtureCard(cardAId, cardAIdentifier),
+    ]);
+    boot = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const { sessionId } = await openPage(cdp, { url: `${origin}/` });
+    await grantNotifications(cdp, origin);
+    await ensureServiceWorkerReady(cdp, sessionId);
+
+    const registrationId = await deliverPushToServiceWorker(cdp, sessionId, {
+      origin,
+      data: {
+        title: "panel-110 tag-renotify",
+        body: "first delivery",
+        cardId: cardAId,
+        url: `${origin}/?card=${encodeURIComponent(cardAId)}`,
+      },
+    });
+
+    const afterFirst = await pollServiceWorkerNotifications(
+      cdp,
+      sessionId,
+      (list) => list.some((n) => n.tag === cardAId),
+      NOTIF_TIMEOUT_MS,
+    );
+    const firstForA = afterFirst.filter((n) => n.tag === cardAId);
+    if (firstForA.length !== 1) {
+      violations.push(
+        `tag-renotify-replace: expected exactly 1 notification tagged ${JSON.stringify(cardAId)} ` +
+          `after the first delivery, observed ${firstForA.length} (${JSON.stringify(afterFirst)})`,
+      );
+    }
+
+    await deliverPushToServiceWorker(cdp, sessionId, {
+      origin,
+      registrationId,
+      data: {
+        title: "panel-110 tag-renotify",
+        body: "second delivery, replaces the first",
+        cardId: cardAId,
+        url: `${origin}/?card=${encodeURIComponent(cardAId)}`,
+      },
+    });
+
+    const afterSecond = await pollServiceWorkerNotifications(
+      cdp,
+      sessionId,
+      (list) =>
+        list.some(
+          (n) =>
+            n.tag === cardAId &&
+            n.body === "second delivery, replaces the first",
+        ),
+      NOTIF_TIMEOUT_MS,
+    );
+    const secondForA = afterSecond.filter((n) => n.tag === cardAId);
+    if (secondForA.length !== 1) {
+      violations.push(
+        `tag-renotify-replace: expected exactly 1 notification tagged ${JSON.stringify(cardAId)} ` +
+          `after the second delivery (replace, not stack), observed ${secondForA.length} ` +
+          `(${JSON.stringify(afterSecond)})`,
+      );
+    } else if (secondForA[0].body !== "second delivery, replaces the first") {
+      violations.push(
+        `tag-renotify-replace: after the second delivery the notification body was ` +
+          `${JSON.stringify(secondForA[0].body)}, expected the second delivery's body, so it ` +
+          `was not actually replaced`,
+      );
+    }
+
+    await deliverPushToServiceWorker(cdp, sessionId, {
+      origin,
+      registrationId,
+      data: {
+        title: "panel-110 tag-renotify",
+        body: "different card",
+        cardId: cardBId,
+        url: `${origin}/?card=${encodeURIComponent(cardBId)}`,
+      },
+    });
+    const afterThird = await pollServiceWorkerNotifications(
+      cdp,
+      sessionId,
+      (list) => list.some((n) => n.tag === cardBId),
+      NOTIF_TIMEOUT_MS,
+    );
+    if (afterThird.length !== 2) {
+      violations.push(
+        `tag-renotify-replace: expected 2 notifications after delivering a DIFFERENT card (the ` +
+          `positive control proving notifications can actually appear at all), observed ` +
+          `${afterThird.length} (${JSON.stringify(afterThird)})`,
+      );
+    }
+
+    const servedSwSource = await (await fetch(`${origin}/sw.js`)).text();
+    if (
+      !servedSwSource.includes("renotify: true") &&
+      !servedSwSource.includes("renotify:true")
+    ) {
+      violations.push(
+        `tag-renotify-replace: the served sw.js does not contain "renotify: true" in its push ` +
+          `handler`,
+      );
+    }
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chrome);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const TAG_RENOTIFY_BREAK_TARGET = "tag: data.cardId,";
+const TAG_RENOTIFY_BREAK_REPLACEMENT =
+  "tag: `panel110-break-unique-${Date.now()}-${Math.random()}`,";
+
+/** `--break tag-renotify-replace`: replaces the sole `tag: data.cardId,` call site in `sw.js`'s
+ * push handler with a per-message unique tag, rebuilds via `resetBuildCache()`, and requires the
+ * SAME check function to report the resulting "still exactly one" violation (a per-message unique
+ * tag means the second delivery no longer replaces the first, so the check should observe TWO
+ * notifications tagged the same card id instead of one). Restores the captured bytes
+ * unconditionally in a `finally`, rebuilds, and requires a clean pass (restore leg). */
+async function runBreakTagRenotifyReplace() {
+  assertBuilt();
+  const original = readFileSync(SW_PATH, "utf8");
+  const occurrences = original.split(TAG_RENOTIFY_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel110: refusing to run --break tag-renotify-replace, expected ` +
+        `${JSON.stringify(TAG_RENOTIFY_BREAK_TARGET)} to occur exactly once in ${SW_PATH}, ` +
+        `measured ${occurrences}. A miscounted anchor would mutate the wrong spot and report a ` +
+        `false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(SW_PATH, original);
+  try {
+    writeFileSync(
+      SW_PATH,
+      original.replace(
+        TAG_RENOTIFY_BREAK_TARGET,
+        TAG_RENOTIFY_BREAK_REPLACEMENT,
+      ),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkTagRenotifyReplace(tripViolations);
+    console.log(
+      `\n--break tag-renotify-replace TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes("expected exactly 1 notification tagged"),
+    );
+  } finally {
+    writeFileSync(SW_PATH, original);
+    resetBuildCache();
+    unregisterRestore(SW_PATH);
+  }
+
+  const restoreViolations = [];
+  await checkTagRenotifyReplace(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break tag-renotify-replace RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
 // ---------------------------------------------------------------------------
 // CHECKS / BREAKS / PROBES registries. Every later plan in this phase
 // appends here.
@@ -2457,6 +2692,7 @@ const CHECKS = {
   "per-origin-deep-link": (violations) => checkPerOriginDeepLink(violations),
   "deep-link-param-opens-card": (violations) =>
     checkDeepLinkParamOpensCard(violations),
+  "tag-renotify-replace": (violations) => checkTagRenotifyReplace(violations),
 };
 
 const BREAKS = {
@@ -2466,6 +2702,7 @@ const BREAKS = {
   "multi-device-prune": runBreakMultiDevicePrune,
   "per-origin-deep-link": runBreakPerOriginDeepLink,
   "deep-link-param-opens-card": runBreakDeepLinkParamOpensCard,
+  "tag-renotify-replace": runBreakTagRenotifyReplace,
 };
 
 const PROBES = {};
