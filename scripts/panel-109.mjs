@@ -75,6 +75,17 @@
  *     The RESTORE leg re-ran clean (`--break push-row-state-machine RESTORE leg: PASS`) after the
  *     captured bytes were restored, and `git diff --quiet` on `SettingsScreen.tsx` confirmed a
  *     byte-identical restore.
+ *   - `denied-state-no-button` proven able to fail (Plan 04): rewriting the push hook's
+ *     `permission === "denied"` comparison to `permission === "never-denied"`, rebuilding, and
+ *     re-running the same check produced, verbatim:
+ *     `denied-state-no-button: expected statusText exactly "Blocked - enable notifications for
+ *     this site in your browser settings.", got null`
+ *     `denied-state-no-button: expected statusColor exactly "var(--status-down)", got null`
+ *     `denied-state-no-button: expected zero buttons in the push row while permission is denied,
+ *     got ["Enable push notifications"]`
+ *     Dropping the blocked branch fell through to the default branch's dead-button-free "Enable
+ *     push notifications" control, exactly the failure the requirement bans. The RESTORE leg
+ *     re-ran clean and `git diff --quiet` confirmed a byte-identical restore.
  *
  * ASSUMPTION EVIDENCE (Plan 03). `node scripts/panel-109.mjs --probe fcm-egress` was run 13 times
  * against headless Chrome with a real, unmocked network path while authoring and hardening this
@@ -1126,6 +1137,141 @@ async function runBreakPushRowStateMachine() {
 }
 
 // ---------------------------------------------------------------------------
+// denied-state-no-button: the blocked state is an explicit status row with no
+// actionable control, never a button that does nothing (the requirement's
+// dead-button ban).
+// ---------------------------------------------------------------------------
+
+const PUSH_ROW_DENIED_STATUS =
+  "Blocked - enable notifications for this site in your browser settings.";
+
+async function checkDeniedStateNoButton(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("denied-state");
+  let server;
+  let chromeChild;
+  let cdp;
+  try {
+    server = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+    chromeChild = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const sessionId = await seedPage(cdp, { permission: "denied" });
+    await openSettingsNotifications(cdp, sessionId);
+
+    const permission = await evalValue(
+      cdp,
+      sessionId,
+      `("Notification" in window) ? Notification.permission : "unsupported"`,
+    );
+    console.log(
+      `denied-state-no-button: observed Notification.permission=${JSON.stringify(permission)}`,
+    );
+    if (permission !== "denied") {
+      violations.push(
+        `denied-state-no-button: positive control failed, expected Notification.permission ` +
+          `exactly "denied", got ${JSON.stringify(permission)}. The CDP permission seed may have ` +
+          `silently failed, which would make every later assertion in this check vacuous.`,
+      );
+    }
+
+    const row = await readPushRow(cdp, sessionId);
+    console.log(
+      `denied-state-no-button: observed statusText=${JSON.stringify(row.statusText)} ` +
+        `statusColor=${JSON.stringify(row.statusColor)} buttons=${JSON.stringify(row.buttons)}`,
+    );
+    if (!row.found) {
+      violations.push("denied-state-no-button: the push row was never found");
+      return;
+    }
+    if (row.statusText !== PUSH_ROW_DENIED_STATUS) {
+      violations.push(
+        `denied-state-no-button: expected statusText exactly ${JSON.stringify(PUSH_ROW_DENIED_STATUS)}, got ${JSON.stringify(row.statusText)}`,
+      );
+    }
+    if (row.statusColor !== "var(--status-down)") {
+      violations.push(
+        `denied-state-no-button: expected statusColor exactly "var(--status-down)", got ${JSON.stringify(row.statusColor)}`,
+      );
+    }
+    if (row.buttons.length !== 0) {
+      violations.push(
+        `denied-state-no-button: expected zero buttons in the push row while permission is denied, got ${JSON.stringify(row.buttons)}`,
+      );
+    }
+    if (row.alertText !== null) {
+      violations.push(
+        `denied-state-no-button: expected alertText null, got ${JSON.stringify(row.alertText)}`,
+      );
+    }
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chromeChild);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await stopServer(server);
+    cleanupSandboxHome(home);
+  }
+}
+
+/** `--break denied-state-no-button`: mutates the push hook's `permission === "denied"`
+ * comparison to a value that can never occur, rebuilds via `resetBuildCache()`, and requires BOTH
+ * the missing blocked copy violation and the button-present violation, since dropping the blocked
+ * branch is precisely what makes the row fall through to the enable button. Restores the captured
+ * bytes in a `finally` unconditionally. */
+async function runBreakDeniedStateNoButton() {
+  assertBuilt();
+  const settingsPath = join(
+    REPO_ROOT,
+    "src/web/features/settings/SettingsScreen.tsx",
+  );
+  const TARGET = 'permission === "denied"';
+  const REPLACEMENT = 'permission === "never-denied"';
+  const original = readFileSync(settingsPath, "utf8");
+  const occurrences = original.split(TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel109: refusing to run --break denied-state-no-button, expected ${JSON.stringify(TARGET)} ` +
+        `to occur exactly once in ${settingsPath}, measured ${occurrences}. The adjacent desktop ` +
+        `permission hook compares a differently named variable; a miscounted anchor would mutate ` +
+        `the wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  try {
+    writeFileSync(settingsPath, original.replace(TARGET, REPLACEMENT));
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkDeniedStateNoButton(tripViolations);
+    console.log(
+      `\n--break denied-state-no-button TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    const missingBlockedCopy = tripViolations.some((v) =>
+      v.includes("expected statusText exactly"),
+    );
+    const buttonPresent = tripViolations.some((v) =>
+      v.includes("expected zero buttons"),
+    );
+    tripFired = missingBlockedCopy && buttonPresent;
+  } finally {
+    writeFileSync(settingsPath, original);
+    resetBuildCache();
+  }
+
+  const restoreViolations = [];
+  await checkDeniedStateNoButton(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break denied-state-no-button RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS registries. Every later plan in this phase appends here.
 // ---------------------------------------------------------------------------
 
@@ -1133,11 +1279,14 @@ const CHECKS = {
   "pwa-manifest-assets": (violations) => checkPwaManifestAssets(violations),
   "push-row-state-machine": (violations) =>
     checkPushRowStateMachine(violations),
+  "denied-state-no-button": (violations) =>
+    checkDeniedStateNoButton(violations),
 };
 
 const BREAKS = {
   "pwa-manifest-assets": runBreakPwaManifestAssets,
   "push-row-state-machine": runBreakPushRowStateMachine,
+  "denied-state-no-button": runBreakDeniedStateNoButton,
 };
 
 // ---------------------------------------------------------------------------
