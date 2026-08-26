@@ -19,8 +19,9 @@
  * phase shares one boot/teardown vocabulary rather than each re-deriving its own.
  *
  * Ports, unique across every existing harness (verified against every `panel-9x.mjs`,
- * `panel-100.mjs` (47876), `panel-104.mjs`'s own sandbox constants): sandbox server 47880. Port
- * 4700 is the user's live service and is forbidden as a sandbox port.
+ * `panel-100.mjs` (47876), `panel-104.mjs`'s own sandbox constants): sandbox server 47880, Plan
+ * 02's own `npx vite` dev-server instance 47881. Port 4700 is the user's live service and is
+ * forbidden as a sandbox port.
  *
  * Usage:
  *   node scripts/panel-108.mjs                every registered check, exits non-zero on any
@@ -53,6 +54,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -347,15 +349,290 @@ async function runBreakSwNoFetchHandler() {
 }
 
 // ---------------------------------------------------------------------------
+// Shared response-shape helpers for sw-no-cache and sw-dev-no-cache: both
+// checks fetch /sw.js from a real running server and must reject an
+// SPA-fallback HTML page returned with status 200 as readable-as-passing.
+// ---------------------------------------------------------------------------
+
+function assertStatus200(label, status, violations) {
+  if (status !== 200) {
+    violations.push(`${label}: expected status 200, got ${status}`);
+  }
+}
+
+function assertLooksLikeServiceWorkerBody(label, body, violations) {
+  if (!body.includes("addEventListener")) {
+    violations.push(
+      `${label}: response body does not contain "addEventListener"`,
+    );
+  }
+  if (body.toLowerCase().includes("<!doctype html")) {
+    violations.push(
+      `${label}: response body looks like the SPA fallback HTML page (contains "<!doctype html")`,
+    );
+  }
+}
+
+/** Production strictness: cache-control must be present and exactly "no-cache". */
+function assertExactNoCache(label, cacheControlValue, violations) {
+  if (cacheControlValue == null) {
+    violations.push(`${label}: expected a cache-control header, got none`);
+    return;
+  }
+  if (cacheControlValue !== "no-cache") {
+    violations.push(
+      `${label}: expected cache-control exactly "no-cache", got ${JSON.stringify(cacheControlValue)}`,
+    );
+  }
+}
+
+/** Dev-mode looseness: cache-control, if present at all, must not carry a long-lived directive. */
+function assertNoLongLivedCache(label, cacheControlValue, violations) {
+  if (cacheControlValue == null) return;
+  if (/immutable/i.test(cacheControlValue)) {
+    violations.push(
+      `${label}: cache-control ${JSON.stringify(cacheControlValue)} contains "immutable"`,
+    );
+  }
+  const maxAgeMatch = /max-age=(\d+)/i.exec(cacheControlValue);
+  if (maxAgeMatch && Number(maxAgeMatch[1]) > 0) {
+    violations.push(
+      `${label}: cache-control ${JSON.stringify(cacheControlValue)} carries max-age=${maxAgeMatch[1]} > 0`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// sw-no-cache: boots a real sandbox production server (NODE_ENV=production,
+// the only mode with the setHeaders callback) and asserts /sw.js and
+// /index.html are both served Cache-Control: no-cache.
+// ---------------------------------------------------------------------------
+
+async function checkSwNoCache(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("swcache");
+  let child;
+  try {
+    child = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    const swRes = await fetch(`http://127.0.0.1:${SANDBOX_PORT}/sw.js`);
+    const swBody = await swRes.text();
+    const swCacheControl = swRes.headers.get("cache-control");
+    console.log(
+      `sw-no-cache: observed cache-control for /sw.js = ${JSON.stringify(swCacheControl)}`,
+    );
+    assertStatus200("sw-no-cache /sw.js", swRes.status, violations);
+    assertExactNoCache("sw-no-cache /sw.js", swCacheControl, violations);
+    assertNoLongLivedCache("sw-no-cache /sw.js", swCacheControl, violations);
+    assertLooksLikeServiceWorkerBody("sw-no-cache /sw.js", swBody, violations);
+
+    const idxRes = await fetch(`http://127.0.0.1:${SANDBOX_PORT}/index.html`);
+    await idxRes.body?.cancel().catch(() => {});
+    const idxCacheControl = idxRes.headers.get("cache-control");
+    console.log(
+      `sw-no-cache: observed cache-control for /index.html = ${JSON.stringify(idxCacheControl)}`,
+    );
+    assertStatus200("sw-no-cache /index.html", idxRes.status, violations);
+    assertExactNoCache("sw-no-cache /index.html", idxCacheControl, violations);
+  } finally {
+    await stopServer(child);
+    cleanupSandboxHome(home);
+  }
+}
+
+/** `--break sw-no-cache`: mutates the BUILT artifact (`dist/server/bootstrap/index.js`), not the
+ * source, since editing dist needs no rebuild and any subsequent `npm run build` regenerates it
+ * regardless. `assertBuilt()` runs FIRST, before the mutation, so it caches `headBuild` and the
+ * SAME check function's own internal `assertBuilt()` call skips rebuilding the tree out from
+ * under the mutated dist file. */
+async function runBreakSwNoCache() {
+  assertBuilt();
+
+  const TARGET = '"sw.js"';
+  const REPLACEMENT = '"panel-108-break-sentinel.js"';
+  const original = readFileSync(DIST_ENTRY, "utf8");
+  const occurrences = original.split(TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel108: refusing to run --break sw-no-cache, expected ${TARGET} to occur exactly once ` +
+        `in ${DIST_ENTRY}, measured ${occurrences}. A miscounted anchor would mutate the wrong ` +
+        `spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  try {
+    writeFileSync(DIST_ENTRY, original.replace(TARGET, REPLACEMENT));
+
+    const tripViolations = [];
+    await checkSwNoCache(tripViolations);
+    console.log(
+      `\n--break sw-no-cache TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes('expected cache-control exactly "no-cache"'),
+    );
+  } finally {
+    writeFileSync(DIST_ENTRY, original);
+  }
+
+  const restoreViolations = [];
+  await checkSwNoCache(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break sw-no-cache RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
+// sw-dev-no-cache: `/sw.js` is served by Vite's OWN dev server under
+// `npm run dev` (vite.config.ts's proxy only matches ^/api/ and ^/sessions/),
+// never proxied to Express, so the production setHeaders callback never runs
+// for it in dev. This settles 108-RESEARCH.md Assumption A1 with measured
+// header values rather than an assumption.
+// ---------------------------------------------------------------------------
+
+const VITE_DEV_PORT = 47881;
+const VITE_STARTUP_TIMEOUT_MS = 30_000;
+
+async function waitForPortOpen(port, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/`);
+      await res.body?.cancel().catch(() => {});
+      return;
+    } catch {
+      // vite not listening yet, keep polling
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    `vite dev server on :${port} did not accept a connection within ${timeoutMs}ms`,
+  );
+}
+
+async function checkSwDevNoCache(violations) {
+  let child;
+  const outputChunks = [];
+  try {
+    child = spawn(
+      "npx",
+      ["vite", "--port", String(VITE_DEV_PORT), "--strictPort"],
+      { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    child.stdout?.on("data", (d) => outputChunks.push(d));
+    child.stderr?.on("data", (d) => outputChunks.push(d));
+
+    await waitForPortOpen(VITE_DEV_PORT, VITE_STARTUP_TIMEOUT_MS);
+
+    const res = await fetch(`http://127.0.0.1:${VITE_DEV_PORT}/sw.js`);
+    const body = await res.text();
+    const cacheControl = res.headers.get("cache-control");
+    const etag = res.headers.get("etag");
+    const lastModified = res.headers.get("last-modified");
+    console.log(
+      `sw-dev-no-cache: observed cache-control=${JSON.stringify(cacheControl)} ` +
+        `etag=${JSON.stringify(etag)} last-modified=${JSON.stringify(lastModified)}`,
+    );
+    assertStatus200("sw-dev-no-cache /sw.js", res.status, violations);
+    assertLooksLikeServiceWorkerBody(
+      "sw-dev-no-cache /sw.js",
+      body,
+      violations,
+    );
+    assertNoLongLivedCache("sw-dev-no-cache /sw.js", cacheControl, violations);
+  } catch (err) {
+    violations.push(
+      `sw-dev-no-cache: run failed: ${err instanceof Error ? err.message : String(err)}\n` +
+        Buffer.concat(outputChunks).toString("utf8"),
+    );
+  } finally {
+    await stopServer(child);
+  }
+}
+
+/** `--break sw-dev-no-cache`: renames the real `src/web/public/sw.js` out of the way so Vite's
+ * dev server can no longer serve it, runs the SAME check function, requires it to report the
+ * non-200 / missing-service-worker violation by name, then renames the file back unconditionally
+ * in a `finally` and re-runs the same check requiring a clean pass. */
+async function runBreakSwDevNoCache() {
+  const relPath = join("src", "web", "public", "sw.js");
+  const absPath = join(REPO_ROOT, relPath);
+  const backupPath = `${absPath}.panel108bak`;
+
+  const preflightStatus = execFileSync(
+    "git",
+    ["status", "--porcelain", relPath],
+    { cwd: REPO_ROOT, encoding: "utf8" },
+  );
+  if (preflightStatus.trim() !== "") {
+    throw new Error(
+      `panel108: refusing to run --break sw-dev-no-cache, ${relPath} is not clean before the ` +
+        `break (git status --porcelain reports):\n${preflightStatus}`,
+    );
+  }
+
+  let tripFired = false;
+  try {
+    renameSync(absPath, backupPath);
+
+    const tripViolations = [];
+    await checkSwDevNoCache(tripViolations);
+    console.log(
+      `\n--break sw-dev-no-cache TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some(
+      (v) =>
+        v.includes("expected status 200") ||
+        v.includes("addEventListener") ||
+        v.includes("SPA fallback"),
+    );
+  } finally {
+    if (existsSync(backupPath)) {
+      renameSync(backupPath, absPath);
+    }
+  }
+
+  const restoreStatus = execFileSync(
+    "git",
+    ["status", "--porcelain", relPath],
+    { cwd: REPO_ROOT, encoding: "utf8" },
+  );
+  if (restoreStatus.trim() !== "") {
+    console.error(
+      `PANEL-108-RESTORE-FAILED: ${relPath} is not clean after restoring the captured ` +
+        `original:\n${restoreStatus}`,
+    );
+  }
+
+  const restoreViolations = [];
+  await checkSwDevNoCache(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break sw-dev-no-cache RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS registries. Every later plan in this phase appends here.
 // ---------------------------------------------------------------------------
 
 const CHECKS = {
   "sw-no-fetch-handler": (violations) => checkSwNoFetchHandler(violations),
+  "sw-no-cache": (violations) => checkSwNoCache(violations),
+  "sw-dev-no-cache": (violations) => checkSwDevNoCache(violations),
 };
 
 const BREAKS = {
   "sw-no-fetch-handler": runBreakSwNoFetchHandler,
+  "sw-no-cache": runBreakSwNoCache,
+  "sw-dev-no-cache": runBreakSwDevNoCache,
 };
 
 // ---------------------------------------------------------------------------
