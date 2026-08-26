@@ -493,6 +493,7 @@ class CDP {
     this.ws = ws;
     this.nextId = 1;
     this.pending = new Map();
+    this.eventListeners = new Map();
     ws.addEventListener("message", (event) => {
       const msg = JSON.parse(event.data);
       if (msg.id != null && this.pending.has(msg.id)) {
@@ -500,8 +501,26 @@ class CDP {
         this.pending.delete(msg.id);
         if (msg.error) reject(new Error(msg.error.message));
         else resolve(msg.result);
+      } else if (msg.method) {
+        const listeners = this.eventListeners.get(msg.method);
+        if (listeners) {
+          for (const fn of [...listeners]) fn(msg.params, msg.sessionId);
+        }
       }
     });
+  }
+
+  /** Registers a listener for a CDP event (e.g. `ServiceWorker.workerRegistrationUpdated`), never
+   * for a command response (those resolve `send()`'s own promise). Returns an unsubscribe
+   * function; this file's only two event consumers (ServiceWorker registration resolution) both
+   * unsubscribe once they have what they need rather than leaking a listener for the rest of the
+   * run. */
+  on(method, fn) {
+    if (!this.eventListeners.has(method)) {
+      this.eventListeners.set(method, new Set());
+    }
+    this.eventListeners.get(method).add(fn);
+    return () => this.eventListeners.get(method)?.delete(fn);
   }
 
   /**
@@ -688,6 +707,152 @@ async function pollUntilTruthy(cdp, sessionId, expression, timeoutMs) {
     await sleep(POLL_INTERVAL_MS);
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Service worker push-delivery and notification-reading helpers (Plan 07's
+// own new capability). `ServiceWorker.deliverPushMessage` was settled
+// empirically as the delivery mechanism: it hands the real shipped sw.js a
+// real plaintext payload with no fallback to a synthetic PushEvent needed,
+// verified directly against a real booted sandbox and real headless Chrome
+// (see the plan summary for the observed transcript).
+// ---------------------------------------------------------------------------
+
+/** Registers `/sw.js` from page scope the same way `src/web/lib/push.ts` does, then awaits
+ * `navigator.serviceWorker.ready`, returning the registration's scope. Throws a descriptive error
+ * if registration never settles inside `READY_TIMEOUT_MS` (surfaced by `evalAsyncValue`'s own
+ * timeout, not a bespoke one, so a stalled registration reads as a diagnosable CDP error rather
+ * than a silent `undefined`). */
+async function ensureServiceWorkerReady(cdp, sessionId) {
+  const scope = await evalAsyncValue(
+    cdp,
+    sessionId,
+    `(async () => {
+      await navigator.serviceWorker.register("/sw.js");
+      const registration = await navigator.serviceWorker.ready;
+      return registration.scope;
+    })()`,
+  );
+  if (typeof scope !== "string" || scope === "") {
+    throw new Error(
+      "ensureServiceWorkerReady: navigator.serviceWorker.ready never settled with a scope",
+    );
+  }
+  return scope;
+}
+
+/** Enables the CDP `ServiceWorker` domain on `sessionId` (the attached page session; the domain
+ * reports every registration reachable from that page's browsing context, not just its own) and
+ * resolves the `registrationId` whose `scopeURL` starts with `origin`. Filtering by scope is load
+ * bearing: a headless Chrome profile registers its own extension service workers too, and an
+ * unfiltered "first non-deleted registration" match resolves one of THOSE instead (observed
+ * directly while building this helper), silently delivering the push to the wrong worker. */
+async function resolveServiceWorkerRegistrationId(
+  cdp,
+  sessionId,
+  origin,
+  timeoutMs = READY_TIMEOUT_MS,
+) {
+  await cdp.send("ServiceWorker.enable", {}, sessionId);
+  return new Promise((resolve) => {
+    let settled = false;
+    const off = cdp.on("ServiceWorker.workerRegistrationUpdated", (params) => {
+      const match = (params.registrations ?? []).find(
+        (r) => !r.isDeleted && r.scopeURL?.startsWith(origin),
+      );
+      if (match && !settled) {
+        settled = true;
+        off();
+        resolve(match.registrationId);
+      }
+    });
+    setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        off();
+        resolve(null);
+      }
+    }, timeoutMs);
+  });
+}
+
+/** Hands the real service worker a real plaintext push payload via
+ * `ServiceWorker.deliverPushMessage`, bypassing the push service and its encryption (RFC 8291
+ * receive-side decryption is Plan 04's own already-proven surface; this plan drives the CLIENT
+ * side). Resolves `registrationId` from `origin` on first use unless the caller already has one
+ * (from a prior call), so a check delivering several payloads in a row only pays the resolution
+ * cost once. Returns the resolved `registrationId`. */
+async function deliverPushToServiceWorker(
+  cdp,
+  sessionId,
+  { origin, data, registrationId },
+) {
+  const resolvedId =
+    registrationId ??
+    (await resolveServiceWorkerRegistrationId(cdp, sessionId, origin));
+  if (resolvedId == null) {
+    throw new Error(
+      `deliverPushToServiceWorker: no service worker registration resolved for origin ${origin}`,
+    );
+  }
+  await cdp.send(
+    "ServiceWorker.deliverPushMessage",
+    {
+      origin,
+      registrationId: resolvedId,
+      data: typeof data === "string" ? data : JSON.stringify(data),
+    },
+    sessionId,
+  );
+  return resolvedId;
+}
+
+/** Reads back what the service worker actually displayed: awaits `navigator.serviceWorker.ready`
+ * from page scope, calls `registration.getNotifications()`, and maps each live `Notification`
+ * (not serializable across CDP on its own) to a plain `{ tag, title, body }` object. */
+async function readServiceWorkerNotifications(cdp, sessionId) {
+  const notifications = await evalAsyncValue(
+    cdp,
+    sessionId,
+    `(async () => {
+      const registration = await navigator.serviceWorker.ready;
+      const list = await registration.getNotifications();
+      return list.map((n) => ({ tag: n.tag, title: n.title, body: n.body }));
+    })()`,
+  );
+  return Array.isArray(notifications) ? notifications : [];
+}
+
+/** Finds and attaches to the CDP target of type `service_worker` whose URL is `${origin}/sw.js`,
+ * polling `Target.getTargets` since the worker target may not exist yet immediately after
+ * registration. Returns `{ targetId, sessionId }` with `Runtime.enable` already sent on the new
+ * session, so a caller can `Runtime.evaluate` inside the worker's own global scope (needed to
+ * dispatch a synthetic `notificationclick` from inside the worker rather than the page). */
+async function attachToServiceWorkerTarget(
+  cdp,
+  origin,
+  timeoutMs = READY_TIMEOUT_MS,
+) {
+  const deadline = Date.now() + timeoutMs;
+  const swUrl = `${origin}/sw.js`;
+  while (Date.now() < deadline) {
+    const { targetInfos } = await cdp.send("Target.getTargets", {});
+    const swTarget = targetInfos.find(
+      (t) => t.type === "service_worker" && t.url === swUrl,
+    );
+    if (swTarget) {
+      const { sessionId } = await cdp.send("Target.attachToTarget", {
+        targetId: swTarget.targetId,
+        flatten: true,
+      });
+      await cdp.send("Runtime.enable", {}, sessionId);
+      return { targetId: swTarget.targetId, sessionId };
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    `attachToServiceWorkerTarget: no service_worker target for ${swUrl} within ${timeoutMs}ms`,
+  );
 }
 
 // ---------------------------------------------------------------------------
