@@ -60,6 +60,12 @@
  *     response body does not contain "addEventListener"` plus a corroborating SPA-fallback-HTML
  *     violation, since Vite's dev server falls back to serving `index.html` (status 200) rather
  *     than 404ing a missing `publicDir` file with a recognized extension.
+ *   - `vapid-persists` proven able to fail (Plan 03): deleting the sandbox's
+ *     `<home>/.dispatch/push-vapid.json` between the check's two boots produced
+ *     `vapid-persists: vapid keypair was regenerated across restarts` against a real sandbox
+ *     server booted twice against the same `$HOME`. A clean run reported
+ *     `vapid-persists: <home>/.dispatch/push-vapid.json byte-identical across two boots,
+ *     permission bits 600`, machine-verifying roadmap success criterion 1.
  */
 
 import {
@@ -68,6 +74,8 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { realpathSync } from "node:fs";
@@ -642,6 +650,127 @@ async function runBreakSwDevNoCache() {
 }
 
 // ---------------------------------------------------------------------------
+// vapid-persists (Plan 03): boots the SAME sandbox home twice and asserts the
+// persisted push-vapid.json key file is byte-identical across both boots,
+// machine-verifying roadmap success criterion 1. Accepts an optional
+// `betweenBoots` callback (default no-op) so the break can fire the SAME
+// check function against a mutated system rather than a copy of the logic.
+// ---------------------------------------------------------------------------
+
+async function checkVapidPersists(violations, betweenBoots = async () => {}) {
+  assertBuilt();
+  const home = makeSandboxHome("vapid");
+  const keyFile = join(home, ".dispatch", "push-vapid.json");
+  let child;
+  try {
+    if (existsSync(keyFile)) {
+      violations.push(
+        `vapid-persists: expected ${keyFile} to not exist before the first boot, it already does`,
+      );
+    }
+
+    child = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+    await stopServer(child);
+    child = undefined;
+
+    if (!existsSync(keyFile)) {
+      violations.push(
+        `vapid-persists: expected ${keyFile} to exist after the first boot, it is missing`,
+      );
+      return;
+    }
+    const mode = statSync(keyFile).mode & 0o777;
+    if (mode !== 0o600) {
+      violations.push(
+        `vapid-persists: expected ${keyFile} mode 600, got ${mode.toString(8)}`,
+      );
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(readFileSync(keyFile, "utf8"));
+    } catch (err) {
+      violations.push(
+        `vapid-persists: ${keyFile} is not valid JSON: ${err.message}`,
+      );
+      return;
+    }
+    const x = parsed.publicKeyJwk?.x;
+    const y = parsed.publicKeyJwk?.y;
+    const d = parsed.privateKeyJwk?.d;
+    if (
+      typeof x !== "string" ||
+      x === "" ||
+      typeof y !== "string" ||
+      y === "" ||
+      typeof d !== "string" ||
+      d === ""
+    ) {
+      violations.push(
+        `vapid-persists: ${keyFile} is missing publicKeyJwk.x/y or privateKeyJwk.d`,
+      );
+      return;
+    }
+    const before = readFileSync(keyFile);
+
+    await betweenBoots(home);
+
+    child = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+    await stopServer(child);
+    child = undefined;
+
+    if (!existsSync(keyFile)) {
+      violations.push(
+        `vapid-persists: expected ${keyFile} to exist after the second boot, it is missing`,
+      );
+      return;
+    }
+    const after = readFileSync(keyFile);
+    if (!before.equals(after)) {
+      violations.push(
+        "vapid-persists: vapid keypair was regenerated across restarts",
+      );
+      return;
+    }
+    console.log(
+      `vapid-persists: ${keyFile} byte-identical across two boots, permission bits ${mode.toString(8)}`,
+    );
+  } finally {
+    await stopServer(child);
+    cleanupSandboxHome(home);
+  }
+}
+
+/** `--break vapid-persists`: deletes the persisted key file between the two boots the check
+ * performs, requires the SAME check function to report the regeneration violation by name (TRIP
+ * leg), then runs the check again against a fresh sandbox home with the default no-op callback
+ * and requires a clean pass (RESTORE leg). No source or dist file is mutated; the sandbox home is
+ * disposable, so there is nothing to restore beyond the temp directory the check already cleans
+ * up. */
+async function runBreakVapidPersists() {
+  const tripViolations = [];
+  await checkVapidPersists(tripViolations, async (home) => {
+    unlinkSync(join(home, ".dispatch", "push-vapid.json"));
+  });
+  console.log(
+    `\n--break vapid-persists TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+  );
+  const tripFired = tripViolations.some((v) =>
+    v.includes("vapid keypair was regenerated across restarts"),
+  );
+
+  const restoreViolations = [];
+  await checkVapidPersists(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break vapid-persists RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS registries. Every later plan in this phase appends here.
 // ---------------------------------------------------------------------------
 
@@ -649,12 +778,14 @@ const CHECKS = {
   "sw-no-fetch-handler": (violations) => checkSwNoFetchHandler(violations),
   "sw-no-cache": (violations) => checkSwNoCache(violations),
   "sw-dev-no-cache": (violations) => checkSwDevNoCache(violations),
+  "vapid-persists": (violations) => checkVapidPersists(violations),
 };
 
 const BREAKS = {
   "sw-no-fetch-handler": runBreakSwNoFetchHandler,
   "sw-no-cache": runBreakSwNoCache,
   "sw-dev-no-cache": runBreakSwDevNoCache,
+  "vapid-persists": runBreakVapidPersists,
 };
 
 // ---------------------------------------------------------------------------
