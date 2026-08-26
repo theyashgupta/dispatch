@@ -81,6 +81,20 @@
  *     full HTTP lifecycle. A clean run reported 1 row after subscribe, 1 row (refreshed keys)
  *     after re-subscribe, 1 row unchanged after two malformed-body rejections, then 0 rows after
  *     unsubscribe, machine-verifying roadmap success criterion 2.
+ *   - `auth-gate-parity` proven able to fail (Plan 05): rewriting the compiled
+ *     `isLocalRequest` in `dist/server/routes/loopback.js` to unconditionally return true
+ *     produced, against a real booted sandbox server sent a foreign `Host` header, `auth-gate-
+ *     parity: GET /api/push/public-key (foreign Host) body does not contain "/__remote/verify"
+ *     (status=200)` plus content-type/referrer-policy/JSON-body violations for all three push
+ *     routes, and `auth-gate-parity: expected 0 rows after the rejected remote subscribe, got 1:
+ *     a foreign-Host request reached the push handler and wrote a row` (the ABSOLUTE-leg
+ *     violation). The PARITY leg still held in that same run, since the always-true
+ *     `isLocalRequest` bypassed the gate for `/api/vault` identically, both answering
+ *     `200 application/json` under the same foreign Host, exactly the documented reason the check
+ *     asserts both properties. A clean run reported all three push routes and `/api/vault`
+ *     answering the code-entry page (`text/html`, `no-referrer`) under a foreign Host, and the
+ *     loopback positive control answering 200 JSON, machine-verifying roadmap success criterion
+ *     4.
  */
 
 import {
@@ -95,6 +109,7 @@ import {
 } from "node:fs";
 import { realpathSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
+import { request as httpRequest } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -1172,6 +1187,269 @@ async function runBreakSubscribeUnsubscribe() {
 }
 
 // ---------------------------------------------------------------------------
+// auth-gate-parity (Plan 05): asserts the push routes are reachable on
+// loopback and rejected identically to /api/vault when accessed under a
+// foreign Host header with no session cookie, matching the hoisted
+// remoteAuthRouter's single enforcement point for every /api/* route.
+// ---------------------------------------------------------------------------
+
+const FOREIGN_HOST = "dispatch-panel-108.invalid";
+
+/** A `node:http` request against `path` carrying a spoofed `Host` header. Not built on `fetch`:
+ * Node's global `fetch` (undici) implements the WHATWG forbidden-request-header list, which
+ * includes `Host`, so a spoofed `Host` passed to `fetch` is silently dropped and the request
+ * connects with the real loopback Host. A gate check written on `fetch` could therefore never
+ * trigger the gate and would pass vacuously. */
+function requestWithHost(port, method, path, hostHeader, body) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const headers = { Host: hostHeader };
+    if (body !== undefined) headers["content-type"] = "application/json";
+    const req = httpRequest(
+      { host: "127.0.0.1", port, path, method, setHost: false, headers },
+      (res) => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => (text += chunk));
+        res.on("end", () =>
+          resolvePromise({
+            status: res.statusCode,
+            headers: res.headers,
+            body: text,
+          }),
+        );
+      },
+    );
+    req.on("error", rejectPromise);
+    if (body !== undefined) req.write(JSON.stringify(body));
+    req.end();
+  });
+}
+
+function looksLikeJson(text) {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Assert `res` is the remote-auth code-entry page, never an API response: body contains the
+ * verify-form's action path, content-type is text/html, referrer-policy is no-referrer, and the
+ * body does not parse as JSON. */
+function assertRemoteAuthGated(label, res, violations) {
+  if (!res.body.includes("/__remote/verify")) {
+    violations.push(
+      `auth-gate-parity: ${label} body does not contain "/__remote/verify" (status=${res.status})`,
+    );
+  }
+  const contentType = res.headers["content-type"];
+  if (typeof contentType !== "string" || !contentType.includes("text/html")) {
+    violations.push(
+      `auth-gate-parity: ${label} expected content-type to include "text/html", got ${JSON.stringify(contentType)}`,
+    );
+  }
+  if (res.headers["referrer-policy"] !== "no-referrer") {
+    violations.push(
+      `auth-gate-parity: ${label} expected referrer-policy "no-referrer", got ${JSON.stringify(res.headers["referrer-policy"])}`,
+    );
+  }
+  if (looksLikeJson(res.body)) {
+    violations.push(
+      `auth-gate-parity: ${label} body parses as JSON, expected the code-entry HTML page`,
+    );
+  }
+}
+
+async function checkAuthGateParity(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("gateparity");
+  let child;
+  try {
+    child = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    const dbPath = join(home, ".dispatch", "board.db");
+    const endpoint = "https://push.example.test/subscription/panel-108-gate";
+
+    // Absolute property: a foreign-Host request to each push route must get the code-entry page,
+    // never an API response.
+    const pubKeyRes = await requestWithHost(
+      SANDBOX_PORT,
+      "GET",
+      "/api/push/public-key",
+      FOREIGN_HOST,
+    );
+    assertRemoteAuthGated(
+      "GET /api/push/public-key (foreign Host)",
+      pubKeyRes,
+      violations,
+    );
+    console.log(
+      `auth-gate-parity: GET /api/push/public-key (foreign Host) -> status=${pubKeyRes.status} ` +
+        `content-type=${pubKeyRes.headers["content-type"]} referrer-policy=${pubKeyRes.headers["referrer-policy"]}`,
+    );
+
+    const subscribeRes = await requestWithHost(
+      SANDBOX_PORT,
+      "POST",
+      "/api/push/subscribe",
+      FOREIGN_HOST,
+      { endpoint, keys: { p256dh: "a", auth: "b" } },
+    );
+    assertRemoteAuthGated(
+      "POST /api/push/subscribe (foreign Host)",
+      subscribeRes,
+      violations,
+    );
+    console.log(
+      `auth-gate-parity: POST /api/push/subscribe (foreign Host) -> status=${subscribeRes.status} ` +
+        `content-type=${subscribeRes.headers["content-type"]} referrer-policy=${subscribeRes.headers["referrer-policy"]}`,
+    );
+
+    // Checked immediately after the rejected subscribe attempt, BEFORE the unsubscribe request
+    // below: a broken gate that also lets the unsubscribe request through would otherwise delete
+    // the very row this assertion exists to catch, masking the violation.
+    const rowsAfterSubscribe = readPushRows(dbPath);
+    if (rowsAfterSubscribe.length !== 0) {
+      violations.push(
+        `auth-gate-parity: expected 0 rows after the rejected remote subscribe, got ${rowsAfterSubscribe.length}: ` +
+          `a foreign-Host request reached the push handler and wrote a row`,
+      );
+    }
+
+    const unsubscribeRes = await requestWithHost(
+      SANDBOX_PORT,
+      "POST",
+      "/api/push/unsubscribe",
+      FOREIGN_HOST,
+      { endpoint },
+    );
+    assertRemoteAuthGated(
+      "POST /api/push/unsubscribe (foreign Host)",
+      unsubscribeRes,
+      violations,
+    );
+    console.log(
+      `auth-gate-parity: POST /api/push/unsubscribe (foreign Host) -> status=${unsubscribeRes.status} ` +
+        `content-type=${unsubscribeRes.headers["content-type"]} referrer-policy=${unsubscribeRes.headers["referrer-policy"]}`,
+    );
+
+    // Parity property: /api/vault under the SAME foreign Host must answer IDENTICALLY, asserted
+    // against the observed vault response rather than a hardcoded expectation.
+    const vaultRes = await requestWithHost(
+      SANDBOX_PORT,
+      "GET",
+      "/api/vault",
+      FOREIGN_HOST,
+    );
+    console.log(
+      `auth-gate-parity: GET /api/vault (foreign Host) -> status=${vaultRes.status} ` +
+        `content-type=${vaultRes.headers["content-type"]} referrer-policy=${vaultRes.headers["referrer-policy"]}`,
+    );
+    for (const [label, res] of [
+      ["GET /api/push/public-key", pubKeyRes],
+      ["POST /api/push/subscribe", subscribeRes],
+      ["POST /api/push/unsubscribe", unsubscribeRes],
+    ]) {
+      if (res.status !== vaultRes.status) {
+        violations.push(
+          `auth-gate-parity: ${label} status ${res.status} does not match /api/vault's ${vaultRes.status} under a foreign Host`,
+        );
+      }
+      if (res.headers["content-type"] !== vaultRes.headers["content-type"]) {
+        violations.push(
+          `auth-gate-parity: ${label} content-type ${JSON.stringify(res.headers["content-type"])} does not match /api/vault's ${JSON.stringify(vaultRes.headers["content-type"])} under a foreign Host`,
+        );
+      }
+      if (
+        res.headers["referrer-policy"] !== vaultRes.headers["referrer-policy"]
+      ) {
+        violations.push(
+          `auth-gate-parity: ${label} referrer-policy ${JSON.stringify(res.headers["referrer-policy"])} does not match /api/vault's ${JSON.stringify(vaultRes.headers["referrer-policy"])} under a foreign Host`,
+        );
+      }
+    }
+
+    // Positive control: a loopback-Host request must still reach the real push handler, so a
+    // totally broken router could not satisfy the absolute property vacuously.
+    const loopbackRes = await requestWithHost(
+      SANDBOX_PORT,
+      "GET",
+      "/api/push/public-key",
+      "127.0.0.1",
+    );
+    if (loopbackRes.status !== 200) {
+      violations.push(
+        `auth-gate-parity: loopback GET /api/push/public-key expected 200, got ${loopbackRes.status}`,
+      );
+    } else if (!looksLikeJson(loopbackRes.body)) {
+      violations.push(
+        `auth-gate-parity: loopback GET /api/push/public-key body does not parse as JSON: ${loopbackRes.body}`,
+      );
+    } else {
+      console.log(
+        "auth-gate-parity: loopback GET /api/push/public-key -> status=200 JSON body confirms the positive control",
+      );
+    }
+  } finally {
+    await stopServer(child);
+    cleanupSandboxHome(home);
+  }
+}
+
+/** `--break auth-gate-parity`: rewrites the compiled `isLocalRequest` in
+ * `dist/server/routes/loopback.js` to unconditionally return true, so the hoisted
+ * `remoteAuthRouter` treats every request as local regardless of Host, requires the SAME check
+ * function the real run uses to report the absolute-property violation by name (TRIP leg: a
+ * foreign-Host request reached the push handler and wrote a row), restores the captured bytes
+ * unconditionally in a `finally`, then re-runs the same check and requires a clean pass (RESTORE
+ * leg). This break trips the ABSOLUTE leg while the PARITY leg still holds, since a always-true
+ * `isLocalRequest` bypasses the gate for `/api/vault` too, so every route answers an identically
+ * real (broken) response under a foreign Host, which is the documented reason the check asserts
+ * both properties. */
+async function runBreakAuthGateParity() {
+  assertBuilt();
+  const distPath = join(REPO_ROOT, "dist", "server", "routes", "loopback.js");
+  const original = readFileSync(distPath, "utf8");
+  const marker = "export function isLocalRequest(req) {";
+  const occurrences = original.split(marker).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `refusing to break auth-gate-parity: expected exactly 1 occurrence of ${JSON.stringify(marker)} in ${distPath}, found ${occurrences}`,
+    );
+  }
+  const idx = original.indexOf(marker);
+
+  const tripViolations = [];
+  try {
+    const mutated =
+      original.slice(0, idx) +
+      "export function isLocalRequest(req) { return true; }\n";
+    writeFileSync(distPath, mutated);
+
+    await checkAuthGateParity(tripViolations);
+  } finally {
+    writeFileSync(distPath, original);
+  }
+  console.log(
+    `\n--break auth-gate-parity TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+  );
+  const tripFired = tripViolations.some((v) =>
+    v.includes("reached the push handler and wrote a row"),
+  );
+
+  const restoreViolations = [];
+  await checkAuthGateParity(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break auth-gate-parity RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS registries. Every later plan in this phase appends here.
 // ---------------------------------------------------------------------------
 
@@ -1183,6 +1461,7 @@ const CHECKS = {
   "push-table-schema": (violations) => checkPushTableSchema(violations),
   "subscribe-unsubscribe": (violations) =>
     checkSubscribeUnsubscribe(violations),
+  "auth-gate-parity": (violations) => checkAuthGateParity(violations),
 };
 
 const BREAKS = {
@@ -1192,6 +1471,7 @@ const BREAKS = {
   "vapid-persists": runBreakVapidPersists,
   "push-table-schema": runBreakPushTableSchema,
   "subscribe-unsubscribe": runBreakSubscribeUnsubscribe,
+  "auth-gate-parity": runBreakAuthGateParity,
 };
 
 // ---------------------------------------------------------------------------
