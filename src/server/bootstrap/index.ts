@@ -38,6 +38,7 @@ import {
 } from "../services/domain/hook-events.js";
 import { seedPlaybooks } from "../services/domain/playbooks.js";
 import { startPoller } from "../adapters/poller.js";
+import { sendPushForCard } from "../services/domain/push-send.js";
 import { startArtifactDetectionLoop } from "../adapters/artifact-detect.js";
 import { buildRegistry, getLinearSource } from "../sources/registry.js";
 import { startMarkerWatcher } from "../adapters/markers/watcher.js";
@@ -49,6 +50,7 @@ import {
 } from "../services/orchestration/update.js";
 import { startCleanupScheduler } from "../services/orchestration/cleanup-scheduler.js";
 import { healServicePlist } from "../services/orchestration/service.js";
+import type { ActivityEvent } from "../../shared/types.js";
 import { DEFAULT_CLEANUP_DELAY_DAYS } from "../../shared/types.js";
 
 const DEFAULT_PORT = 4700;
@@ -381,6 +383,12 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
     startPoller(config, getLinearSource());
   }
   startMarkerWatcher(statusChannel);
+  store.on("activity", (event: ActivityEvent) => {
+    if (event.type !== "status_needs_input" || event.cardId == null) return;
+    const card = store.getCard(event.cardId);
+    if (!card) return;
+    void sendPushForCard(card, event.reason ?? undefined);
+  });
   startArtifactDetectionLoop(port);
   if (config.updateCheck !== false) startUpdateCheckLoop(config);
   return { port };
