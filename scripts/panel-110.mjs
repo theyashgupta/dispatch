@@ -90,6 +90,25 @@
  *     send-failed`, so the stub never observes a request at all. The RESTORE leg re-ran clean
  *     (`--break push-envelope-decrypts RESTORE leg: PASS`) after the captured bytes were
  *     restored, and `git diff --quiet` on `push-send.ts` confirmed a byte-identical restore.
+ *   - `agent-done-no-push` proven able to fail (Plan 05): flipping `bootstrap/index.ts`'s
+ *     activity listener filter from `status_needs_input` to `status_agent_done`, rebuilding, and
+ *     re-running the same check against a real booted sandbox server, a real detached tmux pane,
+ *     and the real stub push service produced, verbatim:
+ *     `agent-done-no-push: expected zero stub push requests after an agent-done transition,
+ *     observed 1`
+ *     `agent-done-no-push: sandbox server log contains a "[push] send" line after an agent-done
+ *     transition, expected none`
+ *     The RESTORE leg re-ran clean (`--break agent-done-no-push RESTORE leg: PASS`) after the
+ *     captured bytes were restored, and `git diff --quiet` on `bootstrap/index.ts` confirmed a
+ *     byte-identical restore.
+ *   - `multi-device-prune` proven able to fail (Plan 05): replacing the `410` literal in
+ *     `push-send.ts`'s prune condition with an unreachable HTTP status number, rebuilding, and
+ *     re-running the same check against a real booted sandbox server, a real detached tmux pane,
+ *     and the real stub push service produced, verbatim:
+ *     `multi-device-prune: endpoint /gone/dead410 (status 410) survived, expected it pruned`
+ *     The RESTORE leg re-ran clean (`--break multi-device-prune RESTORE leg: PASS`) after the
+ *     captured bytes were restored, and `git diff --quiet` on `push-send.ts` confirmed a
+ *     byte-identical restore.
  */
 
 import {
