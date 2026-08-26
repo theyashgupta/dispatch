@@ -109,6 +109,23 @@
  *     The RESTORE leg re-ran clean (`--break multi-device-prune RESTORE leg: PASS`) after the
  *     captured bytes were restored, and `git diff --quiet` on `push-send.ts` confirmed a
  *     byte-identical restore.
+ *   - `per-origin-deep-link` proven able to fail (Plan 06): replacing the sole
+ *     `deepLinkUrl(sub.origin, card.id)` call site in `push-send.ts` with a fixed literal origin
+ *     for every row, rebuilding, and re-running the same check against a real booted sandbox
+ *     server, a real detached tmux pane, and the real stub push service produced, verbatim:
+ *     `per-origin-deep-link: /ok/loopback row's payload url uses scheme "https:", expected
+ *     "http:"`
+ *     `per-origin-deep-link: /ok/loopback row's payload url host is
+ *     "panel-110-break-fixed-origin.example", expected "127.0.0.1:47883"`
+ *     `per-origin-deep-link: /ok/tunnel row's payload url host is
+ *     "panel-110-break-fixed-origin.example", expected "panel-110-tunnel-48382.trycloudflare.com"`
+ *     `per-origin-deep-link: loopback and tunnel rows received the identical deep-link url
+ *     "https://panel-110-break-fixed-origin.example/?card=panel-110-per-origin-deep-link",
+ *     expected them to differ (a single shared origin for both rows is the failure this check
+ *     exists to catch)`
+ *     The RESTORE leg re-ran clean (`--break per-origin-deep-link RESTORE leg: PASS`) after the
+ *     captured bytes were restored, and `git diff --quiet` on `push-send.ts` confirmed a
+ *     byte-identical restore.
  */
 
 import {
@@ -1860,6 +1877,223 @@ async function runBreakMultiDevicePrune() {
 }
 
 // ---------------------------------------------------------------------------
+// Per-origin deep link (Plan 06): two subscription rows stored under
+// different origins must each receive a deep link built from their own
+// origin, and a stale origin must never cost a row its place in the store
+// (D-06/D-07).
+// ---------------------------------------------------------------------------
+
+const PER_ORIGIN_DEEP_LINK_TICK_SLACK_MS = 15_000;
+const PER_ORIGIN_DEEP_LINK_SETTLE_MS = 3_000;
+
+/** Seeds one loopback-origin row and one fake-tunnel-origin row (a device that subscribed under a
+ * tunnel hostname that has since rotated), drives one real NEEDS_INPUT marker, and decrypts each
+ * row's own push envelope with its own subscriber keys to assert its deep-link `url` carries that
+ * row's own origin, the right scheme, and the seeded card id, that the two rows' urls differ, and
+ * that neither row is pruned (an origin mismatch is never a reason to delete a row, D-07). */
+async function checkPerOriginDeepLink(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("per-origin-deep-link");
+  const cardId = "panel-110-per-origin-deep-link";
+  const identifier = "PANEL-110-06a";
+  const sessionId = randomUUID();
+  const tmuxName = `${SANDBOX_PREFIX}per-origin-pane-${process.pid}`;
+  const reason = `panel-110-per-origin-reason-${process.pid}-${Date.now()}`;
+  const loopbackOrigin = `127.0.0.1:${SANDBOX_PORT}`;
+  const tunnelOrigin = `panel-110-tunnel-${process.pid}.trycloudflare.com`;
+
+  const rows = [
+    { path: "/ok/loopback", origin: loopbackOrigin, scheme: "http:" },
+    { path: "/ok/tunnel", origin: tunnelOrigin, scheme: "https:" },
+  ].map((row) => ({
+    ...row,
+    endpoint: `http://127.0.0.1:${STUB_PUSH_PORT}${row.path}`,
+    keys: makeSubscriberKeys(),
+  }));
+
+  let stub;
+  let boot;
+  try {
+    stub = await startStubPushService();
+    await startTmuxPane(tmuxName);
+    await seedNeedsInputCard(home, {
+      cardId,
+      identifier,
+      sessionId,
+      tmuxSession: tmuxName,
+    });
+    for (const row of rows) {
+      seedSubscriptionRow(home, {
+        endpoint: row.endpoint,
+        keys: row.keys,
+        origin: row.origin,
+      });
+    }
+    boot = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    await driveMarker(tmuxName, "NEEDS_INPUT", reason);
+
+    const requests = await stub.waitForRequests(
+      2,
+      PER_ORIGIN_DEEP_LINK_TICK_SLACK_MS,
+    );
+    if (requests.length !== 2) {
+      violations.push(
+        `per-origin-deep-link: expected exactly 2 stub push requests within ` +
+          `${PER_ORIGIN_DEEP_LINK_TICK_SLACK_MS}ms, observed ${requests.length}`,
+      );
+    }
+
+    const payloads = {};
+    for (const row of rows) {
+      const req = requests.find((r) => r.path === row.path);
+      if (req == null) {
+        violations.push(
+          `per-origin-deep-link: no stub request observed for endpoint path ` +
+            `${JSON.stringify(row.path)}`,
+        );
+        continue;
+      }
+      try {
+        payloads[row.path] = decryptPushBody(req.body, row.keys);
+      } catch (err) {
+        violations.push(
+          `per-origin-deep-link: request to ${row.path} did not decrypt with its own ` +
+            `subscriber keys: ${err.message}`,
+        );
+      }
+    }
+
+    for (const row of rows) {
+      const payload = payloads[row.path];
+      if (payload == null) continue;
+      let url;
+      try {
+        url = new URL(payload.url);
+      } catch {
+        url = null;
+      }
+      if (url == null) {
+        violations.push(
+          `per-origin-deep-link: ${row.path} row's payload url ` +
+            `${JSON.stringify(payload.url)} is not a valid absolute URL`,
+        );
+        continue;
+      }
+      if (url.protocol !== row.scheme) {
+        violations.push(
+          `per-origin-deep-link: ${row.path} row's payload url uses scheme ` +
+            `${JSON.stringify(url.protocol)}, expected ${JSON.stringify(row.scheme)}`,
+        );
+      }
+      if (url.host !== row.origin) {
+        violations.push(
+          `per-origin-deep-link: ${row.path} row's payload url host is ` +
+            `${JSON.stringify(url.host)}, expected ${JSON.stringify(row.origin)}`,
+        );
+      }
+      if (url.searchParams.get("card") !== cardId) {
+        violations.push(
+          `per-origin-deep-link: ${row.path} row's payload url card param is ` +
+            `${JSON.stringify(url.searchParams.get("card"))}, expected ${JSON.stringify(cardId)}`,
+        );
+      }
+    }
+
+    const loopbackPayload = payloads["/ok/loopback"];
+    const tunnelPayload = payloads["/ok/tunnel"];
+    if (
+      loopbackPayload != null &&
+      tunnelPayload != null &&
+      loopbackPayload.url === tunnelPayload.url
+    ) {
+      violations.push(
+        `per-origin-deep-link: loopback and tunnel rows received the identical deep-link url ` +
+          `${JSON.stringify(loopbackPayload.url)}, expected them to differ (a single shared ` +
+          `origin for both rows is the failure this check exists to catch)`,
+      );
+    }
+
+    await sleep(PER_ORIGIN_DEEP_LINK_SETTLE_MS);
+    const survivingRows = readPushDbRows(join(home, ".dispatch", "board.db"));
+    const survivingEndpoints = new Set(survivingRows.map((r) => r.endpoint));
+    for (const row of rows) {
+      if (!survivingEndpoints.has(row.endpoint)) {
+        violations.push(
+          `per-origin-deep-link: endpoint ${row.path} (origin ${row.origin}) was pruned, ` +
+            `expected it to survive (an origin mismatch is never a reason to delete a row, D-07)`,
+        );
+      }
+    }
+  } finally {
+    if (stub) await stub.close();
+    await killTmuxPane(tmuxName);
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const PER_ORIGIN_DEEP_LINK_BREAK_TARGET = "deepLinkUrl(sub.origin, card.id)";
+const PER_ORIGIN_DEEP_LINK_BREAK_REPLACEMENT =
+  'deepLinkUrl("panel-110-break-fixed-origin.example", card.id)';
+
+/** `--break per-origin-deep-link`: makes `push-send.ts` build every row's deep-link url from one
+ * fixed origin instead of the row's own (replaces the sole `deepLinkUrl(sub.origin, card.id)`
+ * call site), rebuilds via `resetBuildCache()`, and requires the SAME check function to report
+ * the resulting "expected them to differ" violation (trip leg). Restores the captured bytes
+ * unconditionally in a `finally`, rebuilds, and requires a clean pass (restore leg). */
+async function runBreakPerOriginDeepLink() {
+  assertBuilt();
+  const original = readFileSync(PUSH_SEND_TS_PATH, "utf8");
+  const occurrences =
+    original.split(PER_ORIGIN_DEEP_LINK_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel110: refusing to run --break per-origin-deep-link, expected ` +
+        `${JSON.stringify(PER_ORIGIN_DEEP_LINK_BREAK_TARGET)} to occur exactly once in ` +
+        `${PUSH_SEND_TS_PATH}, measured ${occurrences}. A miscounted anchor would mutate the ` +
+        `wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(PUSH_SEND_TS_PATH, original);
+  try {
+    writeFileSync(
+      PUSH_SEND_TS_PATH,
+      original.replace(
+        PER_ORIGIN_DEEP_LINK_BREAK_TARGET,
+        PER_ORIGIN_DEEP_LINK_BREAK_REPLACEMENT,
+      ),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkPerOriginDeepLink(tripViolations);
+    console.log(
+      `\n--break per-origin-deep-link TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes("expected them to differ"),
+    );
+  } finally {
+    writeFileSync(PUSH_SEND_TS_PATH, original);
+    resetBuildCache();
+    unregisterRestore(PUSH_SEND_TS_PATH);
+  }
+
+  const restoreViolations = [];
+  await checkPerOriginDeepLink(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break per-origin-deep-link RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS / PROBES registries. Every later plan in this phase
 // appends here.
 // ---------------------------------------------------------------------------
@@ -1871,6 +2105,7 @@ const CHECKS = {
     checkPushEnvelopeDecrypts(violations),
   "agent-done-no-push": (violations) => checkAgentDoneNoPush(violations),
   "multi-device-prune": (violations) => checkMultiDevicePrune(violations),
+  "per-origin-deep-link": (violations) => checkPerOriginDeepLink(violations),
 };
 
 const BREAKS = {
@@ -1878,6 +2113,7 @@ const BREAKS = {
   "push-envelope-decrypts": runBreakPushEnvelopeDecrypts,
   "agent-done-no-push": runBreakAgentDoneNoPush,
   "multi-device-prune": runBreakMultiDevicePrune,
+  "per-origin-deep-link": runBreakPerOriginDeepLink,
 };
 
 const PROBES = {};
