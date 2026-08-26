@@ -39,4 +39,4 @@ jobs:
           npm config get registry
       - run: npm ci --ignore-scripts
       - run: npm run build
-      - run: npm publish --access public
+      - run: npm publish --access public --tag previous
