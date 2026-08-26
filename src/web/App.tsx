@@ -35,6 +35,7 @@ import { SettingsScreen, type SettingsTab } from "./features/settings/index.js";
 import { FirstRunSetup } from "./features/setup/index.js";
 import { UpdateBanner } from "./features/update/index.js";
 import { cleanupCard as cleanupCardApi, getCard, getSetup } from "./lib/api.js";
+import { refreshPushSubscription } from "./lib/push.js";
 import type { StartRequest } from "./lib/start-request.js";
 import type { PrerequisiteStatus, TunnelState } from "../shared/types.js";
 import type { CardSearchResult } from "../shared/search.js";
@@ -145,6 +146,10 @@ export function App() {
       localStorage.setItem("dsp.sound", soundEnabled ? "on" : "off");
     } catch {}
   }, [soundEnabled]);
+
+  useEffect(() => {
+    void refreshPushSubscription();
+  }, []);
 
   const lastOpened = useLastOpened();
   const newestTs = feed.events[0]?.ts;
