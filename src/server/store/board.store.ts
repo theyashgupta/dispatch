@@ -24,6 +24,7 @@ import {
   BOARD_DB_PATH,
   type BoardDb,
   type BoardMeta,
+  type PushSubscriptionRow,
   openBoardDb,
 } from "./board-db.js";
 import {
@@ -1185,6 +1186,22 @@ class BoardStore extends EventEmitter {
    */
   listEvents(cardId: string | null, limit: number): ActivityEvent[] {
     return this.db.listEvents(cardId, limit);
+  }
+
+  /**
+   * Upsert a push subscription row. A pure synchronous write delegated to the BoardDb surface
+   * (listEvents precedent) so the route never imports node:sqlite; not enqueued.
+   */
+  addPushSubscription(sub: PushSubscriptionRow): void {
+    this.db.addPushSubscription(sub);
+  }
+
+  /**
+   * Remove a push subscription row by endpoint. A pure synchronous write delegated to the BoardDb
+   * surface (listEvents precedent) so the route never imports node:sqlite; not enqueued.
+   */
+  removePushSubscription(endpoint: string): boolean {
+    return this.db.removePushSubscription(endpoint);
   }
 
   /**

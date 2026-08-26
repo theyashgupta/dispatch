@@ -126,6 +126,23 @@ export interface BoardDb {
    * preserves the `existsSync` guard's intent a second time over.
    */
   snapshotPreV3(): void;
+  /**
+   * Upsert a subscription row, keyed by `endpoint`. A re-subscribe from the same device refreshes
+   * `p256dh`/`auth`/`origin` in place rather than accumulating a duplicate row.
+   * @remarks Safe outside the `persist` write queue: `push_subscriptions` shares no rows with the
+   * card/meta/event write path, this runs on the same single `DatabaseSync` handle with
+   * `busy_timeout = 5000`, and it is a single statement, never part of a multi-statement
+   * transaction.
+   */
+  addPushSubscription(sub: PushSubscriptionRow): void;
+  /**
+   * Delete a subscription row by endpoint.
+   * @returns Whether a row was actually deleted, so the caller can answer honestly instead of
+   * always claiming success.
+   * @remarks Safe outside the `persist` write queue for the same reasons as
+   * {@link BoardDb.addPushSubscription}.
+   */
+  removePushSubscription(endpoint: string): boolean;
 }
 
 /**
@@ -143,6 +160,15 @@ interface EventRow {
   reason: string | null;
   source: string | null;
   ts: string;
+}
+
+/** A `push_subscriptions` row, keyed by endpoint (PUSH-09). */
+export interface PushSubscriptionRow {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  origin: string;
+  createdAt: string;
 }
 
 /** Slot path for the Nth snapshot backup in the `.bak.N` chain. */
@@ -433,6 +459,13 @@ export function openBoardDb(): BoardDb {
       ts       TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_events_card_id ON events(card_id);
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint   TEXT PRIMARY KEY,
+      p256dh     TEXT NOT NULL,
+      auth       TEXT NOT NULL,
+      origin     TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
 
   const upsertCard = db.prepare(
@@ -460,6 +493,15 @@ export function openBoardDb(): BoardDb {
   const selectEventsByCard = db.prepare(
     `SELECT id, card_id, type, from_col, to_col, reason, source, ts
        FROM events WHERE card_id = ? ORDER BY id DESC LIMIT ?`,
+  );
+  const upsertPushSubscription = db.prepare(
+    `INSERT INTO push_subscriptions (endpoint, p256dh, auth, origin, created_at)
+     VALUES (@endpoint, @p256dh, @auth, @origin, @createdAt)
+     ON CONFLICT(endpoint) DO UPDATE SET
+       p256dh = excluded.p256dh, auth = excluded.auth, origin = excluded.origin`,
+  );
+  const deletePushSubscription = db.prepare(
+    `DELETE FROM push_subscriptions WHERE endpoint = ?`,
   );
 
   function persistTxn(
@@ -573,6 +615,19 @@ export function openBoardDb(): BoardDb {
           (err as Error).message,
         );
       }
+    },
+    addPushSubscription(sub) {
+      upsertPushSubscription.run({
+        endpoint: sub.endpoint,
+        p256dh: sub.p256dh,
+        auth: sub.auth,
+        origin: sub.origin,
+        createdAt: sub.createdAt,
+      });
+    },
+    removePushSubscription(endpoint) {
+      const info = deletePushSubscription.run(endpoint);
+      return Number(info.changes) > 0;
     },
   };
 }
