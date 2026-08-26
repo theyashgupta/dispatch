@@ -15,7 +15,8 @@ const MAX_KEY_LEN = 512;
  * `cloudflared`'s `--http-host-header` sentinel rewrites `Host` for tunnel traffic, so
  * {@link deriveOrigin} is the only trustworthy source, mirroring `remote-auth-gate.ts`'s
  * `originMatchesHost` branch structure. Every handler answers a fixed generic error code on an
- * unexpected throw, no stack, path or filesystem-error text.
+ * unexpected throw, no stack, path or filesystem-error text on the wire; the error message is
+ * logged to stderr only.
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
 export const pushRouter = Router();
@@ -79,7 +80,8 @@ pushRouter.get("/push/public-key", (_req, res) => {
     res
       .status(200)
       .json({ publicKey: loadOrCreateVapidKeys().publicKeyBase64Url });
-  } catch {
+  } catch (err) {
+    console.error("[push] public-key read failed:", (err as Error).message);
     res.status(500).json({ error: "push-key-read-failed" });
   }
 });
@@ -116,7 +118,8 @@ pushRouter.post("/push/subscribe", (req, res) => {
       createdAt: new Date().toISOString(),
     });
     res.status(200).json({ ok: true });
-  } catch {
+  } catch (err) {
+    console.error("[push] subscribe failed:", (err as Error).message);
     res.status(500).json({ error: "push-subscribe-failed" });
   }
 });
@@ -132,7 +135,8 @@ pushRouter.post("/push/unsubscribe", (req, res) => {
   try {
     const removed = store.removePushSubscription(endpointResult.endpoint);
     res.status(200).json({ ok: true, removed });
-  } catch {
+  } catch (err) {
+    console.error("[push] unsubscribe failed:", (err as Error).message);
     res.status(500).json({ error: "push-unsubscribe-failed" });
   }
 });
