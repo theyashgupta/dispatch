@@ -786,7 +786,13 @@ async function runBreakVapidPersists() {
 // the break can fire the SAME check function against a mutated database.
 // ---------------------------------------------------------------------------
 
-const EXPECTED_PUSH_COLUMNS = ["endpoint", "p256dh", "auth", "origin", "created_at"];
+const EXPECTED_PUSH_COLUMNS = [
+  "endpoint",
+  "p256dh",
+  "auth",
+  "origin",
+  "created_at",
+];
 const EXPECTED_NOT_NULL_COLUMNS = ["p256dh", "auth", "origin", "created_at"];
 
 async function checkPushTableSchema(violations, mutateDb = async () => {}) {
