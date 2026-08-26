@@ -23,6 +23,8 @@ import {
   GoneBadge,
   LinearStateBadge,
   PrBadge,
+  PrOverflowChip,
+  PR_CHIP_CAP,
   PreviewBadge,
   SourceBadge,
   UnknownProbeBadge,
@@ -35,7 +37,9 @@ import {
   errorCopy,
   needsAttention as getNeedsAttention,
 } from "./card-attention.js";
+import { GroupPrRow } from "./GroupPrRow.js";
 import { MemberRow } from "./MemberRow.js";
+import { cardPrs } from "./card-prs.js";
 
 export const PRIORITY_DOT: Record<number, { color: string; label: string }> = {
   1: { color: "var(--prio-urgent)", label: "Urgent priority" },
@@ -95,6 +99,8 @@ export function CardView({
     useResumeFeedback(card);
   const compact = card.column === "done";
   const isGroup = card.source === "group";
+  const prs = cardPrs(card);
+  const showRepo = new Set(prs.map((pr) => pr.repo)).size > 1;
   const selectable = card.column === "todo" && card.groupId == null && !isGroup;
   const needsAttention = getNeedsAttention(card);
   const priorityDot = isGroup ? undefined : PRIORITY_DOT[card.priority];
@@ -294,15 +300,14 @@ export function CardView({
           >
             <SourceBadge source={card.source ?? "linear"} />
             <LinearStateBadge card={card} />
-            {card.prs?.map((pr) => (
-              <PrBadge key={pr.url} pr={pr} />
-            ))}
-            {card.prsUnknown != null && (
-              <UnknownProbeBadge
-                signal="pr"
-                category={card.prsUnknown.category}
-                partial={(card.prs?.length ?? 0) > 0}
-              />
+            {!isGroup &&
+              prs
+                .slice(0, PR_CHIP_CAP)
+                .map((pr) => (
+                  <PrBadge key={pr.url} pr={pr} showRepo={showRepo} />
+                ))}
+            {!isGroup && prs.length > PR_CHIP_CAP && (
+              <PrOverflowChip hidden={prs.length - PR_CHIP_CAP} />
             )}
             {card.previews?.map((preview) => (
               <PreviewBadge key={preview.port} preview={preview} />
@@ -360,6 +365,8 @@ export function CardView({
         >
           {card.title}
         </div>
+
+        <GroupPrRow card={card} />
 
         <div
           style={{
@@ -683,9 +690,7 @@ export function CardView({
                 key={member.id}
                 member={member}
                 actionable={true}
-                groupPr={card.prs}
                 groupPreviews={card.previews}
-                groupPrsUnknown={card.prsUnknown}
                 groupPreviewsUnknown={card.previewsUnknown}
               />
             ))}
