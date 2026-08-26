@@ -2078,13 +2078,12 @@ function usePushSubscription(): {
   const enable = useCallback(() => {
     setPending("enabling");
     setError(null);
-    void enablePush().then((result: PushEnableResult) => {
+    void enablePush().then(async (result: PushEnableResult) => {
       const livePermission: DesktopPermission =
         "Notification" in window ? Notification.permission : "unsupported";
       setPermission(livePermission);
-      void readPushSubscription().then((subscription) => {
-        setHasSubscription(subscription != null);
-      });
+      const subscription = await readPushSubscription();
+      setHasSubscription(subscription != null);
       setPending(null);
       if (livePermission === "denied") {
         setError(null);
@@ -2099,10 +2098,9 @@ function usePushSubscription(): {
   const disable = useCallback(() => {
     setPending("disabling");
     setError(null);
-    void disablePush().then((ok) => {
-      void readPushSubscription().then((subscription) => {
-        setHasSubscription(subscription != null);
-      });
+    void disablePush().then(async (ok) => {
+      const subscription = await readPushSubscription();
+      setHasSubscription(subscription != null);
       setPending(null);
       if (!ok) setError("generic");
     });
