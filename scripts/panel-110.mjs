@@ -86,12 +86,22 @@ import {
 } from "node:fs";
 import { realpathSync } from "node:fs";
 import { execFile, execFileSync, spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { promisify } from "node:util";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+import {
+  createDecipheriv as gcmDecipheriv,
+  createPublicKey,
+  diffieHellman,
+  generateKeyPairSync,
+  hkdfSync,
+  randomBytes,
+  randomUUID,
+  verify as verifySignature,
+} from "node:crypto";
 
 const execFileP = promisify(execFile);
 
@@ -647,6 +657,320 @@ async function pollPushDbRows(dbPath, predicate, timeoutMs) {
     await sleep(POLL_INTERVAL_MS);
   }
   return last;
+}
+
+// ---------------------------------------------------------------------------
+// Stub push service, subscriber keys, and the RFC 8291/8292 receive side
+// (Plan 04's own new capability): the harness impersonates a push service on
+// loopback and independently decrypts what the real send pipeline sent it,
+// so a later check can assert on real payload contents.
+// ---------------------------------------------------------------------------
+
+/** A `node:http` server bound to 127.0.0.1 on `STUB_PUSH_PORT`, recording every request as `{
+ * method, path, headers, body }` (body collected as a Buffer) and answering with a status derived
+ * from the path prefix, so one stub can play several push-service roles: `/ok/` -> 201, `/gone/`
+ * -> 410, `/missing/` -> 404, `/busy/` -> 429, anything else -> 400. Callers must `close()` it in a
+ * `finally`. */
+function startStubPushService() {
+  let recorded = [];
+  const server = createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const path = req.url ?? "/";
+      recorded.push({
+        method: req.method ?? "",
+        path,
+        headers: { ...req.headers },
+        body: Buffer.concat(chunks),
+      });
+      const status = path.startsWith("/ok/")
+        ? 201
+        : path.startsWith("/gone/")
+          ? 410
+          : path.startsWith("/missing/")
+            ? 404
+            : path.startsWith("/busy/")
+              ? 429
+              : 400;
+      res.writeHead(status);
+      res.end();
+    });
+  });
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(STUB_PUSH_PORT, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve({
+        requests: () => [...recorded],
+        reset: () => {
+          recorded = [];
+        },
+        close: () => new Promise((r) => server.close(() => r())),
+        waitForRequests: async (n, timeoutMs) => {
+          const deadline = Date.now() + timeoutMs;
+          while (recorded.length < n && Date.now() < deadline) {
+            await sleep(POLL_INTERVAL_MS);
+          }
+          return [...recorded];
+        },
+      });
+    });
+  });
+}
+
+/** Generates a P-256 keypair and a 16-byte auth secret, standing in for a browser's
+ * `pushManager.subscribe()` output. `p256dh` is the base64url-encoded 65-byte uncompressed EC
+ * point, `auth` is base64url, `privateKey` is the raw `KeyObject` kept for {@link
+ * decryptPushBody}'s ECDH step. */
+function makeSubscriberKeys() {
+  const { publicKey, privateKey } = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+  });
+  const jwk = publicKey.export({ format: "jwk" });
+  const point = Buffer.concat([
+    Buffer.from([0x04]),
+    Buffer.from(jwk.x, "base64url"),
+    Buffer.from(jwk.y, "base64url"),
+  ]);
+  return {
+    p256dh: point.toString("base64url"),
+    auth: randomBytes(16).toString("base64url"),
+    privateKey,
+  };
+}
+
+/** INSERTs one row directly into the sandbox `push_subscriptions` table via `node:sqlite`
+ * `DatabaseSync`, mirroring the schema `board-db.ts` creates. Callable several times against the
+ * same sandbox home before a single server boot; the schema must already exist (a prior
+ * `seedNeedsInputCard`/`seedFixtureCards` warmup boot guarantees that). */
+function seedSubscriptionRow(home, { endpoint, keys, origin }) {
+  const dbPath = join(home, ".dispatch", "board.db");
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.prepare(
+      `INSERT INTO push_subscriptions (endpoint, p256dh, auth, origin, created_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth,
+         origin = excluded.origin, created_at = excluded.created_at`,
+    ).run(endpoint, keys.p256dh, keys.auth, origin, new Date().toISOString());
+  } finally {
+    db.close();
+  }
+}
+
+/** Parses the `aes128gcm` header (RFC 8188: salt(16), record size(4 BE), key id length(1), key
+ * id), rebuilds the server's ephemeral public key from the 65-byte point, runs the RFC 8291
+ * receive-side derivation (ECDH via {@link diffieHellman}, then three `hkdfSync` stages each
+ * wrapped in `Buffer.from`), decrypts with `aes-128-gcm` using the trailing 16 bytes as the auth
+ * tag, strips the trailing `0x02` delimiter and any zero padding, and returns the parsed JSON.
+ * Throws a descriptive error naming which stage failed (header length, point length, tag
+ * verification, delimiter), so a check violation says what broke. */
+function decryptPushBody(body, subscriberKeys) {
+  if (!Buffer.isBuffer(body) || body.length < 21) {
+    throw new Error(
+      `decryptPushBody: body (${body?.length ?? 0} bytes) too short to contain an aes128gcm ` +
+        `header (stage: header length)`,
+    );
+  }
+  const salt = body.subarray(0, 16);
+  const idlen = body.readUInt8(20);
+  const headerLen = 21 + idlen;
+  if (body.length < headerLen + 16) {
+    throw new Error(
+      `decryptPushBody: body (${body.length} bytes) too short for a ${idlen}-byte keyid plus a ` +
+        `16-byte auth tag (stage: header length)`,
+    );
+  }
+  const keyid = body.subarray(21, headerLen);
+  if (keyid.length !== 65) {
+    throw new Error(
+      `decryptPushBody: server ephemeral public key point is ${keyid.length} bytes, expected 65 ` +
+        `(stage: point length)`,
+    );
+  }
+  const ciphertextAndTag = body.subarray(headerLen);
+  const tag = ciphertextAndTag.subarray(ciphertextAndTag.length - 16);
+  const ciphertext = ciphertextAndTag.subarray(0, ciphertextAndTag.length - 16);
+
+  const serverEphemeralPublicKey = createPublicKey({
+    key: {
+      kty: "EC",
+      crv: "P-256",
+      x: keyid.subarray(1, 33).toString("base64url"),
+      y: keyid.subarray(33, 65).toString("base64url"),
+    },
+    format: "jwk",
+  });
+  const sharedSecret = diffieHellman({
+    privateKey: subscriberKeys.privateKey,
+    publicKey: serverEphemeralPublicKey,
+  });
+
+  const subscriberPoint = Buffer.from(subscriberKeys.p256dh, "base64url");
+  const authSecret = Buffer.from(subscriberKeys.auth, "base64url");
+  const keyInfo = Buffer.concat([
+    Buffer.from("WebPush: info\0"),
+    subscriberPoint,
+    keyid,
+  ]);
+  const prk = Buffer.from(
+    hkdfSync("sha256", sharedSecret, authSecret, keyInfo, 32),
+  );
+  const cek = Buffer.from(
+    hkdfSync(
+      "sha256",
+      prk,
+      salt,
+      Buffer.from("Content-Encoding: aes128gcm\0"),
+      16,
+    ),
+  );
+  const nonce = Buffer.from(
+    hkdfSync("sha256", prk, salt, Buffer.from("Content-Encoding: nonce\0"), 12),
+  );
+
+  let decrypted;
+  try {
+    const decipher = gcmDecipheriv("aes-128-gcm", cek, nonce);
+    decipher.setAuthTag(tag);
+    decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  } catch (err) {
+    throw new Error(
+      `decryptPushBody: AES-128-GCM tag verification failed (stage: tag verification): ${err.message}`,
+    );
+  }
+
+  let end = decrypted.length;
+  while (end > 0 && decrypted[end - 1] === 0x00) end--;
+  if (end === 0 || decrypted[end - 1] !== 0x02) {
+    throw new Error(
+      "decryptPushBody: padding delimiter 0x02 not found after decryption (stage: delimiter)",
+    );
+  }
+  return JSON.parse(decrypted.subarray(0, end - 1).toString("utf8"));
+}
+
+/** Parses a `vapid t=<jwt>, k=<pubkey>` Authorization header value, checks the decoded JWT header
+ * names ES256, the claims' `aud` equals `endpointOrigin` and `exp` is in the future and no more
+ * than 24 hours out, the decoded signature is exactly 64 bytes, and verifies it against a public
+ * key rebuilt from `k` with `dsaEncoding: "ieee-p1363"`. Returns a list of problem strings (empty
+ * when valid) rather than throwing, so a check can attribute each failure by name. */
+function verifyVapidAuthorization(headerValue, endpointOrigin) {
+  const problems = [];
+  const match = /^vapid\s+t=([^,]+),\s*k=(.+)$/i.exec(
+    (headerValue ?? "").trim(),
+  );
+  if (!match) {
+    problems.push(
+      `verifyVapidAuthorization: header value does not match "vapid t=..., k=..." shape: ${JSON.stringify(headerValue)}`,
+    );
+    return problems;
+  }
+  const [, jwt, k] = match;
+  const parts = jwt.split(".");
+  if (parts.length !== 3) {
+    problems.push(
+      `verifyVapidAuthorization: JWT has ${parts.length} dot-separated parts, expected 3`,
+    );
+    return problems;
+  }
+  const [headerB64, claimsB64, sigB64] = parts;
+
+  let header;
+  try {
+    header = JSON.parse(Buffer.from(headerB64, "base64url").toString("utf8"));
+  } catch (err) {
+    problems.push(
+      `verifyVapidAuthorization: JWT header is not valid JSON: ${err.message}`,
+    );
+    return problems;
+  }
+  if (header.alg !== "ES256") {
+    problems.push(
+      `verifyVapidAuthorization: JWT header alg is ${JSON.stringify(header.alg)}, expected "ES256"`,
+    );
+  }
+
+  let claims;
+  try {
+    claims = JSON.parse(Buffer.from(claimsB64, "base64url").toString("utf8"));
+  } catch (err) {
+    problems.push(
+      `verifyVapidAuthorization: JWT claims are not valid JSON: ${err.message}`,
+    );
+    return problems;
+  }
+  if (claims.aud !== endpointOrigin) {
+    problems.push(
+      `verifyVapidAuthorization: claims.aud is ${JSON.stringify(claims.aud)}, expected ${JSON.stringify(endpointOrigin)}`,
+    );
+  }
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (typeof claims.exp !== "number" || claims.exp <= nowSec) {
+    problems.push(
+      `verifyVapidAuthorization: claims.exp (${claims.exp}) is not in the future (now ${nowSec})`,
+    );
+  } else if (claims.exp - nowSec > 24 * 3600) {
+    problems.push(
+      `verifyVapidAuthorization: claims.exp is more than 24 hours out (${claims.exp - nowSec}s)`,
+    );
+  }
+
+  const signature = Buffer.from(sigB64, "base64url");
+  if (signature.length !== 64) {
+    problems.push(
+      `verifyVapidAuthorization: signature is ${signature.length} bytes, expected 64`,
+    );
+    return problems;
+  }
+
+  let publicKey;
+  try {
+    const point = Buffer.from(k, "base64url");
+    if (point.length !== 65) {
+      problems.push(
+        `verifyVapidAuthorization: k= public key point is ${point.length} bytes, expected 65`,
+      );
+      return problems;
+    }
+    publicKey = createPublicKey({
+      key: {
+        kty: "EC",
+        crv: "P-256",
+        x: point.subarray(1, 33).toString("base64url"),
+        y: point.subarray(33, 65).toString("base64url"),
+      },
+      format: "jwk",
+    });
+  } catch (err) {
+    problems.push(
+      `verifyVapidAuthorization: could not rebuild public key from k=: ${err.message}`,
+    );
+    return problems;
+  }
+
+  let valid = false;
+  try {
+    valid = verifySignature(
+      "sha256",
+      Buffer.from(`${headerB64}.${claimsB64}`),
+      { key: publicKey, dsaEncoding: "ieee-p1363" },
+      signature,
+    );
+  } catch (err) {
+    problems.push(
+      `verifyVapidAuthorization: signature verification threw: ${err.message}`,
+    );
+    return problems;
+  }
+  if (!valid) {
+    problems.push(
+      "verifyVapidAuthorization: ES256 signature did not verify against k=",
+    );
+  }
+
+  return problems;
 }
 
 // ---------------------------------------------------------------------------
