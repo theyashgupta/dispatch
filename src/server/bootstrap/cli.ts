@@ -31,7 +31,7 @@ Usage:
   dispatch doctor                     Check required binaries, then exit
   dispatch update                     Check for and guide you through an update
   dispatch uninstall [--purge] [--dry-run] [--yes]
-                                      Stop dispatch sessions and remove its config/hooks
+                                      Remove dispatch's hooks and launchd plist, keeping your data
   dispatch service <install|status|restart|uninstall>
                                       Run dispatch as a background launchd service (macOS)
   dispatch --help | --version
@@ -39,12 +39,14 @@ Usage:
 Options:
   --port <n>   Preferred port (falls back to a free port if taken)
   --no-open    Do not auto-open the browser
-  --purge      uninstall: also delete board data (your playbooks are still kept)
+  --purge      uninstall: also delete config.json and board data, and stop live dsp- sessions
   --dry-run    uninstall: print the plan and change nothing
   --yes        uninstall: skip the confirmation prompt
   --print      service install: print the plist and exit, no side effects
 
-Uninstall never deletes git worktrees — it lists them for you to remove.`;
+Uninstall never deletes git worktrees, it lists them for you to remove.
+Bare uninstall removes: hook.sh, hook-settings.json, pty-shim.py, vault-run, vault-guard.mjs, com.dispatch.app.plist.
+Bare uninstall keeps: config.json, the vault store, playbooks, board data, and any running dsp- sessions.`;
 
 /**
  * Read the package version from the nearest ancestor package.json so `--version` reports the same
@@ -196,8 +198,12 @@ async function doctor(): Promise<void> {
  * installs get printed `@latest` guidance (never `npm i -g`, since the npx cache serves stale
  * versions), a local checkout gets dev-checkout guidance, and a global install offers `[Y/n]`
  * default-yes then runs it on confirm — under a pipe/CI it prints the command instead of prompting
- * or spawning. ALWAYS resolves without a non-zero exit, mirroring `doctor`'s diagnostic posture: a
- * failed update prints the manual fallback command rather than failing the command itself.
+ * or spawning. A failed or skipped update resolves with exit 0, mirroring `doctor`'s diagnostic
+ * posture: it prints the manual fallback command rather than failing the command itself.
+ * @remarks A successful update restarts the service automatically when a plist exists. A failed
+ * restart sets `process.exitCode = 1` (the caller exits with it) because the restart path boots
+ * the job out before bootstrapping, so a failure leaves the agent down, not merely stale, and a
+ * scripted `dispatch update` must not report success over a down service.
  */
 async function update(): Promise<void> {
   const status = await checkForUpdate({ liveCheck: true });
@@ -243,16 +249,47 @@ async function update(): Promise<void> {
   }
   const result = await runUpdate({ interactive: true });
   if (result.ok) {
-    process.stdout.write(
-      existsSync(SERVICE_PLIST_PATH)
-        ? `  Updated to v${result.version} — restart the service to use it: dispatch service restart\n`
-        : `  Updated to v${result.version} — restart dispatch to use it.\n`,
-    );
+    if (existsSync(SERVICE_PLIST_PATH)) {
+      process.stdout.write(
+        `  Updated to v${result.version}, restarting the service.\n`,
+      );
+      const code = await restartService();
+      if (code !== 0) {
+        process.stdout.write(
+          `  Service restart failed, recover with: dispatch service install\n`,
+        );
+        process.exitCode = 1;
+        return;
+      }
+      process.stdout.write(`  Service restarted on v${result.version}.\n`);
+    } else {
+      process.stdout.write(
+        `  Updated to v${result.version}, restart dispatch to use it.\n`,
+      );
+    }
   } else {
     process.stdout.write(
-      `  Update failed — run it yourself: ${result.command}\n`,
+      `  Update failed, run it yourself: ${result.command}\n`,
     );
   }
+}
+
+/**
+ * Parse a `--port` flag value, exiting 2 with a usage message on anything outside 1-65535.
+ * @remarks Shared by the boot path and `service install` so an invalid value can neither reach
+ * the listener nor be rendered into the plist, where `KeepAlive` would turn the CLI's own
+ * rejection into a respawn loop.
+ */
+function parsePortFlag(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    process.stderr.write(
+      `Invalid --port value: ${raw} (expected an integer 1-65535)\n`,
+    );
+    process.exit(2);
+  }
+  return port;
 }
 
 /**
@@ -267,7 +304,7 @@ async function service(
   },
 ): Promise<void> {
   if (sub === "install") {
-    const port = values.port ? Number(values.port) : undefined;
+    const port = parsePortFlag(values.port);
     process.exit(await installService({ port, print: values.print }));
   }
   if (sub === "status") {
@@ -324,10 +361,11 @@ async function uninstall(values: {
     process.stdout.write("\n");
   }
 
-  const stopped = plan.stop.sessions.length;
-  const { plan: done, removed, failed } = await runUninstall(plan);
+  const { plan: done, removed, failed, stopped } = await runUninstall(plan);
   process.stdout.write(
-    `  Removed ${removed.length} file(s), stopped ${stopped} session(s).\n`,
+    `  Removed ${removed.length} file(s), stopped ${stopped.sessions} session(s)` +
+      (stopped.ttyd > 0 ? ` and ${stopped.ttyd} ttyd process(es)` : "") +
+      ".\n",
   );
   if (failed.length > 0) {
     process.stdout.write(`  Failed to remove ${failed.length} file(s):\n`);
@@ -382,7 +420,7 @@ async function cli(): Promise<void> {
   }
   if (positionals[0] === "update") {
     await update();
-    process.exit(0);
+    process.exit();
   }
   if (positionals[0] === "service") {
     await service(positionals[1], values);
@@ -394,16 +432,7 @@ async function cli(): Promise<void> {
   }
 
   process.env.NODE_ENV ??= "production";
-  const desiredPort = values.port ? Number(values.port) : undefined;
-  if (
-    desiredPort !== undefined &&
-    (!Number.isInteger(desiredPort) || desiredPort < 1 || desiredPort > 65535)
-  ) {
-    process.stderr.write(
-      `Invalid --port value: ${values.port} (expected an integer 1–65535)\n`,
-    );
-    process.exit(2);
-  }
+  const desiredPort = parsePortFlag(values.port);
   const { main } = await import("./index.js");
   const { port } = await main({ desiredPort });
   const url = `http://127.0.0.1:${port}`;

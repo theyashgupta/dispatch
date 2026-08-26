@@ -12,26 +12,43 @@ import {
   DISPATCH_DIR,
   HOOK_SCRIPT_PATH,
   HOOK_SETTINGS_PATH,
+  PTY_SHIM_PATH,
   SERVICE_LABEL,
   SERVICE_PLIST_PATH,
+  VAULT_DIR,
+  VAULT_GUARD_PATH,
+  VAULT_METADATA_PATH,
+  VAULT_RUN_PATH,
+  VAULT_SCHEMA_PATH,
+  VAULT_VALUES_PATH,
 } from "../infra/paths.js";
 import { worktreePath } from "../domain/workspace-paths.js";
 import { run } from "../../adapters/exec.js";
 
 /**
  * The three groups `uninstall` reasons about, produced once by `scanFootprint` and consumed by both
- * `renderPlan` and `runUninstall` — so what the user is shown and what is actually touched can never
+ * `renderPlan` and `runUninstall`, so what the user is shown and what is actually touched can never
  * drift apart.
- * @remarks `stop.ttydPids` holds the pids captured AT SCAN TIME, not a count to re-derive later:
+ * @remarks `keep` holds everything the user authored or is currently working in: bare uninstall
+ * resets only dispatch-owned regenerables (hooks, the plist), so `config`, `boardData`, and the live
+ * `sessions` list all start in `keep`, and only `--purge` promotes them into `remove`/`stop`.
+ * `stop.ttydPids` holds the pids captured AT SCAN TIME, not a count to re-derive later:
  * `runUninstall` kills exactly this set, so a ttyd that starts between the scan and the (interactive,
- * possibly long) confirmation is never killed unseen. Rendered as a count only — the pids never reach
+ * possibly long) confirmation is never killed unseen. Rendered as a count only, the pids never reach
  * the user's terminal. `stop.service` is true only when the LaunchAgent plist exists AND the platform
  * is darwin, so a loaded agent gets booted out before its plist is removed via the plain `remove` list.
  */
 export interface UninstallPlan {
   remove: string[];
   stop: { sessions: string[]; ttydPids: number[]; service: boolean };
-  keep: { boardData: string[]; playbooks: string | null; worktrees: string[] };
+  keep: {
+    config: string | null;
+    vault: string | null;
+    boardData: string[];
+    playbooks: string | null;
+    sessions: string[];
+    worktrees: string[];
+  };
 }
 
 /**
@@ -43,6 +60,7 @@ export interface UninstallOutcome {
   plan: UninstallPlan;
   removed: string[];
   failed: { path: string; reason: string }[];
+  stopped: { sessions: number; ttyd: number };
 }
 
 const PACKAGE_NOTE =
@@ -104,10 +122,12 @@ export async function scanFootprint(opts: {
   purge: boolean;
 }): Promise<UninstallPlan> {
   const servicePlistExists = fs.existsSync(SERVICE_PLIST_PATH);
-  const footprint = [
-    CONFIG_PATH,
+  const regenerables = [
     HOOK_SCRIPT_PATH,
     HOOK_SETTINGS_PATH,
+    PTY_SHIM_PATH,
+    VAULT_RUN_PATH,
+    VAULT_GUARD_PATH,
     ...(servicePlistExists ? [SERVICE_PLIST_PATH] : []),
   ].filter((p) => fs.existsSync(p));
   const boardData = boardDataPaths();
@@ -115,19 +135,32 @@ export async function scanFootprint(opts: {
   const sessions = [...(await listSessions())]
     .filter((s) => s.startsWith("dsp-"))
     .sort();
+  const configExists = fs.existsSync(CONFIG_PATH);
+  const vaultDirExists = fs.existsSync(VAULT_DIR);
 
   return {
     remove: opts.purge
-      ? [...footprint, ...boardData, ...boardSidecarPaths()]
-      : footprint,
+      ? [
+          ...regenerables,
+          ...(configExists ? [CONFIG_PATH] : []),
+          ...(vaultDirExists
+            ? [VAULT_METADATA_PATH, VAULT_VALUES_PATH, VAULT_SCHEMA_PATH]
+            : []),
+          ...boardData,
+          ...boardSidecarPaths(),
+        ]
+      : regenerables,
     stop: {
-      sessions,
-      ttydPids: await findDspTtydOrphans(),
+      sessions: opts.purge ? sessions : [],
+      ttydPids: opts.purge ? await findDspTtydOrphans() : [],
       service: servicePlistExists && process.platform === "darwin",
     },
     keep: {
+      config: !opts.purge && configExists ? CONFIG_PATH : null,
+      vault: !opts.purge && vaultDirExists ? VAULT_DIR : null,
       boardData: opts.purge ? [] : boardData,
       playbooks: fs.existsSync(playbooks) ? playbooks : null,
+      sessions: opts.purge ? [] : sessions,
       worktrees: scanWorktrees(),
     },
   };
@@ -172,13 +205,26 @@ export function renderPlan(plan: UninstallPlan): string {
   }
 
   const keepLines: string[] = [];
+  if (plan.keep.config) {
+    keepLines.push(
+      `  ${plan.keep.config}  (your settings and launch args, pass --purge to delete)`,
+    );
+  }
+  if (plan.keep.vault) {
+    keepLines.push(
+      `  ${plan.keep.vault}  (your vault keys, pass --purge to delete)`,
+    );
+  }
   for (const p of plan.keep.boardData) {
-    keepLines.push(`  ${p}  (board data — pass --purge to delete)`);
+    keepLines.push(`  ${p}  (board data, pass --purge to delete)`);
   }
   if (plan.keep.playbooks) {
     keepLines.push(
-      `  ${plan.keep.playbooks}  (your playbooks — kept even with --purge)`,
+      `  ${plan.keep.playbooks}  (your playbooks, kept even with --purge)`,
     );
+  }
+  for (const s of plan.keep.sessions) {
+    keepLines.push(`  tmux session ${s}  (left running, pass --purge to stop)`);
   }
   if (plan.keep.worktrees.length > 0) {
     keepLines.push("  Git worktrees are never deleted — remove them yourself:");
@@ -217,9 +263,12 @@ function hasStopWork(plan: UninstallPlan): boolean {
  * was ACTUALLY removed alongside the plan as it now stands, so the caller can re-render the Keep /
  * worktree report through the one renderer without claiming a failed delete succeeded.
  * @remarks Three invariants make this command safe to run, and each is load-bearing:
- * (1) it deletes ONLY the exact, constant paths the scan collected, one `rmSync(p)` per file — never
+ * (1) it deletes ONLY the exact, constant paths the scan collected, one `rmSync(p)` per file, never
  * `{ recursive: true }`, never a directory, never a glob, and never `~/.dispatch` itself, which still
- * holds the user's playbooks;
+ * holds the user's playbooks. The one named exception is `VAULT_DIR`: its three files are enumerated
+ * into `plan.remove` like any other file, and only once they are gone does a separate, narrowly-scoped
+ * `fs.rmdirSync(VAULT_DIR)` step remove the now-empty directory, the generic loop below never sees a
+ * directory;
  * (2) tmux targets come only from the `dsp-` filter AND are passed as `=<name>`, tmux's EXACT-match
  * prefix (mirroring cleanup.ts) — without the `=`, tmux prefix-matches and could kill a user session;
  * (3) git worktrees are listed for the user, NEVER removed, because they may hold uncommitted agent
@@ -237,9 +286,10 @@ function hasStopWork(plan: UninstallPlan): boolean {
 export async function runUninstall(
   plan: UninstallPlan,
 ): Promise<UninstallOutcome> {
-  killTtydPids(plan.stop.ttydPids);
+  const stoppedTtyd = killTtydPids(plan.stop.ttydPids);
+  let stoppedSessions = 0;
   for (const session of plan.stop.sessions) {
-    await killSession(`=${session}`);
+    if (await killSession(`=${session}`)) stoppedSessions++;
   }
   if (plan.stop.service) {
     try {
@@ -263,6 +313,21 @@ export async function runUninstall(
     }
   }
 
+  const purgingVault = plan.remove.includes(VAULT_METADATA_PATH);
+  if (purgingVault && fs.existsSync(VAULT_DIR)) {
+    try {
+      if (fs.readdirSync(VAULT_DIR).length === 0) {
+        fs.rmdirSync(VAULT_DIR);
+        removed.push(VAULT_DIR);
+      }
+    } catch (err) {
+      const { code, message } = err as NodeJS.ErrnoException;
+      if (code !== "ENOENT") {
+        failed.push({ path: VAULT_DIR, reason: code ?? message });
+      }
+    }
+  }
+
   return {
     plan: {
       ...plan,
@@ -271,5 +336,6 @@ export async function runUninstall(
     },
     removed,
     failed,
+    stopped: { sessions: stoppedSessions, ttyd: stoppedTtyd },
   };
 }

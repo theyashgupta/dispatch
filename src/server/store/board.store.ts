@@ -96,17 +96,14 @@ export function compareDoneOrder(a: Card, b: Card): number {
 /**
  * Strip a card's secrets before it leaves the process — the SINGLE sanctioned place a card loses
  * them. Every new read path (windowed `snapshot()`, and any future one) must call this rather than
- * duplicate the strip, so the redaction boundary can never drift. Four responsibilities:
+ * duplicate the strip, so the redaction boundary can never drift. Three responsibilities:
  * (1) remove the card's own secret field; (2) remove `sessions` outright — the full array is
- * server-side only and carries every session's own secret field; (3) resolve the ACTIVE
- * session by `card.activeSessionId` and, when one resolves, FIELD-PICK exactly the two
- * `ActiveSessionWire` keys (`id`, `ttydPort` — F-96-F narrowed this from six; the other four
- * duplicated the flat mirror below for zero reader benefit) onto `wireCard.activeSession` — never
- * spread the session object, so the secret is omitted by construction and a future field added to
- * `Session` cannot leak through this path; (4) at two or more sessions, FIELD-PICK the
- * `SessionSummary` keys per session onto
- * `wireCard.sessionSummaries`, sorted by `createdAt` ascending, following the identical
- * never-spread discipline as `activeSession` — this is the only place a non-active session's own
+ * server-side only and carries every session's own secret field (the active session's own
+ * `ttydPort`/`activeSessionId` already ride the wire unconditionally via the card's own flat
+ * mirror fields, so no separate active-session projection is needed here, Phase 102); (3) at two
+ * or more sessions, FIELD-PICK the `SessionSummary` keys per session onto
+ * `wireCard.sessionSummaries`, sorted by `createdAt` ascending, never spreading the session
+ * object — this is the only place a non-active session's own
  * `prs`/`previews`/`prsUnknown`/`previewsUnknown` become observable on the wire (`ARTIFACT-01`),
  * since `Card`'s own four fields stay a mirror of the active session only. Also resolves each
  * summary's `parentOrdinal` from `s.builtFrom` against the SAME sorted-by-`createdAt` array that
@@ -122,10 +119,6 @@ export function redactCard(card: Card): Card {
   const wireCard = { ...card };
   delete wireCard.hookToken;
   delete wireCard.sessions;
-  const active = card.sessions?.find((s) => s.id === card.activeSessionId);
-  wireCard.activeSession = active
-    ? { id: active.id, ttydPort: active.ttydPort }
-    : undefined;
   const hasMultipleSessions = (card.sessions?.length ?? 0) >= 2;
   wireCard.sessionCount = hasMultipleSessions
     ? card.sessions!.length
@@ -1036,7 +1029,7 @@ class BoardStore extends EventEmitter {
    * SECURITY: this is the single outbound chokepoint — each kept card is redacted via
    * {@link redactCard}, so the per-session hook-auth secret never rides an SSE frame or a REST
    * response, from the card OR from any session copy (only the persisted board.json carries it).
-   * `activeSession` is a field-picked projection, never a spread, so a future `Session` field
+   * `sessionSummaries` is a field-picked projection, never a spread, so a future `Session` field
    * cannot leak through it. Redact future secret-adjacent card fields there (hookRoutedAt was
    * considered and deliberately rides the wire — a non-secret timestamp).
    * @see docs/ARCHITECTURE.md#sse-transport
@@ -2314,6 +2307,12 @@ class BoardStore extends EventEmitter {
    * `markSessionLost` cannot resolve it either, so it degrades to its documented undefined-target
    * default and derives the card-level loss flag — the pre-Phase-91 behaviour — rather than
    * clearing some unrelated sibling's fields.
+   * @remarks The synthetic record also carries the four ARTIFACT fields (`prs`, `prsUnknown`,
+   * `previews`, `previewsUnknown`) off the same flat mirror. `artifact-detect.ts` reads them off
+   * this record to decide whether a tick actually CHANGED anything, so omitting them made every
+   * diff miss: `prsUnknown` read as undefined and `prs` as `[]` on every tick, so a standing
+   * failure re-broadcast a full SSE board snapshot every 10s for this card class, the exact cost
+   * those write-skip diffs exist to avoid.
    * @returns Pairs whose `session.tmuxSession` is carried in the TYPE, so consumers narrow without
    * a runtime guard the iteration source has already made unreachable (`IN-01`).
    */
@@ -2355,6 +2354,10 @@ class BoardStore extends EventEmitter {
           workspace: card.workspace,
           lastMarker: card.lastMarker,
           hookRoutedAt: card.hookRoutedAt,
+          prs: card.prs,
+          prsUnknown: card.prsUnknown,
+          previews: card.previews,
+          previewsUnknown: card.previewsUnknown,
         },
       });
     }
@@ -2826,6 +2829,154 @@ class BoardStore extends EventEmitter {
       card.activeSessionId = undefined;
       this.setActiveSession(card, {});
     }
+  }
+
+  /**
+   * Scan for warned-but-retained session records past their retention window WITHOUT mutating or
+   * enqueueing anything, so {@link pruneStaleWarnedSessions} can learn whether it has any work
+   * before it takes the single-writer queue. {@link sessionsDueForCleanup} is the in-file
+   * precedent for the shape: a plain read over `this.cards`.
+   * @remarks The pre-scan is not an optimization, it is the difference between an idle timer and a
+   * permanent one. `enqueue` has no no-op path: every call runs `backupTick`, persists the FULL
+   * card set and emits `change`, which makes `sse.route.ts` build and write a whole board snapshot
+   * to every connected client. An unconditional enqueue on the one-minute cleanup tick would
+   * charge a board write and a full SSE fan-out per minute forever to a board with nothing
+   * prunable. `runDueCleanups` already behaves this way, enqueueing only when its own scan yields
+   * work.
+   * @remarks Card guards are the same three every other cleanup dispatcher takes: `done` only,
+   * never mid-{@link isStarting} (which covers start AND resume sagas), never
+   * mid-{@link isCleaningUp}. The last one matters most here. `cleanupWorkspace` does seconds of
+   * `git worktree` work between store calls, and a prune tick landing inside that window would
+   * splice out the very record the teardown is operating on, after which every terminal cleanup
+   * mutator ({@link finishCleanup}, {@link recordCleanupWarning}, {@link recordCleanupBlocked})
+   * takes its "target does not resolve, refusing" branch and the teardown's outcome is discarded.
+   * @remarks The caller re-runs this scan INSIDE the mutator rather than trusting the pre-scan's
+   * snapshot, matching how `runDueCleanups` re-validates against a fresh `store.getCard` before it
+   * dispatches.
+   */
+  private stalePrunableSessions(
+    now: number,
+  ): { card: Card; sessionId: string }[] {
+    const out: { card: Card; sessionId: string }[] = [];
+    for (const card of this.cards.values()) {
+      if (
+        card.column !== "done" ||
+        this.isStarting(card.id) ||
+        this.isCleaningUp(card.id)
+      ) {
+        continue;
+      }
+      for (const session of card.sessions ?? []) {
+        if (!session.cleanupWarning || session.tmuxSession != null) continue;
+        if (session.workspacePath != null || session.claudeSessionId != null) {
+          continue;
+        }
+        const updatedAtMs = Date.parse(session.updatedAt);
+        if (!Number.isFinite(updatedAtMs)) continue;
+        if (now - updatedAtMs < this.cleanupDelayMs) continue;
+        out.push({ card, sessionId: session.id });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Prune stale warned-but-retained session records (Phase 93 residual R3). A warned
+   * teardown ({@link recordCleanupWarning}) deliberately keeps its record so the user can act on
+   * the warning, but nothing removed it afterward, so every failed teardown was a permanent leak
+   * in `card.sessions` until this method.
+   *
+   * The rule: a session record is pruned when all four hold: `cleanupWarning` is set,
+   * `tmuxSession` is absent, `workspacePath` and `claudeSessionId` are BOTH absent, and
+   * `now - Date.parse(session.updatedAt) >= cleanupDelayMs`. Every removal returns a `cleanup`
+   * activity event, so this path is auditable in `GET /api/events` like every other cleanup
+   * branch.
+   * @remarks `cleanupWarning` set identifies the warned-but-retained class; `tmuxSession` absent
+   * excludes {@link noteCleanupWarning}'s preflight-refusal records, whose tmux session, ttyd and
+   * hookToken are deliberately still alive and usable; and the `cleanupDelayMs` window gives the
+   * warning at least as long to be seen as the successful cleanup it replaced would itself have
+   * waited before firing.
+   * @remarks The `workspacePath`/`claudeSessionId` clause is what keeps this from being silent
+   * amnesia. {@link finishCleanup} removes a record only after the teardown SUCCEEDED, so nothing
+   * on disk survives it; this method removes records precisely because their teardown FAILED,
+   * which is exactly when the worktree named by `workspacePath` may still exist
+   * (`cleanup.ts`'s "Cleanup incomplete - some worktrees may remain."). `claudeSessionId` is the
+   * whole `--resume` affordance {@link recordResumeFailure} deliberately keeps, and neither
+   * {@link moveCardManual} nor `recordResumeFailure` clears `cleanupWarning`, so a card warned,
+   * dragged out of Done, failed to resume and dragged back would otherwise have its only recovery
+   * handle deleted a week later. What remains prunable is the population the residual was actually
+   * about: legacy-workspace and folder-already-removed warnings whose only remaining state IS the
+   * warning.
+   * @remarks Fails closed on a bad timestamp: an absent `updatedAt`, or one `Date.parse` cannot
+   * resolve to a finite number, is never pruned. `NaN` comparisons are false in JavaScript, which
+   * happens to give the right answer here, but the finite check is written explicitly so the
+   * safety is stated rather than incidental.
+   * @remarks Selection lives in {@link stalePrunableSessions}, which is run TWICE: once before the
+   * `enqueue` so an idle tick costs no board write and no SSE frame, and once inside the mutator
+   * so the removal acts on freshly resolved state rather than the pre-scan's snapshot. The removal
+   * repeats {@link finishCleanup}'s FULL removal order for every
+   * qualifying record, not merely its `card.*` mirror block: the flat projection is cleared
+   * through {@link setActiveSession} and the token through {@link clearHookToken} BEFORE the
+   * record goes, which is the precondition {@link removeSessionRecord}'s own contract names.
+   * Omitting it drives the pointer repair into `setActiveSession`'s refusing-to-project branch and
+   * leaves the card holding an empty `sessions` array beside a live `workspacePath`, the exact
+   * shape that projection chokepoint calls corrupt: `isAwaitingCleanup` then pins the card
+   * forever, manual recovery re-enters the same refusal, and the next boot's
+   * {@link repairDowngradeDrift} mints an anonymous phantom record from the orphaned flat fields.
+   * `wasActive` is captured BEFORE {@link removeSessionRecord} runs and the matching `card.*`
+   * mirrors are cleared only under that guard.
+   * @remarks The three cleanup mirrors are RE-DERIVED from whatever record is active after the
+   * removal, not merely cleared. {@link setActiveSession} mirrors the six projection fields only,
+   * so a bare clear would leave a card advertising "no warning, no block, no countdown" while its
+   * newly promoted session carries all three, and `CardView` renders every one of them off the
+   * card level. The same gap exists in {@link finishCleanup}, but this is the first path that
+   * reaches it on a timer with no user action, which turns a rare consequence of an explicit
+   * teardown into a background drift source.
+   */
+  pruneStaleWarnedSessions(now: number): Promise<void> {
+    if (this.stalePrunableSessions(now).length === 0) return Promise.resolve();
+    return this.enqueue(() => {
+      const events: Omit<ActivityEvent, "id">[] = [];
+      for (const { card, sessionId } of this.stalePrunableSessions(now)) {
+        const wasActive = sessionId === card.activeSessionId;
+        this.setActiveSession(
+          card,
+          {
+            tmuxSession: undefined,
+            ttydPort: undefined,
+            workspacePath: undefined,
+            workspace: undefined,
+            claudeSessionId: undefined,
+          },
+          sessionId,
+        );
+        this.clearHookToken(card, sessionId);
+        if (wasActive) {
+          card.sessionLost = false;
+          card.terminalError = null;
+          card.prs = undefined;
+          card.prsUnknown = undefined;
+          card.previews = undefined;
+          card.previewsUnknown = undefined;
+        }
+        this.removeSessionRecord(card, sessionId);
+        const promoted = card.sessions?.find(
+          (s) => s.id === card.activeSessionId,
+        );
+        card.cleanupWarning = promoted?.cleanupWarning;
+        card.cleanupBlocked = promoted?.cleanupBlocked;
+        card.cleanupDueAt = promoted?.cleanupDueAt;
+        events.push(
+          this.event("cleanup", {
+            cardId: card.id,
+            fromCol: "done",
+            toCol: "done",
+            reason: "Stale cleanup warning pruned after the retention window.",
+          }),
+        );
+      }
+      return events;
+    });
   }
 
   /**

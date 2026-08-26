@@ -47,8 +47,29 @@ const ID_RE =
  * chokepoint re-freeze (`NEW-21`) — see docs/ARCHITECTURE.md#session-projection-chokepoint.
  * @remarks Moved from 122 to 123 for the deliberate one-ID attention single-source
  * re-freeze (`NEW-22`) — see docs/ARCHITECTURE.md#design-system-invariants.
+ * @remarks Moved from 123 to 124 for the deliberate one-ID exec-chokepoint perf-record
+ * mitigation re-freeze (`T-98-05`), see docs/ARCHITECTURE.md#exec-chokepoint.
+ * @remarks Moved from 124 to 125 for the deliberate one-ID `PrInfo.repo` basename
+ * mitigation re-freeze (`T-98-01`), cited in `shared/types.ts` and `adapters/gh.ts`.
+ * @remarks Moved from 127 to 128 for the deliberate one-ID `PreviewEvidence` basename
+ * mitigation re-freeze (`T-99-01`), cited in `shared/types.ts`.
+ * @remarks Moved from 128 to 129 for the deliberate one-ID `cwdByPids` argv-only
+ * mitigation re-freeze (`T-99-02`), cited in `adapters/dev-server.ts`.
+ * @remarks Moved from 129 to 130 for the deliberate one-ID re-parented dev server
+ * residual re-freeze (`T-99-12`), see docs/ARCHITECTURE.md#known-residuals.
+ * @remarks Moved from 130 to 131 for the deliberate one-ID cleanup-mirror
+ * chokepoint re-freeze (`NEW-23`), see docs/ARCHITECTURE.md#cleanup-mirror-chokepoint.
+ * @remarks Moved from 131 to 135 for the deliberate four-ID re-freeze ratifying the
+ * write-only vault store's guarantees (`T-103-01` through `T-103-04`), see
+ * docs/ARCHITECTURE.md#security-threat-model.
+ * @remarks Moved from 135 to 139 for the deliberate four-ID re-freeze ratifying the vault
+ * page's client-side guarantees (`T-104-01` through `T-104-04`), see
+ * docs/ARCHITECTURE.md#security-threat-model.
+ * @remarks Moved from 139 to 145 for the deliberate six-ID re-freeze ratifying the runner
+ * (`T-105-01`, `T-105-02`), both guard layers (`T-105-03`, `T-105-04`) and the two accepted
+ * residuals (`T-105-05`, `T-105-06`), see docs/ARCHITECTURE.md#security-threat-model.
  */
-const FROZEN_COUNT = 123;
+const FROZEN_COUNT = 145;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");
@@ -132,6 +153,43 @@ const SANCTIONED_WRITERS = [
   { name: "setActiveSession", fields: SESSION_FIELDS },
   { name: "migrateCardsToSessionEntity", fields: ENTITY_FIELDS },
   { name: "removeSessionRecord", fields: ENTITY_FIELDS },
+];
+
+/**
+ * The three Card-mirrors-Session cleanup-lifecycle fields invariant `NEW-23` fences. Unlike
+ * {@link SESSION_FIELDS}, these do NOT funnel through one chokepoint (`setActiveSession`): the
+ * cleanup lifecycle writes each field from whichever step of teardown, blocking, or restoration it
+ * is in, so the sanctioned-writer set below is a set of NINE functions, not three.
+ */
+const CLEANUP_MIRROR_FIELDS = [
+  "cleanupDueAt",
+  "cleanupWarning",
+  "cleanupBlocked",
+];
+
+/**
+ * The DECLARED writers of {@link CLEANUP_MIRROR_FIELDS}, each with the exact subset it is allowed
+ * to write. Every other write anywhere in `src/` is a violation. Deliberately NOT a reuse of
+ * {@link SANCTIONED_WRITERS}: none of `NEW-21`'s three functions writes a cleanup-mirror field, so
+ * reusing that list would make {@link checkCleanupMirrorChokepoint} fire on every legitimate
+ * existing write site on its first run.
+ */
+const CLEANUP_SANCTIONED_WRITERS = [
+  { name: "moveCardManual", fields: ["cleanupDueAt"] },
+  { name: "recordCleanupWarning", fields: ["cleanupWarning", "cleanupDueAt"] },
+  {
+    name: "finishCleanup",
+    fields: ["cleanupWarning", "cleanupBlocked", "cleanupDueAt"],
+  },
+  { name: "recordCleanupBlocked", fields: ["cleanupBlocked"] },
+  { name: "clearCleanupBlocked", fields: ["cleanupBlocked"] },
+  { name: "clearCleanupDue", fields: ["cleanupDueAt"] },
+  { name: "restoreCleanupDue", fields: ["cleanupDueAt"] },
+  { name: "noteCleanupWarning", fields: ["cleanupWarning"] },
+  {
+    name: "pruneStaleWarnedSessions",
+    fields: ["cleanupWarning", "cleanupBlocked", "cleanupDueAt"],
+  },
 ];
 
 /**
@@ -517,7 +575,11 @@ function parseSource(file, content) {
     content,
     ts.ScriptTarget.Latest,
     true,
-    file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    file.endsWith(".tsx")
+      ? ts.ScriptKind.TSX
+      : file.endsWith(".mjs")
+        ? ts.ScriptKind.JS
+        : ts.ScriptKind.TS,
   );
 }
 
@@ -577,12 +639,15 @@ function isAssignmentToken(kind) {
  * positive on the redaction chokepoint itself. Both residues are recorded here rather than left
  * implied, because an undocumented gap reads as coverage.
  * @param sourceFile Parsed file.
+ * @param fields The fenced field list to scan for — {@link SESSION_FIELDS} for `NEW-21`,
+ * {@link CLEANUP_MIRROR_FIELDS} for `NEW-23` — so the ~70-line AST walk itself is never
+ * duplicated for a second field set.
  * @returns One entry per write: 1-based line number, character offset (for the tier-2
  * span-containment check), the receiver's source text (so `ctx.workspacePath` — `SagaContext`'s
  * own unrelated field, not `card.workspacePath` — can be excluded by name), and the fenced field
  * name (so a sanctioned writer can be granted a SUBSET of the fenced fields, not all of them).
  */
-function scanSessionFieldAssignments(sourceFile) {
+function scanSessionFieldAssignments(sourceFile, fields) {
   const results = [];
   const record = (node, field, receiver) => {
     const pos = node.getStart(sourceFile);
@@ -605,13 +670,13 @@ function scanSessionFieldAssignments(sourceFile) {
     } else if (
       ts.isPropertyAccessExpression(node) &&
       ts.isIdentifier(node.name) &&
-      SESSION_FIELDS.includes(node.name.text)
+      fields.includes(node.name.text)
     ) {
       record(node, node.name.text, node.expression.getText(sourceFile));
     } else if (
       ts.isElementAccessExpression(node) &&
       ts.isStringLiteralLike(node.argumentExpression) &&
-      SESSION_FIELDS.includes(node.argumentExpression.text)
+      fields.includes(node.argumentExpression.text)
     ) {
       record(
         node,
@@ -661,7 +726,7 @@ function scanSessionFieldAssignments(sourceFile) {
             ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name)
               ? prop.name.text
               : null;
-          if (name && SESSION_FIELDS.includes(name)) {
+          if (name && fields.includes(name)) {
             record(prop, name, receiver);
           }
         }
@@ -741,6 +806,7 @@ function checkSessionProjectionChokepoint() {
     if (content === null) continue;
     for (const match of scanSessionFieldAssignments(
       parseSource(file, content),
+      SESSION_FIELDS,
     )) {
       if (file === STEPS_PATH && match.receiver === "ctx") continue;
       if (file === BOARD_STORE_PATH) {
@@ -760,6 +826,155 @@ function checkSessionProjectionChokepoint() {
         );
       }
     }
+  }
+  return violations;
+}
+
+/**
+ * Cleanup-mirror chokepoint gate (`NEW-23`). The fenced set is the three
+ * {@link CLEANUP_MIRROR_FIELDS} the cleanup lifecycle mirrors onto `Card`: `cleanupDueAt`,
+ * `cleanupWarning`, `cleanupBlocked`. Unlike `NEW-21`'s single-chokepoint fields, these do not
+ * funnel through one function, so the sanctioned set is {@link CLEANUP_SANCTIONED_WRITERS}, nine
+ * functions each granted only the subset it actually writes.
+ * @remarks Structurally identical two-tier check to {@link checkSessionProjectionChokepoint}:
+ * Tier 1 is a repo-wide fence (any match outside `src/server/store/board.store.ts` is a violation
+ * by construction), and Tier 2 is an in-file slice (inside `board.store.ts`, a match is exempt
+ * only when it falls within a sanctioned writer's own declaration span AND the field it writes is
+ * in that writer's own allowed subset).
+ * @remarks Carries the same missing-subject sentinel discipline as `NEW-21`: if a sanctioned
+ * writer's declaration cannot be found (renamed, deleted), this emits a violation naming the
+ * missing subject rather than silently reporting zero violations, so widening the carve-out by
+ * deleting a writer fails loudly instead of passing vacuously.
+ * @see docs/ARCHITECTURE.md#cleanup-mirror-chokepoint
+ * @returns Violation report lines, one per illegal assignment, plus one missing-subject sentinel
+ * per sanctioned writer that cannot be located.
+ */
+function checkCleanupMirrorChokepoint() {
+  const violations = [];
+  const boardStoreContent = existsSync(BOARD_STORE_PATH)
+    ? readFileSync(BOARD_STORE_PATH, "utf8")
+    : null;
+
+  const boardStoreSpans =
+    boardStoreContent !== null
+      ? declarationSpans(parseSource(BOARD_STORE_PATH, boardStoreContent))
+      : new Map();
+
+  const writers = [];
+  for (const writer of CLEANUP_SANCTIONED_WRITERS) {
+    const slice = boardStoreSpans.get(writer.name);
+    if (slice === undefined) {
+      violations.push(
+        `${BOARD_STORE_PATH}: ${writer.name} not found, NEW-23's cleanup-mirror-chokepoint subject is missing or renamed`,
+      );
+      continue;
+    }
+    writers.push({ ...writer, slice });
+  }
+
+  for (const file of walkSrc(SRC_DIR)) {
+    const content =
+      file === BOARD_STORE_PATH
+        ? boardStoreContent
+        : readFileSync(file, "utf8");
+    if (content === null) continue;
+    for (const match of scanSessionFieldAssignments(
+      parseSource(file, content),
+      CLEANUP_MIRROR_FIELDS,
+    )) {
+      if (file === BOARD_STORE_PATH) {
+        const owner = writers.find(
+          (w) =>
+            match.charOffset >= w.slice[0] &&
+            match.charOffset <= w.slice[1] &&
+            w.fields.includes(match.field),
+        );
+        if (owner) continue;
+        violations.push(
+          `${file}:${match.lineNumber}: retired pattern NEW-23, \`${match.field}\` assigned outside the sanctioned writers (${CLEANUP_SANCTIONED_WRITERS.map((w) => w.name).join(", ")})`,
+        );
+      } else {
+        violations.push(
+          `${file}:${match.lineNumber}: retired pattern NEW-23, \`${match.field}\` assigned outside the cleanup-mirror chokepoint (${BOARD_STORE_PATH})`,
+        );
+      }
+    }
+  }
+  return violations;
+}
+
+/**
+ * The sandbox harnesses that may only ever READ launchd. A sandboxed `HOME` redirects the plist
+ * file and `~/.dispatch`, but `launchctl bootstrap`'s `gui/<uid>/<Label>` registration is a real,
+ * per-user OS registry, so any mutating verb from inside a harness would clobber the researcher's
+ * own live `com.dispatch.app` agent regardless of the sandbox.
+ */
+const LAUNCHCTL_READONLY_HARNESSES = [
+  join("scripts", "reinstall-sim.mjs"),
+  join("scripts", "session-liveness-v3.mjs"),
+];
+
+/**
+ * launchctl-read-only gate over {@link LAUNCHCTL_READONLY_HARNESSES}, two arms over the AST. Arm 1,
+ * the binary: a string literal whose text is `launchctl` or ends in `/launchctl` must be the first
+ * argument of a call whose second argument is an array literal starting with `"print"`. Arm 2, the
+ * command string: any other string or template literal whose text contains the token `launchctl`
+ * (an `execSync` one-liner, a `sh -c` payload, a message) must follow EVERY occurrence inline with
+ * `print`. Comments are never matched because the walk is over the AST, not the text.
+ * @remarks Requiring the verb INLINE is deliberate: a `spawnSync("launchctl", args)` whose verb
+ * lives in a variable cannot be audited by a pattern gate, and a gate that cannot see the verb
+ * cannot fail for the reason it exists. Arm 2 exists because arm 1 alone was blind to the most
+ * idiomatic shell form, `execSync("launchctl bootout ...")`. Out of scope on purpose: a binary
+ * assembled at runtime (`"launch" + "ctl"`), which is evasion rather than accident.
+ * @returns Violation report lines, one per offending occurrence, with line numbers from the original
+ * buffer.
+ */
+function checkLaunchctlReadOnly() {
+  const violations = [];
+  for (const file of LAUNCHCTL_READONLY_HARNESSES) {
+    if (!existsSync(file)) {
+      violations.push(`${file}: missing, cannot audit launchctl usage`);
+      continue;
+    }
+    const sourceFile = parseSource(file, readFileSync(file, "utf8"));
+    const report = (node, reason) => {
+      const { line } = sourceFile.getLineAndCharacterOfPosition(
+        node.getStart(sourceFile),
+      );
+      violations.push(`${file}:${line + 1}: ${reason}`);
+    };
+    const visit = (node) => {
+      const isBinary =
+        ts.isStringLiteralLike(node) &&
+        (node.text === "launchctl" || node.text.endsWith("/launchctl"));
+      if (isBinary) {
+        const call = node.parent;
+        const argv =
+          ts.isCallExpression(call) && call.arguments[0] === node
+            ? call.arguments[1]
+            : undefined;
+        const verb =
+          argv && ts.isArrayLiteralExpression(argv)
+            ? argv.elements[0]
+            : undefined;
+        if (!(verb && ts.isStringLiteralLike(verb) && verb.text === "print")) {
+          report(
+            node,
+            `"launchctl" must be spawned with an argv array whose first element is the read-only "print" verb`,
+          );
+        }
+      } else if (ts.isStringLiteralLike(node) || ts.isTemplateLiteral(node)) {
+        const text = node.getText(sourceFile);
+        if (/\blaunchctl\b(?!\s+print\b)/.test(text)) {
+          report(
+            node,
+            `a string mentioning "launchctl" must follow every occurrence inline with the read-only "print" verb`,
+          );
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
   }
   return violations;
 }
@@ -886,7 +1101,7 @@ function generateBaseline() {
  * sentinels.
  * @returns Nothing; exits 0 iff MISSING, ORPHAN, EXTRA, RETIRED, STRIP
  * CASCADES, BOARD READING RHYTHM, TERMINAL FENCE, SESSION PROJECTION
- * CHOKEPOINT, and ATTENTION SINGLE SOURCE are all empty.
+ * CHOKEPOINT, ATTENTION SINGLE SOURCE, and LAUNCHCTL READ-ONLY are all empty.
  */
 function run() {
   const home = new Set();
@@ -909,7 +1124,9 @@ function run() {
   const boardReadingRhythm = checkBoardReadingRhythm();
   const terminalFence = checkTerminalFence();
   const sessionChokepoint = checkSessionProjectionChokepoint();
+  const cleanupMirrorChokepoint = checkCleanupMirrorChokepoint();
   const attentionSingleSource = checkAttentionSingleSource();
+  const launchctlReadOnly = checkLaunchctlReadOnly();
 
   report("MISSING (baseline - home)", missing);
   report("ORPHAN  (present - baseline)", orphan);
@@ -919,7 +1136,9 @@ function run() {
   report("BOARD READING RHYTHM (NEW-19)", boardReadingRhythm);
   report("TERMINAL FENCE (NEW-20)", terminalFence);
   report("SESSION PROJECTION CHOKEPOINT (NEW-21)", sessionChokepoint);
+  report("CLEANUP MIRROR CHOKEPOINT (NEW-23)", cleanupMirrorChokepoint);
   report("ATTENTION SINGLE SOURCE (NEW-22)", attentionSingleSource);
+  report("LAUNCHCTL READ-ONLY (harnesses)", launchctlReadOnly);
 
   const defects =
     missing.length +
@@ -930,7 +1149,9 @@ function run() {
     boardReadingRhythm.length +
     terminalFence.length +
     sessionChokepoint.length +
-    attentionSingleSource.length;
+    cleanupMirrorChokepoint.length +
+    attentionSingleSource.length +
+    launchctlReadOnly.length;
   console.log(
     `\n${defects === 0 ? "PASS" : "FAIL"}: ${baseline.size - missing.length}/${baseline.size} invariants homed` +
       (missing.length ? ` (${missing.length} missing a home)` : "") +
@@ -952,8 +1173,14 @@ function run() {
       (sessionChokepoint.length
         ? ` (${sessionChokepoint.length} session-projection-chokepoint violation(s))`
         : "") +
+      (cleanupMirrorChokepoint.length
+        ? ` (${cleanupMirrorChokepoint.length} cleanup-mirror-chokepoint violation(s))`
+        : "") +
       (attentionSingleSource.length
         ? ` (${attentionSingleSource.length} attention-single-source violation(s))`
+        : "") +
+      (launchctlReadOnly.length
+        ? ` (${launchctlReadOnly.length} launchctl read-only violation(s))`
         : ""),
   );
   process.exit(defects === 0 ? 0 : 1);

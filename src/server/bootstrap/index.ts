@@ -24,7 +24,11 @@ import {
   setOrchestrationConfig,
 } from "../services/infra/config-holder.js";
 import { checkHooksCapability, installHookArtifacts } from "./hook-setup.js";
-import { ensureHyperlinksTerminalFeature } from "../adapters/tmux.js";
+import { installPtyShim } from "./pty-shim-setup.js";
+import {
+  ensureHyperlinksTerminalFeature,
+  ensureNoAltScreenOverride,
+} from "../adapters/tmux.js";
 import { unregisterHookToken } from "../services/domain/hook-tokens.js";
 import {
   reapActivityThrottle,
@@ -37,8 +41,12 @@ import { buildRegistry, getLinearSource } from "../sources/registry.js";
 import { startMarkerWatcher } from "../adapters/markers/watcher.js";
 import { reconcileSessions } from "./reconcile.js";
 import { resolveEditors } from "../adapters/editors.js";
-import { startUpdateCheckLoop } from "../services/orchestration/update.js";
+import {
+  isPackagedInstall,
+  startUpdateCheckLoop,
+} from "../services/orchestration/update.js";
 import { startCleanupScheduler } from "../services/orchestration/cleanup-scheduler.js";
+import { healServicePlist } from "../services/orchestration/service.js";
 import { DEFAULT_CLEANUP_DELAY_DAYS } from "../../shared/types.js";
 
 const DEFAULT_PORT = 4700;
@@ -80,10 +88,16 @@ const spaFallback: express.RequestHandler = (req, res, next) => {
  * `DENY`/`'none'`) is deliberate: the app frames its OWN same-origin terminal at
  * `/sessions/<id>/terminal/`, so a same-origin allowance must survive while every third-party
  * origin is refused — the relevant threat once Phase 74 makes the app publicly reachable.
+ * `nosniff` rides along here rather than on one route: `/sessions/:id/terminal/scrollback` serves
+ * raw, pane-derived bytes as a document-loadable same-origin `text/plain` response, and that
+ * content is transitively attacker-influenced (anything the agent echoed). Modern browsers do not
+ * sniff `text/plain; charset=utf-8` into HTML, so this is hardening rather than a live hole, but a
+ * global header costs one line and covers every future byte-serving route too.
  */
 const frameGuardHeaders: express.RequestHandler = (_req, res, next) => {
   res.setHeader("X-Frame-Options", "SAMEORIGIN");
   res.setHeader("Content-Security-Policy", "frame-ancestors 'self'");
+  res.setHeader("X-Content-Type-Options", "nosniff");
   next();
 };
 
@@ -115,6 +129,32 @@ const jsonBodyErrorHandler: express.ErrorRequestHandler = (
           ? shaped.statusCode
           : 400;
     res.status(status).json({ error: "invalid request body" });
+    return;
+  }
+  next(err);
+};
+
+/**
+ * Scoped parse-error handler for the `/api` mount, placed between `express.json` and `apiRouter`
+ * so it catches a bad body before any route handler runs. Express 5's default handler renders
+ * V8's `JSON.parse` error message, and for a body that is valid UTF-8 but not JSON at all, that
+ * message quotes the submitted bytes back, so a client that POSTs a bare secret to any `/api`
+ * route would have it reflected in the 400 body and in the server's stderr (T-103-03). Scoped to
+ * the whole `/api` mount deliberately: every `/api` route shares the one `express.json` parser, so
+ * a vault-only handler would leave the identical leak on `/api/cards` and every other route.
+ */
+const apiJsonParseErrorHandler: express.ErrorRequestHandler = (
+  err,
+  _req,
+  res,
+  next,
+) => {
+  const shaped = err as { type?: unknown } | undefined;
+  if (
+    shaped?.type === "entity.parse.failed" ||
+    shaped?.type === "entity.too.large"
+  ) {
+    res.status(400).json({ error: "malformed-body" });
     return;
   }
   next(err);
@@ -236,6 +276,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
 
   const statusChannel = config.statusChannel ?? "auto";
   await installHookArtifacts();
+  await installPtyShim();
   const { capable, version } = await checkHooksCapability();
   if (statusChannel === "hooks" && !capable) {
     console.warn(
@@ -261,7 +302,15 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
     config.cleanupDelayDays ?? DEFAULT_CLEANUP_DELAY_DAYS,
   );
   await ensureHyperlinksTerminalFeature();
+  await ensureNoAltScreenOverride();
   await reconcileSessions();
+  if (isPackagedInstall()) {
+    await healServicePlist({ repointNode: false }).catch((err: unknown) => {
+      console.warn(
+        `[service] boot plist self-heal rejected unexpectedly: ${(err as Error).message}`,
+      );
+    });
+  }
   startCleanupScheduler();
   await sweepStrayTunnels().catch((err: unknown) => {
     console.warn(
@@ -275,7 +324,12 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   const app = express();
   app.use(frameGuardHeaders);
   app.use(remoteAuthRouter);
-  app.use("/api", express.json({ limit: "1mb" }), apiRouter);
+  app.use(
+    "/api",
+    express.json({ limit: "1mb" }),
+    apiJsonParseErrorHandler,
+    apiRouter,
+  );
   app.use("/sessions", terminalProxyRouter);
 
   if (process.env.NODE_ENV === "production") {

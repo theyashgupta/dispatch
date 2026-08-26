@@ -36,6 +36,11 @@ export function unknownProbeCopy(
         detail:
           "Could not check — this repo is not visible to the signed-in gh account, or the remote no longer exists",
       };
+    case "gh rate limited":
+      return {
+        label,
+        detail: "Could not check, GitHub rate-limited the gh CLI",
+      };
     case "gh unavailable":
       return { label, detail: "Could not check — gh CLI not available" };
     case "repo path missing":

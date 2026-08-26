@@ -12,6 +12,7 @@ interface CardProps {
   card: CardModel;
   selected?: boolean;
   multiSelected?: boolean;
+  forceDimmed?: boolean;
   members?: CardModel[];
   onSelect?: (id: string) => void;
   onStartRequest?: (id: string) => void;
@@ -24,6 +25,7 @@ export function Card({
   card,
   selected = false,
   multiSelected = false,
+  forceDimmed = false,
   members,
   onSelect,
   onStartRequest,
@@ -50,7 +52,7 @@ export function Card({
       showDot={showDot}
       showGone={showGone}
       hover={hover}
-      dimmed={isDragging}
+      dimmed={isDragging || forceDimmed}
       rootRef={setNodeRef}
       onSelect={onSelect}
       onStartRequest={onStartRequest}
