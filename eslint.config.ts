@@ -410,6 +410,7 @@ export default tseslint.config(
       "eslint-local/**",
       "scripts/**",
       ".claude/**",
+      "src/web/public/**",
     ],
   },
 
