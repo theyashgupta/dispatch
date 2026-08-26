@@ -48,6 +48,18 @@
  *     `self.addEventListener("fetch", (event) => event.respondWith(fetch(event.request)));` to
  *     `src/web/public/sw.js` produced
  *     `sw-no-fetch-handler: src/web/public/sw.js:20 matches a fetch handler pattern: ...`.
+ *   - `sw-no-cache` proven able to fail (Plan 02): renaming the built `NO_CACHE_BASENAMES` set's
+ *     `"sw.js"` entry to `"panel-108-break-sentinel.js"` in `dist/server/bootstrap/index.js`
+ *     produced `sw-no-cache /sw.js: expected cache-control exactly "no-cache", got "public,
+ *     max-age=31536000, immutable"` against a real booted sandbox production server.
+ *   - `sw-dev-no-cache` proven able to fail (Plan 02), and Assumption A1 from 108-RESEARCH.md
+ *     closed with data: a clean run against the repo's own `npx vite --host 127.0.0.1` measured
+ *     `cache-control="no-cache" etag="W/\"627-1787749450875\"" last-modified="Wed, 26 Aug 2026
+ *     13:04:10 GMT"` for `/sw.js`, confirming Vite's dev server applies no long-lived cache
+ *     directive. Renaming `src/web/public/sw.js` out of the way produced `sw-dev-no-cache /sw.js:
+ *     response body does not contain "addEventListener"` plus a corroborating SPA-fallback-HTML
+ *     violation, since Vite's dev server falls back to serving `index.html` (status 200) rather
+ *     than 404ing a missing `publicDir` file with a recognized extension.
  */
 
 import {
@@ -521,7 +533,17 @@ async function checkSwDevNoCache(violations) {
   try {
     child = spawn(
       "npx",
-      ["vite", "--port", String(VITE_DEV_PORT), "--strictPort"],
+      [
+        "vite",
+        "--port",
+        String(VITE_DEV_PORT),
+        "--strictPort",
+        // Vite's own default bind is IPv6 loopback (::1) only; every other
+        // fetch in this script targets 127.0.0.1, so force IPv4 explicitly
+        // rather than special-casing this one check's host.
+        "--host",
+        "127.0.0.1",
+      ],
       { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"] },
     );
     child.stdout?.on("data", (d) => outputChunks.push(d));
