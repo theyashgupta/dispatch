@@ -1419,6 +1419,11 @@ async function checkPushEnvelopeDecrypts(violations) {
   }
 }
 
+const BOOTSTRAP_INDEX_TS_PATH = join(
+  REPO_ROOT,
+  "src/server/bootstrap/index.ts",
+);
+
 const PUSH_SEND_TS_PATH = join(
   REPO_ROOT,
   "src/server/services/domain/push-send.ts",
@@ -1487,6 +1492,355 @@ async function runBreakPushEnvelopeDecrypts() {
 }
 
 // ---------------------------------------------------------------------------
+// Plan 05's own new capability (PUSH-03, PUSH-06): the two absence-and-
+// arithmetic checks. Neither drives headless Chrome; both reuse the real
+// tmux/board.db/stub-push machinery every earlier plan in this phase built.
+// ---------------------------------------------------------------------------
+
+const AGENT_DONE_EVENT_TICK_SLACK_MS = 15_000;
+const AGENT_DONE_SETTLE_MS = 3_000;
+
+/** Makes a sandbox home, a stub push service and one seeded subscription row on the stub's
+ * `/ok/` path, seeds one fixture card with a real tmux pane, boots the real server, drives a
+ * real `DONE` marker with a unique reason, and polls the sandbox `board.db` for the positive
+ * control (an `events` row with `type = "status_agent_done"` for the seeded card) before
+ * asserting anything about push traffic: a DONE transition that never fired would make a
+ * zero-request assertion pass vacuously, so a missing positive-control row is itself a named
+ * violation. Only once the transition is proven to have happened does it wait a further settle
+ * window and assert the stub saw zero requests and the sandbox server's own log carries no
+ * `[push] send` line. Tears down the stub, the tmux pane, the server and the sandbox home in a
+ * `finally`. */
+async function checkAgentDoneNoPush(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("agent-done-no-push");
+  const cardId = "panel-110-agent-done-no-push";
+  const identifier = "PANEL-110-05a";
+  const sessionId = randomUUID();
+  const tmuxName = `${SANDBOX_PREFIX}done-pane-${process.pid}`;
+  const reason = `panel-110-done-reason-${process.pid}-${Date.now()}`;
+  const sandboxOrigin = `127.0.0.1:${SANDBOX_PORT}`;
+  const endpoint = `http://127.0.0.1:${STUB_PUSH_PORT}/ok/panel-110-done-${process.pid}`;
+  const keys = makeSubscriberKeys();
+
+  let stub;
+  let boot;
+  try {
+    stub = await startStubPushService();
+    await startTmuxPane(tmuxName);
+    await seedNeedsInputCard(home, {
+      cardId,
+      identifier,
+      sessionId,
+      tmuxSession: tmuxName,
+    });
+    seedSubscriptionRow(home, { endpoint, keys, origin: sandboxOrigin });
+    boot = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    await driveMarker(tmuxName, "DONE", reason);
+
+    let hadEvent = false;
+    try {
+      await pollBoardDb(
+        home,
+        (_cards, events) => {
+          const found = events.find(
+            (e) => e.type === "status_agent_done" && e.card_id === cardId,
+          );
+          if (found) hadEvent = true;
+          return found ?? null;
+        },
+        AGENT_DONE_EVENT_TICK_SLACK_MS,
+      );
+    } catch {
+      // handled by the hadEvent check below
+    }
+
+    if (!hadEvent) {
+      violations.push(
+        `agent-done-no-push: no events row with type "status_agent_done" and card_id ` +
+          `${JSON.stringify(cardId)} observed within ${AGENT_DONE_EVENT_TICK_SLACK_MS}ms, the ` +
+          "positive control that the DONE transition really happened did not fire, so the " +
+          "zero-push assertion below would be vacuous",
+      );
+    } else {
+      await sleep(AGENT_DONE_SETTLE_MS);
+
+      const requests = stub.requests();
+      if (requests.length !== 0) {
+        violations.push(
+          "agent-done-no-push: expected zero stub push requests after an agent-done transition, " +
+            `observed ${requests.length}`,
+        );
+      }
+      if (/\[push\] send/.test(boot.log())) {
+        violations.push(
+          'agent-done-no-push: sandbox server log contains a "[push] send" line after an ' +
+            "agent-done transition, expected none",
+        );
+      }
+    }
+  } finally {
+    if (stub) await stub.close();
+    await killTmuxPane(tmuxName);
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const AGENT_DONE_BREAK_TARGET = 'event.type !== "status_needs_input"';
+const AGENT_DONE_BREAK_REPLACEMENT = 'event.type !== "status_agent_done"';
+
+/** `--break agent-done-no-push`: flips `bootstrap/index.ts`'s activity listener filter from
+ * `status_needs_input` to `status_agent_done`, so a DONE transition now sends push instead of a
+ * needs-input one, rebuilds via `resetBuildCache()`, and requires the SAME check function to
+ * report the resulting violation (trip leg). Restores the captured bytes unconditionally in a
+ * `finally`, rebuilds, and requires a clean pass (restore leg). */
+async function runBreakAgentDoneNoPush() {
+  assertBuilt();
+  const original = readFileSync(BOOTSTRAP_INDEX_TS_PATH, "utf8");
+  const occurrences = original.split(AGENT_DONE_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel110: refusing to run --break agent-done-no-push, expected ` +
+        `${JSON.stringify(AGENT_DONE_BREAK_TARGET)} to occur exactly once in ` +
+        `${BOOTSTRAP_INDEX_TS_PATH}, measured ${occurrences}. A miscounted anchor would mutate ` +
+        `the wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(BOOTSTRAP_INDEX_TS_PATH, original);
+  try {
+    writeFileSync(
+      BOOTSTRAP_INDEX_TS_PATH,
+      original.replace(AGENT_DONE_BREAK_TARGET, AGENT_DONE_BREAK_REPLACEMENT),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkAgentDoneNoPush(tripViolations);
+    console.log(
+      `\n--break agent-done-no-push TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes("expected zero stub push requests"),
+    );
+  } finally {
+    writeFileSync(BOOTSTRAP_INDEX_TS_PATH, original);
+    resetBuildCache();
+    unregisterRestore(BOOTSTRAP_INDEX_TS_PATH);
+  }
+
+  const restoreViolations = [];
+  await checkAgentDoneNoPush(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break agent-done-no-push RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+const MULTI_DEVICE_PRUNE_TICK_SLACK_MS = 20_000;
+const MULTI_DEVICE_PRUNE_SETTLE_MS = 3_000;
+
+/** Makes a sandbox home, a stub push service and FOUR seeded subscription rows (`/ok/alive` 201,
+ * `/gone/dead410` 410, `/missing/dead404` 404, `/busy/throttled` 429), each with its own
+ * subscriber keypair and alternating between two distinct `origin` values (demonstrating D-06: a
+ * stored origin never filters who gets sent to), seeds one fixture card with a real tmux pane,
+ * boots the real server, drives one real `NEEDS_INPUT` marker with a unique reason, and asserts
+ * that the fan-out reached all four endpoints, each request decrypts only with its OWN
+ * subscriber keys, the sandbox log carries one `[push] send <status>` line per endpoint, and
+ * after a settle window `push_subscriptions` retains exactly the 201 and 429 rows. Tears down
+ * the stub, the tmux pane, the server and the sandbox home in a `finally`. */
+async function checkMultiDevicePrune(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("multi-device-prune");
+  const cardId = "panel-110-multi-device-prune";
+  const identifier = "PANEL-110-05b";
+  const sessionId = randomUUID();
+  const tmuxName = `${SANDBOX_PREFIX}multi-pane-${process.pid}`;
+  const reason = `panel-110-multi-reason-${process.pid}-${Date.now()}`;
+  const originA = `127.0.0.1:${SANDBOX_PORT}`;
+  const originB = `panel-110-second-origin-${process.pid}.example`;
+
+  const rowSpecs = [
+    { path: "/ok/alive", origin: originA, status: 201 },
+    { path: "/gone/dead410", origin: originB, status: 410 },
+    { path: "/missing/dead404", origin: originA, status: 404 },
+    { path: "/busy/throttled", origin: originB, status: 429 },
+  ];
+  const rows = rowSpecs.map((spec) => ({
+    ...spec,
+    endpoint: `http://127.0.0.1:${STUB_PUSH_PORT}${spec.path}`,
+    keys: makeSubscriberKeys(),
+  }));
+
+  let stub;
+  let boot;
+  try {
+    stub = await startStubPushService();
+    await startTmuxPane(tmuxName);
+    await seedNeedsInputCard(home, {
+      cardId,
+      identifier,
+      sessionId,
+      tmuxSession: tmuxName,
+    });
+    for (const row of rows) {
+      seedSubscriptionRow(home, {
+        endpoint: row.endpoint,
+        keys: row.keys,
+        origin: row.origin,
+      });
+    }
+    boot = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    await driveMarker(tmuxName, "NEEDS_INPUT", reason);
+
+    const requests = await stub.waitForRequests(
+      4,
+      MULTI_DEVICE_PRUNE_TICK_SLACK_MS,
+    );
+    if (requests.length !== 4) {
+      violations.push(
+        `multi-device-prune: expected exactly 4 stub push requests within ` +
+          `${MULTI_DEVICE_PRUNE_TICK_SLACK_MS}ms, observed ${requests.length}`,
+      );
+    }
+
+    const seenPaths = new Set(requests.map((r) => r.path));
+    for (const row of rows) {
+      if (!seenPaths.has(row.path)) {
+        violations.push(
+          `multi-device-prune: no stub request observed for endpoint path ` +
+            `${JSON.stringify(row.path)}, fan-out did not reach every device`,
+        );
+      }
+    }
+
+    for (const row of rows) {
+      const req = requests.find((r) => r.path === row.path);
+      if (req == null) continue;
+      try {
+        const payload = decryptPushBody(req.body, row.keys);
+        if (payload.cardId !== cardId) {
+          violations.push(
+            `multi-device-prune: request to ${row.path} decrypted cardId ` +
+              `${JSON.stringify(payload.cardId)}, expected ${JSON.stringify(cardId)}`,
+          );
+        }
+      } catch (err) {
+        violations.push(
+          `multi-device-prune: request to ${row.path} did not decrypt with its own subscriber ` +
+            `keys (proves per-row encryption, not one envelope reused): ${err.message}`,
+        );
+      }
+    }
+
+    const logDeadline = Date.now() + PUSH_LOG_TICK_SLACK_MS;
+    let missingLogLines = rows.map(
+      (row) => `[push] send ${row.status} ${row.endpoint}`,
+    );
+    while (Date.now() < logDeadline && missingLogLines.length > 0) {
+      const log = boot.log();
+      missingLogLines = missingLogLines.filter((line) => !log.includes(line));
+      if (missingLogLines.length > 0) await sleep(POLL_INTERVAL_MS);
+    }
+    for (const line of missingLogLines) {
+      violations.push(
+        `multi-device-prune: sandbox server log never contained a line ${JSON.stringify(line)}`,
+      );
+    }
+
+    await sleep(MULTI_DEVICE_PRUNE_SETTLE_MS);
+    const survivingRows = readPushDbRows(join(home, ".dispatch", "board.db"));
+    const survivingEndpoints = new Set(survivingRows.map((r) => r.endpoint));
+    for (const row of rows) {
+      const shouldSurvive = row.status === 201 || row.status === 429;
+      const survives = survivingEndpoints.has(row.endpoint);
+      if (shouldSurvive && !survives) {
+        violations.push(
+          `multi-device-prune: endpoint ${row.path} (status ${row.status}) was pruned, expected ` +
+            "it to survive (only 404/410 prune)",
+        );
+      }
+      if (!shouldSurvive && survives) {
+        violations.push(
+          `multi-device-prune: endpoint ${row.path} (status ${row.status}) survived, expected ` +
+            "it pruned",
+        );
+      }
+    }
+  } finally {
+    if (stub) await stub.close();
+    await killTmuxPane(tmuxName);
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const MULTI_DEVICE_PRUNE_BREAK_TARGET = "res.status === 410";
+const MULTI_DEVICE_PRUNE_BREAK_REPLACEMENT = "res.status === 999410";
+
+/** `--break multi-device-prune`: changes `push-send.ts`'s prune condition so a 410 response no
+ * longer prunes its row (replaces the `410` literal with an unreachable HTTP status number),
+ * rebuilds via `resetBuildCache()`, and requires the SAME check function to report the resulting
+ * violation (trip leg). Restores the captured bytes unconditionally in a `finally`, rebuilds, and
+ * requires a clean pass (restore leg). */
+async function runBreakMultiDevicePrune() {
+  assertBuilt();
+  const original = readFileSync(PUSH_SEND_TS_PATH, "utf8");
+  const occurrences =
+    original.split(MULTI_DEVICE_PRUNE_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel110: refusing to run --break multi-device-prune, expected ` +
+        `${JSON.stringify(MULTI_DEVICE_PRUNE_BREAK_TARGET)} to occur exactly once in ` +
+        `${PUSH_SEND_TS_PATH}, measured ${occurrences}. A miscounted anchor would mutate the ` +
+        `wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(PUSH_SEND_TS_PATH, original);
+  try {
+    writeFileSync(
+      PUSH_SEND_TS_PATH,
+      original.replace(
+        MULTI_DEVICE_PRUNE_BREAK_TARGET,
+        MULTI_DEVICE_PRUNE_BREAK_REPLACEMENT,
+      ),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkMultiDevicePrune(tripViolations);
+    console.log(
+      `\n--break multi-device-prune TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes("survived, expected it pruned"),
+    );
+  } finally {
+    writeFileSync(PUSH_SEND_TS_PATH, original);
+    resetBuildCache();
+    unregisterRestore(PUSH_SEND_TS_PATH);
+  }
+
+  const restoreViolations = [];
+  await checkMultiDevicePrune(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break multi-device-prune RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS / PROBES registries. Every later plan in this phase
 // appends here.
 // ---------------------------------------------------------------------------
@@ -1496,11 +1850,15 @@ const CHECKS = {
     checkNeedsInputTriggerFires(violations),
   "push-envelope-decrypts": (violations) =>
     checkPushEnvelopeDecrypts(violations),
+  "agent-done-no-push": (violations) => checkAgentDoneNoPush(violations),
+  "multi-device-prune": (violations) => checkMultiDevicePrune(violations),
 };
 
 const BREAKS = {
   "needs-input-trigger-fires": runBreakNeedsInputTriggerFires,
   "push-envelope-decrypts": runBreakPushEnvelopeDecrypts,
+  "agent-done-no-push": runBreakAgentDoneNoPush,
+  "multi-device-prune": runBreakMultiDevicePrune,
 };
 
 const PROBES = {};
