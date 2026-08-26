@@ -60,6 +60,17 @@ const DEFAULT_POLL_INTERVAL_MS = 60_000;
 const webRoot = fileURLToPath(new URL("../../web", import.meta.url));
 
 /**
+ * Basenames under `webRoot` exempted from the production static handler's default 1-year
+ * immutable cache.
+ *
+ * @remarks
+ * Everything else under `webRoot` is served with `maxAge: "1y", immutable: true`; an immutably
+ * cached service worker would never re-fetch, so a later `sw.js` fix would never reach an
+ * already-installed client.
+ */
+const NO_CACHE_BASENAMES = new Set(["index.html", "sw.js"]);
+
+/**
  * Serve the built SPA's index.html for client-routed deep links in production. Registered after
  * the API router and guarded on GET + non-`/api/` paths so it never shadows `/api/*` or the SSE
  * stream: an unknown `/api/*` still gets Express's default 404 rather than HTML. Sent no-cache so
@@ -339,7 +350,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
         maxAge: "1y",
         immutable: true,
         setHeaders: (res, filePath) => {
-          if (path.basename(filePath) === "index.html") {
+          if (NO_CACHE_BASENAMES.has(path.basename(filePath))) {
             res.setHeader("Cache-Control", "no-cache");
           }
         },
