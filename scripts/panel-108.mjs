@@ -66,6 +66,12 @@
  *     server booted twice against the same `$HOME`. A clean run reported
  *     `vapid-persists: <home>/.dispatch/push-vapid.json byte-identical across two boots,
  *     permission bits 600`, machine-verifying roadmap success criterion 1.
+ *   - `push-table-schema` proven able to fail (Plan 04): opening the sandbox `board.db` read-write
+ *     and running `DROP TABLE push_subscriptions` between the check's boot and its independent
+ *     read produced `push-table-schema: push_subscriptions table is missing` against a real
+ *     booted sandbox server. A clean run reported `push-table-schema: observed columns =
+ *     endpoint, p256dh, auth, origin, created_at`, machine-verifying the table's exact shape and
+ *     that `cards`/`meta`/`events` remain present.
  */
 
 import {
@@ -82,6 +88,7 @@ import { realpathSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
 // ---------------------------------------------------------------------------
@@ -771,6 +778,126 @@ async function runBreakVapidPersists() {
 }
 
 // ---------------------------------------------------------------------------
+// push-table-schema (Plan 04): boots a sandbox server once, stops it so the
+// WAL is settled and no writer is live, then opens the sandbox board.db
+// itself (never a store method) and asserts push_subscriptions has the exact
+// five-column endpoint-keyed shape, alongside the pre-existing cards/meta/
+// events tables. Accepts an optional `mutateDb` callback (default no-op) so
+// the break can fire the SAME check function against a mutated database.
+// ---------------------------------------------------------------------------
+
+const EXPECTED_PUSH_COLUMNS = ["endpoint", "p256dh", "auth", "origin", "created_at"];
+const EXPECTED_NOT_NULL_COLUMNS = ["p256dh", "auth", "origin", "created_at"];
+
+async function checkPushTableSchema(violations, mutateDb = async () => {}) {
+  assertBuilt();
+  const home = makeSandboxHome("pushtable");
+  let child;
+  try {
+    child = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+    await stopServer(child);
+    child = undefined;
+
+    await mutateDb(home);
+
+    const dbPath = join(home, ".dispatch", "board.db");
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const columnRows = db
+        .prepare("PRAGMA table_info(push_subscriptions)")
+        .all();
+      if (columnRows.length === 0) {
+        violations.push(
+          "push-table-schema: push_subscriptions table is missing",
+        );
+      } else {
+        const observedNames = columnRows.map((r) => r.name);
+        console.log(
+          `push-table-schema: observed columns = ${observedNames.join(", ")}`,
+        );
+        for (const name of EXPECTED_PUSH_COLUMNS) {
+          if (!observedNames.includes(name)) {
+            violations.push(
+              `push-table-schema: missing expected column "${name}"`,
+            );
+          }
+        }
+        for (const name of observedNames) {
+          if (!EXPECTED_PUSH_COLUMNS.includes(name)) {
+            violations.push(`push-table-schema: unexpected column "${name}"`);
+          }
+        }
+        const byName = Object.fromEntries(columnRows.map((r) => [r.name, r]));
+        if (byName.endpoint && Number(byName.endpoint.pk) !== 1) {
+          violations.push(
+            `push-table-schema: expected "endpoint" to be the primary key (pk=1), got pk=${byName.endpoint.pk}`,
+          );
+        }
+        for (const name of EXPECTED_NOT_NULL_COLUMNS) {
+          if (byName[name] && Number(byName[name].notnull) !== 1) {
+            violations.push(
+              `push-table-schema: expected column "${name}" to be NOT NULL`,
+            );
+          }
+        }
+      }
+
+      for (const table of ["cards", "meta", "events"]) {
+        const tableRows = db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+          )
+          .all(table);
+        if (tableRows.length === 0) {
+          violations.push(
+            `push-table-schema: expected pre-existing table "${table}" to still exist`,
+          );
+        }
+      }
+    } finally {
+      db.close();
+    }
+  } finally {
+    await stopServer(child);
+    cleanupSandboxHome(home);
+  }
+}
+
+/** `--break push-table-schema`: runs the SAME check function with a `mutateDb` callback that
+ * opens the sandbox database read-write and drops the table, requires the missing-table violation
+ * to be reported by name (TRIP leg), then runs the check again with the default no-op callback
+ * against a fresh sandbox home and requires a clean pass (RESTORE leg). No source or dist file is
+ * mutated; the sandbox home is disposable. */
+async function runBreakPushTableSchema() {
+  const tripViolations = [];
+  await checkPushTableSchema(tripViolations, async (home) => {
+    const dbPath = join(home, ".dispatch", "board.db");
+    const db = new DatabaseSync(dbPath);
+    try {
+      db.exec("DROP TABLE push_subscriptions");
+    } finally {
+      db.close();
+    }
+  });
+  console.log(
+    `\n--break push-table-schema TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+  );
+  const tripFired = tripViolations.some((v) =>
+    v.includes("push_subscriptions table is missing"),
+  );
+
+  const restoreViolations = [];
+  await checkPushTableSchema(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break push-table-schema RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS registries. Every later plan in this phase appends here.
 // ---------------------------------------------------------------------------
 
@@ -779,6 +906,7 @@ const CHECKS = {
   "sw-no-cache": (violations) => checkSwNoCache(violations),
   "sw-dev-no-cache": (violations) => checkSwDevNoCache(violations),
   "vapid-persists": (violations) => checkVapidPersists(violations),
+  "push-table-schema": (violations) => checkPushTableSchema(violations),
 };
 
 const BREAKS = {
@@ -786,6 +914,7 @@ const BREAKS = {
   "sw-no-cache": runBreakSwNoCache,
   "sw-dev-no-cache": runBreakSwDevNoCache,
   "vapid-persists": runBreakVapidPersists,
+  "push-table-schema": runBreakPushTableSchema,
 };
 
 // ---------------------------------------------------------------------------
