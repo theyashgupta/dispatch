@@ -1207,6 +1207,14 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * List all push subscription rows. A pure synchronous read delegated to the BoardDb surface
+   * (listEvents precedent) so the route never imports node:sqlite; not enqueued.
+   */
+  listPushSubscriptions(): PushSubscriptionRow[] {
+    return this.db.listPushSubscriptions();
+  }
+
+  /**
    * Is a start saga currently in flight for this card? Synchronous double-start guard for the
    * orchestrator (CR-01). Not queued/persisted — a purely transient in-memory marker.
    */

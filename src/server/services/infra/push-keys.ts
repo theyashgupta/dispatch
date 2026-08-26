@@ -10,6 +10,7 @@ interface VapidKeyFile {
 
 export interface VapidKeys {
   publicKeyBase64Url: string;
+  privateKeyJwk: JsonWebKey;
 }
 
 let cached: VapidKeys | null = null;
@@ -60,8 +61,7 @@ function readAndValidate(): VapidKeyFile {
  * @remarks
  * Never regenerates on a corrupt or malformed file; throws instead, since a silent regenerate
  * invalidates every browser subscription already bound to the old public key with no visible
- * signal. Only the public key is returned; the private half is persisted for Phase 110's ES256
- * VAPID JWT signing but has no caller yet.
+ * signal. The private half is returned for ES256 VAPID JWT signing and must never be logged.
  */
 export function loadOrCreateVapidKeys(): VapidKeys {
   if (cached) return cached;
@@ -95,6 +95,9 @@ export function loadOrCreateVapidKeys(): VapidKeys {
     );
   }
 
-  cached = { publicKeyBase64Url: point.toString("base64url") };
+  cached = {
+    publicKeyBase64Url: point.toString("base64url"),
+    privateKeyJwk: file.privateKeyJwk,
+  };
   return cached;
 }

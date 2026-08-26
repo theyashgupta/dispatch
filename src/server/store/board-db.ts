@@ -149,6 +149,12 @@ export interface BoardDb {
    * {@link BoardDb.addPushSubscription}.
    */
   removePushSubscription(endpoint: string): boolean;
+  /**
+   * All subscription rows, for the send-time fan-out.
+   * @remarks Safe outside the `persist` write queue for the same reasons as
+   * {@link BoardDb.addPushSubscription}.
+   */
+  listPushSubscriptions(): PushSubscriptionRow[];
 }
 
 /**
@@ -511,6 +517,9 @@ export function openBoardDb(): BoardDb {
   const deletePushSubscription = db.prepare(
     `DELETE FROM push_subscriptions WHERE endpoint = ?`,
   );
+  const selectPushSubscriptions = db.prepare(
+    `SELECT endpoint, p256dh, auth, origin, created_at FROM push_subscriptions`,
+  );
 
   function persistTxn(
     cards: Card[],
@@ -637,6 +646,22 @@ export function openBoardDb(): BoardDb {
     removePushSubscription(endpoint) {
       const info = deletePushSubscription.run(endpoint);
       return Number(info.changes) > 0;
+    },
+    listPushSubscriptions() {
+      const rows = selectPushSubscriptions.all() as {
+        endpoint: string;
+        p256dh: string;
+        auth: string;
+        origin: string;
+        created_at: string;
+      }[];
+      return rows.map((r) => ({
+        endpoint: r.endpoint,
+        p256dh: r.p256dh,
+        auth: r.auth,
+        origin: r.origin,
+        createdAt: r.created_at,
+      }));
     },
   };
 }
