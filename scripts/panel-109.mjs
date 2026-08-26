@@ -132,6 +132,7 @@ import { realpathSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
 // ---------------------------------------------------------------------------
@@ -1617,6 +1618,328 @@ async function runBreakPushPromptOnClickOnly() {
 }
 
 // ---------------------------------------------------------------------------
+// subscribe-round-trip (Plan 05): proves PUSH-01's positive half end to end
+// against real storage. Enabling writes exactly one push_subscriptions row,
+// a reload preserves that same row, and disabling removes it.
+//
+// Two sanctioned designs (109-RESEARCH.md Pitfall 3), keyed off the
+// `fcm-egress` probe's recorded ASSUMPTION EVIDENCE verdict above:
+//   - Design R ("reachable", LIVE here): no page-world stub at all. Every leg
+//     drives a real click against a real headless Chrome that reaches the
+//     real push service, matching this sandbox's measured verdict (8/13
+//     reachable, 5/13 transient timeout, zero hard rejections).
+//     `attemptSubscribeEnable` tolerates one retry with a 40 second
+//     per-attempt timeout to absorb that measured ~38% transient timeout
+//     rate rather than treating one slow round trip as a structural block.
+//   - Design B ("blocked", NOT live): would override only
+//     `PushManager.prototype.subscribe` and `.getSubscription` to resolve a
+//     synthetic subscription, leaving the real public-key fetch, the real
+//     POST /api/push/subscribe carrying the real `toJSON()` output, the real
+//     row write, the real render branch and the real unsubscribe route call
+//     untouched, since only the browser-to-push-service hop is unreachable.
+//     The true end-to-end hop would then be carried by the human
+//     verification checkpoint in plan 109-06 instead of being silently
+//     claimed as automated here.
+// ---------------------------------------------------------------------------
+
+const SUBSCRIBE_ATTEMPT_TIMEOUT_MS = 40_000;
+const SUBSCRIBE_MAX_ATTEMPTS = 2;
+const SUBSCRIBE_RELOAD_TIMEOUT_MS = 15_000;
+const SUBSCRIBE_DISABLE_TIMEOUT_MS = 15_000;
+
+/** Independent read of the sandbox `board.db`'s `push_subscriptions` table, never trusting the
+ * UI's own claim that a subscribe or unsubscribe succeeded. */
+function readPushDbRows(dbPath) {
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    return db.prepare("SELECT * FROM push_subscriptions").all();
+  } finally {
+    db.close();
+  }
+}
+
+/** Polls the independent database read until `predicate` holds or `timeoutMs` elapses, returning
+ * whichever rows were last observed either way. */
+async function pollPushDbRows(dbPath, predicate, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let last = readPushDbRows(dbPath);
+  while (Date.now() < deadline) {
+    last = readPushDbRows(dbPath);
+    if (predicate(last)) return last;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return last;
+}
+
+/** Dispatches a real click on the currently rendered "Enable push notifications" button, if one
+ * is present (absent means a previous attempt's promise is still in flight, so this call keeps
+ * polling instead of clicking again), then polls the rendered row for either the "enabled"
+ * outcome or the error alert `enablePush`'s failure path renders, bounded by `timeoutMs`. */
+async function attemptSubscribeEnable(cdp, sessionId, timeoutMs) {
+  const rect = await findButtonRect(
+    cdp,
+    sessionId,
+    "Enable push notifications",
+  );
+  if (rect) {
+    await dispatchRealClick(cdp, sessionId, rect);
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const row = await readPushRow(cdp, sessionId);
+    if (
+      row.found &&
+      JSON.stringify(row.buttons) ===
+        JSON.stringify(["Disable push notifications"])
+    ) {
+      return { outcome: "enabled", row };
+    }
+    if (row.found && row.alertText) {
+      return { outcome: "error", row };
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return { outcome: "timeout", row: null };
+}
+
+async function checkSubscribeRoundTrip(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("subscribe-rt");
+  let server;
+  let chromeChild;
+  let cdp;
+  try {
+    server = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+    chromeChild = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const dbPath = join(home, ".dispatch", "board.db");
+    const sessionId = await seedPage(cdp, { permission: "granted" });
+    await openSettingsNotifications(cdp, sessionId);
+
+    let enabledResult = null;
+    for (let attempt = 1; attempt <= SUBSCRIBE_MAX_ATTEMPTS; attempt++) {
+      const result = await attemptSubscribeEnable(
+        cdp,
+        sessionId,
+        SUBSCRIBE_ATTEMPT_TIMEOUT_MS,
+      );
+      console.log(
+        `subscribe-round-trip: enable attempt ${attempt}/${SUBSCRIBE_MAX_ATTEMPTS} outcome=${result.outcome}`,
+      );
+      if (result.outcome === "enabled") {
+        enabledResult = result;
+        break;
+      }
+    }
+    if (!enabledResult) {
+      violations.push(
+        `subscribe-round-trip: enable UI never reached the ["Disable push notifications"] row ` +
+          `state after ${SUBSCRIBE_MAX_ATTEMPTS} attempt(s), each bounded at ${SUBSCRIBE_ATTEMPT_TIMEOUT_MS}ms`,
+      );
+    } else {
+      console.log(
+        `subscribe-round-trip: enable step observed statusText=${JSON.stringify(enabledResult.row.statusText)}`,
+      );
+      if (
+        enabledResult.row.statusText == null ||
+        !enabledResult.row.statusText.startsWith("Push enabled -")
+      ) {
+        violations.push(
+          `subscribe-round-trip: expected statusText to start "Push enabled -", got ${JSON.stringify(enabledResult.row.statusText)}`,
+        );
+      }
+    }
+
+    let rows = readPushDbRows(dbPath);
+    console.log(
+      `subscribe-round-trip: after enable, push_subscriptions rows=${rows.length}` +
+        (rows[0] ? ` endpoint=${rows[0].endpoint}` : ""),
+    );
+    if (rows.length !== 1) {
+      violations.push(
+        `subscribe-round-trip: expected exactly 1 push_subscriptions row after enable, got ${rows.length}`,
+      );
+      return;
+    }
+    const enabledRow = rows[0];
+    if (
+      typeof enabledRow.endpoint !== "string" ||
+      !enabledRow.endpoint.startsWith("https://")
+    ) {
+      violations.push(
+        `subscribe-round-trip: expected endpoint to start "https://", got ${JSON.stringify(enabledRow.endpoint)}`,
+      );
+    }
+    if (typeof enabledRow.p256dh !== "string" || enabledRow.p256dh === "") {
+      violations.push(
+        `subscribe-round-trip: expected non-empty p256dh, got ${JSON.stringify(enabledRow.p256dh)}`,
+      );
+    }
+    if (typeof enabledRow.auth !== "string" || enabledRow.auth === "") {
+      violations.push(
+        `subscribe-round-trip: expected non-empty auth, got ${JSON.stringify(enabledRow.auth)}`,
+      );
+    }
+    if (typeof enabledRow.origin !== "string" || enabledRow.origin === "") {
+      violations.push(
+        `subscribe-round-trip: expected non-empty origin, got ${JSON.stringify(enabledRow.origin)}`,
+      );
+    }
+    const enabledEndpoint = enabledRow.endpoint;
+
+    // Reload leg: a FRESH target, same origin/browser profile so the marker persists, permission
+    // still granted, Settings never opened. Covers refreshPushSubscription's positive half: the
+    // upsert must preserve the same row, never create a second one or lose the first.
+    const sessionIdReload = await seedPage(cdp, { permission: "granted" });
+    const shellReadyReload = await pollUntilTruthy(
+      cdp,
+      sessionIdReload,
+      `!!document.querySelector('[aria-label="Sync filters"]')`,
+      SETTINGS_NAV_TIMEOUT_MS,
+    );
+    if (!shellReadyReload) {
+      violations.push(
+        "subscribe-round-trip: reload leg - the app shell never rendered",
+      );
+      return;
+    }
+    await sleep(PUSH_CALL_SETTLE_MS);
+    rows = await pollPushDbRows(
+      dbPath,
+      (r) => r.length === 1 && r[0].endpoint === enabledEndpoint,
+      SUBSCRIBE_RELOAD_TIMEOUT_MS,
+    );
+    console.log(
+      `subscribe-round-trip: after reload, push_subscriptions rows=${rows.length}` +
+        (rows[0] ? ` endpoint=${rows[0].endpoint}` : ""),
+    );
+    if (rows.length !== 1) {
+      violations.push(
+        `subscribe-round-trip: expected exactly 1 row after reload, got ${rows.length}`,
+      );
+    } else if (rows[0].endpoint !== enabledEndpoint) {
+      violations.push(
+        `subscribe-round-trip: expected reload to preserve endpoint ${JSON.stringify(enabledEndpoint)}, got ${JSON.stringify(rows[0].endpoint)}`,
+      );
+    }
+
+    // Disable leg: same reload target, open Settings, real click on Disable.
+    await openSettingsNotifications(cdp, sessionIdReload);
+    const disableRect = await findButtonRect(
+      cdp,
+      sessionIdReload,
+      "Disable push notifications",
+    );
+    if (!disableRect) {
+      violations.push(
+        "subscribe-round-trip: disable leg - the Disable push notifications button was not found",
+      );
+      return;
+    }
+    await dispatchRealClick(cdp, sessionIdReload, disableRect);
+    const disableDeadline = Date.now() + SUBSCRIBE_DISABLE_TIMEOUT_MS;
+    let disabledRow = null;
+    while (Date.now() < disableDeadline) {
+      const row = await readPushRow(cdp, sessionIdReload);
+      if (
+        row.found &&
+        JSON.stringify(row.buttons) ===
+          JSON.stringify(["Enable push notifications"])
+      ) {
+        disabledRow = row;
+        break;
+      }
+      await sleep(POLL_INTERVAL_MS);
+    }
+    if (!disabledRow) {
+      violations.push(
+        `subscribe-round-trip: disable leg - row never returned to ["Enable push notifications"] within ${SUBSCRIBE_DISABLE_TIMEOUT_MS}ms`,
+      );
+      return;
+    }
+    rows = readPushDbRows(dbPath);
+    if (rows.length !== 0) {
+      violations.push(
+        `subscribe-round-trip: expected zero push_subscriptions rows after disable, got ${rows.length}`,
+      );
+    }
+    const permissionAfterDisable = await evalValue(
+      cdp,
+      sessionIdReload,
+      `Notification.permission`,
+    );
+    if (permissionAfterDisable !== "granted") {
+      violations.push(
+        `subscribe-round-trip: expected Notification.permission to remain "granted" after disable, got ${JSON.stringify(permissionAfterDisable)}`,
+      );
+    }
+    console.log(
+      `subscribe-round-trip: after disable, rows=${rows.length} permission=${JSON.stringify(permissionAfterDisable)}`,
+    );
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chromeChild);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await stopServer(server);
+    cleanupSandboxHome(home);
+  }
+}
+
+/** `--break subscribe-round-trip`: captures `push.ts` and redirects the subscribe POST literal
+ * `enablePush` uses to a sentinel path that 404s. The anchor includes `enablePush`'s
+ * `const res = ` assignment deliberately: the bare literal `"/api/push/subscribe"` occurs TWICE
+ * in this file (`enablePush` and `refreshPushSubscription` both call it, since Plan 03 added the
+ * second call site after Plan 02's verify asserted the literal unique), and only `enablePush`'s
+ * occurrence carries this assignment prefix. Rebuilds via `resetBuildCache()` and requires the
+ * missing-row violation by name. Restores the captured bytes in a `finally` unconditionally. */
+async function runBreakSubscribeRoundTrip() {
+  assertBuilt();
+  const pushTsPath = join(REPO_ROOT, "src/web/lib/push.ts");
+  const TARGET = 'const res = await fetch("/api/push/subscribe", {';
+  const REPLACEMENT =
+    'const res = await fetch("/api/push/subscribe-panel-109-sentinel", {';
+  const original = readFileSync(pushTsPath, "utf8");
+  const occurrences = original.split(TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel109: refusing to run --break subscribe-round-trip, expected ${JSON.stringify(TARGET)} ` +
+        `to occur exactly once in ${pushTsPath}, measured ${occurrences}. A miscounted anchor would ` +
+        `mutate the wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  try {
+    writeFileSync(pushTsPath, original.replace(TARGET, REPLACEMENT));
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkSubscribeRoundTrip(tripViolations);
+    console.log(
+      `\n--break subscribe-round-trip TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes("expected exactly 1 push_subscriptions row after enable"),
+    );
+  } finally {
+    writeFileSync(pushTsPath, original);
+    resetBuildCache();
+  }
+
+  const restoreViolations = [];
+  await checkSubscribeRoundTrip(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break subscribe-round-trip RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS registries. Every later plan in this phase appends here.
 // ---------------------------------------------------------------------------
 
@@ -1628,6 +1951,7 @@ const CHECKS = {
     checkDeniedStateNoButton(violations),
   "push-prompt-on-click-only": (violations) =>
     checkPushPromptOnClickOnly(violations),
+  "subscribe-round-trip": (violations) => checkSubscribeRoundTrip(violations),
 };
 
 const BREAKS = {
@@ -1635,6 +1959,7 @@ const BREAKS = {
   "push-row-state-machine": runBreakPushRowStateMachine,
   "denied-state-no-button": runBreakDeniedStateNoButton,
   "push-prompt-on-click-only": runBreakPushPromptOnClickOnly,
+  "subscribe-round-trip": runBreakSubscribeRoundTrip,
 };
 
 // ---------------------------------------------------------------------------
