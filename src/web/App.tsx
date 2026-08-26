@@ -151,6 +151,36 @@ export function App() {
     void refreshPushSubscription();
   }, []);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("card");
+    if (id == null || id === "") return;
+    setSelectedCardId(id);
+    hydratePinned(id);
+    params.delete("card");
+    const search = params.toString();
+    const next =
+      window.location.pathname +
+      (search ? `?${search}` : "") +
+      window.location.hash;
+    window.history.replaceState(null, "", next);
+  }, []);
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    function onMessage(event: MessageEvent) {
+      const data: unknown = event.data;
+      if (typeof data !== "object" || data === null) return;
+      const { type, cardId } = data as { type?: unknown; cardId?: unknown };
+      if (type !== "dsp-open-card" || typeof cardId !== "string") return;
+      setSelectedCardId(cardId);
+      hydratePinned(cardId);
+    }
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () =>
+      navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, []);
+
   const lastOpened = useLastOpened();
   const newestTs = feed.events[0]?.ts;
   const activityUnseen = isUnseen(newestTs, lastOpened["__feed__"]);
