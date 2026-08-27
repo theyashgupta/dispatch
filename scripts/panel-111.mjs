@@ -569,6 +569,20 @@ async function checkServeInRoot(violations) {
 }
 
 const VIEWER_ROUTE_PATH = join(REPO_ROOT, "src/server/routes/viewer.route.ts");
+
+/**
+ * Shared break-`finally` restore: source bytes back, build memo reset, and dist/ removed, so a
+ * throw in the trip leg never leaves a dist/ compiled from the sabotage bytes behind a clean
+ * `git diff` (the restore leg's `assertBuilt()` regenerates dist/ immediately; on the throw
+ * path the user is left with no dist/ instead of a poisoned one, matching `restoreOnSignal`).
+ */
+function restoreViewerSource(original) {
+  writeFileSync(VIEWER_ROUTE_PATH, original);
+  resetBuildCache();
+  rmSync(join(REPO_ROOT, "dist"), { recursive: true, force: true });
+  unregisterRestore(VIEWER_ROUTE_PATH);
+}
+
 const NO_STORE_BREAK_TARGET = "no-store";
 const NO_STORE_BREAK_REPLACEMENT = "no-cache";
 
@@ -607,9 +621,7 @@ async function runBreakServeInRoot() {
       v.includes('expected cache-control header to equal "no-store"'),
     );
   } finally {
-    writeFileSync(VIEWER_ROUTE_PATH, original);
-    resetBuildCache();
-    unregisterRestore(VIEWER_ROUTE_PATH);
+    restoreViewerSource(original);
   }
 
   const restoreViolations = [];
@@ -867,9 +879,7 @@ async function runBreakBoundaryRejections() {
       v.includes("sibling-prefix leaked contents"),
     );
   } finally {
-    writeFileSync(VIEWER_ROUTE_PATH, original);
-    resetBuildCache();
-    unregisterRestore(VIEWER_ROUTE_PATH);
+    restoreViewerSource(original);
   }
 
   const restoreViolations = [];
@@ -979,9 +989,7 @@ async function runBreakSizeCap() {
       v.includes("expected 413 for the oversized file"),
     );
   } finally {
-    writeFileSync(VIEWER_ROUTE_PATH, original);
-    resetBuildCache();
-    unregisterRestore(VIEWER_ROUTE_PATH);
+    restoreViewerSource(original);
   }
 
   const restoreViolations = [];
@@ -1174,9 +1182,7 @@ async function runBreakStaleWorktreeRoot() {
       ),
     );
   } finally {
-    writeFileSync(VIEWER_ROUTE_PATH, original);
-    resetBuildCache();
-    unregisterRestore(VIEWER_ROUTE_PATH);
+    restoreViewerSource(original);
   }
 
   const restoreViolations = [];
