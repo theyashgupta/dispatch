@@ -1020,11 +1020,13 @@ function startStubPushService() {
           recorded = [];
         },
         close: () => new Promise((r) => server.close(() => r())),
-        waitForRequests: async (n, timeoutMs) => {
+        waitForRequests: async (n, timeoutMs, settleMs = 1000) => {
           const deadline = Date.now() + timeoutMs;
           while (recorded.length < n && Date.now() < deadline) {
             await sleep(POLL_INTERVAL_MS);
           }
+          // Settle so an "exactly n" assertion can observe an n+1th duplicate request too.
+          await sleep(settleMs);
           return [...recorded];
         },
       });
