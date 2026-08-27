@@ -1,5 +1,5 @@
 import { Router } from "express";
-import fsp from "node:fs/promises";
+import fsp, { constants as fsConstants } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
@@ -17,8 +17,10 @@ const MAX_BYTES = 2 * 1024 * 1024;
  * route is the trust boundary Phase 112's client-side link handler will rely on. Every
  * filesystem-derived rejection returns a uniform 404, so a response status can never be used as
  * an existence oracle for paths outside the boundary. The live session objects read here for the
- * extra roots must never be mutated. The open-stat-read tail holds one descriptor so the
- * file-type and size-cap checks cannot be raced against the read; the realpath-to-open window
+ * extra roots must never be mutated. The open-stat-read tail opens `O_NONBLOCK` (a blocking
+ * `open(2)` on a `.md`-named FIFO would park the handler and a libuv threadpool thread forever)
+ * and holds one descriptor so the file-type and size-cap checks cannot be raced against the
+ * read; the realpath-to-open window
  * (a directory component swapped for a symlink after containment) is a known residual that
  * would need per-component `O_NOFOLLOW` to close.
  * @see docs/ARCHITECTURE.md#security-threat-model
@@ -72,7 +74,10 @@ viewerRouter.get("/viewer/file", async (req, res) => {
 
   let fh: FileHandle;
   try {
-    fh = await fsp.open(resolved, "r");
+    fh = await fsp.open(
+      resolved,
+      fsConstants.O_RDONLY | fsConstants.O_NONBLOCK,
+    );
   } catch {
     res.status(404).json({ error: "not-found" });
     return;

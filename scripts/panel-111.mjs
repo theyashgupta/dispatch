@@ -840,6 +840,46 @@ async function checkBoundaryRejections(violations) {
     } finally {
       chmodSync(unreadablePath, 0o600);
     }
+
+    // Leg: non-regular file in root, LAST so a hang cannot starve the earlier legs. A
+    // .md-named FIFO must 404 via the isFile() gate and must never park the handler: a
+    // blocking O_RDONLY open(2) on a FIFO waits for a writer forever, so the request is
+    // deadlined instead of trusted.
+    const fifoPath = join(workspaces, "pipe.md");
+    execFileSync("mkfifo", [fifoPath]);
+    try {
+      const fifoRes = await fetch(
+        `${base}?path=${encodeURIComponent(fifoPath)}`,
+        {
+          signal: AbortSignal.timeout(5_000),
+        },
+      );
+      const fifoText = await fifoRes.text();
+      if (fifoRes.status !== 404) {
+        violations.push(
+          `boundary-rejections: fifo-in-root expected 404, observed ${fifoRes.status}`,
+        );
+      }
+      let fifoBody = null;
+      try {
+        fifoBody = JSON.parse(fifoText);
+      } catch {
+        // non-JSON body is caught by the shape assertion below
+      }
+      if (fifoBody?.error !== "not-found") {
+        violations.push(
+          `boundary-rejections: fifo-in-root expected exact body { error: "not-found" }, ` +
+            `observed ${JSON.stringify(fifoText.slice(0, 200))}`,
+        );
+      }
+    } catch (err) {
+      violations.push(
+        `boundary-rejections: fifo-in-root did not answer within 5s (${err.name}); the ` +
+          `handler opened the FIFO blocking and parked a libuv threadpool thread`,
+      );
+    } finally {
+      rmSync(fifoPath, { force: true });
+    }
   } finally {
     await stopServer(boot?.child);
     cleanupSandboxHome(home);
