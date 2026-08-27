@@ -387,7 +387,13 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
     if (event.type !== "status_needs_input" || event.cardId == null) return;
     const card = store.getCard(event.cardId);
     if (!card) return;
-    void sendPushForCard(card, event.reason ?? undefined);
+    void sendPushForCard(card, event.reason ?? undefined).catch(
+      (err: unknown) => {
+        console.error(
+          `[push] fan-out rejected unexpectedly: ${(err as Error).message}`,
+        );
+      },
+    );
   });
   startArtifactDetectionLoop(port);
   if (config.updateCheck !== false) startUpdateCheckLoop(config);
