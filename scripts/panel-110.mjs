@@ -2988,7 +2988,8 @@ const NOTIF_CLICK_BREAK_TARGET = `self.addEventListener("notificationclick", (ev
   event.notification.close();
   const url = event.notification.data?.url;
   const cardId = event.notification.data?.cardId ?? event.notification.tag;
-  if (typeof cardId !== "string" || cardId === "") return;
+  const hasCard = typeof cardId === "string" && cardId !== "";
+  if (!hasCard && typeof url !== "string") return;
   event.waitUntil(
     (async () => {
       const all = await clients.matchAll({
@@ -3007,7 +3008,7 @@ const NOTIF_CLICK_BREAK_TARGET = `self.addEventListener("notificationclick", (ev
         } catch {
           // A browser may refuse focus (no user-activation context); still route the card.
         }
-        existing.postMessage({ type: "dsp-open-card", cardId });
+        if (hasCard) existing.postMessage({ type: "dsp-open-card", cardId });
       } else if (typeof url === "string") {
         await clients.openWindow(url);
       }

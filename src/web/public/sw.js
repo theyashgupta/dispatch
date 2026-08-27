@@ -30,10 +30,14 @@ self.addEventListener("push", (event) => {
     /**
      * The subscription is userVisibleOnly, so a push that shows nothing spends the browser's
      * silent-push budget and can get the permission revoked; show a generic fallback instead.
+     * The fixed tag collapses repeated malformed pushes into one notification, and the empty
+     * cardId plus scope url route its click to the focus/open path instead of a dead end.
      */
     event.waitUntil(
       self.registration.showNotification("Dispatch", {
         body: "A card needs your input.",
+        tag: "dsp-fallback",
+        data: { url: self.registration.scope, cardId: "" },
         icon: "/icon-192.png",
       }),
     );
@@ -54,7 +58,8 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const url = event.notification.data?.url;
   const cardId = event.notification.data?.cardId ?? event.notification.tag;
-  if (typeof cardId !== "string" || cardId === "") return;
+  const hasCard = typeof cardId === "string" && cardId !== "";
+  if (!hasCard && typeof url !== "string") return;
   event.waitUntil(
     (async () => {
       const all = await clients.matchAll({
@@ -73,7 +78,7 @@ self.addEventListener("notificationclick", (event) => {
         } catch {
           // A browser may refuse focus (no user-activation context); still route the card.
         }
-        existing.postMessage({ type: "dsp-open-card", cardId });
+        if (hasCard) existing.postMessage({ type: "dsp-open-card", cardId });
       } else if (typeof url === "string") {
         await clients.openWindow(url);
       }
