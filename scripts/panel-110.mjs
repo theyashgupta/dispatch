@@ -2893,9 +2893,10 @@ async function checkNotificationclickFocusOrOpen(violations) {
       );
     }
 
-    // Open-window branch: close the page so no client matches the origin, redeliver a fresh
-    // notification (the first was already closed above), and dispatch again.
-    await cdp.send("Target.closeTarget", { targetId: page.targetId });
+    // Open-window branch: redeliver a fresh notification (the first was already closed above)
+    // and wait for it WHILE the page session is still alive (delivering over a closed session
+    // races its teardown and can silently drop the push), then close the page so no client
+    // matches the origin, and dispatch again.
     await deliverPushToServiceWorker(cdp, page.sessionId, {
       origin,
       registrationId,
@@ -2905,10 +2906,14 @@ async function checkNotificationclickFocusOrOpen(violations) {
         cardId: cardBId,
         url: `${origin}/?card=${encodeURIComponent(cardBId)}`,
       },
-    }).catch(() => {
-      // The page session that issued the delivery just closed with its target; a later attach
-      // below re-resolves everything the open-branch dispatch needs from the worker's own scope.
     });
+    await pollServiceWorkerNotifications(
+      cdp,
+      page.sessionId,
+      (list) => list.some((n) => n.tag === cardBId),
+      NOTIF_TIMEOUT_MS,
+    );
+    await cdp.send("Target.closeTarget", { targetId: page.targetId });
 
     sw = await attachToServiceWorkerTarget(cdp, origin);
     const beforeOpenTargetIds = new Set(
@@ -2916,12 +2921,12 @@ async function checkNotificationclickFocusOrOpen(violations) {
         .filter((t) => t.type === "page")
         .map((t) => t.targetId),
     );
-    await evalAsyncValue(
+    const dispatchOpen = await evalAsyncValue(
       cdp,
       sw.sessionId,
       `(async () => {
         const notifs = await self.registration.getNotifications();
-        const target = notifs[notifs.length - 1];
+        const target = notifs.find((n) => n.tag === ${JSON.stringify(cardBId)});
         if (!target) return { error: "no live notification for the open-window dispatch" };
         self.__panel110OpenWindowCalls = [];
         const realOpenWindow = self.clients.openWindow.bind(self.clients);
@@ -2933,6 +2938,9 @@ async function checkNotificationclickFocusOrOpen(violations) {
         return { dispatched: true };
       })()`,
     );
+    if (dispatchOpen?.error) {
+      violations.push(`notificationclick-focus-or-open: ${dispatchOpen.error}`);
+    }
 
     const deadline = Date.now() + NOTIF_CLICK_OPEN_TIMEOUT_MS;
     let newPageTarget = null;
