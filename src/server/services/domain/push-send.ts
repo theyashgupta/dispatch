@@ -138,7 +138,7 @@ function encryptPayload(sub: PushSubscriptionRow, plaintext: Buffer): Buffer {
 
 /** `http` for a loopback host, `https` otherwise. */
 function schemeFor(host: string): "http" | "https" {
-  return /^(127\.0\.0\.1|localhost|\[?::1]?)(:\d+)?$/.test(host)
+  return /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host)
     ? "http"
     : "https";
 }
@@ -149,10 +149,21 @@ function schemeFor(host: string): "http" | "https" {
  * worker registration is origin-scoped, so only that origin's client can act on the URL. Accepted
  * consequence: a row created under a rotated tunnel hostname still receives its push, but its
  * deep link points at a dead host, which is the deliberate cost of pruning only on 404 and 410.
+ * Returns null for a stored value that is not a bare host[:port] (for example one smuggling
+ * userinfo through a poisoned Host header), so it can never become an open redirect.
  */
-function deepLinkUrl(origin: string, cardId: string): string {
+function deepLinkUrl(origin: string, cardId: string): string | null {
   const scheme = schemeFor(origin);
-  return `${scheme}://${origin}/?card=${encodeURIComponent(cardId)}`;
+  try {
+    const url = new URL(`${scheme}://${origin}/`);
+    if (url.host !== origin || url.username !== "" || url.password !== "") {
+      return null;
+    }
+    url.searchParams.set("card", cardId);
+    return url.href;
+  } catch {
+    return null;
+  }
 }
 
 /** POST once, retrying exactly once on a thrown network error or timeout (never on an HTTP status). */
@@ -206,7 +217,7 @@ export async function sendPushForCard(
             cardId: card.id,
             title,
             body,
-            url: deepLinkUrl(sub.origin, card.id),
+            url: deepLinkUrl(sub.origin, card.id) ?? undefined,
           }),
         );
         const encrypted = encryptPayload(sub, payload);
