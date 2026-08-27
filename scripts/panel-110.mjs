@@ -2906,6 +2906,12 @@ async function checkNotificationclickFocusOrOpen(violations) {
         const notifs = await self.registration.getNotifications();
         const target = notifs[notifs.length - 1];
         if (!target) return { error: "no live notification for the open-window dispatch" };
+        self.__panel110OpenWindowCalls = [];
+        const realOpenWindow = self.clients.openWindow.bind(self.clients);
+        self.clients.openWindow = (u) => {
+          self.__panel110OpenWindowCalls.push(String(u));
+          return realOpenWindow(u);
+        };
         self.dispatchEvent(new NotificationEvent("notificationclick", { notification: target }));
         return { dispatched: true };
       })()`,
@@ -2933,9 +2939,34 @@ async function checkNotificationclickFocusOrOpen(violations) {
       console.log(
         `notificationclick-focus-or-open: WARNING open-window branch degraded, no new page ` +
           `target observed within ${NOTIF_CLICK_OPEN_TIMEOUT_MS}ms (a synthetic notificationclick ` +
-          `carries no user activation, which clients.openWindow requires); falling back to a ` +
-          `static assertion on the served sw.js source`,
+          `carries no user activation, which clients.openWindow requires); asserting on the ` +
+          `recorded clients.openWindow call instead, with a source grep as the floor`,
       );
+      const openWindowCalls = await evalAsyncValue(
+        cdp,
+        sw.sessionId,
+        `(async () => self.__panel110OpenWindowCalls ?? [])()`,
+      );
+      const openedDeepLink = (openWindowCalls ?? []).find((u) => {
+        try {
+          return new URL(u).searchParams.get("card") === cardBId;
+        } catch {
+          return false;
+        }
+      });
+      if (openedDeepLink == null) {
+        violations.push(
+          `notificationclick-focus-or-open: the open-window branch never called ` +
+            `clients.openWindow with a URL carrying card=${cardBId}, recorded calls: ` +
+            `${JSON.stringify(openWindowCalls)} (proves the branch ran even when Chrome ` +
+            `refuses the actual window)`,
+        );
+      } else {
+        console.log(
+          `notificationclick-focus-or-open: open-window branch verified via recorded ` +
+            `clients.openWindow(${JSON.stringify(openedDeepLink)})`,
+        );
+      }
       const servedSwSource = await (await fetch(`${origin}/sw.js`)).text();
       if (!servedSwSource.includes("clients.openWindow(url)")) {
         violations.push(
