@@ -2939,15 +2939,19 @@ const NOTIF_CLICK_BREAK_TARGET = `self.addEventListener("notificationclick", (ev
   event.notification.close();
   const url = event.notification.data?.url;
   const cardId = event.notification.data?.cardId ?? event.notification.tag;
+  if (typeof cardId !== "string" || cardId === "") return;
   event.waitUntil(
     (async () => {
       const all = await clients.matchAll({
         type: "window",
         includeUncontrolled: true,
       });
-      const existing = all.find(
-        (client) => new URL(client.url).origin === new URL(url).origin,
-      );
+      const existing =
+        typeof url === "string"
+          ? all.find(
+              (client) => new URL(client.url).origin === new URL(url).origin,
+            )
+          : all[0];
       if (existing) {
         try {
           await existing.focus();
@@ -2955,7 +2959,7 @@ const NOTIF_CLICK_BREAK_TARGET = `self.addEventListener("notificationclick", (ev
           // A browser may refuse focus (no user-activation context); still route the card.
         }
         existing.postMessage({ type: "dsp-open-card", cardId });
-      } else {
+      } else if (typeof url === "string") {
         await clients.openWindow(url);
       }
     })(),
