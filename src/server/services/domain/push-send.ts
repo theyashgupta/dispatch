@@ -226,18 +226,25 @@ export async function sendPushForCard(
           }),
         );
         const encrypted = encryptPayload(sub, payload);
-        const res = await postOnce(
-          sub.endpoint,
-          {
-            TTL: String(PUSH_TTL_SECONDS),
-            "Content-Encoding": "aes128gcm",
-            "Content-Type": "application/octet-stream",
-            Urgency: "high",
-            Authorization: `vapid t=${jwt}, k=${vapid.publicKeyBase64Url}`,
-          },
-          encrypted,
-        );
+        const headers = {
+          TTL: String(PUSH_TTL_SECONDS),
+          "Content-Encoding": "aes128gcm",
+          "Content-Type": "application/octet-stream",
+          Urgency: "high",
+          Authorization: `vapid t=${jwt}, k=${vapid.publicKeyBase64Url}`,
+        };
+        let res = await postOnce(sub.endpoint, headers, encrypted);
         console.log(`[push] send ${res.status} ${endpointPrefix}`);
+        if (res.status === 429 || res.status === 503) {
+          const retryAfter = Number(res.headers.get("retry-after") ?? 5);
+          const waitSeconds = Math.min(
+            Number.isFinite(retryAfter) ? retryAfter : 5,
+            30,
+          );
+          await new Promise((r) => setTimeout(r, waitSeconds * 1000));
+          res = await postOnce(sub.endpoint, headers, encrypted);
+          console.log(`[push] retry ${res.status} ${endpointPrefix}`);
+        }
         if (res.status === 404 || res.status === 410) {
           store.removePushSubscription(sub.endpoint);
         }
