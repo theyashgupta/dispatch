@@ -1363,14 +1363,16 @@ async function runBreakAuthGate() {
         `false "the check cannot fail".`,
     );
   }
-  const idx = original.indexOf(IS_LOCAL_REQUEST_MARKER);
-
   let tripFired = false;
   registerRestore(LOOPBACK_DIST_PATH, original);
   try {
-    const mutated =
-      original.slice(0, idx) +
-      "export function isLocalRequest(req) { return true; }\n";
+    // Prepend `return true;` to the body instead of truncating the file: everything after the
+    // function (any future export) survives the mutation, so a trip reads as a trip and never
+    // as an unrelated import failure.
+    const mutated = original.replace(
+      IS_LOCAL_REQUEST_MARKER,
+      `${IS_LOCAL_REQUEST_MARKER} return true;`,
+    );
     writeFileSync(LOOPBACK_DIST_PATH, mutated);
 
     const tripViolations = [];
