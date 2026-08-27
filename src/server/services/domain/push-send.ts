@@ -30,6 +30,7 @@ const PUSH_TTL_SECONDS = 86400;
 const SEND_TIMEOUT_MS = 10_000;
 const NOTIFICATION_FALLBACK_BODY = "Waiting on your input";
 const ENDPOINT_LOG_PREFIX_LEN = 40;
+const VAPID_SUBJECT = "https://github.com/theyashgupta/dispatch";
 
 /** 0x04 followed by a JWK's base64url `x`/`y`, the 65-byte uncompressed EC point form. */
 function rawPoint(jwk: JsonWebKey): Buffer {
@@ -62,6 +63,7 @@ function signVapidJwt(endpoint: string, privateKeyJwk: JsonWebKey): string {
     JSON.stringify({
       aud: new URL(endpoint).origin,
       exp: Math.floor(Date.now() / 1000) + VAPID_JWT_TTL_SECONDS,
+      sub: VAPID_SUBJECT,
     }),
   ).toString("base64url");
   const signingInput = `${header}.${claims}`;

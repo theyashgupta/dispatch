@@ -1149,8 +1149,8 @@ function decryptPushBody(body, subscriberKeys) {
 }
 
 /** Parses a `vapid t=<jwt>, k=<pubkey>` Authorization header value, checks the decoded JWT header
- * names ES256, the claims' `aud` equals `endpointOrigin` and `exp` is in the future and no more
- * than 24 hours out, the decoded signature is exactly 64 bytes, and verifies it against a public
+ * names ES256, the claims' `aud` equals `endpointOrigin`, `exp` is in the future and no more
+ * than 24 hours out and `sub` is a mailto:/https: contact URI, the decoded signature is exactly 64 bytes, and verifies it against a public
  * key rebuilt from `k` with `dsaEncoding: "ieee-p1363"`. Returns a list of problem strings (empty
  * when valid) rather than throwing, so a check can attribute each failure by name. */
 function verifyVapidAuthorization(headerValue, endpointOrigin) {
@@ -1211,6 +1211,13 @@ function verifyVapidAuthorization(headerValue, endpointOrigin) {
   } else if (claims.exp - nowSec > 24 * 3600) {
     problems.push(
       `verifyVapidAuthorization: claims.exp is more than 24 hours out (${claims.exp - nowSec}s)`,
+    );
+  }
+  if (typeof claims.sub !== "string" || !/^(mailto:|https:)/.test(claims.sub)) {
+    problems.push(
+      `verifyVapidAuthorization: claims.sub is ${JSON.stringify(claims.sub)}, expected a ` +
+        `mailto: or https: contact URI (RFC 8292 section 2.1; Apple's push service rejects a ` +
+        `token without it)`,
     );
   }
 
