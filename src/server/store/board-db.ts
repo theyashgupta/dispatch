@@ -131,10 +131,10 @@ export interface BoardDb {
   /**
    * Upsert a subscription row, keyed by `endpoint`. A re-subscribe from the same device refreshes
    * `p256dh`/`auth`/`origin` in place rather than accumulating a duplicate row.
-   * @returns Whether the row was stored. A full table evicts its oldest `created_at` row for a
-   * new endpoint instead of refusing it, so a permanently-failing endpoint (never pruned by the
-   * 404/410 rule) cannot wedge the {@link MAX_PUSH_SUBSCRIPTIONS} cap forever; `false` survives
-   * only as a defensive signal.
+   * @returns Whether the row was stored. For a NEW endpoint an at-or-over-cap table evicts
+   * exactly as many oldest `created_at` rows as the insert needs (an existing endpoint never
+   * evicts), so a permanently-failing endpoint (never pruned by the 404/410 rule) cannot wedge
+   * the {@link MAX_PUSH_SUBSCRIPTIONS} cap forever; `false` survives only as a defensive signal.
    * @remarks Safe outside the `persist` write queue: `push_subscriptions` shares no rows with the
    * card/meta/event write path, and the evict + upsert pair runs back-to-back on the process's
    * single synchronous `DatabaseSync` handle (`busy_timeout = 5000`), so no other statement can
@@ -506,12 +506,13 @@ export function openBoardDb(): BoardDb {
     `SELECT id, card_id, type, from_col, to_col, reason, source, ts
        FROM events WHERE card_id = ? ORDER BY id DESC LIMIT ?`,
   );
-  const evictOldestPushSubscription = db.prepare(
+  const evictExcessPushSubscriptions = db.prepare(
     `DELETE FROM push_subscriptions
-      WHERE endpoint = (SELECT endpoint FROM push_subscriptions
-                         ORDER BY created_at LIMIT 1)
-        AND (SELECT COUNT(*) FROM push_subscriptions) >= ${MAX_PUSH_SUBSCRIPTIONS}
-        AND NOT EXISTS (SELECT 1 FROM push_subscriptions WHERE endpoint = @endpoint)`,
+      WHERE NOT EXISTS (SELECT 1 FROM push_subscriptions WHERE endpoint = @endpoint)
+        AND endpoint IN (
+          SELECT endpoint FROM push_subscriptions
+           ORDER BY created_at
+           LIMIT MAX(0, (SELECT COUNT(*) FROM push_subscriptions) - ${MAX_PUSH_SUBSCRIPTIONS - 1}))`,
   );
   const upsertPushSubscription = db.prepare(
     `INSERT INTO push_subscriptions (endpoint, p256dh, auth, origin, created_at)
@@ -641,7 +642,7 @@ export function openBoardDb(): BoardDb {
       }
     },
     addPushSubscription(sub) {
-      evictOldestPushSubscription.run({ endpoint: sub.endpoint });
+      evictExcessPushSubscriptions.run({ endpoint: sub.endpoint });
       const info = upsertPushSubscription.run({
         endpoint: sub.endpoint,
         p256dh: sub.p256dh,
