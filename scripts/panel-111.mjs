@@ -80,6 +80,15 @@
  *     `stale-worktree-root: expected exact bytes for the stale-workspace .md, observed a mismatch`
  *     The RESTORE leg re-ran clean after the captured bytes were restored, and
  *     `git diff --quiet` on `viewer.route.ts` confirmed a byte-identical restore.
+ *   - `auth-gate` proven able to fail (Plan 03): rewriting the compiled `isLocalRequest` in
+ *     `dist/server/routes/loopback.js` to unconditionally return true (no rebuild), and
+ *     re-running the same check with a real spoofed-Host request produced, verbatim:
+ *     `auth-gate: GET /api/viewer/file (foreign Host) body does not contain "/__remote/verify" (status=200)`
+ *     `auth-gate: GET /api/viewer/file (foreign Host) expected content-type to include "text/html", got "text/markdown; charset=utf-8"`
+ *     `auth-gate: GET /api/viewer/file (foreign Host) expected referrer-policy "no-referrer", got undefined`
+ *     `auth-gate: foreign-Host request leaked doc.md bytes (the viewer route answered directly, bypassing the remote-auth gate)`
+ *     The RESTORE leg re-ran clean after the captured bytes were restored, and
+ *     `git status --porcelain dist/` confirmed a byte-identical restore.
  */
 
 import {
@@ -1101,17 +1110,215 @@ async function runBreakStaleWorktreeRoot() {
   return { tripFired, restoreClean };
 }
 
+// ---------------------------------------------------------------------------
+// auth-gate: the viewer route is reachable only behind the existing
+// remote-auth gate. A real spoofed-Host request against a live server, never
+// `fetch` (undici silently drops a user-set Host header).
+// ---------------------------------------------------------------------------
+
+const FOREIGN_HOST = "dispatch-panel-111.invalid";
+
+/** A `node:http` request against `path` carrying a spoofed `Host` header. Not built on `fetch`:
+ * Node's global `fetch` (undici) implements the WHATWG forbidden-request-header list, which
+ * includes `Host`, so a spoofed `Host` passed to `fetch` is silently dropped and the request
+ * connects with the real loopback Host. A gate check written on `fetch` could therefore never
+ * trigger the gate and would pass vacuously. Ported verbatim from panel-108.mjs. */
+function requestWithHost(port, method, path, hostHeader, body) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const headers = { Host: hostHeader };
+    if (body !== undefined) headers["content-type"] = "application/json";
+    const req = httpRequest(
+      { host: "127.0.0.1", port, path, method, setHost: false, headers },
+      (res) => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => (text += chunk));
+        res.on("end", () =>
+          resolvePromise({
+            status: res.statusCode,
+            headers: res.headers,
+            body: text,
+          }),
+        );
+      },
+    );
+    req.on("error", rejectPromise);
+    if (body !== undefined) req.write(JSON.stringify(body));
+    req.end();
+  });
+}
+
+function looksLikeJson(text) {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Assert `res` is the remote-auth code-entry page, never an API response: body contains the
+ * verify-form's action path, content-type is text/html, referrer-policy is no-referrer, and the
+ * body does not parse as JSON. Ported verbatim from panel-108.mjs. */
+function assertRemoteAuthGated(label, res, violations) {
+  if (!res.body.includes("/__remote/verify")) {
+    violations.push(
+      `auth-gate: ${label} body does not contain "/__remote/verify" (status=${res.status})`,
+    );
+  }
+  const contentType = res.headers["content-type"];
+  if (typeof contentType !== "string" || !contentType.includes("text/html")) {
+    violations.push(
+      `auth-gate: ${label} expected content-type to include "text/html", got ${JSON.stringify(contentType)}`,
+    );
+  }
+  if (res.headers["referrer-policy"] !== "no-referrer") {
+    violations.push(
+      `auth-gate: ${label} expected referrer-policy "no-referrer", got ${JSON.stringify(res.headers["referrer-policy"])}`,
+    );
+  }
+  if (looksLikeJson(res.body)) {
+    violations.push(
+      `auth-gate: ${label} body parses as JSON, expected the code-entry HTML page`,
+    );
+  }
+}
+
+/**
+ * Local parity leg (positive control): the exact same request shape, on a local Host, must 200
+ * with the real file bytes, proving the foreign leg below is attributable to the gate, not a
+ * broken URL. Foreign leg: the same request under a spoofed Host must never reach the viewer
+ * handler; it must get the code-entry HTML page and never the markdown bytes.
+ */
+async function checkAuthGate(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("auth-gate");
+  let boot;
+  try {
+    const workspaces = join(home, "workspaces");
+    mkdirSync(workspaces, { recursive: true });
+    const sentinel = `panel-111-sentinel-${process.pid}`;
+    const docMarker = `AUTH-GATE-MARKER-${sentinel}`;
+    const docBytes = `# Doc\n\n${docMarker}\n`;
+    const docPath = join(workspaces, "doc.md");
+    writeFileSync(docPath, docBytes, "utf8");
+
+    boot = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    const requestPath = "/api/viewer/file?path=" + encodeURIComponent(docPath);
+
+    // Local parity leg.
+    const localRes = await requestWithHost(
+      SANDBOX_PORT,
+      "GET",
+      requestPath,
+      "127.0.0.1:47885",
+    );
+    if (localRes.status !== 200 || localRes.body !== docBytes) {
+      violations.push(
+        `auth-gate: local parity leg failed, expected 200 with exact doc.md bytes, observed ` +
+          `status ${localRes.status}`,
+      );
+    }
+
+    // Foreign leg.
+    const foreignRes = await requestWithHost(
+      SANDBOX_PORT,
+      "GET",
+      requestPath,
+      FOREIGN_HOST,
+    );
+    assertRemoteAuthGated(
+      "GET /api/viewer/file (foreign Host)",
+      foreignRes,
+      violations,
+    );
+    if (foreignRes.body.includes(docMarker)) {
+      violations.push(
+        `auth-gate: foreign-Host request leaked doc.md bytes (the viewer route answered ` +
+          `directly, bypassing the remote-auth gate)`,
+      );
+    }
+  } finally {
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const LOOPBACK_DIST_PATH = join(
+  REPO_ROOT,
+  "dist",
+  "server",
+  "routes",
+  "loopback.js",
+);
+const IS_LOCAL_REQUEST_MARKER = "export function isLocalRequest(req) {";
+
+/** `--break auth-gate`: rewrites the compiled `isLocalRequest` in `dist/server/routes/loopback.js`
+ * to unconditionally return true (NO rebuild, the mutation is in dist, matching panel-108.mjs's
+ * `runBreakAuthGateParity` shape), so the hoisted `remoteAuthRouter` treats every request as
+ * local regardless of Host. Requires the SAME check function to report the foreign-Host leak
+ * (TRIP leg): a foreign-Host request now reaches the viewer handler and returns the real markdown
+ * bytes. Restores the captured bytes unconditionally in a `finally`, then re-runs the same check
+ * and requires a clean pass (RESTORE leg). */
+async function runBreakAuthGate() {
+  assertBuilt();
+  const original = readFileSync(LOOPBACK_DIST_PATH, "utf8");
+  const occurrences = original.split(IS_LOCAL_REQUEST_MARKER).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel111: refusing to run --break auth-gate, expected ` +
+        `${JSON.stringify(IS_LOCAL_REQUEST_MARKER)} to occur exactly once in ${LOOPBACK_DIST_PATH}, ` +
+        `measured ${occurrences}. A miscounted anchor would mutate the wrong spot and report a ` +
+        `false "the check cannot fail".`,
+    );
+  }
+  const idx = original.indexOf(IS_LOCAL_REQUEST_MARKER);
+
+  let tripFired = false;
+  registerRestore(LOOPBACK_DIST_PATH, original);
+  try {
+    const mutated =
+      original.slice(0, idx) +
+      "export function isLocalRequest(req) { return true; }\n";
+    writeFileSync(LOOPBACK_DIST_PATH, mutated);
+
+    const tripViolations = [];
+    await checkAuthGate(tripViolations);
+    console.log(
+      `\n--break auth-gate TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) => v.includes("leaked doc.md bytes"));
+  } finally {
+    writeFileSync(LOOPBACK_DIST_PATH, original);
+    unregisterRestore(LOOPBACK_DIST_PATH);
+  }
+
+  const restoreViolations = [];
+  await checkAuthGate(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break auth-gate RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
 const CHECKS = {
   "serve-in-root": (violations) => checkServeInRoot(violations),
   "boundary-rejections": (violations) => checkBoundaryRejections(violations),
   "size-cap": (violations) => checkSizeCap(violations),
   "stale-worktree-root": (violations) => checkStaleWorktreeRoot(violations),
+  "auth-gate": (violations) => checkAuthGate(violations),
 };
 
 const BREAKS = {
   "serve-in-root": runBreakServeInRoot,
   "boundary-rejections": runBreakBoundaryRejections,
   "size-cap": runBreakSizeCap,
+  "stale-worktree-root": runBreakStaleWorktreeRoot,
+  "auth-gate": runBreakAuthGate,
   "stale-worktree-root": runBreakStaleWorktreeRoot,
 };
 
