@@ -422,12 +422,13 @@ async function seedFixtureCards(home, cards) {
 // ---------------------------------------------------------------------------
 
 /**
- * Leg A (fail-closed, runs FIRST, before `workspaces/` exists): a request for a `.md` under the
- * sandbox's configured `workspaceRoot` must 404, proving the route degrades safely when the
- * allowed-roots accessor's only usable root cannot be realpath'd yet. Leg B (positive control):
- * once `workspaces/` exists with a real `doc.md`, the same URL must 200 with the exact bytes and
- * both locked headers. Leg C (dotfile): a `.md` inside a dot-directory under the boundary is
- * servable, proving there is no hidden-dir denylist.
+ * Leg A (fail-closed, runs FIRST, before `workspaces/` exists): a request for a REAL on-disk
+ * `.md` outside the sole configured root, made while that root cannot be realpath'd yet, must
+ * 404. The file resolves, so the request reaches the allowed-roots loop and only the root's
+ * `realpath` fails, proving the catch-continue branch degrades safely instead of widening
+ * containment. Leg B (positive control): once `workspaces/` exists with a real `doc.md`, that
+ * URL must 200 with the exact bytes and both locked headers. Leg C (dotfile): a `.md` inside a
+ * dot-directory under the boundary is servable, proving there is no hidden-dir denylist.
  */
 async function checkServeInRoot(violations) {
   assertBuilt();
@@ -440,25 +441,45 @@ async function checkServeInRoot(violations) {
     const workspaces = join(home, "workspaces");
     const docPath = join(workspaces, "doc.md");
     const url = `http://127.0.0.1:${SANDBOX_PORT}/api/viewer/file?path=${encodeURIComponent(docPath)}`;
+    const sentinel = `panel-111-sentinel-${process.pid}`;
 
-    // Leg A: fail-closed, requested BEFORE the workspaces directory is created.
-    const beforeRes = await fetch(url);
-    const beforeBody = await beforeRes.json().catch(() => null);
+    // Leg A: fail-closed, a real .md that DOES resolve, requested while the sole configured
+    // root (workspaces/) does not exist yet: the roots loop's catch-continue must leave the
+    // path uncontained and 404, never fall through to a wider containment.
+    const elsewhere = join(home, "elsewhere");
+    mkdirSync(elsewhere, { recursive: true });
+    const strayPath = join(elsewhere, "stray.md");
+    writeFileSync(strayPath, `# Stray\n\nSTRAY-MARKER-${sentinel}\n`, "utf8");
+    const beforeRes = await fetch(
+      `http://127.0.0.1:${SANDBOX_PORT}/api/viewer/file?path=${encodeURIComponent(strayPath)}`,
+    );
+    const beforeText = await beforeRes.text();
+    const beforeBody = (() => {
+      try {
+        return JSON.parse(beforeText);
+      } catch {
+        return null;
+      }
+    })();
     if (beforeRes.status !== 404) {
       violations.push(
-        `serve-in-root: expected 404 before the workspaces dir exists, observed ${beforeRes.status}`,
+        `serve-in-root: expected 404 for a resolvable .md while the sole root is missing, observed ${beforeRes.status}`,
       );
     }
     if (beforeBody?.error !== "not-found") {
       violations.push(
-        `serve-in-root: expected body { error: "not-found" } before the workspaces dir exists, ` +
-          `observed ${JSON.stringify(beforeBody)}`,
+        `serve-in-root: expected body { error: "not-found" } while the sole root is missing, ` +
+          `observed ${JSON.stringify(beforeText.slice(0, 200))}`,
+      );
+    }
+    if (beforeText.includes(`STRAY-MARKER-${sentinel}`)) {
+      violations.push(
+        `serve-in-root: the missing-root leg leaked stray.md bytes (the roots loop widened containment)`,
       );
     }
 
     // Leg B: positive control, the workspaces dir and a legit in-root .md now exist.
     mkdirSync(workspaces, { recursive: true });
-    const sentinel = `panel-111-sentinel-${process.pid}`;
     const docBytes = `# Doc\n\nHello ${sentinel}.\n\n- one\n- two\n`;
     writeFileSync(docPath, docBytes, "utf8");
 
