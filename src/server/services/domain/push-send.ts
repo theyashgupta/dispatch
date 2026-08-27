@@ -42,15 +42,6 @@ function rawPoint(jwk: JsonWebKey): Buffer {
   ]);
 }
 
-/** Split a 65-byte base64url-encoded raw EC point back into JWK `x`/`y` fields. */
-function jwkFromRawPoint(p256dhBase64Url: string): { x: string; y: string } {
-  const buf = Buffer.from(p256dhBase64Url, "base64url");
-  return {
-    x: buf.subarray(1, 33).toString("base64url"),
-    y: buf.subarray(33, 65).toString("base64url"),
-  };
-}
-
 /**
  * Sign a fresh ES256 VAPID JWT for one push endpoint.
  * @remarks `aud` is derived per endpoint with `new URL(endpoint).origin`; never cache or reuse a
@@ -90,17 +81,28 @@ function encryptPayload(sub: PushSubscriptionRow, plaintext: Buffer): Buffer {
   if (plaintext.length + PADDING_DELIMITER.length + 16 > RECORD_SIZE) {
     throw new Error("push payload exceeds the declared record size");
   }
-  const { x, y } = jwkFromRawPoint(sub.p256dh);
+  const uaRawPoint = Buffer.from(sub.p256dh, "base64url");
+  const auth = Buffer.from(sub.auth, "base64url");
+  if (
+    uaRawPoint.length !== 65 ||
+    uaRawPoint[0] !== 0x04 ||
+    auth.length !== 16
+  ) {
+    throw new Error("subscription key material has an invalid length");
+  }
   const uaPublicKey = createPublicKey({
-    key: { kty: "EC", crv: "P-256", x, y },
+    key: {
+      kty: "EC",
+      crv: "P-256",
+      x: uaRawPoint.subarray(1, 33).toString("base64url"),
+      y: uaRawPoint.subarray(33, 65).toString("base64url"),
+    },
     format: "jwk",
   });
-  const auth = Buffer.from(sub.auth, "base64url");
 
   const ephemeralKeys = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
   const ephemeralJwk = ephemeralKeys.publicKey.export({ format: "jwk" });
   const ephemeralRawPoint = rawPoint(ephemeralJwk);
-  const uaRawPoint = Buffer.from(sub.p256dh, "base64url");
 
   const ecdh = diffieHellman({
     privateKey: ephemeralKeys.privateKey,
