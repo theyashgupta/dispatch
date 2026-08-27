@@ -413,6 +413,16 @@ function restoreOnSignal() {
       // best effort: an unwritable path here has no further recovery
     }
   }
+  // The sources are restored but dist/ was built from the sabotaged bytes; the user's launchd
+  // service runs dist/ and `git diff` reports clean, so remove it rather than leave it live.
+  try {
+    rmSync(join(REPO_ROOT, "dist"), { recursive: true, force: true });
+    console.error(
+      "panel-110: removed dist/ (it may hold break-mutated output); run `npm run build`",
+    );
+  } catch {
+    // best effort: a survivor dist/ still gets rebuilt by the next assertBuilt()
+  }
   process.exit(1);
 }
 
