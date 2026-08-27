@@ -134,19 +134,24 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Fail-closed: throw (never degrade) if anything answers on the user's real dispatch port. */
+/** Fail-closed: throw (never degrade) if anything answers on the user's real dispatch port. The
+ * verdict is raised OUTSIDE the try so only connection failure (nothing listening, the safe
+ * case) can be swallowed; any other error after a successful fetch still trips the guard. */
 async function assertNoLiveService() {
+  let live = false;
   try {
     const res = await fetch("http://127.0.0.1:4700/api/board");
     await res.body?.cancel().catch(() => {});
+    live = true;
+  } catch {
+    // connection refused / reset / DNS: nothing is listening on 4700
+  }
+  if (live) {
     throw new Error(
       "PANEL-111-LIVE: a live dispatch service answered on http://127.0.0.1:4700/api/board, " +
         "refusing to start real processes or boot a sandbox server while the user's real service " +
         "is up. Stop the launchd service first, then rerun.",
     );
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith("PANEL-111-LIVE"))
-      throw err;
   }
 }
 
