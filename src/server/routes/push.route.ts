@@ -33,7 +33,10 @@ function deriveOrigin(req: Request): string | null {
   const host = isLocalRequest(req)
     ? (req.headers.host ?? null)
     : getKnownPublicHost();
-  if (host == null || !/^(\[[0-9a-f:]+\]|[a-z0-9.-]+)(:\d{1,5})?$/i.test(host)) {
+  if (
+    host == null ||
+    !/^(\[[0-9a-f:]+\]|[a-z0-9.-]+)(:\d{1,5})?$/i.test(host)
+  ) {
     return null;
   }
   return host;
