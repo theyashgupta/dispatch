@@ -1,5 +1,6 @@
 import { Router } from "express";
 import fsp from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
 import { store } from "../store/board.store.js";
@@ -16,7 +17,10 @@ const MAX_BYTES = 2 * 1024 * 1024;
  * route is the trust boundary Phase 112's client-side link handler will rely on. Every
  * filesystem-derived rejection returns a uniform 404, so a response status can never be used as
  * an existence oracle for paths outside the boundary. The live session objects read here for the
- * extra roots must never be mutated.
+ * extra roots must never be mutated. The open-stat-read tail holds one descriptor so the
+ * file-type and size-cap checks cannot be raced against the read; the realpath-to-open window
+ * (a directory component swapped for a symlink after containment) is a known residual that
+ * would need per-component `O_NOFOLLOW` to close.
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
 export const viewerRouter = Router();
@@ -66,20 +70,32 @@ viewerRouter.get("/viewer/file", async (req, res) => {
     return;
   }
 
-  const st = await fsp.stat(resolved);
-  if (!st.isFile()) {
+  let fh: FileHandle;
+  try {
+    fh = await fsp.open(resolved, "r");
+  } catch {
     res.status(404).json({ error: "not-found" });
     return;
   }
-  if (st.size > MAX_BYTES) {
-    res.status(413).json({ error: "too-large" });
-    return;
+  try {
+    const st = await fh.stat();
+    if (!st.isFile()) {
+      res.status(404).json({ error: "not-found" });
+      return;
+    }
+    if (st.size > MAX_BYTES) {
+      res.status(413).json({ error: "too-large" });
+      return;
+    }
+    const body = await fh.readFile("utf8");
+    res
+      .status(200)
+      .set("Cache-Control", "no-store")
+      .type("text/markdown; charset=utf-8")
+      .send(body);
+  } catch {
+    if (!res.headersSent) res.status(404).json({ error: "not-found" });
+  } finally {
+    await fh.close();
   }
-
-  const body = await fsp.readFile(resolved, "utf8");
-  res
-    .status(200)
-    .set("Cache-Control", "no-store")
-    .type("text/markdown; charset=utf-8")
-    .send(body);
 });

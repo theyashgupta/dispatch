@@ -92,6 +92,7 @@
  */
 
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -741,6 +742,38 @@ async function checkBoundaryRejections(violations) {
       violations.push(
         `boundary-rejections: resolved-path extension gate leaked note.txt bytes via alias.md`,
       );
+    }
+
+    // Leg: unreadable-in-root, a mode-000 .md inside the boundary. `realpath` needs only search
+    // permission on the parents, so containment passes and the open throws EACCES; the response
+    // must be the uniform 404 body, never a 500 with a stack (the T-103-03 leak class).
+    const unreadablePath = join(workspaces, "unreadable.md");
+    writeFileSync(unreadablePath, `# Unreadable\n\n${secretMarker}\n`, "utf8");
+    chmodSync(unreadablePath, 0o000);
+    try {
+      const unreadableRes = await fetch(
+        `${base}?path=${encodeURIComponent(unreadablePath)}`,
+      );
+      const unreadableText = await unreadableRes.text();
+      if (unreadableRes.status !== 404) {
+        violations.push(
+          `boundary-rejections: unreadable-in-root expected 404, observed ${unreadableRes.status}`,
+        );
+      }
+      let unreadableBody = null;
+      try {
+        unreadableBody = JSON.parse(unreadableText);
+      } catch {
+        // non-JSON body is caught by the shape assertion below
+      }
+      if (unreadableBody?.error !== "not-found") {
+        violations.push(
+          `boundary-rejections: unreadable-in-root expected exact body { error: "not-found" }, ` +
+            `observed ${JSON.stringify(unreadableText.slice(0, 200))}`,
+        );
+      }
+    } finally {
+      chmodSync(unreadablePath, 0o600);
     }
   } finally {
     await stopServer(boot?.child);
