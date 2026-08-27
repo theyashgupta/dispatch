@@ -166,7 +166,9 @@ function deepLinkUrl(origin: string, cardId: string): string | null {
   }
 }
 
-/** POST once, retrying exactly once on a thrown network error or timeout (never on an HTTP status). */
+/** POST once, retrying exactly once on a thrown network error (never on an HTTP status, and
+ * never on a timeout or abort: a slow service may have accepted the first request, and a blind
+ * re-send would notify the user twice). */
 async function postOnce(
   endpoint: string,
   headers: Record<string, string>,
@@ -183,7 +185,10 @@ async function postOnce(
         signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       });
     } catch (err) {
+      const name = (err as Error).name;
+      if (name === "TimeoutError" || name === "AbortError") throw err;
       lastErr = err;
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 250));
     }
   }
   throw lastErr;
