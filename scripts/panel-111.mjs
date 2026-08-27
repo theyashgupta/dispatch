@@ -58,6 +58,20 @@
  *     `serve-in-root: expected cache-control header to equal "no-store", observed "no-cache"`
  *     The RESTORE leg re-ran clean after the captured bytes were restored, and
  *     `git diff --quiet` on `viewer.route.ts` confirmed a byte-identical restore.
+ *   - `boundary-rejections` proven able to fail (Plan 02): weakening the containment disjunct
+ *     `rootReal + path.sep` to `rootReal`, rebuilding, and re-running the same check against a
+ *     real sibling-prefix fixture (`workspaces-sibling/leak.md`) produced, verbatim:
+ *     `boundary-rejections: sibling-prefix expected 404, observed 200`
+ *     `boundary-rejections: sibling-prefix leaked contents (the resolved sibling path passed containment)`
+ *     The RESTORE leg re-ran clean after the captured bytes were restored, and
+ *     `git diff --quiet` on `viewer.route.ts` confirmed a byte-identical restore.
+ *   - `size-cap` proven able to fail (Plan 02): replacing the sole `2 * 1024 * 1024` literal
+ *     (the `MAX_BYTES` definition) with a value the oversized fixture can never exceed,
+ *     rebuilding, and re-running the same check against a real >2 MB fixture produced, verbatim:
+ *     `size-cap: expected 413 for the oversized file, observed 200`
+ *     `size-cap: expected body { error: "too-large" } for the oversized file, observed null`
+ *     The RESTORE leg re-ran clean after the captured bytes were restored, and
+ *     `git diff --quiet` on `viewer.route.ts` confirmed a byte-identical restore.
  */
 
 import {
