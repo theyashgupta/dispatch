@@ -25,12 +25,18 @@ export const pushRouter = Router();
  * Derive the trustworthy server-side origin for a request: the loopback `Host` header when local,
  * or the tunnel manager's known public host otherwise. Never reads the client-suppliable Origin
  * request header.
+ * @remarks Fails closed on any value that is not a bare host[:port]: the stored origin later
+ * becomes a `clients.openWindow` deep-link target, so a poisoned `Host` header must never
+ * round-trip into a URL.
  */
 function deriveOrigin(req: Request): string | null {
-  if (isLocalRequest(req)) {
-    return req.headers.host ?? null;
+  const host = isLocalRequest(req)
+    ? (req.headers.host ?? null)
+    : getKnownPublicHost();
+  if (host == null || !/^(\[[0-9a-f:]+\]|[a-z0-9.-]+)(:\d{1,5})?$/i.test(host)) {
+    return null;
   }
-  return getKnownPublicHost();
+  return host;
 }
 
 /** Validate a push endpoint: an `https://` URL string, 1 to 2048 characters. */

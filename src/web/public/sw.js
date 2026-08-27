@@ -79,7 +79,10 @@ self.addEventListener("notificationclick", (event) => {
           // A browser may refuse focus (no user-activation context); still route the card.
         }
         if (hasCard) existing.postMessage({ type: "dsp-open-card", cardId });
-      } else if (typeof url === "string") {
+      } else if (
+        typeof url === "string" &&
+        new URL(url).origin === self.location.origin
+      ) {
         await clients.openWindow(url);
       }
     })(),
