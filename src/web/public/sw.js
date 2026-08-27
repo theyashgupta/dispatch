@@ -27,6 +27,16 @@ self.addEventListener("push", (event) => {
     typeof data.cardId !== "string" ||
     data.cardId === ""
   ) {
+    /**
+     * The subscription is userVisibleOnly, so a push that shows nothing spends the browser's
+     * silent-push budget and can get the permission revoked; show a generic fallback instead.
+     */
+    event.waitUntil(
+      self.registration.showNotification("Dispatch", {
+        body: "A card needs your input.",
+        icon: "/icon-192.png",
+      }),
+    );
     return;
   }
   event.waitUntil(
