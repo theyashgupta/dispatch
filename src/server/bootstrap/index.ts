@@ -14,6 +14,7 @@ import {
 import { sweepStrayTunnels } from "../adapters/cloudflared.js";
 import { disableTunnel } from "../services/orchestration/tunnel.js";
 import { terminalProxyRouter } from "../routes/terminal-proxy.route.js";
+import { viewerPageRouter } from "../routes/viewer-page.route.js";
 import {
   rejectUpgrade,
   terminalProxyUpgrade,
@@ -348,6 +349,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
     apiRouter,
   );
   app.use("/sessions", terminalProxyRouter);
+  app.use("/viewer", viewerPageRouter);
 
   if (process.env.NODE_ENV === "production") {
     app.use(
