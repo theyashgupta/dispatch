@@ -100,6 +100,16 @@
  *     the TOC-click leg is driven by this SAME effect, not an independent native scroll (verified
  *     live during this plan's execution). The RESTORE leg re-ran clean after the captured bytes
  *     were restored, and `git diff --quiet src/` confirmed a byte-identical restore.
+ *   - `md-link-opens-viewer` proven able to fail (Plan 04): replacing the `.md` alternative in the
+ *     `.md|markdown` extension regex in `src/web/terminal-main.ts`'s `markdownFilePath` with an
+ *     unmatchable token, rebuilding, and re-running the same check against a real tmux/ttyd/Chrome
+ *     rig replaying the captured OSC-8 byte shape produced, verbatim:
+ *     `md-link-opens-viewer: expected the md link's recorded URL to start with "http://127.0.0.1:47886/viewer/?path=", observed "file:///.../draft%20notes%20(v2).md"`
+ *     `md-link-opens-viewer: the md link's recorded URL started with file://, the raw URI leaked instead of rerouting through the viewer: "file:///.../draft%20notes%20(v2).md"`
+ *     `md-link-opens-viewer: expected the decoded ?path= to equal "/.../draft notes (v2).md" (space intact), observed null`
+ *     The RESTORE leg re-ran clean after the captured bytes were restored, and
+ *     `git diff --quiet src/` confirmed a byte-identical restore. No tmux server, ttyd, Chrome, or
+ *     listener on 47886/9382 remained after the run.
  */
 
 import {
@@ -115,6 +125,8 @@ import { promisify } from "node:util";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 
 const execFileP = promisify(execFile);
 
@@ -634,6 +646,14 @@ async function pollUntilTruthy(cdp, sessionId, expression, timeoutMs) {
  * `element.click()`'s synthetic untrusted event.
  */
 async function dispatchRealClick(cdp, sessionId, point, modifiers = 0) {
+  // A leading mouseMoved matters for xterm's OSC-8 link provider, which computes a row's
+  // hoverable link ranges lazily on hover; a press/release with no prior move can land on a link
+  // whose range was never computed for this row.
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    { type: "mouseMoved", x: point.x, y: point.y, modifiers },
+    sessionId,
+  );
   await cdp.send(
     "Input.dispatchMouseEvent",
     {
@@ -660,6 +680,290 @@ async function dispatchRealClick(cdp, sessionId, point, modifiers = 0) {
     },
     sessionId,
   );
+}
+
+// ---------------------------------------------------------------------------
+// tmux/ttyd: minimal isolated rig for task 3's terminal-side check, ported
+// from mobile-term-101.mjs's spawnTtyd (~line 835) and standup sequence
+// (~lines 924-1039), trimmed to the plain-shell shape this check needs (no
+// fixture claude binary, no pty-shim, no mouse-report modes).
+// ---------------------------------------------------------------------------
+
+/**
+ * The tmux socket directory every tmux invocation in this section runs against, isolating this
+ * harness's tmux server from the developer's real one exactly like mobile-term-101.mjs's
+ * `SANDBOX_TMUX_TMPDIR`. Short and NOT `SANDBOX_PREFIX`-prefixed: the resulting socket path
+ * (`<dir>/tmux-<uid>/default`) is bounded by a 104-byte `sun_path`.
+ */
+const TMUX_TMPDIR_112 = join(tmpdir(), `p112tmux-${process.pid}`);
+
+/** Retained fingerprint key `adoptAndSweep` (adapters/ttyd.ts) looks for; must match
+ * `TTYD_RUNTIME_REVISION_RETAINED_KEY`'s exact value verbatim. */
+const TTYD_REVISION_RETAINED_KEY = "DISPATCH_TTYD_REVISION_7";
+
+const PORT_PARSE_TIMEOUT_MS = 10_000;
+const LISTEN_POLL_TIMEOUT_MS = 10_000;
+
+/** The isolated tmux env, creating the socket directory on first use. */
+function tmuxEnv112(extra = {}) {
+  mkdirSync(TMUX_TMPDIR_112, { recursive: true, mode: 0o700 });
+  return { ...process.env, TMUX_TMPDIR: TMUX_TMPDIR_112, ...extra };
+}
+
+function tmuxP112(args) {
+  return execFileP("tmux", args, { env: tmuxEnv112() });
+}
+
+/** Plain shell pane, no fixture binary: this check `send-keys`'s a real `printf` command to emit
+ * the captured OSC-8 byte shape, so the pane never needs to run anything but a default shell. */
+async function tmuxNewSession112(name, cwd) {
+  await tmuxP112([
+    "new-session",
+    "-d",
+    "-s",
+    name,
+    "-c",
+    cwd,
+    "-x",
+    "200",
+    "-y",
+    "50",
+  ]);
+}
+
+async function tmuxListSessionNames112() {
+  try {
+    const { stdout } = await tmuxP112([
+      "list-sessions",
+      "-F",
+      "#{session_name}",
+    ]);
+    return stdout
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** Plain-text screen contents (no escape sequences), one entry per visible row, tolerant of a
+ * dead/absent tmux server (empty array). */
+async function tmuxCapturePane112(name) {
+  try {
+    const { stdout } = await tmuxP112([
+      "capture-pane",
+      "-p",
+      "-t",
+      `=${name}:`,
+    ]);
+    return stdout.split("\n");
+  } catch {
+    return [];
+  }
+}
+
+/** `#{pane_width} #{pane_height}`, the pty's CURRENT geometry (post-resize, once ttyd's WS
+ * handshake has synced it to the browser's own negotiated cols/rows via `term.onResize`). */
+async function tmuxPaneSize112(name) {
+  const { stdout } = await tmuxP112([
+    "display-message",
+    "-p",
+    "-t",
+    `=${name}:`,
+    "#{pane_width} #{pane_height}",
+  ]);
+  const [cols, rows] = stdout.trim().split(" ").map(Number);
+  return { cols, rows };
+}
+
+/** Real ttyd against `session`, keyed by `sessionId`, production's exact argv shape
+ * (adapters/ttyd.ts's own `spawnTtyd`) so `adoptAndSweep`'s fingerprint match succeeds. Reused
+ * verbatim in shape from mobile-term-101.mjs. */
+function spawnTtyd112(session, sessionId) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "ttyd",
+      [
+        "-W",
+        "-i",
+        "127.0.0.1",
+        "-p",
+        "0",
+        "-b",
+        `/sessions/${sessionId}/terminal`,
+        "-T",
+        "tmux-256color",
+        "-t",
+        "disableLeaveAlert=true",
+        "-t",
+        `${TTYD_REVISION_RETAINED_KEY}=1`,
+        "tmux",
+        "-u",
+        "attach",
+        "-t",
+        `=${session}`,
+      ],
+      {
+        detached: true,
+        stdio: ["ignore", "ignore", "pipe"],
+        env: tmuxEnv112(),
+      },
+    );
+    let buf = "";
+    const timer = setTimeout(() => {
+      reject(
+        new Error(
+          `ttyd port not reported within ${PORT_PARSE_TIMEOUT_MS}ms for ${session}`,
+        ),
+      );
+    }, PORT_PARSE_TIMEOUT_MS);
+    const onData = (d) => {
+      buf += d.toString();
+      const m = buf.match(/Listening on port:\s*(\d+)/);
+      if (m) {
+        clearTimeout(timer);
+        child.stderr?.off("data", onData);
+        child.unref();
+        resolve({ child, port: Number(m[1]) });
+      }
+    };
+    child.stderr?.on("data", onData);
+    child.once("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      reject(
+        new Error(`ttyd exited early (code ${code}) for ${session}: ${buf}`),
+      );
+    });
+  });
+}
+
+async function waitForPortListening112(
+  port,
+  timeoutMs = LISTEN_POLL_TIMEOUT_MS,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await isPortListening(port)) return;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    `port ${port} never reported LISTENING via lsof within ${timeoutMs}ms`,
+  );
+}
+
+/** Insert one card + session row directly via node:sqlite (migration-diff-v3.mjs /
+ * mobile-term-101.mjs idiom): `board.db`'s schema only exists after a real boot has run its
+ * migrations once, which the check's warmup-boot-then-kill step provides. */
+function seedFixtureSession112(home, card) {
+  const dbPath = join(home, ".dispatch", "board.db");
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec("BEGIN");
+    db.prepare(
+      `INSERT INTO cards (id, data) VALUES (?, ?)
+       ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
+    ).run(card.id, JSON.stringify(card));
+    const metaRow = db.prepare("SELECT data FROM meta WHERE id = 0").get();
+    const meta = metaRow ? JSON.parse(metaRow.data) : {};
+    meta.schemaVersion = 1;
+    db.prepare(
+      `INSERT INTO meta (id, data) VALUES (0, @data)
+       ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
+    ).run({ data: JSON.stringify(meta) });
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  } finally {
+    db.close();
+  }
+}
+
+/** Kill the ttyd child, the isolated tmux session + server, and remove the tmux socket
+ * directory. Best-effort: a check's own `finally` calls this alongside the existing
+ * `stopServer`/`cleanupSandboxHome` teardown, never in place of it. */
+async function tearDownTmux112(tmuxName, ttydChild) {
+  if (ttydChild) {
+    try {
+      process.kill(ttydChild.pid, "SIGTERM");
+    } catch {
+      // already gone
+    }
+  }
+  await tmuxP112(["kill-session", "-t", `=${tmuxName}:`]).catch(() => {});
+  await tmuxP112(["kill-server"]).catch(() => {});
+  rmSync(TMUX_TMPDIR_112, { recursive: true, force: true });
+}
+
+/**
+ * Installed via `Page.addScriptToEvaluateOnNewDocument` (109-04 precedent): stubs `window.open`
+ * to return a fake window whose `location.href` setter records every assignment into a
+ * page-global array, and whose `opener` property is a plain, null-able field, so the terminal's
+ * opener-nulling reroute is observable without a real second browser target
+ * (`Target.setDiscoverTargets` remains the alternative per 112-RESEARCH.md assumption A4, if this
+ * stub ever proves insufficient).
+ */
+const WINDOW_OPEN_STUB_INIT_SCRIPT = `
+(() => {
+  window.__panel112Opens = [];
+  window.open = function () {
+    var location = {};
+    Object.defineProperty(location, "href", {
+      set: function (v) { window.__panel112Opens.push(String(v)); },
+      get: function () { return ""; },
+    });
+    return { opener: {}, location: location };
+  };
+})();
+`;
+
+/** Same shape as `openPage`, but navigates from `about:blank` so `initScript` installs BEFORE
+ * the real navigation (panel-109.mjs's `seedPage` precedent). */
+async function openTerminalPage(cdp, { url, initScript }) {
+  const { targetId } = await cdp.send("Target.createTarget", {
+    url: "about:blank",
+  });
+  const { sessionId } = await cdp.send("Target.attachToTarget", {
+    targetId,
+    flatten: true,
+  });
+  await cdp.send("Page.enable", {}, sessionId);
+  await cdp.send("Runtime.enable", {}, sessionId);
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+  if (initScript) {
+    await cdp.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      { source: initScript },
+      sessionId,
+    );
+  }
+  await cdp.send("Page.navigate", { url }, sessionId);
+  return { targetId, sessionId };
+}
+
+/**
+ * Builds the shell command TEXT that, when typed and executed in a pane, prints the exact
+ * captured OSC-8 byte shape (112-RESEARCH.md Code Examples' `osc8Link` helper) for `absPath`,
+ * with the visible link text (its basename) alone on its own output line so the harness can find
+ * it in `tmux capture-pane -p` without any escape-sequence parsing.
+ */
+function buildOsc8Command(absPath) {
+  const esc = "\\033";
+  const st = esc + "\\\\";
+  const uri = `file://${encodeURI(absPath)}`;
+  const label = absPath.split("/").pop();
+  const fmt = `${esc}]8;id=t112;%s${st}%s${esc}]8;;${st}\\n`;
+  const shQuote = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
+  return `printf ${shQuote(fmt)} ${shQuote(uri)} ${shQuote(label)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2078,6 +2382,327 @@ async function runBreakAnchorJump() {
   return { tripFired, restoreClean };
 }
 
+// ---------------------------------------------------------------------------
+// md-link-opens-viewer: real tmux + ttyd + headless Chrome, meta-clicking a
+// printf-replayed captured OSC-8 markdown link opens the Dispatch viewer
+// route; a non-md control link and a no-modifier click stay unchanged.
+// ---------------------------------------------------------------------------
+
+/**
+ * Real tmux/ttyd/Chrome via CDP: meta-clicking a printf-replayed OSC-8 link carrying the exact
+ * captured byte shape (112-RESEARCH.md) for the space-in-name markdown fixture must open
+ * `/viewer/?path=` with the decoded, space-intact absolute path, never a raw `file://` URL. A
+ * meta-click on a non-markdown control link must record the raw `file://` URI byte-for-byte
+ * (unchanged behavior). A plain click without modifiers must record nothing (the modifier gate).
+ */
+async function checkMdLinkOpensViewer(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("md-link-opens-viewer");
+  const tmuxName = `p112term-${process.pid}`;
+  let ttyd;
+  let boot;
+  let chrome;
+  let cdp;
+  try {
+    writeFixtures(home);
+
+    // Warmup boot + kill first: board.db's schema (cards, meta tables) only exists after a real
+    // boot has run its migrations once, and it must exist BEFORE the tmux session is created, or
+    // this warmup's own reconcileSessions() sweep would eat the not-yet-seeded ttyd.
+    const warmup = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+    await stopServer(warmup.child);
+
+    await tmuxNewSession112(tmuxName, home);
+    const live = await tmuxListSessionNames112();
+    if (!live.includes(tmuxName)) {
+      throw new Error(
+        `md-link-opens-viewer: tmux session ${tmuxName} did not come up, live=${JSON.stringify(live)}`,
+      );
+    }
+
+    const sessionId = randomUUID();
+    ttyd = await spawnTtyd112(tmuxName, sessionId);
+    await waitForPortListening112(ttyd.port);
+
+    const now = new Date().toISOString();
+    const cardId = randomUUID();
+    seedFixtureSession112(home, {
+      id: cardId,
+      issueId: `${cardId}-issue`,
+      identifier: "P112-1",
+      title: "panel-112 md-link-opens-viewer fixture card",
+      description: null,
+      priority: 3,
+      column: "in_progress",
+      updatedAt: now,
+      sessions: [
+        {
+          id: sessionId,
+          createdAt: now,
+          updatedAt: now,
+          tmuxSession: tmuxName,
+          ttydPort: ttyd.port,
+        },
+      ],
+      activeSessionId: sessionId,
+      tmuxSession: tmuxName,
+      ttydPort: ttyd.port,
+    });
+
+    // The real boot: its reconcileSessions() adopts the already-running ttyd by matching the
+    // seeded session record's port, and its ensureHyperlinksTerminalFeature() grants the
+    // hyperlinks terminal-feature against the ALREADY-LIVE isolated tmux server, so ttyd's later
+    // `-T tmux-256color` attach picks it up. Both require TMUX_TMPDIR to reach this tmux server.
+    boot = await bootAndWait(home, { TMUX_TMPDIR: TMUX_TMPDIR_112 });
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const origin = `http://127.0.0.1:${SANDBOX_PORT}`;
+    const terminalUrl = `${origin}/sessions/${sessionId}/terminal/`;
+    const page = await openTerminalPage(cdp, {
+      url: terminalUrl,
+      initScript: WINDOW_OPEN_STUB_INIT_SCRIPT,
+    });
+
+    const screenReady = await pollUntilTruthy(
+      cdp,
+      page.sessionId,
+      `document.querySelector(".xterm-screen") != null ? "yes" : null`,
+      ERROR_POLL_TIMEOUT_MS,
+    );
+    if (screenReady == null) {
+      violations.push(
+        `md-link-opens-viewer: the terminal page's ".xterm-screen" never rendered within ` +
+          `${ERROR_POLL_TIMEOUT_MS}ms`,
+      );
+    } else {
+      // Let the WS handshake complete and the pty settle at the browser's negotiated cols/rows.
+      await sleep(1500);
+      await tmuxP112(["send-keys", "-t", `=${tmuxName}:`, "clear", "Enter"]);
+      await sleep(300);
+
+      const workspaces = join(home, "workspaces");
+      const mdPath = join(workspaces, "draft notes (v2).md");
+      const txtPath = join(workspaces, "control.txt");
+      const mdLabel = basename(mdPath);
+      const txtLabel = basename(txtPath);
+
+      await tmuxP112([
+        "send-keys",
+        "-t",
+        `=${tmuxName}:`,
+        buildOsc8Command(mdPath),
+        "Enter",
+      ]);
+      await tmuxP112([
+        "send-keys",
+        "-t",
+        `=${tmuxName}:`,
+        buildOsc8Command(txtPath),
+        "Enter",
+      ]);
+
+      const findRow = async (label) => {
+        const deadline = Date.now() + ERROR_POLL_TIMEOUT_MS;
+        while (Date.now() < deadline) {
+          const lines = await tmuxCapturePane112(tmuxName);
+          const row = lines.findIndex(
+            (line) => line.replace(/\s+$/, "") === label,
+          );
+          if (row >= 0) return row;
+          await sleep(POLL_INTERVAL_MS);
+        }
+        return -1;
+      };
+
+      const mdRow = await findRow(mdLabel);
+      const txtRow = await findRow(txtLabel);
+      if (mdRow < 0 || txtRow < 0) {
+        violations.push(
+          `md-link-opens-viewer: expected both link labels (${JSON.stringify(mdLabel)}, ` +
+            `${JSON.stringify(txtLabel)}) to appear on their own output row within ` +
+            `${ERROR_POLL_TIMEOUT_MS}ms, observed mdRow=${mdRow} txtRow=${txtRow}`,
+        );
+      } else {
+        const { cols, rows } = await tmuxPaneSize112(tmuxName);
+        const rect = await evalValue(
+          cdp,
+          page.sessionId,
+          `(function(){
+            var el = document.querySelector(".xterm-screen");
+            var r = el.getBoundingClientRect();
+            return { left: r.left, top: r.top, width: r.width, height: r.height };
+          })()`,
+        );
+        const cellWidth = rect.width / cols;
+        const cellHeight = rect.height / rows;
+        const pointFor = (row, label) => ({
+          x: rect.left + (label.length / 2) * cellWidth,
+          y: rect.top + (row + 0.5) * cellHeight,
+        });
+        const mdPoint = pointFor(mdRow, mdLabel);
+        const txtPoint = pointFor(txtRow, txtLabel);
+
+        // modifiers: 0 (no meta/ctrl) - activateLink's gate must return before window.open fires.
+        await dispatchRealClick(cdp, page.sessionId, mdPoint, 0);
+        await sleep(200);
+        const afterPlainClick = await evalValue(
+          cdp,
+          page.sessionId,
+          `window.__panel112Opens.length`,
+        );
+        if (afterPlainClick !== 0) {
+          violations.push(
+            `md-link-opens-viewer: expected a plain (no-modifier) click to record no window.open ` +
+              `calls, observed ${afterPlainClick}`,
+          );
+        }
+
+        // Meta-click (modifiers: 4) the markdown link: must reroute through /viewer/?path=.
+        await dispatchRealClick(cdp, page.sessionId, mdPoint, 4);
+        const mdOpenState = await pollUntilTruthy(
+          cdp,
+          page.sessionId,
+          `window.__panel112Opens.length >= 1 ? "yes" : null`,
+          ERROR_POLL_TIMEOUT_MS,
+        );
+        if (mdOpenState == null) {
+          violations.push(
+            `md-link-opens-viewer: meta-clicking the markdown link never recorded a window.open ` +
+              `call within ${ERROR_POLL_TIMEOUT_MS}ms`,
+          );
+        } else {
+          const mdOpened = await evalValue(
+            cdp,
+            page.sessionId,
+            `window.__panel112Opens[window.__panel112Opens.length - 1]`,
+          );
+          const expectedPrefix = `${origin}/viewer/?path=`;
+          if (!mdOpened.startsWith(expectedPrefix)) {
+            violations.push(
+              `md-link-opens-viewer: expected the md link's recorded URL to start with ` +
+                `${JSON.stringify(expectedPrefix)}, observed ${JSON.stringify(mdOpened)}`,
+            );
+          }
+          if (mdOpened.startsWith("file://")) {
+            violations.push(
+              `md-link-opens-viewer: the md link's recorded URL started with file://, the raw ` +
+                `URI leaked instead of rerouting through the viewer: ${JSON.stringify(mdOpened)}`,
+            );
+          }
+          const decodedPath = new URL(mdOpened).searchParams.get("path");
+          if (decodedPath !== mdPath) {
+            violations.push(
+              `md-link-opens-viewer: expected the decoded ?path= to equal ` +
+                `${JSON.stringify(mdPath)} (space intact), observed ${JSON.stringify(decodedPath)}`,
+            );
+          }
+        }
+
+        // Meta-click the non-markdown control: behavior stays unchanged (raw URI, byte-equal).
+        await dispatchRealClick(cdp, page.sessionId, txtPoint, 4);
+        const txtOpenState = await pollUntilTruthy(
+          cdp,
+          page.sessionId,
+          `window.__panel112Opens.length >= 2 ? "yes" : null`,
+          ERROR_POLL_TIMEOUT_MS,
+        );
+        if (txtOpenState == null) {
+          violations.push(
+            `md-link-opens-viewer: meta-clicking the non-markdown control link never recorded a ` +
+              `second window.open call within ${ERROR_POLL_TIMEOUT_MS}ms`,
+          );
+        } else {
+          const txtOpened = await evalValue(
+            cdp,
+            page.sessionId,
+            `window.__panel112Opens[window.__panel112Opens.length - 1]`,
+          );
+          const expectedTxtUri = `file://${encodeURI(txtPath)}`;
+          if (txtOpened !== expectedTxtUri) {
+            violations.push(
+              `md-link-opens-viewer: expected the non-md control's (.txt) recorded URL to be ` +
+                `byte-equal to ${JSON.stringify(expectedTxtUri)}, observed ` +
+                `${JSON.stringify(txtOpened)}`,
+            );
+          }
+        }
+      }
+    }
+    await cdp.send("Target.closeTarget", { targetId: page.targetId });
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chrome);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await stopServer(boot?.child);
+    await tearDownTmux112(tmuxName, ttyd?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const TERMINAL_MAIN_PATH = join(REPO_ROOT, "src/web/terminal-main.ts");
+const MD_LINK_EXTENSION_TARGET = "(md|markdown)";
+const MD_LINK_EXTENSION_REPLACEMENT = "(zz|markdown)";
+
+/** Shared break-`finally` restore for `terminal-main.ts`: source bytes back, build memo reset,
+ * dist/ removed. */
+function restoreTerminalMainSource(original) {
+  writeFileSync(TERMINAL_MAIN_PATH, original);
+  resetBuildCache();
+  rmSync(join(REPO_ROOT, "dist"), { recursive: true, force: true });
+  unregisterRestore(TERMINAL_MAIN_PATH);
+}
+
+/** `--break md-link-opens-viewer`: replaces the `.md` alternative in `markdownFilePath`'s sole
+ * extension regex with an unmatchable token (panel-110-06 single-call-site precedent), rebuilds,
+ * and requires the SAME check to report the markdown link recorded as a raw `file://` URL (the
+ * matcher no longer recognizes `.md`, so `activateLink` falls through to its unchanged-URI
+ * branch). Restores the captured bytes unconditionally in a `finally`, rebuilds, and requires a
+ * clean pass. */
+async function runBreakMdLinkOpensViewer() {
+  assertBuilt();
+  const original = readFileSync(TERMINAL_MAIN_PATH, "utf8");
+  const occurrences = original.split(MD_LINK_EXTENSION_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel112: refusing to run --break md-link-opens-viewer, expected ` +
+        `${JSON.stringify(MD_LINK_EXTENSION_TARGET)} to occur exactly once in ` +
+        `${TERMINAL_MAIN_PATH}, measured ${occurrences}. A miscounted anchor would mutate the ` +
+        `wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(TERMINAL_MAIN_PATH, original);
+  try {
+    writeFileSync(
+      TERMINAL_MAIN_PATH,
+      original.replace(MD_LINK_EXTENSION_TARGET, MD_LINK_EXTENSION_REPLACEMENT),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkMdLinkOpensViewer(tripViolations);
+    console.log(
+      `\n--break md-link-opens-viewer TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) => v.includes("started with file://"));
+  } finally {
+    restoreTerminalMainSource(original);
+  }
+
+  const restoreViolations = [];
+  await checkMdLinkOpensViewer(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break md-link-opens-viewer RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
 const CHECKS = {
   "viewer-page-served": (violations) => checkViewerPageServed(violations),
   "error-states": (violations) => checkErrorStates(violations),
@@ -2087,6 +2712,7 @@ const CHECKS = {
   "relative-link-navigation": (violations) =>
     checkRelativeLinkNavigation(violations),
   "anchor-jump": (violations) => checkAnchorJump(violations),
+  "md-link-opens-viewer": (violations) => checkMdLinkOpensViewer(violations),
 };
 
 const BREAKS = {
@@ -2097,6 +2723,7 @@ const BREAKS = {
   "toc-threshold": runBreakTocThreshold,
   "relative-link-navigation": runBreakRelativeLinkNavigation,
   "anchor-jump": runBreakAnchorJump,
+  "md-link-opens-viewer": runBreakMdLinkOpensViewer,
 };
 
 const PROBES = {};

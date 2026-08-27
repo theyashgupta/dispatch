@@ -164,6 +164,10 @@ let currentZoom = 1;
  * pins iOS text inflation. Without it, `charWidth` stops tracking `fontSize` after the OS-level page
  * inflates text, and the entire zoom / effective-column-width feature's math (`baseFontSize * zoom`,
  * `fit.fit()`'s cell measurement) goes invalid.
+ * @remarks `linkHandler.allowNonHttpProtocols` must be true: xterm's own OscLinkProvider silently
+ * excludes any OSC-8 link whose protocol is not http or https unless this is set, so `file:` links
+ * (the only scheme Claude Code ever emits, 112-RESEARCH.md) would never reach `activateLink` at
+ * all without it.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 function createTerminal(
@@ -195,7 +199,10 @@ function createTerminal(
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.loadAddon(new WebLinksAddon(activateLink));
-  term.options.linkHandler = { activate: activateLink };
+  term.options.linkHandler = {
+    activate: activateLink,
+    allowNonHttpProtocols: true,
+  };
   return { term, fit };
 }
 
