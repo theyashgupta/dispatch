@@ -1373,7 +1373,6 @@ const BREAKS = {
   "size-cap": runBreakSizeCap,
   "stale-worktree-root": runBreakStaleWorktreeRoot,
   "auth-gate": runBreakAuthGate,
-  "stale-worktree-root": runBreakStaleWorktreeRoot,
 };
 
 const PROBES = {};
