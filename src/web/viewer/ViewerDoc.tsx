@@ -266,14 +266,17 @@ export default function ViewerDoc({
   const [headings, setHeadings] = useState<HeadingEntry[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  const headingIdsPlugin = useMemo(
-    () =>
-      // eslint-disable-next-line react-hooks/refs
-      rehypeHeadingIds((found) => {
-        headingsRef.current = found;
-      }),
-    [],
-  );
+  const headingIdsPlugin = useMemo(() => {
+    // eslint-disable-next-line react-hooks/refs
+    const transform = rehypeHeadingIds((found) => {
+      headingsRef.current = found;
+    });
+    // unified calls each `rehypePlugins` entry as an attacher (zero-arg, returns the per-run
+    // transformer); `rehypeHeadingIds` returns the transformer directly, so it must be wrapped
+    // here rather than placed in the plugins array as-is, or unified invokes it once at freeze
+    // time with no `tree` argument.
+    return () => transform;
+  }, []);
 
   useEffect(() => {
     setHeadings(headingsRef.current);

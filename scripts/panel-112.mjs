@@ -60,6 +60,21 @@
  *     `error-states: the >2MB fixture never rendered the exact "File too large to preview" copy within 15000ms`
  *     The RESTORE leg re-ran clean after the captured bytes were restored, and
  *     `git diff --quiet src/` confirmed a byte-identical restore.
+ *   - `no-raw-html-injection` proven able to fail (Plan 03): replacing the img override's anchor
+ *     rendering in `src/web/viewer/ViewerDoc.tsx` with a native `<img>` element passing `src`
+ *     through unchanged, rebuilding, and re-running the same check against the raw-HTML fixture
+ *     and a real headless Chrome produced, verbatim:
+ *     `no-raw-html-injection: expected 0 img elements inside the content root, observed 1`
+ *     `no-raw-html-injection: expected the markdown image's anchor rel to include "noopener", observed null`
+ *     The RESTORE leg re-ran clean after the captured bytes were restored, and a byte-diff against
+ *     the pre-break snapshot confirmed an identical restore.
+ *   - `syntax-highlighting` proven able to fail (Plan 03): removing `rehypeHighlight` from the
+ *     `rehypePlugins` array in `src/web/viewer/ViewerDoc.tsx` (import left in place), rebuilding,
+ *     and re-running the same check against the code-fences fixture and a real headless Chrome
+ *     produced, verbatim:
+ *     `syntax-highlighting: expected at least one "pre code [class*='hljs-']" element (the ts fence highlighted), found none`
+ *     The RESTORE leg re-ran clean after the captured bytes were restored, and a byte-diff against
+ *     the pre-break snapshot confirmed an identical restore.
  */
 
 import {
@@ -676,6 +691,8 @@ function writeFixtures(home) {
       "const x: number = 1;",
       "```",
       "",
+      "Inline code example: `const inline = true;`",
+      "",
     ].join("\n"),
     "utf8",
   );
@@ -1016,14 +1033,431 @@ async function runBreakErrorStates() {
   return { tripFired, restoreClean };
 }
 
+const VIEWER_DOC_PATH = join(REPO_ROOT, "src/web/viewer/ViewerDoc.tsx");
+
+/** Shared break-`finally` restore for `ViewerDoc.tsx`: source bytes back, build memo reset,
+ * dist/ removed. Every break in this file that mutates `ViewerDoc.tsx` shares this restore so the
+ * three anchors (img override, rehypeHighlight entry, TOC threshold) can never drift into
+ * three slightly different restore paths. */
+function restoreViewerDocSource(original) {
+  writeFileSync(VIEWER_DOC_PATH, original);
+  resetBuildCache();
+  rmSync(join(REPO_ROOT, "dist"), { recursive: true, force: true });
+  unregisterRestore(VIEWER_DOC_PATH);
+}
+
+/** Registers a listener for `console.error` calls and uncaught exceptions on a CDP connection.
+ * Must be called BEFORE `openPage` navigates, since `Target.createTarget` navigates as part of
+ * target creation. Returns an unsubscribe function. */
+function watchConsoleErrors(cdp, errors) {
+  const offConsole = cdp.on("Runtime.consoleAPICalled", (params) => {
+    if (params.type === "error") {
+      errors.push(
+        (params.args ?? [])
+          .map((a) => a.value ?? a.description ?? "")
+          .join(" "),
+      );
+    }
+  });
+  const offException = cdp.on("Runtime.exceptionThrown", (params) => {
+    errors.push(
+      params.exceptionDetails?.exception?.description ??
+        params.exceptionDetails?.text ??
+        "uncaught exception",
+    );
+  });
+  return () => {
+    offConsole();
+    offException();
+  };
+}
+
+// ---------------------------------------------------------------------------
+// no-raw-html-injection: real headless Chrome, the raw-HTML fixture (a script
+// tag, an onerror-bearing img tag, an HTML block, and a markdown-syntax
+// image) never executes or renders as raw DOM inside the content root.
+// ---------------------------------------------------------------------------
+
+/**
+ * Real headless Chrome via CDP: the raw-HTML fixture is the attack payload. Zero script elements
+ * and zero img elements render inside the content root, its markdown-syntax image renders as an
+ * anchor with a `noopener` rel, no element document-wide carries an `onerror` attribute (the
+ * payload never became a live DOM attribute), and no console errors fire.
+ */
+async function checkNoRawHtmlInjection(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("no-raw-html-injection");
+  let boot;
+  let chrome;
+  let cdp;
+  try {
+    writeFixtures(home);
+    boot = await bootAndWait(home);
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const consoleErrors = [];
+    const unwatch = watchConsoleErrors(cdp, consoleErrors);
+
+    const workspaces = join(home, "workspaces");
+    const origin = `http://127.0.0.1:${SANDBOX_PORT}`;
+    const rawHtmlPath = join(workspaces, "raw-html.md");
+    const page = await openPage(cdp, {
+      url: `${origin}/viewer/?path=${encodeURIComponent(rawHtmlPath)}`,
+    });
+
+    const contentReady = await pollUntilTruthy(
+      cdp,
+      page.sessionId,
+      `(function(){var el=document.querySelector(".viewer-content"); return el && el.textContent.includes("Raw HTML Fixture") ? true : null;})()`,
+      ERROR_POLL_TIMEOUT_MS,
+    );
+    if (contentReady == null) {
+      violations.push(
+        `no-raw-html-injection: the raw-HTML fixture's content root never rendered within ${ERROR_POLL_TIMEOUT_MS}ms`,
+      );
+    }
+
+    const scriptCount = await evalValue(
+      cdp,
+      page.sessionId,
+      `document.querySelectorAll(".viewer-content script").length`,
+    );
+    if (scriptCount !== 0) {
+      violations.push(
+        `no-raw-html-injection: expected 0 script elements inside the content root, observed ${scriptCount}`,
+      );
+    }
+
+    const imgCount = await evalValue(
+      cdp,
+      page.sessionId,
+      `document.querySelectorAll(".viewer-content img").length`,
+    );
+    if (imgCount !== 0) {
+      violations.push(
+        `no-raw-html-injection: expected 0 img elements inside the content root, observed ${imgCount}`,
+      );
+    }
+
+    const imageAnchorRel = await evalValue(
+      cdp,
+      page.sessionId,
+      `(function(){
+        var anchors = Array.from(document.querySelectorAll(".viewer-content a"));
+        var found = anchors.find(function(a){
+          return a.getAttribute("href") === "https://example.com/panel-112-fixture.png";
+        });
+        return found ? found.getAttribute("rel") : null;
+      })()`,
+    );
+    if (
+      typeof imageAnchorRel !== "string" ||
+      !imageAnchorRel.includes("noopener")
+    ) {
+      violations.push(
+        `no-raw-html-injection: expected the markdown image's anchor rel to include "noopener", ` +
+          `observed ${JSON.stringify(imageAnchorRel)}`,
+      );
+    }
+
+    const onerrorCount = await evalValue(
+      cdp,
+      page.sessionId,
+      `document.querySelectorAll("[onerror]").length`,
+    );
+    if (onerrorCount !== 0) {
+      violations.push(
+        `no-raw-html-injection: expected 0 elements with an [onerror] attribute document-wide, ` +
+          `observed ${onerrorCount}`,
+      );
+    }
+
+    // Give any deferred console activity from the initial render a moment to land.
+    await sleep(200);
+    if (consoleErrors.length > 0) {
+      violations.push(
+        `no-raw-html-injection: expected no console errors, observed: ${consoleErrors.join(" | ")}`,
+      );
+    }
+
+    await cdp.send("Target.closeTarget", { targetId: page.targetId });
+    unwatch();
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chrome);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const IMG_OVERRIDE_TARGET = [
+  "  img: ({ src, alt }) =>",
+  '    typeof src === "string" && src !== "" ? (',
+  "      <a",
+  "        href={src}",
+  '        target="_blank"',
+  '        rel="noopener noreferrer"',
+  "        style={anchorStyle}",
+  "      >",
+  '        {alt != null && alt !== "" ? alt : src}',
+  "      </a>",
+  "    ) : (",
+  "      <>{alt}</>",
+  "    ),",
+].join("\n");
+const IMG_OVERRIDE_REPLACEMENT =
+  "  img: ({ src, alt }) => <img src={src} alt={alt} />,";
+
+/** `--break no-raw-html-injection`: replaces the img override's anchor rendering with a native
+ * `<img>` element passing `src` through unchanged, the exact regression MDV-03 forbids. Rebuilds,
+ * and requires the SAME check to report the img-count violation. Restores the captured bytes
+ * unconditionally in a `finally`, rebuilds, and requires a clean pass. */
+async function runBreakNoRawHtmlInjection() {
+  assertBuilt();
+  const original = readFileSync(VIEWER_DOC_PATH, "utf8");
+  const occurrences = original.split(IMG_OVERRIDE_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel112: refusing to run --break no-raw-html-injection, expected the img override block ` +
+        `to occur exactly once in ${VIEWER_DOC_PATH}, measured ${occurrences}. A miscounted anchor ` +
+        `would mutate the wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(VIEWER_DOC_PATH, original);
+  try {
+    writeFileSync(
+      VIEWER_DOC_PATH,
+      original.replace(IMG_OVERRIDE_TARGET, IMG_OVERRIDE_REPLACEMENT),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkNoRawHtmlInjection(tripViolations);
+    console.log(
+      `\n--break no-raw-html-injection TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes("expected 0 img elements inside the content root"),
+    );
+  } finally {
+    restoreViewerDocSource(original);
+  }
+
+  const restoreViolations = [];
+  await checkNoRawHtmlInjection(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break no-raw-html-injection RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
+// syntax-highlighting: real headless Chrome, a fenced ts block renders
+// hljs-classed spans, an unknown-language fence renders plain with no page
+// error, and the className-based inline/block code split (Pitfall 1) holds.
+// ---------------------------------------------------------------------------
+
+/**
+ * Real headless Chrome via CDP: the ts fence highlights via hljs-classed spans, the
+ * `panel112-unknown-lang` fence (no registered grammar) renders its text intact with zero hljs-
+ * descendants and no console error (rehype-highlight v7's non-throwing skip), and at least one
+ * inline code element (no pre ancestor) carries no hljs class.
+ */
+async function checkSyntaxHighlighting(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("syntax-highlighting");
+  let boot;
+  let chrome;
+  let cdp;
+  try {
+    writeFixtures(home);
+    boot = await bootAndWait(home);
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const consoleErrors = [];
+    const unwatch = watchConsoleErrors(cdp, consoleErrors);
+
+    const workspaces = join(home, "workspaces");
+    const origin = `http://127.0.0.1:${SANDBOX_PORT}`;
+    const codeFencesPath = join(workspaces, "code-fences.md");
+    const page = await openPage(cdp, {
+      url: `${origin}/viewer/?path=${encodeURIComponent(codeFencesPath)}`,
+    });
+
+    const contentReady = await pollUntilTruthy(
+      cdp,
+      page.sessionId,
+      `(function(){var el=document.querySelector(".viewer-content"); return el && el.textContent.includes("Code Fences") ? true : null;})()`,
+      ERROR_POLL_TIMEOUT_MS,
+    );
+    if (contentReady == null) {
+      violations.push(
+        `syntax-highlighting: the code-fences fixture's content root never rendered within ${ERROR_POLL_TIMEOUT_MS}ms`,
+      );
+    }
+
+    const hljsHighlighted = await pollUntilTruthy(
+      cdp,
+      page.sessionId,
+      `document.querySelectorAll("pre code [class*='hljs-']").length > 0 ? "yes" : null`,
+      ERROR_POLL_TIMEOUT_MS,
+    );
+    if (hljsHighlighted == null) {
+      violations.push(
+        `syntax-highlighting: expected at least one "pre code [class*='hljs-']" element (the ts ` +
+          `fence highlighted), found none`,
+      );
+    }
+
+    const unknownFenceState = await evalValue(
+      cdp,
+      page.sessionId,
+      `(function(){
+        var blocks = Array.from(document.querySelectorAll(".viewer-content pre code"));
+        var unknown = blocks.find(function(c){
+          return (c.className || "").includes("panel112-unknown-lang");
+        });
+        if (!unknown) return { found: false, hljsCount: -1, text: "" };
+        return {
+          found: true,
+          hljsCount: unknown.querySelectorAll("[class*='hljs-']").length,
+          text: unknown.textContent,
+        };
+      })()`,
+    );
+    if (!unknownFenceState.found) {
+      violations.push(
+        `syntax-highlighting: could not find the "panel112-unknown-lang" fence's "pre code" element`,
+      );
+    } else {
+      if (unknownFenceState.hljsCount !== 0) {
+        violations.push(
+          `syntax-highlighting: expected 0 hljs- descendants in the unknown-language fence, ` +
+            `observed ${unknownFenceState.hljsCount}`,
+        );
+      }
+      if (
+        !unknownFenceState.text.includes(
+          "unknown fence language, no highlight.js grammar registered",
+        )
+      ) {
+        violations.push(
+          `syntax-highlighting: expected the unknown-language fence's text content intact, ` +
+            `observed ${JSON.stringify(unknownFenceState.text)}`,
+        );
+      }
+    }
+
+    const inlineCodeOk = await evalValue(
+      cdp,
+      page.sessionId,
+      `(function(){
+        var codes = Array.from(document.querySelectorAll(".viewer-content code"));
+        return codes.some(function(c){
+          return c.closest("pre") == null && !(c.className || "").includes("hljs");
+        });
+      })()`,
+    );
+    if (inlineCodeOk !== true) {
+      violations.push(
+        `syntax-highlighting: expected at least one inline code element with no hljs class and no ` +
+          `pre ancestor`,
+      );
+    }
+
+    await sleep(200);
+    if (consoleErrors.length > 0) {
+      violations.push(
+        `syntax-highlighting: expected no console errors, observed: ${consoleErrors.join(" | ")}`,
+      );
+    }
+
+    await cdp.send("Target.closeTarget", { targetId: page.targetId });
+    unwatch();
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chrome);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const REHYPE_HIGHLIGHT_ENTRY_TARGET = "[headingIdsPlugin, rehypeHighlight]";
+const REHYPE_HIGHLIGHT_ENTRY_REPLACEMENT = "[headingIdsPlugin]";
+
+/** `--break syntax-highlighting`: removes `rehypeHighlight` from the `rehypePlugins` array (the
+ * import stays, this is a use-site removal, not an import removal; `vite build` does not lint).
+ * Rebuilds, and requires the SAME check to report the missing-hljs violation. Restores the
+ * captured bytes unconditionally in a `finally`, rebuilds, and requires a clean pass. */
+async function runBreakSyntaxHighlighting() {
+  assertBuilt();
+  const original = readFileSync(VIEWER_DOC_PATH, "utf8");
+  const occurrences = original.split(REHYPE_HIGHLIGHT_ENTRY_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel112: refusing to run --break syntax-highlighting, expected ` +
+        `${JSON.stringify(REHYPE_HIGHLIGHT_ENTRY_TARGET)} to occur exactly once in ` +
+        `${VIEWER_DOC_PATH}, measured ${occurrences}. A miscounted anchor would mutate the wrong ` +
+        `spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(VIEWER_DOC_PATH, original);
+  try {
+    writeFileSync(
+      VIEWER_DOC_PATH,
+      original.replace(
+        REHYPE_HIGHLIGHT_ENTRY_TARGET,
+        REHYPE_HIGHLIGHT_ENTRY_REPLACEMENT,
+      ),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkSyntaxHighlighting(tripViolations);
+    console.log(
+      `\n--break syntax-highlighting TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes(`expected at least one "pre code [class*='hljs-']" element`),
+    );
+  } finally {
+    restoreViewerDocSource(original);
+  }
+
+  const restoreViolations = [];
+  await checkSyntaxHighlighting(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break syntax-highlighting RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
 const CHECKS = {
   "viewer-page-served": (violations) => checkViewerPageServed(violations),
   "error-states": (violations) => checkErrorStates(violations),
+  "no-raw-html-injection": (violations) => checkNoRawHtmlInjection(violations),
+  "syntax-highlighting": (violations) => checkSyntaxHighlighting(violations),
 };
 
 const BREAKS = {
   "viewer-page-served": runBreakViewerPageServed,
   "error-states": runBreakErrorStates,
+  "no-raw-html-injection": runBreakNoRawHtmlInjection,
+  "syntax-highlighting": runBreakSyntaxHighlighting,
 };
 
 const PROBES = {};
