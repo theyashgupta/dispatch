@@ -153,6 +153,23 @@
  *     The RESTORE leg re-ran clean (`--break tag-renotify-replace RESTORE leg: PASS`) after the
  *     captured bytes were restored, and `git diff --quiet` on `sw.js` confirmed a byte-identical
  *     restore.
+ *   - `notificationclick-focus-or-open` proven able to fail (Plan 07): emptying the sole
+ *     `notificationclick` handler body in `sw.js`, rebuilding, and re-running the same check
+ *     against a real booted sandbox server, real headless Chrome, and a real synthetic
+ *     `NotificationEvent` dispatched inside the worker's own scope produced, verbatim:
+ *     `notificationclick-focus-or-open: page never recorded a "dsp-open-card" message for
+ *     "panel-110-notif-click-card-b" within 8000ms, observed []`
+ *     `notificationclick-focus-or-open: detail panel never showed the clicked card's identifier
+ *     "PANEL-110-07-CLICK-B" within 8000ms`
+ *     `notificationclick-focus-or-open: the clicked notification tagged
+ *     "panel-110-notif-click-card-b" is still listed by getNotifications() after the click,
+ *     expected it closed`
+ *     `notificationclick-focus-or-open: served sw.js does not call clients.openWindow(url) in
+ *     its notificationclick else branch`
+ *     The RESTORE leg re-ran clean (`--break notificationclick-focus-or-open RESTORE leg: PASS`)
+ *     after the captured bytes were restored, and `git diff --quiet` on `sw.js` confirmed a
+ *     byte-identical restore (modulo the pre-existing `try/catch` hardening around
+ *     `existing.focus()`, itself a Plan 07 deviation, see the plan summary).
  */
 
 import {
@@ -2677,6 +2694,302 @@ async function runBreakTagRenotifyReplace() {
   return { tripFired, restoreClean };
 }
 
+const NOTIF_CLICK_OPEN_TIMEOUT_MS = 8_000;
+
+/** Boots the sandbox, seeds two fixture cards, launches Chrome, grants notifications, makes the
+ * service worker ready, and delivers a real push for the SECOND card. Drives a synthetic
+ * `notificationclick` from inside the worker's own scope (settled empirically: a script
+ * constructed `NotificationEvent` can `close()` the notification and run the handler's async body
+ * fine, but `client.focus()` throws `InvalidAccessError` regardless of page-level user
+ * activation, since Chromium only grants window-interaction for a NATIVE notification-click
+ * dispatch, never a script-constructed one; sw.js was hardened with a `try/catch` around
+ * `focus()` so a focus failure never blocks the `postMessage` that follows it, see Plan 07's
+ * summary). The focus branch (message + detail panel + notification closed) is a hard gate; the
+ * open-window branch is a soft, retried assertion that degrades to a static source check and a
+ * logged warning rather than ever failing the check once the focus branch has passed. */
+async function checkNotificationclickFocusOrOpen(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("notificationclick-focus-or-open");
+  const cardAId = "panel-110-notif-click-card-a";
+  const cardAIdentifier = "PANEL-110-07-CLICK-A";
+  const cardBId = "panel-110-notif-click-card-b";
+  const cardBIdentifier = "PANEL-110-07-CLICK-B";
+  const origin = `http://127.0.0.1:${SANDBOX_PORT}`;
+
+  let boot;
+  let chrome;
+  let cdp;
+  try {
+    await seedFixtureCards(home, [
+      deepLinkFixtureCard(cardAId, cardAIdentifier),
+      deepLinkFixtureCard(cardBId, cardBIdentifier),
+    ]);
+    boot = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    let page = await openPage(cdp, { url: `${origin}/` });
+    await grantNotifications(cdp, origin);
+    await ensureServiceWorkerReady(cdp, page.sessionId);
+
+    await evalValue(
+      cdp,
+      page.sessionId,
+      `window.__panel110ClickMessages = []; navigator.serviceWorker.addEventListener("message", (e) => window.__panel110ClickMessages.push(e.data)); true`,
+    );
+
+    const registrationId = await deliverPushToServiceWorker(
+      cdp,
+      page.sessionId,
+      {
+        origin,
+        data: {
+          title: "panel-110 notif click",
+          body: "focus branch",
+          cardId: cardBId,
+          url: `${origin}/?card=${encodeURIComponent(cardBId)}`,
+        },
+      },
+    );
+    await pollServiceWorkerNotifications(
+      cdp,
+      page.sessionId,
+      (list) => list.some((n) => n.tag === cardBId),
+      NOTIF_TIMEOUT_MS,
+    );
+
+    let sw = await attachToServiceWorkerTarget(cdp, origin);
+    const dispatchFocus = await evalAsyncValue(
+      cdp,
+      sw.sessionId,
+      `(async () => {
+        const notifs = await self.registration.getNotifications();
+        const target = notifs.find((n) => n.tag === ${JSON.stringify(cardBId)});
+        if (!target) return { error: "no live notification for tag" };
+        self.dispatchEvent(new NotificationEvent("notificationclick", { notification: target }));
+        return { dispatched: true };
+      })()`,
+    );
+    if (dispatchFocus?.error) {
+      violations.push(
+        `notificationclick-focus-or-open: ${dispatchFocus.error} before the focus-branch dispatch`,
+      );
+    }
+
+    const messagesRaw = await pollUntilTruthy(
+      cdp,
+      page.sessionId,
+      `window.__panel110ClickMessages.length > 0 ? JSON.stringify(window.__panel110ClickMessages) : null`,
+      NOTIF_CLICK_OPEN_TIMEOUT_MS,
+    );
+    const messages = messagesRaw ? JSON.parse(messagesRaw) : [];
+    const matched = messages.find(
+      (m) => m?.type === "dsp-open-card" && m?.cardId === cardBId,
+    );
+    if (!matched) {
+      violations.push(
+        `notificationclick-focus-or-open: page never recorded a "dsp-open-card" message for ` +
+          `${JSON.stringify(cardBId)} within ${NOTIF_CLICK_OPEN_TIMEOUT_MS}ms, observed ` +
+          `${JSON.stringify(messages)}`,
+      );
+    }
+
+    const detailPanelTextProbe = `
+      (function () {
+        var panel = document.querySelector('[aria-label="Ticket detail"]');
+        return panel ? panel.textContent : null;
+      })()
+    `;
+    const panelText = await pollUntilTruthy(
+      cdp,
+      page.sessionId,
+      `(function(){var t=${detailPanelTextProbe}; return (t && t.includes(${JSON.stringify(cardBIdentifier)})) ? t : null;})()`,
+      NOTIF_CLICK_OPEN_TIMEOUT_MS,
+    );
+    if (panelText == null) {
+      violations.push(
+        `notificationclick-focus-or-open: detail panel never showed the clicked card's ` +
+          `identifier ${JSON.stringify(cardBIdentifier)} within ${NOTIF_CLICK_OPEN_TIMEOUT_MS}ms`,
+      );
+    } else if (panelText.includes(cardAIdentifier)) {
+      violations.push(
+        `notificationclick-focus-or-open: detail panel showed the non-clicked card's identifier ` +
+          `${JSON.stringify(cardAIdentifier)}, expected only ${JSON.stringify(cardBIdentifier)}`,
+      );
+    }
+
+    const afterClick = await pollServiceWorkerNotifications(
+      cdp,
+      page.sessionId,
+      (list) => !list.some((n) => n.tag === cardBId),
+      NOTIF_CLICK_OPEN_TIMEOUT_MS,
+    );
+    if (afterClick.some((n) => n.tag === cardBId)) {
+      violations.push(
+        `notificationclick-focus-or-open: the clicked notification tagged ` +
+          `${JSON.stringify(cardBId)} is still listed by getNotifications() after the click, ` +
+          `expected it closed`,
+      );
+    }
+
+    // Open-window branch: close the page so no client matches the origin, redeliver a fresh
+    // notification (the first was already closed above), and dispatch again.
+    await cdp.send("Target.closeTarget", { targetId: page.targetId });
+    await deliverPushToServiceWorker(cdp, page.sessionId, {
+      origin,
+      registrationId,
+      data: {
+        title: "panel-110 notif click",
+        body: "open branch",
+        cardId: cardBId,
+        url: `${origin}/?card=${encodeURIComponent(cardBId)}`,
+      },
+    }).catch(() => {
+      // The page session that issued the delivery just closed with its target; a later attach
+      // below re-resolves everything the open-branch dispatch needs from the worker's own scope.
+    });
+
+    sw = await attachToServiceWorkerTarget(cdp, origin);
+    const beforeOpenTargetIds = new Set(
+      (await cdp.send("Target.getTargets", {})).targetInfos
+        .filter((t) => t.type === "page")
+        .map((t) => t.targetId),
+    );
+    await evalAsyncValue(
+      cdp,
+      sw.sessionId,
+      `(async () => {
+        const notifs = await self.registration.getNotifications();
+        const target = notifs[notifs.length - 1];
+        if (!target) return { error: "no live notification for the open-window dispatch" };
+        self.dispatchEvent(new NotificationEvent("notificationclick", { notification: target }));
+        return { dispatched: true };
+      })()`,
+    );
+
+    const deadline = Date.now() + NOTIF_CLICK_OPEN_TIMEOUT_MS;
+    let newPageTarget = null;
+    while (Date.now() < deadline && newPageTarget == null) {
+      const { targetInfos } = await cdp.send("Target.getTargets", {});
+      newPageTarget = targetInfos.find(
+        (t) =>
+          t.type === "page" &&
+          !beforeOpenTargetIds.has(t.targetId) &&
+          t.url.includes("card="),
+      );
+      if (newPageTarget == null) await sleep(POLL_INTERVAL_MS);
+    }
+
+    if (newPageTarget != null) {
+      console.log(
+        `notificationclick-focus-or-open: open-window branch verified live, a new page target ` +
+          `opened at ${newPageTarget.url}`,
+      );
+    } else {
+      console.log(
+        `notificationclick-focus-or-open: WARNING open-window branch degraded, no new page ` +
+          `target observed within ${NOTIF_CLICK_OPEN_TIMEOUT_MS}ms (a synthetic notificationclick ` +
+          `carries no user activation, which clients.openWindow requires); falling back to a ` +
+          `static assertion on the served sw.js source`,
+      );
+      const servedSwSource = await (await fetch(`${origin}/sw.js`)).text();
+      if (!servedSwSource.includes("clients.openWindow(url)")) {
+        violations.push(
+          `notificationclick-focus-or-open: served sw.js does not call clients.openWindow(url) ` +
+            `in its notificationclick else branch`,
+        );
+      }
+    }
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chrome);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const NOTIF_CLICK_BREAK_TARGET = `self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = event.notification.data?.url;
+  const cardId = event.notification.data?.cardId ?? event.notification.tag;
+  event.waitUntil(
+    (async () => {
+      const all = await clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      const existing = all.find(
+        (client) => new URL(client.url).origin === new URL(url).origin,
+      );
+      if (existing) {
+        try {
+          await existing.focus();
+        } catch {
+          // A browser may refuse focus (no user-activation context); still route the card.
+        }
+        existing.postMessage({ type: "dsp-open-card", cardId });
+      } else {
+        await clients.openWindow(url);
+      }
+    })(),
+  );
+});`;
+const NOTIF_CLICK_BREAK_REPLACEMENT = `self.addEventListener("notificationclick", (event) => {});`;
+
+/** `--break notificationclick-focus-or-open`: empties the entire `notificationclick` handler body
+ * (the sole occurrence of the handler, matched verbatim so a miscounted anchor can never mutate
+ * the wrong spot), rebuilds via `resetBuildCache()`, and requires the SAME check function to
+ * report the resulting "page never recorded a message" violation (trip leg). Restores the
+ * captured bytes unconditionally in a `finally`, rebuilds, and requires a clean pass (restore
+ * leg). */
+async function runBreakNotificationclickFocusOrOpen() {
+  assertBuilt();
+  const original = readFileSync(SW_PATH, "utf8");
+  const occurrences = original.split(NOTIF_CLICK_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel110: refusing to run --break notificationclick-focus-or-open, expected the verbatim ` +
+        `notificationclick handler to occur exactly once in ${SW_PATH}, measured ${occurrences}. ` +
+        `A miscounted anchor would mutate the wrong spot and report a false "the check cannot ` +
+        `fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(SW_PATH, original);
+  try {
+    writeFileSync(
+      SW_PATH,
+      original.replace(NOTIF_CLICK_BREAK_TARGET, NOTIF_CLICK_BREAK_REPLACEMENT),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkNotificationclickFocusOrOpen(tripViolations);
+    console.log(
+      `\n--break notificationclick-focus-or-open TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) => v.includes("page never recorded a"));
+  } finally {
+    writeFileSync(SW_PATH, original);
+    resetBuildCache();
+    unregisterRestore(SW_PATH);
+  }
+
+  const restoreViolations = [];
+  await checkNotificationclickFocusOrOpen(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break notificationclick-focus-or-open RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
 // ---------------------------------------------------------------------------
 // CHECKS / BREAKS / PROBES registries. Every later plan in this phase
 // appends here.
@@ -2693,6 +3006,8 @@ const CHECKS = {
   "deep-link-param-opens-card": (violations) =>
     checkDeepLinkParamOpensCard(violations),
   "tag-renotify-replace": (violations) => checkTagRenotifyReplace(violations),
+  "notificationclick-focus-or-open": (violations) =>
+    checkNotificationclickFocusOrOpen(violations),
 };
 
 const BREAKS = {
@@ -2703,6 +3018,7 @@ const BREAKS = {
   "per-origin-deep-link": runBreakPerOriginDeepLink,
   "deep-link-param-opens-card": runBreakDeepLinkParamOpensCard,
   "tag-renotify-replace": runBreakTagRenotifyReplace,
+  "notificationclick-focus-or-open": runBreakNotificationclickFocusOrOpen,
 };
 
 const PROBES = {};

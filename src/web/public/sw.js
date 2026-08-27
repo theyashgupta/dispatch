@@ -47,7 +47,11 @@ self.addEventListener("notificationclick", (event) => {
         (client) => new URL(client.url).origin === new URL(url).origin,
       );
       if (existing) {
-        await existing.focus();
+        try {
+          await existing.focus();
+        } catch {
+          // A browser may refuse focus (no user-activation context); still route the card.
+        }
         existing.postMessage({ type: "dsp-open-card", cardId });
       } else {
         await clients.openWindow(url);
