@@ -130,7 +130,9 @@ export interface BoardDb {
   snapshotPreV3(): void;
   /**
    * Upsert a subscription row, keyed by `endpoint`. A re-subscribe from the same device refreshes
-   * `p256dh`/`auth`/`origin` in place rather than accumulating a duplicate row.
+   * `p256dh`/`auth`/`origin` AND `created_at` in place rather than accumulating a duplicate row,
+   * so `created_at` means "last subscribed at" and eviction targets the least-recently-subscribed
+   * device, not the first device ever registered.
    * @returns Whether the row was stored. For a NEW endpoint an at-or-over-cap table evicts
    * exactly as many oldest `created_at` rows as the insert needs (an existing endpoint never
    * evicts), so a permanently-failing endpoint (never pruned by the 404/410 rule) cannot wedge
@@ -520,7 +522,8 @@ export function openBoardDb(): BoardDb {
      WHERE (SELECT COUNT(*) FROM push_subscriptions) < ${MAX_PUSH_SUBSCRIPTIONS}
         OR EXISTS (SELECT 1 FROM push_subscriptions WHERE endpoint = @endpoint)
      ON CONFLICT(endpoint) DO UPDATE SET
-       p256dh = excluded.p256dh, auth = excluded.auth, origin = excluded.origin`,
+       p256dh = excluded.p256dh, auth = excluded.auth, origin = excluded.origin,
+       created_at = excluded.created_at`,
   );
   const deletePushSubscription = db.prepare(
     `DELETE FROM push_subscriptions WHERE endpoint = ?`,
