@@ -72,6 +72,14 @@
  *     `size-cap: expected body { error: "too-large" } for the oversized file, observed null`
  *     The RESTORE leg re-ran clean after the captured bytes were restored, and
  *     `git diff --quiet` on `viewer.route.ts` confirmed a byte-identical restore.
+ *   - `stale-worktree-root` proven able to fail (Plan 03): replacing the sole
+ *     `store.sessionsWithTmux()` call with `store.sessionsWithTmux().slice(0, 0)`, rebuilding, and
+ *     re-running the same check against a real seeded session whose `workspacePath` lives outside
+ *     the configured `workspaceRoot` produced, verbatim:
+ *     `stale-worktree-root: expected 200 for a .md under the seeded session's workspacePath, observed 404`
+ *     `stale-worktree-root: expected exact bytes for the stale-workspace .md, observed a mismatch`
+ *     The RESTORE leg re-ran clean after the captured bytes were restored, and
+ *     `git diff --quiet` on `viewer.route.ts` confirmed a byte-identical restore.
  */
 
 import {
@@ -84,9 +92,12 @@ import {
 } from "node:fs";
 import { realpathSync } from "node:fs";
 import { execFile, execFileSync, spawn } from "node:child_process";
+import { request as httpRequest } from "node:http";
 import { promisify } from "node:util";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const execFileP = promisify(execFile);
@@ -343,6 +354,56 @@ async function isPortListening(port) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Boot once against the still-empty sandbox home so the store creates the real sqlite schema (the
+ * panel-93..110.mjs seeding idiom, never a hand-duplicated schema), kill that boot, then insert
+ * every fixture row directly via `node:sqlite` in the same pass. Ported from panel-110.mjs's
+ * `seedFixtureCards`, adjusted for this file's `SANDBOX_PORT` and `bootServerAt`'s `{ child, log
+ * }` return shape.
+ */
+async function seedFixtureCards(home, cards) {
+  const dbPath = join(home, ".dispatch", "board.db");
+  const ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    const warmup = bootServerAt(home);
+    try {
+      await waitForReady(SANDBOX_PORT);
+    } finally {
+      await stopServer(warmup.child);
+    }
+    const deadline = Date.now() + 5_000;
+    while ((await isPortListening(SANDBOX_PORT)) && Date.now() < deadline) {
+      await sleep(POLL_INTERVAL_MS);
+    }
+    const db = new DatabaseSync(dbPath);
+    try {
+      const hasCardsTable =
+        db
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cards'",
+          )
+          .get() != null;
+      if (!hasCardsTable) {
+        console.log(
+          `seedFixtureCards: schema not yet created after warmup attempt ${attempt}/${ATTEMPTS}, retrying`,
+        );
+        continue;
+      }
+      const insert = db.prepare(
+        `INSERT INTO cards (id, data) VALUES (?, ?)
+         ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
+      );
+      for (const card of cards) insert.run(card.id, JSON.stringify(card));
+      return;
+    } finally {
+      db.close();
+    }
+  }
+  throw new Error(
+    `seedFixtureCards: sqlite schema never appeared after ${ATTEMPTS} warmup-boot attempts`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -844,16 +905,214 @@ async function runBreakSizeCap() {
   return { tripFired, restoreClean };
 }
 
+// ---------------------------------------------------------------------------
+// stale-worktree-root: a .md under a live session's seeded workspacePath,
+// OUTSIDE the configured workspaceRoot, is served, and the extra root does
+// not widen containment beyond that exact path.
+// ---------------------------------------------------------------------------
+
+/**
+ * Positive control (an in-root `doc.md`) proves the server serves before either allowed-roots leg
+ * runs. The stale-workspace leg proves the `sessionsWithTmux()` loop in `viewer.route.ts` is live
+ * code: a `.md` under the seeded session's `workspacePath`, which lives OUTSIDE the configured
+ * `workspaceRoot`, must 200. The not-widened leg proves the extra root covers only the seeded
+ * path itself, not its parent directory: a sibling directory that merely shares a name prefix
+ * must still 404.
+ *
+ * @remarks The fixture card's `column` is `"todo"`, not `"in_progress"`: boot-time
+ * `reconcileSessions()` calls `markSessionLost` (clearing the session's `tmuxSession`, the exact
+ * field `sessionsWithTmux()` filters on) for any non-todo/non-done card whose tmux name is not a
+ * real live pane, which this fixture's is not. `"todo"` is IN-03's skip case, so the fixture
+ * session's `tmuxSession` survives boot and the route's own `sessionsWithTmux()` read at request
+ * time sees it.
+ */
+async function checkStaleWorktreeRoot(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("stale-worktree-root");
+  let boot;
+  try {
+    const workspaces = join(home, "workspaces");
+    const staleWorkspace = join(home, "stale-workspace");
+    const staleWorkspaceOther = join(home, "stale-workspace-other");
+    mkdirSync(workspaces, { recursive: true });
+    mkdirSync(staleWorkspace, { recursive: true });
+    mkdirSync(staleWorkspaceOther, { recursive: true });
+
+    const sentinel = `panel-111-sentinel-${process.pid}`;
+    const docBytes = `# Doc\n\nDOC-MARKER-${sentinel}\n`;
+    const notesBytes = `# Notes\n\nSTALE-WORKTREE-MARKER-${sentinel}\n`;
+    const otherBytes = `# Other\n\nOTHER-MARKER-${sentinel}\n`;
+
+    const docPath = join(workspaces, "doc.md");
+    const notesPath = join(staleWorkspace, "notes.md");
+    const otherPath = join(staleWorkspaceOther, "x.md");
+
+    writeFileSync(docPath, docBytes, "utf8");
+    writeFileSync(notesPath, notesBytes, "utf8");
+    writeFileSync(otherPath, otherBytes, "utf8");
+
+    const cardId = "panel-111-stale-worktree-root";
+    const sessionId = randomUUID();
+    const tmuxSession = `${SANDBOX_PREFIX}stale-${process.pid}`;
+    const now = new Date().toISOString();
+    await seedFixtureCards(home, [
+      {
+        id: cardId,
+        issueId: `${cardId}-issue`,
+        identifier: "PANEL-111-01",
+        title: "panel-111 stale-worktree-root fixture card",
+        description: null,
+        priority: 3,
+        column: "todo",
+        updatedAt: now,
+        activeSessionId: sessionId,
+        tmuxSession,
+        workspacePath: staleWorkspace,
+        sessions: [
+          {
+            id: sessionId,
+            createdAt: now,
+            updatedAt: now,
+            tmuxSession,
+            workspacePath: staleWorkspace,
+          },
+        ],
+      },
+    ]);
+
+    boot = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    const base = `http://127.0.0.1:${SANDBOX_PORT}/api/viewer/file`;
+
+    // Positive control FIRST: a dead server would make both legs below vacuous.
+    const controlRes = await fetch(
+      `${base}?path=${encodeURIComponent(docPath)}`,
+    );
+    const controlBody = await controlRes.text();
+    if (controlRes.status !== 200 || controlBody !== docBytes) {
+      violations.push(
+        `stale-worktree-root: positive control failed, expected 200 with exact doc.md bytes, ` +
+          `observed status ${controlRes.status}`,
+      );
+      return;
+    }
+
+    // Leg: the seeded session's workspacePath, OUTSIDE the configured workspaceRoot, is a live
+    // allowed root.
+    const notesRes = await fetch(
+      `${base}?path=${encodeURIComponent(notesPath)}`,
+    );
+    const notesBody = await notesRes.text();
+    if (notesRes.status !== 200) {
+      violations.push(
+        `stale-worktree-root: expected 200 for a .md under the seeded session's workspacePath, ` +
+          `observed ${notesRes.status}`,
+      );
+    }
+    if (notesBody !== notesBytes) {
+      violations.push(
+        `stale-worktree-root: expected exact bytes for the stale-workspace .md, observed a mismatch`,
+      );
+    }
+
+    // Leg: stale-workspace-other, on disk but under no configured or seeded root, must not be
+    // widened into containment.
+    const otherRes = await fetch(
+      `${base}?path=${encodeURIComponent(otherPath)}`,
+    );
+    const otherBody = await otherRes.text();
+    if (otherRes.status !== 404) {
+      violations.push(
+        `stale-worktree-root: expected 404 for stale-workspace-other (no configured root covers ` +
+          `it), observed ${otherRes.status}`,
+      );
+    }
+    if (otherBody.includes(`OTHER-MARKER-${sentinel}`)) {
+      violations.push(
+        `stale-worktree-root: stale-workspace-other leaked contents (the extra root widened ` +
+          `beyond the seeded workspacePath)`,
+      );
+    }
+  } finally {
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const SESSIONS_WITH_TMUX_TARGET = "store.sessionsWithTmux()";
+// `.slice(0, 0)` (not a bare `[]`) keeps the real return type: `for (const { session } of [])`
+// infers `never` for the destructured element under `--strict`, so `session.workspacePath` fails
+// to compile. Slicing a real (typed) call to zero-length empties the loop at runtime with no cast.
+const SESSIONS_WITH_TMUX_REPLACEMENT = "store.sessionsWithTmux().slice(0, 0)";
+
+/** `--break stale-worktree-root`: replaces the sole `store.sessionsWithTmux()` call with an empty
+ * array literal, so the allowed-roots derivation drops every live session's workspacePath and
+ * keeps only the configured `workspaceRoot`. Requires the SAME check to report the
+ * stale-workspace-not-200 violation (the seeded session's root no longer exists). */
+async function runBreakStaleWorktreeRoot() {
+  assertBuilt();
+  const original = readFileSync(VIEWER_ROUTE_PATH, "utf8");
+  const occurrences = original.split(SESSIONS_WITH_TMUX_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel111: refusing to run --break stale-worktree-root, expected ` +
+        `${JSON.stringify(SESSIONS_WITH_TMUX_TARGET)} to occur exactly once in ${VIEWER_ROUTE_PATH}, ` +
+        `measured ${occurrences}. A miscounted anchor would mutate the wrong spot and report a ` +
+        `false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(VIEWER_ROUTE_PATH, original);
+  try {
+    writeFileSync(
+      VIEWER_ROUTE_PATH,
+      original.replace(
+        SESSIONS_WITH_TMUX_TARGET,
+        SESSIONS_WITH_TMUX_REPLACEMENT,
+      ),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkStaleWorktreeRoot(tripViolations);
+    console.log(
+      `\n--break stale-worktree-root TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes(
+        "expected 200 for a .md under the seeded session's workspacePath",
+      ),
+    );
+  } finally {
+    writeFileSync(VIEWER_ROUTE_PATH, original);
+    resetBuildCache();
+    unregisterRestore(VIEWER_ROUTE_PATH);
+  }
+
+  const restoreViolations = [];
+  await checkStaleWorktreeRoot(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break stale-worktree-root RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
 const CHECKS = {
   "serve-in-root": (violations) => checkServeInRoot(violations),
   "boundary-rejections": (violations) => checkBoundaryRejections(violations),
   "size-cap": (violations) => checkSizeCap(violations),
+  "stale-worktree-root": (violations) => checkStaleWorktreeRoot(violations),
 };
 
 const BREAKS = {
   "serve-in-root": runBreakServeInRoot,
   "boundary-rejections": runBreakBoundaryRejections,
   "size-cap": runBreakSizeCap,
+  "stale-worktree-root": runBreakStaleWorktreeRoot,
 };
 
 const PROBES = {};
