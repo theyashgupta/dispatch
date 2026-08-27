@@ -83,6 +83,23 @@
  *     The 2-heading fixture leg stayed quiet (no TOC either side of the threshold change). The
  *     RESTORE leg re-ran clean after the captured bytes were restored, and a byte-diff against the
  *     pre-break snapshot confirmed an identical restore.
+ *   - `relative-link-navigation` proven able to fail (Plan 04): replacing the sole dirname-slice
+ *     expression in `src/web/viewer/ViewerDoc.tsx`'s `resolveRelativeMd` with an empty string,
+ *     rebuilding, and re-running the same check against a real headless Chrome produced, verbatim:
+ *     `relative-link-navigation: expected the content root to contain b.md's sentinel text after the click, it did not`
+ *     `relative-link-navigation: expected document.title "b.md" after the click, observed "a.md"`
+ *     The RESTORE leg re-ran clean after the captured bytes were restored, and
+ *     `git diff --quiet src/` confirmed a byte-identical restore.
+ *   - `anchor-jump` proven able to fail (Plan 04): prefixing the fragment-jump effect's sole
+ *     `document.getElementById(fragment)` lookup in `src/web/viewer-main.tsx` with an impossible
+ *     sentinel, rebuilding, and re-running the same check against a real headless Chrome produced,
+ *     verbatim:
+ *     `anchor-jump: the #later-heading-in-a deep link never scrolled the heading into the viewport's upper band within 15000ms (window.scrollY=0)`
+ *     `anchor-jump: clicking the "#conclusion" TOC entry never updated location.hash and scrolled it into the viewport's upper band within 15000ms (location.hash="#conclusion")`
+ *     Both legs tripped: a same-document `#fragment` anchor click fires `popstate` per spec, so
+ *     the TOC-click leg is driven by this SAME effect, not an independent native scroll (verified
+ *     live during this plan's execution). The RESTORE leg re-ran clean after the captured bytes
+ *     were restored, and `git diff --quiet src/` confirmed a byte-identical restore.
  */
 
 import {
@@ -330,9 +347,14 @@ function unregisterRestore(path) {
 
 /** `entry` is REALPATH'd before being handed to `node`, the macOS /var -> /private/var trap.
  * Returns `{ child, log }`; `log()` returns the accumulated stdout+stderr text observed so far. */
-function bootServerAt(home) {
+function bootServerAt(home, extraEnv = {}) {
   assertBuilt();
-  const env = { ...process.env, HOME: home, NODE_ENV: "production" };
+  const env = {
+    ...process.env,
+    ...extraEnv,
+    HOME: home,
+    NODE_ENV: "production",
+  };
   const child = spawn("node", [realpathSync(DIST_ENTRY)], {
     env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -351,10 +373,12 @@ function bootServerAt(home) {
  * `SANDBOX_PORT`: `listenWithFallback` silently falls back to an OS-assigned port on EADDRINUSE,
  * so a stale server from an earlier run could otherwise satisfy `waitForReady` and every
  * assertion would target a server with the wrong HOME. Stops the child before rethrowing so a
- * failed boot never leaks a listener.
+ * failed boot never leaks a listener. `extraEnv` (task 3's `TMUX_TMPDIR`) is layered under
+ * `HOME`/`NODE_ENV`, which always win, so a tmux-aware boot can never accidentally point at the
+ * wrong sandbox home.
  */
-async function bootAndWait(home) {
-  const boot = bootServerAt(home);
+async function bootAndWait(home, extraEnv = {}) {
+  const boot = bootServerAt(home, extraEnv);
   try {
     await waitForReady(SANDBOX_PORT);
     const marker = `listening on http://127.0.0.1:${SANDBOX_PORT}`;
@@ -602,6 +626,42 @@ async function pollUntilTruthy(cdp, sessionId, expression, timeoutMs) {
   return null;
 }
 
+/**
+ * Real `Input.dispatchMouseEvent` press then release at `point`, panel-109.mjs's own
+ * press/release recipe. `modifiers` follows the CDP bitmask (`4` is Meta/Cmd); the plan's clicks
+ * (relative-link navigation, TOC anchors, terminal OSC-8 links) all need a GENUINE trusted click
+ * so the override handlers under test run exactly as a real user's click would drive them, never
+ * `element.click()`'s synthetic untrusted event.
+ */
+async function dispatchRealClick(cdp, sessionId, point, modifiers = 0) {
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mousePressed",
+      x: point.x,
+      y: point.y,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+      modifiers,
+    },
+    sessionId,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseReleased",
+      x: point.x,
+      y: point.y,
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+      modifiers,
+    },
+    sessionId,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Fixture set. Stable across this phase: plans 03-04 reuse every file written
 // here. Scroll-height and sentinel constraints exist for plan 04's scroll and
@@ -723,7 +783,9 @@ function writeFixtures(home) {
       "",
       "## Later Heading In A",
       "",
-      "Content after the later heading.",
+      // Enough trailing filler that scrollIntoView({block:"start"}) has room to align the
+      // heading near the viewport's top rather than clamping at the document's natural bottom.
+      fillerParagraphs(20),
       "",
     ].join("\n"),
     "utf8",
@@ -1636,12 +1698,395 @@ async function runBreakTocThreshold() {
   return { tripFired, restoreClean };
 }
 
+// ---------------------------------------------------------------------------
+// relative-link-navigation: real headless Chrome, clicking a.md's ./b.md link
+// resolves in-viewer (query + content + title), and the back button restores
+// a.md via the popstate refetch leg.
+// ---------------------------------------------------------------------------
+
+/**
+ * Real headless Chrome via CDP: a genuine `Input.dispatchMouseEvent` click on a.md's `./b.md`
+ * anchor must update `location.search` to b.md's path, render b.md's sentinel text, and set
+ * `document.title` to `b.md`, all without a full page load (`ViewerApp`'s `onNavigate`
+ * `history.pushState` leg). `history.back()` must then revert all three via the `popstate`
+ * refetch leg.
+ */
+async function checkRelativeLinkNavigation(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("relative-link-navigation");
+  let boot;
+  let chrome;
+  let cdp;
+  try {
+    writeFixtures(home);
+    boot = await bootAndWait(home);
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const workspaces = join(home, "workspaces");
+    const origin = `http://127.0.0.1:${SANDBOX_PORT}`;
+    const aPath = join(workspaces, "a.md");
+
+    const page = await openPage(cdp, {
+      url: `${origin}/viewer/?path=${encodeURIComponent(aPath)}`,
+    });
+    const linkRect = await pollUntilTruthy(
+      cdp,
+      page.sessionId,
+      `(function(){
+        var a = document.querySelector('.viewer-content a[href="./b.md"]');
+        if (!a) return null;
+        var r = a.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      })()`,
+      ERROR_POLL_TIMEOUT_MS,
+    );
+    if (linkRect == null) {
+      violations.push(
+        `relative-link-navigation: the "./b.md" anchor never rendered in a.md's content root ` +
+          `within ${ERROR_POLL_TIMEOUT_MS}ms`,
+      );
+    } else {
+      // Real CDP mouse press/release, not element.click(): the override's onClick handler must
+      // run under a genuine trusted event, matching what a real user's click dispatches.
+      await dispatchRealClick(cdp, page.sessionId, linkRect);
+
+      const forwardReady = await pollUntilTruthy(
+        cdp,
+        page.sessionId,
+        `location.search.indexOf("b.md") >= 0 ? "yes" : null`,
+        ERROR_POLL_TIMEOUT_MS,
+      );
+      if (forwardReady == null) {
+        violations.push(
+          `relative-link-navigation: clicking "./b.md" never updated location.search to a b.md ` +
+            `path within ${ERROR_POLL_TIMEOUT_MS}ms`,
+        );
+      }
+      const forwardState = await evalValue(
+        cdp,
+        page.sessionId,
+        `(function(){
+          return {
+            search: location.search,
+            hasSentinel: document.body.textContent.includes(${JSON.stringify(B_SENTINEL)}),
+            title: document.title,
+          };
+        })()`,
+      );
+      if (!/[?&]path=.*b\.md$/.test(decodeURIComponent(forwardState.search))) {
+        violations.push(
+          `relative-link-navigation: expected location.search's decoded path to end with b.md, ` +
+            `observed ${JSON.stringify(forwardState.search)}`,
+        );
+      }
+      if (!forwardState.hasSentinel) {
+        violations.push(
+          `relative-link-navigation: expected the content root to contain b.md's sentinel text ` +
+            `after the click, it did not`,
+        );
+      }
+      if (forwardState.title !== "b.md") {
+        violations.push(
+          `relative-link-navigation: expected document.title "b.md" after the click, observed ` +
+            `${JSON.stringify(forwardState.title)}`,
+        );
+      }
+
+      await evalValue(cdp, page.sessionId, `history.back()`);
+      const backReady = await pollUntilTruthy(
+        cdp,
+        page.sessionId,
+        `location.search.indexOf("a.md") >= 0 ? "yes" : null`,
+        ERROR_POLL_TIMEOUT_MS,
+      );
+      if (backReady == null) {
+        violations.push(
+          `relative-link-navigation: history.back() never restored a.md's path within ` +
+            `${ERROR_POLL_TIMEOUT_MS}ms`,
+        );
+      }
+      const backState = await evalValue(
+        cdp,
+        page.sessionId,
+        `(function(){
+          return {
+            search: location.search,
+            hasLinkText: document.body.textContent.includes("Link to B"),
+            title: document.title,
+          };
+        })()`,
+      );
+      if (!/[?&]path=.*a\.md$/.test(decodeURIComponent(backState.search))) {
+        violations.push(
+          `relative-link-navigation: expected location.search's decoded path to end with a.md ` +
+            `after history.back(), observed ${JSON.stringify(backState.search)}`,
+        );
+      }
+      if (!backState.hasLinkText) {
+        violations.push(
+          `relative-link-navigation: expected a.md's own content back in the content root after ` +
+            `history.back(), it was not`,
+        );
+      }
+      if (backState.title !== "a.md") {
+        violations.push(
+          `relative-link-navigation: expected document.title "a.md" after history.back(), ` +
+            `observed ${JSON.stringify(backState.title)}`,
+        );
+      }
+    }
+    await cdp.send("Target.closeTarget", { targetId: page.targetId });
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chrome);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const RELATIVE_LINK_TARGET =
+  'currentPath.slice(0, currentPath.lastIndexOf("/") + 1)';
+const RELATIVE_LINK_REPLACEMENT = '""';
+
+/** `--break relative-link-navigation`: replaces the resolver's sole dirname-slice expression with
+ * an empty string, so `./b.md` resolves against the filesystem root instead of a.md's own
+ * directory, rebuilds, and requires the SAME check to report the b.md-sentinel-missing violation
+ * (the resolved path 404s, so the click never actually reaches b.md). Restores the captured bytes
+ * unconditionally in a `finally`, rebuilds, and requires a clean pass. */
+async function runBreakRelativeLinkNavigation() {
+  assertBuilt();
+  const original = readFileSync(VIEWER_DOC_PATH, "utf8");
+  const occurrences = original.split(RELATIVE_LINK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel112: refusing to run --break relative-link-navigation, expected ` +
+        `${JSON.stringify(RELATIVE_LINK_TARGET)} to occur exactly once in ${VIEWER_DOC_PATH}, ` +
+        `measured ${occurrences}. A miscounted anchor would mutate the wrong spot and report a ` +
+        `false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(VIEWER_DOC_PATH, original);
+  try {
+    writeFileSync(
+      VIEWER_DOC_PATH,
+      original.replace(RELATIVE_LINK_TARGET, RELATIVE_LINK_REPLACEMENT),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkRelativeLinkNavigation(tripViolations);
+    console.log(
+      `\n--break relative-link-navigation TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) => v.includes("sentinel"));
+  } finally {
+    restoreViewerDocSource(original);
+  }
+
+  const restoreViolations = [];
+  await checkRelativeLinkNavigation(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break relative-link-navigation RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
+// anchor-jump: real headless Chrome, a #fragment deep link jumps after the
+// lazy chunk renders (Pitfall 7), and a TOC click jumps + updates the hash.
+// ---------------------------------------------------------------------------
+
+/**
+ * Real headless Chrome via CDP: loading a.md directly at a `#fragment` for its later heading must
+ * scroll past the top of the page (`window.scrollY > 0`) with the target heading's bounding rect
+ * sitting in the viewport's upper band, proving the jump ran AFTER the lazy `ViewerDoc` chunk
+ * rendered (Pitfall 7), not before. A TOC click on the 5+ heading fixture must update
+ * `location.hash` and scroll the same way.
+ */
+async function checkAnchorJump(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("anchor-jump");
+  let boot;
+  let chrome;
+  let cdp;
+  try {
+    writeFixtures(home);
+    boot = await bootAndWait(home);
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const workspaces = join(home, "workspaces");
+    const origin = `http://127.0.0.1:${SANDBOX_PORT}`;
+
+    // Leg 1: a direct #fragment deep link to a.md's later heading jumps after the lazy chunk.
+    const aPath = join(workspaces, "a.md");
+    const deepLinkPage = await openPage(cdp, {
+      url: `${origin}/viewer/?path=${encodeURIComponent(aPath)}#later-heading-in-a`,
+    });
+    const headingReady = await pollUntilTruthy(
+      cdp,
+      deepLinkPage.sessionId,
+      `document.getElementById("later-heading-in-a") != null ? "yes" : null`,
+      ERROR_POLL_TIMEOUT_MS,
+    );
+    if (headingReady == null) {
+      violations.push(
+        `anchor-jump: a.md's "Later Heading In A" heading never rendered within ` +
+          `${ERROR_POLL_TIMEOUT_MS}ms`,
+      );
+    } else {
+      const jumped = await pollUntilTruthy(
+        cdp,
+        deepLinkPage.sessionId,
+        `(function(){
+          if (window.scrollY <= 0) return null;
+          var el = document.getElementById("later-heading-in-a");
+          var top = el.getBoundingClientRect().top;
+          return (top >= 0 && top < 300) ? "yes" : null;
+        })()`,
+        ERROR_POLL_TIMEOUT_MS,
+      );
+      if (jumped == null) {
+        const scrollY = await evalValue(
+          cdp,
+          deepLinkPage.sessionId,
+          `window.scrollY`,
+        );
+        violations.push(
+          `anchor-jump: the #later-heading-in-a deep link never scrolled the heading into the ` +
+            `viewport's upper band within ${ERROR_POLL_TIMEOUT_MS}ms (window.scrollY=${scrollY})`,
+        );
+      }
+    }
+    await cdp.send("Target.closeTarget", { targetId: deepLinkPage.targetId });
+
+    // Leg 2: a TOC click on the 5+ heading fixture jumps and updates the hash.
+    const headingsPath = join(workspaces, "headings.md");
+    const tocPage = await openPage(cdp, {
+      url: `${origin}/viewer/?path=${encodeURIComponent(headingsPath)}`,
+    });
+    const tocRect = await pollUntilTruthy(
+      cdp,
+      tocPage.sessionId,
+      `(function(){
+        var a = document.querySelector('.viewer-toc-entry[href="#conclusion"]');
+        if (!a) return null;
+        var r = a.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      })()`,
+      ERROR_POLL_TIMEOUT_MS,
+    );
+    if (tocRect == null) {
+      violations.push(
+        `anchor-jump: the "#conclusion" TOC entry never rendered for the 5+ heading fixture ` +
+          `within ${ERROR_POLL_TIMEOUT_MS}ms`,
+      );
+    } else {
+      await dispatchRealClick(cdp, tocPage.sessionId, tocRect);
+      const tocJumped = await pollUntilTruthy(
+        cdp,
+        tocPage.sessionId,
+        `(function(){
+          if (location.hash !== "#conclusion") return null;
+          var el = document.getElementById("conclusion");
+          if (!el) return null;
+          var top = el.getBoundingClientRect().top;
+          return (top >= 0 && top < 300) ? "yes" : null;
+        })()`,
+        ERROR_POLL_TIMEOUT_MS,
+      );
+      if (tocJumped == null) {
+        const hash = await evalValue(cdp, tocPage.sessionId, `location.hash`);
+        violations.push(
+          `anchor-jump: clicking the "#conclusion" TOC entry never updated location.hash and ` +
+            `scrolled it into the viewport's upper band within ${ERROR_POLL_TIMEOUT_MS}ms ` +
+            `(location.hash=${JSON.stringify(hash)})`,
+        );
+      }
+    }
+    await cdp.send("Target.closeTarget", { targetId: tocPage.targetId });
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chrome);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const ANCHOR_JUMP_TARGET = "document.getElementById(fragment)";
+const ANCHOR_JUMP_REPLACEMENT =
+  'document.getElementById("panel112-break-" + fragment)';
+
+/** `--break anchor-jump`: prefixes the fragment-jump effect's sole `getElementById` lookup with
+ * an impossible sentinel so it always misses, rebuilds, and requires the SAME check to report the
+ * deep-link scroll violation. Empirically also trips the TOC-click leg: clicking a same-document
+ * `#fragment` anchor fires `popstate` per spec (verified live against this exact build), which
+ * `ViewerApp`'s own popstate listener answers by refetching and remounting, so the TOC-click leg's
+ * scroll is driven by this SAME effect, not by an independent native browser scroll-into-view.
+ * Restores the captured bytes unconditionally in a `finally`, rebuilds, and requires a clean
+ * pass. */
+async function runBreakAnchorJump() {
+  assertBuilt();
+  const original = readFileSync(VIEWER_MAIN_PATH, "utf8");
+  const occurrences = original.split(ANCHOR_JUMP_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel112: refusing to run --break anchor-jump, expected ` +
+        `${JSON.stringify(ANCHOR_JUMP_TARGET)} to occur exactly once in ${VIEWER_MAIN_PATH}, ` +
+        `measured ${occurrences}. A miscounted anchor would mutate the wrong spot and report a ` +
+        `false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(VIEWER_MAIN_PATH, original);
+  try {
+    writeFileSync(
+      VIEWER_MAIN_PATH,
+      original.replace(ANCHOR_JUMP_TARGET, ANCHOR_JUMP_REPLACEMENT),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkAnchorJump(tripViolations);
+    console.log(
+      `\n--break anchor-jump TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes("later-heading-in-a deep link"),
+    );
+  } finally {
+    restoreViewerMainSource(original);
+  }
+
+  const restoreViolations = [];
+  await checkAnchorJump(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break anchor-jump RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
 const CHECKS = {
   "viewer-page-served": (violations) => checkViewerPageServed(violations),
   "error-states": (violations) => checkErrorStates(violations),
   "no-raw-html-injection": (violations) => checkNoRawHtmlInjection(violations),
   "syntax-highlighting": (violations) => checkSyntaxHighlighting(violations),
   "toc-threshold": (violations) => checkTocThreshold(violations),
+  "relative-link-navigation": (violations) =>
+    checkRelativeLinkNavigation(violations),
+  "anchor-jump": (violations) => checkAnchorJump(violations),
 };
 
 const BREAKS = {
@@ -1650,6 +2095,8 @@ const BREAKS = {
   "no-raw-html-injection": runBreakNoRawHtmlInjection,
   "syntax-highlighting": runBreakSyntaxHighlighting,
   "toc-threshold": runBreakTocThreshold,
+  "relative-link-navigation": runBreakRelativeLinkNavigation,
+  "anchor-jump": runBreakAnchorJump,
 };
 
 const PROBES = {};
