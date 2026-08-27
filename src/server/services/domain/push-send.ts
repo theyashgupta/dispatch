@@ -29,6 +29,7 @@ const VAPID_JWT_TTL_SECONDS = 12 * 3600;
 const PUSH_TTL_SECONDS = 86400;
 const SEND_TIMEOUT_MS = 10_000;
 const NOTIFICATION_FALLBACK_BODY = "Waiting on your input";
+const MAX_BODY_CHARS = 500;
 const ENDPOINT_LOG_PREFIX_LEN = 40;
 const VAPID_SUBJECT = "https://github.com/theyashgupta/dispatch";
 
@@ -86,6 +87,9 @@ function signVapidJwt(endpoint: string, privateKeyJwk: JsonWebKey): string {
  * for the browser.
  */
 function encryptPayload(sub: PushSubscriptionRow, plaintext: Buffer): Buffer {
+  if (plaintext.length + PADDING_DELIMITER.length + 16 > RECORD_SIZE) {
+    throw new Error("push payload exceeds the declared record size");
+  }
   const { x, y } = jwkFromRawPoint(sub.p256dh);
   const uaPublicKey = createPublicKey({
     key: { kty: "EC", crv: "P-256", x, y },
@@ -188,7 +192,9 @@ export async function sendPushForCard(
   const vapid = loadOrCreateVapidKeys();
   const subs = store.listPushSubscriptions();
   const title = `${card.identifier} - Needs Input`;
-  const body = reason?.trim() || NOTIFICATION_FALLBACK_BODY;
+  const raw = reason?.trim() || NOTIFICATION_FALLBACK_BODY;
+  const body =
+    raw.length > MAX_BODY_CHARS ? `${raw.slice(0, MAX_BODY_CHARS - 1)}…` : raw;
 
   await Promise.allSettled(
     subs.map(async (sub) => {
