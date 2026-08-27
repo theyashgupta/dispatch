@@ -488,12 +488,358 @@ async function runBreakServeInRoot() {
   return { tripFired, restoreClean };
 }
 
+// ---------------------------------------------------------------------------
+// boundary-rejections: traversal (plain + encoded), absolute-outside,
+// sibling-prefix, symlink-escape, and the resolved-path extension gate all
+// 404 (or 400 for the request-string extension leg) against REAL requests.
+// ---------------------------------------------------------------------------
+
+/**
+ * Every rejection leg fired as a real HTTP request against a live server. The positive control
+ * (an in-root `doc.md`) MUST pass first: a dead boundary would make every 404 below vacuous.
+ * Each fixture body carries a unique marker string so a leaked byte is unambiguous.
+ */
+async function checkBoundaryRejections(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("boundary-rejections");
+  let boot;
+  try {
+    const workspaces = join(home, "workspaces");
+    const outside = join(home, "outside");
+    const sibling = join(home, "workspaces-sibling");
+    mkdirSync(workspaces, { recursive: true });
+    mkdirSync(outside, { recursive: true });
+    mkdirSync(sibling, { recursive: true });
+
+    const sentinel = `panel-111-sentinel-${process.pid}`;
+    const docMarker = `DOC-MARKER-${sentinel}`;
+    const secretMarker = `SECRET-MARKER-${sentinel}`;
+    const absMarker = `ABS-MARKER-${sentinel}`;
+    const leakMarker = `LEAK-MARKER-${sentinel}`;
+    const noteMarker = `NOTE-MARKER-${sentinel}`;
+
+    const docBytes = `# Doc\n\n${docMarker}\n`;
+    const secretBytes = `# Secret\n\n${secretMarker}\n`;
+    const absBytes = `# Abs\n\n${absMarker}\n`;
+    const leakBytes = `# Leak\n\n${leakMarker}\n`;
+    const noteBytes = `plain text, not markdown: ${noteMarker}\n`;
+
+    const docPath = join(workspaces, "doc.md");
+    const secretPath = join(outside, "secret.md");
+    const absPath = join(outside, "abs.md");
+    const leakPath = join(sibling, "leak.md");
+    const notePath = join(workspaces, "note.txt");
+    const linkPath = join(workspaces, "link.md");
+    const aliasPath = join(workspaces, "alias.md");
+
+    writeFileSync(docPath, docBytes, "utf8");
+    writeFileSync(secretPath, secretBytes, "utf8");
+    writeFileSync(absPath, absBytes, "utf8");
+    writeFileSync(leakPath, leakBytes, "utf8");
+    writeFileSync(notePath, noteBytes, "utf8");
+    symlinkSync(secretPath, linkPath);
+    symlinkSync(notePath, aliasPath);
+
+    boot = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    const base = `http://127.0.0.1:${SANDBOX_PORT}/api/viewer/file`;
+
+    // Positive control FIRST, per panel convention: a dead boundary passes every rejection
+    // leg below vacuously.
+    const controlRes = await fetch(
+      `${base}?path=${encodeURIComponent(docPath)}`,
+    );
+    const controlBody = await controlRes.text();
+    if (controlRes.status !== 200 || controlBody !== docBytes) {
+      violations.push(
+        `boundary-rejections: positive control failed, expected 200 with exact doc.md bytes, ` +
+          `observed status ${controlRes.status}`,
+      );
+      return;
+    }
+
+    // Leg: traversal, plain (unencoded) form.
+    const traversalPath = `${workspaces}/../outside/secret.md`;
+    const traversalPlainRes = await fetch(`${base}?path=${traversalPath}`);
+    const traversalPlainBody = await traversalPlainRes.text();
+    if (traversalPlainRes.status !== 404) {
+      violations.push(
+        `boundary-rejections: traversal (plain) expected 404, observed ${traversalPlainRes.status}`,
+      );
+    }
+    if (traversalPlainBody.includes(secretMarker)) {
+      violations.push(
+        `boundary-rejections: traversal (plain) leaked secret.md bytes`,
+      );
+    }
+
+    // Leg: traversal, encodeURIComponent form of the same path.
+    const traversalEncodedRes = await fetch(
+      `${base}?path=${encodeURIComponent(traversalPath)}`,
+    );
+    const traversalEncodedBody = await traversalEncodedRes.text();
+    if (traversalEncodedRes.status !== 404) {
+      violations.push(
+        `boundary-rejections: traversal (encoded) expected 404, observed ${traversalEncodedRes.status}`,
+      );
+    }
+    if (traversalEncodedBody.includes(secretMarker)) {
+      violations.push(
+        `boundary-rejections: traversal (encoded) leaked secret.md bytes`,
+      );
+    }
+
+    // Leg: absolute-outside.
+    const absRes = await fetch(`${base}?path=${encodeURIComponent(absPath)}`);
+    const absBody = await absRes.text();
+    if (absRes.status !== 404) {
+      violations.push(
+        `boundary-rejections: absolute-outside expected 404, observed ${absRes.status}`,
+      );
+    }
+    if (absBody.includes(absMarker)) {
+      violations.push(
+        `boundary-rejections: absolute-outside leaked abs.md bytes`,
+      );
+    }
+
+    // Leg: sibling-prefix, proves the `+ path.sep` disjunct rejects a directory whose name
+    // merely starts with the root string.
+    const siblingRes = await fetch(
+      `${base}?path=${encodeURIComponent(leakPath)}`,
+    );
+    const siblingBody = await siblingRes.text();
+    if (siblingRes.status !== 404) {
+      violations.push(
+        `boundary-rejections: sibling-prefix expected 404, observed ${siblingRes.status}`,
+      );
+    }
+    if (siblingBody.includes(leakMarker)) {
+      violations.push(
+        `boundary-rejections: sibling-prefix leaked contents (the resolved sibling path passed containment)`,
+      );
+    }
+
+    // Leg: symlink-escape, proves realpath follows the link before the prefix compare.
+    const linkRes = await fetch(`${base}?path=${encodeURIComponent(linkPath)}`);
+    const linkBody = await linkRes.text();
+    if (linkRes.status !== 404) {
+      violations.push(
+        `boundary-rejections: symlink-escape expected 404, observed ${linkRes.status}`,
+      );
+    }
+    if (linkBody.includes(secretMarker)) {
+      violations.push(
+        `boundary-rejections: symlink-escape leaked secret.md bytes`,
+      );
+    }
+
+    // Leg: resolved non-.md, request-string extension gate (step 2, no fs touch).
+    const noteRes = await fetch(`${base}?path=${encodeURIComponent(notePath)}`);
+    if (noteRes.status !== 400) {
+      violations.push(
+        `boundary-rejections: request-string extension gate expected 400 for note.txt, observed ${noteRes.status}`,
+      );
+    }
+
+    // Leg: resolved non-.md via an in-root alias symlink (step 6, the RESOLVED-path gate).
+    const aliasRes = await fetch(
+      `${base}?path=${encodeURIComponent(aliasPath)}`,
+    );
+    const aliasBody = await aliasRes.text();
+    if (aliasRes.status !== 404) {
+      violations.push(
+        `boundary-rejections: resolved-path extension gate expected 404 for alias.md -> note.txt, observed ${aliasRes.status}`,
+      );
+    }
+    if (aliasBody.includes(noteMarker)) {
+      violations.push(
+        `boundary-rejections: resolved-path extension gate leaked note.txt bytes via alias.md`,
+      );
+    }
+  } finally {
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const CONTAINMENT_SEP_TARGET = "rootReal + path.sep";
+const CONTAINMENT_SEP_REPLACEMENT = "rootReal";
+
+/** `--break boundary-rejections`: weakens the containment disjunct so a path whose REAL path
+ * merely string-prefixes the resolved root passes containment. Keys the trip on the
+ * sibling-prefix leak, the only leg this exact mutation opens (symlink-escape, traversal, and
+ * absolute-outside still resolve strictly outside the prefix and stay 404). */
+async function runBreakBoundaryRejections() {
+  assertBuilt();
+  const original = readFileSync(VIEWER_ROUTE_PATH, "utf8");
+  const occurrences = original.split(CONTAINMENT_SEP_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel111: refusing to run --break boundary-rejections, expected ` +
+        `${JSON.stringify(CONTAINMENT_SEP_TARGET)} to occur exactly once in ${VIEWER_ROUTE_PATH}, ` +
+        `measured ${occurrences}. A miscounted anchor would mutate the wrong spot and report a ` +
+        `false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(VIEWER_ROUTE_PATH, original);
+  try {
+    writeFileSync(
+      VIEWER_ROUTE_PATH,
+      original.replace(CONTAINMENT_SEP_TARGET, CONTAINMENT_SEP_REPLACEMENT),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkBoundaryRejections(tripViolations);
+    console.log(
+      `\n--break boundary-rejections TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes("sibling-prefix leaked contents"),
+    );
+  } finally {
+    writeFileSync(VIEWER_ROUTE_PATH, original);
+    resetBuildCache();
+    unregisterRestore(VIEWER_ROUTE_PATH);
+  }
+
+  const restoreViolations = [];
+  await checkBoundaryRejections(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break boundary-rejections RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
+// size-cap: an in-root .md strictly over 2 MB gets 413, a real under-cap file
+// still gets 200 (proves the 413 is not vacuous).
+// ---------------------------------------------------------------------------
+
+const OVERSIZED_BYTES = 2 * 1024 * 1024 + 64;
+
+/**
+ * Under-cap control first (proves the server serves), then the oversized leg: a real file
+ * strictly greater than 2 MB must 413 with `{ error: "too-large" }` and never the file bytes.
+ */
+async function checkSizeCap(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("size-cap");
+  let boot;
+  try {
+    const workspaces = join(home, "workspaces");
+    mkdirSync(workspaces, { recursive: true });
+
+    const sentinel = `panel-111-sentinel-${process.pid}`;
+    const smallBytes = `# Small\n\nSIZE-CAP-SMALL-${sentinel}\n`;
+    const smallPath = join(workspaces, "small.md");
+    writeFileSync(smallPath, smallBytes, "utf8");
+
+    const bigPath = join(workspaces, "big.md");
+    writeFileSync(bigPath, Buffer.alloc(OVERSIZED_BYTES, "a"));
+
+    boot = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    const base = `http://127.0.0.1:${SANDBOX_PORT}/api/viewer/file`;
+
+    const smallRes = await fetch(
+      `${base}?path=${encodeURIComponent(smallPath)}`,
+    );
+    const smallBody = await smallRes.text();
+    if (smallRes.status !== 200 || smallBody !== smallBytes) {
+      violations.push(
+        `size-cap: under-cap control failed, expected 200 with exact small.md bytes, ` +
+          `observed status ${smallRes.status}`,
+      );
+    }
+
+    const bigRes = await fetch(`${base}?path=${encodeURIComponent(bigPath)}`);
+    const bigBody = await bigRes.json().catch(() => null);
+    if (bigRes.status !== 413) {
+      violations.push(
+        `size-cap: expected 413 for the oversized file, observed ${bigRes.status}`,
+      );
+    }
+    if (bigBody?.error !== "too-large") {
+      violations.push(
+        `size-cap: expected body { error: "too-large" } for the oversized file, observed ${JSON.stringify(bigBody)}`,
+      );
+    }
+  } finally {
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const SIZE_CAP_BREAK_TARGET = "2 * 1024 * 1024";
+const SIZE_CAP_BREAK_REPLACEMENT = "1024 * 1024 * 1024 * 1024";
+
+/** `--break size-cap`: replaces the sole `2 * 1024 * 1024` literal (the `MAX_BYTES` definition)
+ * with a value the oversized fixture can never exceed, and requires the SAME check to report the
+ * big.md-not-413 violation. */
+async function runBreakSizeCap() {
+  assertBuilt();
+  const original = readFileSync(VIEWER_ROUTE_PATH, "utf8");
+  const occurrences = original.split(SIZE_CAP_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel111: refusing to run --break size-cap, expected ` +
+        `${JSON.stringify(SIZE_CAP_BREAK_TARGET)} to occur exactly once in ${VIEWER_ROUTE_PATH}, ` +
+        `measured ${occurrences}. A miscounted anchor would mutate the wrong spot and report a ` +
+        `false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(VIEWER_ROUTE_PATH, original);
+  try {
+    writeFileSync(
+      VIEWER_ROUTE_PATH,
+      original.replace(SIZE_CAP_BREAK_TARGET, SIZE_CAP_BREAK_REPLACEMENT),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkSizeCap(tripViolations);
+    console.log(
+      `\n--break size-cap TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes("expected 413 for the oversized file"),
+    );
+  } finally {
+    writeFileSync(VIEWER_ROUTE_PATH, original);
+    resetBuildCache();
+    unregisterRestore(VIEWER_ROUTE_PATH);
+  }
+
+  const restoreViolations = [];
+  await checkSizeCap(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break size-cap RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
 const CHECKS = {
   "serve-in-root": (violations) => checkServeInRoot(violations),
+  "boundary-rejections": (violations) => checkBoundaryRejections(violations),
+  "size-cap": (violations) => checkSizeCap(violations),
 };
 
 const BREAKS = {
   "serve-in-root": runBreakServeInRoot,
+  "boundary-rejections": runBreakBoundaryRejections,
+  "size-cap": runBreakSizeCap,
 };
 
 const PROBES = {};
