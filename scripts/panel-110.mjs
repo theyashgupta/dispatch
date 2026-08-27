@@ -982,7 +982,10 @@ async function pollPushDbRows(dbPath, predicate, timeoutMs) {
 /** A `node:http` server bound to 127.0.0.1 on `STUB_PUSH_PORT`, recording every request as `{
  * method, path, headers, body }` (body collected as a Buffer) and answering with a status derived
  * from the path prefix, so one stub can play several push-service roles: `/ok/` -> 201, `/gone/`
- * -> 410, `/missing/` -> 404, `/busy/` -> 429, anything else -> 400. Callers must `close()` it in a
+ * -> 410, `/missing/` -> 404, `/busy/` -> 429, anything else -> 400. A 429 carries
+ * `Retry-After: 1` so the server's one retry (push-send.ts, default 5s when the header is
+ * absent) lands fast and INSIDE a check's counting window; checks that drive a `/busy/` row must
+ * count that retry request explicitly rather than racing it. Callers must `close()` it in a
  * `finally`. */
 function startStubPushService() {
   let recorded = [];
@@ -1006,7 +1009,7 @@ function startStubPushService() {
             : path.startsWith("/busy/")
               ? 429
               : 400;
-      res.writeHead(status);
+      res.writeHead(status, status === 429 ? { "Retry-After": "1" } : {});
       res.end();
     });
   });
@@ -1959,10 +1962,13 @@ const MULTI_DEVICE_PRUNE_SETTLE_MS = 3_000;
  * subscriber keypair and alternating between two distinct `origin` values (demonstrating D-06: a
  * stored origin never filters who gets sent to), seeds one fixture card with a real tmux pane,
  * boots the real server, drives one real `NEEDS_INPUT` marker with a unique reason, and asserts
- * that the fan-out reached all four endpoints, each request decrypts only with its OWN
- * subscriber keys, the sandbox log carries one `[push] send <status>` line per endpoint, and
- * after a settle window `push_subscriptions` retains exactly the 201 and 429 rows. Tears down
- * the stub, the tmux pane, the server and the sandbox home in a `finally`. */
+ * that the fan-out produced exactly five stub requests: one first attempt per endpoint plus
+ * exactly one `Retry-After` retry of the 429 row (the stub answers `Retry-After: 1`, so the
+ * retry provably arrives inside the window instead of hiding behind the settle sleep). Each
+ * request decrypts only with its OWN subscriber keys, the sandbox log carries one `[push] send
+ * <status>` line per endpoint plus one `[push] retry 429` line, and after a settle window
+ * `push_subscriptions` retains exactly the 201 and 429 rows. Tears down the stub, the tmux
+ * pane, the server and the sandbox home in a `finally`. */
 async function checkMultiDevicePrune(violations) {
   assertBuilt();
   const home = makeSandboxHome("multi-device-prune");
@@ -2010,13 +2016,23 @@ async function checkMultiDevicePrune(violations) {
     await driveMarker(tmuxName, "NEEDS_INPUT", reason);
 
     const requests = await stub.waitForRequests(
-      4,
+      5,
       MULTI_DEVICE_PRUNE_TICK_SLACK_MS,
     );
-    if (requests.length !== 4) {
+    if (requests.length !== 5) {
       violations.push(
-        `multi-device-prune: expected exactly 4 stub push requests within ` +
+        `multi-device-prune: expected exactly 5 stub push requests (4 first attempts plus ` +
+          `1 Retry-After retry of the 429 row) within ` +
           `${MULTI_DEVICE_PRUNE_TICK_SLACK_MS}ms, observed ${requests.length}`,
+      );
+    }
+    const busyCount = requests.filter(
+      (r) => r.path === "/busy/throttled",
+    ).length;
+    if (busyCount !== 2) {
+      violations.push(
+        `multi-device-prune: expected the 429 endpoint to receive exactly 2 requests ` +
+          `(first attempt plus one Retry-After retry), observed ${busyCount}`,
       );
     }
 
@@ -2050,9 +2066,10 @@ async function checkMultiDevicePrune(violations) {
     }
 
     const logDeadline = Date.now() + PUSH_LOG_TICK_SLACK_MS;
-    let missingLogLines = rows.map(
-      (row) => `[push] send ${row.status} ${row.endpoint}`,
-    );
+    let missingLogLines = [
+      ...rows.map((row) => `[push] send ${row.status} ${row.endpoint}`),
+      `[push] retry 429 ${rows.find((row) => row.status === 429).endpoint}`,
+    ];
     while (Date.now() < logDeadline && missingLogLines.length > 0) {
       const log = boot.log();
       missingLogLines = missingLogLines.filter((line) => !log.includes(line));
