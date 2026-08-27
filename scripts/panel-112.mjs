@@ -75,6 +75,14 @@
  *     `syntax-highlighting: expected at least one "pre code [class*='hljs-']" element (the ts fence highlighted), found none`
  *     The RESTORE leg re-ran clean after the captured bytes were restored, and a byte-diff against
  *     the pre-break snapshot confirmed an identical restore.
+ *   - `toc-threshold` proven able to fail (Plan 03): replacing the sole `headings.length >= 3`
+ *     comparison in `src/web/viewer/ViewerDoc.tsx` with the unreachable `headings.length >= 999`,
+ *     rebuilding, and re-running the same check against the 5+ heading fixture and a real headless
+ *     Chrome produced, verbatim:
+ *     `toc-threshold: expected the TOC sidebar to render for the 5+ heading fixture, but ".viewer-toc" was absent within 15000ms`
+ *     The 2-heading fixture leg stayed quiet (no TOC either side of the threshold change). The
+ *     RESTORE leg re-ran clean after the captured bytes were restored, and a byte-diff against the
+ *     pre-break snapshot confirmed an identical restore.
  */
 
 import {
@@ -1446,11 +1454,194 @@ async function runBreakSyntaxHighlighting() {
   return { tripFired, restoreClean };
 }
 
+// ---------------------------------------------------------------------------
+// toc-threshold: real headless Chrome, the 5+ heading fixture shows a TOC
+// whose every entry id resolves to a real heading (including the
+// duplicate-suffixed and inline-markup headings), and the 2-heading fixture
+// shows no TOC (locked 3+ threshold).
+// ---------------------------------------------------------------------------
+
+/**
+ * Real headless Chrome via CDP, two legs on one booted rig. Leg A (`headings.md`, 6 sections
+ * including the duplicated "Introduction" and the inline-bold "**Bold** Heading"): the TOC
+ * sidebar renders, its entry count equals the document's heading count, every entry's href
+ * resolves to a real element id via `getElementById` (the drift-proof property, including the
+ * duplicate's suffixed id). Leg B (`two-headings.md`, 2 headings): no TOC sidebar renders.
+ */
+async function checkTocThreshold(violations) {
+  assertBuilt();
+  const home = makeSandboxHome("toc-threshold");
+  let boot;
+  let chrome;
+  let cdp;
+  try {
+    writeFixtures(home);
+    boot = await bootAndWait(home);
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const workspaces = join(home, "workspaces");
+    const origin = `http://127.0.0.1:${SANDBOX_PORT}`;
+
+    // Leg A: the 5+ heading fixture shows a TOC whose every entry id resolves to a real
+    // heading, including the duplicate's suffixed id and the inline-markup heading's slug.
+    const headingsPath = join(workspaces, "headings.md");
+    const headingsPage = await openPage(cdp, {
+      url: `${origin}/viewer/?path=${encodeURIComponent(headingsPath)}`,
+    });
+    const headingsToc = await pollUntilTruthy(
+      cdp,
+      headingsPage.sessionId,
+      `document.querySelector(".viewer-toc") != null ? "yes" : null`,
+      ERROR_POLL_TIMEOUT_MS,
+    );
+    if (headingsToc == null) {
+      violations.push(
+        `toc-threshold: expected the TOC sidebar to render for the 5+ heading fixture, but ` +
+          `".viewer-toc" was absent within ${ERROR_POLL_TIMEOUT_MS}ms`,
+      );
+    } else {
+      const legAState = await evalValue(
+        cdp,
+        headingsPage.sessionId,
+        `(function(){
+          var headingSelector = ".viewer-content h1, .viewer-content h2, .viewer-content h3, " +
+            ".viewer-content h4, .viewer-content h5, .viewer-content h6";
+          var headingCount = document.querySelectorAll(headingSelector).length;
+          var entries = Array.from(document.querySelectorAll(".viewer-toc-entry"));
+          var entryHrefs = entries.map(function(a){ return a.getAttribute("href"); });
+          var unresolved = entryHrefs.filter(function(href){
+            var id = (href || "").replace(/^#/, "");
+            return id === "" || document.getElementById(id) == null;
+          });
+          return {
+            headingCount: headingCount,
+            entryCount: entries.length,
+            entryHrefs: entryHrefs,
+            unresolved: unresolved,
+            hasDuplicateSuffix: entryHrefs.includes("#introduction-1"),
+          };
+        })()`,
+      );
+      if (legAState.entryCount !== legAState.headingCount) {
+        violations.push(
+          `toc-threshold: expected the TOC entry count (${legAState.entryCount}) to equal the ` +
+            `document's heading count (${legAState.headingCount})`,
+        );
+      }
+      if (legAState.unresolved.length > 0) {
+        violations.push(
+          `toc-threshold: TOC entries with hrefs that do not resolve via getElementById: ` +
+            `${legAState.unresolved.join(", ")}`,
+        );
+      }
+      if (!legAState.hasDuplicateSuffix) {
+        violations.push(
+          `toc-threshold: expected a TOC entry for the duplicate heading's suffixed id ` +
+            `"#introduction-1", observed entries: ${legAState.entryHrefs.join(", ")}`,
+        );
+      }
+    }
+    await cdp.send("Target.closeTarget", { targetId: headingsPage.targetId });
+
+    // Leg B: below the 3+ threshold, the 2-heading fixture shows no TOC sidebar.
+    const twoHeadingsPath = join(workspaces, "two-headings.md");
+    const twoHeadingsPage = await openPage(cdp, {
+      url: `${origin}/viewer/?path=${encodeURIComponent(twoHeadingsPath)}`,
+    });
+    const twoHeadingsReady = await pollUntilTruthy(
+      cdp,
+      twoHeadingsPage.sessionId,
+      `(function(){var el=document.querySelector(".viewer-content"); return el && el.textContent.includes("First section body.") ? true : null;})()`,
+      ERROR_POLL_TIMEOUT_MS,
+    );
+    if (twoHeadingsReady == null) {
+      violations.push(
+        `toc-threshold: the 2-heading fixture's content root never rendered within ${ERROR_POLL_TIMEOUT_MS}ms`,
+      );
+    }
+    const tocPresent = await evalValue(
+      cdp,
+      twoHeadingsPage.sessionId,
+      `document.querySelector(".viewer-toc") != null`,
+    );
+    if (tocPresent) {
+      violations.push(
+        `toc-threshold: expected no TOC sidebar for the 2-heading fixture, but ".viewer-toc" was present`,
+      );
+    }
+    await cdp.send("Target.closeTarget", {
+      targetId: twoHeadingsPage.targetId,
+    });
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chrome);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+const TOC_THRESHOLD_TARGET = "headings.length >= 3";
+const TOC_THRESHOLD_REPLACEMENT = "headings.length >= 999";
+
+/** `--break toc-threshold`: replaces the sole `>= 3` TOC threshold comparison with an
+ * unreachable `>= 999`, rebuilds, and requires the SAME check to report leg A's TOC-absent
+ * violation while leg B (already expecting no TOC) stays quiet. Restores the captured bytes
+ * unconditionally in a `finally`, rebuilds, and requires a clean pass. */
+async function runBreakTocThreshold() {
+  assertBuilt();
+  const original = readFileSync(VIEWER_DOC_PATH, "utf8");
+  const occurrences = original.split(TOC_THRESHOLD_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel112: refusing to run --break toc-threshold, expected ` +
+        `${JSON.stringify(TOC_THRESHOLD_TARGET)} to occur exactly once in ${VIEWER_DOC_PATH}, ` +
+        `measured ${occurrences}. A miscounted anchor would mutate the wrong spot and report a ` +
+        `false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(VIEWER_DOC_PATH, original);
+  try {
+    writeFileSync(
+      VIEWER_DOC_PATH,
+      original.replace(TOC_THRESHOLD_TARGET, TOC_THRESHOLD_REPLACEMENT),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkTocThreshold(tripViolations);
+    console.log(
+      `\n--break toc-threshold TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes(
+        "expected the TOC sidebar to render for the 5+ heading fixture",
+      ),
+    );
+  } finally {
+    restoreViewerDocSource(original);
+  }
+
+  const restoreViolations = [];
+  await checkTocThreshold(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break toc-threshold RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
 const CHECKS = {
   "viewer-page-served": (violations) => checkViewerPageServed(violations),
   "error-states": (violations) => checkErrorStates(violations),
   "no-raw-html-injection": (violations) => checkNoRawHtmlInjection(violations),
   "syntax-highlighting": (violations) => checkSyntaxHighlighting(violations),
+  "toc-threshold": (violations) => checkTocThreshold(violations),
 };
 
 const BREAKS = {
@@ -1458,6 +1649,7 @@ const BREAKS = {
   "error-states": runBreakErrorStates,
   "no-raw-html-injection": runBreakNoRawHtmlInjection,
   "syntax-highlighting": runBreakSyntaxHighlighting,
+  "toc-threshold": runBreakTocThreshold,
 };
 
 const PROBES = {};

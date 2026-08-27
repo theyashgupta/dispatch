@@ -185,12 +185,36 @@ const hrStyle: CSSProperties = {
 };
 
 const staticComponents: Components = {
-  h1: ({ children }) => <h1 style={h1Style}>{children}</h1>,
-  h2: ({ children }) => <h2 style={h2Style}>{children}</h2>,
-  h3: ({ children }) => <h3 style={h3Style}>{children}</h3>,
-  h4: ({ children }) => <h4 style={h4Style}>{children}</h4>,
-  h5: ({ children }) => <h5 style={h4Style}>{children}</h5>,
-  h6: ({ children }) => <h6 style={h4Style}>{children}</h6>,
+  h1: ({ id, children }) => (
+    <h1 id={id} style={h1Style}>
+      {children}
+    </h1>
+  ),
+  h2: ({ id, children }) => (
+    <h2 id={id} style={h2Style}>
+      {children}
+    </h2>
+  ),
+  h3: ({ id, children }) => (
+    <h3 id={id} style={h3Style}>
+      {children}
+    </h3>
+  ),
+  h4: ({ id, children }) => (
+    <h4 id={id} style={h4Style}>
+      {children}
+    </h4>
+  ),
+  h5: ({ id, children }) => (
+    <h5 id={id} style={h4Style}>
+      {children}
+    </h5>
+  ),
+  h6: ({ id, children }) => (
+    <h6 id={id} style={h4Style}>
+      {children}
+    </h6>
+  ),
   p: ({ children }) => <p style={pStyle}>{children}</p>,
   ul: ({ children, className }) => (
     <ul
@@ -271,10 +295,6 @@ export default function ViewerDoc({
     const transform = rehypeHeadingIds((found) => {
       headingsRef.current = found;
     });
-    // unified calls each `rehypePlugins` entry as an attacher (zero-arg, returns the per-run
-    // transformer); `rehypeHeadingIds` returns the transformer directly, so it must be wrapped
-    // here rather than placed in the plugins array as-is, or unified invokes it once at freeze
-    // time with no `tree` argument.
     return () => transform;
   }, []);
 
