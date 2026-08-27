@@ -20,6 +20,27 @@ const enc = new TextEncoder();
 const dec = new TextDecoder();
 
 /**
+ * Extracts the decoded filesystem path from a `file:` URI when it targets a markdown file.
+ *
+ * @remarks Shape derived from a live capture of Claude Code 2.1.245's OSC-8 output
+ * (112-RESEARCH.md, "THE BLOCKER, RESOLVED"): file:///abs/path with empty authority, percent
+ * encoded spaces, no line or column suffix. URL.pathname excludes params and fragments, so the
+ * extension test runs on the pure decoded path; the host is ignored because the viewer API's
+ * realpath containment is the actual boundary.
+ */
+function markdownFilePath(uri: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "file:") return null;
+  const path = decodeURIComponent(url.pathname);
+  return /\.(md|markdown)$/i.test(path) ? path : null;
+}
+
+/**
  * Reverse-tabnabbing-safe, modifier-gated link activator shared by both the plain-text
  * (`WebLinksAddon`) and OSC-8 (`linkHandler`) code paths: open a blank tab, null its opener, THEN
  * navigate — `window.open(url, "_blank")` does not reliably null the opener across browsers, which
@@ -28,12 +49,17 @@ const dec = new TextDecoder();
  */
 function activateLink(event: MouseEvent, uri: string): void {
   if (!(event.metaKey || event.ctrlKey)) return;
+  const mdPath = markdownFilePath(uri);
+  const target =
+    mdPath != null
+      ? `${window.location.origin}/viewer/?path=${encodeURIComponent(mdPath)}`
+      : uri;
   const win = window.open();
   if (win) {
     try {
       win.opener = null;
     } catch {}
-    win.location.href = uri;
+    win.location.href = target;
   } else {
     console.warn("dispatch: cmd+click open blocked");
   }
