@@ -170,6 +170,22 @@
  *     after the captured bytes were restored, and `git diff --quiet` on `sw.js` confirmed a
  *     byte-identical restore (modulo the pre-existing `try/catch` hardening around
  *     `existing.focus()`, itself a Plan 07 deviation, see the plan summary).
+ *   - `needs-input-delivers` proven able to fail (Plan 08), the phase's one check judged by a real
+ *     external push service rather than this repo's own stub: stripping the `k=` parameter from
+ *     the Authorization header value in `push-send.ts`, rebuilding, and re-running the same check
+ *     against a real booted sandbox server, a real detached tmux pane, real headless Chrome
+ *     subscribing to the real push service, and a real send to that real endpoint produced,
+ *     verbatim:
+ *     `needs-input-delivers: attempt outcome=tier-one-failed: real push service responded 403 for
+ *     endpoint prefix https://fcm.googleapis.com/fcm/send/d7-x, expected a 2xx status`
+ *     `needs-input-delivers: attempt outcome=tier-one-failed: real push service responded 403 for
+ *     endpoint prefix https://fcm.googleapis.com/fcm/send/dwve, expected a 2xx status`
+ *     Both bounded attempts tripped (a fresh real subscription each time), proving the real push
+ *     service itself rejects a VAPID header it cannot verify, the opposite-direction proof for
+ *     T-110-31. The RESTORE leg re-ran clean (`--break needs-input-delivers RESTORE leg: PASS`,
+ *     real push service observed HTTP status 201, tier two also observed the notification) after
+ *     the captured bytes were restored, and `git diff --quiet` on `push-send.ts` confirmed a
+ *     byte-identical restore.
  */
 
 import {
@@ -2991,6 +3007,340 @@ async function runBreakNotificationclickFocusOrOpen() {
 }
 
 // ---------------------------------------------------------------------------
+// needs-input-delivers (Plan 08's own new capability): the phase's one check
+// judged by a real external push service instead of this repo's own stub or
+// decrypt logic. A real headless-Chrome subscribe (mirroring src/web/lib/
+// push.ts's own register/fetch-key/subscribe/POST sequence, no synthetic
+// endpoint) feeds a real NEEDS_INPUT transition's real send.
+// ---------------------------------------------------------------------------
+
+const NEEDS_INPUT_DELIVERS_MAX_ATTEMPTS = 2;
+const NEEDS_INPUT_DELIVERS_ATTEMPT_TIMEOUT_MS = 60_000;
+const NEEDS_INPUT_DELIVERS_TIER_ONE_TIMEOUT_MS = 45_000;
+/** Mirrors `push-send.ts`'s own private `ENDPOINT_LOG_PREFIX_LEN`: the server never logs more of
+ * an endpoint than this, so this is also as much of it as this check can match against. */
+const ENDPOINT_LOG_PREFIX_LEN = 40;
+
+/** Runs inside the sandboxed page via `evalAsyncValue`. Mirrors `src/web/lib/push.ts`'s
+ * `enablePush` exactly: register `/sw.js`, fetch the real VAPID public key, convert it with the
+ * same padding and character swap, `pushManager.subscribe()` against the REAL push service (no
+ * timeout race and no `unsubscribe()` at the end, unlike `panel-109.mjs`'s `fcm-egress` probe:
+ * this check needs the subscription to survive so the drive/send legs below can use it), then POST
+ * `subscription.toJSON()` to `/api/push/subscribe`, exactly what the shipped client does. */
+const REAL_SUBSCRIBE_PAGE_EXPRESSION = `
+(async () => {
+  try {
+    const registration = await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
+    const { publicKey } = await fetch("/api/push/public-key").then((r) =>
+      r.json(),
+    );
+    const padding = "=".repeat((4 - (publicKey.length % 4)) % 4);
+    const base64 = (publicKey + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const rawData = atob(base64);
+    const bytes = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; i++) bytes[i] = rawData.charCodeAt(i);
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: bytes,
+    });
+    const res = await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(subscription.toJSON()),
+    });
+    return {
+      ok: res.ok,
+      status: res.status,
+      endpoint: subscription.endpoint,
+      errorName: null,
+      errorMessage: null,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: null,
+      endpoint: null,
+      errorName: err && err.name ? err.name : null,
+      errorMessage: err && err.message ? err.message : String(err),
+    };
+  }
+})()
+`;
+
+/** Scans `log` for every `[push] send <status> <endpointPrefix>` line (the exact shape
+ * `sendPushForCard` emits) and returns the LAST observed status for that exact prefix, or `null`
+ * if the prefix never appeared. */
+function findPushSendLogStatus(log, endpointPrefix) {
+  const re = /\[push\] send (\d+) (\S+)/g;
+  let match;
+  let status = null;
+  while ((match = re.exec(log)) != null) {
+    if (match[2] === endpointPrefix) status = Number(match[1]);
+  }
+  return status;
+}
+
+/**
+ * One bounded attempt of the whole real sequence: fresh sandbox, real headless-Chrome subscribe
+ * against the real push service, an independent `push_subscriptions` read (never trusting the
+ * page's own claim), a real `NEEDS_INPUT` marker, the tier-one hard gate (a real 2xx `[push] send`
+ * log line for the stored endpoint), and the tier-two soft assertion (inbound receipt via
+ * `getNotifications`). Returns one of:
+ *   `{ outcome: "subscribe-failed", detail }` - subscribe or the POST failed, or the row never
+ *     landed in `push_subscriptions`
+ *   `{ outcome: "tier-one-failed", detail, status? }` - no matching send log line, or a non-2xx
+ *   `{ outcome: "success", status, endpointPrefix, tierTwo }`
+ */
+async function attemptNeedsInputDelivers(attemptNum) {
+  const attemptDeadline = Date.now() + NEEDS_INPUT_DELIVERS_ATTEMPT_TIMEOUT_MS;
+  const home = makeSandboxHome(`needs-input-delivers-${attemptNum}`);
+  const cardId = `panel-110-needs-input-delivers-${attemptNum}-${process.pid}`;
+  const identifier = "PANEL-110-08";
+  const sessionUuid = randomUUID();
+  const tmuxName = `${SANDBOX_PREFIX}deliver-pane-${attemptNum}-${process.pid}`;
+  const reason = `panel-110-deliver-reason-${process.pid}-${Date.now()}-${attemptNum}`;
+  let boot;
+  let chromeChild;
+  let cdp;
+  try {
+    await startTmuxPane(tmuxName);
+    await seedNeedsInputCard(home, {
+      cardId,
+      identifier,
+      sessionId: sessionUuid,
+      tmuxSession: tmuxName,
+    });
+    boot = bootServerAt(home);
+    await waitForReady(SANDBOX_PORT);
+
+    chromeChild = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+
+    const origin = `http://127.0.0.1:${SANDBOX_PORT}`;
+    await grantNotifications(cdp, origin);
+    const { sessionId: pageSessionId } = await openPage(cdp, {
+      url: `${origin}/`,
+    });
+    await ensureServiceWorkerReady(cdp, pageSessionId);
+
+    const subscribeResult = await evalAsyncValue(
+      cdp,
+      pageSessionId,
+      REAL_SUBSCRIBE_PAGE_EXPRESSION,
+    );
+    if (!subscribeResult.ok) {
+      return {
+        outcome: "subscribe-failed",
+        detail:
+          `real subscribe/POST did not succeed: status=${subscribeResult.status} ` +
+          `errorName=${subscribeResult.errorName} errorMessage=${subscribeResult.errorMessage}`,
+      };
+    }
+
+    const dbPath = join(home, ".dispatch", "board.db");
+    const rows = await pollPushDbRows(
+      dbPath,
+      (r) => r.some((row) => row.endpoint === subscribeResult.endpoint),
+      10_000,
+    );
+    const row = rows.find((r) => r.endpoint === subscribeResult.endpoint);
+    if (row == null) {
+      return {
+        outcome: "subscribe-failed",
+        detail: `subscribed endpoint never landed in push_subscriptions (prefix ${subscribeResult.endpoint.slice(0, ENDPOINT_LOG_PREFIX_LEN)})`,
+      };
+    }
+
+    await driveMarker(tmuxName, "NEEDS_INPUT", reason);
+
+    const endpointPrefix = row.endpoint.slice(0, ENDPOINT_LOG_PREFIX_LEN);
+    const tierOneDeadline = Math.min(
+      Date.now() + NEEDS_INPUT_DELIVERS_TIER_ONE_TIMEOUT_MS,
+      attemptDeadline,
+    );
+    let observedStatus = null;
+    while (Date.now() < tierOneDeadline) {
+      observedStatus = findPushSendLogStatus(boot.log(), endpointPrefix);
+      if (observedStatus != null) break;
+      await sleep(POLL_INTERVAL_MS);
+    }
+
+    if (observedStatus == null) {
+      return {
+        outcome: "tier-one-failed",
+        detail: `no "[push] send <status> ${endpointPrefix}" line observed in the sandbox server log within ${NEEDS_INPUT_DELIVERS_TIER_ONE_TIMEOUT_MS}ms`,
+      };
+    }
+    if (observedStatus < 200 || observedStatus >= 300) {
+      return {
+        outcome: "tier-one-failed",
+        detail: `real push service responded ${observedStatus} for endpoint prefix ${endpointPrefix}, expected a 2xx status`,
+        status: observedStatus,
+      };
+    }
+
+    let tierTwo;
+    const tierTwoTimeoutMs = attemptDeadline - Date.now();
+    if (tierTwoTimeoutMs > 0) {
+      const notifications = await pollServiceWorkerNotifications(
+        cdp,
+        pageSessionId,
+        (list) => list.some((n) => n.tag === cardId),
+        tierTwoTimeoutMs,
+      );
+      tierTwo = notifications.some((n) => n.tag === cardId)
+        ? { observed: true, note: null }
+        : {
+            observed: false,
+            note:
+              `WARNING: tier two (headless inbound receipt) never observed a notification tagged ` +
+              `${JSON.stringify(cardId)} within the remaining attempt window - a known limitation ` +
+              `of headless Chrome's inbound push connection (see 109-05), not a violation since ` +
+              `tier one already passed`,
+          };
+    } else {
+      tierTwo = {
+        observed: false,
+        note: "WARNING: no attempt time remained to poll tier two after tier one passed",
+      };
+    }
+
+    return {
+      outcome: "success",
+      status: observedStatus,
+      endpointPrefix,
+      tierTwo,
+    };
+  } finally {
+    if (cdp) cdp.close();
+    await stopServer(chromeChild);
+    rmSync(chromeUserDataDir(), { recursive: true, force: true });
+    await killTmuxPane(tmuxName);
+    await stopServer(boot?.child);
+    cleanupSandboxHome(home);
+  }
+}
+
+/** At most `NEEDS_INPUT_DELIVERS_MAX_ATTEMPTS` bounded attempts of the whole sequence, per the
+ * measured ~38% transient failure rate against the real push service (109-05's `fcm-egress`
+ * verdict). A subscribe failure on BOTH attempts is a violation (outbound reachability is already
+ * proven, so two consecutive failures point at a real problem, matching the 109
+ * `subscribe-round-trip` precedent). A tier-one failure (missing or non-2xx send) is reported for
+ * whichever attempt(s) reached it. Tier two is recorded, never a violation when tier one passed. */
+async function checkNeedsInputDelivers(violations) {
+  assertBuilt();
+  const attemptResults = [];
+  let success = null;
+  for (
+    let attempt = 1;
+    attempt <= NEEDS_INPUT_DELIVERS_MAX_ATTEMPTS;
+    attempt++
+  ) {
+    const result = await attemptNeedsInputDelivers(attempt);
+    console.log(
+      `needs-input-delivers: attempt ${attempt}/${NEEDS_INPUT_DELIVERS_MAX_ATTEMPTS} outcome=${result.outcome}` +
+        (result.detail ? ` (${result.detail})` : ""),
+    );
+    attemptResults.push(result);
+    if (result.outcome === "success") {
+      success = result;
+      break;
+    }
+  }
+
+  if (success) {
+    console.log(
+      `needs-input-delivers: real push service accepted the send, observed HTTP status ${success.status}`,
+    );
+    console.log(
+      success.tierTwo.observed
+        ? "needs-input-delivers: tier two (headless inbound receipt) observed the notification"
+        : `needs-input-delivers: ${success.tierTwo.note}`,
+    );
+    return;
+  }
+
+  if (attemptResults.every((r) => r.outcome === "subscribe-failed")) {
+    violations.push(
+      `needs-input-delivers: real subscribe failed on all ${attemptResults.length} attempt(s): ` +
+        attemptResults.map((r) => r.detail).join(" | "),
+    );
+    return;
+  }
+
+  for (const r of attemptResults) {
+    violations.push(
+      `needs-input-delivers: attempt outcome=${r.outcome}: ${r.detail}`,
+    );
+  }
+}
+
+const NEEDS_INPUT_DELIVERS_BREAK_TARGET =
+  "Authorization: `vapid t=${jwt}, k=${vapid.publicKeyBase64Url}`,";
+const NEEDS_INPUT_DELIVERS_BREAK_REPLACEMENT =
+  "Authorization: `vapid t=${jwt}`,";
+
+/** `--break needs-input-delivers`: strips the `k=` parameter from the Authorization header value
+ * in `push-send.ts`, so the real push service can no longer resolve the signing key, rebuilds via
+ * `resetBuildCache()`, and requires the SAME check function to report a tier-one non-2xx violation
+ * (trip leg): subscribing is unaffected (the Authorization header is never sent to FCM until the
+ * send leg), so the failure this trip proves is specifically that the real push service rejects a
+ * VAPID header it cannot verify, the opposite-direction proof for T-110-31. Restores the captured
+ * bytes unconditionally in a `finally`, rebuilds, and requires a clean pass (restore leg). */
+async function runBreakNeedsInputDelivers() {
+  assertBuilt();
+  const original = readFileSync(PUSH_SEND_TS_PATH, "utf8");
+  const occurrences =
+    original.split(NEEDS_INPUT_DELIVERS_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel110: refusing to run --break needs-input-delivers, expected ` +
+        `${JSON.stringify(NEEDS_INPUT_DELIVERS_BREAK_TARGET)} to occur exactly once in ` +
+        `${PUSH_SEND_TS_PATH}, measured ${occurrences}. A miscounted anchor would mutate the ` +
+        `wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(PUSH_SEND_TS_PATH, original);
+  try {
+    writeFileSync(
+      PUSH_SEND_TS_PATH,
+      original.replace(
+        NEEDS_INPUT_DELIVERS_BREAK_TARGET,
+        NEEDS_INPUT_DELIVERS_BREAK_REPLACEMENT,
+      ),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkNeedsInputDelivers(tripViolations);
+    console.log(
+      `\n--break needs-input-delivers TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some(
+      (v) =>
+        v.includes("tier-one-failed") && v.includes("expected a 2xx status"),
+    );
+  } finally {
+    writeFileSync(PUSH_SEND_TS_PATH, original);
+    resetBuildCache();
+    unregisterRestore(PUSH_SEND_TS_PATH);
+  }
+
+  const restoreViolations = [];
+  await checkNeedsInputDelivers(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break needs-input-delivers RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS / PROBES registries. Every later plan in this phase
 // appends here.
 // ---------------------------------------------------------------------------
@@ -3008,6 +3358,7 @@ const CHECKS = {
   "tag-renotify-replace": (violations) => checkTagRenotifyReplace(violations),
   "notificationclick-focus-or-open": (violations) =>
     checkNotificationclickFocusOrOpen(violations),
+  "needs-input-delivers": (violations) => checkNeedsInputDelivers(violations),
 };
 
 const BREAKS = {
@@ -3019,6 +3370,7 @@ const BREAKS = {
   "deep-link-param-opens-card": runBreakDeepLinkParamOpensCard,
   "tag-renotify-replace": runBreakTagRenotifyReplace,
   "notificationclick-focus-or-open": runBreakNotificationclickFocusOrOpen,
+  "needs-input-delivers": runBreakNeedsInputDelivers,
 };
 
 const PROBES = {};
