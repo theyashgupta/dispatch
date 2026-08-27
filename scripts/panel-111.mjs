@@ -346,6 +346,35 @@ function bootServerAt(home) {
   return { child, log: () => acc };
 }
 
+/**
+ * Boot the sandbox server and prove the child THIS run spawned is the process answering on
+ * `SANDBOX_PORT`: `listenWithFallback` silently falls back to an OS-assigned port on EADDRINUSE,
+ * so a stale server from an earlier run could otherwise satisfy `waitForReady` and every
+ * assertion would target a server with the wrong HOME. Stops the child before rethrowing so a
+ * failed boot never leaks a listener.
+ */
+async function bootAndWait(home) {
+  const boot = bootServerAt(home);
+  try {
+    await waitForReady(SANDBOX_PORT);
+    const marker = `listening on http://127.0.0.1:${SANDBOX_PORT}`;
+    const logDeadline = Date.now() + 2_000;
+    while (!boot.log().includes(marker) && Date.now() < logDeadline) {
+      await sleep(POLL_INTERVAL_MS);
+    }
+    if (!boot.log().includes(marker)) {
+      throw new Error(
+        `panel-111: the booted child did not bind ${SANDBOX_PORT} (EADDRINUSE fallback or ` +
+          `crash); refusing to assert against a server this run did not start.\n${boot.log()}`,
+      );
+    }
+  } catch (err) {
+    await stopServer(boot.child);
+    throw err;
+  }
+  return boot;
+}
+
 function readFlag(argv, flag) {
   const idx = argv.indexOf(flag);
   if (idx < 0) return null;
@@ -435,8 +464,7 @@ async function checkServeInRoot(violations) {
   const home = makeSandboxHome("serve-in-root");
   let boot;
   try {
-    boot = bootServerAt(home);
-    await waitForReady(SANDBOX_PORT);
+    boot = await bootAndWait(home);
 
     const workspaces = join(home, "workspaces");
     const docPath = join(workspaces, "doc.md");
@@ -646,8 +674,7 @@ async function checkBoundaryRejections(violations) {
     symlinkSync(secretPath, linkPath);
     symlinkSync(notePath, aliasPath);
 
-    boot = bootServerAt(home);
-    await waitForReady(SANDBOX_PORT);
+    boot = await bootAndWait(home);
 
     const base = `http://127.0.0.1:${SANDBOX_PORT}/api/viewer/file`;
 
@@ -882,8 +909,7 @@ async function checkSizeCap(violations) {
     const bigPath = join(workspaces, "big.md");
     writeFileSync(bigPath, Buffer.alloc(OVERSIZED_BYTES, "a"));
 
-    boot = bootServerAt(home);
-    await waitForReady(SANDBOX_PORT);
+    boot = await bootAndWait(home);
 
     const base = `http://127.0.0.1:${SANDBOX_PORT}/api/viewer/file`;
 
@@ -1043,8 +1069,7 @@ async function checkStaleWorktreeRoot(violations) {
       },
     ]);
 
-    boot = bootServerAt(home);
-    await waitForReady(SANDBOX_PORT);
+    boot = await bootAndWait(home);
 
     const base = `http://127.0.0.1:${SANDBOX_PORT}/api/viewer/file`;
 
@@ -1257,8 +1282,7 @@ async function checkAuthGate(violations) {
     const docPath = join(workspaces, "doc.md");
     writeFileSync(docPath, docBytes, "utf8");
 
-    boot = bootServerAt(home);
-    await waitForReady(SANDBOX_PORT);
+    boot = await bootAndWait(home);
 
     const requestPath = "/api/viewer/file?path=" + encodeURIComponent(docPath);
 
