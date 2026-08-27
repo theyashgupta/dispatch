@@ -457,7 +457,13 @@ function bootServerAt(home) {
 
 function readFlag(argv, flag) {
   const idx = argv.indexOf(flag);
-  return idx >= 0 ? (argv[idx + 1] ?? null) : null;
+  if (idx < 0) return null;
+  const value = argv[idx + 1];
+  if (value == null || value.startsWith("-")) {
+    console.error(`${flag} requires a value`);
+    process.exit(1);
+  }
+  return value;
 }
 
 async function isPortListening(port) {
@@ -3395,21 +3401,21 @@ async function main() {
 
   const argv = process.argv.slice(2);
   const checkName = readFlag(argv, "--check");
-  if (checkName != null && !CHECKS[checkName]) {
+  if (checkName != null && !Object.hasOwn(CHECKS, checkName)) {
     console.error(
       `unknown check "${checkName}", valid: ${Object.keys(CHECKS).join(", ")}`,
     );
     process.exit(1);
   }
   const breakName = readFlag(argv, "--break");
-  if (breakName != null && !BREAKS[breakName]) {
+  if (breakName != null && !Object.hasOwn(BREAKS, breakName)) {
     console.error(
       `unknown break "${breakName}", valid: ${Object.keys(BREAKS).join(", ")}`,
     );
     process.exit(1);
   }
   const probeName = readFlag(argv, "--probe");
-  if (probeName != null && !PROBES[probeName]) {
+  if (probeName != null && !Object.hasOwn(PROBES, probeName)) {
     console.error(
       `unknown probe "${probeName}", valid: ${Object.keys(PROBES).join(", ")}`,
     );
