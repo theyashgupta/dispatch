@@ -2745,7 +2745,9 @@ async function runBreakMdLinkOpensViewer() {
       `\n--break md-link-opens-viewer TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
     );
     tripFired = tripViolations.some((v) =>
-      v.includes("meta-clicking the markdown link never recorded a window.open"),
+      v.includes(
+        "meta-clicking the markdown link never recorded a window.open",
+      ),
     );
   } finally {
     restoreTerminalMainSource(original);

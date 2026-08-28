@@ -149,6 +149,7 @@ function ViewerApp() {
     let cancelled = false;
 
     const load = (): void => {
+      const seq = ++navSeq.current;
       const { path, fragment: frag } = readPathAndFragment();
       setFragment(frag);
       if (path == null) {
@@ -158,7 +159,7 @@ function ViewerApp() {
       if (path === loadedPath.current) return;
       setState(LOADING);
       void fetchFile(path).then((next) => {
-        if (cancelled) return;
+        if (cancelled || seq !== navSeq.current) return;
         setState(next);
         if (next.status === "loaded") {
           loadedPath.current = next.path;
