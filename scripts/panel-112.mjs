@@ -1548,6 +1548,28 @@ async function checkNoRawHtmlInjection(violations) {
       );
     }
 
+    const xssFired = await evalValue(
+      cdp,
+      page.sessionId,
+      `window.__panel112XssFired === true`,
+    );
+    if (xssFired === true) {
+      violations.push(
+        `no-raw-html-injection: the raw-HTML <script> executed (window.__panel112XssFired === true)`,
+      );
+    }
+
+    const imgOnerrorFired = await evalValue(
+      cdp,
+      page.sessionId,
+      `window.__panel112ImgOnerrorFired === true`,
+    );
+    if (imgOnerrorFired === true) {
+      violations.push(
+        `no-raw-html-injection: the raw-HTML <img onerror> fired (window.__panel112ImgOnerrorFired === true)`,
+      );
+    }
+
     // Give any deferred console activity from the initial render a moment to land.
     await sleep(200);
     if (consoleErrors.length > 0) {
