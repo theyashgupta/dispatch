@@ -26,7 +26,13 @@ viewerPageRouter.get("{/*rest}", (req, res) => {
   }
 
   res.set("Cache-Control", "no-cache");
-  res.sendFile(relPath === "" ? "viewer.html" : relPath, {
-    root: WEB_DIST_DIR,
-  });
+  res.sendFile(
+    relPath === "" ? "viewer.html" : relPath,
+    { root: WEB_DIST_DIR },
+    (err) => {
+      if (err && !res.headersSent) {
+        res.status(404).type("text/plain").send("Not found");
+      }
+    },
+  );
 });
