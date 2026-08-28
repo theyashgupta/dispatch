@@ -1,4 +1,5 @@
 import {
+  Component,
   lazy,
   StrictMode,
   Suspense,
@@ -6,6 +7,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles/tokens.css";
@@ -33,11 +35,11 @@ const TOO_LARGE: ViewState = {
   body: "This file is over the 2 MB viewer limit. Open it in your editor instead.",
 };
 
-const COULDNT_LOAD: ViewState = {
+const COULDNT_LOAD = {
   status: "error",
   heading: "Couldn't load file",
   body: "Check that Dispatch is running, then reload the page.",
-};
+} as const;
 
 const centerStackStyle: CSSProperties = {
   display: "flex",
@@ -117,6 +119,31 @@ function ErrorState({ heading, body }: { heading: string; body: string }) {
   );
 }
 
+/**
+ * Renders the {@link COULDNT_LOAD} state when a descendant render throws, so a lazy-chunk load
+ * failure (stale index.html vs rebuilt hashed assets, offline) shows the error state instead of a
+ * blank page. Class component because React exposes error boundaries only through the class API.
+ */
+class ChunkErrorBoundary extends Component<
+  { children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  render(): ReactNode {
+    if (this.state.failed) {
+      return (
+        <ErrorState heading={COULDNT_LOAD.heading} body={COULDNT_LOAD.body} />
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function ViewerApp() {
   const [state, setState] = useState<ViewState>(LOADING);
   const [fragment, setFragment] = useState("");
@@ -190,13 +217,15 @@ function ViewerApp() {
         <ErrorState heading={state.heading} body={state.body} />
       ) : null}
       {state.status === "loaded" ? (
-        <Suspense fallback={<LoadingState />}>
-          <ViewerDoc
-            source={state.source}
-            filePath={state.path}
-            onNavigate={onNavigate}
-          />
-        </Suspense>
+        <ChunkErrorBoundary>
+          <Suspense fallback={<LoadingState />}>
+            <ViewerDoc
+              source={state.source}
+              filePath={state.path}
+              onNavigate={onNavigate}
+            />
+          </Suspense>
+        </ChunkErrorBoundary>
       ) : null}
     </>
   );
