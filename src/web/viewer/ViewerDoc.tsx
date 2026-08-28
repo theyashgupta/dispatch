@@ -30,8 +30,12 @@ function resolveRelativeMd(
   const [pathPart, fragment = ""] = href.split("#");
   if (!/\.(md|markdown)$/i.test(pathPart)) return null;
   const dir = currentPath.slice(0, currentPath.lastIndexOf("/") + 1);
-  const url = new URL(pathPart, `file://${encodeURI(dir)}`);
-  return { path: decodeURIComponent(url.pathname), fragment };
+  try {
+    const url = new URL(pathPart, `file://${encodeURI(dir)}`);
+    return { path: decodeURIComponent(url.pathname), fragment };
+  } catch {
+    return null;
+  }
 }
 
 const blockMargin = "0 0 var(--space-sm)";
