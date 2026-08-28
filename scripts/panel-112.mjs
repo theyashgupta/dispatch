@@ -103,10 +103,9 @@
  *   - `md-link-opens-viewer` proven able to fail (Plan 04): replacing the `.md` alternative in the
  *     `.md|markdown` extension regex in `src/web/terminal-main.ts`'s `markdownFilePath` with an
  *     unmatchable token, rebuilding, and re-running the same check against a real tmux/ttyd/Chrome
- *     rig replaying the captured OSC-8 byte shape produced, verbatim:
- *     `md-link-opens-viewer: expected the md link's recorded URL to start with "http://127.0.0.1:47886/viewer/?path=", observed "file:///.../draft%20notes%20(v2).md"`
- *     `md-link-opens-viewer: the md link's recorded URL started with file://, the raw URI leaked instead of rerouting through the viewer: "file:///.../draft%20notes%20(v2).md"`
- *     `md-link-opens-viewer: expected the decoded ?path= to equal "/.../draft notes (v2).md" (space intact), observed null`
+ *     rig replaying the captured OSC-8 byte shape produced, verbatim (after CR-01's scheme
+ *     allowlist, the unrecognized `.md` link is a blocked `file://` scheme, so it never navigates):
+ *     `md-link-opens-viewer: meta-clicking the markdown link never recorded a window.open call within 15000ms`
  *     The RESTORE leg re-ran clean after the captured bytes were restored, and
  *     `git diff --quiet src/` confirmed a byte-identical restore. No tmux server, ttyd, Chrome, or
  *     listener on 47886/9382 remained after the run.
@@ -955,11 +954,14 @@ async function openTerminalPage(cdp, { url, initScript }) {
  * captured OSC-8 byte shape (112-RESEARCH.md Code Examples' `osc8Link` helper) for `absPath`,
  * with the visible link text (its basename) alone on its own output line so the harness can find
  * it in `tmux capture-pane -p` without any escape-sequence parsing.
+ *
+ * @remarks `uriOverride` swaps the emitted OSC-8 target while keeping the basename label, so the
+ * control leg can plant a `javascript:`-scheme link (the CR-01 XSS vector) without a matching file.
  */
-function buildOsc8Command(absPath) {
+function buildOsc8Command(absPath, uriOverride = null) {
   const esc = "\\033";
   const st = esc + "\\\\";
-  const uri = `file://${encodeURI(absPath)}`;
+  const uri = uriOverride ?? `file://${encodeURI(absPath)}`;
   const label = absPath.split("/").pop();
   const fmt = `${esc}]8;id=t112;%s${st}%s${esc}]8;;${st}\\n`;
   const shQuote = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -2429,15 +2431,16 @@ async function runBreakAnchorJump() {
 // ---------------------------------------------------------------------------
 // md-link-opens-viewer: real tmux + ttyd + headless Chrome, meta-clicking a
 // printf-replayed captured OSC-8 markdown link opens the Dispatch viewer
-// route; a non-md control link and a no-modifier click stay unchanged.
+// route; a javascript:-scheme control link must NOT navigate and a no-modifier
+// click stays unchanged.
 // ---------------------------------------------------------------------------
 
 /**
  * Real tmux/ttyd/Chrome via CDP: meta-clicking a printf-replayed OSC-8 link carrying the exact
  * captured byte shape (112-RESEARCH.md) for the space-in-name markdown fixture must open
  * `/viewer/?path=` with the decoded, space-intact absolute path, never a raw `file://` URL. A
- * meta-click on a non-markdown control link must record the raw `file://` URI byte-for-byte
- * (unchanged behavior). A plain click without modifiers must record nothing (the modifier gate).
+ * meta-click on a `javascript:`-scheme control link must record no window.open at all (CR-01's
+ * scheme allowlist). A plain click without modifiers must record nothing (the modifier gate).
  */
 async function checkMdLinkOpensViewer(violations) {
   assertBuilt();
@@ -2529,9 +2532,10 @@ async function checkMdLinkOpensViewer(violations) {
 
       const workspaces = join(home, "workspaces");
       const mdPath = join(workspaces, "draft notes (v2).md");
-      const txtPath = join(workspaces, "control.txt");
+      const jsCtrlPath = join(workspaces, "js-scheme-control");
+      const jsCtrlUri = "javascript:window.__panel112XssFired = true";
       const mdLabel = basename(mdPath);
-      const txtLabel = basename(txtPath);
+      const jsCtrlLabel = basename(jsCtrlPath);
 
       await tmuxP112([
         "send-keys",
@@ -2544,7 +2548,7 @@ async function checkMdLinkOpensViewer(violations) {
         "send-keys",
         "-t",
         `=${tmuxName}:`,
-        buildOsc8Command(txtPath),
+        buildOsc8Command(jsCtrlPath, jsCtrlUri),
         "Enter",
       ]);
 
@@ -2562,12 +2566,12 @@ async function checkMdLinkOpensViewer(violations) {
       };
 
       const mdRow = await findRow(mdLabel);
-      const txtRow = await findRow(txtLabel);
-      if (mdRow < 0 || txtRow < 0) {
+      const jsCtrlRow = await findRow(jsCtrlLabel);
+      if (mdRow < 0 || jsCtrlRow < 0) {
         violations.push(
           `md-link-opens-viewer: expected both link labels (${JSON.stringify(mdLabel)}, ` +
-            `${JSON.stringify(txtLabel)}) to appear on their own output row within ` +
-            `${ERROR_POLL_TIMEOUT_MS}ms, observed mdRow=${mdRow} txtRow=${txtRow}`,
+            `${JSON.stringify(jsCtrlLabel)}) to appear on their own output row within ` +
+            `${ERROR_POLL_TIMEOUT_MS}ms, observed mdRow=${mdRow} jsCtrlRow=${jsCtrlRow}`,
         );
       } else {
         const { cols, rows } = await tmuxPaneSize112(tmuxName);
@@ -2587,7 +2591,7 @@ async function checkMdLinkOpensViewer(violations) {
           y: rect.top + (row + 0.5) * cellHeight,
         });
         const mdPoint = pointFor(mdRow, mdLabel);
-        const txtPoint = pointFor(txtRow, txtLabel);
+        const jsCtrlPoint = pointFor(jsCtrlRow, jsCtrlLabel);
 
         // modifiers: 0 (no meta/ctrl) - activateLink's gate must return before window.open fires.
         await dispatchRealClick(cdp, page.sessionId, mdPoint, 0);
@@ -2645,33 +2649,41 @@ async function checkMdLinkOpensViewer(violations) {
           }
         }
 
-        // Meta-click the non-markdown control: behavior stays unchanged (raw URI, byte-equal).
-        await dispatchRealClick(cdp, page.sessionId, txtPoint, 4);
-        const txtOpenState = await pollUntilTruthy(
+        // Meta-click the javascript:-scheme control: CR-01's scheme allowlist must block it, so
+        // activateLink returns before window.open and no navigation is ever recorded.
+        const opensBeforeCtrl = await evalValue(
           cdp,
           page.sessionId,
-          `window.__panel112Opens.length >= 2 ? "yes" : null`,
-          ERROR_POLL_TIMEOUT_MS,
+          `window.__panel112Opens.length`,
         );
-        if (txtOpenState == null) {
-          violations.push(
-            `md-link-opens-viewer: meta-clicking the non-markdown control link never recorded a ` +
-              `second window.open call within ${ERROR_POLL_TIMEOUT_MS}ms`,
-          );
-        } else {
-          const txtOpened = await evalValue(
+        await dispatchRealClick(cdp, page.sessionId, jsCtrlPoint, 4);
+        await sleep(500);
+        const opensAfterCtrl = await evalValue(
+          cdp,
+          page.sessionId,
+          `window.__panel112Opens.length`,
+        );
+        if (opensAfterCtrl !== opensBeforeCtrl) {
+          const ctrlOpened = await evalValue(
             cdp,
             page.sessionId,
             `window.__panel112Opens[window.__panel112Opens.length - 1]`,
           );
-          const expectedTxtUri = `file://${encodeURI(txtPath)}`;
-          if (txtOpened !== expectedTxtUri) {
-            violations.push(
-              `md-link-opens-viewer: expected the non-md control's (.txt) recorded URL to be ` +
-                `byte-equal to ${JSON.stringify(expectedTxtUri)}, observed ` +
-                `${JSON.stringify(txtOpened)}`,
-            );
-          }
+          violations.push(
+            `md-link-opens-viewer: meta-clicking the javascript:-scheme control must NOT navigate, ` +
+              `but window.open recorded ${JSON.stringify(ctrlOpened)}`,
+          );
+        }
+        const ctrlXssFired = await evalValue(
+          cdp,
+          page.sessionId,
+          `window.__panel112XssFired === true`,
+        );
+        if (ctrlXssFired === true) {
+          violations.push(
+            `md-link-opens-viewer: the javascript:-scheme OSC-8 control executed ` +
+              `(window.__panel112XssFired === true)`,
+          );
         }
       }
     }
@@ -2701,10 +2713,10 @@ function restoreTerminalMainSource(original) {
 
 /** `--break md-link-opens-viewer`: replaces the `.md` alternative in `markdownFilePath`'s sole
  * extension regex with an unmatchable token (panel-110-06 single-call-site precedent), rebuilds,
- * and requires the SAME check to report the markdown link recorded as a raw `file://` URL (the
- * matcher no longer recognizes `.md`, so `activateLink` falls through to its unchanged-URI
- * branch). Restores the captured bytes unconditionally in a `finally`, rebuilds, and requires a
- * clean pass. */
+ * and requires the SAME check to report that meta-clicking the markdown link recorded no
+ * window.open (the matcher no longer recognizes `.md`, so `activateLink` sees a `file://` scheme
+ * that CR-01's allowlist blocks, and the link never reroutes through the viewer). Restores the
+ * captured bytes unconditionally in a `finally`, rebuilds, and requires a clean pass. */
 async function runBreakMdLinkOpensViewer() {
   assertBuilt();
   const original = readFileSync(TERMINAL_MAIN_PATH, "utf8");
@@ -2732,7 +2744,9 @@ async function runBreakMdLinkOpensViewer() {
     console.log(
       `\n--break md-link-opens-viewer TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
     );
-    tripFired = tripViolations.some((v) => v.includes("started with file://"));
+    tripFired = tripViolations.some((v) =>
+      v.includes("meta-clicking the markdown link never recorded a window.open"),
+    );
   } finally {
     restoreTerminalMainSource(original);
   }
