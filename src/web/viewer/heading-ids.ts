@@ -33,14 +33,20 @@ function toText(node: Nodes): string {
 export function rehypeHeadingIds(collect: (headings: HeadingEntry[]) => void) {
   return (tree: Root): void => {
     const seen = new Map<string, number>();
+    const used = new Set<string>();
     const found: HeadingEntry[] = [];
     const walk = (node: Nodes): void => {
       if (node.type === "element" && /^h[1-6]$/.test(node.tagName)) {
         const text = toText(node);
         const base = slugify(text) || "section";
-        const count = seen.get(base) ?? 0;
+        let count = seen.get(base) ?? 0;
+        let id = count === 0 ? base : `${base}-${count}`;
+        while (used.has(id)) {
+          count += 1;
+          id = `${base}-${count}`;
+        }
         seen.set(base, count + 1);
-        const id = count === 0 ? base : `${base}-${count}`;
+        used.add(id);
         node.properties = { ...node.properties, id };
         found.push({ depth: Number(node.tagName[1]), text, id });
       }
