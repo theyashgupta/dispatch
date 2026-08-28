@@ -1046,6 +1046,10 @@ function writeFixtures(home) {
       "",
       "![Markdown image](https://example.com/panel-112-fixture.png)",
       "",
+      "[js scheme link](javascript:window.__panel112XssFired = true)",
+      "",
+      "![js scheme image](javascript:window.__panel112XssFired = true)",
+      "",
     ].join("\n"),
     "utf8",
   );
@@ -1545,6 +1549,24 @@ async function checkNoRawHtmlInjection(violations) {
       violations.push(
         `no-raw-html-injection: expected 0 elements with an [onerror] attribute document-wide, ` +
           `observed ${onerrorCount}`,
+      );
+    }
+
+    const jsSchemeSurvived = await evalValue(
+      cdp,
+      page.sessionId,
+      `(function(){
+        var nodes = Array.from(document.querySelectorAll(".viewer-content a, .viewer-content img"));
+        return nodes.some(function(n){
+          var v = ((n.getAttribute("href") || n.getAttribute("src") || "")).trim().toLowerCase();
+          return v.indexOf("javascript:") === 0;
+        });
+      })()`,
+    );
+    if (jsSchemeSurvived === true) {
+      violations.push(
+        `no-raw-html-injection: a javascript:-scheme URL survived into a rendered href/src ` +
+          `(defaultUrlTransform regression)`,
       );
     }
 
