@@ -31,7 +31,11 @@ function resolveRelativeMd(
   if (!/\.(md|markdown)$/i.test(pathPart)) return null;
   const dir = currentPath.slice(0, currentPath.lastIndexOf("/") + 1);
   try {
-    const url = new URL(pathPart, `file://${encodeURI(dir)}`);
+    const base = encodeURI(dir).replace(
+      /[#?]/g,
+      (c) => "%" + c.charCodeAt(0).toString(16),
+    );
+    const url = new URL(pathPart, `file://${base}`);
     return { path: decodeURIComponent(url.pathname), fragment };
   } catch {
     return null;
