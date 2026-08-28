@@ -3,6 +3,7 @@ import {
   StrictMode,
   Suspense,
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
 } from "react";
@@ -119,6 +120,7 @@ function ErrorState({ heading, body }: { heading: string; body: string }) {
 function ViewerApp() {
   const [state, setState] = useState<ViewState>(LOADING);
   const [fragment, setFragment] = useState("");
+  const navSeq = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,7 +163,9 @@ function ViewerApp() {
     history.pushState({}, "", url);
     setFragment(frag);
     setState(LOADING);
+    const seq = ++navSeq.current;
     void fetchFile(path).then((next) => {
+      if (seq !== navSeq.current) return;
       setState(next);
       if (next.status === "loaded") {
         document.title = basename(next.path);
