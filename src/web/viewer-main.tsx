@@ -119,11 +119,6 @@ function ErrorState({ heading, body }: { heading: string; body: string }) {
   );
 }
 
-/**
- * Renders the {@link COULDNT_LOAD} state when a descendant render throws, so a lazy-chunk load
- * failure (stale index.html vs rebuilt hashed assets, offline) shows the error state instead of a
- * blank page. Class component because React exposes error boundaries only through the class API.
- */
 class ChunkErrorBoundary extends Component<
   { children: ReactNode },
   { failed: boolean }
