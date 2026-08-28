@@ -45,15 +45,28 @@ function markdownFilePath(uri: string): string | null {
  * (`WebLinksAddon`) and OSC-8 (`linkHandler`) code paths: open a blank tab, null its opener, THEN
  * navigate — `window.open(url, "_blank")` does not reliably null the opener across browsers, which
  * would let the opened page reach back into this terminal via `window.opener`.
+ * @remarks Non-markdown links open only when their scheme is http/https/mailto. Because
+ * `linkHandler.allowNonHttpProtocols` is true, xterm hands EVERY OSC-8 URI here, so an agent-echoed
+ * `javascript:` OSC-8 link would otherwise execute same-origin on the inherited about:blank origin.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 function activateLink(event: MouseEvent, uri: string): void {
   if (!(event.metaKey || event.ctrlKey)) return;
   const mdPath = markdownFilePath(uri);
-  const target =
-    mdPath != null
-      ? `${window.location.origin}/viewer/?path=${encodeURIComponent(mdPath)}`
-      : uri;
+  let target: string;
+  if (mdPath != null) {
+    target = `${window.location.origin}/viewer/?path=${encodeURIComponent(mdPath)}`;
+  } else {
+    let protocol: string;
+    try {
+      protocol = new URL(uri).protocol;
+    } catch {
+      return;
+    }
+    if (protocol !== "http:" && protocol !== "https:" && protocol !== "mailto:")
+      return;
+    target = uri;
+  }
   const win = window.open();
   if (win) {
     try {
