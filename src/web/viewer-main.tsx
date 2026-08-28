@@ -121,6 +121,7 @@ function ViewerApp() {
   const [state, setState] = useState<ViewState>(LOADING);
   const [fragment, setFragment] = useState("");
   const navSeq = useRef(0);
+  const loadedPath = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -132,11 +133,15 @@ function ViewerApp() {
         setState(NOT_FOUND);
         return;
       }
+      if (path === loadedPath.current) return;
       setState(LOADING);
       void fetchFile(path).then((next) => {
         if (cancelled) return;
         setState(next);
-        if (next.status === "loaded") document.title = basename(next.path);
+        if (next.status === "loaded") {
+          loadedPath.current = next.path;
+          document.title = basename(next.path);
+        }
       });
     };
 
@@ -168,6 +173,7 @@ function ViewerApp() {
       if (seq !== navSeq.current) return;
       setState(next);
       if (next.status === "loaded") {
+        loadedPath.current = next.path;
         document.title = basename(next.path);
         if (frag === "") window.scrollTo(0, 0);
       }
