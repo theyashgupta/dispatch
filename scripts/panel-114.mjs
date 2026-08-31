@@ -193,11 +193,27 @@ function stopServer(child) {
   });
 }
 
+/**
+ * `rmSync(..., { recursive: true, force: true })` still throws `ENOTEMPTY` on macOS when a just-
+ * killed process (Chrome's own exit-time lock/lease file writes) races the removal; retried a
+ * few times immediately rather than letting a teardown-only race fail the whole run.
+ */
+function rmSyncRetry(path, attempts = 5) {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      if (i === attempts) throw err;
+    }
+  }
+}
+
 /** Best-effort sandbox home cleanup, called from a `finally` so a failing run never leaks a temp
  * directory. */
 function cleanupSandboxHome(home) {
   if (home == null) return;
-  rmSync(home, { recursive: true, force: true });
+  rmSyncRetry(home);
 }
 
 let headBuild = null;
@@ -1020,8 +1036,603 @@ async function teardownSandbox({ home, child }) {
   while ((await isPortListening(SANDBOX_PORT)) && Date.now() < deadline) {
     await sleep(POLL_INTERVAL_MS);
   }
-  rmSync(chromeUserDataDir(), { recursive: true, force: true });
+  rmSyncRetry(chromeUserDataDir());
   cleanupSandboxHome(home);
+}
+
+// ---------------------------------------------------------------------------
+// Measurement helpers for the "baseline" probe. Installed once via
+// `Page.addScriptToEvaluateOnNewDocument` (109-04 precedent) so every later
+// `Runtime.evaluate` call in this file can call `window.panel114*` without
+// re-sending the source text on every round trip.
+// ---------------------------------------------------------------------------
+
+const MEASURE_HELPERS_SRC = `
+window.panel114FindColumn = function (column) {
+  var el = document.querySelector('[data-column="' + column + '"]');
+  if (!el) throw new Error("panel114: column not found: " + column);
+  return el;
+};
+window.panel114FindCardsInColumn = function (column) {
+  var col = window.panel114FindColumn(column);
+  var scrollContainer = col.querySelector(":scope > .scroll-stable-y");
+  if (!scrollContainer) throw new Error("panel114: scroll container not found in " + column);
+  return Array.prototype.filter.call(scrollContainer.children, function (el) {
+    return el.tagName === "DIV" && /PROP-\\d+/.test(el.textContent);
+  });
+};
+window.panel114FindCardByIdentifier = function (column, identifier) {
+  var matches = window.panel114FindCardsInColumn(column).filter(function (el) {
+    return el.textContent.indexOf(identifier) !== -1;
+  });
+  if (matches.length !== 1) {
+    throw new Error(
+      "panel114: identifier " + identifier + " matched " + matches.length + " card roots in " + column,
+    );
+  }
+  return matches[0];
+};
+window.panel114Rect = function (el) {
+  var r = el.getBoundingClientRect();
+  return {
+    x: r.left + r.width / 2,
+    y: r.top + r.height / 2,
+    top: r.top,
+    left: r.left,
+    width: r.width,
+    height: r.height,
+  };
+};
+window.panel114TitleEl = function (cardEl) {
+  return cardEl.querySelector('[style*="-webkit-line-clamp"]');
+};
+window.panel114HeaderEl = function (column) {
+  return window.panel114FindColumn(column).querySelector(':scope > [style*="sticky"]');
+};
+window.panel114CountChipEl = function (column) {
+  var spans = window.panel114HeaderEl(column).querySelectorAll(":scope > span");
+  return spans[1] || null;
+};
+window.panel114ResizeHandleEl = function (column) {
+  return window.panel114FindColumn(column).querySelector(':scope > [role="separator"]');
+};
+window.panel114ComputedSub = function (el, props) {
+  if (!el) return null;
+  var cs = getComputedStyle(el);
+  var out = {};
+  props.forEach(function (p) {
+    out[p] = cs[p];
+  });
+  return out;
+};
+`;
+
+const MOUSE_AWAY = { x: 0, y: 0 };
+const HOVER_SETTLE_MS = 150;
+const TAB_TRAVERSAL_CAP = 60;
+
+async function moveMouseAway(cdp, sessionId) {
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    { type: "mouseMoved", x: MOUSE_AWAY.x, y: MOUSE_AWAY.y },
+    sessionId,
+  );
+}
+
+/** Real trusted hover at BP-A/BP-B (genuine `Input.dispatchMouseEvent`), or a programmatic
+ * `mouseover`/`mouseout` DOM dispatch at BP-C/BP-D where the emulated mobile/touch device preset
+ * has no hover input, the same "rendered-state" honesty convention Phase 113 used. Returns the
+ * computed sub-style read while the hover is active. */
+async function readUnderHover(cdp, sessionId, elExpr, props, real) {
+  if (real) {
+    const rect = await evalValue(
+      cdp,
+      sessionId,
+      `window.panel114Rect(${elExpr})`,
+    );
+    await cdp.send(
+      "Input.dispatchMouseEvent",
+      { type: "mouseMoved", x: rect.x, y: rect.y },
+      sessionId,
+    );
+    await sleep(HOVER_SETTLE_MS);
+    const value = await evalValue(
+      cdp,
+      sessionId,
+      `window.panel114ComputedSub(${elExpr}, ${JSON.stringify(props)})`,
+    );
+    await moveMouseAway(cdp, sessionId);
+    await sleep(HOVER_SETTLE_MS);
+    return { mode: "real", value };
+  }
+  await evalValue(
+    cdp,
+    sessionId,
+    `${elExpr}.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, relatedTarget: document.body }))`,
+  );
+  await sleep(50);
+  const value = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114ComputedSub(${elExpr}, ${JSON.stringify(props)})`,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${elExpr}.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, cancelable: true, relatedTarget: document.body }))`,
+  );
+  await sleep(50);
+  return { mode: "rendered-state", value };
+}
+
+/** Bounded real Tab traversal (panel-95.mjs/panel-98.mjs's own recipe): presses Tab up to
+ * `TAB_TRAVERSAL_CAP` times, checking after each press whether `document.activeElement` matches
+ * `elExpr`. Blurs whatever was focused first so every traversal starts from a known origin.
+ * Returns `{ reached, tabCount }`. */
+async function tabTraverseTo(cdp, sessionId, elExpr) {
+  await evalValue(
+    cdp,
+    sessionId,
+    `if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();`,
+  );
+  let reached = false;
+  let tabCount = 0;
+  for (; tabCount < TAB_TRAVERSAL_CAP && !reached; tabCount++) {
+    await dispatchRealKey(cdp, sessionId, "Tab", "Tab", 9);
+    reached = await evalValue(
+      cdp,
+      sessionId,
+      `document.activeElement === ${elExpr}`,
+    );
+  }
+  return { reached, tabCount };
+}
+
+async function blurActive(cdp, sessionId) {
+  await evalValue(
+    cdp,
+    sessionId,
+    `if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();`,
+  );
+}
+
+/** Density surfaces from the interfaces block's expectation table, all four breakpoints. Targets
+ * `PROP-401` (a regular todo card), `PROP-414` (a done/compact card) and `PROP-403` (the
+ * 288-character two-line title card), the "todo" column header/count chip. */
+async function measureDensity(cdp, sessionId) {
+  const regular = `window.panel114FindCardByIdentifier("todo","PROP-401")`;
+  const done = `window.panel114FindCardByIdentifier("done","PROP-414")`;
+  const long = `window.panel114FindCardByIdentifier("todo","PROP-403")`;
+
+  const regularPadding = await evalValue(
+    cdp,
+    sessionId,
+    `getComputedStyle(${regular}).padding`,
+  );
+  const regularHeight = await evalValue(
+    cdp,
+    sessionId,
+    `${regular}.getBoundingClientRect().height`,
+  );
+  const donePadding = await evalValue(
+    cdp,
+    sessionId,
+    `getComputedStyle(${done}).padding`,
+  );
+  const interCardGap = await evalValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var c = window.panel114FindCardsInColumn("todo");
+      if (c.length < 2) return null;
+      return c[1].getBoundingClientRect().top - c[0].getBoundingClientRect().top;
+    })()`,
+  );
+  const headerHeight = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114HeaderEl("todo").getBoundingClientRect().height`,
+  );
+  const countChipHeight = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114CountChipEl("todo").getBoundingClientRect().height`,
+  );
+  const titleLineHeight = await evalValue(
+    cdp,
+    sessionId,
+    `getComputedStyle(window.panel114TitleEl(${long})).lineHeight`,
+  );
+  const titleRenderedHeight = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114TitleEl(${long}).getBoundingClientRect().height`,
+  );
+  const cardTitleFontSize = await evalValue(
+    cdp,
+    sessionId,
+    `getComputedStyle(window.panel114TitleEl(${regular})).fontSize`,
+  );
+  const headerFontSize = await evalValue(
+    cdp,
+    sessionId,
+    `getComputedStyle(window.panel114HeaderEl("todo").querySelector("span")).fontSize`,
+  );
+  const countChipFontSize = await evalValue(
+    cdp,
+    sessionId,
+    `getComputedStyle(window.panel114CountChipEl("todo")).fontSize`,
+  );
+
+  return {
+    regularPadding,
+    regularHeight,
+    donePadding,
+    interCardGap,
+    headerHeight,
+    countChipHeight,
+    titleLineHeight,
+    titleRenderedHeight,
+    cardTitleFontSize,
+    headerFontSize,
+    countChipFontSize,
+  };
+}
+
+/** State surfaces from the interfaces block, one breakpoint at a time. `bp.label` gates the real
+ * vs. rendered-state hover technique and the resize-handle rows (absent below 1024px, `Board.tsx`'s
+ * own carousel query removes its entire JSX subtree there). */
+async function measureStates(cdp, sessionId, bp) {
+  const narrow = bp.label === "BP-C" || bp.label === "BP-D";
+  const real = !narrow;
+  const card = `window.panel114FindCardByIdentifier("todo","PROP-401")`;
+  const styleProps = ["background", "boxShadow", "outline"];
+
+  const resting = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114ComputedSub(${card}, ${JSON.stringify(styleProps)})`,
+  );
+  const hover = await readUnderHover(cdp, sessionId, card, styleProps, real);
+
+  const pressRect = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114Rect(${card})`,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    { type: "mouseMoved", x: pressRect.x, y: pressRect.y },
+    sessionId,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mousePressed",
+      x: pressRect.x,
+      y: pressRect.y,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+  await sleep(80);
+  const pressed = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114ComputedSub(${card}, ${JSON.stringify(styleProps)})`,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseReleased",
+      x: pressRect.x,
+      y: pressRect.y,
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+  await sleep(50);
+
+  const traversal = await tabTraverseTo(cdp, sessionId, card);
+  const keyboardFocus = traversal.reached
+    ? await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114ComputedSub(document.activeElement, ["outline","outlineOffset","outlineColor"])`,
+      )
+    : null;
+  await blurActive(cdp, sessionId);
+
+  const headerBefore = await evalValue(
+    cdp,
+    sessionId,
+    `getComputedStyle(window.panel114HeaderEl("todo")).background`,
+  );
+  const headerHover = await readUnderHover(
+    cdp,
+    sessionId,
+    `window.panel114HeaderEl("todo")`,
+    ["background"],
+    real,
+  );
+  const columnHeaderHover = {
+    before: headerBefore,
+    after: headerHover.value.background,
+    mode: headerHover.mode,
+  };
+
+  const activeSelector = `document.querySelector('button[aria-label="Board view"]')`;
+  const activeBefore = await evalValue(
+    cdp,
+    sessionId,
+    `getComputedStyle(${activeSelector}).background`,
+  );
+  const activeHover = await readUnderHover(
+    cdp,
+    sessionId,
+    activeSelector,
+    ["background"],
+    real,
+  );
+  const viewSwitchActiveHover = {
+    before: activeBefore,
+    after: activeHover.value.background,
+    mode: activeHover.mode,
+  };
+
+  const inactiveSelector = `document.querySelector('button[aria-label="Workspace view"]')`;
+  const inactiveBefore = await evalValue(
+    cdp,
+    sessionId,
+    `getComputedStyle(${inactiveSelector}).background`,
+  );
+  const inactiveHover = await readUnderHover(
+    cdp,
+    sessionId,
+    inactiveSelector,
+    ["background"],
+    real,
+  );
+  const viewSwitchInactiveHover = {
+    before: inactiveBefore,
+    after: inactiveHover.value.background,
+    mode: inactiveHover.mode,
+  };
+
+  let resizeHandle;
+  if (bp.label === "BP-A" || bp.label === "BP-B") {
+    const handle = `window.panel114ResizeHandleEl("todo")`;
+    const handleProps = ["borderRight", "borderRightColor", "outline"];
+    const rhResting = await evalValue(
+      cdp,
+      sessionId,
+      `window.panel114ComputedSub(${handle}, ${JSON.stringify(handleProps)})`,
+    );
+    const rhHover = await readUnderHover(
+      cdp,
+      sessionId,
+      handle,
+      handleProps,
+      true,
+    );
+    const rhTraversal = await tabTraverseTo(cdp, sessionId, handle);
+    const rhFocus = rhTraversal.reached
+      ? await evalValue(
+          cdp,
+          sessionId,
+          `window.panel114ComputedSub(document.activeElement, ${JSON.stringify(handleProps)})`,
+        )
+      : null;
+    await blurActive(cdp, sessionId);
+    const rhRect = await evalValue(
+      cdp,
+      sessionId,
+      `window.panel114Rect(${handle})`,
+    );
+    await cdp.send(
+      "Input.dispatchMouseEvent",
+      { type: "mouseMoved", x: rhRect.x, y: rhRect.y },
+      sessionId,
+    );
+    await cdp.send(
+      "Input.dispatchMouseEvent",
+      {
+        type: "mousePressed",
+        x: rhRect.x,
+        y: rhRect.y,
+        button: "left",
+        buttons: 1,
+        clickCount: 1,
+      },
+      sessionId,
+    );
+    await cdp.send(
+      "Input.dispatchMouseEvent",
+      { type: "mouseMoved", x: rhRect.x + 20, y: rhRect.y, buttons: 1 },
+      sessionId,
+    );
+    await sleep(100);
+    const rhDragging = await evalValue(
+      cdp,
+      sessionId,
+      `window.panel114ComputedSub(${handle}, ${JSON.stringify(handleProps)})`,
+    );
+    await cdp.send(
+      "Input.dispatchMouseEvent",
+      {
+        type: "mouseReleased",
+        x: rhRect.x + 20,
+        y: rhRect.y,
+        button: "left",
+        buttons: 0,
+        clickCount: 1,
+      },
+      sessionId,
+    );
+    await moveMouseAway(cdp, sessionId);
+    resizeHandle = {
+      rendered: true,
+      resting: rhResting,
+      hover: rhHover,
+      focus: { reached: rhTraversal.reached, value: rhFocus },
+      dragging: rhDragging,
+    };
+  } else {
+    const absent = await evalValue(
+      cdp,
+      sessionId,
+      `window.panel114ResizeHandleEl("todo") === null`,
+    );
+    resizeHandle = {
+      rendered: false,
+      absentConfirmed: absent,
+      value: "not rendered",
+    };
+  }
+
+  return {
+    resting,
+    hover,
+    pressed,
+    keyboardFocus: { reached: traversal.reached, value: keyboardFocus },
+    columnHeaderHover,
+    viewSwitchActiveHover,
+    viewSwitchInactiveHover,
+    resizeHandle,
+  };
+}
+
+/** Motion surfaces from the interfaces block: the card and count-chip's own transition/animation
+ * properties (expected static today, no motion exists), and the detail panel's scrim/aside
+ * transition after a real click opens it and a real Escape closes it. */
+async function measureMotion(cdp, sessionId) {
+  const card = `window.panel114FindCardByIdentifier("todo","PROP-401")`;
+  const cardMotion = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114ComputedSub(${card}, ["transitionProperty","transitionDuration","animationName"])`,
+  );
+  const chipMotion = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114ComputedSub(window.panel114CountChipEl("todo"), ["transitionProperty","transitionDuration","animationName"])`,
+  );
+
+  const rect = await evalValue(cdp, sessionId, `window.panel114Rect(${card})`);
+  await dispatchRealClick(cdp, sessionId, { x: rect.x, y: rect.y });
+  const opened = await pollUntilTruthy(
+    cdp,
+    sessionId,
+    `document.querySelector('aside[aria-label="Ticket detail"]') != null`,
+    5_000,
+  );
+  let panelMotion = null;
+  if (opened) {
+    await sleep(200);
+    panelMotion = await evalValue(
+      cdp,
+      sessionId,
+      `(function () {
+        var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+        var scrim = aside ? aside.previousElementSibling : null;
+        return {
+          aside: window.panel114ComputedSub(aside, ["transitionDuration", "transitionTimingFunction"]),
+          scrim: window.panel114ComputedSub(scrim, ["transitionDuration", "transitionTimingFunction"]),
+        };
+      })()`,
+    );
+    await dispatchRealKey(cdp, sessionId, "Escape", "Escape", 27);
+    await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `document.querySelector('aside[aria-label="Ticket detail"]') == null`,
+      5_000,
+    );
+  }
+
+  return { cardMotion, chipMotion, panelMotion, panelOpened: Boolean(opened) };
+}
+
+/**
+ * Boots the sandbox, opens the seeded board in real headless Chrome, and at each of the four
+ * breakpoints records every density/state/motion row the interfaces block's expectation table
+ * names, printing the full record as JSON. Never asserts pass/fail: this is a measurement probe,
+ * not a check, its job is to record what ships TODAY before a single source byte changes.
+ */
+async function probeBaseline() {
+  let sandbox = null;
+  let chrome = null;
+  let cdp = null;
+  const record = {};
+  try {
+    console.log("panel-114 --probe baseline: booting sandbox");
+    sandbox = await bootSandbox("baseline");
+    console.log(
+      `panel-114 --probe baseline: sandbox home ${sandbox.home}, launching Chrome`,
+    );
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+    const { sessionId } = await openPage(cdp, { url: "about:blank" });
+    await cdp.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      { source: MEASURE_HELPERS_SRC },
+      sessionId,
+    );
+    await cdp.send(
+      "Page.navigate",
+      { url: `http://127.0.0.1:${SANDBOX_PORT}/` },
+      sessionId,
+    );
+    const loaded = await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `document.getElementById("root") != null`,
+      READY_TIMEOUT_MS,
+    );
+    if (!loaded)
+      throw new Error("probeBaseline: #root never appeared after navigation");
+    // Splash.tsx runs an unconditional 1.3s full-screen overlay on every mount (113-03's own
+    // gotcha); settle past it before the first breakpoint measurement.
+    await sleep(1450);
+
+    for (const bp of BREAKPOINTS) {
+      console.log(`panel-114 --probe baseline: measuring ${bp.label}`);
+      await applyBreakpoint(cdp, sessionId, bp);
+      // A native mousedown/click on a tabIndex=0 element (the card, the resize handle) leaves it
+      // genuinely focused afterward; the prior breakpoint's own pressed/click/drag legs would
+      // otherwise leak a stale focus outline into this breakpoint's "resting" read.
+      await blurActive(cdp, sessionId);
+      await moveMouseAway(cdp, sessionId);
+      await sleep(300);
+      const density = await measureDensity(cdp, sessionId);
+      const states = await measureStates(cdp, sessionId, bp);
+      const motion = await measureMotion(cdp, sessionId);
+      record[bp.label] = { density, states, motion };
+    }
+
+    console.log(JSON.stringify(record, null, 2));
+  } finally {
+    if (cdp) {
+      try {
+        cdp.close();
+      } catch {
+        // best effort
+      }
+    }
+    if (chrome) {
+      try {
+        chrome.kill("SIGTERM");
+      } catch {
+        // best effort
+      }
+    }
+    if (sandbox) await teardownSandbox(sandbox);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1032,7 +1643,9 @@ const CHECKS = {};
 
 const BREAKS = {};
 
-const PROBES = {};
+const PROBES = {
+  baseline: probeBaseline,
+};
 
 // ---------------------------------------------------------------------------
 // main
@@ -1063,16 +1676,19 @@ async function main() {
     );
     process.exit(1);
   }
+  if (probeName != null) {
+    // A probe measures and prints; it never asserts pass/fail, so it is exempt from the
+    // empty-CHECKS vacuous-pass refusal below (that refusal guards the assertive check path
+    // only). This plan's CHECKS/BREAKS stay empty maps; later plans in this phase populate them.
+    await PROBES[probeName]();
+    process.exit(0);
+  }
+
   if (Object.keys(CHECKS).length === 0) {
     console.error(
       "panel-114: refusing to exit 0, CHECKS is empty (would read as a vacuous pass)",
     );
     process.exit(1);
-  }
-
-  if (probeName != null) {
-    await PROBES[probeName]();
-    process.exit(0);
   }
 
   if (breakName != null) {
