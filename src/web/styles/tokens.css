@@ -24,6 +24,12 @@
   --space-2xl: 32px; /* error/first-run outer padding; strip + header height */
   --space-3xl: 48px; /* empty-state vertical centering offset */
 
+  /* Density scale (v3.4), board card/gap dimensions - see
+     docs/standards/design-contract.md ### Density scale (v3.4). */
+  --card-padding: 6px 8px;
+  --card-padding-compact: 6px; /* the done column's flat compact variant */
+  --inter-card-gap: 6px;
+
   /* Typography — 5 chrome sizes + 1 markdown heading cap, 3 weights. */
   --font-body: 13px; /* card title, description body */
   --font-label: 12px; /* identifier, column header, count, sync strip, badges */
@@ -36,7 +42,7 @@
   --weight-medium: 500; /* column headers, panel section labels, sync-strip status text */
   --weight-semibold: 600;
 
-  --line-body: 1.5;
+  --line-body: 1.45;
   --line-label: 1.4;
   --line-heading: 1.3;
   --line-display: 1.2;
@@ -49,7 +55,7 @@
   --strip-height: 56px;
   --strip-padding: 24px; /* sync-strip horizontal padding; swapped per breakpoint below */
   --strip-grid-columns: minmax(0, 1fr) auto minmax(0, 1fr); /* sync-strip zone grid; swapped per breakpoint below */
-  --column-header-height: 32px;
+  --column-header-height: 28px;
   --radius-sm: 4px; /* chips and badges, up to ~19-27px tall */
   --radius: 6px;
   --radius-lg: 10px; /* modal dialog, ~200px tall and above */
@@ -73,6 +79,30 @@
   --status-ok: #3fb950;
   --status-stale: #ef8e3b;
   --status-down: #e5484d;
+
+  /* Motion (v3.4), CSS-only transition/animation durations and easings, so the
+     prefers-reduced-motion kill-switch above reaches every motion this phase
+     ships - see docs/standards/design-contract.md ## Motion. */
+  --motion-panel-open: 200ms;
+  --motion-panel-close: 150ms;
+  --motion-card-move: 150ms;
+  --motion-count-change: 120ms;
+  --easing-enter: ease-out;
+  --easing-exit: ease-in;
+  --hover-transition: background-color 80ms var(--easing-enter);
+
+  /* State palette (v3.4), hover/pressed colors as color-mix() formulas over
+     base surface tokens, never a resolved hex, so the single-source
+     relationship survives a palette change - see
+     docs/standards/design-contract.md ## State palette. */
+  --hover-button-primary: color-mix(in srgb, white 12%, var(--accent));
+  --hover-button-danger: color-mix(in srgb, white 12%, var(--destructive));
+  --hover-resize-handle: color-mix(in srgb, var(--accent) 55%, transparent);
+  --pressed-card: color-mix(in srgb, black 12%, var(--surface-card));
+  /* prettier-ignore */
+  --pressed-card-hover: color-mix(in srgb, black 12%, var(--surface-card-hover));
+  --pressed-button-primary: color-mix(in srgb, black 12%, var(--accent));
+  --pressed-button-danger: color-mix(in srgb, black 12%, var(--destructive));
 
   /* Dimensions */
   --stripe-width: 3px;
@@ -218,6 +248,20 @@ body {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* count-pulse (v3.4), the column count chip's motion-count-change mechanism.
+   Animates transform only, never background-color: a color flash on a chip
+   this small reads ambiguously as a state change - see
+   docs/standards/design-contract.md ## Motion, motion-count-change row. */
+@keyframes count-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.18);
   }
 }
 
