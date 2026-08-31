@@ -24,8 +24,10 @@
  * caller-background composition fix (the active view-switch segment's hover/pressed, without
  * regressing the inactive segment) and `Button.tsx`'s primary/danger hover and pressed, primary
  * proven live and danger proven by a shared-mechanism source assertion plus an in-page token
- * cross-check. Later plans in this phase register the motion/reduced-motion checks and their own
- * break-proof legs.
+ * cross-check. Plan 06 adds `motion` (break-proven), proving `card-move-flip.ts`'s FLIP mechanism
+ * (`Card.tsx`'s composed ref and layout effect) and `Column.tsx`'s count-chip pulse, both driven
+ * through a real `POST /api/cards/:id/move` and the real SSE path. Later plans in this phase
+ * register the reduced-motion check and its own break-proof leg.
  *
  * DETAIL-PANEL FINDING (Plan 04, out of this plan's own scope, recorded for the next phase that
  * touches `DetailPanel.tsx`): `document.querySelector('aside[aria-label="Ticket detail"]') ==
@@ -109,6 +111,20 @@
  *     (BP-B/BP-C/BP-D repeat the identical five-line pattern, `mode: real` for BP-B and
  *     `mode: rendered-state` for BP-C/BP-D.)
  *     The RESTORE leg re-ran clean after the captured bytes were restored, and
+ *     `git diff --quiet src/` confirmed a byte-identical restore.
+ *   - `motion` proven able to fail (Plan 06): rewriting `card-move-flip.ts`'s real
+ *     `` `transform var(--motion-card-move) var(--easing-enter)` `` transition-setting line to a
+ *     literal `` `transform 0s var(--easing-enter)` ``, rebuilding, and re-running the same
+ *     `checkMotion` function against a real booted sandbox, a real headless Chrome and a real
+ *     `POST /api/cards/:id/move` produced, verbatim:
+ *     `motion(BP-A): card transitionDuration expected "0.15s", observed no transitionrun fired`
+ *     `motion(BP-B): card transitionDuration expected "0.15s", observed no transitionrun fired`
+ *     `motion(BP-C): card transitionDuration expected "0.15s", observed no transitionrun fired`
+ *     `motion(BP-D): card transitionDuration expected "0.15s", observed no transitionrun fired`
+ *     (a 0s-duration CSS transition never dispatches `transitionrun` at all, since there is no
+ *     interpolation to run; the count-chip assertions, an independent mechanism, stayed clean at
+ *     every breakpoint throughout the trip leg, confirming the break landed on the card mechanism
+ *     alone.) The RESTORE leg re-ran clean after the captured bytes were restored, and
  *     `git diff --quiet src/` confirmed a byte-identical restore.
  */
 
@@ -1235,6 +1251,81 @@ window.panel114ResolveOutlineColor = function (cssValue) {
   document.body.removeChild(probe);
   return value;
 };
+// Motion capture (Plan 06): a document-level, capture-phase listener set, installed once per
+// document load, so it survives the card's own cross-subtree unmount/mount (the FLIP node that
+// fires transitionrun is a DIFFERENT DOM node than the one queried before the move) and the count
+// chip's own key-driven remount. Filters at the listener itself (propertyName === "transform",
+// animationName === "count-pulse") so only this plan's two mechanisms are ever recorded; every
+// entry captures its own computed style at fire time, never a DOM node reference, since the node
+// may already be gone by the time a caller reads window.panel114MotionCapture back out over CDP.
+window.panel114MotionCapture = {
+  transitionRun: [],
+  transitionEnd: [],
+  animationStart: [],
+  animationEnd: [],
+  reset: function () {
+    this.transitionRun = [];
+    this.transitionEnd = [];
+    this.animationStart = [];
+    this.animationEnd = [];
+  },
+};
+document.addEventListener(
+  "transitionrun",
+  function (e) {
+    if (e.propertyName !== "transform") return;
+    var cs = getComputedStyle(e.target);
+    window.panel114MotionCapture.transitionRun.push({
+      t: performance.now(),
+      propertyName: e.propertyName,
+      transitionDuration: cs.transitionDuration,
+      transitionTimingFunction: cs.transitionTimingFunction,
+      textContent: e.target.textContent ? e.target.textContent.slice(0, 80) : null,
+    });
+  },
+  true,
+);
+document.addEventListener(
+  "transitionend",
+  function (e) {
+    if (e.propertyName !== "transform") return;
+    window.panel114MotionCapture.transitionEnd.push({
+      t: performance.now(),
+      propertyName: e.propertyName,
+      textContent: e.target.textContent ? e.target.textContent.slice(0, 80) : null,
+    });
+  },
+  true,
+);
+document.addEventListener(
+  "animationstart",
+  function (e) {
+    if (e.animationName !== "count-pulse") return;
+    var cs = getComputedStyle(e.target);
+    var col = e.target.closest("[data-column]");
+    window.panel114MotionCapture.animationStart.push({
+      t: performance.now(),
+      animationName: e.animationName,
+      animationDuration: cs.animationDuration,
+      animationTimingFunction: cs.animationTimingFunction,
+      column: col ? col.getAttribute("data-column") : null,
+    });
+  },
+  true,
+);
+document.addEventListener(
+  "animationend",
+  function (e) {
+    if (e.animationName !== "count-pulse") return;
+    var col = e.target.closest("[data-column]");
+    window.panel114MotionCapture.animationEnd.push({
+      t: performance.now(),
+      animationName: e.animationName,
+      column: col ? col.getAttribute("data-column") : null,
+    });
+  },
+  true,
+);
 `;
 
 const MOUSE_AWAY = { x: 0, y: 0 };
@@ -3645,6 +3736,431 @@ async function runBreakControlStates() {
 }
 
 // ---------------------------------------------------------------------------
+// motion: break-proven check for Plan 06's card column-move FLIP mechanism
+// and count-chip pulse. Boots the sandbox once and, at each breakpoint,
+// drives a REAL column change through POST /api/cards/:id/move against the
+// sandbox server (never a direct DOM/state mutation), letting the existing
+// SSE path deliver it to the open page exactly as a real drag would, then
+// reads the in-page motion-capture listeners MEASURE_HELPERS_SRC installs.
+// ---------------------------------------------------------------------------
+
+const MOTION_CARD_ID = "p114-needsinput-1";
+const MOTION_CARD_IDENTIFIER = "PROP-406";
+const MOTION_SOURCE_COLUMN = "needs_input";
+const MOTION_TARGET_COLUMN = "in_review";
+
+const CARD_MOVE_REQUESTED_MS = 150;
+const COUNT_CHANGE_REQUESTED_MS = 120;
+
+/** Tolerance absorbing real event-loop/task-queue jitter between the native `transitionrun`/
+ * `animationstart` and `transitionend`/`animationend` dispatches, both timestamped in-page via
+ * `performance.now()`; a genuinely broken (zeroed) duration reads near 0ms, tens of ms outside
+ * this window, so the tolerance is generous without masking that break. */
+const MOTION_ELAPSED_TOLERANCE_MS = 40;
+
+async function postCardMove(cardId, column) {
+  const res = await fetch(
+    `http://127.0.0.1:${SANDBOX_PORT}/api/cards/${encodeURIComponent(cardId)}/move`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ column }),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(
+      `postCardMove: POST /api/cards/${cardId}/move -> ${column} failed: ${res.status} ${res.statusText}`,
+    );
+  }
+}
+
+async function waitForCardInColumn(
+  cdp,
+  sessionId,
+  column,
+  identifier,
+  timeoutMs,
+) {
+  return pollUntilTruthy(
+    cdp,
+    sessionId,
+    `(function () {
+      try {
+        window.panel114FindCardByIdentifier(${JSON.stringify(column)}, ${JSON.stringify(identifier)});
+        return true;
+      } catch (e) {
+        return false;
+      }
+    })()`,
+    timeoutMs,
+  );
+}
+
+function assertMotionElapsed(violations, bp, label, requestedMs, observedMs) {
+  if (
+    observedMs == null ||
+    Math.abs(observedMs - requestedMs) > MOTION_ELAPSED_TOLERANCE_MS
+  ) {
+    violations.push(
+      `motion(${bp.label}): ${label} expected close to ${requestedMs}ms (tolerance ${MOTION_ELAPSED_TOLERANCE_MS}ms), observed ${observedMs == null ? "no matching event" : `${observedMs}ms`}`,
+    );
+  }
+}
+
+/** Reads `window.panel114MotionCapture` and asserts the card's own `transitionrun`/`transitionend`
+ * pair, returning the reading (never `null`) for the ledger even when a violation was pushed. */
+async function measureAndAssertCardMove(cdp, sessionId, violations, bp) {
+  const capture = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114MotionCapture`,
+  );
+  const run = capture.transitionRun[0] ?? null;
+  if (run == null) {
+    violations.push(
+      `motion(${bp.label}): card transitionDuration expected "0.15s", observed no transitionrun fired`,
+    );
+    return {
+      transitionDuration: null,
+      transitionTimingFunction: null,
+      elapsedMs: null,
+    };
+  }
+  if (run.transitionDuration !== "0.15s") {
+    violations.push(
+      `motion(${bp.label}): card transitionDuration expected "0.15s", observed ${JSON.stringify(run.transitionDuration)}`,
+    );
+  }
+  if (run.transitionTimingFunction !== "ease-out") {
+    violations.push(
+      `motion(${bp.label}): card transitionTimingFunction expected "ease-out", observed ${JSON.stringify(run.transitionTimingFunction)}`,
+    );
+  }
+  const end = capture.transitionEnd[0] ?? null;
+  const elapsedMs = end == null ? null : end.t - run.t;
+  assertMotionElapsed(
+    violations,
+    bp,
+    "card transitionrun-to-transitionend elapsed",
+    CARD_MOVE_REQUESTED_MS,
+    elapsedMs,
+  );
+  return {
+    transitionDuration: run.transitionDuration,
+    transitionTimingFunction: run.transitionTimingFunction,
+    elapsedMs,
+  };
+}
+
+/** Same shape as {@link measureAndAssertCardMove} for one column's count chip, matched by the
+ * `column` field the in-page listener resolves via `closest("[data-column]")`. */
+async function measureAndAssertCountChip(
+  cdp,
+  sessionId,
+  violations,
+  bp,
+  column,
+) {
+  const capture = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114MotionCapture`,
+  );
+  const start = capture.animationStart.find((e) => e.column === column) ?? null;
+  if (start == null) {
+    violations.push(
+      `motion(${bp.label}): count chip (${column}) animationDuration expected "0.12s", observed no animationstart named "count-pulse" fired`,
+    );
+    return {
+      animationDuration: null,
+      animationTimingFunction: null,
+      elapsedMs: null,
+    };
+  }
+  if (start.animationDuration !== "0.12s") {
+    violations.push(
+      `motion(${bp.label}): count chip (${column}) animationDuration expected "0.12s", observed ${JSON.stringify(start.animationDuration)}`,
+    );
+  }
+  if (start.animationTimingFunction !== "ease-out") {
+    violations.push(
+      `motion(${bp.label}): count chip (${column}) animationTimingFunction expected "ease-out", observed ${JSON.stringify(start.animationTimingFunction)}`,
+    );
+  }
+  const end = capture.animationEnd.find((e) => e.column === column) ?? null;
+  const elapsedMs = end == null ? null : end.t - start.t;
+  assertMotionElapsed(
+    violations,
+    bp,
+    `count chip (${column}) animationstart-to-animationend elapsed`,
+    COUNT_CHANGE_REQUESTED_MS,
+    elapsedMs,
+  );
+  return {
+    animationDuration: start.animationDuration,
+    animationTimingFunction: start.animationTimingFunction,
+    elapsedMs,
+  };
+}
+
+/** Bounded 3-attempt retry wrapper, the same shape `checkBoardStates`/`checkControlStates` use: a
+ * real move issues far more CDP round trips than `density`'s own reads, and this development
+ * machine (running the developer's own regular Chrome session concurrently) was observed live to
+ * occasionally stall a single unrelated CDP call. A fresh violations array per attempt prevents a
+ * discarded attempt's partial result from leaking into the final one. */
+async function checkMotion(violations) {
+  const MAX_ATTEMPTS = 3;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const attemptViolations = [];
+    try {
+      await checkMotionOnce(attemptViolations);
+      violations.push(...attemptViolations);
+      return;
+    } catch (err) {
+      lastErr = err;
+      console.error(
+        `motion: attempt ${attempt}/${MAX_ATTEMPTS} threw (likely CDP/renderer contention, not a code defect): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      if (attempt === MAX_ATTEMPTS) throw lastErr;
+    }
+  }
+}
+
+async function checkMotionOnce(violations) {
+  let sandbox = null;
+  let chrome = null;
+  let cdp = null;
+  try {
+    sandbox = await bootSandbox("check-motion");
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+    const { sessionId } = await openPage(cdp, { url: "about:blank" });
+    await cdp.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      { source: MEASURE_HELPERS_SRC },
+      sessionId,
+    );
+    await cdp.send(
+      "Page.navigate",
+      { url: `http://127.0.0.1:${SANDBOX_PORT}/` },
+      sessionId,
+    );
+    const loaded = await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `document.getElementById("root") != null`,
+      READY_TIMEOUT_MS,
+    );
+    if (!loaded) {
+      violations.push("motion: #root never appeared after navigation");
+      return;
+    }
+    // Splash.tsx's unconditional 1.3s overlay, same settle window probeBaseline uses.
+    await sleep(1450);
+
+    for (const bp of BREAKPOINTS) {
+      await applyBreakpoint(cdp, sessionId, bp);
+      await blurActive(cdp, sessionId);
+      await moveMouseAway(cdp, sessionId);
+      await sleep(300);
+
+      // First-paint/remount guard: a plain settle at this breakpoint, with no move triggered
+      // yet, must fire zero count-pulse animations, whether this is the initial page load or a
+      // carousel breakpoint switch that remounted Column.
+      const settleCapture = await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114MotionCapture`,
+      );
+      if (settleCapture.animationStart.length > 0) {
+        violations.push(
+          `motion(${bp.label}): count-pulse animationstart fired with no real value change (first-paint/remount trap), observed ${settleCapture.animationStart.length} event(s)`,
+        );
+      }
+      console.log(
+        `motion(${bp.label}): settle animationstart count = ${settleCapture.animationStart.length} (expected 0)`,
+      );
+      await evalValue(cdp, sessionId, `window.panel114MotionCapture.reset()`);
+
+      const beforeRect = await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114Rect(window.panel114FindCardByIdentifier(${JSON.stringify(MOTION_SOURCE_COLUMN)}, ${JSON.stringify(MOTION_CARD_IDENTIFIER)}))`,
+      );
+
+      await postCardMove(MOTION_CARD_ID, MOTION_TARGET_COLUMN);
+      const arrived = await waitForCardInColumn(
+        cdp,
+        sessionId,
+        MOTION_TARGET_COLUMN,
+        MOTION_CARD_IDENTIFIER,
+        5_000,
+      );
+      if (!arrived) {
+        violations.push(
+          `motion(${bp.label}): card never appeared in ${MOTION_TARGET_COLUMN} after POST /api/cards/.../move`,
+        );
+      } else {
+        await sleep(400);
+
+        const afterRect = await evalValue(
+          cdp,
+          sessionId,
+          `window.panel114Rect(window.panel114FindCardByIdentifier(${JSON.stringify(MOTION_TARGET_COLUMN)}, ${JSON.stringify(MOTION_CARD_IDENTIFIER)}))`,
+        );
+        const displacementPx = Math.hypot(
+          afterRect.left - beforeRect.left,
+          afterRect.top - beforeRect.top,
+        );
+
+        const card = await measureAndAssertCardMove(
+          cdp,
+          sessionId,
+          violations,
+          bp,
+        );
+        const sourceChip = await measureAndAssertCountChip(
+          cdp,
+          sessionId,
+          violations,
+          bp,
+          MOTION_SOURCE_COLUMN,
+        );
+        const targetChip = await measureAndAssertCountChip(
+          cdp,
+          sessionId,
+          violations,
+          bp,
+          MOTION_TARGET_COLUMN,
+        );
+
+        const carouselNote =
+          bp.label === "BP-C" || bp.label === "BP-D"
+            ? " (carousel layout: no side-by-side column rect, not directly comparable to BP-A/BP-B)"
+            : "";
+        console.log(
+          `motion(${bp.label}): card displacement = ${displacementPx.toFixed(3)}px${carouselNote}, ` +
+            `transitionDuration = ${JSON.stringify(card.transitionDuration)}, ` +
+            `transitionTimingFunction = ${JSON.stringify(card.transitionTimingFunction)}, ` +
+            `elapsed = ${card.elapsedMs == null ? "null" : card.elapsedMs.toFixed(1)}ms (requested ${CARD_MOVE_REQUESTED_MS}ms)`,
+        );
+        console.log(
+          `motion(${bp.label}): count chip (${MOTION_SOURCE_COLUMN}) animationDuration = ${JSON.stringify(sourceChip.animationDuration)}, ` +
+            `animationTimingFunction = ${JSON.stringify(sourceChip.animationTimingFunction)}, ` +
+            `elapsed = ${sourceChip.elapsedMs == null ? "null" : sourceChip.elapsedMs.toFixed(1)}ms (requested ${COUNT_CHANGE_REQUESTED_MS}ms)`,
+        );
+        console.log(
+          `motion(${bp.label}): count chip (${MOTION_TARGET_COLUMN}) animationDuration = ${JSON.stringify(targetChip.animationDuration)}, ` +
+            `animationTimingFunction = ${JSON.stringify(targetChip.animationTimingFunction)}, ` +
+            `elapsed = ${targetChip.elapsedMs == null ? "null" : targetChip.elapsedMs.toFixed(1)}ms (requested ${COUNT_CHANGE_REQUESTED_MS}ms)`,
+        );
+      }
+
+      // Restore state for the next breakpoint, and reset the capture arrays so the restore
+      // move's own transitionrun/animationstart never leaks into the next breakpoint's settle
+      // guard.
+      await evalValue(cdp, sessionId, `window.panel114MotionCapture.reset()`);
+      await postCardMove(MOTION_CARD_ID, MOTION_SOURCE_COLUMN);
+      await waitForCardInColumn(
+        cdp,
+        sessionId,
+        MOTION_SOURCE_COLUMN,
+        MOTION_CARD_IDENTIFIER,
+        5_000,
+      );
+      await sleep(400);
+      await evalValue(cdp, sessionId, `window.panel114MotionCapture.reset()`);
+    }
+  } finally {
+    if (cdp) {
+      try {
+        cdp.close();
+      } catch {
+        // best effort
+      }
+    }
+    if (chrome) {
+      try {
+        chrome.kill("SIGTERM");
+      } catch {
+        // best effort
+      }
+    }
+    if (sandbox) await teardownSandbox(sandbox);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BREAKS["motion"]: mutates card-move-flip.ts's real duration token reference
+// to a literal 0s, rebuilds, and re-runs checkMotion itself against the
+// mutated source, then restores the captured bytes unconditionally.
+// ---------------------------------------------------------------------------
+
+const CARD_MOVE_FLIP_PATH = join(
+  REPO_ROOT,
+  "src",
+  "web",
+  "features",
+  "board",
+  "card-move-flip.ts",
+);
+const MOTION_BREAK_TARGET =
+  "transform var(--motion-card-move) var(--easing-enter)";
+const MOTION_BREAK_REPLACEMENT = "transform 0s var(--easing-enter)";
+
+function restoreCardMoveFlipSource(original) {
+  writeFileSync(CARD_MOVE_FLIP_PATH, original);
+  resetBuildCache();
+  rmSync(join(REPO_ROOT, "dist"), { recursive: true, force: true });
+  unregisterRestore(CARD_MOVE_FLIP_PATH);
+}
+
+async function runBreakMotion() {
+  assertBuilt();
+  const original = readFileSync(CARD_MOVE_FLIP_PATH, "utf8");
+  const occurrences = original.split(MOTION_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel-114: refusing to run --break motion, expected ${JSON.stringify(MOTION_BREAK_TARGET)} ` +
+        `to occur exactly once in ${CARD_MOVE_FLIP_PATH}, measured ${occurrences}. A miscounted ` +
+        `anchor would mutate the wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(CARD_MOVE_FLIP_PATH, original);
+  try {
+    writeFileSync(
+      CARD_MOVE_FLIP_PATH,
+      original.replace(MOTION_BREAK_TARGET, MOTION_BREAK_REPLACEMENT),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkMotion(tripViolations);
+    console.log(
+      `\n--break motion TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes("card transitionDuration"),
+    );
+  } finally {
+    restoreCardMoveFlipSource(original);
+  }
+
+  const restoreViolations = [];
+  await checkMotion(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break motion RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS / PROBES
 // ---------------------------------------------------------------------------
 
@@ -3652,12 +4168,14 @@ const CHECKS = {
   density: checkDensity,
   "board-states": checkBoardStates,
   "control-states": checkControlStates,
+  motion: checkMotion,
 };
 
 const BREAKS = {
   density: runBreakDensity,
   "board-states": runBreakBoardStates,
   "control-states": runBreakControlStates,
+  motion: runBreakMotion,
 };
 
 const PROBES = {
