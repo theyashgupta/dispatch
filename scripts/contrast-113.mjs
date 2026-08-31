@@ -492,7 +492,13 @@ async function main() {
       console.error(`--extra-bg requires name=hex, got "${raw}"`);
       process.exit(1);
     }
-    return [raw.slice(0, eq), raw.slice(eq + 1)];
+    const name = raw.slice(0, eq);
+    const hex = raw.slice(eq + 1);
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) {
+      console.error(`--extra-bg hex must be #rrggbb, got "${raw}"`);
+      process.exit(1);
+    }
+    return [name, hex];
   });
 
   const checkName = readFlag(argv, "--check");
