@@ -34,6 +34,8 @@ export function Card({
   onMoveTo,
 }: CardProps) {
   const [hover, setHover] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  const [focused, setFocused] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const showGone = deriveShowGone(card);
 
@@ -52,6 +54,8 @@ export function Card({
       showDot={showDot}
       showGone={showGone}
       hover={hover}
+      pressed={pressed}
+      focused={focused}
       dimmed={isDragging || forceDimmed}
       rootRef={setNodeRef}
       onSelect={onSelect}
@@ -66,6 +70,30 @@ export function Card({
         ...attributes,
         onMouseEnter: () => setHover(true),
         onMouseLeave: () => setHover(false),
+        onPointerDown: (event) => {
+          listeners?.onPointerDown?.(event);
+          setPressed(true);
+        },
+        onPointerUp: (event) => {
+          listeners?.onPointerUp?.(event);
+          setPressed(false);
+        },
+        onPointerCancel: (event) => {
+          listeners?.onPointerCancel?.(event);
+          setPressed(false);
+        },
+        onPointerLeave: (event) => {
+          listeners?.onPointerLeave?.(event);
+          setPressed(false);
+        },
+        onFocus: (event) => {
+          listeners?.onFocus?.(event);
+          setFocused(event.currentTarget.matches(":focus-visible"));
+        },
+        onBlur: (event) => {
+          listeners?.onBlur?.(event);
+          setFocused(false);
+        },
         onClick: (event) => {
           if (isDragging) return;
           if (event.metaKey || event.ctrlKey) {
