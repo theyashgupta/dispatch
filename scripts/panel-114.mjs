@@ -18,8 +18,24 @@
  * one probe, `baseline`, that records every BEFORE value the phase must report before a single
  * source byte changes. Plan 03 adds the first real check, `density` (break-proven), landing the
  * v3.4 density token block in `tokens.css` and repointing `CardView.tsx`/`Column.tsx` onto it.
- * `BREAKS` still holds only `density`; later plans in this phase register the state/motion/
- * reduced-motion checks and their own break-proof legs.
+ * Plan 04 adds `board-states` (break-proven), proving `CardView.tsx`'s hover/pressed/focus-ring
+ * fixes, `Card.tsx`'s composed pointer/focus handlers and `Column.tsx`'s three-branch resize
+ * handle. Later plans in this phase register the motion/reduced-motion checks and their own
+ * break-proof legs.
+ *
+ * DETAIL-PANEL FINDING (Plan 04, out of this plan's own scope, recorded for the next phase that
+ * touches `DetailPanel.tsx`): `document.querySelector('aside[aria-label="Ticket detail"]') ==
+ * null` can NEVER become true. `DetailPanel.tsx`'s `<aside>` stays permanently mounted (the
+ * `PANEL-03` invariant protecting the embedded terminal iframe's identity); `open` is expressed
+ * only via `transform: translateX(100%)` sliding it fully off-screen. `checkDensity`'s own
+ * reading-surface-isolation Escape call and `probeBaseline`'s `measureMotion` both call
+ * `pollUntilTruthy` on that same never-true expression and simply discard its return value, so
+ * neither ever actually confirmed a close; this went unnoticed because neither depends on the
+ * panel visually closing afterward. `board-states` instead dispatches its two panel-opening-prone
+ * real clicks with the Ctrl modifier (`Card.tsx` routes a Ctrl/Cmd-held click to
+ * `onToggleSelect`, never `onSelect`), which never opens the panel in the first place, and its own
+ * `closeDetailPanelIfOpen` safety net reads `window.panel114DetailPanelOpen()` (a bounding-rect
+ * check) instead.
  *
  * Ports, unique against every existing `panel-*.mjs` and other `scripts/*.mjs` harness (verified
  * by grepping every `SANDBOX_PORT =` and `CDP_PORT =` assignment in `scripts/*.mjs`: the highest
@@ -62,6 +78,18 @@
  *     `density(BP-B): regular card padding expected "6px 8px", observed "4px 8px"`
  *     `density(BP-C): regular card padding expected "6px 8px", observed "4px 8px"`
  *     `density(BP-D): regular card padding expected "6px 8px", observed "4px 8px"`
+ *     The RESTORE leg re-ran clean after the captured bytes were restored, and
+ *     `git diff --quiet src/` confirmed a byte-identical restore.
+ *   - `board-states` proven able to fail (Plan 04): reinserting the exact deleted
+ *     `if (hover && !elevated && !selected && !needsAttention) { boxShadowParts.push("0 2px 8px
+ *     rgba(0,0,0,0.3)"); }` branch immediately after the `elevated`/`--shadow-float` line in
+ *     `src/web/features/board/CardView.tsx`, rebuilding, and re-running the same
+ *     `checkBoardStates` function against a real booted sandbox and real headless Chrome
+ *     produced, verbatim:
+ *     `board-states(BP-A): card hover boxShadow expected "none", observed "rgba(0, 0, 0, 0.3) 0px 2px 8px 0px" (mode: real)`
+ *     `board-states(BP-B): card hover boxShadow expected "none", observed "rgba(0, 0, 0, 0.3) 0px 2px 8px 0px" (mode: real)`
+ *     `board-states(BP-C): card hover boxShadow expected "none", observed "rgba(0, 0, 0, 0.3) 0px 2px 8px 0px" (mode: rendered-state)`
+ *     `board-states(BP-D): card hover boxShadow expected "none", observed "rgba(0, 0, 0, 0.3) 0px 2px 8px 0px" (mode: rendered-state)`
  *     The RESTORE leg re-ran clean after the captured bytes were restored, and
  *     `git diff --quiet src/` confirmed a byte-identical restore.
  */
@@ -1115,6 +1143,17 @@ window.panel114CountChipEl = function (column) {
 window.panel114ResizeHandleEl = function (column) {
   return window.panel114FindColumn(column).querySelector(':scope > [role="separator"]');
 };
+// DetailPanel.tsx's <aside> stays permanently mounted (never conditionally rendered) to protect
+// the embedded terminal iframe's identity across open/close (the PANEL-03 invariant); open is
+// expressed only via transform: translateX(100%) sliding it fully off-screen, never by removing
+// it from the DOM. querySelector(...) == null can therefore NEVER become true and is not a usable
+// closed-signal; this reads the element's own bounding rect instead.
+window.panel114DetailPanelOpen = function () {
+  var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+  if (!aside) return false;
+  var r = aside.getBoundingClientRect();
+  return r.width > 0 && r.left < window.innerWidth && r.right > 0;
+};
 window.panel114ComputedSub = function (el, props) {
   if (!el) return null;
   var cs = getComputedStyle(el);
@@ -1123,6 +1162,60 @@ window.panel114ComputedSub = function (el, props) {
     out[p] = cs[p];
   });
   return out;
+};
+/** Chrome's computed-style serialization of a color-mix() result is NOT a stable "rgb(r, g, b)"
+ * string: depending on the exact cascade path it may report "color(srgb ...)" or "oklab(...)".
+ * Never used to REPLACE panel114ComputedSub (which every other check in this file relies on for
+ * exact literal matches, e.g. boxShadow), only called explicitly by board-states' own color
+ * comparisons via a canvas 1x1-pixel round trip, the one technique that resolves ANY valid CSS
+ * <color> syntax to actual composited sRGB bytes regardless of the serialization format Chrome
+ * chose. */
+window.panel114NormalizeColor = function (raw) {
+  if (raw == null) return raw;
+  var canvas =
+    window.__panel114ColorCanvas ||
+    (window.__panel114ColorCanvas = document.createElement("canvas"));
+  canvas.width = 1;
+  canvas.height = 1;
+  var ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.clearRect(0, 0, 1, 1);
+  ctx.fillStyle = raw;
+  ctx.fillRect(0, 0, 1, 1);
+  var d = ctx.getImageData(0, 0, 1, 1).data;
+  // Always includes the alpha channel: --hover-resize-handle is color-mix(in srgb, var(--accent)
+  // 55%, transparent), a TRANSLUCENT token whose RGB channels are identical to the opaque
+  // --accent it is mixed from. Dropping alpha here would make the translucent hover value and the
+  // opaque dragging value normalize to the exact same string.
+  return "rgba(" + d[0] + ", " + d[1] + ", " + d[2] + ", " + (d[3] / 255).toFixed(3) + ")";
+};
+window.panel114ResolveBg = function (cssValue) {
+  var probe = document.createElement("div");
+  probe.style.cssText =
+    "position:absolute;top:-9999px;left:-9999px;pointer-events:none;background:" + cssValue;
+  document.body.appendChild(probe);
+  var value = getComputedStyle(probe).backgroundColor;
+  document.body.removeChild(probe);
+  return value;
+};
+window.panel114ResolveBorderRightColor = function (cssValue) {
+  var probe = document.createElement("div");
+  probe.style.cssText =
+    "position:absolute;top:-9999px;left:-9999px;pointer-events:none;border-right:2px solid " +
+    cssValue;
+  document.body.appendChild(probe);
+  var value = getComputedStyle(probe).borderRightColor;
+  document.body.removeChild(probe);
+  return value;
+};
+window.panel114ResolveOutlineColor = function (cssValue) {
+  var probe = document.createElement("div");
+  probe.style.cssText =
+    "position:absolute;top:-9999px;left:-9999px;pointer-events:none;outline:2px solid " +
+    cssValue;
+  document.body.appendChild(probe);
+  var value = getComputedStyle(probe).outlineColor;
+  document.body.removeChild(probe);
+  return value;
 };
 `;
 
@@ -2008,15 +2101,863 @@ async function runBreakDensity() {
 }
 
 // ---------------------------------------------------------------------------
+// board-states: break-proven check for Plan 04's card hover/pressed/focus,
+// resize-handle three-state split and column-header hover-inertness. Reuses
+// the density check's boot-once-per-run shape and measureStates'/readUnderHover's
+// own techniques, now asserting instead of only recording.
+// ---------------------------------------------------------------------------
+
+/** Converts a `#rrggbb` hex literal to the exact `rgb(r, g, b)` string format
+ * `getComputedStyle` reports, so the check can cross-verify a live probe-resolved token against
+ * the design contract's own recorded hex without ever hardcoding a hex as the primary assertion
+ * source (the probe resolution IS the primary source; this is the cross-check only). */
+function hexToRgbString(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+const PRESSED_CARD_CONTRACT_HEX = "#17181b";
+const PRESSED_CARD_HOVER_CONTRACT_HEX = "#1c1d21";
+
+/** A `color-mix()` value read from an isolated probe element (via `panel114ResolveBg`/
+ * `panel114ResolveBorderRightColor`/`panel114ResolveOutlineColor`) and the SAME token as actually
+ * composited on a real, styled board element were observed LIVE to differ by 1-2 sRGB levels per
+ * channel (more pronounced at BP-D's 3x `deviceScaleFactor`), a genuine sub-pixel color-space
+ * rounding difference between an isolated single-property probe and a real element's full
+ * compositing context, not a measurement bug. `COLOR_TOLERANCE` absorbs that jitter without
+ * masking a real palette regression (a wrong TOKEN, e.g. `--pressed-card` swapped for
+ * `--pressed-card-hover`, differs by dozens of levels per channel, far outside this tolerance). */
+const COLOR_TOLERANCE = 3;
+
+/** Parses a `getComputedStyle`/`panel114NormalizeColor`-style `"rgb(r, g, b)"` or
+ * `"rgba(r, g, b, a)"` string into a 4-channel `[r, g, b, a255]` (alpha scaled to 0-255 so the
+ * same tolerance applies to all four channels), or `null` if the string is not one of those two
+ * exact shapes (e.g. `"none"`). An implicit `rgb(...)` alpha is `255` (fully opaque), so an
+ * opaque and a translucent color with identical RGB (e.g. `--accent` vs `--hover-resize-handle`,
+ * a `color-mix()` of `--accent` with `transparent`) are never mistaken for a match. */
+function parseRgbTriple(str) {
+  if (typeof str !== "string") return null;
+  const rgb = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(str);
+  if (rgb) return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3]), 255];
+  const rgba = /^rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/.exec(str);
+  if (rgba) {
+    return [
+      Number(rgba[1]),
+      Number(rgba[2]),
+      Number(rgba[3]),
+      Math.round(Number(rgba[4]) * 255),
+    ];
+  }
+  return null;
+}
+
+/** True if `a` and `b` are the same non-color string, or both parse (via {@link parseRgbTriple})
+ * within {@link COLOR_TOLERANCE} per channel, alpha included. Never true for two values that fail
+ * to parse and are not byte-identical, so a malformed or unexpected computed-style string still
+ * fails loudly. */
+function colorsMatch(a, b) {
+  if (a === b) return true;
+  const pa = parseRgbTriple(a);
+  const pb = parseRgbTriple(b);
+  if (pa == null || pb == null) return false;
+  return pa.every((v, i) => Math.abs(v - pb[i]) <= COLOR_TOLERANCE);
+}
+
+/** Round-trips a raw `getComputedStyle` (or `panel114Resolve*`) color string through
+ * `window.panel114NormalizeColor`'s canvas-pixel technique, so every color comparison in
+ * `checkBoardStates` compares actual composited bytes rather than Chrome's own (format-unstable)
+ * computed-style serialization. */
+async function normalizeColor(cdp, sessionId, raw) {
+  if (raw == null) return raw;
+  return evalValue(
+    cdp,
+    sessionId,
+    `window.panel114NormalizeColor(${JSON.stringify(raw)})`,
+  );
+}
+
+/** Real trusted `mousePressed`/`mouseReleased` at `elExpr`'s current rect, reading `props` (via
+ * `panel114ComputedSub`) while held and again just after release. Never dispatches a leading
+ * `mouseMoved`: the caller controls whether hover precedes the press, so the pressed-tier formula
+ * can be asserted against whichever resting tier was actually observed immediately before the
+ * press, rather than an assumed one. `modifiers` follows the CDP bitmask (`2` is Ctrl); the
+ * press+release at the same point fires a real trusted `click` afterward, and `Card.tsx`'s own
+ * `onClick` routes a Ctrl/Cmd-held click to `onToggleSelect` (a lightweight selection toggle)
+ * instead of `onSelect` (which opens the detail panel), so passing `2` here proves the pressed
+ * tier without ever touching `DetailPanel.tsx`. */
+async function readUnderPress(cdp, sessionId, elExpr, props, modifiers = 0) {
+  const rect = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114Rect(${elExpr})`,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mousePressed",
+      x: rect.x,
+      y: rect.y,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+      modifiers,
+    },
+    sessionId,
+  );
+  await sleep(80);
+  const pressed = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114ComputedSub(${elExpr}, ${JSON.stringify(props)})`,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseReleased",
+      x: rect.x,
+      y: rect.y,
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+      modifiers,
+    },
+    sessionId,
+  );
+  await sleep(50);
+  const after = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114ComputedSub(${elExpr}, ${JSON.stringify(props)})`,
+  );
+  return { pressed, after };
+}
+
+/**
+ * Rendered-state pressed read: dispatches `pointerdown`/`pointerup` directly via
+ * `dispatchEvent`, never through CDP's `Input` domain. A real CDP `mousePressed` at new
+ * coordinates was found LIVE to implicitly move Chrome's virtual cursor there first, firing a
+ * native `mouseover`/`mouseenter` BEFORE the press settles, so a genuinely un-hovered press is
+ * physically unreachable through that technique: pressing always implies the pointer arrived,
+ * same as real hardware. This synthetic dispatch triggers React's delegated `onPointerDown`
+ * listener (React 17+ attaches at the root, catching any bubbling event, trusted or not) without
+ * moving the virtual cursor and without the native hover side effect, isolating the pressed-tier
+ * assertion from hover exactly as the codebase's own `readUnderHover` "rendered-state" `MouseEvent`
+ * dispatch already isolates hover from a real click elsewhere in this file.
+ */
+async function readUnderSyntheticPress(cdp, sessionId, elExpr, props) {
+  await evalValue(
+    cdp,
+    sessionId,
+    `${elExpr}.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", button: 0, buttons: 1 }))`,
+  );
+  await sleep(80);
+  const pressed = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114ComputedSub(${elExpr}, ${JSON.stringify(props)})`,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${elExpr}.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", button: 0, buttons: 0 }))`,
+  );
+  await sleep(50);
+  const after = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114ComputedSub(${elExpr}, ${JSON.stringify(props)})`,
+  );
+  return { pressed, after };
+}
+
+/** Safety-net cleanup only: every real click this check dispatches now carries the Ctrl modifier
+ * (see {@link readUnderPress}'s own JSDoc), which `Card.tsx` routes away from `onSelect`, so the
+ * detail panel should never open in the first place. If it somehow does, closes it via a real
+ * Escape and polls `window.panel114DetailPanelOpen()` (never `document.querySelector(...) ==
+ * null`, which can NEVER be satisfied since `DetailPanel.tsx`'s `<aside>` stays permanently
+ * mounted off-screen; see that helper's own JSDoc). */
+async function closeDetailPanelIfOpen(cdp, sessionId) {
+  const open = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114DetailPanelOpen()`,
+  );
+  if (!open) return;
+  await dispatchRealKey(cdp, sessionId, "Escape", "Escape", 27);
+  await pollUntilTruthy(
+    cdp,
+    sessionId,
+    `!window.panel114DetailPanelOpen()`,
+    5_000,
+  );
+}
+
+/**
+ * Retry wrapper around {@link checkBoardStatesOnce}. This check issues far more CDP round trips
+ * per run than any other check in this file (real hover, real Tab traversal, real press/release,
+ * twice, per breakpoint), and live runs on this machine observed the underlying headless Chrome
+ * instance occasionally stall on an unrelated `Input.dispatchMouseEvent`/`Runtime.evaluate` call
+ * at a DIFFERENT stage each time (column header once, pressed scenario B another time), never at
+ * the same assertion twice, consistent with real CPU contention from the developer's own live
+ * desktop Chrome session sharing the machine rather than a deterministic bug in this check's own
+ * logic. Retries a THROWN infra-shaped error (never a real assertion violation pushed into
+ * `violations`, which is never thrown) up to `MAX_ATTEMPTS` times, tearing down and re-booting a
+ * fresh sandbox each attempt.
+ */
+async function checkBoardStates(violations) {
+  const MAX_ATTEMPTS = 3;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    // A fresh array per attempt: a THROWN mid-run infra failure must never leak partial
+    // violations from a discarded attempt into the final, real result.
+    const attemptViolations = [];
+    try {
+      await checkBoardStatesOnce(attemptViolations);
+      violations.push(...attemptViolations);
+      return;
+    } catch (err) {
+      lastErr = err;
+      console.error(
+        `board-states: attempt ${attempt}/${MAX_ATTEMPTS} threw (likely CDP/renderer contention, not a code defect): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      if (attempt === MAX_ATTEMPTS) throw lastErr;
+    }
+  }
+}
+
+async function checkBoardStatesOnce(violations) {
+  let sandbox = null;
+  let chrome = null;
+  let cdp = null;
+  try {
+    sandbox = await bootSandbox("check-board-states");
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+    const { sessionId } = await openPage(cdp, { url: "about:blank" });
+    await cdp.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      { source: MEASURE_HELPERS_SRC },
+      sessionId,
+    );
+    await cdp.send(
+      "Page.navigate",
+      { url: `http://127.0.0.1:${SANDBOX_PORT}/` },
+      sessionId,
+    );
+    const loaded = await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `document.getElementById("root") != null`,
+      READY_TIMEOUT_MS,
+    );
+    if (!loaded) {
+      violations.push("board-states: #root never appeared after navigation");
+      return;
+    }
+    // Splash.tsx's unconditional 1.3s overlay, same settle window every other check uses.
+    await sleep(1450);
+
+    const card = `window.panel114FindCardByIdentifier("todo","PROP-401")`;
+
+    // Resolve every token this check needs once, via a probe element in the SAME page, never a
+    // hardcoded hex as the primary assertion source. Every resolution is normalized through
+    // normalizeColor's canvas-pixel round trip: Chrome's computed-style serialization of a
+    // color-mix() result is not a stable "rgb(r, g, b)" string (observed as "color(srgb ...)" and
+    // "oklab(...)" depending on cascade path), so a raw string comparison against a live element's
+    // own (differently-serialized) computed color would false-positive.
+    const resolvedNormalBg = await normalizeColor(
+      cdp,
+      sessionId,
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114ResolveBg("var(--surface-card)")`,
+      ),
+    );
+    const resolvedHoverBg = await normalizeColor(
+      cdp,
+      sessionId,
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114ResolveBg("var(--surface-card-hover)")`,
+      ),
+    );
+    const resolvedPressedCard = await normalizeColor(
+      cdp,
+      sessionId,
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114ResolveBg("var(--pressed-card)")`,
+      ),
+    );
+    const resolvedPressedCardHover = await normalizeColor(
+      cdp,
+      sessionId,
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114ResolveBg("var(--pressed-card-hover)")`,
+      ),
+    );
+    const resolvedAccentOutline = await normalizeColor(
+      cdp,
+      sessionId,
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114ResolveOutlineColor("var(--accent)")`,
+      ),
+    );
+    const resolvedAccentBorder = await normalizeColor(
+      cdp,
+      sessionId,
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114ResolveBorderRightColor("var(--accent)")`,
+      ),
+    );
+    const resolvedHoverResizeHandle = await normalizeColor(
+      cdp,
+      sessionId,
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114ResolveBorderRightColor("var(--hover-resize-handle)")`,
+      ),
+    );
+
+    // Cross-check the live-resolved pressed tokens against the contract's own recorded hex,
+    // proving both the formula (color-mix over each tier's own resting background) and its value.
+    // hexToRgbString's output is a bare "rgb(...)" (implicit alpha 255) while
+    // panel114NormalizeColor always emits "rgba(...)" (explicit alpha channel, see its own
+    // JSDoc); colorsMatch's parseRgbTriple treats those as equivalent when the alpha both resolve
+    // to fully opaque, so this is a value cross-check, not a string-format cross-check.
+    const expectedPressedCard = hexToRgbString(PRESSED_CARD_CONTRACT_HEX);
+    if (!colorsMatch(resolvedPressedCard, expectedPressedCard)) {
+      violations.push(
+        `board-states: --pressed-card resolved ${resolvedPressedCard}, contract records ${PRESSED_CARD_CONTRACT_HEX} (${expectedPressedCard})`,
+      );
+    }
+    const expectedPressedCardHover = hexToRgbString(
+      PRESSED_CARD_HOVER_CONTRACT_HEX,
+    );
+    if (!colorsMatch(resolvedPressedCardHover, expectedPressedCardHover)) {
+      violations.push(
+        `board-states: --pressed-card-hover resolved ${resolvedPressedCardHover}, contract records ${PRESSED_CARD_HOVER_CONTRACT_HEX} (${expectedPressedCardHover})`,
+      );
+    }
+
+    for (const bp of BREAKPOINTS) {
+      await applyBreakpoint(cdp, sessionId, bp);
+      await blurActive(cdp, sessionId);
+      await moveMouseAway(cdp, sessionId);
+      await sleep(300);
+      const real = bp.label === "BP-A" || bp.label === "BP-B";
+      const label = `board-states(${bp.label})`;
+
+      // CARD HOVER: background must be the hover tier, boxShadow and transform must be "none".
+      // The boxShadow assertion is the one that fails against the pre-Plan-04 code, the anchor of
+      // this check.
+      const hoverRead = await readUnderHover(
+        cdp,
+        sessionId,
+        card,
+        ["backgroundColor", "boxShadow", "transform"],
+        real,
+      );
+      if (hoverRead.value.boxShadow !== "none") {
+        violations.push(
+          `${label}: card hover boxShadow expected "none", observed ${JSON.stringify(hoverRead.value.boxShadow)} (mode: ${hoverRead.mode})`,
+        );
+      }
+      if (hoverRead.value.transform !== "none") {
+        violations.push(
+          `${label}: card hover transform expected "none", observed ${JSON.stringify(hoverRead.value.transform)} (mode: ${hoverRead.mode})`,
+        );
+      }
+      hoverRead.value.backgroundColor = await normalizeColor(
+        cdp,
+        sessionId,
+        hoverRead.value.backgroundColor,
+      );
+      if (!colorsMatch(hoverRead.value.backgroundColor, resolvedHoverBg)) {
+        violations.push(
+          `${label}: card hover backgroundColor expected ${resolvedHoverBg} (mode: ${hoverRead.mode}), observed ${hoverRead.value.backgroundColor}`,
+        );
+      }
+
+      // CARD FOCUS: a real Tab traversal, asserting the governed focusRing (never the native
+      // default outlineStyle "auto"), then a real pointer click proving :focus-visible gates it.
+      const traversal = await tabTraverseTo(cdp, sessionId, card);
+      if (!traversal.reached) {
+        violations.push(
+          `${label}: card focus, Tab traversal never reached the card within ${TAB_TRAVERSAL_CAP} presses`,
+        );
+      } else {
+        const focusOutline = await evalValue(
+          cdp,
+          sessionId,
+          `window.panel114ComputedSub(document.activeElement, ["outlineWidth","outlineStyle","outlineColor","outlineOffset"])`,
+        );
+        if (
+          focusOutline.outlineWidth !== "2px" ||
+          focusOutline.outlineStyle !== "solid" ||
+          focusOutline.outlineOffset !== "2px"
+        ) {
+          violations.push(
+            `${label}: card focus outline expected 2px solid with a 2px offset, observed ${JSON.stringify(focusOutline)}`,
+          );
+        }
+        focusOutline.outlineColor = await normalizeColor(
+          cdp,
+          sessionId,
+          focusOutline.outlineColor,
+        );
+        if (!colorsMatch(focusOutline.outlineColor, resolvedAccentOutline)) {
+          violations.push(
+            `${label}: card focus outlineColor expected the resolved accent ${resolvedAccentOutline}, observed ${focusOutline.outlineColor}`,
+          );
+        }
+        if (focusOutline.outlineStyle === "auto") {
+          violations.push(
+            `${label}: card focus outlineStyle read "auto", the browser's native default ring, never focusRing()`,
+          );
+        }
+      }
+      await blurActive(cdp, sessionId);
+      await moveMouseAway(cdp, sessionId);
+
+      const cardRect = await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114Rect(${card})`,
+      );
+      // Ctrl modifier (CDP bitmask 2): Card.tsx routes a Ctrl/Cmd-held click to onToggleSelect
+      // rather than onSelect, so this real click never opens the detail panel (see
+      // readUnderPress's own JSDoc for why); the native mousedown-focuses-a-tabIndex-0-element and
+      // :focus-visible gating this assertion tests are unaffected by the modifier.
+      await dispatchRealClick(
+        cdp,
+        sessionId,
+        { x: cardRect.x, y: cardRect.y },
+        2,
+      );
+      const stillFocused = await evalValue(
+        cdp,
+        sessionId,
+        `document.activeElement === ${card}`,
+      );
+      if (stillFocused) {
+        const clickOutline = await evalValue(
+          cdp,
+          sessionId,
+          `window.panel114ComputedSub(document.activeElement, ["outlineStyle"])`,
+        );
+        if (clickOutline.outlineStyle !== "none") {
+          violations.push(
+            `${label}: a real pointer click left a focus ring painted (outlineStyle ${JSON.stringify(clickOutline.outlineStyle)}), the :focus-visible gate did not hold`,
+          );
+        }
+      }
+      await closeDetailPanelIfOpen(cdp, sessionId);
+      await blurActive(cdp, sessionId);
+      await moveMouseAway(cdp, sessionId);
+      await sleep(150);
+
+      // CARD PRESSED, scenario A: unhovered/unselected first (resting tier --surface-card).
+      // Uses the synthetic pointerdown/pointerup technique (readUnderSyntheticPress), not a real
+      // CDP mousePressed: a real mousePressed at new coordinates was found LIVE to implicitly move
+      // Chrome's virtual cursor there first, firing native hover BEFORE the press settles, making
+      // a genuinely un-hovered real press physically unreachable (pressing always implies the
+      // pointer arrived, matching real hardware). See readUnderSyntheticPress's own JSDoc.
+      const restingA = await normalizeColor(
+        cdp,
+        sessionId,
+        await evalValue(
+          cdp,
+          sessionId,
+          `getComputedStyle(${card}).backgroundColor`,
+        ),
+      );
+      if (!colorsMatch(restingA, resolvedNormalBg)) {
+        violations.push(
+          `${label}: card pressed scenario A precondition, resting backgroundColor expected ${resolvedNormalBg}, observed ${restingA}`,
+        );
+      }
+      const pressA = await readUnderSyntheticPress(cdp, sessionId, card, [
+        "backgroundColor",
+      ]);
+      pressA.pressed.backgroundColor = await normalizeColor(
+        cdp,
+        sessionId,
+        pressA.pressed.backgroundColor,
+      );
+      pressA.after.backgroundColor = await normalizeColor(
+        cdp,
+        sessionId,
+        pressA.after.backgroundColor,
+      );
+      if (!colorsMatch(pressA.pressed.backgroundColor, resolvedPressedCard)) {
+        violations.push(
+          `${label}: card pressed (unhovered, rendered-state) backgroundColor expected ${resolvedPressedCard}, observed ${pressA.pressed.backgroundColor}`,
+        );
+      }
+      // Positive assertion against the expected RESTING value, not a negative one against the
+      // pressed value: --pressed-card and --surface-card differ by only ~3 sRGB levels per
+      // channel, within COLOR_TOLERANCE of each other, so "not equal to pressed" would not
+      // reliably distinguish a genuine return from a still-pressed jitter reading.
+      if (!colorsMatch(pressA.after.backgroundColor, resolvedNormalBg)) {
+        violations.push(
+          `${label}: card pressed (unhovered, rendered-state) backgroundColor expected to return to ${resolvedNormalBg} after release, still reads ${pressA.after.backgroundColor}`,
+        );
+      }
+      await closeDetailPanelIfOpen(cdp, sessionId);
+      await moveMouseAway(cdp, sessionId);
+      await blurActive(cdp, sessionId);
+      await sleep(150);
+
+      // CARD PRESSED, scenario B: hovered first (resting tier --surface-card-hover).
+      if (real) {
+        const hoverPrep = await evalValue(
+          cdp,
+          sessionId,
+          `window.panel114Rect(${card})`,
+        );
+        await cdp.send(
+          "Input.dispatchMouseEvent",
+          { type: "mouseMoved", x: hoverPrep.x, y: hoverPrep.y },
+          sessionId,
+        );
+      } else {
+        await evalValue(
+          cdp,
+          sessionId,
+          `${card}.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, relatedTarget: document.body }))`,
+        );
+      }
+      await sleep(HOVER_SETTLE_MS);
+      const restingB = await normalizeColor(
+        cdp,
+        sessionId,
+        await evalValue(
+          cdp,
+          sessionId,
+          `getComputedStyle(${card}).backgroundColor`,
+        ),
+      );
+      if (!colorsMatch(restingB, resolvedHoverBg)) {
+        violations.push(
+          `${label}: card pressed scenario B precondition, hovered resting backgroundColor expected ${resolvedHoverBg}, observed ${restingB} (mode: ${real ? "real" : "rendered-state"})`,
+        );
+      }
+      // Ctrl modifier (2): the resulting real click never opens the detail panel, see
+      // readUnderPress's own JSDoc.
+      const pressB = await readUnderPress(
+        cdp,
+        sessionId,
+        card,
+        ["backgroundColor"],
+        2,
+      );
+      pressB.pressed.backgroundColor = await normalizeColor(
+        cdp,
+        sessionId,
+        pressB.pressed.backgroundColor,
+      );
+      pressB.after.backgroundColor = await normalizeColor(
+        cdp,
+        sessionId,
+        pressB.after.backgroundColor,
+      );
+      if (
+        !colorsMatch(pressB.pressed.backgroundColor, resolvedPressedCardHover)
+      ) {
+        violations.push(
+          `${label}: card pressed (hovered) backgroundColor expected ${resolvedPressedCardHover}, observed ${pressB.pressed.backgroundColor}`,
+        );
+      }
+      // Positive assertion against the expected resting-hover value (the mouse never left the
+      // card, so it returns to the hover tier, not the plain resting tier); see scenario A's own
+      // comment for why a negative check against the pressed value is not reliable here either.
+      if (!colorsMatch(pressB.after.backgroundColor, resolvedHoverBg)) {
+        violations.push(
+          `${label}: card pressed (hovered) backgroundColor expected to return to ${resolvedHoverBg} after release, still reads ${pressB.after.backgroundColor}`,
+        );
+      }
+      await closeDetailPanelIfOpen(cdp, sessionId);
+      if (!real) {
+        await evalValue(
+          cdp,
+          sessionId,
+          `${card}.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, cancelable: true, relatedTarget: document.body }))`,
+        );
+      }
+      await moveMouseAway(cdp, sessionId);
+      await blurActive(cdp, sessionId);
+      await sleep(150);
+
+      // COLUMN HEADER: byte-identical hover, the contract's own finding proven live, the reason
+      // success criterion 2 is satisfied for the header by design rather than by omission.
+      const header = `window.panel114HeaderEl("todo")`;
+      const headerBefore = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(${header}).backgroundColor`,
+      );
+      const headerHover = await readUnderHover(
+        cdp,
+        sessionId,
+        header,
+        ["backgroundColor"],
+        real,
+      );
+      if (headerHover.value.backgroundColor !== headerBefore) {
+        violations.push(
+          `${label}: column header hover backgroundColor changed (before ${headerBefore}, after ${headerHover.value.backgroundColor}, mode: ${headerHover.mode}), the header must show nothing`,
+        );
+      }
+
+      // RESIZE HANDLE: three pairwise-distinct active states at BP-A/BP-B, absent (not rendered)
+      // at BP-C/BP-D.
+      if (real) {
+        const handle = `window.panel114ResizeHandleEl("todo")`;
+        const handleProps = [
+          "borderRightColor",
+          "outlineWidth",
+          "outlineStyle",
+        ];
+        const resting = await evalValue(
+          cdp,
+          sessionId,
+          `window.panel114ComputedSub(${handle}, ${JSON.stringify(handleProps)})`,
+        );
+        const hover = await readUnderHover(
+          cdp,
+          sessionId,
+          handle,
+          handleProps,
+          true,
+        );
+        const traversalH = await tabTraverseTo(cdp, sessionId, handle);
+        const focusH = traversalH.reached
+          ? await evalValue(
+              cdp,
+              sessionId,
+              `window.panel114ComputedSub(document.activeElement, ${JSON.stringify(handleProps)})`,
+            )
+          : null;
+        await blurActive(cdp, sessionId);
+        const rect = await evalValue(
+          cdp,
+          sessionId,
+          `window.panel114Rect(${handle})`,
+        );
+        await cdp.send(
+          "Input.dispatchMouseEvent",
+          { type: "mouseMoved", x: rect.x, y: rect.y },
+          sessionId,
+        );
+        await cdp.send(
+          "Input.dispatchMouseEvent",
+          {
+            type: "mousePressed",
+            x: rect.x,
+            y: rect.y,
+            button: "left",
+            buttons: 1,
+            clickCount: 1,
+          },
+          sessionId,
+        );
+        await cdp.send(
+          "Input.dispatchMouseEvent",
+          { type: "mouseMoved", x: rect.x + 20, y: rect.y, buttons: 1 },
+          sessionId,
+        );
+        await sleep(100);
+        const dragging = await evalValue(
+          cdp,
+          sessionId,
+          `window.panel114ComputedSub(${handle}, ${JSON.stringify(handleProps)})`,
+        );
+        await cdp.send(
+          "Input.dispatchMouseEvent",
+          {
+            type: "mouseReleased",
+            x: rect.x + 20,
+            y: rect.y,
+            button: "left",
+            buttons: 0,
+            clickCount: 1,
+          },
+          sessionId,
+        );
+        await moveMouseAway(cdp, sessionId);
+
+        resting.borderRightColor = await normalizeColor(
+          cdp,
+          sessionId,
+          resting.borderRightColor,
+        );
+        hover.value.borderRightColor = await normalizeColor(
+          cdp,
+          sessionId,
+          hover.value.borderRightColor,
+        );
+        dragging.borderRightColor = await normalizeColor(
+          cdp,
+          sessionId,
+          dragging.borderRightColor,
+        );
+
+        if (!traversalH.reached) {
+          violations.push(
+            `${label}: resize handle, Tab traversal never reached it`,
+          );
+        }
+        if (
+          !colorsMatch(hover.value.borderRightColor, resolvedHoverResizeHandle)
+        ) {
+          violations.push(
+            `${label}: resize handle hover borderRightColor expected ${resolvedHoverResizeHandle}, observed ${hover.value.borderRightColor}`,
+          );
+        }
+        if (!colorsMatch(dragging.borderRightColor, resolvedAccentBorder)) {
+          violations.push(
+            `${label}: resize handle dragging borderRightColor expected the opaque accent ${resolvedAccentBorder}, observed ${dragging.borderRightColor}`,
+          );
+        }
+        if (focusH != null && focusH.outlineStyle !== "solid") {
+          violations.push(
+            `${label}: resize handle focus outlineStyle expected "solid" (focusRing), observed ${JSON.stringify(focusH.outlineStyle)}`,
+          );
+        }
+        if (focusH != null && focusH.outlineWidth !== "2px") {
+          violations.push(
+            `${label}: resize handle focus outlineWidth expected "2px", observed ${JSON.stringify(focusH.outlineWidth)}`,
+          );
+        }
+        if (
+          colorsMatch(hover.value.borderRightColor, dragging.borderRightColor)
+        ) {
+          violations.push(
+            `${label}: resize handle hover and dragging borderRightColor are identical (${hover.value.borderRightColor}), not pairwise distinct`,
+          );
+        }
+        if (
+          colorsMatch(resting.borderRightColor, hover.value.borderRightColor)
+        ) {
+          violations.push(
+            `${label}: resize handle resting and hover borderRightColor are identical, hover is indistinguishable from resting`,
+          );
+        }
+      } else {
+        const absent = await evalValue(
+          cdp,
+          sessionId,
+          `window.panel114ResizeHandleEl("todo") === null`,
+        );
+        if (!absent) {
+          violations.push(
+            `${label}: resize handle expected absent from the DOM (not rendered) at ${bp.label}, but an element was found`,
+          );
+        }
+      }
+    }
+  } finally {
+    if (cdp) {
+      try {
+        cdp.close();
+      } catch {
+        // best effort
+      }
+    }
+    if (chrome) {
+      try {
+        chrome.kill("SIGTERM");
+      } catch {
+        // best effort
+      }
+    }
+    if (sandbox) await teardownSandbox(sandbox);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BREAKS["board-states"]: reintroduces the real deleted hover box-shadow branch
+// (Task 1's own deletion) into CardView.tsx, rebuilds, and re-runs
+// checkBoardStates itself against the mutated source, then restores the
+// captured bytes unconditionally.
+// ---------------------------------------------------------------------------
+
+const BOARD_STATES_BREAK_ANCHOR =
+  'if (elevated) boxShadowParts.push("var(--shadow-float)");\n';
+const BOARD_STATES_BREAK_INSERT =
+  BOARD_STATES_BREAK_ANCHOR +
+  "  if (hover && !elevated && !selected && !needsAttention) {\n" +
+  '    boxShadowParts.push("0 2px 8px rgba(0,0,0,0.3)");\n' +
+  "  }\n";
+
+async function runBreakBoardStates() {
+  assertBuilt();
+  const original = readFileSync(CARD_VIEW_PATH, "utf8");
+  const occurrences = original.split(BOARD_STATES_BREAK_ANCHOR).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel-114: refusing to run --break board-states, expected the shadow-float anchor to ` +
+        `occur exactly once in ${CARD_VIEW_PATH}, measured ${occurrences}. A miscounted anchor ` +
+        `would mutate the wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(CARD_VIEW_PATH, original);
+  try {
+    writeFileSync(
+      CARD_VIEW_PATH,
+      original.replace(BOARD_STATES_BREAK_ANCHOR, BOARD_STATES_BREAK_INSERT),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkBoardStates(tripViolations);
+    console.log(
+      `\n--break board-states TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) => v.includes("card hover boxShadow"));
+  } finally {
+    restoreCardViewSource(original);
+  }
+
+  const restoreViolations = [];
+  await checkBoardStates(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break board-states RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS / PROBES
 // ---------------------------------------------------------------------------
 
 const CHECKS = {
   density: checkDensity,
+  "board-states": checkBoardStates,
 };
 
 const BREAKS = {
   density: runBreakDensity,
+  "board-states": runBreakBoardStates,
 };
 
 const PROBES = {
