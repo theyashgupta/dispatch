@@ -202,7 +202,7 @@ function buildPairSet(tokens, extraBgs) {
       pairs.push({ fg: fgName, fgHex, bg: bgName, bgHex, role: "nontext" });
     }
   }
-  return { backgrounds, pairs };
+  return { pairs };
 }
 
 // ---------------------------------------------------------------------------
@@ -360,8 +360,8 @@ async function runBreakPairs() {
 
     const tripViolations = [];
     checkPairs(mutatedPath, [], tripViolations);
-    const tripFired = tripViolations.some(
-      (v) => v.includes("--text-muted") && v.includes("--surface-card"),
+    const tripFired = tripViolations.some((v) =>
+      v.includes("--text-muted on --surface-card ("),
     );
     console.log(
       `\n--break pairs TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
@@ -405,7 +405,7 @@ async function runBreakLadder() {
     const tripViolations = [];
     checkLadder(mutatedPath, tripViolations);
     const tripFired = tripViolations.some(
-      (v) => v.includes("--surface-column") && v.includes("--surface-card"),
+      (v) => v.includes("--surface-card (") && v.includes("--surface-column ("),
     );
     console.log(
       `\n--break ladder TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
