@@ -1049,12 +1049,13 @@ function checkStatusColorMechanism() {
     );
   } else {
     const content = readFileSync(COLUMN_META_PATH, "utf8");
-    if (!content.includes("export const COLUMN_ACCENT")) {
+    const columnAccentMatch = /export const COLUMN_ACCENT\b/.exec(content);
+    if (!columnAccentMatch) {
       violations.push(
         `${COLUMN_META_PATH}: export const COLUMN_ACCENT not found, NEW-24's single-source mechanism is missing or renamed`,
       );
     } else {
-      const tail = content.slice(content.indexOf("export const COLUMN_ACCENT"));
+      const tail = content.slice(columnAccentMatch.index);
       const body = tail.slice(0, tail.indexOf("};") + 2);
       const values = [...body.matchAll(/:\s*"([^"]*)"/g)].map((m) => m[1]);
       if (values.length === 0) {
@@ -1081,12 +1082,13 @@ function checkStatusColorMechanism() {
     );
   } else {
     const content = readFileSync(CARD_VIEW_PATH, "utf8");
-    if (!content.includes("export const PRIORITY_DOT")) {
+    const priorityDotMatch = /export const PRIORITY_DOT\b/.exec(content);
+    if (!priorityDotMatch) {
       violations.push(
         `${CARD_VIEW_PATH}: export const PRIORITY_DOT not found, NEW-24's single-source mechanism is missing or renamed`,
       );
     } else {
-      const tail = content.slice(content.indexOf("export const PRIORITY_DOT"));
+      const tail = content.slice(priorityDotMatch.index);
       const body = tail.slice(0, tail.indexOf("};") + 2);
       const values = [...body.matchAll(/color:\s*"([^"]*)"/g)].map((m) => m[1]);
       if (values.length === 0) {
