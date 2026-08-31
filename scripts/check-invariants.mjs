@@ -68,8 +68,10 @@ const ID_RE =
  * @remarks Moved from 139 to 145 for the deliberate six-ID re-freeze ratifying the runner
  * (`T-105-01`, `T-105-02`), both guard layers (`T-105-03`, `T-105-04`) and the two accepted
  * residuals (`T-105-05`, `T-105-06`), see docs/ARCHITECTURE.md#security-threat-model.
+ * @remarks Moved from 145 to 146 for the deliberate one-ID status-colour single-source
+ * re-freeze (`NEW-24`), see docs/ARCHITECTURE.md#design-system-invariants.
  */
-const FROZEN_COUNT = 145;
+const FROZEN_COUNT = 146;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");
@@ -79,6 +81,14 @@ const SYNC_STRIP_PATH = join("src", "web", "features", "sync", "SyncStrip.tsx");
 const TOKENS_PATH = join("src", "web", "styles", "tokens.css");
 const BOARD_DIR = join("src", "web", "features", "board");
 const WEB_DIR = join("src", "web");
+const COLUMN_META_PATH = join(
+  "src",
+  "web",
+  "features",
+  "board",
+  "column-meta.ts",
+);
+const CARD_VIEW_PATH = join("src", "web", "features", "board", "CardView.tsx");
 const TERMINAL_CLIENT_PATHS = [
   join("src", "web", "terminal-main.ts"),
   join("src", "web", "terminal.html"),
@@ -106,6 +116,30 @@ const ATTENTION_FIELDS = ["startError", "sessionLost", "cleanupBlocked"];
  * asserts no `src/web` file other than {@link CARD_ATTENTION_PATH} declares either.
  */
 const ATTENTION_EXPORTS = ["needsAttention", "attentionTitle"];
+
+/**
+ * The thirteen `--col-*`/`--prio-*`/`--status-*` custom-property names `NEW-24` requires present
+ * in {@link TOKENS_PATH} with a hex value. Named here rather than derived, so a silently emptied
+ * or renamed token is itself a detectable defect, not an empty denylist: the missing-subject
+ * sentinel in `checkStatusColorSingleSource` fires per absent name. The hex VALUES themselves are
+ * never hardcoded here; they are read from `tokens.css` at run time, so a palette retune cannot
+ * leave a stale denylist behind.
+ */
+const STATUS_COLOR_PALETTE_TOKENS = [
+  "--prio-urgent",
+  "--prio-high",
+  "--prio-medium",
+  "--prio-low",
+  "--col-todo",
+  "--col-in-progress",
+  "--col-needs-input",
+  "--col-agent-done",
+  "--col-in-review",
+  "--col-done",
+  "--status-ok",
+  "--status-stale",
+  "--status-down",
+];
 const STEPS_PATH = join(
   "src",
   "server",
@@ -980,6 +1014,166 @@ function checkLaunchctlReadOnly() {
 }
 
 /**
+ * Parse {@link TOKENS_PATH} for `--col-*`/`--prio-*`/`--status-*` custom-property declarations
+ * holding a hex value.
+ * @returns A map from declared name to its lowercased hex value, for every such declaration found
+ * (not filtered to {@link STATUS_COLOR_PALETTE_TOKENS}, so the caller can still detect a stray
+ * unlisted declaration if one is ever added).
+ */
+function readStatusColorPalette() {
+  const tokens = readFileSync(TOKENS_PATH, "utf8");
+  const declRe = /(-{2}(?:prio|col|status)-[a-z-]+):\s*(#[0-9a-fA-F]{3,8})\b/g;
+  const found = new Map();
+  let match;
+  while ((match = declRe.exec(tokens)) !== null) {
+    found.set(match[1], match[2].toLowerCase());
+  }
+  return found;
+}
+
+/**
+ * The mechanism half of `NEW-24`: `COLUMN_ACCENT` ({@link COLUMN_META_PATH}) and `PRIORITY_DOT`
+ * ({@link CARD_VIEW_PATH}) are each fenced as the single definition of "which colour a column or
+ * priority renders", asserted still exported and still holding only `var(--col-*)`/`var(--accent)`
+ * or `var(--prio-*)` string values. A missing/renamed export is a sentinel violation, not a silent
+ * pass: a literal-only fence would pass unchanged against a build that deleted either map and
+ * inlined its `var()` strings by hand at every former call site.
+ * @returns Violation report lines, one per defect.
+ */
+function checkStatusColorMechanism() {
+  const violations = [];
+
+  if (!existsSync(COLUMN_META_PATH)) {
+    violations.push(
+      `${COLUMN_META_PATH}: file not found, NEW-24's COLUMN_ACCENT subject is missing or renamed`,
+    );
+  } else {
+    const content = readFileSync(COLUMN_META_PATH, "utf8");
+    if (!content.includes("export const COLUMN_ACCENT")) {
+      violations.push(
+        `${COLUMN_META_PATH}: export const COLUMN_ACCENT not found, NEW-24's single-source mechanism is missing or renamed`,
+      );
+    } else {
+      const tail = content.slice(content.indexOf("export const COLUMN_ACCENT"));
+      const body = tail.slice(0, tail.indexOf("};") + 2);
+      const values = [...body.matchAll(/:\s*"([^"]*)"/g)].map((m) => m[1]);
+      if (values.length === 0) {
+        violations.push(
+          `${COLUMN_META_PATH}: COLUMN_ACCENT holds no string values, NEW-24's single-source mechanism is malformed`,
+        );
+      }
+      for (const value of values) {
+        if (
+          !/^var\(-{2}col-[a-z-]+\)$/.test(value) &&
+          value !== "var(--accent)"
+        ) {
+          violations.push(
+            `${COLUMN_META_PATH}: COLUMN_ACCENT value "${value}" is not a var(--col-*) or var(--accent) reference, NEW-24's single-source mechanism is broken`,
+          );
+        }
+      }
+    }
+  }
+
+  if (!existsSync(CARD_VIEW_PATH)) {
+    violations.push(
+      `${CARD_VIEW_PATH}: file not found, NEW-24's PRIORITY_DOT subject is missing or renamed`,
+    );
+  } else {
+    const content = readFileSync(CARD_VIEW_PATH, "utf8");
+    if (!content.includes("export const PRIORITY_DOT")) {
+      violations.push(
+        `${CARD_VIEW_PATH}: export const PRIORITY_DOT not found, NEW-24's single-source mechanism is missing or renamed`,
+      );
+    } else {
+      const tail = content.slice(content.indexOf("export const PRIORITY_DOT"));
+      const body = tail.slice(0, tail.indexOf("};") + 2);
+      const values = [...body.matchAll(/color:\s*"([^"]*)"/g)].map((m) => m[1]);
+      if (values.length === 0) {
+        violations.push(
+          `${CARD_VIEW_PATH}: PRIORITY_DOT holds no color values, NEW-24's single-source mechanism is malformed`,
+        );
+      }
+      for (const value of values) {
+        if (!/^var\(-{2}prio-[a-z-]+\)$/.test(value)) {
+          violations.push(
+            `${CARD_VIEW_PATH}: PRIORITY_DOT color "${value}" is not a var(--prio-*) reference, NEW-24's single-source mechanism is broken`,
+          );
+        }
+      }
+    }
+  }
+
+  return violations;
+}
+
+/**
+ * Status-colour single-source fence (`NEW-24`). Deliberately NOT a `RETIRED_PATTERNS` entry: that
+ * array scans all of `src/**`, hardcodes its literals, and this gate's subject is `src/web` with a
+ * denylist derived from {@link TOKENS_PATH} at run time, not a fixed literal list.
+ * @remarks Asserts the MECHANISM as well as the literal, the same discipline `NEW-18`'s and
+ * `NEW-22`'s own JSDoc argue for: `COLUMN_ACCENT` (`column-meta.ts`) and `PRIORITY_DOT`
+ * (`CardView.tsx`) are each the single definition of "which colour a column or priority renders",
+ * consumed by `Column.tsx`, `SearchBox.tsx` and `StatusPillSwitcher.tsx` (columns) and `CardView.tsx`
+ * itself (priority). A gate that only fenced literals would pass unchanged against a build that
+ * deleted either map and inlined its `var()` strings by hand.
+ * @remarks All thirteen {@link STATUS_COLOR_PALETTE_TOKENS} names must be present in `tokens.css`
+ * with a hex value; any absent one is a named missing-subject sentinel violation, never a silently
+ * shrunk denylist.
+ * BREAK EVIDENCE for all three legs (literal reintroduction, deleted palette declaration, renamed
+ * `COLUMN_ACCENT`) is recorded in
+ * `.planning/phases/114-board-density-states-motion-accents/114-MEASUREMENTS.md` under
+ * "NEW-24 break legs".
+ * @returns Violation report lines: the missing-subject sentinel(s) if the palette or the mechanism
+ * subjects are gone or renamed, one per retired literal found in `src/web`, and one per mechanism
+ * defect.
+ */
+function checkStatusColorSingleSource() {
+  const violations = [];
+
+  if (!existsSync(TOKENS_PATH)) {
+    return [`${TOKENS_PATH}: file not found, NEW-24 cannot verify the palette`];
+  }
+
+  const palette = readStatusColorPalette();
+  const missingTokens = STATUS_COLOR_PALETTE_TOKENS.filter(
+    (name) => !palette.has(name),
+  );
+  if (missingTokens.length) {
+    for (const name of missingTokens) {
+      violations.push(
+        `${TOKENS_PATH}: ${name} not found, NEW-24 cannot verify the palette`,
+      );
+    }
+    return violations;
+  }
+
+  const namesByValue = new Map();
+  for (const name of STATUS_COLOR_PALETTE_TOKENS) {
+    const value = palette.get(name);
+    if (!namesByValue.has(value)) namesByValue.set(value, []);
+    namesByValue.get(value).push(name);
+  }
+
+  for (const file of walkSrc(WEB_DIR)) {
+    const lines = readFileSync(file, "utf8").split("\n");
+    lines.forEach((line, i) => {
+      const lower = line.toLowerCase();
+      for (const [value, names] of namesByValue) {
+        if (lower.includes(value)) {
+          violations.push(
+            `${file}:${i + 1}: retired pattern NEW-24, a status-meaning colour literal (${value}, the value of ${names.join(", ")}) must read var(${names[0]}) instead`,
+          );
+        }
+      }
+    });
+  }
+
+  violations.push(...checkStatusColorMechanism());
+  return violations;
+}
+
+/**
  * Collect invariant IDs that appear inside JSDoc blocks only.
  * @remarks Toggles an in-block flag on `/**` and `*\/`; body/line `//` comments
  * are never scanned, so an undeleted original body comment is not a false home.
@@ -1101,7 +1295,8 @@ function generateBaseline() {
  * sentinels.
  * @returns Nothing; exits 0 iff MISSING, ORPHAN, EXTRA, RETIRED, STRIP
  * CASCADES, BOARD READING RHYTHM, TERMINAL FENCE, SESSION PROJECTION
- * CHOKEPOINT, ATTENTION SINGLE SOURCE, and LAUNCHCTL READ-ONLY are all empty.
+ * CHOKEPOINT, ATTENTION SINGLE SOURCE, LAUNCHCTL READ-ONLY, and STATUS COLOR
+ * SINGLE SOURCE are all empty.
  */
 function run() {
   const home = new Set();
@@ -1127,6 +1322,7 @@ function run() {
   const cleanupMirrorChokepoint = checkCleanupMirrorChokepoint();
   const attentionSingleSource = checkAttentionSingleSource();
   const launchctlReadOnly = checkLaunchctlReadOnly();
+  const statusColorSingleSource = checkStatusColorSingleSource();
 
   report("MISSING (baseline - home)", missing);
   report("ORPHAN  (present - baseline)", orphan);
@@ -1139,6 +1335,7 @@ function run() {
   report("CLEANUP MIRROR CHOKEPOINT (NEW-23)", cleanupMirrorChokepoint);
   report("ATTENTION SINGLE SOURCE (NEW-22)", attentionSingleSource);
   report("LAUNCHCTL READ-ONLY (harnesses)", launchctlReadOnly);
+  report("STATUS COLOR SINGLE SOURCE (NEW-24)", statusColorSingleSource);
 
   const defects =
     missing.length +
@@ -1151,7 +1348,8 @@ function run() {
     sessionChokepoint.length +
     cleanupMirrorChokepoint.length +
     attentionSingleSource.length +
-    launchctlReadOnly.length;
+    launchctlReadOnly.length +
+    statusColorSingleSource.length;
   console.log(
     `\n${defects === 0 ? "PASS" : "FAIL"}: ${baseline.size - missing.length}/${baseline.size} invariants homed` +
       (missing.length ? ` (${missing.length} missing a home)` : "") +
@@ -1181,6 +1379,9 @@ function run() {
         : "") +
       (launchctlReadOnly.length
         ? ` (${launchctlReadOnly.length} launchctl read-only violation(s))`
+        : "") +
+      (statusColorSingleSource.length
+        ? ` (${statusColorSingleSource.length} status-color-single-source violation(s))`
         : ""),
   );
   process.exit(defects === 0 ? 0 : 1);

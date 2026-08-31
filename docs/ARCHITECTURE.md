@@ -2605,6 +2605,29 @@ src/web/terminal-main.ts src/web/terminal.html`, run against the phase's recorde
 output is the proof. A reader who sees `PASS: 121/121` alone has not yet seen this second half
 run.
 
+**No file under `src/web` may carry a status-meaning colour literal (`NEW-24`).** The status,
+priority and column palettes each live once, in `src/web/styles/tokens.css`, as thirteen
+`--col-*`/`--prio-*`/`--status-*` custom properties. `checkStatusColorSingleSource` in
+`scripts/check-invariants.mjs` reads those thirteen declarations at run time and builds its
+denylist from the resulting hex values, rather than hardcoding them, so a future palette retune
+can never leave a stale denylist behind; the check requires all thirteen names present with a hex
+value and reports a named missing-subject sentinel violation, not a silently emptied denylist, if
+any is absent or renamed. A global `src/**` scan would be the wrong shape here, the same reasoning
+`NEW-18` and `NEW-19` already record above: this check's subject is `src/web` specifically. The
+literal half alone is not the whole guarantee, so the check also fences the MECHANISM: the single
+definition of "which colour a column renders" is `COLUMN_ACCENT` in
+`src/web/features/board/column-meta.ts` (consumed by `Column.tsx`, `SearchBox.tsx` and
+`StatusPillSwitcher.tsx`), and the single definition of "which colour a priority renders" is
+`PRIORITY_DOT` in `src/web/features/board/CardView.tsx`. Both must still exist and still hold only
+`var(--col-*)`/`var(--accent)` or `var(--prio-*)` values, or the mechanism half reports a sentinel
+violation, matching `NEW-22`'s own two-half fence/claim discipline. A repo-wide audit at landing,
+recorded in `.planning/phases/114-board-density-states-motion-accents/114-MEASUREMENTS.md` under
+"NEW-24 break legs", found zero status-meaning colour literals under `src/web`, so the gate is
+confirmatory rather than a cleanup of a present violation; the same ledger records three verbatim
+trips proving the check can fail: a reintroduced literal at a real consuming site, a deleted
+palette declaration hitting the missing-subject sentinel, and a renamed `COLUMN_ACCENT` hitting
+the mechanism half.
+
 `scripts/check-invariants.mjs` mechanically covers all six through four separate checks: a
 global retired-pattern scan over `src/**/*.{ts,tsx}` catches the retired box-shadow focus
 expression, the retired float-shadow literal, and a hardcoded wordmark weight reappearing
