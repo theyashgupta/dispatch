@@ -343,6 +343,13 @@ export function DetailPanel({
     setFullscreen(false);
   }
 
+  const scrimTransition = open
+    ? "opacity var(--motion-panel-open) var(--easing-enter)"
+    : "opacity var(--motion-panel-close) var(--easing-exit)";
+  const asideTransition = open
+    ? "transform var(--motion-panel-open) var(--easing-enter)"
+    : "transform var(--motion-panel-close) var(--easing-exit)";
+
   return (
     <>
       {!docked && (
@@ -355,7 +362,7 @@ export function DetailPanel({
             background: "rgba(0,0,0,0.4)",
             opacity: open ? 1 : 0,
             pointerEvents: open ? "auto" : "none",
-            transition: "opacity 150ms ease-out",
+            transition: scrimTransition,
             zIndex: 10,
           }}
         />
@@ -390,7 +397,7 @@ export function DetailPanel({
             : open
               ? "translateX(0)"
               : "translateX(100%)",
-          transition: docked ? "none" : "transform 150ms ease-out",
+          transition: docked ? "none" : asideTransition,
           zIndex: 11,
         }}
       >
