@@ -14,6 +14,7 @@ import {
   useColumnWidths,
 } from "../../hooks/useColumnWidths.js";
 import { Button } from "../../primitives/Button.js";
+import { focusRing } from "../../primitives/focus-ring.js";
 import { DONE_PAGE_SIZE } from "../../../shared/done-limit.js";
 
 const MIN_COL_WIDTH = 220;
@@ -309,11 +310,12 @@ export function Column({
             cursor: "col-resize",
             zIndex: 2,
             background: "transparent",
-            outline: "none",
-            borderRight:
-              hoveringHandle || resizing || handleFocused
-                ? "2px solid var(--accent)"
+            borderRight: resizing
+              ? "2px solid var(--accent)"
+              : hoveringHandle
+                ? "2px solid var(--hover-resize-handle)"
                 : "2px solid transparent",
+            ...focusRing(handleFocused, true),
           }}
         />
       )}
