@@ -20,7 +20,11 @@
  * v3.4 density token block in `tokens.css` and repointing `CardView.tsx`/`Column.tsx` onto it.
  * Plan 04 adds `board-states` (break-proven), proving `CardView.tsx`'s hover/pressed/focus-ring
  * fixes, `Card.tsx`'s composed pointer/focus handlers and `Column.tsx`'s three-branch resize
- * handle. Later plans in this phase register the motion/reduced-motion checks and their own
+ * handle. Plan 05 adds `control-states` (break-proven), proving `IconButton.tsx`'s conditional
+ * caller-background composition fix (the active view-switch segment's hover/pressed, without
+ * regressing the inactive segment) and `Button.tsx`'s primary/danger hover and pressed, primary
+ * proven live and danger proven by a shared-mechanism source assertion plus an in-page token
+ * cross-check. Later plans in this phase register the motion/reduced-motion checks and their own
  * break-proof legs.
  *
  * DETAIL-PANEL FINDING (Plan 04, out of this plan's own scope, recorded for the next phase that
@@ -90,6 +94,20 @@
  *     `board-states(BP-B): card hover boxShadow expected "none", observed "rgba(0, 0, 0, 0.3) 0px 2px 8px 0px" (mode: real)`
  *     `board-states(BP-C): card hover boxShadow expected "none", observed "rgba(0, 0, 0, 0.3) 0px 2px 8px 0px" (mode: rendered-state)`
  *     `board-states(BP-D): card hover boxShadow expected "none", observed "rgba(0, 0, 0, 0.3) 0px 2px 8px 0px" (mode: rendered-state)`
+ *     The RESTORE leg re-ran clean after the captured bytes were restored, and
+ *     `git diff --quiet src/` confirmed a byte-identical restore.
+ *   - `control-states` proven able to fail (Plan 05): moving `IconButton.tsx`'s `...style` spread
+ *     line back to LAST (the exact pre-fix order Task 1 undid), rebuilding, and re-running the
+ *     same `checkControlStates` function against a real booted sandbox and real headless Chrome
+ *     produced, verbatim (the inactive segment's own assertions did not appear in the trip
+ *     output at any breakpoint, confirming Research Pitfall 4's regression guard held):
+ *     `control-states(BP-A): view-switch active segment hover backgroundColor (rgba(31, 34, 53, 1.000)) does not differ from resting (rgba(31, 34, 53, 1.000)), the hover-view-switch-segment defect (mode: real)`
+ *     `control-states(BP-A): view-switch active segment hover backgroundColor expected the 22% accent tint rgba(36, 39, 64, 1.000), observed rgba(31, 34, 53, 1.000) (mode: real)`
+ *     `control-states(BP-A): view-switch active segment pressed backgroundColor expected rgba(27, 30, 47, 1.000) (black 12% over its own resting value), observed rgba(31, 34, 53, 1.000)`
+ *     `control-states(BP-A): view-switch active segment pressed backgroundColor does not differ from its own resting backgroundColor`
+ *     `control-states(BP-A): view-switch active segment pressed backgroundColor does not differ from its own hovered backgroundColor`
+ *     (BP-B/BP-C/BP-D repeat the identical five-line pattern, `mode: real` for BP-B and
+ *     `mode: rendered-state` for BP-C/BP-D.)
  *     The RESTORE leg re-ran clean after the captured bytes were restored, and
  *     `git diff --quiet src/` confirmed a byte-identical restore.
  */
@@ -1262,7 +1280,7 @@ async function readUnderHover(cdp, sessionId, elExpr, props, real) {
     sessionId,
     `${elExpr}.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, relatedTarget: document.body }))`,
   );
-  await sleep(50);
+  await sleep(HOVER_SETTLE_MS);
   const value = await evalValue(
     cdp,
     sessionId,
@@ -2207,7 +2225,7 @@ async function readUnderPress(cdp, sessionId, elExpr, props, modifiers = 0) {
     },
     sessionId,
   );
-  await sleep(80);
+  await sleep(HOVER_SETTLE_MS);
   const pressed = await evalValue(
     cdp,
     sessionId,
@@ -2253,7 +2271,7 @@ async function readUnderSyntheticPress(cdp, sessionId, elExpr, props) {
     sessionId,
     `${elExpr}.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", button: 0, buttons: 1 }))`,
   );
-  await sleep(80);
+  await sleep(HOVER_SETTLE_MS);
   const pressed = await evalValue(
     cdp,
     sessionId,
@@ -2947,17 +2965,699 @@ async function runBreakBoardStates() {
 }
 
 // ---------------------------------------------------------------------------
+// control-states: break-proven check for Plan 05's IconButton composition fix
+// (the active view-switch segment's hover/pressed, proven live and proven
+// not to regress the inactive segment) and Button's primary/danger hover and
+// pressed (primary proven live, danger proven by shared-mechanism source
+// assertion plus an in-page token cross-check). Reuses board-states' own
+// retry wrapper, color-normalization and synthetic-press techniques.
+// ---------------------------------------------------------------------------
+
+const CONTRACT_HOVER_BUTTON_PRIMARY_HEX = "#717cd7";
+const CONTRACT_HOVER_BUTTON_DANGER_HEX = "#e85e62";
+const BUTTON_TSX_PATH = join(
+  REPO_ROOT,
+  "src",
+  "web",
+  "primitives",
+  "Button.tsx",
+);
+const ICON_BUTTON_TSX_PATH = join(
+  REPO_ROOT,
+  "src",
+  "web",
+  "primitives",
+  "IconButton.tsx",
+);
+
+/** Focuses `elExpr`, dispatches `Input.insertText`, then reads the value back and throws on
+ * mismatch: these are React controlled inputs, and an insert the framework discards would
+ * otherwise leave the check asserting against an empty field (panel-104.mjs's own `typeInto`
+ * recipe, inlined here rather than shared since this is the only caller in this file). */
+async function typeIntoControlStates(cdp, sessionId, elExpr, text) {
+  await evalValue(cdp, sessionId, `${elExpr}.focus()`);
+  await cdp.send("Input.insertText", { text }, sessionId);
+  const value = await evalValue(cdp, sessionId, `${elExpr}.value`);
+  if (value !== text) {
+    throw new Error(
+      `panel114: typeIntoControlStates read back ${JSON.stringify(value)}, expected ${JSON.stringify(text)}`,
+    );
+  }
+}
+
+/** Retry wrapper, same shape and same reasoning as {@link checkBoardStates}'s own: this check
+ * issues many CDP round trips (real/rendered-state hover, synthetic press, real Tab traversal, a
+ * real click to open a modal, a real text insert), and this machine's shared headless Chrome
+ * instance occasionally stalls on an unrelated call under CPU contention from the developer's own
+ * live desktop session. */
+async function checkControlStates(violations) {
+  const MAX_ATTEMPTS = 3;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const attemptViolations = [];
+    try {
+      await checkControlStatesOnce(attemptViolations);
+      violations.push(...attemptViolations);
+      return;
+    } catch (err) {
+      lastErr = err;
+      console.error(
+        `control-states: attempt ${attempt}/${MAX_ATTEMPTS} threw (likely CDP/renderer contention, not a code defect): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      if (attempt === MAX_ATTEMPTS) throw lastErr;
+    }
+  }
+}
+
+async function checkControlStatesOnce(violations) {
+  let sandbox = null;
+  let chrome = null;
+  let cdp = null;
+  try {
+    sandbox = await bootSandbox("check-control-states");
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+    const { sessionId } = await openPage(cdp, { url: "about:blank" });
+    await cdp.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      { source: MEASURE_HELPERS_SRC },
+      sessionId,
+    );
+    await cdp.send(
+      "Page.navigate",
+      { url: `http://127.0.0.1:${SANDBOX_PORT}/` },
+      sessionId,
+    );
+    const loaded = await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `document.getElementById("root") != null`,
+      READY_TIMEOUT_MS,
+    );
+    if (!loaded) {
+      violations.push("control-states: #root never appeared after navigation");
+      return;
+    }
+    // Splash.tsx's unconditional 1.3s overlay, same settle window every other check uses.
+    await sleep(1450);
+
+    // Token resolutions, once, via the same probe-element technique board-states uses. Every
+    // resolution round-trips through normalizeColor's canvas-pixel readback since a color-mix()
+    // result's computed-style serialization is not one stable string.
+    const resolvedHoverBg = await normalizeColor(
+      cdp,
+      sessionId,
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114ResolveBg("var(--surface-card-hover)")`,
+      ),
+    );
+    const resolvedPressedCardHover = await normalizeColor(
+      cdp,
+      sessionId,
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114ResolveBg("var(--pressed-card-hover)")`,
+      ),
+    );
+    const resolvedActiveHoverTint = await normalizeColor(
+      cdp,
+      sessionId,
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114ResolveBg("color-mix(in srgb, var(--accent) 22%, var(--surface-column))")`,
+      ),
+    );
+    const resolvedHoverButtonPrimary = await normalizeColor(
+      cdp,
+      sessionId,
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114ResolveBg("var(--hover-button-primary)")`,
+      ),
+    );
+    const resolvedPressedButtonPrimary = await normalizeColor(
+      cdp,
+      sessionId,
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114ResolveBg("var(--pressed-button-primary)")`,
+      ),
+    );
+    const resolvedHoverButtonDanger = await normalizeColor(
+      cdp,
+      sessionId,
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114ResolveBg("var(--hover-button-danger)")`,
+      ),
+    );
+
+    const expectedHoverPrimary = hexToRgbString(
+      CONTRACT_HOVER_BUTTON_PRIMARY_HEX,
+    );
+    if (!colorsMatch(resolvedHoverButtonPrimary, expectedHoverPrimary)) {
+      violations.push(
+        `control-states: --hover-button-primary resolved ${resolvedHoverButtonPrimary}, contract records ${CONTRACT_HOVER_BUTTON_PRIMARY_HEX} (${expectedHoverPrimary})`,
+      );
+    }
+    const expectedHoverDanger = hexToRgbString(
+      CONTRACT_HOVER_BUTTON_DANGER_HEX,
+    );
+    if (!colorsMatch(resolvedHoverButtonDanger, expectedHoverDanger)) {
+      violations.push(
+        `control-states: --hover-button-danger resolved ${resolvedHoverButtonDanger}, contract records ${CONTRACT_HOVER_BUTTON_DANGER_HEX} (${expectedHoverDanger})`,
+      );
+    }
+
+    // DANGER, by shared-mechanism source assertion, never a live replica: Button.tsx's own
+    // composed background expression must resolve BOTH --hover-button-primary and
+    // --hover-button-danger inside the SAME expression the live primary proof below exercises.
+    // Combined with that live primary proof and the token cross-check above, this establishes
+    // danger's behaviour without an untrustworthy replica (the seeded board does not reliably
+    // render a danger-variant instance, the same reason Phase 113 used a runtime replica).
+    const buttonSrc = readFileSync(BUTTON_TSX_PATH, "utf8");
+    const bgStart = buttonSrc.indexOf(
+      "background:",
+      buttonSrc.indexOf("const composed"),
+    );
+    const bgSeg = buttonSrc.slice(bgStart, bgStart + 600);
+    if (
+      !bgSeg.includes("--hover-button-danger") ||
+      !bgSeg.includes("--hover-button-primary")
+    ) {
+      violations.push(
+        "control-states: danger is not proven by shared mechanism, Button.tsx's composed background expression does not resolve both --hover-button-primary and --hover-button-danger inside the same expression",
+      );
+    }
+    console.log(
+      "control-states: danger's hover/pressed tokens are proven correct by SHARED MECHANISM " +
+        "(Button.tsx routes primary and danger through the identical composed background " +
+        "expression the live primary proof below exercises) plus the in-page --hover-button-danger " +
+        "token resolution cross-checked above against the contract's recorded #e85e62, not by a " +
+        "live danger-variant instance.",
+    );
+
+    for (const bp of BREAKPOINTS) {
+      await applyBreakpoint(cdp, sessionId, bp);
+      await blurActive(cdp, sessionId);
+      await moveMouseAway(cdp, sessionId);
+      await sleep(300);
+      const real = bp.label === "BP-A" || bp.label === "BP-B";
+      const label = `control-states(${bp.label})`;
+
+      // VIEW-SWITCH SEGMENTS, located by aria-label/aria-pressed rather than position, so this
+      // check reads correctly regardless of which segment happens to be active. Pressed is proven
+      // via the synthetic pointerdown/pointerup technique (never a real CDP mousePressed): a real
+      // press+release on either segment fires a real trusted click, and SyncStrip.tsx's own
+      // onClick has no modifier-routing escape hatch the way Card.tsx does, so a real press on the
+      // currently-inactive segment would toggle viewMode as a side effect this check has no
+      // business causing.
+      const groupSel = `document.querySelector('[role="group"][aria-label="View"]')`;
+      const groupExists = await evalValue(
+        cdp,
+        sessionId,
+        `${groupSel} != null`,
+      );
+      if (!groupExists) {
+        violations.push(`${label}: view-switch group not found`);
+      } else {
+        const activeSel = `${groupSel}.querySelector('[aria-pressed="true"]')`;
+        const inactiveSel = `${groupSel}.querySelector('[aria-pressed="false"]')`;
+        const activeExists = await evalValue(
+          cdp,
+          sessionId,
+          `${activeSel} != null`,
+        );
+        const inactiveExists = await evalValue(
+          cdp,
+          sessionId,
+          `${inactiveSel} != null`,
+        );
+        if (!activeExists || !inactiveExists) {
+          violations.push(
+            `${label}: view-switch segments not found (active=${activeExists}, inactive=${inactiveExists})`,
+          );
+        } else {
+          const activeRestingRaw = await evalValue(
+            cdp,
+            sessionId,
+            `getComputedStyle(${activeSel}).backgroundColor`,
+          );
+          const activeResting = await normalizeColor(
+            cdp,
+            sessionId,
+            activeRestingRaw,
+          );
+
+          const activeHover = await readUnderHover(
+            cdp,
+            sessionId,
+            activeSel,
+            ["backgroundColor"],
+            real,
+          );
+          activeHover.value.backgroundColor = await normalizeColor(
+            cdp,
+            sessionId,
+            activeHover.value.backgroundColor,
+          );
+          if (colorsMatch(activeHover.value.backgroundColor, activeResting)) {
+            violations.push(
+              `${label}: view-switch active segment hover backgroundColor (${activeHover.value.backgroundColor}) does not differ from resting (${activeResting}), the hover-view-switch-segment defect (mode: ${activeHover.mode})`,
+            );
+          }
+          if (
+            !colorsMatch(
+              activeHover.value.backgroundColor,
+              resolvedActiveHoverTint,
+            )
+          ) {
+            violations.push(
+              `${label}: view-switch active segment hover backgroundColor expected the 22% accent tint ${resolvedActiveHoverTint}, observed ${activeHover.value.backgroundColor} (mode: ${activeHover.mode})`,
+            );
+          }
+
+          const inactiveHover = await readUnderHover(
+            cdp,
+            sessionId,
+            inactiveSel,
+            ["backgroundColor"],
+            real,
+          );
+          inactiveHover.value.backgroundColor = await normalizeColor(
+            cdp,
+            sessionId,
+            inactiveHover.value.backgroundColor,
+          );
+          if (
+            !colorsMatch(inactiveHover.value.backgroundColor, resolvedHoverBg)
+          ) {
+            violations.push(
+              `${label}: view-switch inactive segment hover backgroundColor expected the shared hover tier ${resolvedHoverBg}, observed ${inactiveHover.value.backgroundColor} (mode: ${inactiveHover.mode}), the Pitfall 4 regression guard`,
+            );
+          }
+
+          const activePress = await readUnderSyntheticPress(
+            cdp,
+            sessionId,
+            activeSel,
+            ["backgroundColor"],
+          );
+          activePress.pressed.backgroundColor = await normalizeColor(
+            cdp,
+            sessionId,
+            activePress.pressed.backgroundColor,
+          );
+          const expectedActivePressed = await normalizeColor(
+            cdp,
+            sessionId,
+            await evalValue(
+              cdp,
+              sessionId,
+              `window.panel114ResolveBg("color-mix(in srgb, black 12%, " + ${JSON.stringify(activeRestingRaw)} + ")")`,
+            ),
+          );
+          if (
+            !colorsMatch(
+              activePress.pressed.backgroundColor,
+              expectedActivePressed,
+            )
+          ) {
+            violations.push(
+              `${label}: view-switch active segment pressed backgroundColor expected ${expectedActivePressed} (black 12% over its own resting value), observed ${activePress.pressed.backgroundColor}`,
+            );
+          }
+          if (colorsMatch(activePress.pressed.backgroundColor, activeResting)) {
+            violations.push(
+              `${label}: view-switch active segment pressed backgroundColor does not differ from its own resting backgroundColor`,
+            );
+          }
+          if (
+            colorsMatch(
+              activePress.pressed.backgroundColor,
+              activeHover.value.backgroundColor,
+            )
+          ) {
+            violations.push(
+              `${label}: view-switch active segment pressed backgroundColor does not differ from its own hovered backgroundColor`,
+            );
+          }
+
+          const inactivePress = await readUnderSyntheticPress(
+            cdp,
+            sessionId,
+            inactiveSel,
+            ["backgroundColor"],
+          );
+          inactivePress.pressed.backgroundColor = await normalizeColor(
+            cdp,
+            sessionId,
+            inactivePress.pressed.backgroundColor,
+          );
+          if (
+            !colorsMatch(
+              inactivePress.pressed.backgroundColor,
+              resolvedPressedCardHover,
+            )
+          ) {
+            violations.push(
+              `${label}: view-switch inactive segment pressed backgroundColor expected ${resolvedPressedCardHover}, observed ${inactivePress.pressed.backgroundColor}`,
+            );
+          }
+          if (
+            colorsMatch(inactivePress.pressed.backgroundColor, resolvedHoverBg)
+          ) {
+            violations.push(
+              `${label}: view-switch inactive segment pressed backgroundColor does not differ from its own hovered backgroundColor`,
+            );
+          }
+        }
+      }
+
+      // ICON BUTTON, ordinary case: the always-mounted Settings gear, the contract's own test
+      // subject for hover-icon-button. Pressed uses the synthetic technique (never a real click,
+      // which would navigate to Settings, a side effect this check has no business causing).
+      const gearSel = `document.querySelector('[aria-label="Sync filters"]')`;
+      const gearExists = await evalValue(cdp, sessionId, `${gearSel} != null`);
+      if (!gearExists) {
+        violations.push(`${label}: Settings gear IconButton not found`);
+      } else {
+        const gearRestingRaw = await evalValue(
+          cdp,
+          sessionId,
+          `getComputedStyle(${gearSel}).backgroundColor`,
+        );
+        if (gearRestingRaw !== "rgba(0, 0, 0, 0)") {
+          violations.push(
+            `${label}: Settings gear resting backgroundColor expected transparent (rgba(0, 0, 0, 0)), observed ${gearRestingRaw}`,
+          );
+        }
+        const gearHover = await readUnderHover(
+          cdp,
+          sessionId,
+          gearSel,
+          ["backgroundColor"],
+          real,
+        );
+        gearHover.value.backgroundColor = await normalizeColor(
+          cdp,
+          sessionId,
+          gearHover.value.backgroundColor,
+        );
+        if (!colorsMatch(gearHover.value.backgroundColor, resolvedHoverBg)) {
+          violations.push(
+            `${label}: Settings gear hover backgroundColor expected ${resolvedHoverBg}, observed ${gearHover.value.backgroundColor} (mode: ${gearHover.mode})`,
+          );
+        }
+        const gearPress = await readUnderSyntheticPress(
+          cdp,
+          sessionId,
+          gearSel,
+          ["backgroundColor"],
+        );
+        gearPress.pressed.backgroundColor = await normalizeColor(
+          cdp,
+          sessionId,
+          gearPress.pressed.backgroundColor,
+        );
+        if (
+          !colorsMatch(
+            gearPress.pressed.backgroundColor,
+            resolvedPressedCardHover,
+          )
+        ) {
+          violations.push(
+            `${label}: Settings gear pressed backgroundColor expected ${resolvedPressedCardHover}, observed ${gearPress.pressed.backgroundColor}`,
+          );
+        }
+        const traversalG = await tabTraverseTo(cdp, sessionId, gearSel);
+        if (!traversalG.reached) {
+          violations.push(
+            `${label}: Settings gear, Tab traversal never reached it within ${TAB_TRAVERSAL_CAP} presses`,
+          );
+        } else {
+          const gearOutline = await evalValue(
+            cdp,
+            sessionId,
+            `window.panel114ComputedSub(document.activeElement, ["outlineWidth","outlineStyle","outlineOffset"])`,
+          );
+          if (
+            gearOutline.outlineWidth !== "2px" ||
+            gearOutline.outlineStyle !== "solid"
+          ) {
+            violations.push(
+              `${label}: Settings gear focus outline expected 2px solid (focusRing()), observed ${JSON.stringify(gearOutline)}`,
+            );
+          }
+        }
+        await blurActive(cdp, sessionId);
+      }
+      await moveMouseAway(cdp, sessionId);
+    }
+
+    // PRIMARY BUTTON, live, once (not swept per breakpoint, matching this section's own scope):
+    // opens the New Ticket modal with a real click, types into its prompt textarea so the primary
+    // submit button is enabled, then reads resting/hover/pressed. Never actually clicks the
+    // button itself: a real click would call runGenerate, an actual backend draft-generation
+    // request this check has no business triggering, so pressed uses the synthetic technique.
+    await applyBreakpoint(cdp, sessionId, BREAKPOINTS[0]);
+    await blurActive(cdp, sessionId);
+    await moveMouseAway(cdp, sessionId);
+    await sleep(300);
+    const newTicketBtn = `document.querySelector('[aria-label="New ticket"]')`;
+    const newTicketExists = await evalValue(
+      cdp,
+      sessionId,
+      `${newTicketBtn} != null`,
+    );
+    if (!newTicketExists) {
+      violations.push("control-states: New ticket button not found");
+    } else {
+      const rect = await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114Rect(${newTicketBtn})`,
+      );
+      await dispatchRealClick(cdp, sessionId, { x: rect.x, y: rect.y });
+      const modalOpened = await pollUntilTruthy(
+        cdp,
+        sessionId,
+        `document.querySelector('[role="dialog"][aria-label="New ticket"]') != null`,
+        5_000,
+      );
+      if (!modalOpened) {
+        violations.push(
+          "control-states: New Ticket modal did not open after a real click",
+        );
+      } else {
+        const promptSel = `document.querySelector('textarea[aria-label="What do you want to build or fix?"]')`;
+        await typeIntoControlStates(
+          cdp,
+          sessionId,
+          promptSel,
+          "A test ticket for control-states",
+        );
+        const primaryBtnSel = `Array.prototype.find.call(document.querySelectorAll('[role="dialog"][aria-label="New ticket"] button'), function (b) { return b.textContent.trim() === "Generate ticket"; })`;
+        const primaryExists = await evalValue(
+          cdp,
+          sessionId,
+          `(${primaryBtnSel}) != null`,
+        );
+        if (!primaryExists) {
+          violations.push(
+            "control-states: New Ticket modal's primary 'Generate ticket' submit button not found after typing a prompt",
+          );
+        } else {
+          const primaryRestingRaw = await evalValue(
+            cdp,
+            sessionId,
+            `getComputedStyle(${primaryBtnSel}).backgroundColor`,
+          );
+          const primaryResting = await normalizeColor(
+            cdp,
+            sessionId,
+            primaryRestingRaw,
+          );
+          const resolvedAccentBg = await normalizeColor(
+            cdp,
+            sessionId,
+            await evalValue(
+              cdp,
+              sessionId,
+              `window.panel114ResolveBg("var(--accent)")`,
+            ),
+          );
+          if (!colorsMatch(primaryResting, resolvedAccentBg)) {
+            violations.push(
+              `control-states: primary button resting backgroundColor expected the accent ${resolvedAccentBg}, observed ${primaryResting}`,
+            );
+          }
+          const primaryHover = await readUnderHover(
+            cdp,
+            sessionId,
+            primaryBtnSel,
+            ["backgroundColor"],
+            true,
+          );
+          primaryHover.value.backgroundColor = await normalizeColor(
+            cdp,
+            sessionId,
+            primaryHover.value.backgroundColor,
+          );
+          if (
+            !colorsMatch(
+              primaryHover.value.backgroundColor,
+              resolvedHoverButtonPrimary,
+            )
+          ) {
+            violations.push(
+              `control-states: primary button hover backgroundColor expected ${resolvedHoverButtonPrimary} (the resolved ${CONTRACT_HOVER_BUTTON_PRIMARY_HEX}), observed ${primaryHover.value.backgroundColor}`,
+            );
+          }
+          const primaryPress = await readUnderSyntheticPress(
+            cdp,
+            sessionId,
+            primaryBtnSel,
+            ["backgroundColor"],
+          );
+          primaryPress.pressed.backgroundColor = await normalizeColor(
+            cdp,
+            sessionId,
+            primaryPress.pressed.backgroundColor,
+          );
+          if (
+            !colorsMatch(
+              primaryPress.pressed.backgroundColor,
+              resolvedPressedButtonPrimary,
+            )
+          ) {
+            violations.push(
+              `control-states: primary button pressed backgroundColor expected ${resolvedPressedButtonPrimary}, observed ${primaryPress.pressed.backgroundColor}`,
+            );
+          }
+        }
+        await moveMouseAway(cdp, sessionId);
+        await dispatchRealKey(cdp, sessionId, "Escape", "Escape", 27);
+        await pollUntilTruthy(
+          cdp,
+          sessionId,
+          `document.querySelector('[role="dialog"][aria-label="New ticket"]') == null`,
+          5_000,
+        );
+      }
+    }
+  } finally {
+    if (cdp) {
+      try {
+        cdp.close();
+      } catch {
+        // best effort
+      }
+    }
+    if (chrome) {
+      try {
+        chrome.kill("SIGTERM");
+      } catch {
+        // best effort
+      }
+    }
+    if (sandbox) await teardownSandbox(sandbox);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BREAKS["control-states"]: moves IconButton.tsx's `...style` spread back to
+// LAST (the exact pre-fix order Task 1 undid), rebuilds, and re-runs
+// checkControlStates itself against the mutated source, then restores the
+// captured bytes unconditionally.
+// ---------------------------------------------------------------------------
+
+const ICON_BUTTON_STYLE_SPREAD_LINE = "    ...style,\n";
+const ICON_BUTTON_FOCUS_RING_LINE = "    ...focusRing(focused),\n";
+
+function restoreIconButtonSource(original) {
+  writeFileSync(ICON_BUTTON_TSX_PATH, original);
+  resetBuildCache();
+  rmSync(join(REPO_ROOT, "dist"), { recursive: true, force: true });
+  unregisterRestore(ICON_BUTTON_TSX_PATH);
+}
+
+async function runBreakControlStates() {
+  assertBuilt();
+  const original = readFileSync(ICON_BUTTON_TSX_PATH, "utf8");
+  const styleOccurrences =
+    original.split(ICON_BUTTON_STYLE_SPREAD_LINE).length - 1;
+  const focusRingOccurrences =
+    original.split(ICON_BUTTON_FOCUS_RING_LINE).length - 1;
+  if (styleOccurrences !== 1 || focusRingOccurrences !== 1) {
+    throw new Error(
+      `panel-114: refusing to run --break control-states, expected the style-spread line to occur ` +
+        `exactly once (measured ${styleOccurrences}) and the focusRing spread line to occur exactly ` +
+        `once (measured ${focusRingOccurrences}) in ${ICON_BUTTON_TSX_PATH}. A miscounted anchor ` +
+        `would mutate the wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(ICON_BUTTON_TSX_PATH, original);
+  try {
+    const withoutStyleLine = original.replace(
+      ICON_BUTTON_STYLE_SPREAD_LINE,
+      "",
+    );
+    const mutated = withoutStyleLine.replace(
+      ICON_BUTTON_FOCUS_RING_LINE,
+      ICON_BUTTON_FOCUS_RING_LINE + ICON_BUTTON_STYLE_SPREAD_LINE,
+    );
+    writeFileSync(ICON_BUTTON_TSX_PATH, mutated);
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkControlStates(tripViolations);
+    console.log(
+      `\n--break control-states TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some(
+      (v) =>
+        v.includes("view-switch active segment hover backgroundColor") &&
+        v.includes("does not differ from resting"),
+    );
+  } finally {
+    restoreIconButtonSource(original);
+  }
+
+  const restoreViolations = [];
+  await checkControlStates(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break control-states RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS / PROBES
 // ---------------------------------------------------------------------------
 
 const CHECKS = {
   density: checkDensity,
   "board-states": checkBoardStates,
+  "control-states": checkControlStates,
 };
 
 const BREAKS = {
   density: runBreakDensity,
   "board-states": runBreakBoardStates,
+  "control-states": runBreakControlStates,
 };
 
 const PROBES = {
