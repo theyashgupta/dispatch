@@ -30,6 +30,7 @@ const secondaryStyle: CSSProperties = {
   lineHeight: "var(--line-label)",
   cursor: "pointer",
   outline: "none",
+  transition: "var(--hover-transition)",
 };
 
 const primaryStyle: CSSProperties = {
@@ -45,6 +46,7 @@ const primaryStyle: CSSProperties = {
   lineHeight: "var(--line-label)",
   cursor: "pointer",
   outline: "none",
+  transition: "var(--hover-transition)",
 };
 
 const dangerStyle: CSSProperties = {
@@ -60,6 +62,7 @@ const dangerStyle: CSSProperties = {
   lineHeight: "var(--line-label)",
   cursor: "pointer",
   outline: "none",
+  transition: "var(--hover-transition)",
 };
 
 export function Button({
@@ -72,15 +75,21 @@ export function Button({
   onMouseLeave,
   onFocus,
   onBlur,
+  onPointerDown,
+  onPointerUp,
+  onPointerCancel,
+  onPointerLeave,
   children,
   ...rest
 }: ButtonProps) {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [pressed, setPressed] = useState(false);
   const isDisabled = disabled || loading;
-  if (isDisabled && (hovered || focused)) {
+  if (isDisabled && (hovered || focused || pressed)) {
     setHovered(false);
     setFocused(false);
+    setPressed(false);
   }
   const base =
     variant === "primary"
@@ -88,14 +97,25 @@ export function Button({
       : variant === "danger"
         ? dangerStyle
         : secondaryStyle;
+  const isDanger = variant === "danger";
   const composed: CSSProperties = {
     ...base,
     background:
       variant === "secondary"
-        ? hovered
-          ? "var(--surface-card-hover)"
-          : "transparent"
-        : base.background,
+        ? pressed
+          ? "var(--pressed-card-hover)"
+          : hovered
+            ? "var(--surface-card-hover)"
+            : "transparent"
+        : pressed
+          ? isDanger
+            ? "var(--pressed-button-danger)"
+            : "var(--pressed-button-primary)"
+          : hovered
+            ? isDanger
+              ? "var(--hover-button-danger)"
+              : "var(--hover-button-primary)"
+            : base.background,
     ...focusRing(focused),
     ...(isDisabled ? { cursor: "default", opacity: 0.5 } : null),
     ...(loading
@@ -128,6 +148,22 @@ export function Button({
       onBlur={(event) => {
         setFocused(false);
         onBlur?.(event);
+      }}
+      onPointerDown={(event) => {
+        setPressed(true);
+        onPointerDown?.(event);
+      }}
+      onPointerUp={(event) => {
+        setPressed(false);
+        onPointerUp?.(event);
+      }}
+      onPointerCancel={(event) => {
+        setPressed(false);
+        onPointerCancel?.(event);
+      }}
+      onPointerLeave={(event) => {
+        setPressed(false);
+        onPointerLeave?.(event);
       }}
       style={composed}
       {...(loading ? { "aria-busy": true } : null)}
