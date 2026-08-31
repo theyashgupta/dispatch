@@ -127,7 +127,9 @@ function round2(x) {
 // ---------------------------------------------------------------------------
 
 function loadTokens(tokensPath) {
-  const text = fs.readFileSync(tokensPath, "utf8");
+  const text = fs
+    .readFileSync(tokensPath, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
   const re = new RegExp(
     PREFIX + "([a-zA-Z0-9-]+):\\s*(#[0-9a-fA-F]{6})\\s*;",
     "g",
