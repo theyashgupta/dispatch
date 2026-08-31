@@ -219,6 +219,17 @@ export function Column({
     doneLimit > cards.length &&
     doneRemaining > 0;
 
+  const count =
+    column === "done" && doneTotal != null ? doneTotal : cards.length;
+  const prevCountRef = useRef(count);
+  const [countPulse, setCountPulse] = useState(0);
+  useEffect(() => {
+    if (prevCountRef.current !== count) {
+      prevCountRef.current = count;
+      setCountPulse((n) => n + 1);
+    }
+  }, [count]);
+
   function renderCard(card: CardModel) {
     return (
       <Card
@@ -347,15 +358,22 @@ export function Column({
           {COLUMN_LABELS[column]}
         </span>
         <span
+          key={countPulse}
           style={{
             background: `color-mix(in srgb, ${COLUMN_ACCENT[column]} 16%, var(--surface-column))`,
             color: COLUMN_ACCENT[column],
             borderRadius: "var(--radius-sm)",
             padding: "0 var(--space-xs)",
             fontSize: "var(--font-micro)",
+            ...(countPulse > 0
+              ? {
+                  animation:
+                    "count-pulse var(--motion-count-change) var(--easing-enter)",
+                }
+              : {}),
           }}
         >
-          {column === "done" && doneTotal != null ? doneTotal : cards.length}
+          {count}
         </span>
         {manualEntryBlocked && (
           <span
