@@ -13,8 +13,10 @@
  * DEVIATION FROM PRECEDENT. Every `panel-*.mjs` break mutates the real artifact it checks, in
  * place, then restores the captured bytes in a `finally`. This script's break deliberately does
  * NOT do that: this phase's hard invariant is that no `src/` file is ever touched, at any point,
- * so the break instead writes a mutated COPY of the token file under `/tmp/contrast-113-break/`
- * and drives the exact same check function against that copy via the `tokens` flag. Do not
+ * so the break instead writes a mutated COPY of the token file under a private mkdtemp directory
+ * and drives the exact same check function against that copy via the `tokens` flag. Each break
+ * leg creates its own private directory via fs.mkdtempSync, so concurrent runs cannot clobber
+ * each other and a pre-planted symlink at a predictable path is never followed. Do not
  * "correct" this back to in-place mutation; it would violate the phase's own acceptance criteria
  * (a clean git status for `src/` must hold through every task).
  *
@@ -52,6 +54,7 @@
  */
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const DEFAULT_TOKENS_PATH = "src/web/styles/tokens.css";
@@ -329,8 +332,6 @@ function printLadderTable(rows) {
 // Break legs
 // ---------------------------------------------------------------------------
 
-const BREAK_TMP_DIR = "/tmp/contrast-113-break";
-
 /**
  * --break pairs: writes a copy of the real token file with --text-muted rewritten to a value
  * whose contrast against --surface-card drops below the 4.5 text floor, runs the same pair check
@@ -340,8 +341,8 @@ const BREAK_TMP_DIR = "/tmp/contrast-113-break";
  */
 async function runBreakPairs() {
   const realPath = path.resolve(process.cwd(), DEFAULT_TOKENS_PATH);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "contrast-113-break-"));
   try {
-    fs.mkdirSync(BREAK_TMP_DIR, { recursive: true });
     const original = fs.readFileSync(realPath, "utf8");
     const mutated = original.replace(
       /--text-muted:\s*#[0-9a-fA-F]{6}/,
@@ -352,7 +353,7 @@ async function runBreakPairs() {
         "break pairs: --text-muted declaration not found to mutate",
       );
     }
-    const mutatedPath = path.join(BREAK_TMP_DIR, "tokens.css");
+    const mutatedPath = path.join(tmpDir, "tokens.css");
     fs.writeFileSync(mutatedPath, mutated);
 
     const tripViolations = [];
@@ -373,7 +374,7 @@ async function runBreakPairs() {
 
     return { tripFired, restoreClean };
   } finally {
-    fs.rmSync(BREAK_TMP_DIR, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 
@@ -384,8 +385,8 @@ async function runBreakPairs() {
  */
 async function runBreakLadder() {
   const realPath = path.resolve(process.cwd(), DEFAULT_TOKENS_PATH);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "contrast-113-break-"));
   try {
-    fs.mkdirSync(BREAK_TMP_DIR, { recursive: true });
     const original = fs.readFileSync(realPath, "utf8");
     const mutated = original.replace(
       /--surface-card:\s*#[0-9a-fA-F]{6}/,
@@ -396,7 +397,7 @@ async function runBreakLadder() {
         "break ladder: --surface-card declaration not found to mutate",
       );
     }
-    const mutatedPath = path.join(BREAK_TMP_DIR, "tokens-ladder.css");
+    const mutatedPath = path.join(tmpDir, "tokens-ladder.css");
     fs.writeFileSync(mutatedPath, mutated);
 
     const tripViolations = [];
@@ -417,7 +418,7 @@ async function runBreakLadder() {
 
     return { tripFired, restoreClean };
   } finally {
-    fs.rmSync(BREAK_TMP_DIR, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 
