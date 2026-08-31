@@ -13,11 +13,13 @@
  * sandbox directory is created.
  *
  * SCOPE, Plan 01 claims this phase's instrument script, its port claims, and the stable fixture
- * set every later plan in this phase reuses. This plan's own deliverable is the scaffold (safety
+ * set every later plan in this phase reuses. Plan 01's own deliverable was the scaffold (safety
  * preflight, sandbox spine, raw-CDP driver, `seedFixtureCards`, the four breakpoint presets) plus
  * one probe, `baseline`, that records every BEFORE value the phase must report before a single
- * source byte changes. `CHECKS` and `BREAKS` stay empty maps in this plan; later plans in this
- * phase register the density/state/motion/reduced-motion checks and their break-proof legs.
+ * source byte changes. Plan 03 adds the first real check, `density` (break-proven), landing the
+ * v3.4 density token block in `tokens.css` and repointing `CardView.tsx`/`Column.tsx` onto it.
+ * `BREAKS` still holds only `density`; later plans in this phase register the state/motion/
+ * reduced-motion checks and their own break-proof legs.
  *
  * Ports, unique against every existing `panel-*.mjs` and other `scripts/*.mjs` harness (verified
  * by grepping every `SANDBOX_PORT =` and `CDP_PORT =` assignment in `scripts/*.mjs`: the highest
@@ -49,11 +51,28 @@
  * violation, any safety trip (`assertNoLiveService`), or a break whose trip/restore leg did not
  * behave as expected.
  *
- * BREAK EVIDENCE, appended to by every plan in this phase that registers a check. Empty for now;
- * this plan registers zero checks.
+ * BREAK EVIDENCE, appended to by every plan in this phase that registers a check. The quoted
+ * lines below are the VERBATIM TRIP-leg output captured from a real `--break` run:
+ *   - `density` proven able to fail (Plan 03): replacing the sole `"var(--card-padding)"` regular-
+ *     card-padding token reference in `src/web/features/board/CardView.tsx` with the exact
+ *     retired spacing-scale shorthand this plan repointed away from,
+ *     `"var(--space-xs) var(--space-sm)"`, rebuilding, and re-running the same `checkDensity`
+ *     function against a real booted sandbox and real headless Chrome produced, verbatim:
+ *     `density(BP-A): regular card padding expected "6px 8px", observed "4px 8px"`
+ *     `density(BP-B): regular card padding expected "6px 8px", observed "4px 8px"`
+ *     `density(BP-C): regular card padding expected "6px 8px", observed "4px 8px"`
+ *     `density(BP-D): regular card padding expected "6px 8px", observed "4px 8px"`
+ *     The RESTORE leg re-ran clean after the captured bytes were restored, and
+ *     `git diff --quiet src/` confirmed a byte-identical restore.
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { realpathSync } from "node:fs";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -1636,12 +1655,369 @@ async function probeBaseline() {
 }
 
 // ---------------------------------------------------------------------------
+// density: break-proven check for Plan 03's density token repoint. Boots the
+// sandbox once, asserts every expected-after value from the interfaces
+// block's table at all four breakpoints, then a reading-surface isolation
+// assertion owned by this check alone (no other check reads .reading-surface).
+// ---------------------------------------------------------------------------
+
+/** Same value `114-01`'s BEFORE ledger recorded (byte-identical at all four breakpoints); the
+ * count chip must not be squeezed by the density change, so the after value is asserted equal
+ * to the before value rather than to a new number. */
+const BEFORE_COUNT_CHIP_HEIGHT = 15.390625;
+
+/** Tolerance for float px comparisons: CDP's `getBoundingClientRect`/`getComputedStyle` reads are
+ * exact for these fixed-px values in practice, but a hairline tolerance absorbs any genuine
+ * sub-pixel rendering jitter without masking a real regression. */
+const DENSITY_PX_TOLERANCE = 0.05;
+
+function assertDensityPx(violations, bp, label, expected, observed) {
+  if (Math.abs(observed - expected) > DENSITY_PX_TOLERANCE) {
+    violations.push(
+      `density(${bp.label}): ${label} expected ${expected}px, observed ${observed}px`,
+    );
+  }
+}
+
+function assertDensityExact(violations, bp, label, expected, observed) {
+  if (observed !== expected) {
+    violations.push(
+      `density(${bp.label}): ${label} expected ${JSON.stringify(expected)}, observed ${JSON.stringify(observed)}`,
+    );
+  }
+}
+
+/**
+ * Boots the sandbox, opens the seeded board, and at each of the four breakpoints asserts: regular
+ * card padding (6px/8px), done card padding (6px flat), inter-card gap (6px, read as the live
+ * pitch between the todo column's first two cards minus the upper card's own height, isolating
+ * the gap from either card's own content), column header height (28px), count chip height
+ * (unchanged from the 114-01 BEFORE value), card title computed line height (18.85px), the
+ * 288-character two-line title's rendered height (37.6875px), and the three type-scale sizes
+ * (13px/12px/11px). Once, after the breakpoint sweep, opens the detail panel on a seeded
+ * markdown card and asserts its `.reading-surface` paragraph's computed line height is still
+ * 20.8px, the isolation NEW-19's fence exists to protect.
+ */
+async function checkDensity(violations) {
+  let sandbox = null;
+  let chrome = null;
+  let cdp = null;
+  try {
+    sandbox = await bootSandbox("check-density");
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+    const { sessionId } = await openPage(cdp, { url: "about:blank" });
+    await cdp.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      { source: MEASURE_HELPERS_SRC },
+      sessionId,
+    );
+    await cdp.send(
+      "Page.navigate",
+      { url: `http://127.0.0.1:${SANDBOX_PORT}/` },
+      sessionId,
+    );
+    const loaded = await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `document.getElementById("root") != null`,
+      READY_TIMEOUT_MS,
+    );
+    if (!loaded) {
+      violations.push("density: #root never appeared after navigation");
+      return;
+    }
+    // Splash.tsx's unconditional 1.3s overlay, same settle window probeBaseline uses.
+    await sleep(1450);
+
+    const regular = `window.panel114FindCardByIdentifier("todo","PROP-401")`;
+    const done = `window.panel114FindCardByIdentifier("done","PROP-414")`;
+    const long = `window.panel114FindCardByIdentifier("todo","PROP-403")`;
+
+    for (const bp of BREAKPOINTS) {
+      await applyBreakpoint(cdp, sessionId, bp);
+      await blurActive(cdp, sessionId);
+      await moveMouseAway(cdp, sessionId);
+      await sleep(300);
+
+      const regularPadding = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(${regular}).padding`,
+      );
+      assertDensityExact(
+        violations,
+        bp,
+        "regular card padding",
+        "6px 8px",
+        regularPadding,
+      );
+
+      const donePadding = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(${done}).padding`,
+      );
+      assertDensityExact(
+        violations,
+        bp,
+        "done card padding",
+        "6px",
+        donePadding,
+      );
+
+      const pitch = await evalValue(
+        cdp,
+        sessionId,
+        `(function () {
+          var c = window.panel114FindCardsInColumn("todo");
+          if (c.length < 2) return null;
+          var r0 = c[0].getBoundingClientRect();
+          var r1 = c[1].getBoundingClientRect();
+          return { pitch: r1.top - r0.top, upperHeight: r0.height };
+        })()`,
+      );
+      if (pitch == null) {
+        violations.push(
+          `density(${bp.label}): fewer than two cards in the todo column, cannot measure inter-card gap`,
+        );
+      } else {
+        assertDensityPx(
+          violations,
+          bp,
+          "inter-card gap",
+          6,
+          pitch.pitch - pitch.upperHeight,
+        );
+      }
+
+      const headerHeight = await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114HeaderEl("todo").getBoundingClientRect().height`,
+      );
+      assertDensityPx(violations, bp, "column header height", 28, headerHeight);
+
+      const countChipHeight = await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114CountChipEl("todo").getBoundingClientRect().height`,
+      );
+      assertDensityPx(
+        violations,
+        bp,
+        "count chip height (unchanged from BEFORE)",
+        BEFORE_COUNT_CHIP_HEIGHT,
+        countChipHeight,
+      );
+
+      const titleLineHeight = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(window.panel114TitleEl(${long})).lineHeight`,
+      );
+      assertDensityExact(
+        violations,
+        bp,
+        "card title computed lineHeight",
+        "18.85px",
+        titleLineHeight,
+      );
+
+      const titleRenderedHeight = await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114TitleEl(${long}).getBoundingClientRect().height`,
+      );
+      assertDensityPx(
+        violations,
+        bp,
+        "two-line 288-char title rendered height",
+        37.6875,
+        titleRenderedHeight,
+      );
+
+      const cardTitleFontSize = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(window.panel114TitleEl(${regular})).fontSize`,
+      );
+      assertDensityExact(
+        violations,
+        bp,
+        "card title font-size",
+        "13px",
+        cardTitleFontSize,
+      );
+
+      const headerFontSize = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(window.panel114HeaderEl("todo").querySelector("span")).fontSize`,
+      );
+      assertDensityExact(
+        violations,
+        bp,
+        "column header font-size",
+        "12px",
+        headerFontSize,
+      );
+
+      const countChipFontSize = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(window.panel114CountChipEl("todo")).fontSize`,
+      );
+      assertDensityExact(
+        violations,
+        bp,
+        "count chip font-size",
+        "11px",
+        countChipFontSize,
+      );
+    }
+
+    // Isolation assertion, owned by this check alone: the detail panel's own reading-surface
+    // paragraph line height must stay 20.8px, proving the global --line-body change (1.5 to 1.45)
+    // did not leak past NEW-19's board-directory fence.
+    await applyBreakpoint(cdp, sessionId, BREAKPOINTS[0]);
+    await blurActive(cdp, sessionId);
+    await moveMouseAway(cdp, sessionId);
+    const cardRect = await evalValue(
+      cdp,
+      sessionId,
+      `window.panel114Rect(${regular})`,
+    );
+    await dispatchRealClick(cdp, sessionId, { x: cardRect.x, y: cardRect.y });
+    const opened = await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `document.querySelector('aside[aria-label="Ticket detail"]') != null`,
+      5_000,
+    );
+    if (!opened) {
+      violations.push(
+        "density: detail panel never opened for the reading-surface isolation assertion",
+      );
+    } else {
+      await sleep(200);
+      const readingLineHeight = await evalValue(
+        cdp,
+        sessionId,
+        `(function () {
+          var p = document.querySelector(".reading-surface p");
+          return p ? getComputedStyle(p).lineHeight : null;
+        })()`,
+      );
+      if (readingLineHeight !== "20.8px") {
+        violations.push(
+          `density: .reading-surface paragraph lineHeight expected "20.8px", observed ${JSON.stringify(readingLineHeight)}`,
+        );
+      }
+      await dispatchRealKey(cdp, sessionId, "Escape", "Escape", 27);
+      await pollUntilTruthy(
+        cdp,
+        sessionId,
+        `document.querySelector('aside[aria-label="Ticket detail"]') == null`,
+        5_000,
+      );
+    }
+  } finally {
+    if (cdp) {
+      try {
+        cdp.close();
+      } catch {
+        // best effort
+      }
+    }
+    if (chrome) {
+      try {
+        chrome.kill("SIGTERM");
+      } catch {
+        // best effort
+      }
+    }
+    if (sandbox) await teardownSandbox(sandbox);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BREAKS["density"]: mutates the real card-padding repoint CardView.tsx's Task
+// 2 landed, rebuilds, and re-runs checkDensity itself against the mutated
+// source, then restores the captured bytes unconditionally.
+// ---------------------------------------------------------------------------
+
+const CARD_VIEW_PATH = join(
+  REPO_ROOT,
+  "src",
+  "web",
+  "features",
+  "board",
+  "CardView.tsx",
+);
+const DENSITY_BREAK_TARGET = '"var(--card-padding)"';
+const DENSITY_BREAK_REPLACEMENT = '"var(--space-xs) var(--space-sm)"';
+
+function restoreCardViewSource(original) {
+  writeFileSync(CARD_VIEW_PATH, original);
+  resetBuildCache();
+  rmSync(join(REPO_ROOT, "dist"), { recursive: true, force: true });
+  unregisterRestore(CARD_VIEW_PATH);
+}
+
+async function runBreakDensity() {
+  assertBuilt();
+  const original = readFileSync(CARD_VIEW_PATH, "utf8");
+  const occurrences = original.split(DENSITY_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel-114: refusing to run --break density, expected ${JSON.stringify(DENSITY_BREAK_TARGET)} ` +
+        `to occur exactly once in ${CARD_VIEW_PATH}, measured ${occurrences}. A miscounted anchor ` +
+        `would mutate the wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(CARD_VIEW_PATH, original);
+  try {
+    writeFileSync(
+      CARD_VIEW_PATH,
+      original.replace(DENSITY_BREAK_TARGET, DENSITY_BREAK_REPLACEMENT),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkDensity(tripViolations);
+    console.log(
+      `\n--break density TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) => v.includes("regular card padding"));
+  } finally {
+    restoreCardViewSource(original);
+  }
+
+  const restoreViolations = [];
+  await checkDensity(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break density RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS / PROBES
 // ---------------------------------------------------------------------------
 
-const CHECKS = {};
+const CHECKS = {
+  density: checkDensity,
+};
 
-const BREAKS = {};
+const BREAKS = {
+  density: runBreakDensity,
+};
 
 const PROBES = {
   baseline: probeBaseline,
