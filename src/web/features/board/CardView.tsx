@@ -208,8 +208,8 @@ export function CardView({
           border,
           borderRadius: "var(--radius)",
           padding: compact
-            ? "var(--space-xs)"
-            : "var(--space-xs) var(--space-sm)",
+            ? "var(--card-padding-compact)"
+            : "var(--card-padding)",
           cursor: "pointer",
           display: "flex",
           flexDirection: "column",

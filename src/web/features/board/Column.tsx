@@ -402,7 +402,7 @@ export function Column({
           overflowY: "auto",
           display: "flex",
           flexDirection: "column",
-          gap: "var(--space-sm)",
+          gap: "var(--inter-card-gap)",
         }}
       >
         {cards.length === 0 ? (
