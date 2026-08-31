@@ -26,8 +26,12 @@
  * proven live and danger proven by a shared-mechanism source assertion plus an in-page token
  * cross-check. Plan 06 adds `motion` (break-proven), proving `card-move-flip.ts`'s FLIP mechanism
  * (`Card.tsx`'s composed ref and layout effect) and `Column.tsx`'s count-chip pulse, both driven
- * through a real `POST /api/cards/:id/move` and the real SSE path. Later plans in this phase
- * register the reduced-motion check and its own break-proof leg.
+ * through a real `POST /api/cards/:id/move` and the real SSE path. Plan 07 adds `panel-motion`
+ * (break-proven), proving `DetailPanel.tsx`'s open/close split onto the `motion-panel-open`/
+ * `motion-panel-close`/`easing-enter`/`easing-exit` tokens (a real trusted click to open, a real
+ * trusted Escape to close) plus a source-scan leg asserting zero naked millisecond literals remain
+ * under `src/web`. Later plans in this phase register the reduced-motion check and its own
+ * break-proof leg.
  *
  * DETAIL-PANEL FINDING (Plan 04, out of this plan's own scope, recorded for the next phase that
  * touches `DetailPanel.tsx`): `document.querySelector('aside[aria-label="Ticket detail"]') ==
@@ -126,13 +130,29 @@
  *     every breakpoint throughout the trip leg, confirming the break landed on the card mechanism
  *     alone.) The RESTORE leg re-ran clean after the captured bytes were restored, and
  *     `git diff --quiet src/` confirmed a byte-identical restore.
+ *   - `panel-motion` proven able to fail (Plan 07): mutating `DetailPanel.tsx`'s own
+ *     `asideTransition` close arm from `` `transform var(--motion-panel-close)
+ *     var(--easing-exit)` `` to `` `transform var(--motion-panel-close) var(--easing-enter)` ``
+ *     (reusing the enter easing for the close arm, the exact pre-split behaviour Task 1 undid),
+ *     rebuilding, and re-running the same `checkPanelMotion` function against a real booted
+ *     sandbox and a real headless Chrome produced, verbatim:
+ *     `panel-motion(BP-A): aside close transitionTimingFunction expected "ease-in", observed "ease-out"`
+ *     `panel-motion(BP-B): aside close transitionTimingFunction expected "ease-in", observed "ease-out"`
+ *     `panel-motion(BP-C): aside close transitionTimingFunction expected "ease-in", observed "ease-out"`
+ *     `panel-motion(BP-D): aside close transitionTimingFunction expected "ease-in", observed "ease-out"`
+ *     (the scrim's own close-arm assertions, an independent element, stayed clean at every
+ *     breakpoint throughout the trip leg, confirming the break landed on the aside's own
+ *     `asideTransition` local alone.) The RESTORE leg re-ran clean after the captured bytes were
+ *     restored, and `git diff --quiet src/` confirmed a byte-identical restore.
  */
 
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { realpathSync } from "node:fs";
@@ -1322,6 +1342,62 @@ document.addEventListener(
       t: performance.now(),
       animationName: e.animationName,
       column: col ? col.getAttribute("data-column") : null,
+    });
+  },
+  true,
+);
+// Panel motion capture (Plan 07): document-level, capture-phase, same technique as
+// panel114MotionCapture above, but the aside/scrim never unmount (DETAIL-PANEL FINDING, PANEL-03),
+// so classification is by target identity rather than by property/animation name. The scrim is
+// aside's own previousElementSibling (measureMotion's own precedent), matched here by relation
+// rather than a stored reference so a listener installed before either element exists still works.
+window.panel114PanelMotionCapture = {
+  aside: { run: [], end: [] },
+  scrim: { run: [], end: [] },
+  reset: function () {
+    this.aside.run = [];
+    this.aside.end = [];
+    this.scrim.run = [];
+    this.scrim.end = [];
+  },
+};
+window.panel114ClassifyPanelMotionTarget = function (el) {
+  if (!el) return null;
+  if (el.tagName === "ASIDE" && el.getAttribute("aria-label") === "Ticket detail") return "aside";
+  var next = el.nextElementSibling;
+  if (
+    el.getAttribute("aria-hidden") === "true" &&
+    next &&
+    next.tagName === "ASIDE" &&
+    next.getAttribute("aria-label") === "Ticket detail"
+  ) {
+    return "scrim";
+  }
+  return null;
+};
+document.addEventListener(
+  "transitionrun",
+  function (e) {
+    var kind = window.panel114ClassifyPanelMotionTarget(e.target);
+    if (!kind) return;
+    var cs = getComputedStyle(e.target);
+    window.panel114PanelMotionCapture[kind].run.push({
+      t: performance.now(),
+      propertyName: e.propertyName,
+      transitionDuration: cs.transitionDuration,
+      transitionTimingFunction: cs.transitionTimingFunction,
+    });
+  },
+  true,
+);
+document.addEventListener(
+  "transitionend",
+  function (e) {
+    var kind = window.panel114ClassifyPanelMotionTarget(e.target);
+    if (!kind) return;
+    window.panel114PanelMotionCapture[kind].end.push({
+      t: performance.now(),
+      propertyName: e.propertyName,
     });
   },
   true,
@@ -4161,6 +4237,410 @@ async function runBreakMotion() {
 }
 
 // ---------------------------------------------------------------------------
+// CHECKS["panel-motion"] (Plan 07): proves DetailPanel.tsx's open/close split onto the
+// motion-panel-open/motion-panel-close/easing-enter/easing-exit tokens, driven by a real trusted
+// click to open and a real trusted Escape keypress to close, at all four breakpoints, plus a
+// second, cheap source-scan leg (no browser needed) that finds any naked millisecond literal
+// surviving in a transition/animation declaration under src/web.
+// ---------------------------------------------------------------------------
+
+const PANEL_MOTION_CARD_COLUMN = "todo";
+const PANEL_MOTION_CARD_IDENTIFIER = "PROP-401";
+
+const PANEL_OPEN_REQUESTED_MS = 200;
+const PANEL_CLOSE_REQUESTED_MS = 150;
+
+/** Same tolerance rationale as {@link MOTION_ELAPSED_TOLERANCE_MS}: a genuinely broken (zeroed or
+ * mismatched) duration reads tens of ms outside this window, so 40ms absorbs real event-loop
+ * jitter without masking that break. The design contract's own live BEFORE measurement recorded
+ * observed elapsed 182.4-198.2ms (open) and 133.3-149.9ms (close), both comfortably inside it. */
+const PANEL_MOTION_ELAPSED_TOLERANCE_MS = 40;
+
+/** Naked motion literal: a `transition`/`animation` declaration carrying a bare `Nms` duration,
+ * the same pattern this plan's own task-2 verify gate greps for across `src/web`. */
+const NAKED_MOTION_LITERAL_RE = /(transition|animation)[^;"']*[0-9]+ms/;
+
+/**
+ * Walks `src/web` for `.ts`/`.tsx` files and returns every line matching
+ * {@link NAKED_MOTION_LITERAL_RE}, formatted `path/to/file.tsx:LINE: <trimmed line text>`. Pure
+ * `fs`, no sandbox or browser needed; this is what keeps the retirement from silently regressing
+ * when a future component copies the old flat-ms pattern.
+ */
+function scanForNakedMotionLiterals() {
+  const root = join(REPO_ROOT, "src", "web");
+  const survivors = [];
+  for (const rel of readdirSync(root, { recursive: true })) {
+    if (!/\.(ts|tsx)$/.test(rel)) continue;
+    const full = join(root, rel);
+    if (!statSync(full).isFile()) continue;
+    const lines = readFileSync(full, "utf8").split("\n");
+    lines.forEach((line, i) => {
+      if (NAKED_MOTION_LITERAL_RE.test(line)) {
+        survivors.push(`src/web/${rel}:${i + 1}: ${line.trim()}`);
+      }
+    });
+  }
+  return survivors;
+}
+
+function assertPanelMotionElapsed(
+  violations,
+  bp,
+  label,
+  requestedMs,
+  observedMs,
+) {
+  if (
+    observedMs == null ||
+    Math.abs(observedMs - requestedMs) > PANEL_MOTION_ELAPSED_TOLERANCE_MS
+  ) {
+    violations.push(
+      `panel-motion(${bp.label}): ${label} elapsed expected close to ${requestedMs}ms ` +
+        `(tolerance ${PANEL_MOTION_ELAPSED_TOLERANCE_MS}ms), observed ${observedMs == null ? "no matching event" : `${observedMs}ms`}`,
+    );
+  }
+}
+
+/** Reads one captured `{ run, end }` leg (already pulled from `window.panel114PanelMotionCapture`)
+ * and asserts its `transitionDuration`/`transitionTimingFunction`/elapsed against the requested
+ * values, returning the reading (never `null`) for the ledger even when a violation was pushed.
+ * Shared by all four legs (aside open/close, scrim open/close): same shape as
+ * {@link measureAndAssertCardMove}, generalized over the requested duration/easing/label since
+ * this check has four legs to that one check's one. */
+function assertPanelMotionLeg(
+  violations,
+  bp,
+  label,
+  run,
+  end,
+  requestedMs,
+  requestedDuration,
+  requestedEasing,
+) {
+  if (run == null) {
+    violations.push(
+      `panel-motion(${bp.label}): ${label} transitionDuration expected ${JSON.stringify(requestedDuration)}, observed no transitionrun fired`,
+    );
+    return {
+      transitionDuration: null,
+      transitionTimingFunction: null,
+      elapsedMs: null,
+    };
+  }
+  if (run.transitionDuration !== requestedDuration) {
+    violations.push(
+      `panel-motion(${bp.label}): ${label} transitionDuration expected ${JSON.stringify(requestedDuration)}, observed ${JSON.stringify(run.transitionDuration)}`,
+    );
+  }
+  if (run.transitionTimingFunction !== requestedEasing) {
+    violations.push(
+      `panel-motion(${bp.label}): ${label} transitionTimingFunction expected ${JSON.stringify(requestedEasing)}, observed ${JSON.stringify(run.transitionTimingFunction)}`,
+    );
+  }
+  const elapsedMs = end == null ? null : end.t - run.t;
+  assertPanelMotionElapsed(violations, bp, label, requestedMs, elapsedMs);
+  return {
+    transitionDuration: run.transitionDuration,
+    transitionTimingFunction: run.transitionTimingFunction,
+    elapsedMs,
+  };
+}
+
+/**
+ * Retry wrapper around {@link checkPanelMotionOnce}, same shape and same rationale as
+ * {@link checkMotion}'s own wrapper: a thrown infra-shaped error (CDP/renderer contention) is
+ * retried up to `MAX_ATTEMPTS` times with a fresh sandbox each attempt; a real assertion violation
+ * is never thrown, only pushed into `violations`, so it is never retried away.
+ */
+async function checkPanelMotion(violations) {
+  const MAX_ATTEMPTS = 3;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const attemptViolations = [];
+    try {
+      await checkPanelMotionOnce(attemptViolations);
+      violations.push(...attemptViolations);
+      return;
+    } catch (err) {
+      lastErr = err;
+      console.error(
+        `panel-motion: attempt ${attempt}/${MAX_ATTEMPTS} threw (likely CDP/renderer contention, not a code defect): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      if (attempt === MAX_ATTEMPTS) throw lastErr;
+    }
+  }
+}
+
+async function checkPanelMotionOnce(violations) {
+  for (const survivor of scanForNakedMotionLiterals()) {
+    violations.push(`panel-motion: naked motion literal survives: ${survivor}`);
+  }
+
+  let sandbox = null;
+  let chrome = null;
+  let cdp = null;
+  try {
+    sandbox = await bootSandbox("check-panel-motion");
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+    const { sessionId } = await openPage(cdp, { url: "about:blank" });
+    await cdp.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      { source: MEASURE_HELPERS_SRC },
+      sessionId,
+    );
+    await cdp.send(
+      "Page.navigate",
+      { url: `http://127.0.0.1:${SANDBOX_PORT}/` },
+      sessionId,
+    );
+    const loaded = await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `document.getElementById("root") != null`,
+      READY_TIMEOUT_MS,
+    );
+    if (!loaded) {
+      violations.push("panel-motion: #root never appeared after navigation");
+      return;
+    }
+    // Splash.tsx's unconditional 1.3s overlay, same settle window probeBaseline/checkMotion use.
+    await sleep(1450);
+
+    for (const bp of BREAKPOINTS) {
+      await applyBreakpoint(cdp, sessionId, bp);
+      await blurActive(cdp, sessionId);
+      await moveMouseAway(cdp, sessionId);
+      await sleep(300);
+
+      const alreadyOpen = await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114DetailPanelOpen()`,
+      );
+      if (alreadyOpen) {
+        violations.push(
+          `panel-motion(${bp.label}): detail panel was already open before this breakpoint's own open trigger`,
+        );
+        continue;
+      }
+
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114PanelMotionCapture.reset()`,
+      );
+
+      const cardRect = await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114Rect(window.panel114FindCardByIdentifier(${JSON.stringify(PANEL_MOTION_CARD_COLUMN)}, ${JSON.stringify(PANEL_MOTION_CARD_IDENTIFIER)}))`,
+      );
+      await dispatchRealClick(cdp, sessionId, {
+        x: cardRect.x,
+        y: cardRect.y,
+      });
+      const opened = await pollUntilTruthy(
+        cdp,
+        sessionId,
+        `window.panel114DetailPanelOpen()`,
+        5_000,
+      );
+      if (!opened) {
+        violations.push(
+          `panel-motion(${bp.label}): detail panel never opened after a real trusted click`,
+        );
+        continue;
+      }
+      await sleep(450);
+
+      const panelWidth = await evalValue(
+        cdp,
+        sessionId,
+        `document.querySelector('aside[aria-label="Ticket detail"]').getBoundingClientRect().width`,
+      );
+
+      const openCapture = await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114PanelMotionCapture`,
+      );
+      const asideOpen = assertPanelMotionLeg(
+        violations,
+        bp,
+        "aside open",
+        openCapture.aside.run[0] ?? null,
+        openCapture.aside.end[0] ?? null,
+        PANEL_OPEN_REQUESTED_MS,
+        "0.2s",
+        "ease-out",
+      );
+      const scrimOpen = assertPanelMotionLeg(
+        violations,
+        bp,
+        "scrim open",
+        openCapture.scrim.run[0] ?? null,
+        openCapture.scrim.end[0] ?? null,
+        PANEL_OPEN_REQUESTED_MS,
+        "0.2s",
+        "ease-out",
+      );
+      console.log(
+        `panel-motion(${bp.label}): panel width in effect = ${panelWidth.toFixed(2)}px, ` +
+          `aside open transitionDuration=${JSON.stringify(asideOpen.transitionDuration)} transitionTimingFunction=${JSON.stringify(asideOpen.transitionTimingFunction)} elapsed=${asideOpen.elapsedMs == null ? "null" : asideOpen.elapsedMs.toFixed(1)}ms (requested ${PANEL_OPEN_REQUESTED_MS}ms), ` +
+          `scrim open transitionDuration=${JSON.stringify(scrimOpen.transitionDuration)} transitionTimingFunction=${JSON.stringify(scrimOpen.transitionTimingFunction)} elapsed=${scrimOpen.elapsedMs == null ? "null" : scrimOpen.elapsedMs.toFixed(1)}ms (requested ${PANEL_OPEN_REQUESTED_MS}ms)`,
+      );
+
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114PanelMotionCapture.reset()`,
+      );
+      await dispatchRealKey(cdp, sessionId, "Escape", "Escape", 27);
+      const closed = await pollUntilTruthy(
+        cdp,
+        sessionId,
+        `!window.panel114DetailPanelOpen()`,
+        5_000,
+      );
+      if (!closed) {
+        violations.push(
+          `panel-motion(${bp.label}): detail panel never closed after a real trusted Escape keypress`,
+        );
+        continue;
+      }
+      await sleep(400);
+
+      const closeCapture = await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114PanelMotionCapture`,
+      );
+      const asideClose = assertPanelMotionLeg(
+        violations,
+        bp,
+        "aside close",
+        closeCapture.aside.run[0] ?? null,
+        closeCapture.aside.end[0] ?? null,
+        PANEL_CLOSE_REQUESTED_MS,
+        "0.15s",
+        "ease-in",
+      );
+      const scrimClose = assertPanelMotionLeg(
+        violations,
+        bp,
+        "scrim close",
+        closeCapture.scrim.run[0] ?? null,
+        closeCapture.scrim.end[0] ?? null,
+        PANEL_CLOSE_REQUESTED_MS,
+        "0.15s",
+        "ease-in",
+      );
+      console.log(
+        `panel-motion(${bp.label}): aside close transitionDuration=${JSON.stringify(asideClose.transitionDuration)} transitionTimingFunction=${JSON.stringify(asideClose.transitionTimingFunction)} elapsed=${asideClose.elapsedMs == null ? "null" : asideClose.elapsedMs.toFixed(1)}ms (requested ${PANEL_CLOSE_REQUESTED_MS}ms), ` +
+          `scrim close transitionDuration=${JSON.stringify(scrimClose.transitionDuration)} transitionTimingFunction=${JSON.stringify(scrimClose.transitionTimingFunction)} elapsed=${scrimClose.elapsedMs == null ? "null" : scrimClose.elapsedMs.toFixed(1)}ms (requested ${PANEL_CLOSE_REQUESTED_MS}ms)`,
+      );
+
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114PanelMotionCapture.reset()`,
+      );
+    }
+  } finally {
+    if (cdp) {
+      try {
+        cdp.close();
+      } catch {
+        // best effort
+      }
+    }
+    if (chrome) {
+      try {
+        chrome.kill("SIGTERM");
+      } catch {
+        // best effort
+      }
+    }
+    if (sandbox) await teardownSandbox(sandbox);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BREAKS["panel-motion"]: mutates DetailPanel.tsx's own asideTransition close arm to reuse the
+// enter easing token (the exact pre-split behaviour Task 1 undid), rebuilds, and re-runs
+// checkPanelMotion itself against the mutated source, then restores the captured bytes
+// unconditionally.
+// ---------------------------------------------------------------------------
+
+const DETAIL_PANEL_PATH = join(
+  REPO_ROOT,
+  "src",
+  "web",
+  "features",
+  "detail",
+  "DetailPanel.tsx",
+);
+const PANEL_MOTION_BREAK_TARGET =
+  '"transform var(--motion-panel-close) var(--easing-exit)"';
+const PANEL_MOTION_BREAK_REPLACEMENT =
+  '"transform var(--motion-panel-close) var(--easing-enter)"';
+
+function restoreDetailPanelSource(original) {
+  writeFileSync(DETAIL_PANEL_PATH, original);
+  resetBuildCache();
+  rmSync(join(REPO_ROOT, "dist"), { recursive: true, force: true });
+  unregisterRestore(DETAIL_PANEL_PATH);
+}
+
+async function runBreakPanelMotion() {
+  assertBuilt();
+  const original = readFileSync(DETAIL_PANEL_PATH, "utf8");
+  const occurrences = original.split(PANEL_MOTION_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel-114: refusing to run --break panel-motion, expected ${JSON.stringify(PANEL_MOTION_BREAK_TARGET)} ` +
+        `to occur exactly once in ${DETAIL_PANEL_PATH}, measured ${occurrences}. A miscounted ` +
+        `anchor would mutate the wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(DETAIL_PANEL_PATH, original);
+  try {
+    writeFileSync(
+      DETAIL_PANEL_PATH,
+      original.replace(
+        PANEL_MOTION_BREAK_TARGET,
+        PANEL_MOTION_BREAK_REPLACEMENT,
+      ),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkPanelMotion(tripViolations);
+    console.log(
+      `\n--break panel-motion TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) =>
+      v.includes("aside close transitionTimingFunction"),
+    );
+  } finally {
+    restoreDetailPanelSource(original);
+  }
+
+  const restoreViolations = [];
+  await checkPanelMotion(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break panel-motion RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS / PROBES
 // ---------------------------------------------------------------------------
 
@@ -4169,6 +4649,7 @@ const CHECKS = {
   "board-states": checkBoardStates,
   "control-states": checkControlStates,
   motion: checkMotion,
+  "panel-motion": checkPanelMotion,
 };
 
 const BREAKS = {
@@ -4176,6 +4657,7 @@ const BREAKS = {
   "board-states": runBreakBoardStates,
   "control-states": runBreakControlStates,
   motion: runBreakMotion,
+  "panel-motion": runBreakPanelMotion,
 };
 
 const PROBES = {
