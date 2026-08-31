@@ -2898,7 +2898,6 @@ const overlayStyle: CSSProperties = {
   zIndex: 18,
   display: "flex",
   background: "var(--bg)",
-  transition: "opacity 150ms ease-out",
 };
 
 const sidebarStyle: CSSProperties = {
@@ -3134,6 +3133,10 @@ export function SettingsScreen({
       style={{
         ...overlayStyle,
         opacity: entered && !closing ? 1 : 0,
+        transition:
+          entered && !closing
+            ? "opacity var(--motion-panel-open) var(--easing-enter)"
+            : "opacity var(--motion-panel-close) var(--easing-exit)",
       }}
     >
       <nav aria-label="Settings sections" style={sidebarStyle}>

@@ -230,8 +230,6 @@ export function PlaybookEditorModal({
                   background: "var(--surface-card)",
                   border: "1px solid var(--border)",
                   borderRadius: "var(--radius)",
-                  transition:
-                    "opacity 150ms ease-out, transform 150ms ease-out",
                 }}
               >
                 <textarea

@@ -75,7 +75,9 @@ export function ActivityDrawer({
           display: "flex",
           flexDirection: "column",
           transform: open ? "translateX(0)" : "translateX(100%)",
-          transition: "transform 150ms ease-out",
+          transition: open
+            ? "transform var(--motion-panel-open) var(--easing-enter)"
+            : "transform var(--motion-panel-close) var(--easing-exit)",
           zIndex: 13,
         }}
       >
