@@ -18,6 +18,14 @@ export const DISPATCH_DIR = path.join(os.homedir(), ".dispatch");
 export const CONFIG_PATH = path.join(DISPATCH_DIR, "config.json");
 
 /**
+ * The VAPID keypair file, `~/.dispatch/push-vapid.json`. Generate-once and NEVER regenerated: a
+ * browser's `pushManager.subscribe({ applicationServerKey })` binds the subscription to the exact
+ * public key bytes passed at subscribe time, so a fresh keypair silently 403s every existing
+ * subscription with no user-visible error until a send is attempted.
+ */
+export const VAPID_KEYS_PATH = path.join(DISPATCH_DIR, "push-vapid.json");
+
+/**
  * The dispatch-owned hook script claude invokes on Stop/UserPromptSubmit. Absolute (derived from
  * `os.homedir()` via DISPATCH_DIR) because the generated settings JSON must never rely on shell
  * expansion of `~` or `$HOME`.

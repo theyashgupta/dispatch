@@ -20,20 +20,59 @@ const enc = new TextEncoder();
 const dec = new TextDecoder();
 
 /**
+ * Extracts the decoded filesystem path from a `file:` URI when it targets a markdown file.
+ *
+ * @remarks Shape derived from a live capture of Claude Code 2.1.245's OSC-8 output
+ * (112-RESEARCH.md, "THE BLOCKER, RESOLVED"): file:///abs/path with empty authority, percent
+ * encoded spaces, no line or column suffix. URL.pathname excludes params and fragments, so the
+ * extension test runs on the pure decoded path; the host is ignored because the viewer API's
+ * realpath containment is the actual boundary.
+ */
+function markdownFilePath(uri: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "file:") return null;
+  const path = decodeURIComponent(url.pathname);
+  return /\.(md|markdown)$/i.test(path) ? path : null;
+}
+
+/**
  * Reverse-tabnabbing-safe, modifier-gated link activator shared by both the plain-text
  * (`WebLinksAddon`) and OSC-8 (`linkHandler`) code paths: open a blank tab, null its opener, THEN
  * navigate — `window.open(url, "_blank")` does not reliably null the opener across browsers, which
  * would let the opened page reach back into this terminal via `window.opener`.
+ * @remarks Non-markdown links open only when their scheme is http/https/mailto. Because
+ * `linkHandler.allowNonHttpProtocols` is true, xterm hands EVERY OSC-8 URI here, so an agent-echoed
+ * `javascript:` OSC-8 link would otherwise execute same-origin on the inherited about:blank origin.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 function activateLink(event: MouseEvent, uri: string): void {
   if (!(event.metaKey || event.ctrlKey)) return;
+  const mdPath = markdownFilePath(uri);
+  let target: string;
+  if (mdPath != null) {
+    target = `${window.location.origin}/viewer/?path=${encodeURIComponent(mdPath)}`;
+  } else {
+    let protocol: string;
+    try {
+      protocol = new URL(uri).protocol;
+    } catch {
+      return;
+    }
+    if (protocol !== "http:" && protocol !== "https:" && protocol !== "mailto:")
+      return;
+    target = uri;
+  }
   const win = window.open();
   if (win) {
     try {
       win.opener = null;
     } catch {}
-    win.location.href = uri;
+    win.location.href = target;
   } else {
     console.warn("dispatch: cmd+click open blocked");
   }
@@ -138,6 +177,10 @@ let currentZoom = 1;
  * pins iOS text inflation. Without it, `charWidth` stops tracking `fontSize` after the OS-level page
  * inflates text, and the entire zoom / effective-column-width feature's math (`baseFontSize * zoom`,
  * `fit.fit()`'s cell measurement) goes invalid.
+ * @remarks `linkHandler.allowNonHttpProtocols` must be true: xterm's own OscLinkProvider silently
+ * excludes any OSC-8 link whose protocol is not http or https unless this is set, so `file:` links
+ * (the only scheme Claude Code ever emits, 112-RESEARCH.md) would never reach `activateLink` at
+ * all without it.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 function createTerminal(
@@ -169,7 +212,10 @@ function createTerminal(
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.loadAddon(new WebLinksAddon(activateLink));
-  term.options.linkHandler = { activate: activateLink };
+  term.options.linkHandler = {
+    activate: activateLink,
+    allowNonHttpProtocols: true,
+  };
   return { term, fit };
 }
 

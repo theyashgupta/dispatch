@@ -14,11 +14,14 @@ import {
 import { sweepStrayTunnels } from "../adapters/cloudflared.js";
 import { disableTunnel } from "../services/orchestration/tunnel.js";
 import { terminalProxyRouter } from "../routes/terminal-proxy.route.js";
+import { viewerPageRouter } from "../routes/viewer-page.route.js";
 import {
   rejectUpgrade,
   terminalProxyUpgrade,
 } from "../adapters/terminal-proxy.js";
 import { probePreflight } from "../services/infra/preflight.js";
+import { loadOrCreateVapidKeys } from "../services/infra/push-keys.js";
+import { VAPID_KEYS_PATH } from "../services/infra/paths.js";
 import {
   setHooksRuntime,
   setOrchestrationConfig,
@@ -36,6 +39,7 @@ import {
 } from "../services/domain/hook-events.js";
 import { seedPlaybooks } from "../services/domain/playbooks.js";
 import { startPoller } from "../adapters/poller.js";
+import { sendPushForCard } from "../services/domain/push-send.js";
 import { startArtifactDetectionLoop } from "../adapters/artifact-detect.js";
 import { buildRegistry, getLinearSource } from "../sources/registry.js";
 import { startMarkerWatcher } from "../adapters/markers/watcher.js";
@@ -47,6 +51,7 @@ import {
 } from "../services/orchestration/update.js";
 import { startCleanupScheduler } from "../services/orchestration/cleanup-scheduler.js";
 import { healServicePlist } from "../services/orchestration/service.js";
+import type { ActivityEvent } from "../../shared/types.js";
 import { DEFAULT_CLEANUP_DELAY_DAYS } from "../../shared/types.js";
 
 const DEFAULT_PORT = 4700;
@@ -58,6 +63,17 @@ const DEFAULT_POLL_INTERVAL_MS = 60_000;
  * in dev — the sibling `../../web` shape is identical in both layouts and independent of cwd.
  */
 const webRoot = fileURLToPath(new URL("../../web", import.meta.url));
+
+/**
+ * Basenames under `webRoot` exempted from the production static handler's default 1-year
+ * immutable cache.
+ *
+ * @remarks
+ * Everything else under `webRoot` is served with `maxAge: "1y", immutable: true`; an immutably
+ * cached service worker would never re-fetch, so a later `sw.js` fix would never reach an
+ * already-installed client.
+ */
+const NO_CACHE_BASENAMES = new Set(["index.html", "sw.js"]);
 
 /**
  * Serve the built SPA's index.html for client-routed deep links in production. Registered after
@@ -273,6 +289,8 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   const config = loadConfig();
   setOrchestrationConfig(config);
   buildRegistry(config);
+  loadOrCreateVapidKeys();
+  console.log(`[push] VAPID keypair loaded from ${VAPID_KEYS_PATH}`);
 
   const statusChannel = config.statusChannel ?? "auto";
   await installHookArtifacts();
@@ -331,6 +349,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
     apiRouter,
   );
   app.use("/sessions", terminalProxyRouter);
+  app.use("/viewer", viewerPageRouter);
 
   if (process.env.NODE_ENV === "production") {
     app.use(
@@ -339,7 +358,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
         maxAge: "1y",
         immutable: true,
         setHeaders: (res, filePath) => {
-          if (path.basename(filePath) === "index.html") {
+          if (NO_CACHE_BASENAMES.has(path.basename(filePath))) {
             res.setHeader("Cache-Control", "no-cache");
           }
         },
@@ -366,6 +385,18 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
     startPoller(config, getLinearSource());
   }
   startMarkerWatcher(statusChannel);
+  store.on("activity", (event: ActivityEvent) => {
+    if (event.type !== "status_needs_input" || event.cardId == null) return;
+    const card = store.getCard(event.cardId);
+    if (!card) return;
+    void sendPushForCard(card, event.reason ?? undefined).catch(
+      (err: unknown) => {
+        console.error(
+          `[push] fan-out rejected unexpectedly: ${(err as Error).message}`,
+        );
+      },
+    );
+  });
   startArtifactDetectionLoop(port);
   if (config.updateCheck !== false) startUpdateCheckLoop(config);
   return { port };
