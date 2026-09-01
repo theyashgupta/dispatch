@@ -2337,9 +2337,9 @@ async function measureSurfaces(cdp, sessionId, bp) {
       sessionId,
       "SessionSwitcher.tsx",
       "segment (active)",
-      `${sessionGroupExpr}.children[0]`,
-      `${sessionGroupExpr}.children.length >= 1`,
-      `$EL.getAttribute('aria-pressed') != null`,
+      `${sessionGroupExpr}.querySelector('[aria-pressed="true"]')`,
+      `${sessionGroupExpr}.querySelectorAll('[aria-pressed="true"]').length === 1`,
+      `$EL.getAttribute('aria-pressed') === "true"`,
     ),
   );
 
