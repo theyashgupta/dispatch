@@ -1793,14 +1793,23 @@ class BoardStore extends EventEmitter {
    * Reconcile a tracked ttyd exit: clear the port AND set the terminal error in ONE mutation.
    * Must stay atomic — two sequential mutations would broadcast an intermediate frame with
    * port-null/error-null, which the DetailPanel's ensure-on-open effect reads as "needs a
-   * terminal" and silently auto-respawns a deliberately killed ttyd. No-op if the id is unknown.
+   * terminal" and silently auto-respawns a deliberately killed ttyd. No-op if no session names
+   * `session`.
+   * @remarks (LOCAL-2) Keyed by the tmux session NAME and resolved across EVERY record each card
+   * owns, not the card-level active mirror: a non-active sibling's ttyd dying used to leave a
+   * stale `ttydPort` on that record with no `terminalError`, so switching back to it rendered a
+   * dead iframe the panel's ensure-on-open effect would never respawn (the stuck-terminal bug).
+   * `terminalError` is card-level UI state, so it is set only when the dead ttyd belonged to the
+   * ACTIVE session.
    */
-  recordTtydExit(id: string, e: TerminalError): Promise<void> {
+  recordTtydExit(session: string, e: TerminalError): Promise<void> {
     return this.enqueue(() => {
-      const card = this.cards.get(id);
-      if (card) {
-        this.setActiveSession(card, { ttydPort: undefined });
-        card.terminalError = e;
+      for (const card of this.cards.values()) {
+        const target = card.sessions?.find((s) => s.tmuxSession === session);
+        if (!target) continue;
+        this.setActiveSession(card, { ttydPort: undefined }, target.id);
+        if (target.id === card.activeSessionId) card.terminalError = e;
+        break;
       }
       return [];
     });
@@ -2561,16 +2570,29 @@ class BoardStore extends EventEmitter {
    * session-setters which force `in_progress` and would yank an In Review card out of its column.
    * A column-preserving mutation performs no non-drag promotion, so it coexists safely with the
    * reconcile/watcher IN-03 hazard. No-op if the id is unknown. SECURITY: never logs card contents.
+   * @remarks `sessionId` (LOCAL-2) is the saga's captured target, resolved the way
+   * `markSessionLost` resolves its own: an omitted/stale id degrades to `card.activeSessionId`.
+   * Without it, an active-pointer switch during the resume would stamp the fresh tmux name onto
+   * whichever sibling happens to be active at completion time.
    * @see docs/ARCHITECTURE.md#in-review-lifecycle
    */
-  resumeSession(id: string, { session }: { session: string }): Promise<void> {
+  resumeSession(
+    id: string,
+    { session }: { session: string },
+    sessionId?: string,
+  ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card) return [];
-      this.setActiveSession(card, {
-        tmuxSession: session,
-        ttydPort: undefined,
-      });
+      const target = card.sessions?.find((s) => s.id === sessionId);
+      this.setActiveSession(
+        card,
+        {
+          tmuxSession: session,
+          ttydPort: undefined,
+        },
+        target ? sessionId : undefined,
+      );
       card.sessionLost = false;
       card.terminalError = null;
       card.resumeError = null;
@@ -2607,23 +2629,38 @@ class BoardStore extends EventEmitter {
    * panel's "Resuming…" state would be permanent. The copy is a constant, so no tmux/claude
    * stderr or pane text can leak (SECURITY, matches setStartError). `hookToken` is cleared AND
    * unregistered with the session fields (clearHookToken). No-op if the id is unknown.
+   * @remarks `sessionId` (LOCAL-2) is the saga's captured target, resolved like
+   * {@link resumeSession}'s own. `sessionLost` is DERIVED from every session the card owns
+   * (markSessionLost's rule) rather than asserted: a failed sub-session resume on a card with a
+   * live sibling must not flip the whole card to Lost, and the card-level artifact clears are
+   * gated on that same derived full loss.
    * @see docs/ARCHITECTURE.md#in-review-lifecycle
    */
-  recordResumeFailure(id: string): Promise<void> {
+  recordResumeFailure(id: string, sessionId?: string): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card) return [];
-      card.sessionLost = true;
-      this.setActiveSession(card, {
-        tmuxSession: undefined,
-        ttydPort: undefined,
-      });
-      card.terminalError = null;
-      card.prs = undefined;
-      card.prsUnknown = undefined;
-      card.previews = undefined;
-      card.previewsUnknown = undefined;
-      this.clearHookToken(card);
+      const target = card.sessions?.find((s) => s.id === sessionId);
+      const resolvedId = target ? sessionId : undefined;
+      this.setActiveSession(
+        card,
+        {
+          tmuxSession: undefined,
+          ttydPort: undefined,
+        },
+        resolvedId,
+      );
+      this.clearHookToken(card, resolvedId);
+      const sessions = card.sessions ?? [];
+      card.sessionLost =
+        sessions.length === 0 || sessions.every((s) => s.tmuxSession == null);
+      if (card.sessionLost) {
+        card.terminalError = null;
+        card.prs = undefined;
+        card.prsUnknown = undefined;
+        card.previews = undefined;
+        card.previewsUnknown = undefined;
+      }
       card.resumeError =
         "Resume failed — the worktree may be gone. Use Restart to begin a fresh session in the same branch.";
       return [this.event("resume_failed", { cardId: id })];

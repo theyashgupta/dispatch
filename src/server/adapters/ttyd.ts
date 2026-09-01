@@ -410,8 +410,7 @@ function onExit(session: string, exitedChild: ChildProcess): void {
   if (!entry || entry.child !== exitedChild) return;
 
   procs.delete(session);
-  const card = store.snapshot().cards.find((c) => c.tmuxSession === session);
-  if (card) void store.recordTtydExit(card.id, { variant: "died" });
+  void store.recordTtydExit(session, { variant: "died" });
 }
 
 /**
