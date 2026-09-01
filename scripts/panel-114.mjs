@@ -2104,6 +2104,18 @@ async function readSurface(
     sessionId,
     `window.panel114ComputedSub((${resolverExpr}), ${JSON.stringify(SURFACE_GOVERNED_PROPS)})`,
   );
+  // 114-01: Chrome's computed-style serialization of color-mix() values is not one stable string
+  // across versions, and several swept surfaces (count-chip, active status pill, SearchBox result
+  // rows) REST on color-mix() backgrounds. Round-trip through the canvas-pixel normalizer so the
+  // recorded colors compare composited bytes, same as this file's own checks and panel-115's port
+  // of this function.
+  style.backgroundColor = await normalizeColor(
+    cdp,
+    sessionId,
+    style.backgroundColor,
+  );
+  style.color = await normalizeColor(cdp, sessionId, style.color);
+  style.borderColor = await normalizeColor(cdp, sessionId, style.borderColor);
   const rect = await evalValue(
     cdp,
     sessionId,
