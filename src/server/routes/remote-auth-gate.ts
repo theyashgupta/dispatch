@@ -21,8 +21,8 @@ import {
 
 const VERIFY_PATH = "/__remote/verify";
 
-const GENERIC_ERROR = "That code didn't match — try again.";
-const RATE_LIMITED_ERROR = "Too many attempts — wait a moment and try again.";
+const GENERIC_ERROR = "That code didn't match. Try again.";
+const RATE_LIMITED_ERROR = "Too many attempts. Wait a moment and try again.";
 
 /**
  * Whether a request may proceed without a code prompt: local by the existing loopback predicate,
@@ -154,7 +154,7 @@ function codeEntryPageHtml(errorMessage?: string): string {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="referrer" content="no-referrer" />
-<title>Dispatch — Enter access code</title>
+<title>Dispatch: Enter access code</title>
 <style>
   :root {
     --bg: #0b0c0e;

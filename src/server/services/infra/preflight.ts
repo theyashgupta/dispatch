@@ -19,13 +19,13 @@ export const REQUIRED_BINARIES = ["tmux", "ttyd", "git", "claude"] as const;
 const INSTALLABLE_BINARIES = new Set(["tmux", "ttyd", "git"]);
 
 /** Print-only guidance for `claude`, which is never package-manager-installed. */
-const CLAUDE_HINT = "install Claude Code — https://docs.claude.com/claude-code";
+const CLAUDE_HINT = "install Claude Code: https://docs.claude.com/claude-code";
 
 /** Fallback guidance for an installable binary when no package manager is detected. */
 const GENERIC_HINTS: Record<string, string> = {
   tmux: "install tmux via your platform's package manager or build from source",
-  ttyd: "install ttyd — https://github.com/tsl0922/ttyd/releases",
-  git: "install git — https://git-scm.com/downloads",
+  ttyd: "install ttyd: https://github.com/tsl0922/ttyd/releases",
+  git: "install git: https://git-scm.com/downloads",
 };
 
 /** Linux package managers probed in fixed priority order. */

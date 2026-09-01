@@ -11,7 +11,7 @@ export function resumeFailureCopy(
 ): string {
   if (resumeError != null) return resumeError;
   if (status === 409) {
-    return "Resume was rejected — the session may already be starting. Wait a moment and try Resume again.";
+    return "Resume was rejected. The session may already be starting. Wait a moment and try Resume again.";
   }
   return "Resume didn't go through. Try Resume again, or use Restart to begin a fresh session in the same branch.";
 }

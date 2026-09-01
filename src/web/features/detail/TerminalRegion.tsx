@@ -59,7 +59,7 @@ export function TerminalRegion({ card }: TerminalRegionProps) {
               }
               label={
                 c.terminalError.variant === "spawn"
-                  ? "Terminal unavailable — couldn't start"
+                  ? "Terminal unavailable: couldn't start"
                   : "Terminal disconnected"
               }
             />
