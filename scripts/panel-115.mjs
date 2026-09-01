@@ -195,27 +195,39 @@ function stopServer(child) {
   });
 }
 
+/** Delay between `rmSyncRetry` attempts: long enough for a just-killed Chrome to finish its
+ * exit-time lock/lease file writes, short enough to cost at most ~1s per teardown. */
+const RM_RETRY_DELAY_MS = 200;
+
 /**
  * `rmSync(..., { recursive: true, force: true })` still throws `ENOTEMPTY` on macOS when a just-
- * killed process (Chrome's own exit-time lock/lease file writes) races the removal; retried a
- * few times immediately rather than letting a teardown-only race fail the whole run.
+ * killed process (Chrome's own exit-time lock/lease file writes) races the removal; retried with
+ * a short sleep between attempts. A still-failing final attempt LOGS and returns instead of
+ * throwing: every caller is teardown code running in or under a `finally`, where a throw would
+ * replace the run's real error with an inscrutable ENOTEMPTY and leak the directory anyway.
  */
-function rmSyncRetry(path, attempts = 5) {
+async function rmSyncRetry(path, attempts = 5) {
   for (let i = 1; i <= attempts; i++) {
     try {
       rmSync(path, { recursive: true, force: true });
       return;
     } catch (err) {
-      if (i === attempts) throw err;
+      if (i === attempts) {
+        console.log(
+          `rmSyncRetry: giving up on ${path} after ${attempts} attempts (${err.code ?? err.message}); remove it by hand`,
+        );
+        return;
+      }
+      await sleep(RM_RETRY_DELAY_MS);
     }
   }
 }
 
 /** Best-effort sandbox home cleanup, called from a `finally` so a failing run never leaks a temp
  * directory. */
-function cleanupSandboxHome(home) {
+async function cleanupSandboxHome(home) {
   if (home == null) return;
-  rmSyncRetry(home);
+  await rmSyncRetry(home);
 }
 
 let headBuild = null;
@@ -1035,21 +1047,24 @@ async function bootSandbox(label) {
     };
   } catch (err) {
     if (boot != null) await stopServer(boot.child);
-    cleanupSandboxHome(home);
+    await cleanupSandboxHome(home);
     throw err;
   }
 }
 
 /** Stops the server, waits for the port to stop listening, and cleans the Chrome user-data dir
- * plus the sandbox home. Best-effort throughout, never throws on an already-gone resource. */
+ * plus the sandbox home. Best-effort throughout, never throws: an already-gone resource is a
+ * no-op and a removal that keeps failing logs and continues (see `rmSyncRetry`). Callers must
+ * await Chrome's own exit (`stopServer(chrome)`) BEFORE calling this, or the user-data-dir
+ * removal races Chrome's exit-time lock/lease writes. */
 async function teardownSandbox({ home, child }) {
   await stopServer(child);
   const deadline = Date.now() + 5_000;
   while ((await isPortListening(SANDBOX_PORT)) && Date.now() < deadline) {
     await sleep(POLL_INTERVAL_MS);
   }
-  rmSyncRetry(chromeUserDataDir());
-  cleanupSandboxHome(home);
+  await rmSyncRetry(chromeUserDataDir());
+  await cleanupSandboxHome(home);
 }
 
 // ---------------------------------------------------------------------------
@@ -1784,7 +1799,10 @@ async function probeBaseline() {
     }
     if (chrome) {
       try {
-        chrome.kill("SIGTERM");
+        // Await Chrome's actual exit (SIGKILL escalation included) so the
+        // user-data-dir removal in teardownSandbox below cannot race its
+        // exit-time lock/lease writes.
+        await stopServer(chrome);
       } catch {
         // best effort
       }
@@ -2009,7 +2027,10 @@ async function checkRhythm(violations) {
     }
     if (chrome) {
       try {
-        chrome.kill("SIGTERM");
+        // Await Chrome's actual exit (SIGKILL escalation included) so the
+        // user-data-dir removal in teardownSandbox below cannot race its
+        // exit-time lock/lease writes.
+        await stopServer(chrome);
       } catch {
         // best effort
       }
@@ -2601,7 +2622,10 @@ async function checkElevation(violations) {
     }
     if (chrome) {
       try {
-        chrome.kill("SIGTERM");
+        // Await Chrome's actual exit (SIGKILL escalation included) so the
+        // user-data-dir removal in teardownSandbox below cannot race its
+        // exit-time lock/lease writes.
+        await stopServer(chrome);
       } catch {
         // best effort
       }
@@ -3284,7 +3308,10 @@ async function checkStatesOnce(violations) {
     }
     if (chrome) {
       try {
-        chrome.kill("SIGTERM");
+        // Await Chrome's actual exit (SIGKILL escalation included) so the
+        // user-data-dir removal in teardownSandbox below cannot race its
+        // exit-time lock/lease writes.
+        await stopServer(chrome);
       } catch {
         // best effort
       }
