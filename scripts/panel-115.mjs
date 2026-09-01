@@ -2002,15 +2002,599 @@ async function runBreakRhythm() {
 }
 
 // ---------------------------------------------------------------------------
+// elevation: break-proven check reading every board and panel surface LIVE
+// against the one elevation ladder (LUI-07's second half). Boots the sandbox
+// once, opens the fully populated fixture card's detail panel, and at each of
+// the four breakpoints reads every panel/board surface the plan's interfaces
+// block names through the canvas 1x1 normalizer, ranks them by the WCAG
+// relative-luminance functions ported verbatim from contrast-113.mjs (lines
+// 88-101: hexToRgb/lin/relLum, the formula is not re-derived), and confirms
+// resting surfaces carry no elevation-implying box-shadow.
+// ---------------------------------------------------------------------------
+
+/** Ported verbatim from scripts/contrast-113.mjs lines 88-101 (hexToRgb/lin/relLum), the WCAG
+ * relative-luminance formula this file's own rank assertions reuse rather than re-derive. */
+function hexToRgb(hex) {
+  const clean = hex.replace("#", "");
+  const n = parseInt(clean, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function lin(c) {
+  const v = c / 255;
+  return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+}
+
+function relLum([r, g, b]) {
+  const [R, G, B] = [r, g, b].map(lin);
+  return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+}
+
+/** The four elevation-ladder tokens' literal hex values, tokens.css's own source of truth
+ * (design-contract.md's `## Elevation` table). Used to build the "expected" side of every live
+ * token-match assertion below; never re-derived from a live read. */
+const ELEVATION_TOKEN_HEX = {
+  "--bg": "#0b0c0e",
+  "--surface-column": "#131417",
+  "--surface-card": "#1a1b1f",
+  "--surface-card-hover": "#202126",
+};
+
+/** Builds the same `"rgba(r, g, b, 1.000)"` shape `window.panel115NormalizeColor` produces for an
+ * opaque background, so a token-match assertion can reuse {@link colorsMatch}'s tolerance. */
+function expectedRgba(hex) {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, 1.000)`;
+}
+
+/** Relative luminance of a `window.panel115NormalizeColor`-shaped `"rgba(r, g, b, a)"` string, via
+ * {@link parseRgbTriple} (already tolerant of both the `"rgb(...)"` and `"rgba(...)"` shapes). */
+function relLumFromNormalized(str) {
+  const parsed = parseRgbTriple(str);
+  if (parsed == null) {
+    throw new Error(
+      `relLumFromNormalized: "${str}" is not a parseable rgb()/rgba() string`,
+    );
+  }
+  return relLum([parsed[0], parsed[1], parsed[2]]);
+}
+
+function assertElevationToken(violations, bp, name, measured, tokenName) {
+  const expected = expectedRgba(ELEVATION_TOKEN_HEX[tokenName]);
+  if (!colorsMatch(measured, expected)) {
+    violations.push(
+      `elevation(${bp.label}): ${name} measured ${measured}, expected ${tokenName} (${expected})`,
+    );
+  }
+}
+
+/** Named per the plan's own requirement: "A surface measured out of rank is a violation naming
+ * both surfaces and both luminances, not a bare boolean." */
+function assertLuminanceGreater(
+  violations,
+  bp,
+  lowerName,
+  lowerValue,
+  higherName,
+  higherValue,
+) {
+  const lowerLum = relLumFromNormalized(lowerValue);
+  const higherLum = relLumFromNormalized(higherValue);
+  if (!(higherLum > lowerLum)) {
+    violations.push(
+      `elevation(${bp.label}): rank violation, ${higherName} (luminance ${higherLum.toFixed(5)}) ` +
+        `is not strictly greater than ${lowerName} (luminance ${lowerLum.toFixed(5)})`,
+    );
+  }
+}
+
+function assertElevationExact(violations, bp, label, expected, observed) {
+  if (observed !== expected) {
+    violations.push(
+      `elevation(${bp.label}): ${label} expected ${JSON.stringify(expected)}, observed ${JSON.stringify(observed)}`,
+    );
+  }
+}
+
+/** The comparison fixture card (`p115-plain`), never opened/selected: `CardView.tsx`'s own
+ * `elevated`/`selected`/`pressed` background formula means the PRIMARY fixture card (whose panel
+ * this check opens) reads its own `--surface-card-hover` "selected" tint, not a genuinely resting
+ * tier, once its panel is open, confirmed live in 115-01's own BEFORE ledger. The comparison card
+ * is the only card in this fixture that is ever genuinely at rest. */
+const RESTING_CARD_COLUMN = "todo";
+const RESTING_CARD_IDENTIFIER = "PROP-502";
+
+/**
+ * `Column.tsx`'s own `[data-column]` root carries an UNCONDITIONAL `boxShadow: "inset 0 1px 0
+ * rgba(255,255,255,0.02)"` (a hairline top-edge highlight, never state-conditional, never routed
+ * through `--shadow-float`) at every breakpoint, live-measured while building this check. This
+ * contradicts design-contract.md's "columns keep no shadow" phrasing, whose own Note column only
+ * ever live-confirmed a resting CARD's boxShadow, never a column's. `Column.tsx` sits outside this
+ * plan's file scope (Task 1/2/3 touch only `panel-115.mjs`, `TerminalRegion.tsx` and the ledger),
+ * so this asserts the column's boxShadow against its OWN measured baseline (a real regression
+ * guard against a future accidental change) rather than a false "none" expectation, the 114-04
+ * "record the actual evidence" precedent this plan's own Task 2 names. See 115-04-SUMMARY.md's
+ * Deviations and the ledger's `## Elevation` section for the full finding.
+ */
+const COLUMN_RESTING_BOX_SHADOW =
+  "rgba(255, 255, 255, 0.02) 0px 1px 0px 0px inset";
+
+/**
+ * Boots the sandbox, opens the fully populated fixture card's detail panel, and at each of the
+ * four breakpoints reads every panel surface (aside, session-switcher container, the Notice mono
+ * provisioning-stderr block, the terminal viewport, and four transparent/inherited rows) and every
+ * board surface (the comparison card's own column, its resting background, and its hovered
+ * background) through the canvas normalizer, then asserts: each resolves to its expected ladder
+ * token, the live luminance rank the ladder claims actually holds, and every resting surface's
+ * boxShadow matches its (measured, not assumed) baseline.
+ */
+async function checkElevation(violations) {
+  let sandbox = null;
+  let chrome = null;
+  let cdp = null;
+  try {
+    sandbox = await bootSandbox("check-elevation");
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+    const { sessionId } = await openPage(cdp, { url: "about:blank" });
+    await cdp.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      { source: MEASURE_HELPERS_SRC },
+      sessionId,
+    );
+    await cdp.send(
+      "Page.navigate",
+      { url: `http://127.0.0.1:${SANDBOX_PORT}/` },
+      sessionId,
+    );
+    const loaded = await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `document.getElementById("root") != null`,
+      READY_TIMEOUT_MS,
+    );
+    if (!loaded) {
+      violations.push("elevation: #root never appeared after navigation");
+      return;
+    }
+    // Splash.tsx's unconditional 1.3s overlay, same settle window every other probe/check uses.
+    await sleep(1450);
+
+    const asideExpr = `document.querySelector('aside[aria-label="Ticket detail"]')`;
+    const sessionGroupExpr = `document.querySelector('aside[aria-label="Ticket detail"] [role="group"][aria-label="Sessions"]')`;
+    // Scoped two levels: `.reading-surface` itself also carries the `scroll-stable-y` class (on
+    // the SAME element, DetailPanel.tsx:602/628), so the descendant combinator below can only
+    // match the nested Notice mono block, never the wrapper matching its own selector.
+    const noticeMonoExpr = `document.querySelector('aside[aria-label="Ticket detail"] .reading-surface .scroll-stable-y')`;
+    const terminalViewportExpr = `(function () { var f = document.querySelector('aside[aria-label="Ticket detail"] iframe[title^="Live terminal for"]'); return f ? f.parentElement : null; })()`;
+    const headerRowExpr = `document.querySelector('aside[aria-label="Ticket detail"] h1').parentElement.parentElement`;
+    const sessionSwitcherRowExpr = `${sessionGroupExpr}.parentElement.parentElement`;
+    const readingSurfaceExpr = `document.querySelector('aside[aria-label="Ticket detail"] .reading-surface')`;
+    const cardTimelineRootExpr = `(function () { var r = document.querySelector('#card-timeline-region'); return r ? r.parentElement : null; })()`;
+    const columnExpr = `window.panel115FindColumn("${RESTING_CARD_COLUMN}")`;
+    const restingCardExpr = `window.panel115FindCardByIdentifier("${RESTING_CARD_COLUMN}", "${RESTING_CARD_IDENTIFIER}")`;
+
+    // Same open-once-per-run discipline as checkRhythm/probeBaseline: DetailPanel.tsx re-layouts
+    // an already-open panel in place on resize, and closing/reopening across the carousel
+    // boundary reproduces the DETAIL-PANEL FINDING renderer wedge (115-01/panel-114 precedent).
+    let panelOpened = false;
+    for (const bp of BREAKPOINTS) {
+      await applyBreakpoint(cdp, sessionId, bp);
+      await blurActive(cdp, sessionId);
+      await moveMouseAway(cdp, sessionId);
+      await sleep(300);
+      if (!panelOpened) {
+        await openPrimaryCardPanel(cdp, sessionId);
+        panelOpened = true;
+      } else {
+        await sleep(HOVER_SETTLE_MS);
+      }
+
+      // Below CAROUSEL_QUERY's 1024px threshold the comparison card's own "todo" column can sit
+      // off-screen, the same carousel gotcha openPrimaryCardPanel already works around for "done".
+      await evalValue(
+        cdp,
+        sessionId,
+        `window.panel115FindColumn("${RESTING_CARD_COLUMN}").scrollIntoView({ behavior: "instant", inline: "start", block: "nearest" })`,
+      );
+      await sleep(50);
+
+      // --- Panel surfaces ---
+      const asideBgRaw = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(${asideExpr}).backgroundColor`,
+      );
+      const asideBackground = await normalizeColor(cdp, sessionId, asideBgRaw);
+      const asideBoxShadow = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(${asideExpr}).boxShadow`,
+      );
+
+      const sessionSwitcherBgRaw = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(${sessionGroupExpr}).backgroundColor`,
+      );
+      const sessionSwitcherBackground = await normalizeColor(
+        cdp,
+        sessionId,
+        sessionSwitcherBgRaw,
+      );
+
+      const noticeMonoBgRaw = await evalValue(
+        cdp,
+        sessionId,
+        `${noticeMonoExpr} ? getComputedStyle(${noticeMonoExpr}).backgroundColor : null`,
+      );
+      const noticeMonoBackground =
+        noticeMonoBgRaw != null
+          ? await normalizeColor(cdp, sessionId, noticeMonoBgRaw)
+          : null;
+      if (noticeMonoBackground == null) {
+        violations.push(
+          `elevation(${bp.label}): Notice mono block not found (provisioning stderr block missing from DOM)`,
+        );
+      }
+
+      const terminalBgRaw = await evalValue(
+        cdp,
+        sessionId,
+        `${terminalViewportExpr} ? getComputedStyle(${terminalViewportExpr}).backgroundColor : null`,
+      );
+      const terminalBackground =
+        terminalBgRaw != null
+          ? await normalizeColor(cdp, sessionId, terminalBgRaw)
+          : null;
+      if (terminalBackground == null) {
+        violations.push(
+          `elevation(${bp.label}): terminal viewport not found (iframe missing from DOM)`,
+        );
+      }
+
+      const headerRowBgRaw = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(${headerRowExpr}).backgroundColor`,
+      );
+      const sessionSwitcherRowBgRaw = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(${sessionSwitcherRowExpr}).backgroundColor`,
+      );
+      const readingSurfaceBgRaw = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(${readingSurfaceExpr}).backgroundColor`,
+      );
+      const cardTimelineRootBgRaw = await evalValue(
+        cdp,
+        sessionId,
+        `${cardTimelineRootExpr} ? getComputedStyle(${cardTimelineRootExpr}).backgroundColor : null`,
+      );
+
+      // --- Board surfaces ---
+      const columnBgRaw = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(${columnExpr}).backgroundColor`,
+      );
+      const columnBackground = await normalizeColor(
+        cdp,
+        sessionId,
+        columnBgRaw,
+      );
+      const columnBoxShadow = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(${columnExpr}).boxShadow`,
+      );
+
+      await blurActive(cdp, sessionId);
+      await moveMouseAway(cdp, sessionId);
+      await sleep(HOVER_SETTLE_MS);
+      const restingCardBgRaw = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(${restingCardExpr}).backgroundColor`,
+      );
+      const restingCardBackground = await normalizeColor(
+        cdp,
+        sessionId,
+        restingCardBgRaw,
+      );
+      const restingCardBoxShadow = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(${restingCardExpr}).boxShadow`,
+      );
+
+      // Rendered-state dispatch at EVERY breakpoint, never real coordinate-based hover, here.
+      // DetailPanel.tsx's own scrim (`!docked`, `position: fixed; inset: 0; pointerEvents: "auto"`
+      // while `open`, `zIndex: 10`, above the board's own cards at their default stacking order)
+      // covers the ENTIRE board whenever the panel is open in this fixture's floating (non-docked)
+      // mode, live-confirmed while building this check: a real `Input.dispatchMouseEvent` at the
+      // card's own coordinates hits the scrim, not the card, so the card's hover state never
+      // flips (`elementFromPoint` at the card's rect returns a bare, class-less `<div>` either
+      // way, since both the scrim and the card use inline styles with no className, an ambiguous
+      // read that masked this for a first pass). A real hover on a BOARD card is physically
+      // unreachable via coordinate-based input while the panel is open, the same "real input
+      // cannot reach this state" category as 114-04's own unhovered-pressed finding. The
+      // rendered-state technique (`element.dispatchEvent(...)` on the card's own DOM reference,
+      // which bypasses hit-testing entirely) is the only valid technique here, not a fallback.
+      const hovered = await readUnderHover(
+        cdp,
+        sessionId,
+        restingCardExpr,
+        ["backgroundColor", "boxShadow"],
+        false,
+      );
+      const hoveredCardBackground = await normalizeColor(
+        cdp,
+        sessionId,
+        hovered.value.backgroundColor,
+      );
+
+      console.log(
+        `elevation(${bp.label}): aside=${asideBackground} sessionSwitcher=${sessionSwitcherBackground} ` +
+          `noticeMono=${noticeMonoBackground} terminal=${terminalBackground} column=${columnBackground} ` +
+          `restingCard=${restingCardBackground} hoveredCard=${hoveredCardBackground} (${hovered.mode}) ` +
+          `asideBoxShadow=${asideBoxShadow} columnBoxShadow=${columnBoxShadow} restingCardBoxShadow=${restingCardBoxShadow}`,
+      );
+
+      // ---- token-match assertions ----
+      assertElevationToken(
+        violations,
+        bp,
+        "aside panel root",
+        asideBackground,
+        "--surface-column",
+      );
+      assertElevationToken(
+        violations,
+        bp,
+        "session-switcher container",
+        sessionSwitcherBackground,
+        "--surface-card",
+      );
+      if (noticeMonoBackground != null) {
+        assertElevationToken(
+          violations,
+          bp,
+          "Notice mono block (provisioning stderr)",
+          noticeMonoBackground,
+          "--surface-card",
+        );
+      }
+      if (terminalBackground != null) {
+        assertElevationToken(
+          violations,
+          bp,
+          "terminal viewport (accepted recessed exception, see Task 3)",
+          terminalBackground,
+          "--bg",
+        );
+      }
+      assertElevationToken(
+        violations,
+        bp,
+        "board column (todo)",
+        columnBackground,
+        "--surface-column",
+      );
+      assertElevationToken(
+        violations,
+        bp,
+        "board resting card (PROP-502)",
+        restingCardBackground,
+        "--surface-card",
+      );
+      assertElevationToken(
+        violations,
+        bp,
+        `board hovered card (PROP-502, ${hovered.mode})`,
+        hoveredCardBackground,
+        "--surface-card-hover",
+      );
+
+      // ---- transparent/inherited-background assertions ----
+      assertElevationExact(
+        violations,
+        bp,
+        "header row background (transparent)",
+        "rgba(0, 0, 0, 0)",
+        headerRowBgRaw,
+      );
+      assertElevationExact(
+        violations,
+        bp,
+        "session-switcher row background (transparent)",
+        "rgba(0, 0, 0, 0)",
+        sessionSwitcherRowBgRaw,
+      );
+      assertElevationExact(
+        violations,
+        bp,
+        "reading-surface wrapper background (transparent)",
+        "rgba(0, 0, 0, 0)",
+        readingSurfaceBgRaw,
+      );
+      if (cardTimelineRootBgRaw != null) {
+        assertElevationExact(
+          violations,
+          bp,
+          "CardTimeline root background (transparent)",
+          "rgba(0, 0, 0, 0)",
+          cardTimelineRootBgRaw,
+        );
+      }
+
+      // ---- rank-order assertions (live luminance, both surfaces + values named) ----
+      if (terminalBackground != null) {
+        assertLuminanceGreater(
+          violations,
+          bp,
+          "terminal viewport (--bg tier)",
+          terminalBackground,
+          "aside panel root (--surface-column tier)",
+          asideBackground,
+        );
+        assertLuminanceGreater(
+          violations,
+          bp,
+          "terminal viewport (--bg tier)",
+          terminalBackground,
+          "board column (--surface-column tier)",
+          columnBackground,
+        );
+      }
+      assertLuminanceGreater(
+        violations,
+        bp,
+        "aside panel root (--surface-column tier)",
+        asideBackground,
+        "session-switcher container (--surface-card tier)",
+        sessionSwitcherBackground,
+      );
+      assertLuminanceGreater(
+        violations,
+        bp,
+        "board column (--surface-column tier)",
+        columnBackground,
+        "board resting card (--surface-card tier)",
+        restingCardBackground,
+      );
+      assertLuminanceGreater(
+        violations,
+        bp,
+        "board resting card (--surface-card tier)",
+        restingCardBackground,
+        "board hovered card (--surface-card-hover tier)",
+        hoveredCardBackground,
+      );
+      assertLuminanceGreater(
+        violations,
+        bp,
+        "session-switcher container (--surface-card tier)",
+        sessionSwitcherBackground,
+        "board hovered card (--surface-card-hover tier)",
+        hoveredCardBackground,
+      );
+
+      // ---- resting box-shadow assertions ----
+      assertElevationExact(
+        violations,
+        bp,
+        "aside resting boxShadow (v2.9, in force)",
+        "none",
+        asideBoxShadow,
+      );
+      assertElevationExact(
+        violations,
+        bp,
+        "board resting card boxShadow (v2.9, in force)",
+        "none",
+        restingCardBoxShadow,
+      );
+      assertElevationExact(
+        violations,
+        bp,
+        "board column resting boxShadow (measured baseline, see Deviations)",
+        COLUMN_RESTING_BOX_SHADOW,
+        columnBoxShadow,
+      );
+    }
+  } finally {
+    if (cdp) {
+      try {
+        cdp.close();
+      } catch {
+        // best effort
+      }
+    }
+    if (chrome) {
+      try {
+        chrome.kill("SIGTERM");
+      } catch {
+        // best effort
+      }
+    }
+    if (sandbox) await teardownSandbox(sandbox);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BREAKS["elevation"]: mutates the real aside background declaration
+// DetailPanel.tsx:390 (the single, unique `background: "var(--surface-column)",`
+// occurrence in that file), repointing the panel aside from the
+// --surface-column tier onto --surface-card, which puts the panel above the
+// session-switcher card it sits beside and must trip the live rank
+// assertion, naming both surfaces and both luminances.
+// ---------------------------------------------------------------------------
+
+const ELEVATION_BREAK_TARGET =
+  '          background: "var(--surface-column)",\n';
+const ELEVATION_BREAK_REPLACEMENT =
+  '          background: "var(--surface-card)",\n';
+
+async function runBreakElevation() {
+  assertBuilt();
+  const original = readFileSync(DETAIL_PANEL_PATH, "utf8");
+  const occurrences = original.split(ELEVATION_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel-115: refusing to run --break elevation, expected the aside's own ` +
+        `background: "var(--surface-column)" declaration to occur exactly once in ` +
+        `${DETAIL_PANEL_PATH}, measured ${occurrences}. A miscounted anchor would mutate the ` +
+        `wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(DETAIL_PANEL_PATH, original);
+  try {
+    writeFileSync(
+      DETAIL_PANEL_PATH,
+      original.replace(ELEVATION_BREAK_TARGET, ELEVATION_BREAK_REPLACEMENT),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkElevation(tripViolations);
+    console.log(
+      `\n--break elevation TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some(
+      (v) => v.includes("rank violation") && v.includes("aside panel root"),
+    );
+  } finally {
+    restoreDetailPanelSource(original);
+  }
+
+  const restoreViolations = [];
+  await checkElevation(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break elevation RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS / PROBES.
 // ---------------------------------------------------------------------------
 
 const CHECKS = {
   rhythm: checkRhythm,
+  elevation: checkElevation,
 };
 
 const BREAKS = {
   rhythm: runBreakRhythm,
+  elevation: runBreakElevation,
 };
 
 const PROBES = {
