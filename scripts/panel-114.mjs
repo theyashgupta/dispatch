@@ -2539,6 +2539,17 @@ async function probeSurfaces() {
       console.error(
         `panel-114 --probe surfaces: attempt ${attempt}/${MAX_ATTEMPTS} threw (likely CDP/renderer contention, not a code defect): ${err instanceof Error ? err.message : String(err)}`,
       );
+      if (attempt === MAX_ATTEMPTS) break;
+      // The stalled attempt's own finally awaited Chrome's exit, but a SIGKILL-escalated process
+      // tree has been observed live (checkReducedMotion, same file) to not always release
+      // CDP_PORT by the time the next attempt's launchChrome() tries to bind it ("Failed to open
+      // a new tab" on the retry immediately following a timeout). This probe's round-trip count
+      // is the exact profile that comment names, so drain the port, capped at 5s, before
+      // relaunching.
+      const deadline = Date.now() + 5_000;
+      while ((await isPortListening(CDP_PORT)) && Date.now() < deadline) {
+        await sleep(POLL_INTERVAL_MS);
+      }
     }
   }
   throw lastErr;
@@ -2613,7 +2624,10 @@ async function probeSurfacesOnce() {
     }
     if (chrome) {
       try {
-        chrome.kill("SIGTERM");
+        // Await Chrome's actual exit (SIGKILL escalation included) so the user-data-dir removal
+        // in teardownSandbox below cannot race its exit-time lock/lease writes, the exact race
+        // rmSyncRetry's own remarks document.
+        await stopServer(chrome);
       } catch {
         // best effort
       }
