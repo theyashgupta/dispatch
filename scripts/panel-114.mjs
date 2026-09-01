@@ -30,8 +30,11 @@
  * (break-proven), proving `DetailPanel.tsx`'s open/close split onto the `motion-panel-open`/
  * `motion-panel-close`/`easing-enter`/`easing-exit` tokens (a real trusted click to open, a real
  * trusted Escape to close) plus a source-scan leg asserting zero naked millisecond literals remain
- * under `src/web`. Later plans in this phase register the reduced-motion check and its own
- * break-proof leg.
+ * under `src/web`. Plan 08 adds `reduced-motion` (break-proven), proving every motion Plans 03,
+ * 06 and 07 shipped honours `tokens.css`'s existing `prefers-reduced-motion` kill switch, at
+ * BP-A and BP-D only (the width and reduce media queries are independent axes), plus a WAAPI
+ * positive control proving the zero readings measure the CSS mechanism, not a silently-broken
+ * emulation. This is the phase's sixth and final registered check.
  *
  * DETAIL-PANEL FINDING (Plan 04, out of this plan's own scope, recorded for the next phase that
  * touches `DetailPanel.tsx`): `document.querySelector('aside[aria-label="Ticket detail"]') ==
@@ -144,6 +147,28 @@
  *     breakpoint throughout the trip leg, confirming the break landed on the aside's own
  *     `asideTransition` local alone.) The RESTORE leg re-ran clean after the captured bytes were
  *     restored, and `git diff --quiet src/` confirmed a byte-identical restore.
+ *   - `reduced-motion` proven able to fail (Plan 08): narrowing `tokens.css`'s kill-switch block's
+ *     universal selector, `` `@media (prefers-reduced-motion: reduce) { * {` ``, to
+ *     `` `@media (prefers-reduced-motion: reduce) { [data-panel114-never-matches] {` `` (a
+ *     selector that cannot match any real element), rebuilding, and re-running the same
+ *     `checkReducedMotion` function against a real booted sandbox and real headless Chrome
+ *     produced, verbatim, at both checked breakpoints:
+ *     `reduced-motion(BP-A): card hover expected duration "0s" or no matching event to fire under emulated reduce, observed duration="0.08s" eventFired=null`
+ *     `reduced-motion(BP-A): icon button hover expected duration "0s" or no matching event to fire under emulated reduce, observed duration="0.08s" eventFired=null`
+ *     `reduced-motion(BP-A): primary button hover expected duration "0s" or no matching event to fire under emulated reduce, observed duration="0.08s" eventFired=null`
+ *     `reduced-motion(BP-A): card column move expected duration "0s" or no matching event to fire under emulated reduce, observed duration="0.08s" eventFired=true`
+ *     `reduced-motion(BP-A): count chip pulse (needs_input) expected duration "0s" or no matching event to fire under emulated reduce, observed duration="0.12s" eventFired=true`
+ *     `reduced-motion(BP-A): count chip pulse (in_review) expected duration "0s" or no matching event to fire under emulated reduce, observed duration="0.12s" eventFired=true`
+ *     `reduced-motion(BP-A): panel aside open expected duration "0s" or no matching event to fire under emulated reduce, observed duration="0.2s" eventFired=true`
+ *     `reduced-motion(BP-A): panel scrim open expected duration "0s" or no matching event to fire under emulated reduce, observed duration="0.2s" eventFired=true`
+ *     `reduced-motion(BP-A): panel aside close expected duration "0s" or no matching event to fire under emulated reduce, observed duration="0.15s" eventFired=true`
+ *     `reduced-motion(BP-A): panel scrim close expected duration "0s" or no matching event to fire under emulated reduce, observed duration="0.15s" eventFired=true`
+ *     (BP-D repeats the identical ten-line pattern.) The WAAPI positive control (a real
+ *     `Element.animate()`, 400ms opacity fade, awaited to completion) still resolved
+ *     `playState: "finished"` throughout the trip leg at both breakpoints, confirming the trip
+ *     landed on the CSS kill switch alone and the emulation itself never degraded. The RESTORE
+ *     leg re-ran clean after the captured bytes were restored, and `git diff --quiet src/`
+ *     confirmed a byte-identical restore.
  */
 
 import {
@@ -595,11 +620,12 @@ async function waitForCdpUp() {
   throw new Error(`Chrome debugging port :${CDP_PORT} did not come up`);
 }
 
-async function evalValue(cdp, sessionId, expression) {
+async function evalValue(cdp, sessionId, expression, timeoutMs = 20_000) {
   const { result, exceptionDetails } = await cdp.send(
     "Runtime.evaluate",
     { expression, returnByValue: true, awaitPromise: false },
     sessionId,
+    timeoutMs,
   );
   if (exceptionDetails) {
     const thrown =
@@ -4641,6 +4667,689 @@ async function runBreakPanelMotion() {
 }
 
 // ---------------------------------------------------------------------------
+// CHECKS["reduced-motion"] (Plan 08): proves every motion Plans 03, 06 and 07 shipped honours
+// tokens.css's existing prefers-reduced-motion kill switch, live on the real shipped elements,
+// at BP-A and BP-D only (the plan's own WHY THE CHECK RUNS AT TWO BREAKPOINTS AND NOT FOUR
+// rationale, inherited from 113-VERIFIED-VALUES.md: the reduce media query and the width media
+// queries are independent axes, so the widest and narrowest breakpoints both reading zero
+// establishes the block applies uniformly; BP-B/BP-C add no new information). Card hover and
+// control hover are read directly (113-VERIFIED-VALUES.md's own finding: the kill switch's
+// `* { transition: none !important; }` zeroes the computed value unconditionally, no trigger
+// needed); card column move, count-chip pulse and panel open/close are driven through the SAME
+// real route/click/Escape the motion/panel-motion checks use, reading both the direct duration
+// AND whether the corresponding transitionrun/animationstart ever fired, so each motion's outcome
+// is recorded rather than collapsed into one verdict. One WAAPI positive control (a real
+// Element.animate(), 400ms, awaited to completion under the same emulated state) proves the zero
+// readings measure the CSS mechanism, not a silently-broken emulation.
+// ---------------------------------------------------------------------------
+
+const REDUCED_MOTION_BREAKPOINTS = [BREAKPOINTS[0], BREAKPOINTS[3]];
+
+async function setReducedMotionEmulation(cdp, sessionId, reduce) {
+  await cdp.send(
+    "Emulation.setEmulatedMedia",
+    {
+      features: reduce
+        ? [{ name: "prefers-reduced-motion", value: "reduce" }]
+        : [],
+    },
+    sessionId,
+    40_000,
+  );
+}
+
+/**
+ * Records one motion's reduced-motion reading and pushes a violation unless the direct
+ * `transitionDuration`/`animationDuration` read is `"0s"` OR the corresponding
+ * `transitionrun`/`animationstart` event never fired (`eventFired === false`). `eventFired` is
+ * `null` for the three motions this check has no event capture for (card hover, icon button
+ * hover, primary button hover): the direct read is their only signal, matching the plan's own
+ * interfaces block ("card hover"/"control hover" rows name only a property to read, no event).
+ * Pushes one line onto `ledgerLines` either way, so `--check reduced-motion`'s console output
+ * records which signal each motion actually produced, never collapsing the two into one verdict.
+ */
+function assertReducedMotion(
+  violations,
+  ledgerLines,
+  bp,
+  label,
+  observedDuration,
+  eventFired,
+) {
+  const zeroed = observedDuration === "0s";
+  const neverFired = eventFired === false;
+  const pass = zeroed || neverFired;
+  const outcome = !pass
+    ? "VIOLATION"
+    : zeroed && neverFired
+      ? "zeroed and never fired"
+      : zeroed
+        ? "zeroed"
+        : "never fired";
+  ledgerLines.push(
+    `reduced-motion(${bp.label}): ${label} duration=${JSON.stringify(observedDuration)} eventFired=${eventFired === null ? "n/a" : eventFired} -> ${outcome}`,
+  );
+  if (!pass) {
+    violations.push(
+      `reduced-motion(${bp.label}): ${label} expected duration "0s" or no matching event to fire under emulated reduce, observed duration=${JSON.stringify(observedDuration)} eventFired=${eventFired}`,
+    );
+  }
+}
+
+/** Real off-screen `Element.animate()` call (Web Animations API), 400ms opacity fade, driven and
+ * AWAITED under the same emulated reduce state as every reading above. 113-VERIFIED-VALUES.md's
+ * own `reduced-motion-mechanism` row established that the CSS-only kill switch does not reach
+ * WAAPI, so this control still resolving `playState: "finished"` proves the zero readings above
+ * measure the CSS mechanism rather than a silently-broken emulation. */
+async function runWaapiPositiveControl(cdp, sessionId) {
+  return evalAsyncValue(
+    cdp,
+    sessionId,
+    `(function () {
+      var el = document.createElement("div");
+      el.style.cssText = "position:absolute;top:-9999px;left:-9999px;pointer-events:none;opacity:1;";
+      document.body.appendChild(el);
+      var start = performance.now();
+      var anim = el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 400 });
+      return anim.finished.then(
+        function (a) {
+          var elapsedMs = performance.now() - start;
+          document.body.removeChild(el);
+          return { playState: a.playState, elapsedMs: elapsedMs };
+        },
+        function () {
+          var elapsedMs = performance.now() - start;
+          document.body.removeChild(el);
+          return { playState: "errored", elapsedMs: elapsedMs };
+        },
+      );
+    })()`,
+  );
+}
+
+/** Same retry shape and rationale as {@link checkMotion}/{@link checkPanelMotion}: a thrown
+ * infra-shaped error is retried with a fresh sandbox, a real assertion violation is only ever
+ * pushed, never thrown, so it is never retried away. A higher attempt cap than those checks'
+ * shared `MAX_ATTEMPTS = 3`: this check drives more CDP round trips per breakpoint than any
+ * sibling check (a full New Ticket modal dance, a real move, a real panel open/close, all under
+ * emulated reduce, in addition to the direct duration reads), so a longer run has more exposure
+ * to this development machine's own documented (114-04/114-07) CDP-transport contention under
+ * real concurrent load. Observed live: the panel-close leg's real `window.history.back()`
+ * (BP-D's narrow-viewport takeover) occasionally leaves the renderer wedged for the REST of that
+ * attempt, not just the one read immediately after it, so per-call resilience alone cannot save
+ * an affected attempt; a higher attempt count is what actually recovers, same mechanism this
+ * check already leans on for ordinary contention. */
+async function checkReducedMotion(violations) {
+  const MAX_ATTEMPTS = 15;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const attemptViolations = [];
+    try {
+      await checkReducedMotionOnce(attemptViolations);
+      violations.push(...attemptViolations);
+      return;
+    } catch (err) {
+      lastErr = err;
+      console.error(
+        `reduced-motion: attempt ${attempt}/${MAX_ATTEMPTS} threw (likely CDP/renderer contention, not a code defect): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      if (attempt === MAX_ATTEMPTS) throw lastErr;
+      // A stalled attempt's own finally already sent Chrome SIGTERM, but this check drives far
+      // more CDP round trips per breakpoint than density/board-states (a full New Ticket modal
+      // dance, a real move, a real panel open/close, all under emulated reduce), so the killed
+      // process observably has not always released CDP_PORT by the time the very next attempt's
+      // launchChrome() tries to bind it (observed live: "Failed to open a new tab" on the retry
+      // immediately following a timeout). Wait for the port to actually stop listening, capped at
+      // 5s, before the next attempt.
+      const deadline = Date.now() + 5_000;
+      while ((await isPortListening(CDP_PORT)) && Date.now() < deadline) {
+        await sleep(POLL_INTERVAL_MS);
+      }
+      // A flat cooldown on top of the port wait: killed Chrome process trees do not release
+      // memory back to the OS instantaneously, and launching a fresh one immediately compounds
+      // pressure on an already-contended machine rather than easing it.
+      await sleep(3_000);
+    }
+  }
+}
+
+/** {@link evalValue} at a 40s bound instead of the shared 20s default: this check drives more
+ * CDP round trips per breakpoint than any sibling check (a full New Ticket modal dance, a real
+ * move, a real panel open/close, all under emulated reduce, plus the direct duration reads), and
+ * this development machine was observed live to occasionally need noticeably longer than 20s for
+ * an individual `Runtime.evaluate` round trip under real concurrent load, not because any single
+ * call is hung, just slow. A slow-but-eventually-answered call finishing under 40s is strictly
+ * better than discarding an otherwise-successful attempt's progress and paying a full fresh
+ * sandbox+Chrome boot to retry it. */
+function rmEval(cdp, sessionId, expression) {
+  return evalValue(cdp, sessionId, expression, 40_000);
+}
+
+/**
+ * Reads `window.panel114PanelMotionCapture` with a bounded 15s timeout, catching (not
+ * propagating) a failure and returning `null` instead. Observed live on this development
+ * machine: this exact read, immediately after a real Escape close at BP-D (the breakpoint whose
+ * `takeover` mode drives `DetailPanel.tsx`'s own `window.history.back()` on close, a genuine
+ * async browser history operation independent of this check), occasionally never resolves even
+ * at a 40s bound, while every OTHER read in this same attempt, including the two duration reads
+ * on either side of this call, answers normally. This function exists so that ONE flaky read of
+ * a SECONDARY signal (eventFired) cannot discard an otherwise-successful attempt's PRIMARY signal
+ * (the duration reads, already captured by the caller before this call runs) by throwing and
+ * forcing the whole attempt to retry from a fresh sandbox+Chrome boot. A `null` return degrades
+ * the corresponding `assertReducedMotion` calls to duration-only, exactly the `eventFired: null`
+ * shape this check already uses for the three motions with no capture object at all.
+ */
+async function readPanelMotionCaptureSafe(cdp, sessionId) {
+  try {
+    return await evalValue(
+      cdp,
+      sessionId,
+      `window.panel114PanelMotionCapture`,
+      15_000,
+    );
+  } catch (err) {
+    console.error(
+      `reduced-motion: window.panel114PanelMotionCapture read did not answer, degrading its eventFired signal to n/a for this reading (duration reads are unaffected): ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
+}
+
+async function checkReducedMotionOnce(violations) {
+  let sandbox = null;
+  let chrome = null;
+  let cdp = null;
+  try {
+    sandbox = await bootSandbox("check-reduced-motion");
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+    const { sessionId } = await openPage(cdp, { url: "about:blank" });
+    await cdp.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      { source: MEASURE_HELPERS_SRC },
+      sessionId,
+    );
+    await cdp.send(
+      "Page.navigate",
+      { url: `http://127.0.0.1:${SANDBOX_PORT}/` },
+      sessionId,
+    );
+    const loaded = await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `document.getElementById("root") != null`,
+      READY_TIMEOUT_MS,
+    );
+    if (!loaded) {
+      violations.push("reduced-motion: #root never appeared after navigation");
+      return;
+    }
+    // Splash.tsx's unconditional 1.3s overlay, same settle window every other check in this file
+    // uses.
+    await sleep(1450);
+
+    for (const bp of REDUCED_MOTION_BREAKPOINTS) {
+      const ledgerLines = [];
+      await applyBreakpoint(cdp, sessionId, bp);
+      await blurActive(cdp, sessionId);
+      await moveMouseAway(cdp, sessionId);
+      await sleep(300);
+      await setReducedMotionEmulation(cdp, sessionId, true);
+
+      // WAAPI POSITIVE CONTROL, run FIRST at this breakpoint (not last): still under the same
+      // emulated reduce state, proving the zero readings the rest of this breakpoint's own
+      // legs produce measure the CSS mechanism, not a silently-broken emulation. Ordered before
+      // the panel open/close legs specifically: those two legs drive a real
+      // window.history.back() at BP-D (DetailPanel.tsx's own narrow-viewport takeover), observed
+      // live on this development machine to occasionally leave the renderer's main thread
+      // unresponsive to ANY further CDP traffic for the remainder of that attempt; running this
+      // control first means a later stall in this same breakpoint can never cost the one control
+      // reading every OTHER motion's zero-reading depends on for its own validity.
+      const waapiResult = await runWaapiPositiveControl(cdp, sessionId);
+      ledgerLines.push(
+        `reduced-motion(${bp.label}): WAAPI positive control (Element.animate, 400ms opacity) -> playState=${waapiResult.playState}, elapsed=${waapiResult.elapsedMs.toFixed(1)}ms`,
+      );
+      if (waapiResult.playState !== "finished") {
+        violations.push(
+          `reduced-motion(${bp.label}): WAAPI positive control expected playState "finished" (proving the emulation does not suppress Element.animate), observed ${JSON.stringify(waapiResult.playState)}`,
+        );
+      }
+
+      // CARD HOVER: a direct getComputedStyle read, no trigger needed (see the header comment's
+      // own rationale, 113-VERIFIED-VALUES.md's finding).
+      const cardHoverDuration = await rmEval(
+        cdp,
+        sessionId,
+        `getComputedStyle(window.panel114FindCardByIdentifier(${JSON.stringify(MOTION_SOURCE_COLUMN)}, ${JSON.stringify(MOTION_CARD_IDENTIFIER)})).transitionDuration`,
+      );
+      assertReducedMotion(
+        violations,
+        ledgerLines,
+        bp,
+        "card hover",
+        cardHoverDuration,
+        null,
+      );
+
+      // CONTROL HOVER, icon button: the always-mounted Settings-gear IconButton, the same
+      // selector checkControlStates uses.
+      const gearSel = `document.querySelector('[aria-label="Sync filters"]')`;
+      const gearExists = await rmEval(cdp, sessionId, `${gearSel} != null`);
+      if (!gearExists) {
+        violations.push(
+          `reduced-motion(${bp.label}): Settings gear IconButton not found`,
+        );
+      } else {
+        const gearDuration = await rmEval(
+          cdp,
+          sessionId,
+          `getComputedStyle(${gearSel}).transitionDuration`,
+        );
+        assertReducedMotion(
+          violations,
+          ledgerLines,
+          bp,
+          "icon button hover",
+          gearDuration,
+          null,
+        );
+      }
+
+      // CONTROL HOVER, primary button: New Ticket modal's "Generate ticket" button, opened by a
+      // real click, never typed into or submitted; this check only reads its static
+      // transitionDuration, set unconditionally on Button.tsx's base style regardless of
+      // disabled state.
+      const newTicketBtn = `document.querySelector('[aria-label="New ticket"]')`;
+      const newTicketExists = await rmEval(
+        cdp,
+        sessionId,
+        `${newTicketBtn} != null`,
+      );
+      if (!newTicketExists) {
+        violations.push(
+          `reduced-motion(${bp.label}): New ticket button not found`,
+        );
+      } else {
+        const rect = await rmEval(
+          cdp,
+          sessionId,
+          `window.panel114Rect(${newTicketBtn})`,
+        );
+        await dispatchRealClick(cdp, sessionId, { x: rect.x, y: rect.y });
+        const modalOpened = await pollUntilTruthy(
+          cdp,
+          sessionId,
+          `document.querySelector('[role="dialog"][aria-label="New ticket"]') != null`,
+          5_000,
+        );
+        if (!modalOpened) {
+          violations.push(
+            `reduced-motion(${bp.label}): New Ticket modal did not open after a real click`,
+          );
+        } else {
+          const primaryBtnSel = `Array.prototype.find.call(document.querySelectorAll('[role="dialog"][aria-label="New ticket"] button'), function (b) { return b.textContent.trim() === "Generate ticket"; })`;
+          const primaryExists = await rmEval(
+            cdp,
+            sessionId,
+            `(${primaryBtnSel}) != null`,
+          );
+          if (!primaryExists) {
+            violations.push(
+              `reduced-motion(${bp.label}): New Ticket modal's primary 'Generate ticket' button not found`,
+            );
+          } else {
+            const primaryDuration = await rmEval(
+              cdp,
+              sessionId,
+              `getComputedStyle(${primaryBtnSel}).transitionDuration`,
+            );
+            assertReducedMotion(
+              violations,
+              ledgerLines,
+              bp,
+              "primary button hover",
+              primaryDuration,
+              null,
+            );
+          }
+          await dispatchRealKey(cdp, sessionId, "Escape", "Escape", 27);
+          await pollUntilTruthy(
+            cdp,
+            sessionId,
+            `document.querySelector('[role="dialog"][aria-label="New ticket"]') == null`,
+            5_000,
+          );
+        }
+      }
+      await moveMouseAway(cdp, sessionId);
+      await sleep(200);
+
+      // CARD COLUMN MOVE: the same real POST /api/cards/:id/move route and the same card
+      // checkMotion drives, under the same emulated reduce state.
+      await rmEval(cdp, sessionId, `window.panel114MotionCapture.reset()`);
+      await postCardMove(MOTION_CARD_ID, MOTION_TARGET_COLUMN);
+      const arrived = await waitForCardInColumn(
+        cdp,
+        sessionId,
+        MOTION_TARGET_COLUMN,
+        MOTION_CARD_IDENTIFIER,
+        5_000,
+      );
+      if (!arrived) {
+        violations.push(
+          `reduced-motion(${bp.label}): card never appeared in ${MOTION_TARGET_COLUMN} after POST /api/cards/.../move`,
+        );
+      } else {
+        await sleep(400);
+        const moveCapture = await rmEval(
+          cdp,
+          sessionId,
+          `window.panel114MotionCapture`,
+        );
+        const cardMoveDuration = await rmEval(
+          cdp,
+          sessionId,
+          `getComputedStyle(window.panel114FindCardByIdentifier(${JSON.stringify(MOTION_TARGET_COLUMN)}, ${JSON.stringify(MOTION_CARD_IDENTIFIER)})).transitionDuration`,
+        );
+        assertReducedMotion(
+          violations,
+          ledgerLines,
+          bp,
+          "card column move",
+          cardMoveDuration,
+          moveCapture.transitionRun.length > 0,
+        );
+
+        const sourceChipDuration = await rmEval(
+          cdp,
+          sessionId,
+          `getComputedStyle(window.panel114CountChipEl(${JSON.stringify(MOTION_SOURCE_COLUMN)})).animationDuration`,
+        );
+        assertReducedMotion(
+          violations,
+          ledgerLines,
+          bp,
+          `count chip pulse (${MOTION_SOURCE_COLUMN})`,
+          sourceChipDuration,
+          moveCapture.animationStart.some(
+            (e) => e.column === MOTION_SOURCE_COLUMN,
+          ),
+        );
+        const targetChipDuration = await rmEval(
+          cdp,
+          sessionId,
+          `getComputedStyle(window.panel114CountChipEl(${JSON.stringify(MOTION_TARGET_COLUMN)})).animationDuration`,
+        );
+        assertReducedMotion(
+          violations,
+          ledgerLines,
+          bp,
+          `count chip pulse (${MOTION_TARGET_COLUMN})`,
+          targetChipDuration,
+          moveCapture.animationStart.some(
+            (e) => e.column === MOTION_TARGET_COLUMN,
+          ),
+        );
+      }
+
+      // Restore the card for the next breakpoint; reduced-motion emulation stays active while
+      // restoring since this check never asserts anything about the restore move itself.
+      await rmEval(cdp, sessionId, `window.panel114MotionCapture.reset()`);
+      await postCardMove(MOTION_CARD_ID, MOTION_SOURCE_COLUMN);
+      await waitForCardInColumn(
+        cdp,
+        sessionId,
+        MOTION_SOURCE_COLUMN,
+        MOTION_CARD_IDENTIFIER,
+        5_000,
+      );
+      await sleep(300);
+
+      // PANEL OPEN/CLOSE: the same real trusted click and real trusted Escape checkPanelMotion
+      // drives, under the same emulated reduce state, each direction captured separately.
+      const alreadyOpen = await rmEval(
+        cdp,
+        sessionId,
+        `window.panel114DetailPanelOpen()`,
+      );
+      if (alreadyOpen) {
+        violations.push(
+          `reduced-motion(${bp.label}): detail panel was already open before this breakpoint's own open trigger`,
+        );
+      } else {
+        await rmEval(
+          cdp,
+          sessionId,
+          `window.panel114PanelMotionCapture.reset()`,
+        );
+        const cardRect = await rmEval(
+          cdp,
+          sessionId,
+          `window.panel114Rect(window.panel114FindCardByIdentifier(${JSON.stringify(PANEL_MOTION_CARD_COLUMN)}, ${JSON.stringify(PANEL_MOTION_CARD_IDENTIFIER)}))`,
+        );
+        await dispatchRealClick(cdp, sessionId, {
+          x: cardRect.x,
+          y: cardRect.y,
+        });
+        const opened = await pollUntilTruthy(
+          cdp,
+          sessionId,
+          `window.panel114DetailPanelOpen()`,
+          5_000,
+        );
+        if (!opened) {
+          violations.push(
+            `reduced-motion(${bp.label}): detail panel never opened after a real trusted click`,
+          );
+        } else {
+          await sleep(300);
+          // Duration reads first, the primary signal per the interfaces block's own "Property to
+          // read" column; the capture-object read (openCapture, below) supplies only the
+          // secondary eventFired signal and is read last, wrapped, so a stall on IT alone cannot
+          // discard the duration reads this attempt already has in hand.
+          const asideOpenDuration = await rmEval(
+            cdp,
+            sessionId,
+            `getComputedStyle(document.querySelector('aside[aria-label="Ticket detail"]')).transitionDuration`,
+          );
+          const scrimOpenDuration = await rmEval(
+            cdp,
+            sessionId,
+            `getComputedStyle(document.querySelector('aside[aria-label="Ticket detail"]').previousElementSibling).transitionDuration`,
+          );
+          const openCapture = await readPanelMotionCaptureSafe(cdp, sessionId);
+          assertReducedMotion(
+            violations,
+            ledgerLines,
+            bp,
+            "panel aside open",
+            asideOpenDuration,
+            openCapture == null ? null : openCapture.aside.run.length > 0,
+          );
+          assertReducedMotion(
+            violations,
+            ledgerLines,
+            bp,
+            "panel scrim open",
+            scrimOpenDuration,
+            openCapture == null ? null : openCapture.scrim.run.length > 0,
+          );
+
+          await rmEval(
+            cdp,
+            sessionId,
+            `window.panel114PanelMotionCapture.reset()`,
+          );
+          await dispatchRealKey(cdp, sessionId, "Escape", "Escape", 27);
+          const closed = await pollUntilTruthy(
+            cdp,
+            sessionId,
+            `!window.panel114DetailPanelOpen()`,
+            5_000,
+          );
+          if (!closed) {
+            violations.push(
+              `reduced-motion(${bp.label}): detail panel never closed after a real trusted Escape keypress`,
+            );
+          } else {
+            // Close is real: DetailPanel.tsx's own narrow-viewport takeover calls
+            // window.history.back() on close (docs/standards/design-contract.md's own
+            // "history-based back-button takeover on narrow viewports", unchanged by this
+            // phase), a genuine async browser history operation at BP-D. checkPanelMotion's own
+            // identical close leg settles 400ms before its own read for the same reason; matched
+            // here rather than the shorter 300ms this check used elsewhere. Duration reads first,
+            // same ordering rationale as the open leg above.
+            await sleep(400);
+            const asideCloseDuration = await rmEval(
+              cdp,
+              sessionId,
+              `getComputedStyle(document.querySelector('aside[aria-label="Ticket detail"]')).transitionDuration`,
+            );
+            const scrimCloseDuration = await rmEval(
+              cdp,
+              sessionId,
+              `getComputedStyle(document.querySelector('aside[aria-label="Ticket detail"]').previousElementSibling).transitionDuration`,
+            );
+            const closeCapture = await readPanelMotionCaptureSafe(
+              cdp,
+              sessionId,
+            );
+            assertReducedMotion(
+              violations,
+              ledgerLines,
+              bp,
+              "panel aside close",
+              asideCloseDuration,
+              closeCapture == null ? null : closeCapture.aside.run.length > 0,
+            );
+            assertReducedMotion(
+              violations,
+              ledgerLines,
+              bp,
+              "panel scrim close",
+              scrimCloseDuration,
+              closeCapture == null ? null : closeCapture.scrim.run.length > 0,
+            );
+          }
+        }
+      }
+
+      await setReducedMotionEmulation(cdp, sessionId, false);
+      console.log(
+        `reduced-motion(${bp.label}): two-breakpoint rationale, BP-A/BP-D only: the reduce media query and the width media queries are independent axes (113-VERIFIED-VALUES.md), so BP-B/BP-C add no new information.`,
+      );
+      console.log(ledgerLines.join("\n"));
+    }
+  } finally {
+    if (cdp) {
+      try {
+        cdp.close();
+      } catch {
+        // best effort
+      }
+    }
+    if (chrome) {
+      // A plain SIGTERM (every sibling check's own finally uses only this) was observed live,
+      // on this development machine under real concurrent load, to sometimes leave the whole
+      // Chrome process tree running past this function's return: this check drives far more CDP
+      // round trips per attempt than any sibling check, so a stalled/thrashing Chrome instance
+      // has more exposure to being too unresponsive to act on SIGTERM before the NEXT attempt's
+      // launchChrome() adds another full instance on top of it, compounding the same contention
+      // this retry exists to survive. stopServer's own SIGTERM-then-SIGKILL-after-KILL_TIMEOUT_MS
+      // escalation (used for the sandbox server) is mirrored here for the Chrome child too.
+      await new Promise((resolve) => {
+        if (chrome.exitCode !== null || chrome.signalCode !== null) {
+          resolve();
+          return;
+        }
+        const escalate = setTimeout(() => {
+          try {
+            chrome.kill("SIGKILL");
+          } catch {
+            // best effort
+          }
+        }, KILL_TIMEOUT_MS);
+        chrome.once("exit", () => {
+          clearTimeout(escalate);
+          resolve();
+        });
+        try {
+          chrome.kill("SIGTERM");
+        } catch {
+          clearTimeout(escalate);
+          resolve();
+        }
+      });
+    }
+    if (sandbox) await teardownSandbox(sandbox);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BREAKS["reduced-motion"]: narrows tokens.css's kill-switch universal selector to something
+// that cannot match any real element, rebuilds, and re-runs checkReducedMotion itself against
+// the mutated source, then restores the captured bytes unconditionally.
+// ---------------------------------------------------------------------------
+
+const TOKENS_CSS_PATH = join(REPO_ROOT, "src", "web", "styles", "tokens.css");
+const REDUCED_MOTION_BREAK_TARGET =
+  "@media (prefers-reduced-motion: reduce) {\n  * {";
+const REDUCED_MOTION_BREAK_REPLACEMENT =
+  "@media (prefers-reduced-motion: reduce) {\n  [data-panel114-never-matches] {";
+
+function restoreTokensCssSource(original) {
+  writeFileSync(TOKENS_CSS_PATH, original);
+  resetBuildCache();
+  rmSync(join(REPO_ROOT, "dist"), { recursive: true, force: true });
+  unregisterRestore(TOKENS_CSS_PATH);
+}
+
+async function runBreakReducedMotion() {
+  assertBuilt();
+  const original = readFileSync(TOKENS_CSS_PATH, "utf8");
+  const occurrences = original.split(REDUCED_MOTION_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel-114: refusing to run --break reduced-motion, expected ${JSON.stringify(REDUCED_MOTION_BREAK_TARGET)} ` +
+        `to occur exactly once in ${TOKENS_CSS_PATH}, measured ${occurrences}. A miscounted anchor ` +
+        `would mutate the wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(TOKENS_CSS_PATH, original);
+  try {
+    writeFileSync(
+      TOKENS_CSS_PATH,
+      original.replace(
+        REDUCED_MOTION_BREAK_TARGET,
+        REDUCED_MOTION_BREAK_REPLACEMENT,
+      ),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkReducedMotion(tripViolations);
+    console.log(
+      `\n--break reduced-motion TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) => v.includes("card hover"));
+  } finally {
+    restoreTokensCssSource(original);
+  }
+
+  const restoreViolations = [];
+  await checkReducedMotion(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break reduced-motion RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS / PROBES
 // ---------------------------------------------------------------------------
 
@@ -4650,6 +5359,7 @@ const CHECKS = {
   "control-states": checkControlStates,
   motion: checkMotion,
   "panel-motion": checkPanelMotion,
+  "reduced-motion": checkReducedMotion,
 };
 
 const BREAKS = {
@@ -4658,6 +5368,7 @@ const BREAKS = {
   "control-states": runBreakControlStates,
   motion: runBreakMotion,
   "panel-motion": runBreakPanelMotion,
+  "reduced-motion": runBreakReducedMotion,
 };
 
 const PROBES = {
