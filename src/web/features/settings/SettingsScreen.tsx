@@ -784,9 +784,11 @@ function PlaybooksTabSection({ playbooksTab }: PlaybooksTabSectionProps) {
         !playbooksLoadError &&
         playbooks !== null &&
         playbooks.length === 0 && (
-          <Notice tone="muted" label="No playbooks yet">
-            Create one, or generate a draft with AI.
-          </Notice>
+          <div style={{ marginTop: "var(--space-lg)" }}>
+            <Notice tone="muted" label="No playbooks yet">
+              Create one, or generate a draft with AI.
+            </Notice>
+          </div>
         )}
 
       {!playbooksLoading &&
@@ -1509,10 +1511,12 @@ function VaultImportOutcomeNotice({
   const { imported, skipped } = outcome;
   if (imported.length === 0 && skipped.length === 0) {
     return (
-      <Notice
-        tone="muted"
-        label="Nothing to import, all keys are already here."
-      />
+      <div style={{ marginTop: "var(--space-lg)" }}>
+        <Notice
+          tone="muted"
+          label="Nothing to import, all keys are already here."
+        />
+      </div>
     );
   }
   const importedLine =
@@ -1524,9 +1528,11 @@ function VaultImportOutcomeNotice({
       ? `Skipped ${skipped.length} already here: ${skipped.join(", ")}`
       : null;
   return (
-    <Notice tone="muted" label={importedLine ?? skippedLine}>
-      {importedLine !== null ? skippedLine : null}
-    </Notice>
+    <div style={{ marginTop: "var(--space-lg)" }}>
+      <Notice tone="muted" label={importedLine ?? skippedLine}>
+        {importedLine !== null ? skippedLine : null}
+      </Notice>
+    </div>
   );
 }
 
@@ -1579,10 +1585,12 @@ function VaultTabSection({ vaultTab }: VaultTabSectionProps) {
       )}
 
       {!loading && !loadError && keys !== null && keys.length === 0 && (
-        <Notice tone="muted" label="No keys yet">
-          Add one above to store a secret Claude can use without ever reading
-          it.
-        </Notice>
+        <div style={{ marginTop: "var(--space-lg)" }}>
+          <Notice tone="muted" label="No keys yet">
+            Add one above to store a secret Claude can use without ever reading
+            it.
+          </Notice>
+        </div>
       )}
 
       {!loading && !loadError && keys !== null && keys.length > 0 && (
@@ -2865,9 +2873,11 @@ function WorkspacesTabSection({ workspacesTab }: WorkspacesTabSectionProps) {
       )}
 
       {!loading && !loadError && folders.length === 0 && (
-        <Notice tone="muted" label="No workspaces yet">
-          Add a folder above to start tickets in it.
-        </Notice>
+        <div style={{ marginTop: "var(--space-lg)" }}>
+          <Notice tone="muted" label="No workspaces yet">
+            Add a folder above to start tickets in it.
+          </Notice>
+        </div>
       )}
 
       {!loading && !loadError && folders.length > 0 && (

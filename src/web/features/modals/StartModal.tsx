@@ -1191,9 +1191,11 @@ function PlaybookPickerSection({
         onSelect={selectPlaybook}
       />
       {seedRows.length === 0 && restRows.length === 0 && (
-        <Notice tone="muted" label="No playbooks available">
-          Starting without one. Manage playbooks in Settings ▸ Playbooks.
-        </Notice>
+        <div style={{ marginTop: "var(--space-lg)" }}>
+          <Notice tone="muted" label="No playbooks available">
+            Starting without one. Manage playbooks in Settings ▸ Playbooks.
+          </Notice>
+        </div>
       )}
     </div>
   );
