@@ -179,7 +179,11 @@ function buildPairSet(tokens, extraBgs) {
   const nontextFg = new Map();
   for (const [name, hex] of tokens) {
     if (name === "--border") continue;
-    if (name.startsWith("--text") || name === "--destructive") {
+    if (
+      name.startsWith("--text") ||
+      name === "--destructive" ||
+      name === "--destructive-text"
+    ) {
       textFg.set(name, hex);
     } else if (
       name === "--accent" ||

@@ -12,7 +12,8 @@
   --surface-card-hover: #202126; /* Card hover lift (no accent) */
   --border: #26272b; /* Borders / dividers */
   --accent: #5e6ad2; /* interactive/selected-state signal only: active view toggle, active inbox badge, drag-target highlight, needs-attention card border, resize-handle hover, active search result row */
-  --destructive: #e5484d; /* Sync-failure / disconnected / config error */
+  --destructive: #e5484d; /* Sync-failure / disconnected / config error: fills, stripes, borders, icon glyphs, status dots (non-text only) */
+  --destructive-text: #ea6d71; /* Destructive TEXT role only, split from --destructive (LUI-07): white 20% lighten, measured 4.5:1+ on all elevation/pressed tiers and the real Lost-chip tint */
   --text: #e8e9ea; /* Primary text: titles, headings, description body */
   --text-muted: #8a8f98; /* Muted: identifiers, headers, counts, timestamps */
 
