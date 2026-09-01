@@ -203,6 +203,14 @@
  *                                                                   with a source census that fails
  *                                                                   if anyone ever starts walking
  *                                                                   the chain
+ *   node scripts/session-liveness-v3.mjs --check resume           LOCAL-2: kill a REAL sub-session's
+ *                                                                   tmux, wait out the real 3-strike
+ *                                                                   detector, switch the active
+ *                                                                   pointer to the dead record, and
+ *                                                                   prove /resume answers 202 and
+ *                                                                   relaunches on the sub-session's
+ *                                                                   OWN exact tmux name while the
+ *                                                                   live sibling survives untouched
  *   node scripts/session-liveness-v3.mjs --check all               every check, its own fresh fixture(s)
  *
  * `liveness` and `reconcile` each run MORE THAN ONE fixture cycle within a single invocation — a
@@ -13504,6 +13512,268 @@ async function checkHookTokenAttribution(built) {
   return violations;
 }
 
+/**
+ * `--check resume` (LOCAL-2): a DEAD sub-session with a LIVE sibling must be resumable through
+ * the real `/resume` route, and the relaunch must land on the sub-session's OWN tmux name. This
+ * is the exact regression the multi-session model shipped: the route's lost-session gate read the
+ * card-level `sessionLost` flag (false while any sibling lives, so every dead sub-session 409'd),
+ * and the saga derived its tmux name and failure-path kill target from `card.identifier` (session
+ * 1's name), cross-wiring a sub-session's resume onto the primary and able to kill the primary's
+ * live pane on failure.
+ *
+ * Sequence: create session 2 through the real start saga, kill its tmux and wait out the REAL
+ * 3-strike detector (which promotes session 1 to active), switch the active pointer back to the
+ * dead session 2 through the real `/session` route, POST the real `/resume` route, then assert
+ * from BOTH tmux reality and the persisted records: `/resume` answers 202 (the 409 is the
+ * regression signature), session 2's record carries its own EXACT recreated tmux name
+ * (`dsp-<identifier>-2`, never session 1's), session 1's EXACT name is still live with its record
+ * untouched, and the card never reads `sessionLost`/`resumeError` at the end.
+ *
+ * A second leg then kills session 2 again and REBOOTS the backend (stub pathPrefix preserved), so
+ * the loss is discovered by boot reconcile instead of the runtime detector, and proves the same
+ * switch-then-resume sequence recovers it: the "resume after an app restart" acceptance case.
+ */
+async function checkResume(built) {
+  const violations = [];
+  const session1Name = built.tmux.a;
+  const session2Name = `dsp-${built.identifier}-2`;
+
+  const { status, body } = await startSecondSession(built, {
+    newSession: true,
+  });
+  console.log(`resume: POST /start {newSession:true} -> ${status}`);
+  if (status !== 202) {
+    violations.push(
+      `resume: POST /start returned ${status}, expected 202 (body=${JSON.stringify(body)})`,
+    );
+    return violations;
+  }
+  const settled = await waitForSagaSettled(built, {
+    timeoutMs: SECOND_SESSION_SAGA_TIMEOUT_MS,
+  });
+  if (settled.timedOut || settled.card?.startError != null) {
+    violations.push(
+      `resume: second-session saga did not settle cleanly (timedOut=${settled.timedOut} startError=${JSON.stringify(settled.card?.startError)})`,
+    );
+    return violations;
+  }
+
+  const seeded = readCard(built.dbPath, built.cardId);
+  const rec2 = seeded?.sessions?.find((s) => s.tmuxSession === session2Name);
+  if (rec2 == null) {
+    violations.push(
+      `resume: no persisted session record carries tmuxSession=${session2Name} after the second start`,
+    );
+    return violations;
+  }
+
+  const detectorMs = await killSessionAndAwaitDetector(
+    built,
+    session2Name,
+    null,
+    rec2.id,
+  );
+  console.log(
+    `resume: killed ${session2Name}; detector cleared its record in ${detectorMs}ms`,
+  );
+  if (detectorMs == null) {
+    violations.push(
+      `resume: the 3-strike detector never cleared session 2's tmuxSession after a real kill`,
+    );
+    return violations;
+  }
+
+  const afterKill = readCard(built.dbPath, built.cardId);
+  if (afterKill?.sessionLost === true) {
+    violations.push(
+      `resume: card flipped sessionLost=true although session 1 (${session1Name}) is still live`,
+    );
+  }
+
+  const switchRes = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${built.cardId}/session`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: rec2.id }),
+    },
+  );
+  await switchRes.body?.cancel().catch(() => {});
+  console.log(
+    `resume: POST /session (switch to dead session 2) -> ${switchRes.status}`,
+  );
+  if (switchRes.status !== 202) {
+    violations.push(
+      `resume: switching the active pointer to the dead session 2 returned ${switchRes.status}, expected 202`,
+    );
+    return violations;
+  }
+
+  const resumeRes = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${built.cardId}/resume`,
+    { method: "POST", headers: { "content-type": "application/json" } },
+  );
+  const resumeBody = await resumeRes.json().catch(() => undefined);
+  console.log(`resume: POST /resume -> ${resumeRes.status}`);
+  if (resumeRes.status !== 202) {
+    violations.push(
+      `resume: POST /resume on a dead sub-session returned ${resumeRes.status} (body=${JSON.stringify(resumeBody)}), expected 202: the sub-session resume regression`,
+    );
+    return violations;
+  }
+
+  const deadline = Date.now() + SECOND_SESSION_SAGA_TIMEOUT_MS;
+  let resumed;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    let persisted;
+    try {
+      persisted = readCard(built.dbPath, built.cardId);
+    } catch {
+      persisted = undefined;
+    }
+    lastError = persisted?.resumeError ?? null;
+    const r2 = persisted?.sessions?.find((s) => s.id === rec2.id);
+    if (r2?.tmuxSession != null) {
+      resumed = { card: persisted, record: r2 };
+      break;
+    }
+    if (lastError != null) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  if (resumed == null) {
+    violations.push(
+      `resume: session 2's record never regained a tmuxSession within ${SECOND_SESSION_SAGA_TIMEOUT_MS}ms (resumeError=${JSON.stringify(lastError)})`,
+    );
+    return violations;
+  }
+
+  if (resumed.record.tmuxSession !== session2Name) {
+    violations.push(
+      `resume: session 2 resumed onto tmux name ${resumed.record.tmuxSession}, expected its own EXACT name ${session2Name}: the identifier-derived cross-wiring regression`,
+    );
+  }
+
+  const live = await tmuxListSessionNames();
+  if (!live.includes(session2Name)) {
+    violations.push(
+      `resume: recreated tmux session ${session2Name} not found in list-sessions: ${JSON.stringify(live)}`,
+    );
+  }
+  if (!live.includes(session1Name)) {
+    violations.push(
+      `resume: session 1's EXACT tmux name ${session1Name} disappeared during the sub-session resume, which is what the failure-path kill used to target`,
+    );
+  }
+
+  const rec1 = resumed.card?.sessions?.find((s) => s.id === built.sessionA.id);
+  if (rec1?.tmuxSession !== session1Name) {
+    violations.push(
+      `resume: session 1's record no longer names its own tmux session (${JSON.stringify(rec1?.tmuxSession)}, expected ${session1Name})`,
+    );
+  }
+  if (resumed.card?.sessionLost === true) {
+    violations.push(
+      `resume: card reads sessionLost=true after a successful resume`,
+    );
+  }
+  if (resumed.card?.resumeError != null) {
+    violations.push(
+      `resume: card carries a resumeError after a successful resume: ${JSON.stringify(resumed.card.resumeError)}`,
+    );
+  }
+  if (violations.length > 0) return violations;
+
+  // --- Restart leg: the same dead sub-session must resume when the loss was discovered by BOOT
+  // reconcile (a real backend restart) rather than the runtime 3-strike detector. The reboot MUST
+  // carry the stub-claude pathPrefix: a bare restartServer would let the resume relaunch resolve
+  // a real `claude` install.
+  await tmuxKillSessionExact(session2Name);
+  await killAndWait(built.server?.child);
+  built.server = bootServer(built.home, { pathPrefix: built.pathPrefix });
+  await waitForReady(built.port);
+  const reconcileDeadline = Date.now() + LIVENESS_POLL_TIMEOUT_MS;
+  let lostAfterBoot = false;
+  while (Date.now() < reconcileDeadline) {
+    let persisted;
+    try {
+      persisted = readCard(built.dbPath, built.cardId);
+    } catch {
+      persisted = undefined;
+    }
+    const r2 = persisted?.sessions?.find((s) => s.id === rec2.id);
+    if (r2 != null && r2.tmuxSession == null) {
+      lostAfterBoot = true;
+      break;
+    }
+    await sleep(LIVENESS_POLL_INTERVAL_MS);
+  }
+  console.log(
+    `resume: after backend restart, boot reconcile marked session 2 lost=${lostAfterBoot}`,
+  );
+  if (!lostAfterBoot) {
+    violations.push(
+      `resume: boot reconcile never cleared the killed session 2's tmuxSession after the backend restart`,
+    );
+    return violations;
+  }
+
+  const reswitch = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${built.cardId}/session`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: rec2.id }),
+    },
+  );
+  await reswitch.body?.cancel().catch(() => {});
+  const reresume = await fetch(
+    `http://127.0.0.1:${built.port}/api/cards/${built.cardId}/resume`,
+    { method: "POST", headers: { "content-type": "application/json" } },
+  );
+  const reresumeBody = await reresume.json().catch(() => undefined);
+  console.log(
+    `resume: after restart, POST /session -> ${reswitch.status}, POST /resume -> ${reresume.status}`,
+  );
+  if (reswitch.status !== 202 || reresume.status !== 202) {
+    violations.push(
+      `resume: after the backend restart, switch/resume returned ${reswitch.status}/${reresume.status}, expected 202/202 (resume body=${JSON.stringify(reresumeBody)})`,
+    );
+    return violations;
+  }
+
+  const restartResumeDeadline = Date.now() + SECOND_SESSION_SAGA_TIMEOUT_MS;
+  let restartResumed = null;
+  while (Date.now() < restartResumeDeadline) {
+    let persisted;
+    try {
+      persisted = readCard(built.dbPath, built.cardId);
+    } catch {
+      persisted = undefined;
+    }
+    const r2 = persisted?.sessions?.find((s) => s.id === rec2.id);
+    if (r2?.tmuxSession != null) {
+      restartResumed = r2;
+      break;
+    }
+    if (persisted?.resumeError != null) break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  if (restartResumed?.tmuxSession !== session2Name) {
+    violations.push(
+      `resume: after the backend restart, session 2 did not resume onto its own exact tmux name (got ${JSON.stringify(restartResumed?.tmuxSession)}, expected ${session2Name})`,
+    );
+  }
+  const liveAfterRestart = await tmuxListSessionNames();
+  if (!liveAfterRestart.includes(session1Name)) {
+    violations.push(
+      `resume: session 1's EXACT tmux name ${session1Name} disappeared during the post-restart resume`,
+    );
+  }
+
+  return violations;
+}
+
 const CHECKS = {
   safety: () => withFixture("safety", checkSafety),
   "hook-attribution": () =>
@@ -13597,6 +13867,7 @@ const CHECKS = {
       checkHookTokenAttribution,
       HOOK_ATTRIBUTION_FIXTURE,
     ),
+  resume: () => withFixture("resume", checkResume, SECOND_SESSION_FIXTURE),
 };
 
 /**
