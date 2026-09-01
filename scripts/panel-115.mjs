@@ -48,7 +48,13 @@
  * behave as expected.
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { realpathSync } from "node:fs";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -1703,24 +1709,317 @@ async function probeBaseline() {
 }
 
 // ---------------------------------------------------------------------------
-// CHECKS / BREAKS / PROBES. CHECKS and BREAKS stay empty maps this plan;
-// 115-02 through 115-06 populate them against the BEFORE ledger this probe
-// records.
+// rhythm: break-proven check for Plan 03's shared panel section-rhythm token
+// (LUI-05). Boots the sandbox once, asserts the landed --panel-section-gap
+// value between every adjacent reading-surface sibling pair at all four
+// breakpoints, the description block's own gap by name (the exact
+// flush-description regression LUI-05 closes), the v2.9 reading-surface
+// padding/line-height contract rows staying in force, and the header/h1
+// verdicts 115-03's own ledger recorded as UNCHANGED (Task 2).
 // ---------------------------------------------------------------------------
 
-const CHECKS = {};
+/** Landed value, tokens.css's own `--panel-section-gap`. */
+const PANEL_SECTION_GAP_PX = 16;
+/** `.reading-surface`'s own `--space-xl` padding-top: gap index 0 in
+ * `panel115ReferenceBlockGaps()`'s output, unaffected by the flex `gap` declaration (which only
+ * applies between children, never before the first one). */
+const READING_SURFACE_PADDING_TOP_PX = 24;
+/** Sub-pixel tolerance for float px comparisons, the panel-114 `assertDensityPx` precedent. */
+const RHYTHM_PX_TOLERANCE = 0.05;
 
-const BREAKS = {};
+function assertRhythmPx(violations, bp, label, expected, observed) {
+  if (Math.abs(observed - expected) > RHYTHM_PX_TOLERANCE) {
+    violations.push(
+      `rhythm(${bp.label}): ${label} expected ${expected}px, observed ${observed}px`,
+    );
+  }
+}
+
+function assertRhythmExact(violations, bp, label, expected, observed) {
+  if (observed !== expected) {
+    violations.push(
+      `rhythm(${bp.label}): ${label} expected ${JSON.stringify(expected)}, observed ${JSON.stringify(observed)}`,
+    );
+  }
+}
+
+/**
+ * Boots the sandbox, opens the fully populated fixture card's detail panel, and at each of the
+ * four breakpoints asserts: every adjacent reading-surface sibling gap equals
+ * `--panel-section-gap` (16px, sub-pixel tolerance), the description block's own gap to both
+ * neighbours is non-zero (named separately from the generic loop), `.reading-surface`'s padding
+ * and `.md-body` line-height stay at their v2.9 values, and the header row padding / `h1`
+ * fontSize/fontWeight/lineHeight match Task 2's UNCHANGED verdicts.
+ */
+async function checkRhythm(violations) {
+  let sandbox = null;
+  let chrome = null;
+  let cdp = null;
+  try {
+    sandbox = await bootSandbox("check-rhythm");
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+    const { sessionId } = await openPage(cdp, { url: "about:blank" });
+    await cdp.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      { source: MEASURE_HELPERS_SRC },
+      sessionId,
+    );
+    await cdp.send(
+      "Page.navigate",
+      { url: `http://127.0.0.1:${SANDBOX_PORT}/` },
+      sessionId,
+    );
+    const loaded = await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `document.getElementById("root") != null`,
+      READY_TIMEOUT_MS,
+    );
+    if (!loaded) {
+      violations.push("rhythm: #root never appeared after navigation");
+      return;
+    }
+    // Splash.tsx's unconditional 1.3s overlay, same settle window probeBaseline/checkDensity use.
+    await sleep(1450);
+
+    const h1Expr = `document.querySelector('aside[aria-label="Ticket detail"] h1')`;
+    const headerRowExpr = `${h1Expr}.parentElement.parentElement`;
+
+    // Same open-once-per-run discipline as probeBaseline: DetailPanel.tsx re-layouts an
+    // already-open panel in place on resize, and closing/reopening across the carousel boundary
+    // reproduces the DETAIL-PANEL FINDING renderer wedge (115-01/panel-114 precedent).
+    let panelOpened = false;
+    for (const bp of BREAKPOINTS) {
+      await applyBreakpoint(cdp, sessionId, bp);
+      await blurActive(cdp, sessionId);
+      await moveMouseAway(cdp, sessionId);
+      await sleep(300);
+      if (!panelOpened) {
+        await openPrimaryCardPanel(cdp, sessionId);
+        panelOpened = true;
+      } else {
+        await sleep(HOVER_SETTLE_MS);
+      }
+
+      const gaps = await evalValue(
+        cdp,
+        sessionId,
+        `window.panel115ReferenceBlockGaps()`,
+      );
+      if (gaps.length === 0) {
+        violations.push(
+          `rhythm(${bp.label}): no reading-surface children found, cannot measure section rhythm`,
+        );
+      } else {
+        assertRhythmPx(
+          violations,
+          bp,
+          "reading-surface top padding (gap index 0)",
+          READING_SURFACE_PADDING_TOP_PX,
+          gaps[0].gap,
+        );
+        for (let i = 1; i < gaps.length; i++) {
+          assertRhythmPx(
+            violations,
+            bp,
+            `sibling gap ${i} (${gaps[i].prevSnippet.slice(0, 20)} -> ${gaps[i].nextSnippet.slice(0, 20)})`,
+            PANEL_SECTION_GAP_PX,
+            gaps[i].gap,
+          );
+        }
+        // Named separately from the generic loop above: this is the exact regression LUI-05
+        // motivates, a description block sitting flush (zero gap) against its neighbour. Gap
+        // index 1 is PrList -> description; gap index 2 is description -> the next notice.
+        if (gaps.length > 1 && gaps[1].gap <= 0) {
+          violations.push(
+            `rhythm(${bp.label}): flush-description violation, the description block has a ${gaps[1].gap}px gap to its previous sibling (expected ${PANEL_SECTION_GAP_PX}px)`,
+          );
+        }
+        if (gaps.length > 2 && gaps[2].gap <= 0) {
+          violations.push(
+            `rhythm(${bp.label}): flush-description violation, the description block has a ${gaps[2].gap}px gap to its next sibling (expected ${PANEL_SECTION_GAP_PX}px)`,
+          );
+        }
+      }
+
+      const readingSurfacePadding = await evalValue(
+        cdp,
+        sessionId,
+        `(function () {
+          var el = document.querySelector('aside[aria-label="Ticket detail"] .reading-surface');
+          return el ? getComputedStyle(el).padding : null;
+        })()`,
+      );
+      assertRhythmExact(
+        violations,
+        bp,
+        "reading-surface padding (v2.9, in force)",
+        "24px 16px",
+        readingSurfacePadding,
+      );
+      const mdBodyLineHeight = await evalValue(
+        cdp,
+        sessionId,
+        `(function () {
+          var p = document.querySelector('aside[aria-label="Ticket detail"] .md-body p');
+          return p ? getComputedStyle(p).lineHeight : null;
+        })()`,
+      );
+      assertRhythmExact(
+        violations,
+        bp,
+        "md-body resolved line-height (v2.9, in force)",
+        "20.8px",
+        mdBodyLineHeight,
+      );
+
+      const headerPadding = await evalValue(
+        cdp,
+        sessionId,
+        `getComputedStyle(${headerRowExpr}).padding`,
+      );
+      assertRhythmExact(
+        violations,
+        bp,
+        "header row resolved padding (Task 2: UNCHANGED)",
+        "8px 16px 8px 24px",
+        headerPadding,
+      );
+      const h1Style = await evalValue(
+        cdp,
+        sessionId,
+        `window.panel115ComputedSub(${h1Expr}, ["fontSize","fontWeight","lineHeight"])`,
+      );
+      assertRhythmExact(
+        violations,
+        bp,
+        "h1 resolved fontSize (Task 2: UNCHANGED)",
+        "17px",
+        h1Style.fontSize,
+      );
+      assertRhythmExact(
+        violations,
+        bp,
+        "h1 resolved fontWeight (Task 2: UNCHANGED)",
+        "600",
+        h1Style.fontWeight,
+      );
+      assertRhythmExact(
+        violations,
+        bp,
+        "h1 resolved lineHeight (Task 2: UNCHANGED)",
+        "22.1px",
+        h1Style.lineHeight,
+      );
+    }
+  } finally {
+    if (cdp) {
+      try {
+        cdp.close();
+      } catch {
+        // best effort
+      }
+    }
+    if (chrome) {
+      try {
+        chrome.kill("SIGTERM");
+      } catch {
+        // best effort
+      }
+    }
+    if (sandbox) await teardownSandbox(sandbox);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BREAKS["rhythm"]: mutates the real flex-gap declaration Task 1 landed on
+// the hasLiveSession reading-surface wrapper (DetailPanel.tsx), the wrapper
+// this fixture's card actually renders through (its session carries a live
+// tmuxSession and the harness expands Details), rebuilds, and re-runs
+// checkRhythm itself against the mutated source, then restores the captured
+// bytes unconditionally.
+// ---------------------------------------------------------------------------
+
+const DETAIL_PANEL_PATH = join(
+  REPO_ROOT,
+  "src",
+  "web",
+  "features",
+  "detail",
+  "DetailPanel.tsx",
+);
+// 26-space indent is unique to the hasLiveSession wrapper; the sibling reading-surface wrapper
+// carries the identical property at 24-space indent. Confirmed by the exact occurrence-count
+// guard below before any mutation runs.
+const RHYTHM_BREAK_TARGET =
+  '                          gap: "var(--panel-section-gap)",\n';
+
+function restoreDetailPanelSource(original) {
+  writeFileSync(DETAIL_PANEL_PATH, original);
+  resetBuildCache();
+  rmSync(join(REPO_ROOT, "dist"), { recursive: true, force: true });
+  unregisterRestore(DETAIL_PANEL_PATH);
+}
+
+async function runBreakRhythm() {
+  assertBuilt();
+  const original = readFileSync(DETAIL_PANEL_PATH, "utf8");
+  const occurrences = original.split(RHYTHM_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel-115: refusing to run --break rhythm, expected the hasLiveSession wrapper's gap ` +
+        `declaration to occur exactly once in ${DETAIL_PANEL_PATH}, measured ${occurrences}. A ` +
+        `miscounted anchor would mutate the wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(DETAIL_PANEL_PATH, original);
+  try {
+    writeFileSync(DETAIL_PANEL_PATH, original.replace(RHYTHM_BREAK_TARGET, ""));
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkRhythm(tripViolations);
+    console.log(
+      `\n--break rhythm TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some((v) => v.includes("flush-description"));
+  } finally {
+    restoreDetailPanelSource(original);
+  }
+
+  const restoreViolations = [];
+  await checkRhythm(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break rhythm RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
+// CHECKS / BREAKS / PROBES.
+// ---------------------------------------------------------------------------
+
+const CHECKS = {
+  rhythm: checkRhythm,
+};
+
+const BREAKS = {
+  rhythm: runBreakRhythm,
+};
 
 const PROBES = {
   baseline: probeBaseline,
 };
 
 // Silence no-unused-vars for spine identifiers ported ahead of the checks that will call them
-// (115-02 onward), matching this file's own doc-block explanation of the port-now-use-later shape.
-void resetBuildCache;
-void registerRestore;
-void unregisterRestore;
+// (states/elevation, 115-04 onward), matching this file's own doc-block explanation of the
+// port-now-use-later shape.
 void evalAsyncValue;
 void readUnderHover;
 void tabTraverseTo;
