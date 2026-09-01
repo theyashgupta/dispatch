@@ -1006,6 +1006,57 @@ const FIXTURE_CARDS = [
   }),
 ];
 
+// ---------------------------------------------------------------------------
+// probeSurfaces-only fixture (Plan 116-02): FIXTURE_CARDS minus every
+// "in_review" card, so EmptyState.tsx's non-todo branch has a genuinely empty
+// column to render, plus one seeded group card and its one member so
+// GroupPrRow.tsx and MemberRow.tsx have a real group to mount. Probe-run-only,
+// never assigned into FIXTURE_CARDS itself, which the six existing checks
+// assert against by exact set and position.
+// ---------------------------------------------------------------------------
+
+const SURFACE_GROUP_CARD_ID = "p116-group-1";
+const SURFACE_GROUP_MEMBER_ID = "p116-member-1";
+
+const SURFACE_PROBE_CARDS = [
+  ...FIXTURE_CARDS.filter((card) => card.column !== "in_review"),
+  {
+    id: SURFACE_GROUP_CARD_ID,
+    issueId: `${SURFACE_GROUP_CARD_ID}-issue`,
+    identifier: "PROP-501",
+    title: "Group: onboarding revamp",
+    description: null,
+    priority: 0,
+    column: "todo",
+    updatedAt: FIXTURE_TIMESTAMP,
+    source: "group",
+    prs: [
+      {
+        number: 42,
+        url: "https://github.com/example/megrim/pull/42",
+        title: "Onboarding revamp",
+        state: "open",
+        isDraft: false,
+        ci: "pass",
+        repo: "megrim",
+      },
+    ],
+  },
+  {
+    id: SURFACE_GROUP_MEMBER_ID,
+    issueId: `${SURFACE_GROUP_MEMBER_ID}-issue`,
+    identifier: "PROP-502",
+    title: "Wire up the onboarding checklist",
+    description: null,
+    priority: 1,
+    column: "todo",
+    updatedAt: FIXTURE_TIMESTAMP,
+    groupId: SURFACE_GROUP_CARD_ID,
+    source: "linear",
+    url: "https://linear.app/example/issue/PROP-502",
+  },
+];
+
 /**
  * Boot once against the still-empty sandbox home so the store creates the real sqlite schema (the
  * panel-93..112.mjs seeding idiom, never a hand-duplicated schema), kill that boot, then insert
@@ -1127,14 +1178,19 @@ async function applyBreakpoint(cdp, sessionId, bp) {
 }
 
 /**
- * Boots the sandbox: seeds the 18-card fixture, boots the production server against the seeded
- * home, and waits for `GET /api/board` to answer 200 with all 18 cards present. Returns
- * `{ home, child, log }` for the caller to hold across every breakpoint measurement and to pass
- * to `teardownSandbox`.
+ * Boots the sandbox: seeds `cards` (the 18-card fixture by default), boots the production server
+ * against the seeded home, and waits for `GET /api/board` to answer 200 with every seeded card
+ * present. Returns `{ home, child, log }` for the caller to hold across every breakpoint
+ * measurement and to pass to `teardownSandbox`.
+ *
+ * @remarks
+ * The optional `cards` param exists solely for `probeSurfaces` (Plan 116-02): it needs a group
+ * card, a group member, and one genuinely empty column, none of which belong in `FIXTURE_CARDS`
+ * itself since the six existing checks assert against that exact set and its card positions.
  */
-async function bootSandbox(label) {
+async function bootSandbox(label, cards = FIXTURE_CARDS) {
   const home = makeSandboxHome(label);
-  await seedFixtureCards(home, FIXTURE_CARDS);
+  await seedFixtureCards(home, cards);
   const boot = await bootAndWait(home);
   const deadline = Date.now() + READY_TIMEOUT_MS;
   let cardCount = 0;
@@ -1142,14 +1198,14 @@ async function bootSandbox(label) {
     const res = await fetch(`http://127.0.0.1:${SANDBOX_PORT}/api/board`);
     const body = await res.json();
     cardCount = Array.isArray(body) ? body.length : (body?.cards?.length ?? 0);
-    if (cardCount >= FIXTURE_CARDS.length) break;
+    if (cardCount >= cards.length) break;
     await sleep(POLL_INTERVAL_MS);
   }
-  if (cardCount < FIXTURE_CARDS.length) {
+  if (cardCount < cards.length) {
     await stopServer(boot.child);
     cleanupSandboxHome(home);
     throw new Error(
-      `bootSandbox: GET /api/board never reported ${FIXTURE_CARDS.length} cards (last seen ${cardCount})`,
+      `bootSandbox: GET /api/board never reported ${cards.length} cards (last seen ${cardCount})`,
     );
   }
   return { home, child: boot.child, log: boot.log };
@@ -1939,6 +1995,614 @@ async function probeBaseline() {
     }
 
     console.log(JSON.stringify(record, null, 2));
+  } finally {
+    if (cdp) {
+      try {
+        cdp.close();
+      } catch {
+        // best effort
+      }
+    }
+    if (chrome) {
+      try {
+        chrome.kill("SIGTERM");
+      } catch {
+        // best effort
+      }
+    }
+    if (sandbox) await teardownSandbox(sandbox);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PROBES.surfaces (Plan 116-02): a board-wide governed-property sweep. A
+// PROBE, never a CHECK: it measures and prints, it never asserts pass or
+// fail. Covers every src/web/features/board/*.tsx file, plus two
+// incidentally-reachable non-board tokens (--font-display, --font-heading)
+// that the same booted page happens to mount alongside the board.
+// ---------------------------------------------------------------------------
+
+/** The one property set the generic reader below reads off every resolved surface root, matching
+ * this plan's own governed-property list verbatim. */
+const SURFACE_GOVERNED_PROPS = [
+  "fontSize",
+  "fontWeight",
+  "fontFamily",
+  "lineHeight",
+  "borderRadius",
+  "backgroundColor",
+  "color",
+  "borderColor",
+  "boxShadow",
+  "padding",
+  "gap",
+  "outline",
+  "transition",
+];
+
+/**
+ * ONE generic reader for every surface descriptor, never eleven bespoke ones. Resolves an element
+ * via a live JS expression, asserts UNIQUENESS then SHAPE, and only reads governed CSS properties
+ * off an element that passed both (`T-116-05`): a failed assertion records `ROOT-FAIL` with a
+ * written reason and never a reading taken from an unasserted element.
+ *
+ * @remarks
+ * `shapeExprTemplate` is a JS boolean expression with the literal placeholder `$EL`, substituted
+ * with `resolverExpr` (parenthesized) before evaluation, so callers describe the shape check
+ * against "the resolved element" without re-typing the resolver.
+ */
+async function readSurface(
+  cdp,
+  sessionId,
+  surface,
+  part,
+  resolverExpr,
+  uniquenessExpr,
+  shapeExprTemplate,
+) {
+  let uniqueOk;
+  try {
+    uniqueOk = await evalValue(cdp, sessionId, uniquenessExpr);
+  } catch (err) {
+    return {
+      surface,
+      part,
+      status: "ROOT-FAIL",
+      reason: `uniqueness assertion threw: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!uniqueOk) {
+    return {
+      surface,
+      part,
+      status: "ROOT-FAIL",
+      reason: `uniqueness assertion failed: ${uniquenessExpr}`,
+    };
+  }
+  const shapeExpr = shapeExprTemplate.split("$EL").join(`(${resolverExpr})`);
+  let shapeOk;
+  try {
+    shapeOk = await evalValue(cdp, sessionId, shapeExpr);
+  } catch (err) {
+    return {
+      surface,
+      part,
+      status: "ROOT-FAIL",
+      reason: `shape assertion threw: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!shapeOk) {
+    return {
+      surface,
+      part,
+      status: "ROOT-FAIL",
+      reason: `shape assertion failed: ${shapeExpr}`,
+    };
+  }
+  const style = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114ComputedSub((${resolverExpr}), ${JSON.stringify(SURFACE_GOVERNED_PROPS)})`,
+  );
+  const rect = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114Rect((${resolverExpr}))`,
+  );
+  return {
+    surface,
+    part,
+    status: "OK",
+    style,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+/**
+ * Reads `elExpr`'s rect and dispatches a real click there. Deliberately never calls
+ * `scrollIntoView()`: live-verified that calling it on this probe's own trigger elements stalls
+ * the renderer's very next `Runtime.evaluate` outright (a real, repeatable hang). Every card this
+ * probe clicks lives in the todo column's first four positions, on-screen with no scroll needed
+ * at any of the four breakpoints this file defines.
+ */
+async function clickElementInView(cdp, sessionId, elExpr, modifiers = 0) {
+  const rect = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114Rect(${elExpr})`,
+  );
+  await dispatchRealClick(cdp, sessionId, { x: rect.x, y: rect.y }, modifiers);
+}
+
+/**
+ * One-time interaction setup, run once before the breakpoint loop: both states it drives
+ * (`selectedIds`, a group card's own `expanded`) live in the same mounted React tree across a
+ * breakpoint change, so redoing this per breakpoint would be redundant, not more correct.
+ *
+ * @remarks
+ * Deliberately never opens the detail panel here: `DetailPanel.tsx`'s own non-docked scrim
+ * (`pointerEvents: "auto"`, `inset: 0`, board view is never docked) would intercept every
+ * subsequent real click this setup or the per-breakpoint sweep dispatches. `measureSurfaces`
+ * opens, reads, and closes the panel itself, once per breakpoint, as its own last step.
+ */
+async function setupSurfaceInteractions(cdp, sessionId) {
+  // The group card's own expand toggle stops propagation on both pointerdown and click, so it
+  // never touches selectedIds or selectedCardId, and nothing later in this probe (including the
+  // Board.tsx global Escape listener the SelectionBar.tsx setup below has to work around) resets
+  // per-card local state. Safe to run once, before the breakpoint loop.
+  await clickElementInView(
+    cdp,
+    sessionId,
+    `window.panel114FindCardByIdentifier("todo","PROP-501").querySelector('button[aria-label="Show members"]')`,
+  );
+  await sleep(150);
+}
+
+/** Every board surface descriptor's reading for one breakpoint, plus the two bonus non-board
+ * tokens. `carousel` mirrors Board.tsx's own `useMediaQuery(CAROUSEL_QUERY)` gate verbatim
+ * (`max-width: 1023px`), the exact boundary that structurally mounts or removes several of these
+ * surfaces. */
+async function measureSurfaces(cdp, sessionId, bp) {
+  const records = [];
+  const push = (rec) => records.push({ bp: bp.label, ...rec });
+  const notMounted = (surface, part, reason) =>
+    push({ surface, part, status: "NOT-MOUNTED", reason });
+  const carousel = bp.width < 1024;
+
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "Board.tsx",
+      "board-root",
+      `document.querySelector('[data-column]').parentElement`,
+      `(function(){var c=document.querySelectorAll('[data-column]');if(c.length!==${EXPECTED_COLUMN_COUNT})return false;var p=c[0].parentElement;for(var i=1;i<c.length;i++){if(c[i].parentElement!==p)return false;}return true;})()`,
+      `$EL.querySelectorAll(':scope > [data-column]').length === ${EXPECTED_COLUMN_COUNT}`,
+    ),
+  );
+
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "Column.tsx",
+      "column-root",
+      `window.panel114FindColumn("todo")`,
+      `document.querySelectorAll('[data-column="todo"]').length === 1`,
+      `$EL.getAttribute('data-column') === "todo"`,
+    ),
+  );
+
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "Column.tsx",
+      "column-header",
+      `window.panel114HeaderEl("todo")`,
+      `window.panel114FindColumn("todo").querySelectorAll(':scope > [style*="sticky"]').length === 1`,
+      `$EL.textContent.indexOf("TO DO") !== -1`,
+    ),
+  );
+
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "Column.tsx",
+      "count-chip",
+      `window.panel114CountChipEl("todo")`,
+      `window.panel114HeaderEl("todo").querySelectorAll(':scope > span').length >= 2`,
+      `/^\\d+$/.test($EL.textContent.trim())`,
+    ),
+  );
+
+  if (!carousel) {
+    push(
+      await readSurface(
+        cdp,
+        sessionId,
+        "Column.tsx",
+        "resize-handle",
+        `window.panel114ResizeHandleEl("todo")`,
+        `window.panel114FindColumn("todo").querySelectorAll(':scope > [role="separator"]').length === 1`,
+        `$EL.getAttribute('aria-orientation') === "vertical"`,
+      ),
+    );
+  } else {
+    notMounted(
+      "Column.tsx",
+      "resize-handle",
+      "Board.tsx's own carousel query (max-width: 1023px) removes the resize-handle JSX subtree entirely below 1024px",
+    );
+  }
+
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "CardView.tsx",
+      "card-root",
+      `window.panel114FindCardByIdentifier("todo","PROP-401")`,
+      `(function(){try{window.panel114FindCardByIdentifier("todo","PROP-401");return true;}catch(e){return false;}})()`,
+      `$EL.textContent.indexOf("PROP-401") !== -1`,
+    ),
+  );
+
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "Card.tsx",
+      "card-title",
+      `window.panel114TitleEl(window.panel114FindCardByIdentifier("todo","PROP-401"))`,
+      `window.panel114TitleEl(window.panel114FindCardByIdentifier("todo","PROP-401")) != null`,
+      `window.panel114FindCardByIdentifier("todo","PROP-401").contains($EL)`,
+    ),
+  );
+
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "EmptyState.tsx",
+      "empty-state",
+      `window.panel114FindColumn("in_review").querySelector(':scope > .scroll-stable-y').children[0]`,
+      `window.panel114FindColumn("in_review").querySelector(':scope > .scroll-stable-y').children.length === 1`,
+      `$EL.textContent.indexOf("Nothing waiting on you.") !== -1`,
+    ),
+  );
+
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "GroupPrRow.tsx",
+      "group-pr-row",
+      `window.panel114FindCardByIdentifier("todo","PROP-501").querySelector('button[aria-label^="PR "]').parentElement`,
+      `window.panel114FindCardByIdentifier("todo","PROP-501").querySelectorAll('button[aria-label^="PR "]').length >= 1`,
+      `$EL.querySelector('button[aria-label^="PR "]') != null`,
+    ),
+  );
+
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "MemberRow.tsx",
+      "member-row",
+      `window.panel114FindCardByIdentifier("todo","PROP-501").querySelector('[style*="border-top"]').children[0]`,
+      `(function(){var w=window.panel114FindCardByIdentifier("todo","PROP-501").querySelector('[style*="border-top"]');return w!=null&&w.children.length===1;})()`,
+      `$EL.textContent.indexOf("PROP-502") !== -1`,
+    ),
+  );
+
+  // Board.tsx's own global keydown listener clears selectedIds on ANY Escape press while
+  // selectedIds.size > 0 (its own group-selection-cancel affordance), so the previous
+  // breakpoint's MoveToPicker/SearchBox close-via-Escape below silently empties this plan's own
+  // multi-select. Redone fresh every breakpoint rather than once before the loop.
+  for (const identifier of ["PROP-402", "PROP-403"]) {
+    await clickElementInView(
+      cdp,
+      sessionId,
+      `window.panel114FindCardByIdentifier("todo", ${JSON.stringify(identifier)})`,
+      4,
+    );
+    await sleep(80);
+  }
+  await sleep(120);
+
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "SelectionBar.tsx",
+      "selection-bar",
+      `document.querySelector('button[aria-label="Clear selection"]').parentElement`,
+      `document.querySelectorAll('button[aria-label="Clear selection"]').length === 1`,
+      `$EL.textContent.indexOf("selected") !== -1`,
+    ),
+  );
+
+  if (carousel) {
+    push(
+      await readSurface(
+        cdp,
+        sessionId,
+        "StatusPillSwitcher.tsx",
+        "pill-switcher",
+        `document.querySelector('nav[aria-label="Jump to board column"]')`,
+        `document.querySelectorAll('nav[aria-label="Jump to board column"]').length === 1`,
+        `$EL.querySelectorAll('button').length === ${EXPECTED_COLUMN_COUNT}`,
+      ),
+    );
+  } else {
+    notMounted(
+      "StatusPillSwitcher.tsx",
+      "pill-switcher",
+      "Board.tsx only mounts StatusPillSwitcher when isCarousel (max-width: 1023px)",
+    );
+  }
+
+  if (carousel) {
+    const cardExpr = `window.panel114FindCardByIdentifier("todo","PROP-403")`;
+    const triggerExpr = `${cardExpr}.querySelector('button[aria-expanded]')`;
+    await clickElementInView(cdp, sessionId, triggerExpr);
+    await sleep(150);
+    push(
+      await readSurface(
+        cdp,
+        sessionId,
+        "MoveToPicker.tsx",
+        "move-to-picker",
+        `document.querySelector('[role="group"][aria-label^="Move "]')`,
+        `document.querySelectorAll('[role="group"][aria-label^="Move "]').length === 1`,
+        `$EL.querySelectorAll('button').length > 0`,
+      ),
+    );
+    await dispatchRealKey(cdp, sessionId, "Escape", "Escape", 27);
+    await sleep(100);
+  } else {
+    notMounted(
+      "MoveToPicker.tsx",
+      "move-to-picker",
+      "the card's own Move-to trigger only renders when isCarousel (CardView.tsx), the sole live path this probe uses to reach the picker",
+    );
+  }
+
+  const inputExpr = `document.querySelector('input[role="combobox"][aria-label="Search tickets"]')`;
+  let searchInputReady = !carousel;
+  if (carousel) {
+    push(
+      await readSurface(
+        cdp,
+        sessionId,
+        "SearchBox.tsx",
+        "search-trigger (bonus part)",
+        `document.querySelector('button[aria-label="Search tickets (⌘K)"]')`,
+        `document.querySelectorAll('button[aria-label="Search tickets (⌘K)"]').length === 1`,
+        `$EL.querySelector('svg') != null`,
+      ),
+    );
+    // A plain rect-read-then-click, deliberately NOT clickElementInView: this trigger lives in
+    // the always-on-top header row (never below the fold, no scroll needed at any breakpoint),
+    // and live-verified that scrollIntoView() on THIS element stalls the renderer's very next
+    // Runtime.evaluate call outright (a real, repeatable hang, not flakiness).
+    const triggerRect = await evalValue(
+      cdp,
+      sessionId,
+      `window.panel114Rect(document.querySelector('button[aria-label="Search tickets (⌘K)"]'))`,
+    );
+    await dispatchRealClick(cdp, sessionId, {
+      x: triggerRect.x,
+      y: triggerRect.y,
+    });
+    searchInputReady = Boolean(
+      await pollUntilTruthy(cdp, sessionId, `(${inputExpr}) != null`, 2000),
+    );
+    if (!searchInputReady) {
+      // One retry: an occasional CDP/renderer stall (the same class of flake
+      // checkBoardStates/checkControlStates retry up to 3 times for) can eat the first click.
+      const retryRect = await evalValue(
+        cdp,
+        sessionId,
+        `window.panel114Rect(document.querySelector('button[aria-label="Search tickets (⌘K)"]'))`,
+      );
+      await dispatchRealClick(cdp, sessionId, {
+        x: retryRect.x,
+        y: retryRect.y,
+      });
+      searchInputReady = Boolean(
+        await pollUntilTruthy(cdp, sessionId, `(${inputExpr}) != null`, 2000),
+      );
+    }
+  } else {
+    notMounted(
+      "SearchBox.tsx",
+      "search-trigger (bonus part)",
+      "the collapsed icon trigger only renders when isCarousel; >=1024px renders the inline combobox input directly instead",
+    );
+  }
+
+  if (searchInputReady) {
+    await evalValue(cdp, sessionId, `(${inputExpr}).focus()`);
+    await evalValue(cdp, sessionId, `(${inputExpr}).select()`);
+    await cdp.send("Input.insertText", { text: "log" }, sessionId);
+    await sleep(400);
+    push(
+      await readSurface(
+        cdp,
+        sessionId,
+        "SearchBox.tsx",
+        "search-listbox",
+        `document.querySelector('[role="listbox"]')`,
+        `document.querySelectorAll('[role="listbox"]').length === 1`,
+        `$EL.getAttribute('id') === "search-results-listbox"`,
+      ),
+    );
+    await dispatchRealKey(cdp, sessionId, "Escape", "Escape", 27);
+    await sleep(100);
+  } else {
+    push({
+      surface: "SearchBox.tsx",
+      part: "search-listbox",
+      status: "ROOT-FAIL",
+      reason:
+        "the carousel overlay's own combobox input never appeared after a real click on its collapsed trigger",
+    });
+    // The carousel overlay's own full-viewport transparent backdrop (z-index 15, above the
+    // detail-panel scrim's z-index 10) can be left open by a failed trigger click; a stray open
+    // backdrop would swallow every real click this probe dispatches for the REST of the run, not
+    // just this breakpoint, since `overlayOpen` is ordinary React state that survives a resize.
+    await dispatchRealClick(cdp, sessionId, { x: 5, y: 5 });
+    await dispatchRealKey(cdp, sessionId, "Escape", "Escape", 27);
+    await sleep(150);
+  }
+
+  // Bonus, not one of the eleven board files: SyncStrip.tsx's wordmark is mounted in the same
+  // booted page and settles --font-display; absent below 768px by the contract's own scope.
+  if (bp.width >= 768) {
+    push(
+      await readSurface(
+        cdp,
+        sessionId,
+        "SyncStrip.tsx",
+        "wordmark (bonus, --font-display)",
+        `Array.prototype.find.call(document.querySelectorAll('span'), function(s){ return s.textContent === "DISPATCH" && s.children.length === 0; })`,
+        `Array.prototype.filter.call(document.querySelectorAll('span'), function(s){ return s.textContent === "DISPATCH" && s.children.length === 0; }).length === 1`,
+        `$EL.textContent === "DISPATCH"`,
+      ),
+    );
+  } else {
+    notMounted(
+      "SyncStrip.tsx",
+      "wordmark (bonus, --font-display)",
+      "SyncStrip.tsx does not render the wordmark below 768px, matching design-contract.md's own font-display scope",
+    );
+  }
+
+  return records;
+}
+
+/**
+ * PanelHeader.tsx's h1 (bonus, --font-heading), read ONCE, at whatever breakpoint the main sweep
+ * left the page on (BP-D, the last entry in `BREAKPOINTS`), never resized again afterward.
+ *
+ * @remarks
+ * Live-verified across many runs that resizing the viewport WHILE `DetailPanel.tsx` is open, or
+ * even immediately before/after a fresh open on this specific card, is the one spot in the whole
+ * probe prone to wedging the renderer's very next `Runtime.evaluate` outright (a real, repeatable
+ * hang tied to this exact transition, not ordinary CPU-contention flakiness the retry wrapper
+ * already absorbs elsewhere). A single reading with zero further resizes sidesteps it entirely.
+ * `--font-heading` is not breakpoint-dependent in the contract (17px at every width), so one live
+ * reading is sufficient evidence; it is never closed afterward, the sandbox tears down right
+ * after this function returns.
+ */
+async function measurePanelHeaderOnce(cdp, sessionId, bp) {
+  const rect = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel114Rect(window.panel114FindCardByIdentifier("todo","PROP-403"))`,
+  );
+  await dispatchRealClick(cdp, sessionId, { x: rect.x, y: rect.y });
+  await sleep(250);
+  const record = await readSurface(
+    cdp,
+    sessionId,
+    "PanelHeader.tsx",
+    "panel-title (bonus, --font-heading)",
+    `document.querySelector('h1[title]')`,
+    `document.querySelectorAll('h1[title]').length === 1`,
+    `$EL.textContent.length > 0 && $EL.textContent !== "Select a ticket"`,
+  );
+  return [{ bp: bp.label, ...record }];
+}
+
+/**
+ * Retry wrapper, same shape and reasoning as {@link checkBoardStates}'s own: a full sandbox boot
+ * plus over 200 CDP round trips (roughly 3x any single existing check) occasionally hits an
+ * unresponsive `Runtime.evaluate` under CPU contention from the developer's own live desktop
+ * session (a renderer stall, not a code defect); a fresh sandbox boot on the next attempt
+ * reliably clears it. A higher budget than the six checks' own `MAX_ATTEMPTS = 3`, matching this
+ * probe's proportionally higher round-trip count.
+ */
+async function probeSurfaces() {
+  const MAX_ATTEMPTS = 5;
+  let lastErr;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await probeSurfacesOnce();
+      return;
+    } catch (err) {
+      lastErr = err;
+      console.error(
+        `panel-114 --probe surfaces: attempt ${attempt}/${MAX_ATTEMPTS} threw (likely CDP/renderer contention, not a code defect): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  throw lastErr;
+}
+
+async function probeSurfacesOnce() {
+  let sandbox = null;
+  let chrome = null;
+  let cdp = null;
+  const allRecords = [];
+  try {
+    console.log("panel-114 --probe surfaces: booting sandbox");
+    sandbox = await bootSandbox("surfaces", SURFACE_PROBE_CARDS);
+    console.log(
+      `panel-114 --probe surfaces: sandbox home ${sandbox.home}, launching Chrome`,
+    );
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+    const { sessionId } = await openPage(cdp, { url: "about:blank" });
+    await cdp.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      { source: MEASURE_HELPERS_SRC },
+      sessionId,
+    );
+    await cdp.send(
+      "Page.navigate",
+      { url: `http://127.0.0.1:${SANDBOX_PORT}/` },
+      sessionId,
+    );
+    const loaded = await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `document.getElementById("root") != null`,
+      READY_TIMEOUT_MS,
+    );
+    if (!loaded)
+      throw new Error("probeSurfaces: #root never appeared after navigation");
+    // Splash.tsx's own unconditional 1.3s overlay, the same settle window every other probe/check
+    // in this file uses.
+    await sleep(1450);
+
+    await setupSurfaceInteractions(cdp, sessionId);
+
+    for (const bp of BREAKPOINTS) {
+      console.log(`panel-114 --probe surfaces: measuring ${bp.label}`);
+      await applyBreakpoint(cdp, sessionId, bp);
+      await sleep(300);
+      const records = await measureSurfaces(cdp, sessionId, bp);
+      allRecords.push(...records);
+    }
+
+    console.log(
+      "panel-114 --probe surfaces: measuring PanelHeader.tsx (bonus)",
+    );
+    allRecords.push(
+      ...(await measurePanelHeaderOnce(
+        cdp,
+        sessionId,
+        BREAKPOINTS[BREAKPOINTS.length - 1],
+      )),
+    );
+
+    console.log(JSON.stringify(allRecords, null, 2));
   } finally {
     if (cdp) {
       try {
@@ -5380,6 +6044,7 @@ const BREAKS = {
 
 const PROBES = {
   baseline: probeBaseline,
+  surfaces: probeSurfaces,
 };
 
 // ---------------------------------------------------------------------------
