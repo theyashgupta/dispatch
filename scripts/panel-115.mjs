@@ -2030,8 +2030,18 @@ async function measureSurfaces(cdp, sessionId, bp) {
       ? "CardTimeline.tsx's own `{expanded && (...)}` conditional render removes #card-timeline-region from the DOM entirely while collapsed, live-confirmed by a real toggle click this run, the correct absence, not a probe gap"
       : "toggle click did not collapse the region within 150ms, recorded honestly rather than silently reusing the expanded reading",
   );
-  await clickElementInView(cdp, sessionId, cardTimelineToggleExpr);
-  await sleep(150);
+  // Re-expand ONLY if the collapse actually landed: if the first click missed, an unconditional
+  // second click would collapse the region instead and silently poison every remaining
+  // breakpoint's timeline-region-expanded reading. Verify the re-expand landed before moving on.
+  if (timelineNowCollapsed) {
+    await clickElementInView(cdp, sessionId, cardTimelineToggleExpr);
+    await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `document.querySelector('#card-timeline-region') != null`,
+      2_000,
+    );
+  }
 
   // --- SURF-13 DetailPanel.tsx ----------------------------------------------
   push(
