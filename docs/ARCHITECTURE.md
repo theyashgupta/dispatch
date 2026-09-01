@@ -898,17 +898,30 @@ manager (`adapters/ttyd.ts`) spawns, tracks, and reuses a writable, loopback-onl
 an existing `dsp-<identifier>` tmux session so the live `claude` REPL can be embedded in the
 detail-panel iframe (`TERM-01`). Its invocation is ONE fixed, unconditional shape — no environment
 variable selects an alternate form: `ttyd -W -i 127.0.0.1 -p 0 -b /sessions/<sessionId>/terminal -T
-tmux-256color -t disableLeaveAlert=true -t DISPATCH_TTYD_REVISION_<revision>=1 tmux -u attach -t
-=<session>`. `-T tmux-256color` is load-bearing, not cosmetic (`TERM-05`): it is the TERM string the
-no-alt-screen override below is scoped to, so an attaching client identifying itself as anything else
-would not get tmux's smcup/rmcup cancellation and would lose local scrollback entirely. The two
-`-t` tokens are `disableLeaveAlert` and the inert retained-key revision token — there is no
-`-I <index>`, no `-t theme=`/`fontFamily`/`fontSize`: look, font, and every interaction pattern are
-entirely client-owned (below), and the retained-key token is now the SOLE re-adoption fingerprint
-(the old flag-OFF JSON theme marker this token used to coexist with is retired — a ttyd spawned by
-an older, pre-retirement dispatch build no longer matches `compatible` and is swept rather than
-adopted on the first restart after this ships, a deliberate one-time degradation, never a
-regression).
+tmux-256color -t disableLeaveAlert=true -t DISPATCH_TTYD_REVISION_<revision>=1 -t
+DISPATCH_TTYD_INSTANCE_<id>=1 tmux -u attach -t =<session>`. `-T tmux-256color` is load-bearing, not
+cosmetic (`TERM-05`): it is the TERM string the no-alt-screen override below is scoped to, so an
+attaching client identifying itself as anything else would not get tmux's smcup/rmcup cancellation
+and would lose local scrollback entirely. The three `-t` tokens are `disableLeaveAlert` and the two
+inert retained-key tokens (revision and instance, below) — there is no `-I <index>`, no `-t
+theme=`/`fontFamily`/`fontSize`: look, font, and every interaction pattern are entirely client-owned
+(below), and the two retained-key tokens together are the re-adoption fingerprint (the old flag-OFF
+JSON theme marker the revision token used to coexist with is retired — a ttyd spawned by an older,
+pre-retirement dispatch build no longer matches `compatible` and is swept rather than adopted on the
+first restart after this ships, a deliberate one-time degradation, never a regression).
+
+**ttyd ownership is scoped per Dispatch instance by `DISPATCH_TTYD_INSTANCE_<id>`.** `<id>` is the
+first 12 hex chars of `sha256(DISPATCH_DIR)`, so two instances on one machine with different data
+directories (a dev checkout or sandbox run under another `HOME`) carry different ids. Like the
+revision token, the identity lives in the KEY, not the value, because ttyd rewrites `=` to a space
+in its proctitle. The boot-time scan (`classifyDspTtydProcesses`, `adapters/ttyd-fingerprint.ts`)
+classifies every fingerprinted ttyd three ways: OUR instance key → sweep candidate and, with the
+exact current revision key, adoptable; a DIFFERENT instance key → excluded outright, never swept and
+never adopted, so a second instance booting can no longer kill the first instance's terminals; NO
+instance key (spawned by a pre-instance-key build) → sweep candidate only, so legacy processes are
+cleaned up once after upgrade. `compatible` now requires BOTH keys, which only narrows the
+re-adoption fingerprint. `uninstall` counts and kills through the same classification, so it also
+leaves another instance's ttyd alone.
 
 **Phase 92 re-keyed the base path from the card to the session (`PROXY-01`), and
 `TTYD_RUNTIME_REVISION` bumped to 6 in the same commit.** `resolveLiveTtydPort`

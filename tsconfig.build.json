@@ -7,5 +7,6 @@
     "declaration": false,
     "sourceMap": false
   },
-  "include": ["src/server", "src/shared"]
+  "include": ["src/server", "src/shared"],
+  "exclude": ["src/**/*.test.ts"]
 }

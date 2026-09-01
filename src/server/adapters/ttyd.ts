@@ -1,57 +1,14 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import net from "node:net";
-import path from "node:path";
 import { promisify } from "node:util";
 import { store } from "../store/board.store.js";
+import {
+  TTYD_INSTANCE_RETAINED_KEY,
+  TTYD_RUNTIME_REVISION_RETAINED_KEY,
+  classifyDspTtydProcesses,
+} from "./ttyd-fingerprint.js";
 
 const execFileP = promisify(execFile);
-/**
- * Bumped 5 -> 6 alongside the `-b` base path moving from card-keyed to session-keyed (`PROXY-01`).
- * A ttyd spawned by an earlier build carries a card-keyed `-b`, and adopting it would hand the app
- * a live-looking pane the new session-keyed route cannot address. Old-revision processes fall out
- * of `compatible`, are never re-adopted, and are therefore swept — a deliberate, one-time,
- * user-visible reconnect on first boot after upgrade, never a silent adoption of an unaddressable
- * pane. The re-adoption fingerprint has only NARROWED, per the rule below.
- * @remarks Bumped 6 -> 7 for `TERM-05`: a pre-`-T tmux-256color` ttyd attaches on the wrong TERM,
- * so the no-alt-screen `terminal-overrides` entry never matches it and the client it serves has no
- * local scrollback and no way to self-heal. Same one-time reconnect, same reasoning: swept, never
- * re-adopted.
- * @see docs/ARCHITECTURE.md#terminal-ttyd
- */
-const TTYD_RUNTIME_REVISION = 7;
-const TTYD_RUNTIME_REVISION_KEY = "DISPATCH_TTYD_REVISION";
-
-/**
- * The sole re-adoption fingerprint, `-t`'d as a retained bare key (arbitrary value `1`) rather
- * than in the theme JSON that used to also carry it — that JSON is gone now that the native
- * client owns theme/font, so this key is the ONLY marker left. It lives in the KEY, not the
- * value, because ttyd rewrites `=`→space in its proctitle — a value-side revision would split
- * into two separate, ungreppable tokens (RESEARCH.md §4, empirically verified against installed
- * ttyd 1.7.7).
- * @see docs/ARCHITECTURE.md#terminal-ttyd
- */
-const TTYD_RUNTIME_REVISION_RETAINED_KEY = `${TTYD_RUNTIME_REVISION_KEY}_${TTYD_RUNTIME_REVISION}`;
-
-const escapeRegExp = (s: string): string =>
-  s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-/**
- * Ownership arm that survives ttyd's proctitle rewrite. ttyd overwrites its own argv buffer at
- * startup (rendering `-t key=value` as `-t key value`), and when an earlier token is large enough
- * to fill that fixed buffer the TRAILING command is dropped outright — a pre-2.7.0 ttyd carrying
- * the retired multi-KB theme JSON shows no `tmux attach` in `ps` at all, empirically confirmed
- * against ttyd 1.7.7. Such a process matched neither the `tmux`+`attach` arm nor the
- * current-revision arm, so it was never swept AND never adopted: it leaked across every restart
- * and upgrade, holding its port and serving its session from the retired patched index forever.
- * `-b /sessions/<sessionId>/terminal` is early enough to always survive the rewrite and is
- * specific enough to be dispatch's own. This widens the SWEEP arm ONLY — `compatible` still
- * demands the exact current revision key, because a re-adoption fingerprint may only ever narrow.
- * The regex itself is agnostic to what the single opaque segment between `/sessions/` and
- * `/terminal` names (a card id, formerly, or a session id, now), so it needs no code change here.
- * @see docs/ARCHITECTURE.md#terminal-ttyd
- */
-const DSP_BASE_PATH_RE = /(?:^|\s)-b\s+\/sessions\/[^\s/]+\/terminal(?:\s|$)/;
-
 /**
  * `ps -axww` prints each process's FULL command line, and a leaked pre-2.7.0 ttyd contributes
  * ~140KB of retired theme JSON on its own. Node's 1 MiB `execFile` default is therefore reachable
@@ -59,17 +16,6 @@ const DSP_BASE_PATH_RE = /(?:^|\s)-b\s+\/sessions\/[^\s/]+\/terminal(?:\s|$)/;
  * a scan that throws sweeps nothing, which leaks another ttyd, which enlarges the next scan.
  */
 const PS_MAX_BUFFER = 64 * 1024 * 1024;
-
-/**
- * Boundary-anchored matcher for the current revision inside a ttyd proctitle. A bare substring
- * `includes` of the retained key would also fire on a future revision 40–49 (`…REVISION_4` is a
- * prefix of `…REVISION_40`), silently adopting a process spawned by an incompatible runtime
- * contract. The trailing `(?!\d)` negative lookahead pins the match to exactly this revision.
- * @see docs/ARCHITECTURE.md#terminal-ttyd
- */
-const REVISION_RETAINED_KEY_RE = new RegExp(
-  `${escapeRegExp(TTYD_RUNTIME_REVISION_RETAINED_KEY)}(?!\\d)`,
-);
 
 interface TtydProc {
   child: ChildProcess | null;
@@ -183,10 +129,10 @@ export function getLiveTtydPort(session: string): number | null {
  * change ttyd's server-side routing only, never the served bytes. ttyd stays loopback-bound (`-i
  * 127.0.0.1 -p 0` unchanged) — reachable only through the proxy.
  * @remarks This argv shape is fixed and unconditional — no environment variable selects an
- * alternate form. `disableLeaveAlert=true` and `TTYD_RUNTIME_REVISION_RETAINED_KEY=1` are the only
- * two `-t` tokens: no `-I` served index, no `-t theme|fontFamily|fontSize` (dispatch's own
- * built-bundle client now owns the look entirely), and the retained key is the sole re-adoption
- * fingerprint left once the theme JSON marker is gone.
+ * alternate form. `disableLeaveAlert=true`, `TTYD_RUNTIME_REVISION_RETAINED_KEY=1` and
+ * `TTYD_INSTANCE_RETAINED_KEY=1` are the only three `-t` tokens: no `-I` served index, no `-t
+ * theme|fontFamily|fontSize` (dispatch's own built-bundle client now owns the look entirely). The
+ * two retained keys together are the re-adoption fingerprint: exact revision AND this instance.
  * @remarks `tmux -u` states the client's UTF-8 mode explicitly instead of letting tmux derive it
  * from `LANG`/`LC_ALL`/`LC_CTYPE`. This client inherits the backend's environment, and a
  * launchd-started dispatch gets a minimal one with no locale set at all — a non-UTF-8 tmux client
@@ -214,6 +160,8 @@ async function spawnTtyd(session: string, sessionId: string): Promise<number> {
       "disableLeaveAlert=true",
       "-t",
       `${TTYD_RUNTIME_REVISION_RETAINED_KEY}=1`,
+      "-t",
+      `${TTYD_INSTANCE_RETAINED_KEY}=1`,
       "tmux",
       "-u",
       "attach",
@@ -442,8 +390,9 @@ export function killTtyd(session: string): void {
  * sweep, split out so a non-destructive caller (`uninstall --dry-run`) can COUNT orphans without
  * killing them.
  *
- * Fingerprint (RESEARCH Probe 2/3): match iff basename(argv[0]) === "ttyd" AND the command has
- * argv "tmux" + "attach", OR Dispatch's exact current revision marker, OR Dispatch's
+ * Fingerprint (RESEARCH Probe 2/3): match iff basename(argv[0]) === "ttyd" AND the command does
+ * NOT carry another instance's `DISPATCH_TTYD_INSTANCE_<id>` key AND it has argv "tmux" +
+ * "attach", OR Dispatch's exact current revision marker, OR Dispatch's
  * `-b /sessions/<sessionId>/terminal` base path. The basename check excludes the backend's own
  * node/ps/shell commands that merely mention "ttyd" (Pitfall 1); a generic full-command-line
  * substring match would self-match the backend (Pitfall 2), so only exact fixed markers are
@@ -468,16 +417,11 @@ export async function findDspTtydOrphans(): Promise<number[]> {
 }
 
 /**
- * Classify the unchanged Dispatch ttyd ownership fingerprint by runtime-contract compatibility.
- * Every fingerprint match remains sweepable, while only an exact current revision is adoptable.
- * `hasCurrentRevision` now matches ONLY the retained-key token (`-t
- * DISPATCH_TTYD_REVISION_<N>=1`) — with the flag gone there is one argv shape, so the flag-OFF
- * JSON theme marker this used to also match no longer exists. A ttyd spawned by an older dispatch
- * build (pre-retirement, still carrying the JSON marker) therefore falls out of `compatible`: it
- * stays a sweep candidate via the unchanged `tmux`+`attach` fingerprint, gets killed on boot, and
- * the panel fresh-spawns a current-shape ttyd in its place. That one-time degradation on the first
- * restart after this ships is deliberate, not a bug — narrowing a re-adoption fingerprint may only
- * decline adoption, never widen it.
+ * Run the machine-wide `ps` scan and classify it via `classifyDspTtydProcesses`.
+ *
+ * @remarks A `ps` failure is tolerated (empty sets, never crashes boot) but is LOUD: silently
+ * returning empty disables sweep and re-adoption wholesale, which is indistinguishable from a
+ * clean machine.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 async function scanDspTtydProcesses(): Promise<{
@@ -496,26 +440,7 @@ async function scanDspTtydProcesses(): Promise<{
     );
     return { candidates: new Set(), compatible: new Set() };
   }
-  const candidates = new Set<number>();
-  const compatible = new Set<number>();
-  for (const line of out.split("\n")) {
-    const m = line.match(/^\s*(\d+)\s+(.*)$/);
-    if (!m) continue;
-    const pid = Number(m[1]);
-    if (pid === process.pid || pid === process.ppid) continue;
-    const argv = m[2].trim().split(/\s+/);
-    if (path.basename(argv[0]) !== "ttyd") continue;
-    const hasCurrentRevision = REVISION_RETAINED_KEY_RE.test(m[2]);
-    if (
-      !(argv.includes("tmux") && argv.includes("attach")) &&
-      !hasCurrentRevision &&
-      !DSP_BASE_PATH_RE.test(m[2])
-    )
-      continue;
-    candidates.add(pid);
-    if (hasCurrentRevision) compatible.add(pid);
-  }
-  return { candidates, compatible };
+  return classifyDspTtydProcesses(out, new Set([process.pid, process.ppid]));
 }
 
 /**
