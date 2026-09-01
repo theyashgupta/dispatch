@@ -1,6 +1,7 @@
 interface Rect {
   left: number;
   top: number;
+  at: number;
 }
 
 /**
@@ -66,13 +67,23 @@ export function suppressCardMoveFlip(cardId: string): void {
 /**
  * Records `node`'s current rect under `cardId`, called from the FLIP layout
  * effect's cleanup on unmount.
+ *
+ * @remarks
+ * Rects are viewport-relative and stamped with `performance.now()`: cleanup
+ * runs on EVERY unmount (view switches, resorts), not only column moves, so
+ * `playCardMoveFlip` discards any entry older than {@link FLIP_STALE_MS}
+ * rather than replaying a slide from coordinates the layout no longer holds.
  */
 export function recordCardMoveRect(cardId: string, node: HTMLElement): void {
   if (outgoingRects.size >= MAX_TRACKED_CARDS) {
     outgoingRects.clear();
   }
   const rect = node.getBoundingClientRect();
-  outgoingRects.set(cardId, { left: rect.left, top: rect.top });
+  outgoingRects.set(cardId, {
+    left: rect.left,
+    top: rect.top,
+    at: performance.now(),
+  });
 }
 
 /**
@@ -102,6 +113,7 @@ export function playCardMoveFlip(cardId: string, node: HTMLElement): void {
   const prev = outgoingRects.get(cardId);
   if (prev == null) return;
   outgoingRects.delete(cardId);
+  if (performance.now() - prev.at > FLIP_STALE_MS) return;
 
   const next = node.getBoundingClientRect();
   const dx = prev.left - next.left;
