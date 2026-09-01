@@ -431,10 +431,12 @@ export function DetailPanel({
               touchAction: "none",
               zIndex: 3,
               background: "transparent",
-              borderLeft:
-                hoveringHandle || resizing
-                  ? "2px solid var(--accent)"
+              borderLeft: resizing
+                ? "2px solid var(--accent)"
+                : hoveringHandle
+                  ? "2px solid var(--hover-resize-handle)"
                   : "2px solid transparent",
+              transition: "border-left-color 80ms var(--easing-enter)",
               ...focusRing(handleFocused),
             }}
           >

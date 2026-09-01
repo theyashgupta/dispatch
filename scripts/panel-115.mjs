@@ -1123,6 +1123,32 @@ window.panel115NormalizeColor = function (raw) {
   var d = ctx.getImageData(0, 0, 1, 1).data;
   return "rgba(" + d[0] + ", " + d[1] + ", " + d[2] + ", " + (d[3] / 255).toFixed(3) + ")";
 };
+/** Resolves any CSS <color>-producing \`cssValue\` (a bare token, a color-mix(), a literal) to its
+ * computed \`background-color\` string via a throwaway off-screen probe element, ported from
+ * panel-114.mjs's \`panel114ResolveBg\`. Callers round-trip the result through
+ * \`panel115NormalizeColor\` for a stable, format-independent comparison. */
+window.panel115ResolveBg = function (cssValue) {
+  var probe = document.createElement("div");
+  probe.style.cssText =
+    "position:absolute;top:-9999px;left:-9999px;pointer-events:none;background:" + cssValue;
+  document.body.appendChild(probe);
+  var value = getComputedStyle(probe).backgroundColor;
+  document.body.removeChild(probe);
+  return value;
+};
+/** Same technique as {@link window.panel115ResolveBg}, resolving the LEFT border's color instead:
+ * DetailPanel.tsx's own resize handle is styled via \`borderLeft\`, not \`background\`, ported from
+ * panel-114.mjs's \`panel114ResolveBorderRightColor\` (that board handle uses \`borderRight\`). */
+window.panel115ResolveBorderLeftColor = function (cssValue) {
+  var probe = document.createElement("div");
+  probe.style.cssText =
+    "position:absolute;top:-9999px;left:-9999px;pointer-events:none;border-left:2px solid " +
+    cssValue;
+  document.body.appendChild(probe);
+  var value = getComputedStyle(probe).borderLeftColor;
+  document.body.removeChild(probe);
+  return value;
+};
 /** Direct children of the FIRST \`.reading-surface\` under the open panel (the ReferenceBlocks +
  * CardTimeline container): the vertical gap between each adjacent sibling pair, computed as
  * next.top - prev.bottom, exactly the LUI-05 finding plan 115-03 closes. Entry 0 is the
@@ -1257,6 +1283,42 @@ async function blurActive(cdp, sessionId) {
     sessionId,
     `if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();`,
   );
+}
+
+/**
+ * Rendered-state pressed read: dispatches `pointerdown`/`pointerup` directly via `dispatchEvent`,
+ * never through CDP's `Input` domain, ported verbatim from panel-114.mjs's `readUnderSyntheticPress`.
+ * A real CDP `mousePressed`/`mouseReleased` at the same point fires a real trusted `click`
+ * afterward; every panel-local control this plan measures has an `onClick` side effect the check
+ * has no business causing (`switchSession`, `window.open`, panel toggles), so this synthetic
+ * dispatch (which never synthesizes a `click`) is the uniform safe technique here, the same reason
+ * 114-05 used it for the board's view-switch segment. Returns `{ pressed, after }`, both resolved
+ * via `panel115ComputedSub`.
+ */
+async function readUnderSyntheticPress(cdp, sessionId, elExpr, props) {
+  await evalValue(
+    cdp,
+    sessionId,
+    `${elExpr}.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", button: 0, buttons: 1 }))`,
+  );
+  await sleep(HOVER_SETTLE_MS);
+  const pressed = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel115ComputedSub(${elExpr}, ${JSON.stringify(props)})`,
+  );
+  await evalValue(
+    cdp,
+    sessionId,
+    `${elExpr}.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", button: 0, buttons: 0 }))`,
+  );
+  await sleep(50);
+  const after = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel115ComputedSub(${elExpr}, ${JSON.stringify(props)})`,
+  );
+  return { pressed, after };
 }
 
 /** Tolerance for float px comparisons: CDP's `getBoundingClientRect`/`getComputedStyle` reads are
@@ -2584,29 +2646,711 @@ async function runBreakElevation() {
 }
 
 // ---------------------------------------------------------------------------
+// states: break-proven check extending the v3.4 hover/pressed/focus state
+// palette and CSS-only motion to every panel-local interactive element
+// (LUI-05/LUI-07's states half). Boots the sandbox once, opens the fully
+// populated fixture card's panel, and at each of the four breakpoints reads
+// resting/hover/pressed/focus-visible plus the resolved CSS transition for
+// every panel-local control the plan's interfaces block names.
+// ---------------------------------------------------------------------------
+
+const PANEL_HEADER_PATH = join(
+  REPO_ROOT,
+  "src",
+  "web",
+  "features",
+  "detail",
+  "PanelHeader.tsx",
+);
+const SESSION_LOST_SECTION_PATH = join(
+  REPO_ROOT,
+  "src",
+  "web",
+  "features",
+  "detail",
+  "SessionLostSection.tsx",
+);
+const START_ANOTHER_SESSION_BUTTON_PATH = join(
+  REPO_ROOT,
+  "src",
+  "web",
+  "features",
+  "detail",
+  "StartAnotherSessionButton.tsx",
+);
+const CARD_TIMELINE_PATH = join(
+  REPO_ROOT,
+  "src",
+  "web",
+  "features",
+  "detail",
+  "CardTimeline.tsx",
+);
+const PR_LIST_PATH = join(
+  REPO_ROOT,
+  "src",
+  "web",
+  "features",
+  "detail",
+  "PrList.tsx",
+);
+const PREVIEW_ROW_PATH = join(
+  REPO_ROOT,
+  "src",
+  "web",
+  "features",
+  "detail",
+  "PreviewRow.tsx",
+);
+const SESSION_SWITCHER_PATH = join(
+  REPO_ROOT,
+  "src",
+  "web",
+  "features",
+  "detail",
+  "SessionSwitcher.tsx",
+);
+
+/** Every panel-local file this plan's interfaces block names, none of which may render a raw
+ * `<button>` outside the governed `IconButton`/`Button` primitives (a shared-mechanism proof, the
+ * same category as `control-states`'s own danger-variant proof in panel-114.mjs): a raw button
+ * inherits the browser's ungoverned default hover/pressed/focus rendering, exactly the defect
+ * CONTEXT.md's "nothing keeps an inherited browser default state" truth forbids. `PanelHeader.tsx`
+ * carries several column/state-gated action buttons this fixture's `column: "done"` card never
+ * renders (Promote/Move/Sync/Clean up/Start); `SessionLostSection.tsx` renders only for a LOST
+ * active session (this fixture's active session is live); `StartAnotherSessionButton.tsx` returns
+ * `null` outright on `column: "done"`. None of the three is live-reachable with this fixture
+ * without inventing a second fixture card this plan has no other use for, so this source-level
+ * proof is the honest substitute: it establishes every button in these files still routes through
+ * the SAME primitive this check independently live-proves elsewhere in this run (Details toggle,
+ * CardTimeline toggle, PR/preview open, session-switcher segments).
+ */
+const STATES_RAW_BUTTON_SWEEP = [
+  { path: PANEL_HEADER_PATH, label: "PanelHeader.tsx" },
+  { path: SESSION_LOST_SECTION_PATH, label: "SessionLostSection.tsx" },
+  {
+    path: START_ANOTHER_SESSION_BUTTON_PATH,
+    label: "StartAnotherSessionButton.tsx",
+  },
+  { path: CARD_TIMELINE_PATH, label: "CardTimeline.tsx" },
+  { path: PR_LIST_PATH, label: "PrList.tsx" },
+  { path: PREVIEW_ROW_PATH, label: "PreviewRow.tsx" },
+  { path: SESSION_SWITCHER_PATH, label: "SessionSwitcher.tsx" },
+];
+
+function checkNoRawButtons(violations) {
+  for (const f of STATES_RAW_BUTTON_SWEEP) {
+    const src = readFileSync(f.path, "utf8");
+    if (/<button[\s>]/.test(src)) {
+      violations.push(
+        `states: ${f.label} renders a raw <button> element outside the governed IconButton/Button primitive (shared-mechanism proof failed)`,
+      );
+    }
+  }
+}
+
+function assertStatesToken(violations, bp, label, tier, measured, expected) {
+  if (!colorsMatch(measured, expected)) {
+    violations.push(
+      `states(${bp.label}): ${label} ${tier} backgroundColor expected ${expected}, observed ${measured}`,
+    );
+  }
+}
+
+/** Confirms `transitionStr` names `property` with a strictly positive duration, in either `s` or
+ * `ms` units (Chrome's own serialization is not stable across shorthand forms): the CSS-only proof
+ * a WAAPI call or an instant swap cannot satisfy, so the reduced-motion kill switch (a CSS-only
+ * block, 113-04 finding) genuinely reaches every state change this check asserts. */
+function assertStatesTransition(
+  violations,
+  bp,
+  label,
+  transitionStr,
+  property,
+) {
+  const re = new RegExp(`${property}\\s+([\\d.]+)(m?s)`);
+  const match = re.exec(transitionStr ?? "");
+  const durationMs = match
+    ? parseFloat(match[1]) * (match[2] === "s" ? 1000 : 1)
+    : 0;
+  if (match == null || durationMs <= 0) {
+    violations.push(
+      `states(${bp.label}): ${label} resolved transition "${transitionStr}" does not name ${property} with a non-zero CSS transition duration`,
+    );
+  }
+}
+
+function assertStatesFocus(violations, bp, label, reached, style) {
+  if (!reached) {
+    violations.push(
+      `states(${bp.label}): ${label} Tab traversal never reached it (focus-visible unreachable)`,
+    );
+    return;
+  }
+  if (style.outlineStyle !== "solid" || style.outlineWidth !== "2px") {
+    violations.push(
+      `states(${bp.label}): ${label} focus-visible outline expected 2px solid, observed ${style.outlineWidth} ${style.outlineStyle}`,
+    );
+  }
+}
+
+/**
+ * Full resting/hover/pressed/focus/transition read-and-assert for one `IconButton`/`Button`-backed
+ * control, reused across every panel-local control this check measures except the resize handle
+ * (a different element shape, styled via `borderLeft` rather than `background`, and pressed by a
+ * real drag rather than a click). Hover uses `real` (BP-A/BP-B) or rendered-state (BP-C/BP-D), the
+ * convention `readUnderHover`'s own JSDoc already documents. Pressed always uses the synthetic
+ * dispatch (`readUnderSyntheticPress`), since every control this check measures has an `onClick`
+ * side effect the check has no business triggering.
+ */
+async function measureAndAssertControl(
+  cdp,
+  sessionId,
+  violations,
+  bp,
+  real,
+  { label, expr, expectedResting, expectedHover, expectedPressed },
+) {
+  const props = ["backgroundColor", "transition"];
+  const resting = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel115ComputedSub(${expr}, ${JSON.stringify(props)})`,
+  );
+  if (resting == null) {
+    violations.push(`states(${bp.label}): ${label} not found in the DOM`);
+    return;
+  }
+  const restingBg = await normalizeColor(
+    cdp,
+    sessionId,
+    resting.backgroundColor,
+  );
+  // Live-confirmed: a bare Tab-key press does not always restart sequential focus navigation
+  // from the top of the document after a blur(); this file's own repeated tabTraverseTo calls,
+  // issued for controls out of strict DOM order, were observed dragging the scrollable
+  // `.reading-surface` container to a scrollTop far from 0 (up to its max), a side effect of an
+  // EARLIER control's own traversal, leaving a LATER (but DOM-earlier) control's real on-screen
+  // rect off-screen (a negative `top`) by the time this function computes it for a REAL
+  // coordinate-based hover dispatch. Explicitly scrolling the element into view before every
+  // interaction (the same `scrollIntoView` idiom `openPrimaryCardPanel`/`checkElevation` already
+  // use for the board carousel) makes this function's own real-input reads correct regardless of
+  // tab-order side effects from whichever control ran before it.
+  await evalValue(
+    cdp,
+    sessionId,
+    `${expr}.scrollIntoView({ behavior: "instant", block: "nearest" })`,
+  );
+  await sleep(50);
+  const hover = await readUnderHover(cdp, sessionId, expr, props, real);
+  const hoverBg = await normalizeColor(
+    cdp,
+    sessionId,
+    hover.value.backgroundColor,
+  );
+  const press = await readUnderSyntheticPress(cdp, sessionId, expr, props);
+  const pressBg = await normalizeColor(
+    cdp,
+    sessionId,
+    press.pressed.backgroundColor,
+  );
+  const traversal = await tabTraverseTo(cdp, sessionId, expr);
+  const focusStyle = traversal.reached
+    ? await evalValue(
+        cdp,
+        sessionId,
+        `window.panel115ComputedSub(document.activeElement, ["outlineWidth","outlineStyle"])`,
+      )
+    : { outlineWidth: "none", outlineStyle: "none" };
+  await blurActive(cdp, sessionId);
+  await moveMouseAway(cdp, sessionId);
+  await sleep(50);
+
+  console.log(
+    `states(${bp.label}): ${label} resting=${restingBg} hover=${hoverBg} (${hover.mode}) ` +
+      `pressed=${pressBg} transition="${resting.transition}" focusReached=${traversal.reached}`,
+  );
+
+  assertStatesToken(
+    violations,
+    bp,
+    label,
+    "resting",
+    restingBg,
+    expectedResting,
+  );
+  assertStatesToken(violations, bp, label, "hover", hoverBg, expectedHover);
+  assertStatesToken(violations, bp, label, "pressed", pressBg, expectedPressed);
+  assertStatesTransition(
+    violations,
+    bp,
+    label,
+    resting.transition,
+    "background-color",
+  );
+  assertStatesFocus(violations, bp, label, traversal.reached, focusStyle);
+}
+
+async function checkStates(violations) {
+  const MAX_ATTEMPTS = 3;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const attemptViolations = [];
+    try {
+      await checkStatesOnce(attemptViolations);
+      violations.push(...attemptViolations);
+      return;
+    } catch (err) {
+      lastErr = err;
+      console.error(
+        `states: attempt ${attempt}/${MAX_ATTEMPTS} threw (likely CDP/renderer contention, not a code defect): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      if (attempt === MAX_ATTEMPTS) throw lastErr;
+    }
+  }
+}
+
+/** `SessionSwitcher.tsx`'s own `activeSegmentTint` constant, copied verbatim so the check resolves
+ * the EXACT same color-mix() expression the component composes, never a re-derivation. If that
+ * constant's value ever changes, this literal must be updated alongside it (a hazard shared by
+ * every other CSS-literal-mirroring assertion already in this file, e.g. `ELEVATION_BREAK_TARGET`). */
+const SESSION_SWITCHER_ACTIVE_TINT_CSS =
+  "color-mix(in srgb, var(--accent) 16%, var(--surface-column))";
+
+async function checkStatesOnce(violations) {
+  let sandbox = null;
+  let chrome = null;
+  let cdp = null;
+  try {
+    sandbox = await bootSandbox("check-states");
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+    const { sessionId } = await openPage(cdp, { url: "about:blank" });
+    await cdp.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      { source: MEASURE_HELPERS_SRC },
+      sessionId,
+    );
+    await cdp.send(
+      "Page.navigate",
+      { url: `http://127.0.0.1:${SANDBOX_PORT}/` },
+      sessionId,
+    );
+    const loaded = await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `document.getElementById("root") != null`,
+      READY_TIMEOUT_MS,
+    );
+    if (!loaded) {
+      violations.push("states: #root never appeared after navigation");
+      return;
+    }
+    // Splash.tsx's unconditional 1.3s overlay, same settle window every other check uses.
+    await sleep(1450);
+
+    checkNoRawButtons(violations);
+
+    // Token resolutions, once, via the same off-screen probe-element technique control-states
+    // uses in panel-114.mjs. Every resolution round-trips through normalizeColor's canvas-pixel
+    // readback since a color-mix() result's computed-style serialization is not one stable string.
+    const resolve = async (cssValue) =>
+      normalizeColor(
+        cdp,
+        sessionId,
+        await evalValue(
+          cdp,
+          sessionId,
+          `window.panel115ResolveBg(${JSON.stringify(cssValue)})`,
+        ),
+      );
+    const resolveBorderLeft = async (cssValue) =>
+      normalizeColor(
+        cdp,
+        sessionId,
+        await evalValue(
+          cdp,
+          sessionId,
+          `window.panel115ResolveBorderLeftColor(${JSON.stringify(cssValue)})`,
+        ),
+      );
+
+    const transparentBg = await resolve("transparent");
+    const hoverIconBg = await resolve("var(--surface-card-hover)");
+    const pressedIconBg = await resolve("var(--pressed-card-hover)");
+    const activeSegmentRestingBg = await resolve(
+      SESSION_SWITCHER_ACTIVE_TINT_CSS,
+    );
+    const activeSegmentHoverBg = await resolve(
+      "color-mix(in srgb, var(--accent) 22%, var(--surface-column))",
+    );
+    const activeSegmentPressedBg = await resolve(
+      `color-mix(in srgb, black 12%, ${SESSION_SWITCHER_ACTIVE_TINT_CSS})`,
+    );
+    const resizeHandleTransparentBorder =
+      await resolveBorderLeft("transparent");
+    const resizeHandleHoverBorder = await resolveBorderLeft(
+      "var(--hover-resize-handle)",
+    );
+    const resizeHandleAccentBorder = await resolveBorderLeft("var(--accent)");
+
+    console.log(
+      `states: resolved tokens transparentBg=${transparentBg} hoverIconBg=${hoverIconBg} ` +
+        `pressedIconBg=${pressedIconBg} activeSegmentResting=${activeSegmentRestingBg} ` +
+        `activeSegmentHover=${activeSegmentHoverBg} activeSegmentPressed=${activeSegmentPressedBg} ` +
+        `resizeHandleTransparentBorder=${resizeHandleTransparentBorder} ` +
+        `resizeHandleHoverBorder=${resizeHandleHoverBorder} resizeHandleAccentBorder=${resizeHandleAccentBorder}`,
+    );
+
+    const sessionGroupExpr = `document.querySelector('aside[aria-label="Ticket detail"] [role="group"][aria-label="Sessions"]')`;
+    const detailsToggleExpr = `Array.prototype.find.call(document.querySelectorAll('aside[aria-label="Ticket detail"] button[aria-expanded]'), function (b) { return b.getAttribute("aria-controls") !== "card-timeline-region"; })`;
+    const cardTimelineToggleExpr = `document.querySelector('aside[aria-label="Ticket detail"] button[aria-controls="card-timeline-region"]')`;
+    const prOpenExpr = `document.querySelector('aside[aria-label="Ticket detail"] button[aria-label^="Open PR"]')`;
+    const previewOpenExpr = `document.querySelector('aside[aria-label="Ticket detail"] button[aria-label^="Open localhost"]')`;
+    const resizeHandleExpr = `document.querySelector('aside[aria-label="Ticket detail"] [role="separator"][aria-label="Resize panel"]')`;
+
+    // Same open-once-per-run discipline as checkRhythm/checkElevation/probeBaseline:
+    // DetailPanel.tsx re-layouts an already-open panel in place on resize, and closing/reopening
+    // across the carousel boundary reproduces the DETAIL-PANEL FINDING renderer wedge
+    // (115-01/panel-114 precedent).
+    let panelOpened = false;
+    for (const bp of BREAKPOINTS) {
+      await applyBreakpoint(cdp, sessionId, bp);
+      await blurActive(cdp, sessionId);
+      await moveMouseAway(cdp, sessionId);
+      await sleep(300);
+      if (!panelOpened) {
+        await openPrimaryCardPanel(cdp, sessionId);
+        panelOpened = true;
+      } else {
+        await sleep(HOVER_SETTLE_MS);
+      }
+
+      // readUnderHover's own JSDoc: real trusted hover at BP-A/BP-B, rendered-state dispatch at
+      // BP-C/BP-D where the emulated mobile/touch device preset has no hover input.
+      const real = bp.label === "BP-A" || bp.label === "BP-B";
+
+      // --- SessionSwitcher: the three segment variants, read separately (inactive/active/lost). ---
+      await measureAndAssertControl(cdp, sessionId, violations, bp, real, {
+        label: "session-switcher segment 2 (inactive, sibling)",
+        expr: `${sessionGroupExpr}.children[1]`,
+        expectedResting: transparentBg,
+        expectedHover: hoverIconBg,
+        expectedPressed: pressedIconBg,
+      });
+      await measureAndAssertControl(cdp, sessionId, violations, bp, real, {
+        label: "session-switcher segment 3 (lost)",
+        expr: `${sessionGroupExpr}.children[2]`,
+        expectedResting: transparentBg,
+        expectedHover: hoverIconBg,
+        expectedPressed: pressedIconBg,
+      });
+      // The active segment (ordinal 1) routes through IconButton's `callerBackground` branch
+      // (114-05's fix for the board's own view-switch segment): unverified on the PANEL's own
+      // active segment until this live read, per the interfaces block's explicit instruction.
+      await measureAndAssertControl(cdp, sessionId, violations, bp, real, {
+        label: "session-switcher segment 1 (active, callerBackground branch)",
+        expr: `${sessionGroupExpr}.children[0]`,
+        expectedResting: activeSegmentRestingBg,
+        expectedHover: activeSegmentHoverBg,
+        expectedPressed: activeSegmentPressedBg,
+      });
+
+      // --- PanelHeader's "Details" toggle (Button, secondary variant). ---
+      await measureAndAssertControl(cdp, sessionId, violations, bp, real, {
+        label: "PanelHeader Details toggle",
+        expr: detailsToggleExpr,
+        expectedResting: transparentBg,
+        expectedHover: hoverIconBg,
+        expectedPressed: pressedIconBg,
+      });
+
+      // --- PrList's PR-open IconButton. Tested in DOM order relative to CardTimeline (both
+      // share the SAME scrollable `.reading-surface` container): `measureAndAssertControl`'s own
+      // `scrollIntoView` guard makes real-input reads correct regardless of order, but keeping
+      // the test order DOM-monotonic minimizes the number of full-page Tab-traversal wraps this
+      // check issues. ---
+      await measureAndAssertControl(cdp, sessionId, violations, bp, real, {
+        label: "PrList PR-open IconButton",
+        expr: prOpenExpr,
+        expectedResting: transparentBg,
+        expectedHover: hoverIconBg,
+        expectedPressed: pressedIconBg,
+      });
+
+      // --- CardTimeline's activity toggle (IconButton). ---
+      await measureAndAssertControl(cdp, sessionId, violations, bp, real, {
+        label: "CardTimeline activity toggle",
+        expr: cardTimelineToggleExpr,
+        expectedResting: transparentBg,
+        expectedHover: hoverIconBg,
+        expectedPressed: pressedIconBg,
+      });
+
+      // --- PreviewRow's preview-open IconButton (its own, separate `.reading-surface` scroll
+      // container, so no ordering constraint with the block above). ---
+      await measureAndAssertControl(cdp, sessionId, violations, bp, real, {
+        label: "PreviewRow preview-open IconButton",
+        expr: previewOpenExpr,
+        expectedResting: transparentBg,
+        expectedHover: hoverIconBg,
+        expectedPressed: pressedIconBg,
+      });
+
+      // --- Resize handle: DetailPanel.tsx:404's own takeover guard (`!docked &&
+      // !effectiveFullscreen`) means it is not rendered at all below the 1024px carousel
+      // threshold (BP-C/BP-D go `takeover`), the exact same threshold Column.tsx's own board
+      // handle uses ("absent (not rendered)" at BP-C/BP-D, panel-114's own control-states
+      // finding). Only measured at BP-A/BP-B, where it is real and `isCoarsePointer` is false (a
+      // genuine mouse hover input is valid there). Pressed is proven via a REAL CDP
+      // mousePressed/mouseReleased at the SAME point (zero movement): `handleResizePointerDown`
+      // calls `setPointerCapture`, which throws on a synthetic (non-UA-tracked) pointerId, so the
+      // synthetic dispatch this check uses everywhere else cannot reach this element's pressed
+      // state; a real CDP press IS UA-tracked and works, and a zero-movement release stays inside
+      // the 3px tap threshold, so it commits no persisted width change (component's own tap-vs-drag
+      // branch, DetailPanel.tsx `handlePointerUp`).
+      if (real) {
+        const handleResting = await evalValue(
+          cdp,
+          sessionId,
+          `window.panel115ComputedSub(${resizeHandleExpr}, ["borderLeftColor","transition"])`,
+        );
+        if (handleResting == null) {
+          violations.push(
+            `states(${bp.label}): resize handle not found in the DOM at a breakpoint where it should be rendered`,
+          );
+        } else {
+          const handleRestingBorder = await normalizeColor(
+            cdp,
+            sessionId,
+            handleResting.borderLeftColor,
+          );
+          const handleHover = await readUnderHover(
+            cdp,
+            sessionId,
+            resizeHandleExpr,
+            ["borderLeftColor"],
+            true,
+          );
+          const handleHoverBorder = await normalizeColor(
+            cdp,
+            sessionId,
+            handleHover.value.borderLeftColor,
+          );
+
+          const rect = await evalValue(
+            cdp,
+            sessionId,
+            `window.panel115Rect(${resizeHandleExpr})`,
+          );
+          await cdp.send(
+            "Input.dispatchMouseEvent",
+            {
+              type: "mousePressed",
+              x: rect.x,
+              y: rect.y,
+              button: "left",
+              buttons: 1,
+              clickCount: 1,
+            },
+            sessionId,
+          );
+          await sleep(HOVER_SETTLE_MS);
+          const handlePressed = await evalValue(
+            cdp,
+            sessionId,
+            `window.panel115ComputedSub(${resizeHandleExpr}, ["borderLeftColor"])`,
+          );
+          const handlePressedBorder = await normalizeColor(
+            cdp,
+            sessionId,
+            handlePressed.borderLeftColor,
+          );
+          await cdp.send(
+            "Input.dispatchMouseEvent",
+            {
+              type: "mouseReleased",
+              x: rect.x,
+              y: rect.y,
+              button: "left",
+              buttons: 0,
+              clickCount: 1,
+            },
+            sessionId,
+          );
+          await sleep(50);
+          await moveMouseAway(cdp, sessionId);
+
+          const traversal = await tabTraverseTo(
+            cdp,
+            sessionId,
+            resizeHandleExpr,
+          );
+          const handleFocusStyle = traversal.reached
+            ? await evalValue(
+                cdp,
+                sessionId,
+                `window.panel115ComputedSub(document.activeElement, ["outlineWidth","outlineStyle"])`,
+              )
+            : { outlineWidth: "none", outlineStyle: "none" };
+          await blurActive(cdp, sessionId);
+
+          console.log(
+            `states(${bp.label}): resize handle resting=${handleRestingBorder} hover=${handleHoverBorder} ` +
+              `pressed=${handlePressedBorder} transition="${handleResting.transition}" focusReached=${traversal.reached}`,
+          );
+
+          assertStatesToken(
+            violations,
+            bp,
+            "resize handle",
+            "resting",
+            handleRestingBorder,
+            resizeHandleTransparentBorder,
+          );
+          assertStatesToken(
+            violations,
+            bp,
+            "resize handle",
+            "hover",
+            handleHoverBorder,
+            resizeHandleHoverBorder,
+          );
+          assertStatesToken(
+            violations,
+            bp,
+            "resize handle",
+            "pressed (resizing)",
+            handlePressedBorder,
+            resizeHandleAccentBorder,
+          );
+          if (colorsMatch(handleHoverBorder, handlePressedBorder)) {
+            violations.push(
+              `states(${bp.label}): resize handle hover and pressed borderLeftColor are identical (${handleHoverBorder}), not pairwise distinct`,
+            );
+          }
+          assertStatesTransition(
+            violations,
+            bp,
+            "resize handle",
+            handleResting.transition,
+            "border-left-color",
+          );
+          assertStatesFocus(
+            violations,
+            bp,
+            "resize handle",
+            traversal.reached,
+            handleFocusStyle,
+          );
+        }
+      } else {
+        console.log(
+          `states(${bp.label}): resize handle not rendered (takeover breakpoint, same threshold as Column.tsx's board handle)`,
+        );
+      }
+    }
+  } finally {
+    if (cdp) {
+      try {
+        cdp.close();
+      } catch {
+        // best effort
+      }
+    }
+    if (chrome) {
+      try {
+        chrome.kill("SIGTERM");
+      } catch {
+        // best effort
+      }
+    }
+    if (sandbox) await teardownSandbox(sandbox);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BREAKS["states"]: mutates the real hover-tier fix Task 2 landed on
+// DetailPanel.tsx's resize handle (the "2px solid var(--hover-resize-handle)"
+// branch), collapsing hover back onto the pre-fix bug (solid --accent,
+// indistinguishable from pressed), rebuilds, and re-runs checkStates itself
+// against the mutated source, then restores the captured bytes unconditionally.
+// ---------------------------------------------------------------------------
+
+const STATES_BREAK_TARGET = '"2px solid var(--hover-resize-handle)"';
+const STATES_BREAK_REPLACEMENT = '"2px solid var(--accent)"';
+
+async function runBreakStates() {
+  assertBuilt();
+  const original = readFileSync(DETAIL_PANEL_PATH, "utf8");
+  const occurrences = original.split(STATES_BREAK_TARGET).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `panel-115: refusing to run --break states, expected the resize handle's hover-tier ` +
+        `declaration to occur exactly once in ${DETAIL_PANEL_PATH}, measured ${occurrences}. A ` +
+        `miscounted anchor would mutate the wrong spot and report a false "the check cannot fail".`,
+    );
+  }
+
+  let tripFired = false;
+  registerRestore(DETAIL_PANEL_PATH, original);
+  try {
+    writeFileSync(
+      DETAIL_PANEL_PATH,
+      original.replace(STATES_BREAK_TARGET, STATES_BREAK_REPLACEMENT),
+    );
+    resetBuildCache();
+
+    const tripViolations = [];
+    await checkStates(tripViolations);
+    console.log(
+      `\n--break states TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
+    );
+    tripFired = tripViolations.some(
+      (v) =>
+        v.includes("resize handle") &&
+        (v.includes("hover backgroundColor") ||
+          v.includes("hover") ||
+          v.includes("not pairwise distinct")),
+    );
+  } finally {
+    restoreDetailPanelSource(original);
+  }
+
+  const restoreViolations = [];
+  await checkStates(restoreViolations);
+  const restoreClean = restoreViolations.length === 0;
+  console.log(
+    `--break states RESTORE leg: ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+  );
+
+  return { tripFired, restoreClean };
+}
+
+// ---------------------------------------------------------------------------
 // CHECKS / BREAKS / PROBES.
 // ---------------------------------------------------------------------------
 
 const CHECKS = {
   rhythm: checkRhythm,
   elevation: checkElevation,
+  states: checkStates,
 };
 
 const BREAKS = {
   rhythm: runBreakRhythm,
   elevation: runBreakElevation,
+  states: runBreakStates,
 };
 
 const PROBES = {
   baseline: probeBaseline,
 };
 
-// Silence no-unused-vars for spine identifiers ported ahead of the checks that will call them
-// (states/elevation, 115-04 onward), matching this file's own doc-block explanation of the
-// port-now-use-later shape.
+// Silence no-unused-vars for spine identifiers ported ahead of the checks that will call them,
+// matching this file's own doc-block explanation of the port-now-use-later shape.
 void evalAsyncValue;
-void readUnderHover;
-void tabTraverseTo;
 void closePrimaryCardPanel;
 
 // ---------------------------------------------------------------------------
