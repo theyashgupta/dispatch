@@ -177,8 +177,9 @@ this row's earlier "columns keep no shadow" claim never actually verified, only 
 confirmed a resting card. **Disposition (Phase 116 audit, KI-01): ACCEPTED, not a violation.**
 Read correctly, "columns keep no shadow" is a claim about the ladder's own no-rest-drop-shadow
 rule, and this value is not a drop shadow: it is a 1px INSET highlight with no blur and no
-outward extent, categorically distinct from `--shadow-float` (a 6px-blur, 16px-spread, outward
-shadow) and not a second definition of that single token. Removing it would be a visual
+outward extent, categorically distinct from `--shadow-float` (a 6px-offset, 16px-blur,
+zero-spread outward drop shadow, `0 6px 16px rgba(0, 0, 0, 0.45)`) and not a second definition
+of that single token. Removing it would be a visual
 regression to a landed, deliberate top-edge treatment with no reported visual defect and no
 research basis for a different value, which an audit has no mandate to author on its own
 initiative. `scripts/panel-115.mjs`'s `CHECKS.elevation` continues to assert the column's
