@@ -44,7 +44,7 @@ import { DONE_PAGE_SIZE } from "../shared/done-limit.js";
 function BootScreen({ connection }: { connection: ConnectionStatus }) {
   const statusText =
     connection === "disconnected"
-      ? "Disconnected — reconnecting…"
+      ? "Disconnected, reconnecting…"
       : "Connecting…";
   return (
     <div

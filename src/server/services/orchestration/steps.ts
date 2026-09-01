@@ -256,7 +256,7 @@ const createWorktrees: SagaStep = {
       } else {
         if (ctx.inheritBaseRef != null) {
           ctx.warnings.push(
-            `inherited branch ${ctx.inheritBaseRef} not found in ${path.basename(repoPath)} — cut from ${base}`,
+            `inherited branch ${ctx.inheritBaseRef} not found in ${path.basename(repoPath)}, cut from ${base}`,
           );
         }
         try {
@@ -264,7 +264,7 @@ const createWorktrees: SagaStep = {
           baseRef = "origin/" + base;
         } catch (err) {
           ctx.warnings.push(
-            `git fetch origin ${base} failed in ${path.basename(repoPath)} — cut from local ${base}`,
+            `git fetch origin ${base} failed in ${path.basename(repoPath)}, cut from local ${base}`,
           );
           const hasLocalBase = await revParseVerify(
             repoPath,

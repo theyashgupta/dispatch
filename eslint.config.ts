@@ -519,6 +519,31 @@ export default tseslint.config(
     rules: { "no-restricted-imports": "off" },
   },
 
+  /**
+   * Copy guard: no em dash, spaced en dash, or free-standing double hyphen
+   * in any string literal, template chunk, or JSX text. Flags (`--yes`) and
+   * CSS custom properties (`--color`) pass because the hyphens touch a word
+   * character; regex literals are exempt so the marker parser can keep
+   * accepting the dash variants older agents still emit.
+   */
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...[
+          "Literal:not([regex])[value=",
+          "TemplateElement[value.raw=",
+          "JSXText[value=",
+        ].map((prefix) => ({
+          selector: `${prefix}/\u2014| \u2013 |(^|[^-\\w])--($|[^-\\w])/]`,
+          message:
+            "No em dashes, spaced en dashes, or double hyphens in copy. Use a comma, period, colon, or rephrase.",
+        })),
+      ],
+    },
+  },
+
   {
     files: ["src/**/*.{ts,tsx}"],
     rules: {

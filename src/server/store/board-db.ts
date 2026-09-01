@@ -327,7 +327,7 @@ export function readWorkspaceRegistry(): {
  */
 function quarantineAndRecover(cause: unknown): DatabaseSync {
   console.warn(
-    `[store] board.db failed to open cleanly (${(cause as Error).message}) — quarantining and walking the backup chain.`,
+    `[store] board.db failed to open cleanly (${(cause as Error).message}), quarantining and walking the backup chain.`,
   );
   try {
     if (fs.existsSync(BOARD_DB_PATH)) {
@@ -352,7 +352,7 @@ function quarantineAndRecover(cause: unknown): DatabaseSync {
     }
   }
   console.warn(
-    `[store] board.db and every backup slot were unreadable — starting with an empty database.`,
+    `[store] board.db and every backup slot were unreadable, starting with an empty database.`,
   );
   try {
     fs.rmSync(BOARD_DB_PATH, { force: true });
@@ -396,7 +396,7 @@ function connect(): DatabaseSync {
       `[store] board.db at ${BOARD_DB_PATH} could not be opened and this is NOT corruption ` +
         `(${(err as Error).message}). board.db and every backup were left untouched. ` +
         `Fix the underlying problem (file permissions on ~/.dispatch, free disk space, or a ` +
-        `stuck lock) and restart — dispatch will not quarantine or overwrite your data on a ` +
+        `stuck lock) and restart, dispatch will not quarantine or overwrite your data on a ` +
         `non-corruption error.`,
       { cause: err },
     );

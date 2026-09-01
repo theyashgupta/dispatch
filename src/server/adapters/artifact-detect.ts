@@ -684,7 +684,7 @@ export function startArtifactDetectionLoop(backendPort: number): void {
       await detectCardArtifacts(backendPort);
     } catch (err) {
       console.error(
-        `[artifact-detect] tick failed — continuing: ${(err as Error).message}`,
+        `[artifact-detect] tick failed, continuing: ${(err as Error).message}`,
       );
     } finally {
       scheduleNext();

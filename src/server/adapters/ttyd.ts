@@ -491,7 +491,7 @@ async function scanDspTtydProcesses(): Promise<{
     }));
   } catch (err) {
     console.error(
-      "[ttyd] process scan failed — orphan sweep and re-adoption skipped this pass:",
+      "[ttyd] process scan failed, orphan sweep and re-adoption skipped this pass:",
       err instanceof Error ? err.message : String(err),
     );
     return { candidates: new Set(), compatible: new Set() };

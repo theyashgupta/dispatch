@@ -72,7 +72,7 @@ function warnFallback(): void {
   if (warnedOnce) return;
   warnedOnce = true;
   console.warn(
-    "[terminal-theme] ghostty config unavailable — using Catppuccin Mocha fallback",
+    "[terminal-theme] ghostty config unavailable, using Catppuccin Mocha fallback",
   );
 }
 

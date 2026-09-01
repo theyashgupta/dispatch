@@ -92,7 +92,7 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
                 ))
               : blockedEntries.map((entry) => (
                   <div key={entry.key} style={{ color: "var(--text)" }}>
-                    {`Session ${entry.ordinal} — ${entry.repo}: ${
+                    {`Session ${entry.ordinal} (${entry.repo}): ${
                       entry.count
                     } uncommitted file${entry.count === 1 ? "" : "s"}`}
                   </div>
@@ -116,7 +116,7 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
           <div role="alert" style={{ marginTop: "var(--space-sm)" }}>
             <Notice
               tone="destructive"
-              label="Couldn't reach the server — try again."
+              label="Couldn't reach the server. Try again."
             />
           </div>
         )}

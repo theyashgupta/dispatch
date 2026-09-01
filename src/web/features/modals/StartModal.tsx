@@ -1137,7 +1137,7 @@ function InheritToggleSection({
               color: "var(--text-muted)",
             }}
           >
-            {`Includes Session ${parentOrdinal}'s commits. Any uncommitted work in Session ${parentOrdinal} stays exactly where it is — this new session just starts without it.`}
+            {`Includes Session ${parentOrdinal}'s commits. Any uncommitted work in Session ${parentOrdinal} stays exactly where it is. This new session just starts without it.`}
           </span>
         </span>
       </label>
@@ -1322,7 +1322,7 @@ export function StartModal({
             onFocus={() => setFocused("textarea")}
             onBlur={() => setFocused(null)}
             aria-label="Prompt for Claude"
-            placeholder="Optional direction for Claude — press Start to launch"
+            placeholder="Optional direction for Claude. Press Start to launch"
             style={{
               minHeight: "96px",
               resize: "vertical",
@@ -1354,7 +1354,7 @@ export function StartModal({
               <>
                 <Notice
                   tone="destructive"
-                  label="Can't start — a selected repo is missing"
+                  label="Can't start: a selected repo is missing"
                 />
                 <div
                   style={{
@@ -1371,7 +1371,7 @@ export function StartModal({
               <>
                 <Notice
                   tone="destructive"
-                  label="Can't start — that playbook is gone"
+                  label="Can't start: that playbook is gone"
                 />
                 <div
                   style={{
@@ -1380,8 +1380,8 @@ export function StartModal({
                     color: "var(--text-muted)",
                   }}
                 >
-                  The selected playbook was deleted. The list has refreshed —
-                  pick another and press Start again.
+                  The selected playbook was deleted. The list has refreshed.
+                  Pick another and press Start again.
                 </div>
               </>
             ) : (

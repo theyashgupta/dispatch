@@ -165,7 +165,7 @@ export async function startSession(
       : undefined;
     const warnings: string[] = [];
     if (playbookName !== undefined && playbookBody === undefined) {
-      warnings.push("saved playbook not found — started without it");
+      warnings.push("saved playbook not found, started without it");
     }
 
     await store.setExtraDirection(cardId, extraDirection);
