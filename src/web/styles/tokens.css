@@ -94,6 +94,7 @@
   --easing-enter: ease-out;
   --easing-exit: ease-in;
   --hover-transition: background-color 80ms var(--easing-enter);
+  --resize-handle-transition: border-left-color 80ms var(--easing-enter);
 
   /* State palette (v3.4), hover/pressed colors as color-mix() formulas over
      base surface tokens, never a resolved hex, so the single-source

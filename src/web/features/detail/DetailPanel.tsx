@@ -436,7 +436,7 @@ export function DetailPanel({
                 : hoveringHandle
                   ? "2px solid var(--hover-resize-handle)"
                   : "2px solid transparent",
-              transition: "border-left-color 80ms var(--easing-enter)",
+              transition: "var(--resize-handle-transition)",
               ...focusRing(handleFocused),
             }}
           >
