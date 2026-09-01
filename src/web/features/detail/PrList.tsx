@@ -41,7 +41,7 @@ function PrListRow({ pr }: { pr: PrInfo }) {
         style={{
           flex: "0 0 auto",
           fontFamily: "var(--font-mono)",
-          fontSize: "var(--font-label)",
+          fontSize: "var(--font-micro)",
           color: "var(--text-muted)",
         }}
       >
@@ -118,7 +118,6 @@ export function PrList({ card }: { card: Card }) {
   return (
     <div
       style={{
-        marginBottom: "var(--space-lg)",
         display: "flex",
         flexDirection: "column",
         gap: "var(--space-xs)",

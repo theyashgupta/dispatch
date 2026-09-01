@@ -76,7 +76,7 @@ function BootScreen({ connection }: { connection: ConnectionStatus }) {
           fontWeight: "var(--weight-semibold)",
           color:
             connection === "disconnected"
-              ? "var(--destructive)"
+              ? "var(--destructive-text)"
               : "var(--text-muted)",
         }}
       >

@@ -343,6 +343,13 @@ export function DetailPanel({
     setFullscreen(false);
   }
 
+  const scrimTransition = open
+    ? "opacity var(--motion-panel-open) var(--easing-enter)"
+    : "opacity var(--motion-panel-close) var(--easing-exit)";
+  const asideTransition = open
+    ? "transform var(--motion-panel-open) var(--easing-enter)"
+    : "transform var(--motion-panel-close) var(--easing-exit)";
+
   return (
     <>
       {!docked && (
@@ -355,7 +362,7 @@ export function DetailPanel({
             background: "rgba(0,0,0,0.4)",
             opacity: open ? 1 : 0,
             pointerEvents: open ? "auto" : "none",
-            transition: "opacity 150ms ease-out",
+            transition: scrimTransition,
             zIndex: 10,
           }}
         />
@@ -390,7 +397,7 @@ export function DetailPanel({
             : open
               ? "translateX(0)"
               : "translateX(100%)",
-          transition: docked ? "none" : "transform 150ms ease-out",
+          transition: docked ? "none" : asideTransition,
           zIndex: 11,
         }}
       >
@@ -424,10 +431,12 @@ export function DetailPanel({
               touchAction: "none",
               zIndex: 3,
               background: "transparent",
-              borderLeft:
-                hoveringHandle || resizing
-                  ? "2px solid var(--accent)"
+              borderLeft: resizing
+                ? "2px solid var(--accent)"
+                : hoveringHandle
+                  ? "2px solid var(--hover-resize-handle)"
                   : "2px solid transparent",
+              transition: "var(--resize-handle-transition)",
               ...focusRing(handleFocused),
             }}
           >
@@ -597,6 +606,9 @@ export function DetailPanel({
                           flex: "0 1 auto",
                           maxHeight: "40%",
                           overflowY: "auto",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "var(--panel-section-gap)",
                         }}
                       >
                         <ReferenceBlocks
@@ -619,6 +631,9 @@ export function DetailPanel({
                       style={{
                         flex: c?.tmuxSession ? "0 1 auto" : "1 1 auto",
                         overflowY: "auto",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "var(--panel-section-gap)",
                       }}
                     >
                       <ReferenceBlocks

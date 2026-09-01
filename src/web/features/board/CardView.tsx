@@ -31,6 +31,7 @@ import {
 } from "../badges/index.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
+import { focusRing } from "../../primitives/focus-ring.js";
 import { IconButton } from "../../primitives/IconButton.js";
 import { Notice } from "../../primitives/Notice.js";
 import {
@@ -55,6 +56,8 @@ interface CardViewProps {
   showDot: boolean;
   showGone: boolean;
   hover: boolean;
+  pressed?: boolean;
+  focused?: boolean;
   elevated?: boolean;
   dimmed?: boolean;
   rootRef?: React.Ref<HTMLDivElement>;
@@ -75,6 +78,8 @@ export function CardView({
   showDot,
   showGone,
   hover,
+  pressed = false,
+  focused = false,
   elevated = false,
   dimmed = false,
   rootRef,
@@ -142,7 +147,7 @@ export function CardView({
           ...chipStyle,
           background:
             "color-mix(in srgb, var(--destructive) 16%, var(--surface-card))",
-          color: "var(--destructive)",
+          color: "var(--destructive-text)",
         }}
         title={sessionChipTitle("Lost")}
       >
@@ -174,9 +179,13 @@ export function CardView({
         : "1px solid var(--border)";
   const background = elevated
     ? "var(--surface-card)"
-    : hoverOrSelected
-      ? "var(--surface-card-hover)"
-      : "var(--surface-card)";
+    : pressed
+      ? hoverOrSelected
+        ? "var(--pressed-card-hover)"
+        : "var(--pressed-card)"
+      : hoverOrSelected
+        ? "var(--surface-card-hover)"
+        : "var(--surface-card)";
   const boxShadowParts: string[] = [];
   if (needsAttention) {
     boxShadowParts.push("0 0 0 1px var(--accent)");
@@ -184,9 +193,6 @@ export function CardView({
     boxShadowParts.push("0 0 0 1px var(--text)");
   }
   if (elevated) boxShadowParts.push("var(--shadow-float)");
-  if (hover && !elevated && !selected && !needsAttention) {
-    boxShadowParts.push("0 2px 8px rgba(0,0,0,0.3)");
-  }
   const boxShadow =
     boxShadowParts.length > 0 ? boxShadowParts.join(", ") : "none";
 
@@ -208,15 +214,17 @@ export function CardView({
           border,
           borderRadius: "var(--radius)",
           padding: compact
-            ? "var(--space-xs)"
-            : "var(--space-xs) var(--space-sm)",
+            ? "var(--card-padding-compact)"
+            : "var(--card-padding)",
           cursor: "pointer",
           display: "flex",
           flexDirection: "column",
           gap: "var(--space-xs)",
           opacity: dimmed ? 0.4 : 1,
           boxShadow,
+          transition: "var(--hover-transition)",
           touchAction: "manipulation",
+          ...focusRing(focused),
         }}
       >
         {multiSelected && (

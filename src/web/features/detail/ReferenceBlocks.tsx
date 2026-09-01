@@ -25,7 +25,6 @@ export function ReferenceBlocks({
       {c != null && c.source === "group" && members != null && (
         <div
           style={{
-            marginBottom: "var(--space-lg)",
             display: "flex",
             flexDirection: "column",
             gap: "var(--space-xs)",
@@ -105,7 +104,6 @@ export function ReferenceBlocks({
       {c?.startError != null && (
         <div
           style={{
-            marginTop: "var(--space-lg)",
             paddingTop: "var(--space-lg)",
             borderTop: "1px solid var(--border)",
             display: "flex",

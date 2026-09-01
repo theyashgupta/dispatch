@@ -18,7 +18,6 @@ import {
   Filter,
   FolderGit2,
   Globe,
-  Key,
   KeyRound,
   Pencil,
   Plus,
@@ -785,9 +784,11 @@ function PlaybooksTabSection({ playbooksTab }: PlaybooksTabSectionProps) {
         !playbooksLoadError &&
         playbooks !== null &&
         playbooks.length === 0 && (
-          <Notice tone="muted" label="No playbooks yet">
-            Create one, or generate a draft with AI.
-          </Notice>
+          <div style={{ marginTop: "var(--space-lg)" }}>
+            <Notice tone="muted" label="No playbooks yet">
+              Create one, or generate a draft with AI.
+            </Notice>
+          </div>
         )}
 
       {!playbooksLoading &&
@@ -1155,7 +1156,7 @@ function VaultValueEditor({ keySummary, vault }: VaultValueEditorProps) {
             fontSize: "var(--font-label)",
             fontWeight: "var(--weight-semibold)",
             lineHeight: "var(--line-label)",
-            color: "var(--destructive)",
+            color: "var(--destructive-text)",
           }}
         >
           {valueError}
@@ -1240,35 +1241,69 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
         onMouseLeave={() => setHover(false)}
         style={{
           display: "flex",
-          alignItems: "center",
-          gap: "var(--space-sm)",
+          flexDirection: "column",
+          gap: "var(--space-xs)",
           padding: "var(--space-sm)",
           borderRadius: "var(--radius)",
           background: hover ? "var(--surface-card-hover)" : "transparent",
         }}
       >
-        <span
+        <div
           style={{
-            flex: "1 1 auto",
-            minWidth: 0,
-            fontFamily: "var(--font-mono)",
-            fontSize: "var(--font-label)",
-            fontWeight: "var(--weight-semibold)",
-            lineHeight: "var(--line-label)",
-            color: "var(--text)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "var(--space-sm)",
           }}
-          title={keySummary.name}
         >
-          {keySummary.name}
-        </span>
+          <span
+            style={{
+              flex: "1 1 auto",
+              minWidth: 0,
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--font-label)",
+              fontWeight: "var(--weight-semibold)",
+              lineHeight: "var(--line-label)",
+              color: "var(--text)",
+              whiteSpace: "normal",
+              wordBreak: "break-all",
+            }}
+          >
+            {keySummary.name}
+          </span>
+          <VaultBadge filled={keySummary.filled} />
+          <Button
+            variant="secondary"
+            aria-label={
+              keySummary.filled
+                ? `Rotate value for ${keySummary.name}`
+                : `Fill value for ${keySummary.name}`
+            }
+            onClick={() => vault.openValueEditor(keySummary.name)}
+            style={{
+              flex: "0 0 auto",
+              height: "24px",
+              padding: "0 var(--space-sm)",
+              fontSize: "var(--font-label)",
+            }}
+          >
+            {keySummary.filled ? "Rotate" : "Set value"}
+          </Button>
+          <IconButton
+            aria-label={`Edit purpose for ${keySummary.name}`}
+            onClick={() => vault.openPurposeEditor(keySummary.name)}
+          >
+            <Pencil size={14} strokeWidth={2} aria-hidden="true" />
+          </IconButton>
+          <IconButton
+            aria-label={`Delete ${keySummary.name}`}
+            onClick={() => vault.openDelete(keySummary)}
+          >
+            <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+          </IconButton>
+        </div>
         {editingPurpose ? (
           <div
             style={{
-              flex: "0 1 auto",
-              minWidth: 0,
               display: "flex",
               alignItems: "center",
               gap: "var(--space-xs)",
@@ -1311,44 +1346,17 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
         ) : (
           <span
             style={{
-              flex: "0 1 auto",
-              minWidth: 0,
               fontFamily: "var(--font-ui)",
-              fontSize: "var(--font-body)",
-              lineHeight: "var(--line-body)",
+              fontSize: "var(--font-label)",
+              lineHeight: "var(--line-label)",
               color: "var(--text-muted)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              whiteSpace: "normal",
+              wordBreak: "break-word",
             }}
-            title={keySummary.purpose}
           >
             {keySummary.purpose}
           </span>
         )}
-        <VaultBadge filled={keySummary.filled} />
-        <IconButton
-          aria-label={
-            keySummary.filled
-              ? `Rotate value for ${keySummary.name}`
-              : `Fill value for ${keySummary.name}`
-          }
-          onClick={() => vault.openValueEditor(keySummary.name)}
-        >
-          <Key size={14} strokeWidth={2} aria-hidden="true" />
-        </IconButton>
-        <IconButton
-          aria-label={`Edit purpose for ${keySummary.name}`}
-          onClick={() => vault.openPurposeEditor(keySummary.name)}
-        >
-          <Pencil size={14} strokeWidth={2} aria-hidden="true" />
-        </IconButton>
-        <IconButton
-          aria-label={`Delete ${keySummary.name}`}
-          onClick={() => vault.openDelete(keySummary)}
-        >
-          <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
-        </IconButton>
       </div>
       {purposeError !== null && (
         <div
@@ -1357,7 +1365,7 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
             fontSize: "var(--font-label)",
             fontWeight: "var(--weight-semibold)",
             lineHeight: "var(--line-label)",
-            color: "var(--destructive)",
+            color: "var(--destructive-text)",
           }}
         >
           {purposeError}
@@ -1462,7 +1470,7 @@ function VaultAddForm({ vault }: VaultAddFormProps) {
             fontSize: "var(--font-label)",
             fontWeight: "var(--weight-semibold)",
             lineHeight: "var(--line-label)",
-            color: "var(--destructive)",
+            color: "var(--destructive-text)",
           }}
         >
           {vault.addError}
@@ -1503,10 +1511,12 @@ function VaultImportOutcomeNotice({
   const { imported, skipped } = outcome;
   if (imported.length === 0 && skipped.length === 0) {
     return (
-      <Notice
-        tone="muted"
-        label="Nothing to import, all keys are already here."
-      />
+      <div style={{ marginTop: "var(--space-lg)" }}>
+        <Notice
+          tone="muted"
+          label="Nothing to import, all keys are already here."
+        />
+      </div>
     );
   }
   const importedLine =
@@ -1518,9 +1528,11 @@ function VaultImportOutcomeNotice({
       ? `Skipped ${skipped.length} already here: ${skipped.join(", ")}`
       : null;
   return (
-    <Notice tone="muted" label={importedLine ?? skippedLine}>
-      {importedLine !== null ? skippedLine : null}
-    </Notice>
+    <div style={{ marginTop: "var(--space-lg)" }}>
+      <Notice tone="muted" label={importedLine ?? skippedLine}>
+        {importedLine !== null ? skippedLine : null}
+      </Notice>
+    </div>
   );
 }
 
@@ -1573,10 +1585,12 @@ function VaultTabSection({ vaultTab }: VaultTabSectionProps) {
       )}
 
       {!loading && !loadError && keys !== null && keys.length === 0 && (
-        <Notice tone="muted" label="No keys yet">
-          Add one above to store a secret Claude can use without ever reading
-          it.
-        </Notice>
+        <div style={{ marginTop: "var(--space-lg)" }}>
+          <Notice tone="muted" label="No keys yet">
+            Add one above to store a secret Claude can use without ever reading
+            it.
+          </Notice>
+        </div>
       )}
 
       {!loading && !loadError && keys !== null && keys.length > 0 && (
@@ -2292,7 +2306,7 @@ function NotificationsTabSection({
         {push.error != null && (
           <div
             role="alert"
-            style={{ ...remoteBodyTextStyle, color: "var(--destructive)" }}
+            style={{ ...remoteBodyTextStyle, color: "var(--destructive-text)" }}
           >
             {push.error === "cap"
               ? "This browser already has too many devices subscribed. Remove one from another Settings session first."
@@ -2448,7 +2462,7 @@ function CleanupTabSection({ cleanupTab }: CleanupTabSectionProps) {
               fontSize: "var(--font-label)",
               fontWeight: "var(--weight-semibold)",
               lineHeight: "var(--line-label)",
-              color: "var(--destructive)",
+              color: "var(--destructive-text)",
             }}
           >
             Enter a whole number between 0 and 90.
@@ -2859,9 +2873,11 @@ function WorkspacesTabSection({ workspacesTab }: WorkspacesTabSectionProps) {
       )}
 
       {!loading && !loadError && folders.length === 0 && (
-        <Notice tone="muted" label="No workspaces yet">
-          Add a folder above to start tickets in it.
-        </Notice>
+        <div style={{ marginTop: "var(--space-lg)" }}>
+          <Notice tone="muted" label="No workspaces yet">
+            Add a folder above to start tickets in it.
+          </Notice>
+        </div>
       )}
 
       {!loading && !loadError && folders.length > 0 && (
@@ -2898,7 +2914,6 @@ const overlayStyle: CSSProperties = {
   zIndex: 18,
   display: "flex",
   background: "var(--bg)",
-  transition: "opacity 150ms ease-out",
 };
 
 const sidebarStyle: CSSProperties = {
@@ -3134,6 +3149,10 @@ export function SettingsScreen({
       style={{
         ...overlayStyle,
         opacity: entered && !closing ? 1 : 0,
+        transition:
+          entered && !closing
+            ? "opacity var(--motion-panel-open) var(--easing-enter)"
+            : "opacity var(--motion-panel-close) var(--easing-exit)",
       }}
     >
       <nav aria-label="Settings sections" style={sidebarStyle}>

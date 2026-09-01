@@ -19,6 +19,7 @@ const iconButtonStyle: CSSProperties = {
   color: "var(--text-muted)",
   cursor: "pointer",
   outline: "none",
+  transition: "var(--hover-transition)",
 };
 
 export function IconButton({
@@ -29,19 +30,37 @@ export function IconButton({
   onMouseLeave,
   onFocus,
   onBlur,
+  onPointerDown,
+  onPointerUp,
+  onPointerCancel,
+  onPointerLeave,
   ...rest
 }: IconButtonProps) {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  if (disabled && (hovered || focused)) {
+  const [pressed, setPressed] = useState(false);
+  if (disabled && (hovered || focused || pressed)) {
     setHovered(false);
     setFocused(false);
+    setPressed(false);
   }
+  const callerBackground = style?.background;
   const composed: CSSProperties = {
     ...iconButtonStyle,
-    background: hovered ? "var(--surface-card-hover)" : "transparent",
-    ...focusRing(focused),
     ...style,
+    background:
+      callerBackground != null
+        ? pressed
+          ? `color-mix(in srgb, black 12%, ${callerBackground})`
+          : hovered
+            ? "color-mix(in srgb, var(--accent) 22%, var(--surface-column))"
+            : callerBackground
+        : pressed
+          ? "var(--pressed-card-hover)"
+          : hovered
+            ? "var(--surface-card-hover)"
+            : "transparent",
+    ...focusRing(focused),
   };
   return (
     <button
@@ -63,6 +82,22 @@ export function IconButton({
       onBlur={(event) => {
         setFocused(false);
         onBlur?.(event);
+      }}
+      onPointerDown={(event) => {
+        setPressed(true);
+        onPointerDown?.(event);
+      }}
+      onPointerUp={(event) => {
+        setPressed(false);
+        onPointerUp?.(event);
+      }}
+      onPointerCancel={(event) => {
+        setPressed(false);
+        onPointerCancel?.(event);
+      }}
+      onPointerLeave={(event) => {
+        setPressed(false);
+        onPointerLeave?.(event);
       }}
       style={composed}
     />
