@@ -1918,11 +1918,21 @@ async function readSurface(
   };
 }
 
-/** Reads `elExpr`'s rect and dispatches a real click there. Ported from panel-114.mjs's own
- * `clickElementInView` (Plan 116-02): deliberately never calls `scrollIntoView()`, every element
- * this probe clicks already sits inside the already-open, already-scrolled panel at every
- * breakpoint this file defines. */
+/** Scrolls `elExpr` into view then reads its rect and dispatches a real click there. Named after
+ * panel-114.mjs's own `clickElementInView` (Plan 116-02), but that board-side version
+ * deliberately skips `scrollIntoView()` for a different reason (a live-verified renderer hang
+ * tied to specific board carousel triggers). This panel-side version DOES scroll first, matching
+ * `checkStates.measureAndAssertControl`'s own established idiom in THIS file: the CardTimeline
+ * toggle this function clicks lives inside the scrollable `.scroll-stable-y.reading-surface`
+ * wrapper, and a first pass without the scroll dispatched the click at the button's real (but
+ * scrolled-out-of-view) viewport coordinates, silently missing it. */
 async function clickElementInView(cdp, sessionId, elExpr, modifiers = 0) {
+  await evalValue(
+    cdp,
+    sessionId,
+    `${elExpr}.scrollIntoView({ behavior: "instant", block: "nearest" })`,
+  );
+  await sleep(50);
   const rect = await evalValue(
     cdp,
     sessionId,
