@@ -12,7 +12,7 @@ export function PrBadge({ pr, showRepo }: { pr: PrInfo; showRepo?: boolean }) {
     pr.ci != null
       ? ` · Checks ${pr.ci === "pass" ? "passing" : pr.ci === "fail" ? "failing" : "pending"}`
       : "";
-  const label = `PR ${repoPrefix}#${pr.number} — ${prStateLabel(pr)}${ciLabel}`;
+  const label = `PR ${repoPrefix}#${pr.number}: ${prStateLabel(pr)}${ciLabel}`;
   return (
     <button
       type="button"
