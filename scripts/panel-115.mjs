@@ -677,8 +677,10 @@ async function dispatchRealKey(cdp, sessionId, key, code, virtualKeyCode) {
 
 const FIXTURE_TIMESTAMP = "2026-08-31T12:00:00.000Z";
 
-/** Ported from panel-92.mjs's own `makeSession`: `tmuxSession: null` (rather than an omitted
- * key) mints the LOST shape `redactCard` reads via `s.tmuxSession == null`. */
+/** Ported from panel-92.mjs's own `makeSession`: a missing `tmuxSession` mints the LOST shape.
+ * The `?? undefined` below plus `JSON.stringify` means the seeded card stores an OMITTED
+ * `tmuxSession` key (not a literal `null`); `redactCard`'s `s.tmuxSession == null` matches
+ * both shapes, so the distinction is invisible at run time. */
 function makeSession(home, tmuxSession, ttydPort, createdAtOffsetMs) {
   const id = randomUUID();
   const createdAt = new Date(Date.now() - createdAtOffsetMs).toISOString();
@@ -931,8 +933,6 @@ async function applyBreakpoint(cdp, sessionId, bp) {
     );
   }
 }
-
-const FIXTURE_CARDS = [];
 
 /**
  * Boot once against the still-empty sandbox home so the store creates the real sqlite schema (the
@@ -1359,13 +1359,6 @@ async function readUnderSyntheticPress(cdp, sessionId, elExpr, props) {
   return { pressed, after };
 }
 
-/** Tolerance for float px comparisons: CDP's `getBoundingClientRect`/`getComputedStyle` reads are
- * exact for fixed-px values in practice, but a hairline tolerance absorbs any genuine sub-pixel
- * rendering jitter without masking a real regression. Ported for later plans in this phase; the
- * `baseline` probe itself never asserts and has no need of it yet. */
-const DENSITY_PX_TOLERANCE = 0.05;
-void DENSITY_PX_TOLERANCE;
-
 /** A `color-mix()` value read from an isolated probe element and the SAME token as actually
  * composited on a real, styled element were observed LIVE (Phase 114) to differ by 1-2 sRGB
  * levels per channel, a genuine sub-pixel color-space rounding difference, not a measurement bug.
@@ -1402,7 +1395,6 @@ function colorsMatch(a, b) {
   if (pa == null || pb == null) return false;
   return pa.every((v, i) => Math.abs(v - pb[i]) <= COLOR_TOLERANCE);
 }
-void colorsMatch;
 
 /** Round-trips a raw `getComputedStyle` color string through `window.panel115NormalizeColor`'s
  * canvas-pixel technique, so every color comparison in this file's probe compares actual
@@ -3497,8 +3489,6 @@ async function main() {
   console.log("\nPASS");
   process.exit(0);
 }
-
-void FIXTURE_CARDS;
 
 main().catch((err) => {
   console.error(`panel-115 failed: ${err.stack ?? err.message}`);
