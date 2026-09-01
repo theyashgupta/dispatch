@@ -12,9 +12,13 @@ const execFileP = promisify(execFile);
  * of `compatible`, are never re-adopted, and are therefore swept — a deliberate, one-time,
  * user-visible reconnect on first boot after upgrade, never a silent adoption of an unaddressable
  * pane. The re-adoption fingerprint has only NARROWED, per the rule below.
+ * @remarks Bumped 6 -> 7 for `TERM-05`: a pre-`-T tmux-256color` ttyd attaches on the wrong TERM,
+ * so the no-alt-screen `terminal-overrides` entry never matches it and the client it serves has no
+ * local scrollback and no way to self-heal. Same one-time reconnect, same reasoning: swept, never
+ * re-adopted.
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
-const TTYD_RUNTIME_REVISION = 6;
+const TTYD_RUNTIME_REVISION = 7;
 const TTYD_RUNTIME_REVISION_KEY = "DISPATCH_TTYD_REVISION";
 
 /**
@@ -204,6 +208,8 @@ async function spawnTtyd(session: string, sessionId: string): Promise<number> {
       "0",
       "-b",
       `/sessions/${sessionId}/terminal`,
+      "-T",
+      "tmux-256color",
       "-t",
       "disableLeaveAlert=true",
       "-t",

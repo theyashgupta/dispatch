@@ -338,7 +338,9 @@ export function SyncStrip({
               whiteSpace: "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",
-              color: disconnected ? "var(--destructive)" : "var(--text-muted)",
+              color: disconnected
+                ? "var(--destructive-text)"
+                : "var(--text-muted)",
               fontWeight: "var(--weight-medium)",
             }}
           >

@@ -21,7 +21,7 @@ const captionStyle: CSSProperties = {
 const inlineErrorStyle: CSSProperties = {
   fontSize: "var(--font-body)",
   lineHeight: "var(--line-body)",
-  color: "var(--destructive)",
+  color: "var(--destructive-text)",
 };
 
 function acceptErrorCopy(error: string | null): string {

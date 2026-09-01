@@ -1,15 +1,17 @@
 import { Globe } from "lucide-react";
 import { useState } from "react";
 import type { PreviewInfo } from "../../../shared/types.js";
+import { previewBadgeTitle } from "./preview-evidence.js";
 
 export function PreviewBadge({ preview }: { preview: PreviewInfo }) {
   const [hovered, setHovered] = useState(false);
-  const label = `Open preview at localhost:${preview.port}`;
+  const title = previewBadgeTitle(preview);
+  const ariaLabel = `Open preview, localhost:${preview.port}`;
   return (
     <button
       type="button"
-      title={label}
-      aria-label={label}
+      title={title}
+      aria-label={ariaLabel}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => {
         event.stopPropagation();

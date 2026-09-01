@@ -22,7 +22,7 @@ interface GhPrResult {
   title: string;
   state: "OPEN" | "MERGED" | "CLOSED";
   isDraft: boolean;
-  statusCheckRollup: GhCheckRun[];
+  statusCheckRollup: GhCheckRun[] | null;
 }
 
 const loggedCategories = new Set<string>();
@@ -33,6 +33,21 @@ const loggedCategories = new Set<string>();
  */
 export type PrProbeResult =
   { ok: true; prs: PrInfo[] } | { ok: false; category: ProbeFailureCategory };
+
+/**
+ * Narrow `gh`'s own `state` token to the closed {@link PrInfo} union, reading anything
+ * unrecognised as `open`.
+ *
+ * @remarks
+ * A bare cast asserted rather than validated, so an unknown token flowed all the way to
+ * `pr-style.ts`, which falls through its two `if`s to the GREEN open branch: a false green on an
+ * affordance whose whole job is to be trusted at a glance, plus a `NaN` sort comparison from a
+ * rank lookup that returned undefined.
+ */
+function stateOf(raw: string): PrInfo["state"] {
+  const s = raw.toLowerCase();
+  return s === "merged" || s === "closed" ? s : "open";
+}
 
 /**
  * Reduce a `statusCheckRollup` into the badge's single CI verdict, in fixed precedence: no checks
@@ -56,6 +71,12 @@ export type PrProbeResult =
  * shipped once. Today's `StatusState` enum happens to be fully covered, so the fallthrough was
  * latent rather than live, but a widened enum member, a lower-cased `gh` output, or a non-enum state
  * from a legacy provider would each have painted a green dot on a check that did not pass.
+ *
+ * The caller passes `pr.statusCheckRollup ?? []`, and the field is typed nullable so that coalesce
+ * cannot be dropped silently: `gh` reports `null` for a PR whose head commit is gone, which
+ * `--state all` now reaches, and a throw here lands INSIDE `listPrsForBranch`'s own `try`, which
+ * reclassifies a SUCCESSFUL lookup as `gh pr list failed`, blanks the whole repo's list and spends
+ * a `PROBE_FAILURE_CEILING` strike every tick until last-known-good is wiped.
  */
 function rollupOf(checks: GhCheckRun[]): "pass" | "fail" | "pending" | null {
   if (checks.length === 0) return null;
@@ -121,10 +142,20 @@ function rollupOf(checks: GhCheckRun[]): "pass" | "fail" | "pending" | null {
  * user moved or deleted mid-session reports the folder rather than latching
  * "gh CLI not available" forever while `gh` is installed and healthy. The `existsSync` cost is paid
  * only on the failure path, never on a successful lookup.
+ *
+ * `repo` is supplied by the caller, not derived here, because repo identity is only knowable at
+ * the call site (`artifact-detect.ts` already holds `workspace.repos[i]`'s own path); a folder
+ * basename is passed rather than `repoPath` so no absolute path can reach the wire (T-98-01).
+ *
+ * A `429`/`403` throttle response is classified as its own `"gh rate limited"` category, checked
+ * before the `HTTP 401` test in the same ternary chain: `gh` never emits `HTTP 401` or
+ * `gh auth login` for a rate-limit response, so the ordering is not load-bearing for correctness,
+ * grouping the two rate-limit phrasings together simply keeps the chain readable.
  */
 export async function listPrsForBranch(
   repoPath: string,
   branch: string,
+  repo: string,
 ): Promise<PrProbeResult> {
   try {
     const { stdout } = await run(
@@ -150,9 +181,10 @@ export async function listPrsForBranch(
         number: pr.number,
         url: pr.url,
         title: pr.title,
-        state: pr.state.toLowerCase() as PrInfo["state"],
+        state: stateOf(pr.state),
         isDraft: pr.isDraft,
-        ci: rollupOf(pr.statusCheckRollup),
+        ci: rollupOf(pr.statusCheckRollup ?? []),
+        repo,
       })),
     };
   } catch (err) {
@@ -163,11 +195,14 @@ export async function listPrsForBranch(
         ? existsSync(repoPath)
           ? "gh unavailable"
           : "repo path missing"
-        : stderr.includes("HTTP 401") || stderr.includes("gh auth login")
-          ? "gh not authenticated"
-          : stderr.includes("Could not resolve to a Repository")
-            ? "gh repo not accessible"
-            : "gh pr list failed";
+        : stderr.includes("API rate limit exceeded") ||
+            stderr.includes("secondary rate limit")
+          ? "gh rate limited"
+          : stderr.includes("HTTP 401") || stderr.includes("gh auth login")
+            ? "gh not authenticated"
+            : stderr.includes("Could not resolve to a Repository")
+              ? "gh repo not accessible"
+              : "gh pr list failed";
     if (!loggedCategories.has(category)) {
       loggedCategories.add(category);
       console.error(`[artifact-detect] ${category}`);

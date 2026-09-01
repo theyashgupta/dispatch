@@ -76,7 +76,7 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
           >
             <div
               style={{
-                color: "var(--destructive)",
+                color: "var(--destructive-text)",
                 fontWeight: "var(--weight-semibold)",
               }}
             >

@@ -30,6 +30,11 @@ function isAttentionColumn(col: Column): col is "needs_input" | "agent_done" {
  * effect run even when several cards transition in the same snapshot (e.g. two agents finish at
  * once), so a burst of arrivals stays a single gentle ding rather than an overlapping barrage;
  * each transitioned card still gets its own desktop Notification.
+ * @remarks The `tag: card.id` on the Notification is the PUSH-05 dedup contract: it must stay
+ * equal to the card id so this in-tab notification and the service worker's push notification
+ * (`tag: data.cardId` in src/web/public/sw.js) coalesce into one when a tab is open. The title
+ * separator is a hyphen for the same reason, matching push-send.ts so the surviving title is
+ * identical whichever arrives first.
  * @see docs/ARCHITECTURE.md#attention-routing
  */
 export function useTransitionNotifications(
@@ -78,7 +83,7 @@ export function useTransitionNotifications(
       }
 
       if (notifyGranted) {
-        const title = `${card.identifier}: ${LABEL[col]}`;
+        const title = `${card.identifier} - ${LABEL[col]}`;
         const body = card.statusReason?.trim() || FALLBACK[col] || "";
         try {
           const n = new Notification(title, { body, tag: card.id });

@@ -18,7 +18,6 @@ import { Button } from "../../primitives/Button.js";
 import { Notice } from "../../primitives/Notice.js";
 import { CardTimeline } from "./CardTimeline.js";
 import { PanelHeader } from "./PanelHeader.js";
-import { PrRow } from "./PrRow.js";
 import { PreviewRow } from "./PreviewRow.js";
 import { UnknownProbeRow } from "./UnknownProbeRow.js";
 import { ReferenceBlocks } from "./ReferenceBlocks.js";
@@ -306,7 +305,7 @@ export function DetailPanel({
       spawnedForRef.current = null;
       return;
     }
-    if (card.activeSession?.ttydPort != null) {
+    if (card.ttydPort != null) {
       spawnedForRef.current = null;
       return;
     }
@@ -333,7 +332,7 @@ export function DetailPanel({
     c.workspacePath != null;
 
   const hasLiveSession = !!(c?.tmuxSession && !c.sessionLost);
-  const activeSessionLost = c?.activeSession != null && !c.tmuxSession;
+  const activeSessionLost = c?.activeSessionId != null && !c.tmuxSession;
 
   if (!hasLiveSession && (fullscreen || detailsExpanded)) {
     setFullscreen(false);
@@ -343,6 +342,13 @@ export function DetailPanel({
   if (docked && fullscreen) {
     setFullscreen(false);
   }
+
+  const scrimTransition = open
+    ? "opacity var(--motion-panel-open) var(--easing-enter)"
+    : "opacity var(--motion-panel-close) var(--easing-exit)";
+  const asideTransition = open
+    ? "transform var(--motion-panel-open) var(--easing-enter)"
+    : "transform var(--motion-panel-close) var(--easing-exit)";
 
   return (
     <>
@@ -356,7 +362,7 @@ export function DetailPanel({
             background: "rgba(0,0,0,0.4)",
             opacity: open ? 1 : 0,
             pointerEvents: open ? "auto" : "none",
-            transition: "opacity 150ms ease-out",
+            transition: scrimTransition,
             zIndex: 10,
           }}
         />
@@ -391,7 +397,7 @@ export function DetailPanel({
             : open
               ? "translateX(0)"
               : "translateX(100%)",
-          transition: docked ? "none" : "transform 150ms ease-out",
+          transition: docked ? "none" : asideTransition,
           zIndex: 11,
         }}
       >
@@ -425,10 +431,12 @@ export function DetailPanel({
               touchAction: "none",
               zIndex: 3,
               background: "transparent",
-              borderLeft:
-                hoveringHandle || resizing
-                  ? "2px solid var(--accent)"
+              borderLeft: resizing
+                ? "2px solid var(--accent)"
+                : hoveringHandle
+                  ? "2px solid var(--hover-resize-handle)"
                   : "2px solid transparent",
+              transition: "var(--resize-handle-transition)",
               ...focusRing(handleFocused),
             }}
           >
@@ -598,6 +606,9 @@ export function DetailPanel({
                           flex: "0 1 auto",
                           maxHeight: "40%",
                           overflowY: "auto",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "var(--panel-section-gap)",
                         }}
                       >
                         <ReferenceBlocks
@@ -620,6 +631,9 @@ export function DetailPanel({
                       style={{
                         flex: c?.tmuxSession ? "0 1 auto" : "1 1 auto",
                         overflowY: "auto",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "var(--panel-section-gap)",
                       }}
                     >
                       <ReferenceBlocks
@@ -638,9 +652,7 @@ export function DetailPanel({
                   )}
 
                   {c != null &&
-                    (c.prsUnknown != null ||
-                      c.previewsUnknown != null ||
-                      (c.prs != null && c.prs.length > 0) ||
+                    (c.previewsUnknown != null ||
                       (c.previews != null && c.previews.length > 0)) && (
                       <div
                         className="reading-surface"
@@ -651,16 +663,6 @@ export function DetailPanel({
                           borderBottom: "1px solid var(--border)",
                         }}
                       >
-                        {c.prs?.map((pr) => (
-                          <PrRow key={pr.url} pr={pr} />
-                        ))}
-                        {c.prsUnknown != null && (
-                          <UnknownProbeRow
-                            signal="pr"
-                            category={c.prsUnknown.category}
-                            partial={(c.prs?.length ?? 0) > 0}
-                          />
-                        )}
                         {c.previews?.map((preview) => (
                           <PreviewRow key={preview.port} preview={preview} />
                         ))}

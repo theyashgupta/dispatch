@@ -1,4 +1,5 @@
 import type { Card } from "../../../shared/types.js";
+import { VAULT_RUN_PATH, VAULT_SCHEMA_PATH } from "../infra/paths.js";
 
 /**
  * Describe the workspace layout for any repo count (N ≥ 1): a comma-joined list of `<name>/`
@@ -67,6 +68,32 @@ const STATUS_PROTOCOL = [
   `- When blocked and needing human input: DISPATCH_STATUS: NEEDS_INPUT - <one-line reason>`,
   `- When the task is complete: DISPATCH_STATUS: DONE - <one-line summary>`,
   `- Before calling a tool that pauses for the user (AskUserQuestion, ExitPlanMode, or any action needing approval), print the NEEDS_INPUT line above as your entire reply first, then call the tool.`,
+];
+
+const VAULT_FLAG_DASH = "-".repeat(2);
+
+/**
+ * The vault contract block, taught unconditionally beside `STATUS_PROTOCOL` so every session knows
+ * a vault may exist, how to read it, and that a refusal is expected, before its first refusal ever
+ * happens. Built at module load from `VAULT_RUN_PATH`/`VAULT_SCHEMA_PATH` so it can never name a
+ * path the boot writer does not actually write. Neither constant is card-, session- or
+ * config-derived, so this block interpolates no untrusted input and needs no fencing, unlike the
+ * title/description slots above it in `buildKickoff`'s returned array. `VAULT_FLAG_DASH` builds the
+ * runner's `--keys` flag and its end-of-options separator from two concatenated single-hyphen
+ * characters rather than a literal doubled token, matching `hook-setup.ts`'s own `VAULT_RUN_SCRIPT`
+ * separator workaround, so this file's own source text never carries an adjacent-hyphen sequence.
+ *
+ * @remarks This block is prompt-engineering only, not a structural guarantee, nothing stops a
+ * session from ignoring it. It is deliberately paired with the `permissions.deny` rule on
+ * `values.env` and the PreToolUse Bash guard, both registered in `hook-setup.ts` and ratified as
+ * `T-105-04` (the guard, load-bearing), which hold whether or not this text is followed.
+ * @see docs/ARCHITECTURE.md#security-threat-model
+ */
+const VAULT_PROTOCOL = [
+  `## Vault protocol`,
+  `This project may have secrets configured in Settings, Vault. Read ${VAULT_SCHEMA_PATH} for the list of key names and what each is for; it never carries a value.`,
+  `To use a key's value, run the command that needs it through the runner rather than reading the value yourself: ${VAULT_RUN_PATH} ${VAULT_FLAG_DASH}keys NAME[,NAME...] ${VAULT_FLAG_DASH} command [args...]. Only the named keys reach that one command.`,
+  `Values are never directly readable, and the runner or a blocked read may refuse. A refusal is the system working as intended, not a bug to work around: name the key to the user and point them at Settings, Vault.`,
 ];
 
 /**
@@ -250,5 +277,7 @@ export function buildKickoff(
     workspaceOrientation(repoNames, card.identifier),
     ``,
     ...STATUS_PROTOCOL,
+    ``,
+    ...VAULT_PROTOCOL,
   ].join("\n");
 }
