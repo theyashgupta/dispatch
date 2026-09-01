@@ -1019,6 +1019,21 @@ iOS text inflation breaks the `charWidth ∝ fontSize` relationship the zoom / e
 feature's math depends on. The theme resolver's never-throws contract (above) is part of the same
 invariant — a themed terminal must open even when Ghostty is absent or its config fails to parse.
 
+**Selection in the web terminal stays native because Dispatch pins mouse ownership at session
+creation (LOCAL-3).** xterm.js only makes a native selection while no program owns the mouse, and
+two things can take it: the pane app requesting mouse tracking (tmux forwards the ACTIVE pane's
+mouse mode to every attached client even with tmux `mouse off`, measured on tmux 3.7c), or tmux
+itself when its `mouse` option is on (a drag then enters tmux copy-mode, painted with the default
+`mode-style` `bg=yellow`, and the text only reaches a tmux buffer, never the clipboard). Both are
+closed in `adapters/tmux.ts#newSession`: the pane environment carries
+`CLAUDE_CODE_DISABLE_MOUSE=1` next to the classic-renderer force, and the session gets `mouse off`
+pinned at session scope so a later `set -g mouse on` from anyone else on the shared server cannot
+reach a Dispatch pane. `scripts/terminal-selection-guard.ts` (`npm run selection-guard`) fails if
+either pin is lost, running against a private tmux server so the live one is never touched. The
+trade-off is deliberate: Claude Code's own drag-to-copy (its pbcopy path) is unreachable from the
+browser, but it only ever reached the Mac's clipboard, not a remote viewer's, and native selection
+plus the browser's copy works from every device.
+
 **A phone flick is local, not a round trip, because of five cooperating pieces (`TERM-05`).**
 
 **1. The renderer is forced classic per pane.** `CLASSIC_RENDERER_ENV` (`adapters/tmux.ts`) is

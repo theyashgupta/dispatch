@@ -52,6 +52,7 @@
     "replay-gate": "tsx scripts/replay-watcher.ts --check",
     "doc-drift": "node scripts/check-doc-drift.mjs",
     "invariants": "node scripts/check-invariants.mjs",
+    "selection-guard": "tsx scripts/terminal-selection-guard.ts",
     "sim": "node scripts/fresh-env-sim.mjs",
     "migration-diff": "node scripts/migration-diff-v3.mjs",
     "downgrade-guard": "node scripts/downgrade-guard-v3.mjs",
