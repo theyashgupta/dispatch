@@ -345,7 +345,10 @@ cardsRouter.post("/cards/:id/resume", (req, res) => {
     return;
   }
 
-  if (card.sessionLost !== true) {
+  const activeRecord = card.sessions?.some(
+    (s) => s.id === card.activeSessionId,
+  );
+  if (card.sessionLost !== true && activeRecord !== true) {
     res.status(409).json({ error: "card has no lost session to resume" });
     return;
   }
