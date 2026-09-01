@@ -2612,7 +2612,12 @@ priority and column palettes each live once, in `src/web/styles/tokens.css`, as 
 denylist from the resulting hex values, rather than hardcoding them, so a future palette retune
 can never leave a stale denylist behind; the check requires all thirteen names present with a hex
 value and reports a named missing-subject sentinel violation, not a silently emptied denylist, if
-any is absent or renamed. A global `src/**` scan would be the wrong shape here, the same reasoning
+any is absent or renamed. The literal scan covers `.ts`, `.tsx`, `.css` and `.html` under
+`src/web`, since a stylesheet reintroduces a palette hex as easily as a component, with two named
+exemptions: `tokens.css` itself, the palette's single legitimate home, and the `--hl-*` custom
+properties in `src/web/viewer/viewer.css`, whose values carry syntax-highlight meaning rather
+than status meaning (`--hl-attr`'s `#ef8e3b` matches `--status-stale`/`--prio-high` by
+coincidental hue reuse, not by status semantics). A global `src/**` scan would be the wrong shape here, the same reasoning
 `NEW-18` and `NEW-19` already record above: this check's subject is `src/web` specifically. The
 literal half alone is not the whole guarantee, so the check also fences the MECHANISM: the single
 definition of "which colour a column renders" is `COLUMN_ACCENT` in
@@ -2622,7 +2627,8 @@ definition of "which colour a column renders" is `COLUMN_ACCENT` in
 `var(--col-*)`/`var(--accent)` or `var(--prio-*)` values, or the mechanism half reports a sentinel
 violation, matching `NEW-22`'s own two-half fence/claim discipline. A repo-wide audit at landing,
 recorded in `.planning/phases/114-board-density-states-motion-accents/114-MEASUREMENTS.md` under
-"NEW-24 break legs", found zero status-meaning colour literals under `src/web`, so the gate is
+"NEW-24 break legs", found zero status-meaning colour literals under `src/web` outside the
+`viewer.css` `--hl-*` exemption named above, so the gate is
 confirmatory rather than a cleanup of a present violation; the same ledger records three verbatim
 trips proving the check can fail: a reintroduced literal at a real consuming site, a deleted
 palette declaration hitting the missing-subject sentinel, and a renamed `COLUMN_ACCENT` hitting
