@@ -54,7 +54,7 @@ export function spawnTunnel(localPort: number): Promise<string> {
   if (child) {
     return Promise.reject(
       new Error(
-        "cloudflared child already tracked — refusing to spawn a second",
+        "cloudflared child already tracked, refusing to spawn a second",
       ),
     );
   }

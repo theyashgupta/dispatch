@@ -79,7 +79,7 @@ export function EmptyState({
         ) : (
           <>
             New tickets synced from Linear land in the Inbox for triage, not
-            directly here — promote what you want to work on next.
+            directly here. Promote what you want to work on next.
           </>
         )}
         <br />
@@ -91,7 +91,7 @@ export function EmptyState({
           onClick={onOpenInbox}
           style={{ alignSelf: "center" }}
         >
-          Open Inbox — {waiting} waiting
+          Open Inbox: {waiting} waiting
         </Button>
       )}
     </div>

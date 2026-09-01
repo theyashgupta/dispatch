@@ -330,8 +330,8 @@ export function FirstRunSetup({
             const rowLabel = p.present
               ? `${p.name} installed`
               : p.installable
-                ? `${p.name} missing — install with ${commandText ?? "your package manager"}`
-                : `${p.name} missing — see ${commandText ?? "the docs"}`;
+                ? `${p.name} missing. Install with ${commandText ?? "your package manager"}`
+                : `${p.name} missing. See ${commandText ?? "the docs"}`;
             return (
               <div
                 key={p.name}
@@ -431,7 +431,7 @@ export function FirstRunSetup({
             aria-label={
               node.ok
                 ? `Node v${node.version}`
-                : `Node v${node.version} — below supported floor (${node.floor})`
+                : `Node v${node.version}, below supported floor (${node.floor})`
             }
           >
             <span
@@ -466,7 +466,7 @@ export function FirstRunSetup({
             >
               {node.ok
                 ? `v${node.version}`
-                : `v${node.version} — below supported floor (${node.floor})`}
+                : `v${node.version}, below supported floor (${node.floor})`}
             </span>
           </div>
           <div
@@ -477,8 +477,8 @@ export function FirstRunSetup({
             }}
             aria-label={
               storage.ok
-                ? `Storage OK — ${storage.path}`
-                : `Storage check failed — ${storage.path}`
+                ? `Storage OK: ${storage.path}`
+                : `Storage check failed: ${storage.path}`
             }
           >
             <span
@@ -512,8 +512,8 @@ export function FirstRunSetup({
               }}
             >
               {storage.ok
-                ? `OK — ${storage.path}`
-                : `check failed — ${storage.path}`}
+                ? `OK: ${storage.path}`
+                : `check failed: ${storage.path}`}
             </span>
           </div>
 

@@ -670,7 +670,7 @@ export function CardView({
                   style={{ flex: "0 0 auto" }}
                 />
               }
-              label="Uncommitted work — cleanup blocked"
+              label="Uncommitted work: cleanup blocked"
             />
           </div>
         )}

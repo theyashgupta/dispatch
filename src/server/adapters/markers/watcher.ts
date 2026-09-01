@@ -162,7 +162,7 @@ async function scanSession(
     if (!warnedCaptures.has(tmuxName)) {
       warnedCaptures.add(tmuxName);
       console.warn(
-        `[watcher] capture failed for a session — skipping until it recovers: ${(err as Error).message}`,
+        `[watcher] capture failed for a session, skipping until it recovers: ${(err as Error).message}`,
       );
     }
     return;
@@ -220,7 +220,7 @@ async function scanSession(
     if (view !== prev.flip.baseline) {
       const divergentTicks = prev.flip.divergentTicks + 1;
       console.warn(
-        `[watcher] agent-output divergence tick ${divergentTicks}/2 — ${diffFingerprint(prev.flip.baseline, view)}`,
+        `[watcher] agent-output divergence tick ${divergentTicks}/2: ${diffFingerprint(prev.flip.baseline, view)}`,
       );
     }
   }
@@ -326,7 +326,7 @@ export function startMarkerWatcher(statusChannel: StatusChannel): void {
       reapDeadSessions();
     } catch (err) {
       console.error(
-        `[watcher] tick failed — continuing: ${(err as Error).message}`,
+        `[watcher] tick failed, continuing: ${(err as Error).message}`,
       );
     } finally {
       scheduleNext();

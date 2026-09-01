@@ -88,6 +88,12 @@ function toStartError(
  * itself, so there is exactly one chokepoint for "does this id name a session the card owns".
  * The saga context's inherited-base-ref field carries the parent's BRANCH, not its session id,
  * because the consuming saga step needs a git ref to build a worktree from.
+ * @remarks (LOCAL-2) A non-newSession start derives `sessionName` from the ACTIVE session
+ * record's own `branch`, falling back to `card.identifier` for a first start (no records yet) and
+ * for a cleaned-up card. A bare Restart or reattach of a card whose active session is a suffixed
+ * sub-session therefore rebuilds THAT session's branch/workspace/tmux instead of silently
+ * retargeting the primary's, which used to overwrite the sub-session's record with session 1's
+ * fields.
  * @see docs/ARCHITECTURE.md#orchestration-saga
  */
 export async function startSession(
@@ -111,7 +117,10 @@ export async function startSession(
       await store.setStartIntent(cardId, { playbook: opts.playbook });
     }
 
-    let sessionName = card.identifier;
+    const activeRecord = card.sessions?.find(
+      (s) => s.id === card.activeSessionId,
+    );
+    let sessionName = activeRecord?.branch ?? card.identifier;
     if (wantsNewSession) {
       reserved = await store.reserveNewSession(
         cardId,
@@ -141,7 +150,7 @@ export async function startSession(
       }
       await store.attachExistingSession(cardId, card.activeSessionId, {
         workspacePath,
-        branch: card.identifier,
+        branch: sessionName,
         tmuxSession: session,
       });
       setTimeout(
@@ -156,7 +165,7 @@ export async function startSession(
       : undefined;
     const warnings: string[] = [];
     if (playbookName !== undefined && playbookBody === undefined) {
-      warnings.push("saved playbook not found — started without it");
+      warnings.push("saved playbook not found, started without it");
     }
 
     await store.setExtraDirection(cardId, extraDirection);

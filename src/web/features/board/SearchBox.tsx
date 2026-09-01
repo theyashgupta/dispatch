@@ -324,7 +324,7 @@ export function SearchBox({
       {status === "loading" ? (
         renderStateRow("Searching…")
       ) : status === "error" ? (
-        renderStateRow("Couldn't search right now — try again.")
+        renderStateRow("Couldn't search right now. Try again.")
       ) : results.length === 0 ? (
         renderStateRow(`No tickets match "${trimmedQuery}".`)
       ) : (
@@ -332,7 +332,7 @@ export function SearchBox({
           {results.map((result, index) => renderRow(result, index))}
           {total > results.length &&
             renderStateRow(
-              `Showing top ${SEARCH_RESULT_LIMIT} of ${total} — refine your search to narrow results.`,
+              `Showing top ${SEARCH_RESULT_LIMIT} of ${total}. Refine your search to narrow results.`,
             )}
         </>
       )}

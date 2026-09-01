@@ -378,7 +378,7 @@ export function Column({
         </span>
         {manualEntryBlocked && (
           <span
-            title="Agent Done is set automatically by a real agent completion signal — it is never a manual drop target"
+            title="Agent Done is set automatically by a real agent completion signal. It is never a manual drop target"
             style={{
               color: "var(--text-muted)",
               fontSize: "var(--font-label)",
@@ -411,7 +411,7 @@ export function Column({
             lineHeight: "var(--line-label)",
           }}
         >
-          Can&rsquo;t drop here — a card only reaches Agent Done on a real agent
+          Can&rsquo;t drop here. A card only reaches Agent Done on a real agent
           completion signal.
         </div>
       )}

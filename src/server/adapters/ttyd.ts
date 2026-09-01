@@ -416,8 +416,7 @@ function onExit(session: string, exitedChild: ChildProcess): void {
   if (!entry || entry.child !== exitedChild) return;
 
   procs.delete(session);
-  const card = store.snapshot().cards.find((c) => c.tmuxSession === session);
-  if (card) void store.recordTtydExit(card.id, { variant: "died" });
+  void store.recordTtydExit(session, { variant: "died" });
 }
 
 /**
@@ -492,7 +491,7 @@ async function scanDspTtydProcesses(): Promise<{
     }));
   } catch (err) {
     console.error(
-      "[ttyd] process scan failed — orphan sweep and re-adoption skipped this pass:",
+      "[ttyd] process scan failed, orphan sweep and re-adoption skipped this pass:",
       err instanceof Error ? err.message : String(err),
     );
     return { candidates: new Set(), compatible: new Set() };
