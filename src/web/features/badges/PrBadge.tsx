@@ -46,7 +46,14 @@ export function PrBadge({ pr, showRepo }: { pr: PrInfo; showRepo?: boolean }) {
     >
       <Icon size={12} strokeWidth={2} aria-hidden="true" />
       {showRepoTag && (
-        <span style={{ fontFamily: "var(--font-mono)" }}>{pr.repo}</span>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--font-micro)",
+          }}
+        >
+          {pr.repo}
+        </span>
       )}
       {`#${pr.number}`}
       {showCiDot && (
