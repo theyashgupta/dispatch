@@ -21,7 +21,6 @@ const destructiveHeadingStyle: CSSProperties = {
 };
 
 const mutedLabelledContainer: CSSProperties = {
-  marginTop: "var(--space-lg)",
   display: "flex",
   flexDirection: "column",
   gap: "var(--space-xs)",

@@ -118,7 +118,6 @@ export function PrList({ card }: { card: Card }) {
   return (
     <div
       style={{
-        marginBottom: "var(--space-lg)",
         display: "flex",
         flexDirection: "column",
         gap: "var(--space-xs)",

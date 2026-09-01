@@ -56,7 +56,6 @@ export function CardTimeline({
   return (
     <div
       style={{
-        marginTop: "var(--space-lg)",
         paddingTop: "var(--space-lg)",
         borderTop: "1px solid var(--border)",
         display: "flex",

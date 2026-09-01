@@ -24,6 +24,7 @@
   --space-xl: 24px; /* slide-over/error screen block spacing */
   --space-2xl: 32px; /* error/first-run outer padding; strip + header height */
   --space-3xl: 48px; /* empty-state vertical centering offset */
+  --panel-section-gap: 16px; /* LUI-05: the detail panel's single reading-surface section rhythm, docs/standards/design-contract.md ## Spacing rhythm; replaces ReferenceBlocks/PrList/CardTimeline's own ad hoc per-block margins */
 
   /* Density scale (v3.4), board card/gap dimensions - see
      docs/standards/design-contract.md ### Density scale (v3.4). */

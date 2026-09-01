@@ -604,6 +604,9 @@ export function DetailPanel({
                           flex: "0 1 auto",
                           maxHeight: "40%",
                           overflowY: "auto",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "var(--panel-section-gap)",
                         }}
                       >
                         <ReferenceBlocks
@@ -626,6 +629,9 @@ export function DetailPanel({
                       style={{
                         flex: c?.tmuxSession ? "0 1 auto" : "1 1 auto",
                         overflowY: "auto",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "var(--panel-section-gap)",
                       }}
                     >
                       <ReferenceBlocks
