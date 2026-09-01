@@ -14,6 +14,7 @@
   --accent: #5e6ad2; /* interactive/selected-state signal only: active view toggle, active inbox badge, drag-target highlight, needs-attention card border, resize-handle hover, active search result row */
   --destructive: #e5484d; /* Sync-failure / disconnected / config error: fills, stripes, borders, icon glyphs, status dots (non-text only) */
   --destructive-text: #ea6d71; /* Destructive TEXT role only, split from --destructive (LUI-07): white 20% lighten, measured 4.5:1+ on all elevation/pressed tiers and the real Lost-chip tint */
+  --destructive-button-fill: #c03136; /* Danger Button fill only, split from --destructive (115 review WR-01): same 358deg hue darkened so the white label clears the 4.5:1 text floor at rest (5.62:1) and on the 12% white hover lighten (4.62:1); guarded by contrast-113's derived pair set */
   --text: #e8e9ea; /* Primary text: titles, headings, description body */
   --text-muted: #8a8f98; /* Muted: identifiers, headers, counts, timestamps */
 
@@ -101,13 +102,15 @@
      relationship survives a palette change - see
      docs/standards/design-contract.md ## State palette. */
   --hover-button-primary: color-mix(in srgb, white 12%, var(--accent));
-  --hover-button-danger: color-mix(in srgb, white 12%, var(--destructive));
+  /* prettier-ignore */
+  --hover-button-danger: color-mix(in srgb, white 12%, var(--destructive-button-fill));
   --hover-resize-handle: color-mix(in srgb, var(--accent) 55%, transparent);
   --pressed-card: color-mix(in srgb, black 12%, var(--surface-card));
   /* prettier-ignore */
   --pressed-card-hover: color-mix(in srgb, black 12%, var(--surface-card-hover));
   --pressed-button-primary: color-mix(in srgb, black 12%, var(--accent));
-  --pressed-button-danger: color-mix(in srgb, black 12%, var(--destructive));
+  /* prettier-ignore */
+  --pressed-button-danger: color-mix(in srgb, black 12%, var(--destructive-button-fill));
 
   /* Dimensions */
   --stripe-width: 3px;

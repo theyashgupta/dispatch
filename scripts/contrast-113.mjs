@@ -196,6 +196,78 @@ function buildPairSet(tokens, extraBgs) {
   return { pairs };
 }
 
+/**
+ * The exact sRGB mix a browser's `color-mix(in srgb, A p%, B)` computes for two opaque hex
+ * colors, so derived-pair backgrounds below re-derive from the live token values rather than
+ * pinning a resolved hex that would go stale on a base-token retune.
+ */
+function srgbMix(hexA, hexB, pctA) {
+  const a = hexToRgb(hexA);
+  const b = hexToRgb(hexB);
+  const mixed = a.map((v, i) => Math.round(v * pctA + b[i] * (1 - pctA)));
+  return "#" + mixed.map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Real rendered text pairs whose background (or foreground) is not itself a raw token, so the
+ * generated ladder-tier cross-product can never produce them (115 review WR-01/WR-02):
+ *
+ * 1. The danger Button's white `#ffffff` label on `--destructive-button-fill`, at rest and on
+ *    the `--hover-button-danger` 12% white lighten (Button.tsx danger variant).
+ * 2. `--destructive-text` on the Lost-chip tint, `color-mix(in srgb, var(--destructive) 16%,
+ *    var(--surface-card))` (CardView.tsx:149). The chip's background is this one opaque computed
+ *    color: it is deliberately pinned to the resting `--surface-card` tier and does NOT re-base
+ *    when the card behind it hovers, so the hover-tier mix is not a rendered text background and
+ *    is excluded here. Measured for the record: at 16% over `--surface-card-hover` the mix would
+ *    be #40272c and `--destructive-text` on it 4.48:1, BELOW the text floor, so any future
+ *    re-base of the chip tint onto the hover tier must change the tint formula and this list.
+ *
+ * A referenced token missing from the parsed file is pushed as a violation, never silently
+ * skipped, so deleting a token cannot retire its guard.
+ */
+function buildDerivedTextPairs(tokens, violations) {
+  const pairs = [];
+  const need = (name) => {
+    const hex = tokens.get(PREFIX + name);
+    if (hex == null) {
+      violations.push(
+        `derived: token ${PREFIX + name} not found in the token file, its derived pair cannot be checked`,
+      );
+    }
+    return hex;
+  };
+  const fill = need("destructive-button-fill");
+  if (fill != null) {
+    pairs.push({
+      fg: "danger-button-label(#ffffff)",
+      fgHex: "#ffffff",
+      bg: PREFIX + "destructive-button-fill",
+      bgHex: fill,
+      role: "text",
+    });
+    pairs.push({
+      fg: "danger-button-label(#ffffff)",
+      fgHex: "#ffffff",
+      bg: "hover-button-danger(computed)",
+      bgHex: srgbMix("#ffffff", fill, 0.12),
+      role: "text",
+    });
+  }
+  const destructive = need("destructive");
+  const card = need("surface-card");
+  const destructiveText = need("destructive-text");
+  if (destructive != null && card != null && destructiveText != null) {
+    pairs.push({
+      fg: PREFIX + "destructive-text",
+      fgHex: destructiveText,
+      bg: "lost-chip-tint(computed)",
+      bgHex: srgbMix(destructive, card, 0.16),
+      role: "text",
+    });
+  }
+  return pairs;
+}
+
 // ---------------------------------------------------------------------------
 // Checks
 // ---------------------------------------------------------------------------
@@ -209,6 +281,7 @@ function checkPairs(tokensPath, extraBgs, violations) {
   }
 
   const { pairs } = buildPairSet(tokens, extraBgs);
+  pairs.push(...buildDerivedTextPairs(tokens, violations));
   const rows = [];
   let failCount = 0;
   let residualCount = 0;

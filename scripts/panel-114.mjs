@@ -3167,7 +3167,7 @@ async function runBreakBoardStates() {
 // ---------------------------------------------------------------------------
 
 const CONTRACT_HOVER_BUTTON_PRIMARY_HEX = "#717cd7";
-const CONTRACT_HOVER_BUTTON_DANGER_HEX = "#e85e62";
+const CONTRACT_HOVER_BUTTON_DANGER_HEX = "#c84a4e";
 const BUTTON_TSX_PATH = join(
   REPO_ROOT,
   "src",
@@ -3354,7 +3354,7 @@ async function checkControlStatesOnce(violations) {
       "control-states: danger's hover/pressed tokens are proven correct by SHARED MECHANISM " +
         "(Button.tsx routes primary and danger through the identical composed background " +
         "expression the live primary proof below exercises) plus the in-page --hover-button-danger " +
-        "token resolution cross-checked above against the contract's recorded #e85e62, not by a " +
+        "token resolution cross-checked above against the contract's recorded #c84a4e, not by a " +
         "live danger-variant instance.",
     );
 

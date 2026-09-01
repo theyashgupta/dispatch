@@ -52,7 +52,7 @@ const primaryStyle: CSSProperties = {
 const dangerStyle: CSSProperties = {
   height: "32px",
   padding: "0 var(--space-lg)",
-  background: "var(--destructive)",
+  background: "var(--destructive-button-fill)",
   border: "none",
   borderRadius: "var(--radius)",
   color: "#ffffff",
