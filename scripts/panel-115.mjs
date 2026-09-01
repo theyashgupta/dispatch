@@ -1804,6 +1804,678 @@ async function probeBaseline() {
 }
 
 // ---------------------------------------------------------------------------
+// PROBES.surfaces (Plan 116-03): a detail-panel-wide governed-property
+// sweep, ported in shape from panel-114.mjs's own PROBES.surfaces (Plan
+// 116-02). A PROBE, never a CHECK: it measures and prints, it never asserts
+// pass or fail. Covers every src/web/features/detail/*.tsx file (11 total).
+// ---------------------------------------------------------------------------
+
+/** The one property set the generic reader below reads off every resolved surface root, matching
+ * this plan's own governed-property list verbatim (identical set to panel-114.mjs's own
+ * SURFACE_GOVERNED_PROPS). */
+const SURFACE_GOVERNED_PROPS = [
+  "fontSize",
+  "fontWeight",
+  "fontFamily",
+  "lineHeight",
+  "borderRadius",
+  "backgroundColor",
+  "color",
+  "borderColor",
+  "boxShadow",
+  "padding",
+  "gap",
+  "outline",
+  "transition",
+];
+
+/**
+ * ONE generic reader for every detail-panel surface descriptor, ported in shape from
+ * panel-114.mjs's own `readSurface` (Plan 116-02): resolves an element via a live JS expression,
+ * asserts UNIQUENESS then SHAPE, and only reads governed CSS properties off an element that
+ * passed both (T-116-05). A failed assertion records ROOT-FAIL with a written reason, never a
+ * reading taken from an unasserted element.
+ *
+ * @remarks
+ * Unlike the board reader, every color-bearing property this function reads
+ * (backgroundColor/color/borderColor) is round-tripped through this file's own `normalizeColor`
+ * afterward: several panel surfaces resolve `color-mix()` resting tints (the active
+ * session-switcher segment, the resize handle's hover/pressed border) whose computed-style
+ * serialization is not one stable string (the 114-01 finding, in force here too).
+ */
+async function readSurface(
+  cdp,
+  sessionId,
+  surface,
+  part,
+  resolverExpr,
+  uniquenessExpr,
+  shapeExprTemplate,
+) {
+  let uniqueOk;
+  try {
+    uniqueOk = await evalValue(cdp, sessionId, uniquenessExpr);
+  } catch (err) {
+    return {
+      surface,
+      part,
+      status: "ROOT-FAIL",
+      reason: `uniqueness assertion threw: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!uniqueOk) {
+    return {
+      surface,
+      part,
+      status: "ROOT-FAIL",
+      reason: `uniqueness assertion failed: ${uniquenessExpr}`,
+    };
+  }
+  const shapeExpr = shapeExprTemplate.split("$EL").join(`(${resolverExpr})`);
+  let shapeOk;
+  try {
+    shapeOk = await evalValue(cdp, sessionId, shapeExpr);
+  } catch (err) {
+    return {
+      surface,
+      part,
+      status: "ROOT-FAIL",
+      reason: `shape assertion threw: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!shapeOk) {
+    return {
+      surface,
+      part,
+      status: "ROOT-FAIL",
+      reason: `shape assertion failed: ${shapeExpr}`,
+    };
+  }
+  const style = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel115ComputedSub((${resolverExpr}), ${JSON.stringify(SURFACE_GOVERNED_PROPS)})`,
+  );
+  style.backgroundColor = await normalizeColor(
+    cdp,
+    sessionId,
+    style.backgroundColor,
+  );
+  style.color = await normalizeColor(cdp, sessionId, style.color);
+  style.borderColor = await normalizeColor(cdp, sessionId, style.borderColor);
+  const rect = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel115Rect((${resolverExpr}))`,
+  );
+  return {
+    surface,
+    part,
+    status: "OK",
+    style,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+/** Reads `elExpr`'s rect and dispatches a real click there. Ported from panel-114.mjs's own
+ * `clickElementInView` (Plan 116-02): deliberately never calls `scrollIntoView()`, every element
+ * this probe clicks already sits inside the already-open, already-scrolled panel at every
+ * breakpoint this file defines. */
+async function clickElementInView(cdp, sessionId, elExpr, modifiers = 0) {
+  const rect = await evalValue(
+    cdp,
+    sessionId,
+    `window.panel115Rect(${elExpr})`,
+  );
+  await dispatchRealClick(cdp, sessionId, { x: rect.x, y: rect.y }, modifiers);
+}
+
+/** True below `DetailPanel.tsx`'s own `CAROUSEL_QUERY` threshold (max-width: 1023px), the same
+ * boundary that forces `takeover`/`effectiveFullscreen` true and structurally removes the resize
+ * handle and `PanelHeader.tsx`'s fullscreen toggle from the JSX tree entirely (never a probe
+ * gap). */
+function isTakeoverBp(bp) {
+  return bp.width < 1024;
+}
+
+/**
+ * Every detail-panel surface descriptor's reading for one breakpoint, covering all 11
+ * `src/web/features/detail/*.tsx` files. Three of the eleven are structurally NOT-MOUNTED by this
+ * fixture at EVERY breakpoint, each confirmed by reading the component's own source gate rather
+ * than assumed:
+ *   - `SessionLostSection.tsx` renders only when `activeSessionLost`
+ *     (`c.activeSessionId != null && !c.tmuxSession`, DetailPanel.tsx:335); this fixture's active
+ *     session carries a live `tmuxSession`, so it is never true.
+ *   - `StartAnotherSessionButton.tsx` returns `null` outright when `card.column === "done"`
+ *     (its own line 24); this fixture's primary card sits in `column: "done"`.
+ *   - `UnknownProbeRow.tsx` renders only when `previewsUnknown`/`prsUnknown` is set; this
+ *     fixture's card sets `previews`/`prs` directly and never either `Unknown` field.
+ * None of the three is forced by editing the fixture: `rhythm`/`elevation`/`states` assert
+ * against that exact fixture (116-03-PLAN.md's own instruction).
+ */
+async function measureSurfaces(cdp, sessionId, bp) {
+  const records = [];
+  const push = (rec) => records.push({ bp: bp.label, ...rec });
+  const notMounted = (surface, part, reason) =>
+    push({ surface, part, status: "NOT-MOUNTED", reason });
+  const takeover = isTakeoverBp(bp);
+  const asideExpr = `document.querySelector('aside[aria-label="Ticket detail"]')`;
+
+  // --- SURF-12 CardTimeline.tsx --------------------------------------------
+  const cardTimelineToggleExpr = `document.querySelector('aside[aria-label="Ticket detail"] button[aria-controls="card-timeline-region"]')`;
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "CardTimeline.tsx",
+      "activity-toggle",
+      cardTimelineToggleExpr,
+      `document.querySelectorAll('aside[aria-label="Ticket detail"] button[aria-controls="card-timeline-region"]').length === 1`,
+      `$EL.getAttribute('aria-label') === "Toggle activity"`,
+    ),
+  );
+
+  // CardTimeline.tsx's own `useState(true)`: the region starts EXPANDED, not collapsed. Read the
+  // default-expanded region first (this fixture's 5 seeded event rows keep `rows.length > 0`,
+  // the `#card-timeline-region` branch with content, never the empty-state branch), then toggle
+  // closed for the collapsed reading, then toggle back open so the rest of this sweep (PrList
+  // lives in the SAME scroll container) sees the same settled, expanded DOM shape every other
+  // check in this file assumes.
+  const timelineExpandedFirst = await evalValue(
+    cdp,
+    sessionId,
+    `document.querySelector('#card-timeline-region') != null`,
+  );
+  if (timelineExpandedFirst) {
+    push(
+      await readSurface(
+        cdp,
+        sessionId,
+        "CardTimeline.tsx",
+        "timeline-region-expanded",
+        `document.querySelector('#card-timeline-region')`,
+        `document.querySelectorAll('#card-timeline-region').length === 1`,
+        `$EL.id === "card-timeline-region"`,
+      ),
+    );
+  } else {
+    notMounted(
+      "CardTimeline.tsx",
+      "timeline-region-expanded",
+      "expanded was false at the moment this breakpoint was measured (CardTimeline.tsx's own local `expanded` state)",
+    );
+  }
+  await clickElementInView(cdp, sessionId, cardTimelineToggleExpr);
+  await sleep(150);
+  const timelineNowCollapsed = await evalValue(
+    cdp,
+    sessionId,
+    `document.querySelector('#card-timeline-region') == null`,
+  );
+  notMounted(
+    "CardTimeline.tsx",
+    "timeline-region-collapsed",
+    timelineNowCollapsed
+      ? "CardTimeline.tsx's own `{expanded && (...)}` conditional render removes #card-timeline-region from the DOM entirely while collapsed, live-confirmed by a real toggle click this run, the correct absence, not a probe gap"
+      : "toggle click did not collapse the region within 150ms, recorded honestly rather than silently reusing the expanded reading",
+  );
+  await clickElementInView(cdp, sessionId, cardTimelineToggleExpr);
+  await sleep(150);
+
+  // --- SURF-13 DetailPanel.tsx ----------------------------------------------
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "DetailPanel.tsx",
+      "panel-root",
+      asideExpr,
+      `document.querySelectorAll('aside[aria-label="Ticket detail"]').length === 1`,
+      `$EL.getAttribute('aria-label') === "Ticket detail"`,
+    ),
+  );
+
+  if (!takeover) {
+    push(
+      await readSurface(
+        cdp,
+        sessionId,
+        "DetailPanel.tsx",
+        "resize-handle",
+        `document.querySelector('aside[aria-label="Ticket detail"] [role="separator"][aria-label="Resize panel"]')`,
+        `document.querySelectorAll('aside[aria-label="Ticket detail"] [role="separator"][aria-label="Resize panel"]').length === 1`,
+        `$EL.getAttribute('aria-orientation') === "vertical"`,
+      ),
+    );
+  } else {
+    notMounted(
+      "DetailPanel.tsx",
+      "resize-handle",
+      "DetailPanel.tsx's own `!docked && !effectiveFullscreen` gate: below the 1024px carousel threshold `takeover` forces `effectiveFullscreen` true, removing the handle's JSX subtree entirely",
+    );
+  }
+
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "DetailPanel.tsx",
+      "reading-surface-wrapper (ReferenceBlocks+CardTimeline)",
+      `document.querySelector('aside[aria-label="Ticket detail"] .scroll-stable-y.reading-surface')`,
+      `document.querySelectorAll('aside[aria-label="Ticket detail"] .scroll-stable-y.reading-surface').length === 1`,
+      `$EL.className.indexOf('reading-surface') !== -1`,
+    ),
+  );
+
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "DetailPanel.tsx",
+      "previews-wrapper",
+      `document.querySelector('aside[aria-label="Ticket detail"] button[aria-label^="Open localhost"]').parentElement.parentElement`,
+      `document.querySelectorAll('aside[aria-label="Ticket detail"] button[aria-label^="Open localhost"]').length === 1`,
+      `$EL.className.indexOf('reading-surface') !== -1`,
+    ),
+  );
+
+  // --- SURF-14 PanelHeader.tsx ------------------------------------------------
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "PanelHeader.tsx",
+      "h1-title",
+      `document.querySelector('aside[aria-label="Ticket detail"] h1[title]')`,
+      `document.querySelectorAll('aside[aria-label="Ticket detail"] h1[title]').length === 1`,
+      `$EL.textContent.length > 0`,
+    ),
+  );
+
+  // Same aria-controls exclusion `checkStates` already uses for this same button (not a text
+  // search): at BP-D's narrowPanel width (<= 520px, PanelHeader.tsx's own narrowPanel gate) the
+  // button's visible text collapses to just the chevron icon, aria-label/title carry "Details"
+  // instead, and `panel115FindByText`'s textContent search stops matching, a real narrow-viewport
+  // selector gap this run's BP-D reading exposed live, not a rendering defect.
+  const detailsToggleExpr = `Array.prototype.find.call(document.querySelectorAll('aside[aria-label="Ticket detail"] button[aria-expanded]'), function (b) { return b.getAttribute("aria-controls") !== "card-timeline-region"; })`;
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "PanelHeader.tsx",
+      "details-toggle",
+      detailsToggleExpr,
+      `Array.prototype.filter.call(document.querySelectorAll('aside[aria-label="Ticket detail"] button[aria-expanded]'), function (b) { return b.getAttribute("aria-controls") !== "card-timeline-region"; }).length === 1`,
+      `$EL.getAttribute('aria-expanded') != null`,
+    ),
+  );
+
+  const fullscreenSelector = `aside[aria-label="Ticket detail"] button[aria-label="Enter fullscreen"], aside[aria-label="Ticket detail"] button[aria-label="Exit fullscreen"]`;
+  if (!takeover) {
+    push(
+      await readSurface(
+        cdp,
+        sessionId,
+        "PanelHeader.tsx",
+        "fullscreen-toggle",
+        `document.querySelector('${fullscreenSelector}')`,
+        `document.querySelectorAll('${fullscreenSelector}').length === 1`,
+        `$EL != null`,
+      ),
+    );
+  } else {
+    notMounted(
+      "PanelHeader.tsx",
+      "fullscreen-toggle",
+      "PanelHeader.tsx's own `hasLiveSession && !docked && !takeover` gate: `takeover` is forced true by the same isCarousel query DetailPanel.tsx's resize handle uses, removing this IconButton below 1024px",
+    );
+  }
+
+  const closeSelector = `aside[aria-label="Ticket detail"] button[aria-label="Close panel"], aside[aria-label="Ticket detail"] button[aria-label="Back to board"]`;
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "PanelHeader.tsx",
+      "close-button",
+      `document.querySelector('${closeSelector}')`,
+      `document.querySelectorAll('${closeSelector}').length === 1`,
+      `$EL != null`,
+    ),
+  );
+
+  const vscodeSelector = `aside[aria-label="Ticket detail"] button[aria-label="Open in VS Code"]`;
+  const vscodePresent = await evalValue(
+    cdp,
+    sessionId,
+    `document.querySelector('${vscodeSelector}') != null`,
+  );
+  if (vscodePresent) {
+    push(
+      await readSurface(
+        cdp,
+        sessionId,
+        "PanelHeader.tsx",
+        "vscode-button",
+        `document.querySelector('${vscodeSelector}')`,
+        `document.querySelectorAll('${vscodeSelector}').length === 1`,
+        `$EL != null`,
+      ),
+    );
+  } else {
+    notMounted(
+      "PanelHeader.tsx",
+      "vscode-button",
+      "PanelHeader.tsx renders this IconButton only when board.editors.code is true (server-side resolveEditors host detection) AND the card carries a workspacePath; this sandbox's boot-time editor detection reported code:false (no `code` binary resolved on PATH), a host-environment fact, not a fixture gap",
+    );
+  }
+
+  const cursorSelector = `aside[aria-label="Ticket detail"] button[aria-label="Open in Cursor"]`;
+  const cursorPresent = await evalValue(
+    cdp,
+    sessionId,
+    `document.querySelector('${cursorSelector}') != null`,
+  );
+  if (cursorPresent) {
+    push(
+      await readSurface(
+        cdp,
+        sessionId,
+        "PanelHeader.tsx",
+        "cursor-button",
+        `document.querySelector('${cursorSelector}')`,
+        `document.querySelectorAll('${cursorSelector}').length === 1`,
+        `$EL != null`,
+      ),
+    );
+  } else {
+    notMounted(
+      "PanelHeader.tsx",
+      "cursor-button",
+      "PanelHeader.tsx renders this IconButton only when board.editors.cursor is true (server-side resolveEditors host detection) AND the card carries a workspacePath; this sandbox's boot-time editor detection reported cursor:false (no `cursor` binary resolved on PATH), a host-environment fact, not a fixture gap",
+    );
+  }
+
+  // --- SURF-15 PreviewRow.tsx -------------------------------------------------
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "PreviewRow.tsx",
+      "preview-row",
+      `document.querySelector('aside[aria-label="Ticket detail"] button[aria-label^="Open localhost"]').parentElement`,
+      `document.querySelectorAll('aside[aria-label="Ticket detail"] button[aria-label^="Open localhost"]').length === 1`,
+      `$EL.querySelector('button[aria-label^="Open localhost"]') != null`,
+    ),
+  );
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "PreviewRow.tsx",
+      "open-button",
+      `document.querySelector('aside[aria-label="Ticket detail"] button[aria-label^="Open localhost"]')`,
+      `document.querySelectorAll('aside[aria-label="Ticket detail"] button[aria-label^="Open localhost"]').length === 1`,
+      `$EL.getAttribute('aria-label').indexOf('Open localhost') === 0`,
+    ),
+  );
+
+  // --- SURF-16 PrList.tsx -----------------------------------------------------
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "PrList.tsx",
+      "section-label",
+      `window.panel115FindByText('aside[aria-label="Ticket detail"] span', "Pull Requests")`,
+      `window.panel115FindByText('aside[aria-label="Ticket detail"] span', "Pull Requests") != null`,
+      `$EL.textContent.indexOf("Pull Requests") !== -1`,
+    ),
+  );
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "PrList.tsx",
+      "pr-row",
+      `document.querySelector('aside[aria-label="Ticket detail"] button[aria-label^="Open PR"]').parentElement`,
+      `document.querySelectorAll('aside[aria-label="Ticket detail"] button[aria-label^="Open PR"]').length >= 1`,
+      `$EL.querySelector('button[aria-label^="Open PR"]') != null`,
+    ),
+  );
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "PrList.tsx",
+      "open-pr-button",
+      `document.querySelector('aside[aria-label="Ticket detail"] button[aria-label^="Open PR"]')`,
+      `document.querySelectorAll('aside[aria-label="Ticket detail"] button[aria-label^="Open PR"]').length >= 1`,
+      `$EL.getAttribute('aria-label').indexOf('Open PR') === 0`,
+    ),
+  );
+
+  // --- SURF-17 ReferenceBlocks.tsx ---------------------------------------------
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "ReferenceBlocks.tsx",
+      "description-markdown",
+      `document.querySelector('aside[aria-label="Ticket detail"] .md-body').parentElement`,
+      `document.querySelectorAll('aside[aria-label="Ticket detail"] .md-body').length === 1`,
+      `$EL.querySelector('.md-body') != null`,
+    ),
+  );
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "ReferenceBlocks.tsx",
+      "muted-notice",
+      `window.panel115FindByText('aside[aria-label="Ticket detail"] span', "Status").parentElement`,
+      `window.panel115FindByText('aside[aria-label="Ticket detail"] span', "Status") != null`,
+      `$EL.textContent.indexOf("Status") !== -1`,
+    ),
+  );
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "ReferenceBlocks.tsx",
+      "start-error-block",
+      `window.panel115FindByText('aside[aria-label="Ticket detail"] span', "Provisioning error").parentElement.parentElement`,
+      `window.panel115FindByText('aside[aria-label="Ticket detail"] span', "Provisioning error") != null`,
+      `$EL.textContent.indexOf("Provisioning error") !== -1`,
+    ),
+  );
+
+  // --- SURF-18 SessionLostSection.tsx: structurally NOT-MOUNTED, see JSDoc above. ---
+  notMounted(
+    "SessionLostSection.tsx",
+    "session-lost-section",
+    "renders only when `activeSessionLost` (c.activeSessionId != null && !c.tmuxSession, DetailPanel.tsx:335); this fixture's active session carries a live tmuxSession",
+  );
+
+  // --- SURF-19 SessionSwitcher.tsx ---------------------------------------------
+  const sessionGroupExpr = `document.querySelector('aside[aria-label="Ticket detail"] [role="group"][aria-label="Sessions"]')`;
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "SessionSwitcher.tsx",
+      "sessions-group",
+      sessionGroupExpr,
+      `document.querySelectorAll('aside[aria-label="Ticket detail"] [role="group"][aria-label="Sessions"]').length === 1`,
+      `$EL.getAttribute('role') === "group"`,
+    ),
+  );
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "SessionSwitcher.tsx",
+      "segment (active)",
+      `${sessionGroupExpr}.children[0]`,
+      `${sessionGroupExpr}.children.length >= 1`,
+      `$EL.getAttribute('aria-pressed') != null`,
+    ),
+  );
+
+  // --- SURF-20 StartAnotherSessionButton.tsx: structurally NOT-MOUNTED, see JSDoc above. ---
+  notMounted(
+    "StartAnotherSessionButton.tsx",
+    "start-another-session-button",
+    'returns null outright when card.column === "done" (StartAnotherSessionButton.tsx:24); this fixture\'s primary card sits in column: "done"',
+  );
+
+  // --- SURF-21 TerminalRegion.tsx -----------------------------------------------
+  const terminalIframeExpr = `document.querySelector('aside[aria-label="Ticket detail"] iframe[title^="Live terminal for"]')`;
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "TerminalRegion.tsx",
+      "terminal-wrapper",
+      `${terminalIframeExpr}.parentElement`,
+      `document.querySelectorAll('aside[aria-label="Ticket detail"] iframe[title^="Live terminal for"]').length === 1`,
+      `$EL.querySelector('iframe') != null`,
+    ),
+  );
+  push(
+    await readSurface(
+      cdp,
+      sessionId,
+      "TerminalRegion.tsx",
+      "terminal-iframe",
+      terminalIframeExpr,
+      `document.querySelectorAll('aside[aria-label="Ticket detail"] iframe[title^="Live terminal for"]').length === 1`,
+      `$EL.tagName === "IFRAME"`,
+    ),
+  );
+
+  // --- SURF-22 UnknownProbeRow.tsx: structurally NOT-MOUNTED, see JSDoc above. ---
+  notMounted(
+    "UnknownProbeRow.tsx",
+    "unknown-probe-row",
+    "renders only when previewsUnknown/prsUnknown is set on the card; this fixture's card sets previews/prs directly and never either Unknown field",
+  );
+
+  return records;
+}
+
+/**
+ * Retry wrapper, same shape and reasoning as panel-114.mjs's own `probeSurfaces` (Plan 116-02): a
+ * full sandbox boot plus well over 100 CDP round trips occasionally hits an unresponsive
+ * `Runtime.evaluate` under CPU contention from the developer's own live desktop session (a
+ * renderer stall, not a code defect); a fresh sandbox boot on the next attempt reliably clears
+ * it. A higher budget than the three checks' own 3-attempt convention, matching this probe's
+ * proportionally higher round-trip count.
+ */
+async function probeSurfaces() {
+  const MAX_ATTEMPTS = 5;
+  let lastErr;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await probeSurfacesOnce();
+      return;
+    } catch (err) {
+      lastErr = err;
+      console.error(
+        `panel-115 --probe surfaces: attempt ${attempt}/${MAX_ATTEMPTS} threw (likely CDP/renderer contention, not a code defect): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  throw lastErr;
+}
+
+async function probeSurfacesOnce() {
+  let sandbox = null;
+  let chrome = null;
+  let cdp = null;
+  const allRecords = [];
+  try {
+    console.log("panel-115 --probe surfaces: booting sandbox");
+    sandbox = await bootSandbox("surfaces");
+    console.log(
+      `panel-115 --probe surfaces: sandbox home ${sandbox.home}, launching Chrome`,
+    );
+    chrome = launchChrome();
+    await waitForCdpUp();
+    cdp = await connectCDP();
+    const { sessionId } = await openPage(cdp, { url: "about:blank" });
+    await cdp.send(
+      "Page.addScriptToEvaluateOnNewDocument",
+      { source: MEASURE_HELPERS_SRC },
+      sessionId,
+    );
+    await cdp.send(
+      "Page.navigate",
+      { url: `http://127.0.0.1:${SANDBOX_PORT}/` },
+      sessionId,
+    );
+    const loaded = await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `document.getElementById("root") != null`,
+      READY_TIMEOUT_MS,
+    );
+    if (!loaded)
+      throw new Error("probeSurfaces: #root never appeared after navigation");
+    // Splash.tsx's own unconditional 1.3s overlay, the same settle window every other probe/check
+    // in this file uses.
+    await sleep(1450);
+
+    // Same open-once-per-run discipline as probeBaseline/checkRhythm/checkElevation/checkStates:
+    // DetailPanel.tsx re-layouts an already-open panel in place on resize, and closing/reopening
+    // across the carousel boundary reproduces the DETAIL-PANEL FINDING renderer wedge
+    // (115-01/panel-114 precedent). Logged explicitly, once, per this plan's own acceptance
+    // criterion that the single-open discipline be asserted in the probe's own log line.
+    let panelOpened = false;
+    for (const bp of BREAKPOINTS) {
+      console.log(`panel-115 --probe surfaces: measuring ${bp.label}`);
+      await applyBreakpoint(cdp, sessionId, bp);
+      await blurActive(cdp, sessionId);
+      await moveMouseAway(cdp, sessionId);
+      await sleep(300);
+      if (!panelOpened) {
+        await openPrimaryCardPanel(cdp, sessionId);
+        panelOpened = true;
+        console.log(
+          "panel-115 --probe surfaces: panel opened exactly once this run, every remaining breakpoint only resizes underneath it",
+        );
+      } else {
+        await sleep(HOVER_SETTLE_MS);
+      }
+      const records = await measureSurfaces(cdp, sessionId, bp);
+      allRecords.push(...records);
+    }
+
+    console.log(JSON.stringify(allRecords, null, 2));
+  } finally {
+    if (cdp) {
+      try {
+        cdp.close();
+      } catch {
+        // best effort
+      }
+    }
+    if (chrome) {
+      try {
+        // Await Chrome's actual exit (SIGKILL escalation included) so the
+        // user-data-dir removal in teardownSandbox below cannot race its
+        // exit-time lock/lease writes.
+        await stopServer(chrome);
+      } catch {
+        // best effort
+      }
+    }
+    if (sandbox) await teardownSandbox(sandbox);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // rhythm: break-proven check for Plan 03's shared panel section-rhythm token
 // (LUI-05). Boots the sandbox once, asserts the landed --panel-section-gap
 // value between every adjacent reading-surface sibling pair at all four
@@ -3388,6 +4060,7 @@ const BREAKS = {
 
 const PROBES = {
   baseline: probeBaseline,
+  surfaces: probeSurfaces,
 };
 
 // Silence no-unused-vars for spine identifiers ported ahead of the checks that will call them,
