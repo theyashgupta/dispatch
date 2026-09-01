@@ -309,7 +309,7 @@ export function DetailPanel({
       spawnedForRef.current = null;
       return;
     }
-    const spawnKey = `${card.id}:${card.activeSession?.id ?? ""}`;
+    const spawnKey = `${card.id}:${card.activeSessionId ?? ""}`;
     if (
       card.tmuxSession &&
       !card.sessionLost &&

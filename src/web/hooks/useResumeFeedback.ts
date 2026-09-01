@@ -40,7 +40,7 @@ export function useResumeFeedback(card: CardModel): ResumeFeedback {
     if (card.resumeError != null) setResuming(false);
   }
 
-  const resetKey = `${card.sessionLost === true}:${card.activeSession?.id ?? ""}`;
+  const resetKey = `${card.sessionLost === true}:${card.activeSessionId ?? ""}`;
   const [prevResetKey, setPrevResetKey] = useState(resetKey);
   if (resetKey !== prevResetKey) {
     setPrevResetKey(resetKey);
