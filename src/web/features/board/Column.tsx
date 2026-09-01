@@ -326,6 +326,7 @@ export function Column({
               : hoveringHandle
                 ? "2px solid var(--hover-resize-handle)"
                 : "2px solid transparent",
+            transition: "var(--resize-handle-transition)",
             ...focusRing(handleFocused, true),
           }}
         />
