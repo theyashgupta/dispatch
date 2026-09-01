@@ -81,7 +81,7 @@ async function ingestDir(
 function buildPrompt(direction: string, sources: string): string {
   return `You are writing a "playbook" for Dispatch, a local kanban tool that launches Claude Code agent sessions on tickets. A playbook is a reusable markdown instruction block appended to the agent's kickoff prompt for a ticket.
 
-Output rules — follow exactly:
+Output rules (follow exactly):
 - Output ONLY the playbook's markdown body. No preamble, no closing remarks, no code fence wrapping the whole output, no YAML front-matter, no "name:" line.
 - Start the body with this exact section:
 
@@ -95,7 +95,7 @@ Output rules — follow exactly:
 What the user wants this playbook to do:
 ${direction}
 
-Reference material (context only — extract the method and conventions, do not copy verbatim):
+Reference material (context only, extract the method and conventions, do not copy verbatim):
 ${sources}`;
 }
 

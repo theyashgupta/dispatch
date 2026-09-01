@@ -24,7 +24,7 @@ import {
 } from "../services/orchestration/service.js";
 import { SERVICE_PLIST_PATH } from "../services/infra/paths.js";
 
-const HELP = `dispatch — local Kanban that turns Linear tickets into Claude Code sessions
+const HELP = `dispatch: local Kanban that turns Linear tickets into Claude Code sessions
 
 Usage:
   dispatch [--port <n>] [--no-open]   Boot the app and open the browser
@@ -44,7 +44,7 @@ Options:
   --yes        uninstall: skip the confirmation prompt
   --print      service install: print the plist and exit, no side effects
 
-Uninstall never deletes git worktrees — it lists them for you to remove.`;
+Uninstall never deletes git worktrees. It lists them for you to remove.`;
 
 /**
  * Read the package version from the nearest ancestor package.json so `--version` reports the same
@@ -135,25 +135,25 @@ async function doctor(): Promise<void> {
     process.stdout.write(
       p.present
         ? `  ✓ ${p.name}\n`
-        : `  ✗ ${p.name} — ${p.command ?? p.hint ?? "not installable"}\n`,
+        : `  ✗ ${p.name}: ${p.command ?? p.hint ?? "not installable"}\n`,
     );
   }
   process.stdout.write(
     report.node.ok
       ? `  ✓ Node ${report.node.version}\n`
-      : `  ⚠ Node ${report.node.version} — below supported floor (${report.node.floor})\n`,
+      : `  ⚠ Node ${report.node.version}, below supported floor (${report.node.floor})\n`,
   );
   process.stdout.write(
     report.storage.ok
-      ? `  ✓ Storage OK — ${report.storage.path}\n`
-      : `  ✗ Storage check failed — ${report.storage.path}\n`,
+      ? `  ✓ Storage OK: ${report.storage.path}\n`
+      : `  ✗ Storage check failed: ${report.storage.path}\n`,
   );
 
   const u = await checkForUpdate({ liveCheck: true });
   if (!u.updateAvailable) {
     process.stdout.write(
       u.latest == null
-        ? `  ⚠ dispatch ${u.current} — could not reach the registry\n`
+        ? `  ⚠ dispatch ${u.current}: could not reach the registry\n`
         : `  ✓ dispatch ${u.current} (latest)\n`,
     );
   } else {
@@ -164,7 +164,7 @@ async function doctor(): Promise<void> {
           ? "npx @theyashgupta/dispatch@latest"
           : "pull the latest changes (dev checkout)";
     process.stdout.write(
-      `  ✗ dispatch ${u.current} — ${u.latest} available: ${command}\n`,
+      `  ✗ dispatch ${u.current}, ${u.latest} available: ${command}\n`,
     );
   }
 
@@ -186,7 +186,7 @@ async function doctor(): Promise<void> {
     process.stdout.write(
       ok
         ? `  ✓ ${status.name} installed\n`
-        : `  ✗ ${status.name} still missing — run manually: ${command}\n`,
+        : `  ✗ ${status.name} still missing. Run manually: ${command}\n`,
     );
   }
 }
@@ -206,7 +206,7 @@ async function update(): Promise<void> {
   if (!status.updateAvailable) {
     process.stdout.write(
       status.latest == null
-        ? `  Couldn't reach the registry — dispatch ${status.current} may not be the latest.\n`
+        ? `  Couldn't reach the registry. Dispatch ${status.current} may not be the latest.\n`
         : `  dispatch ${status.current} is up to date.\n`,
     );
     return;
@@ -220,7 +220,7 @@ async function update(): Promise<void> {
   }
   if (status.installMode === "local") {
     process.stdout.write(
-      `  This is a dev checkout — pull the latest changes to update.\n`,
+      `  This is a dev checkout. Pull the latest changes to update.\n`,
     );
     return;
   }
@@ -238,19 +238,19 @@ async function update(): Promise<void> {
     { defaultYes: true },
   );
   if (!yes) {
-    process.stdout.write(`  Skipped — nothing was changed.\n`);
+    process.stdout.write(`  Skipped. Nothing was changed.\n`);
     return;
   }
   const result = await runUpdate({ interactive: true });
   if (result.ok) {
     process.stdout.write(
       existsSync(SERVICE_PLIST_PATH)
-        ? `  Updated to v${result.version} — restart the service to use it: dispatch service restart\n`
-        : `  Updated to v${result.version} — restart dispatch to use it.\n`,
+        ? `  Updated to v${result.version}. Restart the service to use it: dispatch service restart\n`
+        : `  Updated to v${result.version}. Restart dispatch to use it.\n`,
     );
   } else {
     process.stdout.write(
-      `  Update failed — run it yourself: ${result.command}\n`,
+      `  Update failed. Run it yourself: ${result.command}\n`,
     );
   }
 }
@@ -313,12 +313,12 @@ async function uninstall(values: {
     process.stdout.write(renderPlan(plan));
     if (!interactive) {
       process.stdout.write(
-        `\n  Not a terminal — nothing was changed. Re-run with --yes to proceed.\n`,
+        `\n  Not a terminal. Nothing was changed. Re-run with --yes to proceed.\n`,
       );
       return;
     }
     if (!(await confirm(`  Proceed? [y/N] `, { defaultYes: false }))) {
-      process.stdout.write(`  Cancelled — nothing was changed.\n`);
+      process.stdout.write(`  Cancelled. Nothing was changed.\n`);
       return;
     }
     process.stdout.write("\n");
@@ -400,7 +400,7 @@ async function cli(): Promise<void> {
     (!Number.isInteger(desiredPort) || desiredPort < 1 || desiredPort > 65535)
   ) {
     process.stderr.write(
-      `Invalid --port value: ${values.port} (expected an integer 1–65535)\n`,
+      `Invalid --port value: ${values.port} (expected an integer 1-65535)\n`,
     );
     process.exit(2);
   }

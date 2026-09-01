@@ -122,7 +122,7 @@ export function ReferenceBlocks({
                 style={{ flex: "0 0 auto" }}
               />
             }
-            label={`Provisioning error — ${c.startError.step}`}
+            label={`Provisioning error: ${c.startError.step}`}
           />
           <Notice tone="destructive" mono>
             {c.startError.stderr}

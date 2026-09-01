@@ -4,7 +4,7 @@ import type { PreviewInfo } from "../../../shared/types.js";
 
 export function PreviewBadge({ preview }: { preview: PreviewInfo }) {
   const [hovered, setHovered] = useState(false);
-  const label = `Open preview — localhost:${preview.port}`;
+  const label = `Open preview at localhost:${preview.port}`;
   return (
     <button
       type="button"

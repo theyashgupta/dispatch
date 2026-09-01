@@ -159,7 +159,7 @@ function handleUpgrade(
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
 function shutdown(signal: NodeJS.Signals): void {
-  console.log(`[shutdown] ${signal} received — tearing down remote access`);
+  console.log(`[shutdown] ${signal} received, tearing down remote access`);
   disableTunnel();
   process.exit(0);
 }
@@ -209,14 +209,14 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
     );
   } else {
     console.warn(
-      `[preflight] Node ${preflight.node.version} is below the supported floor (${preflight.node.floor}) — continuing; upgrade Node if you hit issues`,
+      `[preflight] Node ${preflight.node.version} is below the supported floor (${preflight.node.floor}), continuing; upgrade Node if you hit issues`,
     );
   }
   if (preflight.storage.ok) {
-    console.log(`[preflight] storage OK — ${preflight.storage.path}`);
+    console.log(`[preflight] storage OK: ${preflight.storage.path}`);
   } else {
     console.warn(
-      `[preflight] storage check FAILED — ${preflight.storage.path} did not open cleanly (continuing; the store recovers on load)`,
+      `[preflight] storage check FAILED: ${preflight.storage.path} did not open cleanly (continuing; the store recovers on load)`,
     );
   }
   const missing = preflight.binaries.filter((p) => !p.present);
@@ -241,7 +241,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
     console.warn(
       `[hooks] statusChannel is "hooks" but ${
         version ? `claude ${version}` : "the claude CLI"
-      } lacks hook support — status routing is disabled: sessions launch ` +
+      } lacks hook support. Status routing is disabled: sessions launch ` +
         "without hooks and the watcher never scans, so no card will move " +
         "or flip this run",
     );

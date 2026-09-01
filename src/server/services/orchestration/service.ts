@@ -161,7 +161,7 @@ export async function installService(opts: {
   const installMode = detectInstallMode();
   if (installMode === "npx") {
     process.stdout.write(
-      "  dispatch service needs a persistent install — run:\n" +
+      "  dispatch service needs a persistent install. Run:\n" +
         "    npm i -g @theyashgupta/dispatch@latest\n" +
         "  then re-run: dispatch service install\n",
     );
@@ -198,7 +198,7 @@ export async function installService(opts: {
 
   process.stdout.write(
     `  Installed ${SERVICE_PLIST_PATH}\n` +
-      `  Loaded — dispatch will run at login and restart on crash.\n` +
+      `  Loaded. Dispatch will run at login and restart on crash.\n` +
       `  Expected at: http://127.0.0.1:${port}\n`,
   );
   return 0;
@@ -223,7 +223,7 @@ export async function serviceStatus(): Promise<number> {
     ]);
     const running = /state = running/.test(stdout);
     process.stdout.write(
-      running ? "  Loaded — running\n" : "  Loaded — not running\n",
+      running ? "  Loaded, running\n" : "  Loaded, not running\n",
     );
   } catch {
     process.stdout.write("  Not loaded.\n");
@@ -237,7 +237,7 @@ export async function serviceStatus(): Promise<number> {
 export async function restartService(): Promise<number> {
   if (!existsSync(SERVICE_PLIST_PATH)) {
     process.stdout.write(
-      "  Service is not installed — run: dispatch service install\n",
+      "  Service is not installed. Run: dispatch service install\n",
     );
     return 1;
   }

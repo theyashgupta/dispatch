@@ -46,7 +46,7 @@ export interface UninstallOutcome {
 }
 
 const PACKAGE_NOTE =
-  `The dispatch package itself is left installed — a running process cannot delete itself.\n` +
+  `The dispatch package itself is left installed. A running process cannot delete itself.\n` +
   `  Remove it with:  npm uninstall -g @theyashgupta/dispatch\n` +
   `  Or, if you ran it via npx, clear the npx cache.\n`;
 
@@ -160,7 +160,7 @@ export function renderPlan(plan: UninstallPlan): string {
     if (ttydCount > 0) {
       lines.push(
         `  ${ttydCount} ttyd terminal process(es)`,
-        `    Matched by process fingerprint, not by dispatch ownership — this`,
+        `    Matched by process fingerprint, not by dispatch ownership, this`,
         `    includes ANY "ttyd … tmux attach" process on this machine, even one`,
         `    dispatch did not start.`,
       );
@@ -173,15 +173,15 @@ export function renderPlan(plan: UninstallPlan): string {
 
   const keepLines: string[] = [];
   for (const p of plan.keep.boardData) {
-    keepLines.push(`  ${p}  (board data — pass --purge to delete)`);
+    keepLines.push(`  ${p}  (board data, pass --purge to delete)`);
   }
   if (plan.keep.playbooks) {
     keepLines.push(
-      `  ${plan.keep.playbooks}  (your playbooks — kept even with --purge)`,
+      `  ${plan.keep.playbooks}  (your playbooks, kept even with --purge)`,
     );
   }
   if (plan.keep.worktrees.length > 0) {
-    keepLines.push("  Git worktrees are never deleted — remove them yourself:");
+    keepLines.push("  Git worktrees are never deleted. Remove them yourself:");
     for (const w of plan.keep.worktrees) {
       keepLines.push(`    git worktree remove ${w}`);
     }
@@ -193,8 +193,8 @@ export function renderPlan(plan: UninstallPlan): string {
   if (plan.remove.length === 0 && !hasStopWork(plan)) {
     lines.push(
       keepLines.length > 0
-        ? "Nothing left to stop or remove — only the kept paths above remain."
-        : "Nothing to stop or remove — dispatch's footprint is gone.",
+        ? "Nothing left to stop or remove. Only the kept paths above remain."
+        : "Nothing to stop or remove. Dispatch's footprint is gone.",
       "",
     );
   }

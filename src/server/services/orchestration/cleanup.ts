@@ -84,7 +84,7 @@ export async function cleanupWorkspace(
   const target = card.sessions?.find((s) => s.id === resolvedId);
   if (sessionId !== undefined && !target) {
     console.error(
-      `[cleanup] card ${cardId} — cleanup target ${sessionId} does not resolve, refusing`,
+      `[cleanup] card ${cardId}: cleanup target ${sessionId} does not resolve, refusing`,
     );
     return;
   }
@@ -133,7 +133,7 @@ export async function cleanupWorkspace(
       await store.noteCleanupWarning(
         cardId,
         resolvedId,
-        "Cleanup preflight failed — a worktree could not be checked.",
+        "Cleanup preflight failed. A worktree could not be checked.",
       );
       return;
     }
@@ -207,13 +207,13 @@ export async function cleanupWorkspace(
     await store.recordCleanupWarning(
       cardId,
       resolvedId,
-      "Cleanup incomplete — some worktrees may remain.",
+      "Cleanup incomplete. Some worktrees may remain.",
     );
   } else if (isLegacyWorkspace) {
     await store.recordCleanupWarning(
       cardId,
       resolvedId,
-      "Cleanup kept worktree registrations — this ticket predates per-ticket workspaces.",
+      "Cleanup kept worktree registrations. This ticket predates per-ticket workspaces.",
     );
   } else {
     await store.finishCleanup(cardId, resolvedId);

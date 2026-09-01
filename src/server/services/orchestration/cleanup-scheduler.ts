@@ -90,7 +90,7 @@ export function startCleanupScheduler(): void {
       await runDueCleanups();
     } catch (err) {
       console.error(
-        `[cleanup-scheduler] tick failed — continuing: ${(err as Error).message}`,
+        `[cleanup-scheduler] tick failed, continuing: ${(err as Error).message}`,
       );
     } finally {
       scheduleNext();

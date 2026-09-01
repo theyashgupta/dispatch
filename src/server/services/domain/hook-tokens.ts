@@ -55,7 +55,7 @@ export function registerHookToken(
     ?.sessions?.some((s) => s.id === sessionId);
   if (!owned) {
     console.error(
-      `[hooks] refusing session registration for card ${cardId} — session ${sessionId} not found`,
+      `[hooks] refusing session registration for card ${cardId}: session ${sessionId} not found`,
     );
     return;
   }

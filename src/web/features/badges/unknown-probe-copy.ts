@@ -28,24 +28,24 @@ export function unknownProbeCopy(
     case "gh not authenticated":
       return {
         label,
-        detail: "Could not check — not authenticated for this repo",
+        detail: "Could not check: not authenticated for this repo",
       };
     case "gh repo not accessible":
       return {
         label,
         detail:
-          "Could not check — this repo is not visible to the signed-in gh account, or the remote no longer exists",
+          "Could not check: this repo is not visible to the signed-in gh account, or the remote no longer exists",
       };
     case "gh unavailable":
-      return { label, detail: "Could not check — gh CLI not available" };
+      return { label, detail: "Could not check: gh CLI not available" };
     case "repo path missing":
       return {
         label,
-        detail: "Could not check — this card's repo folder no longer exists",
+        detail: "Could not check: this card's repo folder no longer exists",
       };
     case "gh pr list failed":
-      return { label, detail: "Could not check — gh lookup failed" };
+      return { label, detail: "Could not check: gh lookup failed" };
     case "detection unavailable":
-      return { label, detail: "Could not check — detection tooling failed" };
+      return { label, detail: "Could not check: detection tooling failed" };
   }
 }

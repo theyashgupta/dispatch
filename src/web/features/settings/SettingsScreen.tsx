@@ -188,7 +188,7 @@ function PlaybookDeleteConfirm({
         {error && (
           <Notice
             tone="destructive"
-            label="Couldn't delete playbook — try again."
+            label="Couldn't delete playbook. Try again."
           />
         )}
       </Modal.Body>
@@ -427,7 +427,7 @@ function FiltersTabSection({ filters }: FiltersTabSectionProps) {
             color: "var(--text-muted)",
           }}
         >
-          Couldn't load filters — reopen settings to retry.
+          Couldn't load filters. Reopen settings to retry.
         </span>
       )}
       {capabilities && draft && (
@@ -537,7 +537,7 @@ function FiltersTabSection({ filters }: FiltersTabSectionProps) {
                       color: "var(--text-muted)",
                     }}
                   >
-                    Couldn't load options — reopen settings to retry.
+                    Couldn't load options. Reopen settings to retry.
                   </span>
                 )}
                 {optTruncated[dim] && (
@@ -621,7 +621,7 @@ function FiltersTabSection({ filters }: FiltersTabSectionProps) {
           {saveError && (
             <Notice
               tone="destructive"
-              label="Couldn't save filters — try again."
+              label="Couldn't save filters. Try again."
             />
           )}
         </div>
@@ -756,7 +756,7 @@ function PlaybooksTabSection({ playbooksTab }: PlaybooksTabSectionProps) {
       {!playbooksLoading && playbooksLoadError && (
         <Notice
           tone="destructive"
-          label="Couldn't load playbooks — reopen settings to retry."
+          label="Couldn't load playbooks. Reopen settings to retry."
         />
       )}
 
@@ -940,7 +940,7 @@ function RemoteTabSection({ tunnelState, remoteTab }: RemoteTabSectionProps) {
     return (
       <div style={remoteSectionStyle}>
         <div style={remoteBodyTextStyle}>
-          Reach this board — including live terminals — from any device over a
+          Reach this board, including live terminals, from any device over a
           temporary public link, guarded by an access code.
         </div>
         <div>
@@ -953,7 +953,7 @@ function RemoteTabSection({ tunnelState, remoteTab }: RemoteTabSectionProps) {
           </Button>
         </div>
         <span style={remoteHelperTextStyle}>
-          Uses an on-demand Cloudflare tunnel — requires cloudflared.
+          Uses an on-demand Cloudflare tunnel. Requires cloudflared.
         </span>
       </div>
     );
@@ -999,7 +999,7 @@ function RemoteTabSection({ tunnelState, remoteTab }: RemoteTabSectionProps) {
           value={`${tunnelState.url}?code=${encodeURIComponent(tunnelState.code)}`}
         />
         <div style={remoteFieldBlockStyle}>
-          <Field>Access code — enter this on a device without the QR</Field>
+          <Field>Access code: enter this on a device without the QR</Field>
           <div style={remoteMonoRowStyle}>
             <span style={remoteMonoTextStyle}>{tunnelState.code}</span>
             <IconButton
@@ -1105,13 +1105,13 @@ function NotificationsTabSection({
         {status === "granted" && (
           <RemoteStatusRow
             color="var(--status-ok)"
-            text="Enabled — you'll get a system notification when a card needs your input or an agent finishes."
+            text="Enabled. You'll get a system notification when a card needs your input or an agent finishes."
           />
         )}
         {status === "denied" && (
           <RemoteStatusRow
             color="var(--status-down)"
-            text="Blocked — enable notifications for this site in your browser settings."
+            text="Blocked. Enable notifications for this site in your browser settings."
           />
         )}
         {status === "unsupported" && (
@@ -1265,7 +1265,7 @@ function CleanupTabSection({ cleanupTab }: CleanupTabSectionProps) {
             color: "var(--text-muted)",
           }}
         >
-          Couldn't load the cleanup delay — reopen settings to retry.
+          Couldn't load the cleanup delay. Reopen settings to retry.
         </span>
       )}
       <div
@@ -1326,7 +1326,7 @@ function CleanupTabSection({ cleanupTab }: CleanupTabSectionProps) {
         {saveError && (
           <Notice
             tone="destructive"
-            label="Couldn't save cleanup delay — try again."
+            label="Couldn't save cleanup delay. Try again."
           />
         )}
       </div>
@@ -1455,7 +1455,7 @@ function ModelsTabSection({ modelsTab }: ModelsTabSectionProps) {
             color: "var(--text-muted)",
           }}
         >
-          Couldn't load Claude's launch arguments — reopen settings to retry.
+          Couldn't load Claude's launch arguments. Reopen settings to retry.
         </span>
       )}
       <div
@@ -1566,7 +1566,7 @@ function ModelsTabSection({ modelsTab }: ModelsTabSectionProps) {
         {saveError && (
           <Notice
             tone="destructive"
-            label="Couldn't save Claude's arguments — try again."
+            label="Couldn't save Claude's arguments. Try again."
           />
         )}
       </div>
@@ -1723,7 +1723,7 @@ function WorkspacesTabSection({ workspacesTab }: WorkspacesTabSectionProps) {
       {!loading && loadError && (
         <Notice
           tone="destructive"
-          label="Couldn't load workspaces — reopen settings to retry."
+          label="Couldn't load workspaces. Reopen settings to retry."
         />
       )}
 

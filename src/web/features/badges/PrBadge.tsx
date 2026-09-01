@@ -68,7 +68,7 @@ export function PrBadge({ pr }: { pr: PrInfo }) {
     pr.ci != null
       ? ` · Checks ${pr.ci === "pass" ? "passing" : pr.ci === "fail" ? "failing" : "pending"}`
       : "";
-  const label = `PR #${pr.number} — ${stateLabelFor(pr)}${ciLabel}`;
+  const label = `PR #${pr.number}: ${stateLabelFor(pr)}${ciLabel}`;
   return (
     <button
       type="button"

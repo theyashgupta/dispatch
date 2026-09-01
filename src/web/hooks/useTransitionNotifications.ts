@@ -78,7 +78,7 @@ export function useTransitionNotifications(
       }
 
       if (notifyGranted) {
-        const title = `${card.identifier} — ${LABEL[col]}`;
+        const title = `${card.identifier}: ${LABEL[col]}`;
         const body = card.statusReason?.trim() || FALLBACK[col] || "";
         try {
           const n = new Notification(title, { body, tag: card.id });

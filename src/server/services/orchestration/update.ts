@@ -240,7 +240,7 @@ export function startUpdateCheckLoop(config: Config): void {
             ? "npx @theyashgupta/dispatch@latest"
             : "pull the latest changes (dev checkout)";
       console.log(
-        `[update] dispatch ${status.latest} is available (current: ${status.current}) — ${command}`,
+        `[update] dispatch ${status.latest} is available (current: ${status.current}), ${command}`,
       );
     }
   });

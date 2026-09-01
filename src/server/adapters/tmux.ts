@@ -62,7 +62,7 @@ export async function ensureHyperlinksTerminalFeature(): Promise<void> {
     const failure = err as Error & { stderr?: string };
     if (NO_SERVER_STDERR.test(failure.stderr ?? "")) return;
     console.warn(
-      `[tmux] could not grant xterm-256color the hyperlinks terminal-feature — Cmd+Click on real Claude Code OSC-8 links may not work: ${failure.message}`,
+      `[tmux] could not grant xterm-256color the hyperlinks terminal-feature, Cmd+Click on real Claude Code OSC-8 links may not work: ${failure.message}`,
     );
   }
 }

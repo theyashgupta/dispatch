@@ -113,13 +113,13 @@ export async function checkHooksCapability(): Promise<HooksCapability> {
   try {
     const claudePath = await resolveBinaryPath("claude");
     if (!claudePath) {
-      console.warn("[hooks] claude not resolvable — hook injection disabled");
+      console.warn("[hooks] claude not resolvable, hook injection disabled");
       return { capable: false, version: null };
     }
     const { stdout } = await run(claudePath, ["--version"]);
     const m = /(\d+)\.(\d+)\.(\d+)/.exec(stdout);
     if (!m) {
-      console.warn("[hooks] claude version unparseable — injection disabled");
+      console.warn("[hooks] claude version unparseable, injection disabled");
       return { capable: false, version: null };
     }
     const version = [Number(m[1]), Number(m[2]), Number(m[3])];
@@ -128,13 +128,13 @@ export async function checkHooksCapability(): Promise<HooksCapability> {
         return { capable: true, version: m[0] };
       }
       if (version[i] < HOOKS_FLOOR[i]) {
-        console.warn("[hooks] claude below hooks floor — injection disabled");
+        console.warn("[hooks] claude below hooks floor, injection disabled");
         return { capable: false, version: m[0] };
       }
     }
     return { capable: true, version: m[0] };
   } catch {
-    console.warn("[hooks] claude version check failed — injection disabled");
+    console.warn("[hooks] claude version check failed, injection disabled");
     return { capable: false, version: null };
   }
 }

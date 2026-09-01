@@ -82,7 +82,7 @@ function warnUnrecognizedChildren(children: ReactNode): void {
         : null;
     if (type !== ModalHeader && type !== ModalBody && type !== ModalActions) {
       console.warn(
-        "Modal: unrecognized child ignored — wrap content in Modal.Header, Modal.Body, or Modal.Actions (fragments are not traversed)",
+        "Modal: unrecognized child ignored. Wrap content in Modal.Header, Modal.Body, or Modal.Actions (fragments are not traversed)",
         child,
       );
     }
