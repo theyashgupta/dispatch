@@ -4282,15 +4282,20 @@ const PANEL_CLOSE_REQUESTED_MS = 150;
  * observed elapsed 182.4-198.2ms (open) and 133.3-149.9ms (close), both comfortably inside it. */
 const PANEL_MOTION_ELAPSED_TOLERANCE_MS = 40;
 
-/** Naked motion literal: a `transition`/`animation` declaration carrying a bare `Nms` duration,
- * the same pattern this plan's own task-2 verify gate greps for across `src/web`. */
-const NAKED_MOTION_LITERAL_RE = /(transition|animation)[^;"']*[0-9]+ms/;
+/** Naked motion literal: a `transition`/`animation` declaration carrying a bare `Nms` duration.
+ * Matched against WHOLE file contents, never per line: `Splash.tsx` proved a Prettier-wrapped
+ * declaration puts the keyword and the duration on different lines, so a per-line test
+ * self-confirms a false "zero survivors" claim. `[^;{}]` bounds the span at declaration
+ * terminators so the lazy match cannot leak across unrelated statements. */
+const NAKED_MOTION_LITERAL_RE = /(?:transition|animation)\s*:[^;{}]*?[0-9]+ms/g;
 
 /**
- * Walks `src/web` for `.ts`/`.tsx` files and returns every line matching
- * {@link NAKED_MOTION_LITERAL_RE}, formatted `path/to/file.tsx:LINE: <trimmed line text>`. Pure
- * `fs`, no sandbox or browser needed; this is what keeps the retirement from silently regressing
- * when a future component copies the old flat-ms pattern.
+ * Walks `src/web` for `.ts`/`.tsx` files and returns every match of
+ * {@link NAKED_MOTION_LITERAL_RE} against the full file text, formatted
+ * `path/to/file.tsx:LINE: <collapsed match text>` (LINE is the line of the `ms` literal itself,
+ * since the declaration keyword may sit lines above it). Pure `fs`, no sandbox or browser needed;
+ * this is what keeps the retirement from silently regressing when a future component copies the
+ * old flat-ms pattern.
  */
 function scanForNakedMotionLiterals() {
   const root = join(REPO_ROOT, "src", "web");
@@ -4299,12 +4304,14 @@ function scanForNakedMotionLiterals() {
     if (!/\.(ts|tsx)$/.test(rel)) continue;
     const full = join(root, rel);
     if (!statSync(full).isFile()) continue;
-    const lines = readFileSync(full, "utf8").split("\n");
-    lines.forEach((line, i) => {
-      if (NAKED_MOTION_LITERAL_RE.test(line)) {
-        survivors.push(`src/web/${rel}:${i + 1}: ${line.trim()}`);
-      }
-    });
+    const content = readFileSync(full, "utf8");
+    for (const match of content.matchAll(NAKED_MOTION_LITERAL_RE)) {
+      const msAt = match.index + match[0].search(/[0-9]+ms/);
+      const line = content.slice(0, msAt).split("\n").length;
+      survivors.push(
+        `src/web/${rel}:${line}: ${match[0].replace(/\s+/g, " ").trim()}`,
+      );
+    }
   }
   return survivors;
 }

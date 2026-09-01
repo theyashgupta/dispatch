@@ -87,6 +87,8 @@
   --motion-panel-close: 150ms;
   --motion-card-move: 150ms;
   --motion-count-change: 120ms;
+  --motion-splash-in: 400ms;
+  --motion-splash-out: 300ms;
   --easing-enter: ease-out;
   --easing-exit: ease-in;
   --hover-transition: background-color 80ms var(--easing-enter);
