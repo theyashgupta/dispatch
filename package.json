@@ -39,6 +39,7 @@
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,magenta \"tsx watch src/server/bootstrap/index.ts\" \"vite\"",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test 'src/**/*.test.ts'",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
@@ -70,7 +71,7 @@
     "contrast-113": "node scripts/contrast-113.mjs",
     "panel-114": "node scripts/panel-114.mjs",
     "panel-115": "node scripts/panel-115.mjs",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants",
     "prepack": "npm run build"
   },
   "dependencies": {
