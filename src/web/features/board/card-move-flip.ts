@@ -46,6 +46,17 @@ const FLIP_STALE_MS = 100;
 const suppressedFlips = new Map<string, number>();
 
 /**
+ * Ceiling on how long a play may hold its restore hooks: slightly above
+ * `--motion-card-move` (150ms), so the timeout fires only when no
+ * transition event ever will (`prefers-reduced-motion` suppresses the
+ * transition entirely, so neither `transitionend` nor `transitioncancel`
+ * fires and the fallback is the only restore path).
+ */
+const RESTORE_FALLBACK_MS = 250;
+
+const pendingRestores = new WeakMap<HTMLElement, () => void>();
+
+/**
  * Marks `cardId` so its next imminent remount does not play a FLIP.
  *
  * @remarks
@@ -97,8 +108,11 @@ export function recordCardMoveRect(cardId: string, node: HTMLElement): void {
  * paint and there would be nothing left to animate), then enables a
  * `transform` transition and clears the transform to identity so the
  * browser animates the rest. The node's own prior `transition` value is
- * restored once that transition ends, so a caller's own `transition` (e.g.
- * `--hover-transition`) is not permanently overwritten.
+ * restored on `transitionend`, `transitioncancel`, or a
+ * {@link RESTORE_FALLBACK_MS} timeout, whichever fires first, so a caller's
+ * own `transition` (e.g. `--hover-transition`) is never stranded; a second
+ * play on the same node runs the pending restore first, so it captures the
+ * true original value rather than the previous run's flip string.
  */
 export function playCardMoveFlip(cardId: string, node: HTMLElement): void {
   const suppressedAt = suppressedFlips.get(cardId);
@@ -120,6 +134,8 @@ export function playCardMoveFlip(cardId: string, node: HTMLElement): void {
   const dy = prev.top - next.top;
   if (dx === 0 && dy === 0) return;
 
+  pendingRestores.get(node)?.();
+
   const restoreTransition = node.style.transition;
   node.style.transition = "none";
   node.style.transform = `translate(${dx}px, ${dy}px)`;
@@ -127,10 +143,19 @@ export function playCardMoveFlip(cardId: string, node: HTMLElement): void {
   node.style.transition = `transform var(--motion-card-move) var(--easing-enter)`;
   node.style.transform = "";
 
-  const onTransitionEnd = (event: TransitionEvent) => {
-    if (event.target !== node || event.propertyName !== "transform") return;
+  const restore = () => {
+    pendingRestores.delete(node);
+    clearTimeout(fallback);
+    node.removeEventListener("transitionend", onDone);
+    node.removeEventListener("transitioncancel", onDone);
     node.style.transition = restoreTransition;
-    node.removeEventListener("transitionend", onTransitionEnd);
   };
-  node.addEventListener("transitionend", onTransitionEnd);
+  const onDone = (event: TransitionEvent) => {
+    if (event.target !== node || event.propertyName !== "transform") return;
+    restore();
+  };
+  const fallback = setTimeout(restore, RESTORE_FALLBACK_MS);
+  node.addEventListener("transitionend", onDone);
+  node.addEventListener("transitioncancel", onDone);
+  pendingRestores.set(node, restore);
 }
