@@ -68,6 +68,7 @@
     "panel-112": "node scripts/panel-112.mjs",
     "contrast-113": "node scripts/contrast-113.mjs",
     "panel-114": "node scripts/panel-114.mjs",
+    "panel-115": "node scripts/panel-115.mjs",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants",
     "prepack": "npm run build"
   },
