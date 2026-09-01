@@ -28,6 +28,7 @@ import {
 import { COLUMN_LABELS } from "../../lib/event-copy.js";
 import { DECK_BACK_OFFSETS_PX, dragSelectionIds } from "./drag-selection.js";
 import { Column } from "./Column.js";
+import { suppressCardMoveFlip } from "./card-move-flip.js";
 import { CardView } from "./CardView.js";
 import { IconButton } from "../../primitives/IconButton.js";
 import { Notice } from "../../primitives/Notice.js";
@@ -431,16 +432,19 @@ export function Board({
       if (over.id === "in_progress") {
         const members = selectedGroupMembers();
         if (members.length < 2) {
+          suppressCardMoveFlip(String(active.id));
           performMove(String(active.id), over.id);
           return;
         }
         setGroupModalMembers(members);
         return;
       }
+      for (const id of ids) suppressCardMoveFlip(id);
       void performGroupMove(ids, over.id);
       return;
     }
 
+    suppressCardMoveFlip(String(active.id));
     performMove(String(active.id), over.id);
   }
 

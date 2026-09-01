@@ -36,6 +36,34 @@ const MAX_TRACKED_CARDS = 300;
 const outgoingRects = new Map<string, Rect>();
 
 /**
+ * Freshness window for a suppression mark (and, symmetrically, a stored
+ * rect): a drop-committed move records and plays inside one React commit,
+ * so anything older than this is not part of the current move.
+ */
+const FLIP_STALE_MS = 100;
+
+const suppressedFlips = new Map<string, number>();
+
+/**
+ * Marks `cardId` so its next imminent remount does not play a FLIP.
+ *
+ * @remarks
+ * A pointer-drag drop commits the column move in the same batch that clears
+ * the drag, so the card remounts with `isDragging` already `false` and the
+ * play-leg guard cannot see the drop. The user already moved the card by
+ * hand; replaying the travel would snap it back and re-animate a completed
+ * gesture. `Board.tsx` calls this from `handleDragEnd` for the dropped ids.
+ * Marks expire after {@link FLIP_STALE_MS}, so a move that never commits
+ * (same column, refused target) cannot swallow a later genuine move.
+ */
+export function suppressCardMoveFlip(cardId: string): void {
+  if (suppressedFlips.size >= MAX_TRACKED_CARDS) {
+    suppressedFlips.clear();
+  }
+  suppressedFlips.set(cardId, performance.now());
+}
+
+/**
  * Records `node`'s current rect under `cardId`, called from the FLIP layout
  * effect's cleanup on unmount.
  */
@@ -62,6 +90,15 @@ export function recordCardMoveRect(cardId: string, node: HTMLElement): void {
  * `--hover-transition`) is not permanently overwritten.
  */
 export function playCardMoveFlip(cardId: string, node: HTMLElement): void {
+  const suppressedAt = suppressedFlips.get(cardId);
+  if (suppressedAt != null) {
+    suppressedFlips.delete(cardId);
+    if (performance.now() - suppressedAt <= FLIP_STALE_MS) {
+      outgoingRects.delete(cardId);
+      return;
+    }
+  }
+
   const prev = outgoingRects.get(cardId);
   if (prev == null) return;
   outgoingRects.delete(cardId);
