@@ -18,7 +18,6 @@ import {
   Filter,
   FolderGit2,
   Globe,
-  Key,
   KeyRound,
   Pencil,
   Plus,
@@ -1240,35 +1239,69 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
         onMouseLeave={() => setHover(false)}
         style={{
           display: "flex",
-          alignItems: "center",
-          gap: "var(--space-sm)",
+          flexDirection: "column",
+          gap: "var(--space-xs)",
           padding: "var(--space-sm)",
           borderRadius: "var(--radius)",
           background: hover ? "var(--surface-card-hover)" : "transparent",
         }}
       >
-        <span
+        <div
           style={{
-            flex: "1 1 auto",
-            minWidth: 0,
-            fontFamily: "var(--font-mono)",
-            fontSize: "var(--font-label)",
-            fontWeight: "var(--weight-semibold)",
-            lineHeight: "var(--line-label)",
-            color: "var(--text)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "var(--space-sm)",
           }}
-          title={keySummary.name}
         >
-          {keySummary.name}
-        </span>
+          <span
+            style={{
+              flex: "1 1 auto",
+              minWidth: 0,
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--font-label)",
+              fontWeight: "var(--weight-semibold)",
+              lineHeight: "var(--line-label)",
+              color: "var(--text)",
+              whiteSpace: "normal",
+              wordBreak: "break-all",
+            }}
+          >
+            {keySummary.name}
+          </span>
+          <VaultBadge filled={keySummary.filled} />
+          <Button
+            variant="secondary"
+            aria-label={
+              keySummary.filled
+                ? `Rotate value for ${keySummary.name}`
+                : `Fill value for ${keySummary.name}`
+            }
+            onClick={() => vault.openValueEditor(keySummary.name)}
+            style={{
+              flex: "0 0 auto",
+              height: "24px",
+              padding: "0 var(--space-sm)",
+              fontSize: "var(--font-label)",
+            }}
+          >
+            {keySummary.filled ? "Rotate" : "Set value"}
+          </Button>
+          <IconButton
+            aria-label={`Edit purpose for ${keySummary.name}`}
+            onClick={() => vault.openPurposeEditor(keySummary.name)}
+          >
+            <Pencil size={14} strokeWidth={2} aria-hidden="true" />
+          </IconButton>
+          <IconButton
+            aria-label={`Delete ${keySummary.name}`}
+            onClick={() => vault.openDelete(keySummary)}
+          >
+            <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+          </IconButton>
+        </div>
         {editingPurpose ? (
           <div
             style={{
-              flex: "0 1 auto",
-              minWidth: 0,
               display: "flex",
               alignItems: "center",
               gap: "var(--space-xs)",
@@ -1311,44 +1344,17 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
         ) : (
           <span
             style={{
-              flex: "0 1 auto",
-              minWidth: 0,
               fontFamily: "var(--font-ui)",
-              fontSize: "var(--font-body)",
-              lineHeight: "var(--line-body)",
+              fontSize: "var(--font-label)",
+              lineHeight: "var(--line-label)",
               color: "var(--text-muted)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              whiteSpace: "normal",
+              wordBreak: "break-word",
             }}
-            title={keySummary.purpose}
           >
             {keySummary.purpose}
           </span>
         )}
-        <VaultBadge filled={keySummary.filled} />
-        <IconButton
-          aria-label={
-            keySummary.filled
-              ? `Rotate value for ${keySummary.name}`
-              : `Fill value for ${keySummary.name}`
-          }
-          onClick={() => vault.openValueEditor(keySummary.name)}
-        >
-          <Key size={14} strokeWidth={2} aria-hidden="true" />
-        </IconButton>
-        <IconButton
-          aria-label={`Edit purpose for ${keySummary.name}`}
-          onClick={() => vault.openPurposeEditor(keySummary.name)}
-        >
-          <Pencil size={14} strokeWidth={2} aria-hidden="true" />
-        </IconButton>
-        <IconButton
-          aria-label={`Delete ${keySummary.name}`}
-          onClick={() => vault.openDelete(keySummary)}
-        >
-          <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
-        </IconButton>
       </div>
       {purposeError !== null && (
         <div
