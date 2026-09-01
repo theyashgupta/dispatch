@@ -238,15 +238,20 @@ export async function panePidsBySession(): Promise<Map<
 }
 
 /**
- * Forces Claude Code's classic main-screen renderer inside every Dispatch pane.
+ * Forces Claude Code's classic main-screen renderer, with mouse tracking off, in every Dispatch pane.
  *
  * @remarks TERM-05: the fullscreen renderer (`tui: "fullscreen"`, the default for installs first
  * launched on 2.1.239+) owns the alt screen with mouse tracking on, so a phone flick becomes one
  * round-trip mouse report per row and tmux history stays at 0. The classic renderer writes the
  * transcript to the normal buffer, where xterm.js scrolls it locally with zero round trips.
+ * @remarks Mouse tracking is disabled outright, not left to the renderer choice: tmux forwards the
+ * active pane's mouse mode to every attached client even with tmux `mouse off`, and once xterm.js
+ * is in that mode a drag is handed to Claude Code instead of making a native selection, so
+ * copy in the web terminal silently stops working (LOCAL-3).
  */
-const CLASSIC_RENDERER_ENV = {
+const CLAUDE_PANE_ENV = {
   CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN: "1",
+  CLAUDE_CODE_DISABLE_MOUSE: "1",
 } as const;
 
 /**
@@ -275,7 +280,11 @@ const HISTORY_LIMIT = "10000";
  * detection is unreliable). Trailing args become the window command. Optional `env` entries
  * become `-e KEY=VALUE` pairs (tmux ≥3.2, probe-verified on 3.6a) placed after the geometry
  * and before the command, so per-session values reach the spawned process without ever
- * appearing in its argv. Ends by re-running the idempotent hyperlinks grant: session creation is
+ * appearing in its argv. The session then gets `mouse off` pinned at session scope: a later
+ * `set -g mouse on` from anyone else on the shared server would otherwise make tmux capture the
+ * mouse for this pane, turning every drag in the web terminal into a tmux copy-mode selection
+ * (the yellow `mode-style` highlight) whose text only reaches a tmux buffer, never the clipboard.
+ * Ends by re-running the idempotent hyperlinks grant: session creation is
  * the one moment a live tmux server is guaranteed, which closes the cold-boot and
  * server-restart gaps the boot-time call alone cannot cover (see
  * {@link ensureHyperlinksTerminalFeature}).
@@ -288,7 +297,7 @@ export async function newSession(
   commandArgv: string[],
   env?: Record<string, string>,
 ): Promise<void> {
-  const envArgs = Object.entries({ ...CLASSIC_RENDERER_ENV, ...env }).flatMap(
+  const envArgs = Object.entries({ ...CLAUDE_PANE_ENV, ...env }).flatMap(
     ([key, value]) => ["-e", `${key}=${value}`],
   );
   await run("tmux", [
@@ -310,6 +319,7 @@ export async function newSession(
     ...envArgs,
     ...wrapWithPtyShim(commandArgv),
   ]);
+  await run("tmux", ["set", "-t", name, "mouse", "off"]);
   await ensureHyperlinksTerminalFeature();
   await ensureNoAltScreenOverride();
 }
