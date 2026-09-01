@@ -2155,8 +2155,10 @@ async function clickElementInView(cdp, sessionId, elExpr, modifiers = 0) {
  * @remarks
  * Deliberately never opens the detail panel here: `DetailPanel.tsx`'s own non-docked scrim
  * (`pointerEvents: "auto"`, `inset: 0`, board view is never docked) would intercept every
- * subsequent real click this setup or the per-breakpoint sweep dispatches. `measureSurfaces`
- * opens, reads, and closes the panel itself, once per breakpoint, as its own last step.
+ * subsequent real click this setup or the per-breakpoint sweep dispatches. The panel is opened
+ * exactly once, by `measurePanelHeaderOnce`, AFTER the final breakpoint's sweep, and never
+ * closed before teardown; see that function's own remarks for why per-breakpoint open/resize
+ * was abandoned (it wedges the renderer).
  */
 async function setupSurfaceInteractions(cdp, sessionId) {
   // The group card's own expand toggle stops propagation on both pointerdown and click, so it
