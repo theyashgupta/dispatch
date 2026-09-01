@@ -1119,9 +1119,17 @@ window.panel115NormalizeColor = function (raw) {
 };
 /** Direct children of the FIRST \`.reading-surface\` under the open panel (the ReferenceBlocks +
  * CardTimeline container): the vertical gap between each adjacent sibling pair, computed as
- * next.top - prev.bottom, exactly the LUI-05 finding plan 115-03 closes. Each entry also carries
- * a short text snippet of both elements so the ledger stays human-readable without re-deriving
- * DOM order by hand. */
+ * next.top - prev.bottom, exactly the LUI-05 finding plan 115-03 closes. Entry 0 is the
+ * container's OWN padding-box top to the first child's top (never a sibling-margin collapse,
+ * since a non-zero parent padding always blocks parent/child margin collapse), included because
+ * every block-to-block sibling pair here collapses to the SAME 16px (\`ReferenceBlocks.tsx\`'s
+ * "Pull Requests"/notices/start-error/CardTimeline blocks all declare a one-sided
+ * \`var(--space-lg)\` margin, and the only zero-margin block, the description, never sits between
+ * two zero-margin neighbours, so CSS's max-of-adjoining-margins collapse rule always resolves to
+ * 16 for THIS fixture's block combination) while the container's own \`--space-xl\` (24px)
+ * padding-top is genuinely different, an honest measured example of the ad hoc, non-uniform
+ * rhythm 115-03 closes. Each entry also carries a short text snippet of both elements so the
+ * ledger stays human-readable without re-deriving DOM order by hand. */
 window.panel115ReferenceBlockGaps = function () {
   var container = document.querySelector(
     'aside[aria-label="Ticket detail"] .reading-surface',
@@ -1131,6 +1139,16 @@ window.panel115ReferenceBlockGaps = function () {
     return el.getBoundingClientRect().height > 0;
   });
   var gaps = [];
+  if (children.length > 0) {
+    var containerRect = container.getBoundingClientRect();
+    var firstRect = children[0].getBoundingClientRect();
+    gaps.push({
+      index: 0,
+      gap: firstRect.top - containerRect.top,
+      prevSnippet: "(container border-box top, includes --space-xl padding-top)",
+      nextSnippet: (children[0].textContent || "").trim().slice(0, 40),
+    });
+  }
   for (var i = 1; i < children.length; i++) {
     var prevRect = children[i - 1].getBoundingClientRect();
     var nextRect = children[i].getBoundingClientRect();
@@ -1309,6 +1327,18 @@ async function normalizeColor(cdp, sessionId, raw) {
  */
 async function openPrimaryCardPanel(cdp, sessionId) {
   const cardExpr = `window.panel115FindCardByIdentifier("done", "PROP-501")`;
+  // Below CAROUSEL_QUERY's 1023px threshold (useMediaQuery.ts:12) Board.tsx swaps to a
+  // horizontally scrolling column carousel (overflowX: auto); the "done" column can sit fully
+  // off-screen at BP-C/BP-D, so a real click at its own (still-correct) getBoundingClientRect()
+  // lands outside the viewport and never reaches the card. Board.tsx's own `handlePillSelect`
+  // scrolls a column into view via `scrollIntoView`; this does the same for the fixture column
+  // before measuring, an instant (non-smooth) scroll so no animation settle time is needed.
+  await evalValue(
+    cdp,
+    sessionId,
+    `window.panel115FindColumn("done").scrollIntoView({ behavior: "instant", inline: "start", block: "nearest" })`,
+  );
+  await sleep(50);
   const rect = await evalValue(
     cdp,
     sessionId,
@@ -1324,22 +1354,45 @@ async function openPrimaryCardPanel(cdp, sessionId) {
   if (!opened) {
     throw new Error("openPrimaryCardPanel: panel did not open within 5000ms");
   }
+  // `window.panel115DetailPanelOpen()` is satisfied as soon as the aside's slide-in transform
+  // starts moving (any nonzero on-screen overlap), well before the 200ms `--motion-panel-open`
+  // transition finishes; a click dispatched against a rect read mid-slide misses the "Details"
+  // button's real (still-animating) on-screen position. Settling past the transition before
+  // reading its rect is required, not just tidy, a live run without this sleep clicked the wrong
+  // point and the toggle's `aria-expanded` never flipped.
+  await sleep(250);
+  // Scoped to the aside: CardView.tsx:542 renders its own unrelated "Details" text on a board
+  // card (a session-count disclosure), which sits earlier in DOM order than the panel's own
+  // header toggle. An unscoped `document.querySelectorAll("button")` text search matches that
+  // board-level button first, a real collision discovered live while developing this probe (the
+  // click landed on a board card instead of the panel header and the toggle never flipped).
+  const detailsToggleExpr = `window.panel115FindByText('aside[aria-label="Ticket detail"] button', "Details")`;
   const detailsToggle = await evalValue(
     cdp,
     sessionId,
-    `window.panel115FindByText("button", "Details") != null`,
+    `${detailsToggleExpr} != null`,
   );
   if (detailsToggle) {
     const toggleRect = await evalValue(
       cdp,
       sessionId,
-      `window.panel115Rect(window.panel115FindByText("button", "Details"))`,
+      `window.panel115Rect(${detailsToggleExpr})`,
     );
     await dispatchRealClick(cdp, sessionId, {
       x: toggleRect.x,
       y: toggleRect.y,
     });
-    await sleep(200);
+    const expanded = await pollUntilTruthy(
+      cdp,
+      sessionId,
+      `${detailsToggleExpr}.getAttribute("aria-expanded") === "true"`,
+      2_000,
+    );
+    if (!expanded) {
+      throw new Error(
+        "openPrimaryCardPanel: Details toggle click did not flip aria-expanded within 2000ms",
+      );
+    }
   }
   return opened;
 }
@@ -1362,7 +1415,7 @@ async function measurePanel(cdp, sessionId) {
   const asideBackgroundRaw = await evalValue(
     cdp,
     sessionId,
-    `getComputedStyle(${asideExpr}).background`,
+    `getComputedStyle(${asideExpr}).backgroundColor`,
   );
   const asideBackground = await normalizeColor(
     cdp,
@@ -1412,13 +1465,13 @@ async function measurePanel(cdp, sessionId) {
     sessionId,
     `window.panel115ComputedSub(${h1Expr}.previousElementSibling, ["fontSize","fontWeight","color","fontFamily"])`,
   );
-  const sectionFieldEl = `window.panel115FindByText("span", "Pull Requests")`;
+  const sectionFieldEl = `window.panel115FindByText('aside[aria-label="Ticket detail"] span', "Pull Requests")`;
   const sectionFieldStyle = await evalValue(
     cdp,
     sessionId,
     `window.panel115ComputedSub(${sectionFieldEl}, ["fontSize","fontWeight","color"])`,
   );
-  const mutedLabelEl = `window.panel115FindByText("span", "Status")`;
+  const mutedLabelEl = `window.panel115FindByText('aside[aria-label="Ticket detail"] span', "Status")`;
   const mutedLabelStyle = await evalValue(
     cdp,
     sessionId,
@@ -1462,7 +1515,7 @@ async function measurePanel(cdp, sessionId) {
   const sessionSwitcherBgRaw = await evalValue(
     cdp,
     sessionId,
-    `${sessionGroupExpr} ? getComputedStyle(${sessionGroupExpr}).background : null`,
+    `${sessionGroupExpr} ? getComputedStyle(${sessionGroupExpr}).backgroundColor : null`,
   );
   const sessionSwitcherBackground = await normalizeColor(
     cdp,
@@ -1478,7 +1531,7 @@ async function measurePanel(cdp, sessionId) {
   const prListRowCount = await evalValue(
     cdp,
     sessionId,
-    `document.querySelectorAll('aside[aria-label="Ticket detail"] a[aria-label^="Open PR"]').length`,
+    `document.querySelectorAll('aside[aria-label="Ticket detail"] button[aria-label^="Open PR"]').length`,
   );
   const mutedNoticeLabelCount = await evalValue(
     cdp,
@@ -1486,24 +1539,24 @@ async function measurePanel(cdp, sessionId) {
     `(function () {
       var labels = ["Status", "Start warning", "Cleanup"];
       return labels.filter(function (t) {
-        return window.panel115FindByText("span", t) != null;
+        return window.panel115FindByText('aside[aria-label="Ticket detail"] span', t) != null;
       }).length;
     })()`,
   );
   const provisioningErrorPresent = await evalValue(
     cdp,
     sessionId,
-    `window.panel115FindByText("span", "Provisioning error") != null`,
+    `window.panel115FindByText('aside[aria-label="Ticket detail"] span', "Provisioning error") != null`,
   );
   const previewRowCount = await evalValue(
     cdp,
     sessionId,
-    `document.querySelectorAll('aside[aria-label="Ticket detail"] a[aria-label^="Open localhost"]').length`,
+    `document.querySelectorAll('aside[aria-label="Ticket detail"] button[aria-label^="Open localhost"]').length`,
   );
   const activityLabelPresent = await evalValue(
     cdp,
     sessionId,
-    `window.panel115FindByText("span", "Activity") != null`,
+    `window.panel115FindByText('aside[aria-label="Ticket detail"] span', "Activity") != null`,
   );
   const timelineRowCount = await evalValue(
     cdp,
@@ -1520,7 +1573,7 @@ async function measurePanel(cdp, sessionId) {
   const cardBgRaw = await evalValue(
     cdp,
     sessionId,
-    `getComputedStyle(window.panel115FindCardByIdentifier("done", "PROP-501")).background`,
+    `getComputedStyle(window.panel115FindCardByIdentifier("done", "PROP-501")).backgroundColor`,
   );
   const cardBackground = await normalizeColor(cdp, sessionId, cardBgRaw);
 
@@ -1602,17 +1655,31 @@ async function probeBaseline() {
     // own gotcha); settle past it before the first breakpoint measurement.
     await sleep(1450);
 
+    // The panel is opened exactly ONCE, at the first breakpoint, and never closed/reopened
+    // between breakpoints: DetailPanel.tsx re-layouts an already-open panel in place on resize
+    // (it never unmounts, PANEL-03), so nothing about a viewport resize requires a new open. This
+    // is deliberate, not an optimization: closing across the >=1024px/<1024px carousel boundary
+    // (BP-B -> BP-C, BP-C -> BP-D) drives DetailPanel.tsx's own `window.history.back()`/
+    // `pushState` pair, and reopening immediately afterward reproduced a genuine renderer wedge
+    // live during this plan's own harness development (`CDP.send: no response to
+    // Runtime.evaluate ... the renderer likely stalled`), matching panel-114.mjs's own
+    // DETAIL-PANEL FINDING (a wedge under history-navigation system contention at a narrow
+    // breakpoint). Opening once and only resizing underneath it avoids that churn entirely.
+    let panelOpened = false;
     for (const bp of BREAKPOINTS) {
       console.log(`panel-115 --probe baseline: measuring ${bp.label}`);
       await applyBreakpoint(cdp, sessionId, bp);
       await blurActive(cdp, sessionId);
       await moveMouseAway(cdp, sessionId);
       await sleep(300);
-      await openPrimaryCardPanel(cdp, sessionId);
-      await sleep(HOVER_SETTLE_MS);
+      if (!panelOpened) {
+        await openPrimaryCardPanel(cdp, sessionId);
+        panelOpened = true;
+      } else {
+        await sleep(HOVER_SETTLE_MS);
+      }
       const panel = await measurePanel(cdp, sessionId);
       record[bp.label] = panel;
-      await closePrimaryCardPanel(cdp, sessionId);
     }
 
     console.log(JSON.stringify(record, null, 2));
@@ -1657,6 +1724,7 @@ void unregisterRestore;
 void evalAsyncValue;
 void readUnderHover;
 void tabTraverseTo;
+void closePrimaryCardPanel;
 
 // ---------------------------------------------------------------------------
 // main
