@@ -989,32 +989,55 @@ async function seedFixtureCards(home, cards, eventRows) {
  * activity rows), seeds it, boots the production server against the seeded home, and waits for
  * `GET /api/board` to answer 200 with both cards present. Returns `{ home, child, log }` for the
  * caller to hold across every breakpoint measurement and to pass to `teardownSandbox`.
+ *
+ * On any failure after the home is created, stops whatever booted and removes the home before
+ * rethrowing: callers assign `sandbox = await bootSandbox(...)` inside their try, so on a throw
+ * their `finally` sees `sandbox` still null and skips `teardownSandbox`; without this cleanup a
+ * leaked (non-detached) server child would hold port 47889 (SANDBOX_PORT) and fail every later run's
+ * marker guard until killed by hand.
  */
 async function bootSandbox(label) {
   const home = makeSandboxHome(label);
-  const primary = buildPrimaryCard(home);
-  const comparison = buildComparisonCard();
-  const cards = [primary, comparison];
-  const eventRows = buildEventRows(primary.id);
-  await seedFixtureCards(home, cards, eventRows);
-  const boot = await bootAndWait(home);
-  const deadline = Date.now() + READY_TIMEOUT_MS;
-  let cardCount = 0;
-  while (Date.now() < deadline) {
-    const res = await fetch(`http://127.0.0.1:${SANDBOX_PORT}/api/board`);
-    const body = await res.json();
-    cardCount = Array.isArray(body) ? body.length : (body?.cards?.length ?? 0);
-    if (cardCount >= cards.length) break;
-    await sleep(POLL_INTERVAL_MS);
-  }
-  if (cardCount < cards.length) {
-    await stopServer(boot.child);
+  let boot = null;
+  try {
+    const primary = buildPrimaryCard(home);
+    const comparison = buildComparisonCard();
+    const cards = [primary, comparison];
+    const eventRows = buildEventRows(primary.id);
+    await seedFixtureCards(home, cards, eventRows);
+    boot = await bootAndWait(home);
+    const deadline = Date.now() + READY_TIMEOUT_MS;
+    let cardCount = 0;
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${SANDBOX_PORT}/api/board`);
+        const body = await res.json();
+        cardCount = Array.isArray(body)
+          ? body.length
+          : (body?.cards?.length ?? 0);
+        if (cardCount >= cards.length) break;
+      } catch {
+        // transient fetch/parse failure while the server settles: "not ready
+        // yet" (waitForReady's own idiom), never a boot abort
+      }
+      await sleep(POLL_INTERVAL_MS);
+    }
+    if (cardCount < cards.length) {
+      throw new Error(
+        `bootSandbox: GET /api/board never reported ${cards.length} cards (last seen ${cardCount})`,
+      );
+    }
+    return {
+      home,
+      child: boot.child,
+      log: boot.log,
+      primaryCardId: primary.id,
+    };
+  } catch (err) {
+    if (boot != null) await stopServer(boot.child);
     cleanupSandboxHome(home);
-    throw new Error(
-      `bootSandbox: GET /api/board never reported ${cards.length} cards (last seen ${cardCount})`,
-    );
+    throw err;
   }
-  return { home, child: boot.child, log: boot.log, primaryCardId: primary.id };
 }
 
 /** Stops the server, waits for the port to stop listening, and cleans the Chrome user-data dir
