@@ -1154,7 +1154,7 @@ function VaultValueEditor({ keySummary, vault }: VaultValueEditorProps) {
             fontSize: "var(--font-label)",
             fontWeight: "var(--weight-semibold)",
             lineHeight: "var(--line-label)",
-            color: "var(--destructive)",
+            color: "var(--destructive-text)",
           }}
         >
           {valueError}
@@ -1363,7 +1363,7 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
             fontSize: "var(--font-label)",
             fontWeight: "var(--weight-semibold)",
             lineHeight: "var(--line-label)",
-            color: "var(--destructive)",
+            color: "var(--destructive-text)",
           }}
         >
           {purposeError}
@@ -1468,7 +1468,7 @@ function VaultAddForm({ vault }: VaultAddFormProps) {
             fontSize: "var(--font-label)",
             fontWeight: "var(--weight-semibold)",
             lineHeight: "var(--line-label)",
-            color: "var(--destructive)",
+            color: "var(--destructive-text)",
           }}
         >
           {vault.addError}
@@ -2298,7 +2298,7 @@ function NotificationsTabSection({
         {push.error != null && (
           <div
             role="alert"
-            style={{ ...remoteBodyTextStyle, color: "var(--destructive)" }}
+            style={{ ...remoteBodyTextStyle, color: "var(--destructive-text)" }}
           >
             {push.error === "cap"
               ? "This browser already has too many devices subscribed. Remove one from another Settings session first."
@@ -2454,7 +2454,7 @@ function CleanupTabSection({ cleanupTab }: CleanupTabSectionProps) {
               fontSize: "var(--font-label)",
               fontWeight: "var(--weight-semibold)",
               lineHeight: "var(--line-label)",
-              color: "var(--destructive)",
+              color: "var(--destructive-text)",
             }}
           >
             Enter a whole number between 0 and 90.

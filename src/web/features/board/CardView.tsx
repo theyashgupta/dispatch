@@ -147,7 +147,7 @@ export function CardView({
           ...chipStyle,
           background:
             "color-mix(in srgb, var(--destructive) 16%, var(--surface-card))",
-          color: "var(--destructive)",
+          color: "var(--destructive-text)",
         }}
         title={sessionChipTitle("Lost")}
       >

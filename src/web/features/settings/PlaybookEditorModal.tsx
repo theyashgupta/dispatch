@@ -196,7 +196,7 @@ export function PlaybookEditorModal({
                   fontSize: "var(--font-label)",
                   fontWeight: "var(--weight-semibold)",
                   lineHeight: "var(--line-label)",
-                  color: "var(--destructive)",
+                  color: "var(--destructive-text)",
                 }}
               >
                 {nameError}
@@ -409,7 +409,7 @@ export function PlaybookEditorModal({
                   fontSize: "var(--font-label)",
                   fontWeight: "var(--weight-semibold)",
                   lineHeight: "var(--line-label)",
-                  color: "var(--destructive)",
+                  color: "var(--destructive-text)",
                 }}
               >
                 {FOOTGUN_MESSAGE}

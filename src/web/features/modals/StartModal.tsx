@@ -1387,7 +1387,7 @@ export function StartModal({
                 style={{
                   fontSize: "var(--font-body)",
                   lineHeight: "var(--line-body)",
-                  color: "var(--destructive)",
+                  color: "var(--destructive-text)",
                 }}
               >
                 {error.text}
