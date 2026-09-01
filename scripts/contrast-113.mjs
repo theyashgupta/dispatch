@@ -71,25 +71,15 @@ const LADDER_NAMES = [
  * RESIDUAL rather than FAIL, subject to three guards: a measured ratio below `recordedRatio` is a
  * regression, a measured ratio meeting its floor is a stale entry that must be retired, and an
  * entry naming a pair absent from the generated pair set is stale too.
+ *
+ * Deliberately empty (Phase 115): the two entries that lived here (--destructive on
+ * --surface-card at 4.40, --destructive on --surface-card-hover at 4.11) were retired by
+ * splitting --destructive into a fill role (unchanged, non-text, 3:1 floor) and a new
+ * --destructive-text role (4.5:1+ on every tier, measured). This array staying empty is the
+ * tripwire: any future pair violation is a hard FAIL with nowhere to hide, never silently
+ * re-absorbed into a residual entry.
  */
-const RESIDUALS = [
-  {
-    fg: "--destructive",
-    bg: "--surface-card",
-    role: "text",
-    recordedRatio: 4.4,
-    owningPhase: 115,
-    note: "renders as literal text color at 16+ call sites, including CardView.tsx:145 (session-lost chip)",
-  },
-  {
-    fg: "--destructive",
-    bg: "--surface-card-hover",
-    role: "text",
-    recordedRatio: 4.11,
-    owningPhase: 115,
-    note: "the v3.4 hover tier makes the same chip's background lighter, so this residual is worse in the hover state than at rest",
-  },
-];
+const RESIDUALS = [];
 
 // ---------------------------------------------------------------------------
 // WCAG relative luminance and contrast ratio
@@ -162,9 +152,9 @@ function findResidual(fg, bg) {
 
 /**
  * Builds the background set (four fixed ladder tiers plus any --extra-bg additions) and the two
- * foreground sets (text-role: --text*, --destructive; non-text-role: --accent, --prio-*, --col-*,
- * --status-*), then generates every background x foreground pair, excluding --border and any pair
- * where the foreground and background name are identical.
+ * foreground sets (text-role: --text*, --destructive-text; non-text-role: --accent, --destructive,
+ * --prio-*, --col-*, --status-*), then generates every background x foreground pair, excluding
+ * --border and any pair where the foreground and background name are identical.
  */
 function buildPairSet(tokens, extraBgs) {
   const backgrounds = new Map();
@@ -179,14 +169,11 @@ function buildPairSet(tokens, extraBgs) {
   const nontextFg = new Map();
   for (const [name, hex] of tokens) {
     if (name === "--border") continue;
-    if (
-      name.startsWith("--text") ||
-      name === "--destructive" ||
-      name === "--destructive-text"
-    ) {
+    if (name.startsWith("--text") || name === "--destructive-text") {
       textFg.set(name, hex);
     } else if (
       name === "--accent" ||
+      name === "--destructive" ||
       name.startsWith("--prio-") ||
       name.startsWith("--col-") ||
       name.startsWith("--status-")
