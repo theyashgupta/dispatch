@@ -24,8 +24,9 @@ interface ResumeFeedback {
  * `resumeError` (derive-from-props, no effect), a watchdog surfaces a
  * "still resuming" nudge after {@link RESUME_WATCHDOG_MS}, and a non-2xx POST
  * response marks the request failed. All feedback state resets when
- * `sessionLost` transitions — the board card persists across session-lost
- * episodes, so stale watchdog/failure notices must not survive a recovery.
+ * `sessionLost` transitions or the active session changes: the board card
+ * persists across session-lost episodes, so stale watchdog/failure notices
+ * must not survive a recovery or a session switch.
  */
 export function useResumeFeedback(card: CardModel): ResumeFeedback {
   const [resuming, setResuming] = useState(false);
@@ -39,10 +40,10 @@ export function useResumeFeedback(card: CardModel): ResumeFeedback {
     if (card.resumeError != null) setResuming(false);
   }
 
-  const sessionLost = card.sessionLost === true;
-  const [prevSessionLost, setPrevSessionLost] = useState(sessionLost);
-  if (sessionLost !== prevSessionLost) {
-    setPrevSessionLost(sessionLost);
+  const resetKey = `${card.sessionLost === true}:${card.activeSession?.id ?? ""}`;
+  const [prevResetKey, setPrevResetKey] = useState(resetKey);
+  if (resetKey !== prevResetKey) {
+    setPrevResetKey(resetKey);
     setResuming(false);
     setRequestFailed(false);
     setResumeStatus(null);

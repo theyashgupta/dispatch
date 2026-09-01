@@ -310,16 +310,17 @@ export function DetailPanel({
       spawnedForRef.current = null;
       return;
     }
+    const spawnKey = `${card.id}:${card.activeSession?.id ?? ""}`;
     if (
       card.tmuxSession &&
       !card.sessionLost &&
       card.terminalError == null &&
-      spawnedForRef.current !== card.id
+      spawnedForRef.current !== spawnKey
     ) {
-      spawnedForRef.current = card.id;
+      spawnedForRef.current = spawnKey;
       ensureTerminal(card.id).catch((err) => {
         console.error(err);
-        if (spawnedForRef.current === card.id) spawnedForRef.current = null;
+        if (spawnedForRef.current === spawnKey) spawnedForRef.current = null;
       });
     }
   }, [card]);
