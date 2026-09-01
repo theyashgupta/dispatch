@@ -111,7 +111,7 @@ export function WorkspaceAdd({
             fontSize: "var(--font-label)",
             fontWeight: "var(--weight-semibold)",
             lineHeight: "var(--line-label)",
-            color: "var(--destructive)",
+            color: "var(--destructive-text)",
           }}
         >
           {validationError}

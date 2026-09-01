@@ -12,15 +12,18 @@ import {
   ArrowLeft,
   Bell,
   Bot,
+  Check,
   ClipboardList,
   Copy,
   Filter,
   FolderGit2,
   Globe,
+  KeyRound,
   Pencil,
   Plus,
   RotateCcw,
   Trash2,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -30,25 +33,41 @@ import {
   type Playbook,
   type SourceFilters,
   type TunnelState,
+  type VaultKeySummary,
 } from "../../../shared/types.js";
 import {
+  addVaultKey,
   addWorkspaceFolder,
   deletePlaybook,
+  deleteVaultKey,
   disableRemote,
+  editVaultPurpose,
   enableRemote,
   getCleanupDelay,
   getClaudeArgs,
   getLinearFilters,
   getLinearOptions,
   getPlaybooks,
+  getVaultKeys,
   getWorkspaceFolders,
+  importFromEnvVault,
   previewLinearFilters,
   removeWorkspaceFolder,
   saveCleanupDelay,
   saveClaudeArgs,
   saveLinearFilters,
+  setVaultValue,
 } from "../../lib/api.js";
 import { playChime } from "../../lib/chime.js";
+import {
+  disablePush,
+  enablePush,
+  isIOSDevice,
+  isPushSupported,
+  readPushSubscription,
+  type PushEnableResult,
+} from "../../lib/push.js";
+import { useMediaQuery } from "../../hooks/useMediaQuery.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";
@@ -65,6 +84,7 @@ export type SettingsTab =
   | "models"
   | "workspaces"
   | "playbooks"
+  | "vault"
   | "remote"
   | "notifications"
   | "cleanup";
@@ -764,9 +784,11 @@ function PlaybooksTabSection({ playbooksTab }: PlaybooksTabSectionProps) {
         !playbooksLoadError &&
         playbooks !== null &&
         playbooks.length === 0 && (
-          <Notice tone="muted" label="No playbooks yet">
-            Create one, or generate a draft with AI.
-          </Notice>
+          <div style={{ marginTop: "var(--space-lg)" }}>
+            <Notice tone="muted" label="No playbooks yet">
+              Create one, or generate a draft with AI.
+            </Notice>
+          </div>
         )}
 
       {!playbooksLoading &&
@@ -785,6 +807,948 @@ function PlaybooksTabSection({ playbooksTab }: PlaybooksTabSectionProps) {
           </div>
         )}
     </div>
+  );
+}
+
+type VaultImportOutcome =
+  { ok: true; imported: string[]; skipped: string[] } | { ok: false } | null;
+
+interface VaultTab {
+  keys: VaultKeySummary[] | null;
+  loading: boolean;
+  loadError: boolean;
+  reload: () => Promise<void>;
+  addName: string;
+  setAddName: (v: string) => void;
+  addPurpose: string;
+  setAddPurpose: (v: string) => void;
+  addError: string | null;
+  addPending: boolean;
+  handleAdd: () => Promise<void>;
+  valueEditorFor: string | null;
+  openValueEditor: (name: string) => void;
+  closeValueEditor: () => void;
+  purposeEditorFor: string | null;
+  openPurposeEditor: (name: string) => void;
+  closePurposeEditor: () => void;
+  deleteTarget: VaultKeySummary | null;
+  openDelete: (key: VaultKeySummary) => void;
+  closeDelete: () => void;
+  envVaultAvailable: boolean;
+  importConfirmOpen: boolean;
+  openImportConfirm: () => void;
+  closeImportConfirm: () => void;
+  importPending: boolean;
+  handleImport: () => Promise<void>;
+  importOutcome: VaultImportOutcome;
+}
+
+const VAULT_NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
+
+function vaultAddErrorCopy(error: string): string {
+  switch (error) {
+    case "invalid-name":
+      return "Use uppercase letters, digits and underscores only, starting with a letter or underscore.";
+    case "name-exists":
+      return "A key with this name already exists.";
+    case "invalid-purpose":
+      return "Enter a one-line purpose.";
+    default:
+      return "Couldn't add key, try again.";
+  }
+}
+
+function vaultValueErrorCopy(error: string): string {
+  switch (error) {
+    case "missing-value":
+      return "Enter a value.";
+    case "invalid-value":
+      return "Value must be a single line, under 8KB.";
+    case "not-found":
+      return "This key no longer exists, reopen settings to retry.";
+    default:
+      return "Couldn't save value, try again.";
+  }
+}
+
+function vaultPurposeErrorCopy(error: string): string {
+  switch (error) {
+    case "invalid-purpose":
+      return "Enter a one-line purpose.";
+    case "not-found":
+      return "This key no longer exists, reopen settings to retry.";
+    default:
+      return "Couldn't update purpose, try again.";
+  }
+}
+
+function useVaultTab(active: boolean): VaultTab {
+  const [keys, setKeys] = useState<VaultKeySummary[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [visited, setVisited] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addPurpose, setAddPurpose] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addPending, setAddPending] = useState(false);
+  const [valueEditorFor, setValueEditorFor] = useState<string | null>(null);
+  const [purposeEditorFor, setPurposeEditorFor] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<VaultKeySummary | null>(
+    null,
+  );
+  const [envVaultAvailable, setEnvVaultAvailable] = useState(false);
+  const [importConfirmOpen, setImportConfirmOpen] = useState(false);
+  const [importPending, setImportPending] = useState(false);
+  const [importOutcome, setImportOutcome] = useState<VaultImportOutcome>(null);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const { keys: list, envVaultAvailable: available } = await getVaultKeys();
+      setKeys([...list].sort((a, b) => a.name.localeCompare(b.name)));
+      setEnvVaultAvailable(available);
+    } catch (err) {
+      console.error("getVaultKeys failed", err);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!active || visited) return;
+    setVisited(true);
+    void reload();
+  }, [active, visited, reload]);
+
+  const handleAdd = useCallback(async () => {
+    if (addPending) return;
+    const name = addName.trim();
+    const purpose = addPurpose.trim();
+    if (!VAULT_NAME_RE.test(name)) {
+      setAddError(vaultAddErrorCopy("invalid-name"));
+      return;
+    }
+    if (purpose === "" || purpose.includes("\n") || purpose.length > 200) {
+      setAddError(vaultAddErrorCopy("invalid-purpose"));
+      return;
+    }
+    setAddPending(true);
+    setAddError(null);
+    try {
+      const result = await addVaultKey({ name, purpose });
+      if (result.ok) {
+        setAddName("");
+        setAddPurpose("");
+        setAddError(null);
+        await reload();
+        return;
+      }
+      setAddError(vaultAddErrorCopy(result.error));
+    } catch (err) {
+      console.error("addVaultKey failed", err);
+      setAddError(vaultAddErrorCopy("fetch-failed"));
+    } finally {
+      setAddPending(false);
+    }
+  }, [addPending, addName, addPurpose, reload]);
+
+  const openValueEditor = useCallback((name: string) => {
+    setValueEditorFor(name);
+    setPurposeEditorFor(null);
+  }, []);
+  const closeValueEditor = useCallback(() => setValueEditorFor(null), []);
+
+  const openPurposeEditor = useCallback((name: string) => {
+    setPurposeEditorFor(name);
+    setValueEditorFor(null);
+  }, []);
+  const closePurposeEditor = useCallback(() => setPurposeEditorFor(null), []);
+
+  const openDelete = useCallback((key: VaultKeySummary) => {
+    setDeleteTarget(key);
+    setValueEditorFor(null);
+    setPurposeEditorFor(null);
+  }, []);
+  const closeDelete = useCallback(() => setDeleteTarget(null), []);
+
+  const openImportConfirm = useCallback(() => {
+    setImportOutcome(null);
+    setImportConfirmOpen(true);
+  }, []);
+  const closeImportConfirm = useCallback(() => setImportConfirmOpen(false), []);
+
+  const handleImport = useCallback(async () => {
+    if (importPending) return;
+    setImportPending(true);
+    try {
+      const result = await importFromEnvVault();
+      setImportConfirmOpen(false);
+      if (result.ok) {
+        setImportOutcome({
+          ok: true,
+          imported: result.imported,
+          skipped: result.skipped,
+        });
+        await reload();
+        return;
+      }
+      setImportOutcome({ ok: false });
+    } catch (err) {
+      console.error("importFromEnvVault failed", err);
+      setImportConfirmOpen(false);
+      setImportOutcome({ ok: false });
+    } finally {
+      setImportPending(false);
+    }
+  }, [importPending, reload]);
+
+  return {
+    keys,
+    loading,
+    loadError,
+    reload,
+    addName,
+    setAddName,
+    addPurpose,
+    setAddPurpose,
+    addError,
+    addPending,
+    handleAdd,
+    valueEditorFor,
+    openValueEditor,
+    closeValueEditor,
+    purposeEditorFor,
+    openPurposeEditor,
+    closePurposeEditor,
+    deleteTarget,
+    openDelete,
+    closeDelete,
+    envVaultAvailable,
+    importConfirmOpen,
+    openImportConfirm,
+    closeImportConfirm,
+    importPending,
+    handleImport,
+    importOutcome,
+  };
+}
+
+function VaultBadge({ filled }: { filled: boolean }) {
+  return (
+    <span
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--space-xs)",
+        flex: "0 0 auto",
+        fontFamily: "var(--font-ui)",
+        fontSize: "var(--font-micro)",
+        fontWeight: "var(--weight-semibold)",
+        lineHeight: "var(--line-label)",
+        color: filled ? "var(--status-ok)" : "var(--text-muted)",
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          width: "6px",
+          height: "6px",
+          borderRadius: "50%",
+          background: filled ? "var(--status-ok)" : "var(--text-muted)",
+          flex: "0 0 auto",
+        }}
+      />
+      {filled ? "Filled" : "Empty"}
+    </span>
+  );
+}
+
+interface VaultValueEditorProps {
+  keySummary: VaultKeySummary;
+  vault: VaultTab;
+}
+
+function VaultValueEditor({ keySummary, vault }: VaultValueEditorProps) {
+  const [draftValue, setDraftValue] = useState("");
+  const [valueError, setValueError] = useState<string | null>(null);
+  const [savePending, setSavePending] = useState(false);
+  const [focused, setFocused] = useState(false);
+
+  async function handleSaveValue() {
+    if (savePending) return;
+    const value = draftValue.trim();
+    if (value === "") {
+      setValueError(vaultValueErrorCopy("missing-value"));
+      return;
+    }
+    if (
+      value.includes("\n") ||
+      value.includes("\r") ||
+      new TextEncoder().encode(value).length > 8192
+    ) {
+      setValueError(vaultValueErrorCopy("invalid-value"));
+      return;
+    }
+    setSavePending(true);
+    setValueError(null);
+    try {
+      const result = await setVaultValue(keySummary.name, value);
+      if (result.ok) {
+        setDraftValue("");
+        vault.closeValueEditor();
+        void vault.reload();
+        return;
+      }
+      setValueError(vaultValueErrorCopy(result.error));
+    } catch (err) {
+      console.error("setVaultValue failed", err);
+      setValueError(vaultValueErrorCopy("fetch-failed"));
+    } finally {
+      setSavePending(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-sm)",
+        padding: "var(--space-sm)",
+        marginLeft: "var(--space-sm)",
+        background: "var(--surface-column)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+      }}
+    >
+      <Field>Value</Field>
+      <input
+        type="text"
+        autoComplete="new-password"
+        spellCheck={false}
+        data-1p-ignore
+        data-lpignore="true"
+        data-bwignore="true"
+        value={draftValue}
+        onChange={(e) => setDraftValue(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        aria-label={`Value for ${keySummary.name}`}
+        style={{
+          height: "32px",
+          padding: "0 var(--space-sm)",
+          background: "var(--surface-card)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius)",
+          color: "var(--text)",
+          fontFamily: "var(--font-mono)",
+          fontSize: "var(--font-body)",
+          lineHeight: "var(--line-body)",
+          ...focusRing(focused),
+        }}
+      />
+      {valueError !== null && (
+        <div
+          role="alert"
+          style={{
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            lineHeight: "var(--line-label)",
+            color: "var(--destructive-text)",
+          }}
+        >
+          {valueError}
+        </div>
+      )}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          gap: "var(--space-sm)",
+        }}
+      >
+        <Button variant="secondary" onClick={vault.closeValueEditor}>
+          Cancel edit
+        </Button>
+        <Button
+          variant="primary"
+          loading={savePending}
+          onClick={() => void handleSaveValue()}
+        >
+          {savePending ? "Saving value..." : "Save value"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+interface VaultKeyRowProps {
+  keySummary: VaultKeySummary;
+  vault: VaultTab;
+}
+
+function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
+  const [hover, setHover] = useState(false);
+  const editingPurpose = vault.purposeEditorFor === keySummary.name;
+  const [draftPurpose, setDraftPurpose] = useState(keySummary.purpose);
+  const [purposeError, setPurposeError] = useState<string | null>(null);
+  const [purposePending, setPurposePending] = useState(false);
+  const [purposeFocused, setPurposeFocused] = useState(false);
+
+  useEffect(() => {
+    setPurposeError(null);
+    if (editingPurpose) {
+      setDraftPurpose(keySummary.purpose);
+    }
+  }, [editingPurpose, keySummary.purpose]);
+
+  async function handleSavePurpose() {
+    if (purposePending) return;
+    const purpose = draftPurpose.trim();
+    if (
+      purpose === "" ||
+      purpose.length > 200 ||
+      purpose.includes("\n") ||
+      purpose.includes("\r")
+    ) {
+      setPurposeError(vaultPurposeErrorCopy("invalid-purpose"));
+      return;
+    }
+    setPurposePending(true);
+    setPurposeError(null);
+    try {
+      const result = await editVaultPurpose(keySummary.name, purpose);
+      if (result.ok) {
+        vault.closePurposeEditor();
+        void vault.reload();
+        return;
+      }
+      setPurposeError(vaultPurposeErrorCopy(result.error));
+    } catch (err) {
+      console.error("editVaultPurpose failed", err);
+      setPurposeError(vaultPurposeErrorCopy("fetch-failed"));
+    } finally {
+      setPurposePending(false);
+    }
+  }
+
+  return (
+    <>
+      <div
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--space-xs)",
+          padding: "var(--space-sm)",
+          borderRadius: "var(--radius)",
+          background: hover ? "var(--surface-card-hover)" : "transparent",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "var(--space-sm)",
+          }}
+        >
+          <span
+            style={{
+              flex: "1 1 auto",
+              minWidth: 0,
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--font-label)",
+              fontWeight: "var(--weight-semibold)",
+              lineHeight: "var(--line-label)",
+              color: "var(--text)",
+              whiteSpace: "normal",
+              wordBreak: "break-all",
+            }}
+          >
+            {keySummary.name}
+          </span>
+          <VaultBadge filled={keySummary.filled} />
+          <Button
+            variant="secondary"
+            aria-label={
+              keySummary.filled
+                ? `Rotate value for ${keySummary.name}`
+                : `Fill value for ${keySummary.name}`
+            }
+            onClick={() => vault.openValueEditor(keySummary.name)}
+            style={{
+              flex: "0 0 auto",
+              height: "24px",
+              padding: "0 var(--space-sm)",
+              fontSize: "var(--font-label)",
+            }}
+          >
+            {keySummary.filled ? "Rotate" : "Set value"}
+          </Button>
+          <IconButton
+            aria-label={`Edit purpose for ${keySummary.name}`}
+            onClick={() => vault.openPurposeEditor(keySummary.name)}
+          >
+            <Pencil size={14} strokeWidth={2} aria-hidden="true" />
+          </IconButton>
+          <IconButton
+            aria-label={`Delete ${keySummary.name}`}
+            onClick={() => vault.openDelete(keySummary)}
+          >
+            <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+          </IconButton>
+        </div>
+        {editingPurpose ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--space-xs)",
+            }}
+          >
+            <input
+              type="text"
+              aria-label={`Purpose for ${keySummary.name}`}
+              value={draftPurpose}
+              onChange={(e) => setDraftPurpose(e.target.value)}
+              onFocus={() => setPurposeFocused(true)}
+              onBlur={() => setPurposeFocused(false)}
+              style={{
+                flex: "1 1 auto",
+                height: "32px",
+                padding: "0 var(--space-sm)",
+                background: "var(--surface-column)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius)",
+                color: "var(--text)",
+                fontFamily: "var(--font-ui)",
+                fontSize: "var(--font-body)",
+                lineHeight: "var(--line-body)",
+                ...focusRing(purposeFocused),
+              }}
+            />
+            <IconButton
+              aria-label={`Save purpose for ${keySummary.name}`}
+              onClick={() => void handleSavePurpose()}
+            >
+              <Check size={14} strokeWidth={2} aria-hidden="true" />
+            </IconButton>
+            <IconButton
+              aria-label={`Cancel purpose edit for ${keySummary.name}`}
+              onClick={vault.closePurposeEditor}
+            >
+              <X size={14} strokeWidth={2} aria-hidden="true" />
+            </IconButton>
+          </div>
+        ) : (
+          <span
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: "var(--font-label)",
+              lineHeight: "var(--line-label)",
+              color: "var(--text-muted)",
+              whiteSpace: "normal",
+              wordBreak: "break-word",
+            }}
+          >
+            {keySummary.purpose}
+          </span>
+        )}
+      </div>
+      {purposeError !== null && (
+        <div
+          role="alert"
+          style={{
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            lineHeight: "var(--line-label)",
+            color: "var(--destructive-text)",
+          }}
+        >
+          {purposeError}
+        </div>
+      )}
+      {vault.valueEditorFor === keySummary.name && (
+        <VaultValueEditor keySummary={keySummary} vault={vault} />
+      )}
+    </>
+  );
+}
+
+interface VaultAddFormProps {
+  vault: VaultTab;
+}
+
+function VaultAddForm({ vault }: VaultAddFormProps) {
+  const [nameFocused, setNameFocused] = useState(false);
+  const [purposeFocused, setPurposeFocused] = useState(false);
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-sm)",
+        padding: "var(--space-lg)",
+        background: "var(--surface-card)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+      }}
+    >
+      <div style={{ display: "flex", gap: "var(--space-sm)" }}>
+        <div
+          style={{
+            flex: "1 1 auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-xs)",
+          }}
+        >
+          <Field>Name</Field>
+          <input
+            type="text"
+            aria-label="New key name"
+            placeholder="API_KEY"
+            spellCheck={false}
+            value={vault.addName}
+            onChange={(e) => vault.setAddName(e.target.value)}
+            onFocus={() => setNameFocused(true)}
+            onBlur={() => setNameFocused(false)}
+            style={{
+              height: "32px",
+              padding: "0 var(--space-sm)",
+              background: "var(--surface-column)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              color: "var(--text)",
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--font-body)",
+              lineHeight: "var(--line-body)",
+              ...focusRing(nameFocused),
+            }}
+          />
+        </div>
+        <div
+          style={{
+            flex: "1 1 auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-xs)",
+          }}
+        >
+          <Field>Purpose</Field>
+          <input
+            type="text"
+            aria-label="New key purpose"
+            placeholder="One-line purpose"
+            value={vault.addPurpose}
+            onChange={(e) => vault.setAddPurpose(e.target.value)}
+            onFocus={() => setPurposeFocused(true)}
+            onBlur={() => setPurposeFocused(false)}
+            style={{
+              height: "32px",
+              padding: "0 var(--space-sm)",
+              background: "var(--surface-column)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              color: "var(--text)",
+              fontFamily: "var(--font-ui)",
+              fontSize: "var(--font-body)",
+              lineHeight: "var(--line-body)",
+              ...focusRing(purposeFocused),
+            }}
+          />
+        </div>
+      </div>
+      {vault.addError !== null && (
+        <div
+          role="alert"
+          style={{
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            lineHeight: "var(--line-label)",
+            color: "var(--destructive-text)",
+          }}
+        >
+          {vault.addError}
+        </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <Button
+          variant="primary"
+          loading={vault.addPending}
+          onClick={() => void vault.handleAdd()}
+        >
+          <Plus size={14} strokeWidth={2} aria-hidden="true" />
+          {vault.addPending ? "Adding..." : "Add key"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+interface VaultTabSectionProps {
+  vaultTab: VaultTab;
+}
+
+function VaultImportOutcomeNotice({
+  outcome,
+}: {
+  outcome: VaultImportOutcome;
+}) {
+  if (outcome === null) return null;
+  if (!outcome.ok) {
+    return (
+      <Notice
+        tone="destructive"
+        label="Couldn't import from env-vault, reopen settings to retry."
+      />
+    );
+  }
+  const { imported, skipped } = outcome;
+  if (imported.length === 0 && skipped.length === 0) {
+    return (
+      <div style={{ marginTop: "var(--space-lg)" }}>
+        <Notice
+          tone="muted"
+          label="Nothing to import, all keys are already here."
+        />
+      </div>
+    );
+  }
+  const importedLine =
+    imported.length > 0
+      ? `Imported ${imported.length} key(s): ${imported.join(", ")}`
+      : null;
+  const skippedLine =
+    skipped.length > 0
+      ? `Skipped ${skipped.length} already here: ${skipped.join(", ")}`
+      : null;
+  return (
+    <div style={{ marginTop: "var(--space-lg)" }}>
+      <Notice tone="muted" label={importedLine ?? skippedLine}>
+        {importedLine !== null ? skippedLine : null}
+      </Notice>
+    </div>
+  );
+}
+
+function VaultTabSection({ vaultTab }: VaultTabSectionProps) {
+  const { keys, loading, loadError } = vaultTab;
+
+  return (
+    <div
+      className="scroll-stable-y"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-lg)",
+        flex: "1 1 auto",
+        minHeight: 0,
+        overflowY: "auto",
+      }}
+    >
+      <VaultAddForm vault={vaultTab} />
+
+      {vaultTab.envVaultAvailable && (
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <Button variant="secondary" onClick={vaultTab.openImportConfirm}>
+            Import from env-vault
+          </Button>
+        </div>
+      )}
+
+      <VaultImportOutcomeNotice outcome={vaultTab.importOutcome} />
+
+      {loading && (
+        <span
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            lineHeight: "var(--line-label)",
+            color: "var(--text-muted)",
+          }}
+        >
+          Loading…
+        </span>
+      )}
+
+      {!loading && loadError && (
+        <Notice
+          tone="destructive"
+          label="Couldn't load vault keys, reopen settings to retry."
+        />
+      )}
+
+      {!loading && !loadError && keys !== null && keys.length === 0 && (
+        <div style={{ marginTop: "var(--space-lg)" }}>
+          <Notice tone="muted" label="No keys yet">
+            Add one above to store a secret Claude can use without ever reading
+            it.
+          </Notice>
+        </div>
+      )}
+
+      {!loading && !loadError && keys !== null && keys.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {keys.map((k) => (
+            <VaultKeyRow key={k.name} keySummary={k} vault={vaultTab} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface VaultDeleteConfirmProps {
+  keySummary: VaultKeySummary;
+  onClose: () => void;
+  onDeleted: () => void;
+}
+
+function VaultDeleteConfirm({
+  keySummary,
+  onClose,
+  onDeleted,
+}: VaultDeleteConfirmProps) {
+  const modalRef = useRef<ModalControl>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState(false);
+
+  async function handleDelete() {
+    if (pending) return;
+    setPending(true);
+    keepRef.current?.focus();
+    setError(false);
+    try {
+      const result = await deleteVaultKey(keySummary.name);
+      if (result.ok) {
+        onDeleted();
+        return;
+      }
+      setError(true);
+    } catch (err) {
+      console.error("deleteVaultKey failed", err);
+      setError(true);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Modal
+      ariaLabel={`Delete ${keySummary.name}`}
+      onClose={onClose}
+      controlRef={modalRef}
+      initialFocusRef={keepRef}
+    >
+      <Modal.Header>{keySummary.name}</Modal.Header>
+      <Modal.Body>
+        <div
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-body)",
+            lineHeight: "var(--line-body)",
+            color: "var(--text)",
+          }}
+        >
+          Delete this key? Any command that depends on it will stop finding the
+          value. This can't be undone.
+        </div>
+        {error && (
+          <Notice tone="destructive" label="Couldn't delete key, try again." />
+        )}
+      </Modal.Body>
+      <Modal.Actions>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: "var(--space-sm)",
+            flex: "0 0 auto",
+          }}
+        >
+          <Button
+            ref={keepRef}
+            variant="secondary"
+            onClick={() => modalRef.current?.requestClose()}
+          >
+            Keep key
+          </Button>
+          <Button
+            variant="danger"
+            loading={pending}
+            onClick={() => void handleDelete()}
+          >
+            {pending ? "Deleting key..." : "Delete key"}
+          </Button>
+        </div>
+      </Modal.Actions>
+    </Modal>
+  );
+}
+
+interface VaultImportConfirmProps {
+  vault: VaultTab;
+}
+
+function VaultImportConfirm({ vault }: VaultImportConfirmProps) {
+  const modalRef = useRef<ModalControl>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  return (
+    <Modal
+      ariaLabel="Import keys from env-vault?"
+      onClose={vault.closeImportConfirm}
+      controlRef={modalRef}
+      initialFocusRef={cancelRef}
+    >
+      <Modal.Header>Import keys from env-vault?</Modal.Header>
+      <Modal.Body>
+        <div
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-body)",
+            lineHeight: "var(--line-body)",
+            color: "var(--text)",
+          }}
+        >
+          This copies key names, purposes, and values from your standalone
+          env-vault. Keys already here are skipped, never overwritten, and the
+          original files are left untouched.
+        </div>
+      </Modal.Body>
+      <Modal.Actions>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: "var(--space-sm)",
+            flex: "0 0 auto",
+          }}
+        >
+          <Button
+            ref={cancelRef}
+            variant="secondary"
+            onClick={() => modalRef.current?.requestClose()}
+          >
+            Cancel import
+          </Button>
+          <Button
+            variant="primary"
+            loading={vault.importPending}
+            onClick={() => void vault.handleImport()}
+          >
+            {vault.importPending ? "Importing keys..." : "Import keys"}
+          </Button>
+        </div>
+      </Modal.Actions>
+    </Modal>
   );
 }
 
@@ -1086,6 +2050,96 @@ function useDesktopPermission(): {
   return { status, request };
 }
 
+type PushRowState =
+  | "ios-needs-install"
+  | "unsupported"
+  | "default"
+  | "enabling"
+  | "enabled"
+  | "disabling"
+  | "denied";
+
+function usePushSubscription(): {
+  state: PushRowState;
+  error: "cap" | "generic" | null;
+  enable: () => void;
+  disable: () => void;
+} {
+  const [permission, setPermission] = useState<DesktopPermission>(() =>
+    "Notification" in window ? Notification.permission : "unsupported",
+  );
+  const [hasSubscription, setHasSubscription] = useState<boolean | null>(null);
+  const [pending, setPending] = useState<"enabling" | "disabling" | null>(null);
+  const [error, setError] = useState<"cap" | "generic" | null>(null);
+
+  const standaloneMedia = useMediaQuery("(display-mode: standalone)");
+  const standalone =
+    standaloneMedia ||
+    ("standalone" in navigator &&
+      (navigator as Navigator & { standalone?: boolean }).standalone === true);
+
+  useEffect(() => {
+    let active = true;
+    void readPushSubscription().then((subscription) => {
+      if (!active) return;
+      setHasSubscription(subscription != null);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const enable = useCallback(() => {
+    setPending("enabling");
+    setError(null);
+    void enablePush().then(async (result: PushEnableResult) => {
+      const livePermission: DesktopPermission =
+        "Notification" in window ? Notification.permission : "unsupported";
+      setPermission(livePermission);
+      const subscription = await readPushSubscription();
+      setHasSubscription(subscription != null);
+      setPending(null);
+      if (livePermission === "denied") {
+        setError(null);
+      } else if (result.ok) {
+        setError(null);
+      } else {
+        setError(result.error === "too-many-subscriptions" ? "cap" : "generic");
+      }
+    });
+  }, []);
+
+  const disable = useCallback(() => {
+    setPending("disabling");
+    setError(null);
+    void disablePush().then(async (ok) => {
+      const subscription = await readPushSubscription();
+      setHasSubscription(subscription != null);
+      setPending(null);
+      if (!ok) setError("generic");
+    });
+  }, []);
+
+  let state: PushRowState;
+  if (isIOSDevice() && !standalone) {
+    state = "ios-needs-install";
+  } else if (!isPushSupported()) {
+    state = "unsupported";
+  } else if (pending === "enabling") {
+    state = "enabling";
+  } else if (pending === "disabling") {
+    state = "disabling";
+  } else if (permission === "denied") {
+    state = "denied";
+  } else if (permission === "granted" && hasSubscription === true) {
+    state = "enabled";
+  } else {
+    state = "default";
+  }
+
+  return { state, error, enable, disable };
+}
+
 interface NotificationsTabSectionProps {
   soundEnabled: boolean;
   onToggleSound: (enabled: boolean) => void;
@@ -1097,6 +2151,7 @@ function NotificationsTabSection({
 }: NotificationsTabSectionProps) {
   const { status, request } = useDesktopPermission();
   const [soundFocus, setSoundFocus] = useState(false);
+  const push = usePushSubscription();
 
   return (
     <div style={remoteSectionStyle}>
@@ -1168,6 +2223,96 @@ function NotificationsTabSection({
             Test sound
           </Button>
         </div>
+      </div>
+
+      <div style={remoteFieldBlockStyle}>
+        {push.state === "ios-needs-install" ? (
+          <Field>Add to your Home Screen to enable push</Field>
+        ) : (
+          <Field>Push notifications (this device)</Field>
+        )}
+        {push.state === "ios-needs-install" && (
+          <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            <li style={remoteBodyTextStyle}>
+              1. Tap the Share icon in Safari's toolbar.
+            </li>
+            <li style={remoteBodyTextStyle}>2. Tap "Add to Home Screen".</li>
+            <li style={remoteBodyTextStyle}>
+              3. Open Dispatch from your Home Screen.
+            </li>
+            <li style={remoteBodyTextStyle}>
+              4. Enable push notifications from Settings there.
+            </li>
+          </ol>
+        )}
+        {push.state === "unsupported" && (
+          <span style={remoteHelperTextStyle}>
+            Not supported in this browser.
+          </span>
+        )}
+        {push.state === "default" && (
+          <>
+            <span style={remoteBodyTextStyle}>
+              {
+                "Get a push notification when a card needs your input, even with the tab closed."
+              }
+            </span>
+            <div>
+              <Button variant="secondary" onClick={push.enable}>
+                Enable push notifications
+              </Button>
+            </div>
+          </>
+        )}
+        {push.state === "enabling" && (
+          <div>
+            <Button variant="secondary" loading disabled>
+              Enabling...
+            </Button>
+          </div>
+        )}
+        {push.state === "enabled" && (
+          <>
+            <RemoteStatusRow
+              color="var(--status-ok)"
+              text="Push enabled - this device will get a push notification when a card needs your input, even with the tab closed."
+            />
+            <div>
+              <Button variant="secondary" onClick={push.disable}>
+                Disable push notifications
+              </Button>
+            </div>
+          </>
+        )}
+        {push.state === "disabling" && (
+          <>
+            <RemoteStatusRow
+              color="var(--status-ok)"
+              text="Push enabled - this device will get a push notification when a card needs your input, even with the tab closed."
+            />
+            <div>
+              <Button variant="secondary" loading disabled>
+                Disabling...
+              </Button>
+            </div>
+          </>
+        )}
+        {push.state === "denied" && (
+          <RemoteStatusRow
+            color="var(--status-down)"
+            text="Blocked - enable notifications for this site in your browser settings."
+          />
+        )}
+        {push.error != null && (
+          <div
+            role="alert"
+            style={{ ...remoteBodyTextStyle, color: "var(--destructive-text)" }}
+          >
+            {push.error === "cap"
+              ? "This browser already has too many devices subscribed. Remove one from another Settings session first."
+              : "Couldn't turn on push, try again."}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1317,7 +2462,7 @@ function CleanupTabSection({ cleanupTab }: CleanupTabSectionProps) {
               fontSize: "var(--font-label)",
               fontWeight: "var(--weight-semibold)",
               lineHeight: "var(--line-label)",
-              color: "var(--destructive)",
+              color: "var(--destructive-text)",
             }}
           >
             Enter a whole number between 0 and 90.
@@ -1728,9 +2873,11 @@ function WorkspacesTabSection({ workspacesTab }: WorkspacesTabSectionProps) {
       )}
 
       {!loading && !loadError && folders.length === 0 && (
-        <Notice tone="muted" label="No workspaces yet">
-          Add a folder above to start tickets in it.
-        </Notice>
+        <div style={{ marginTop: "var(--space-lg)" }}>
+          <Notice tone="muted" label="No workspaces yet">
+            Add a folder above to start tickets in it.
+          </Notice>
+        </div>
       )}
 
       {!loading && !loadError && folders.length > 0 && (
@@ -1755,6 +2902,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "models", label: "Models", icon: Bot },
   { id: "workspaces", label: "Workspaces", icon: FolderGit2 },
   { id: "playbooks", label: "Playbooks", icon: ClipboardList },
+  { id: "vault", label: "Vault", icon: KeyRound },
   { id: "remote", label: "Remote", icon: Globe },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "cleanup", label: "Cleanup", icon: Trash2 },
@@ -1766,7 +2914,6 @@ const overlayStyle: CSSProperties = {
   zIndex: 18,
   display: "flex",
   background: "var(--bg)",
-  transition: "opacity 150ms ease-out",
 };
 
 const sidebarStyle: CSSProperties = {
@@ -1960,18 +3107,35 @@ export function SettingsScreen({
   const modelsTab = useModelsTab(requestClose);
   const workspacesTab = useWorkspacesTab();
   const playbooksTab = usePlaybooksTab(tab === "playbooks");
+  const vaultTab = useVaultTab(tab === "vault");
   const remoteTab = useRemoteTab();
   const cleanupTab = useCleanupTab(requestClose);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
-      if (playbooksTab.editorState || playbooksTab.deleteTarget) return;
+      if (
+        playbooksTab.editorState ||
+        playbooksTab.deleteTarget ||
+        vaultTab.deleteTarget ||
+        vaultTab.valueEditorFor ||
+        vaultTab.purposeEditorFor ||
+        vaultTab.importConfirmOpen
+      )
+        return;
       requestClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [playbooksTab.editorState, playbooksTab.deleteTarget, requestClose]);
+  }, [
+    playbooksTab.editorState,
+    playbooksTab.deleteTarget,
+    vaultTab.deleteTarget,
+    vaultTab.valueEditorFor,
+    vaultTab.purposeEditorFor,
+    vaultTab.importConfirmOpen,
+    requestClose,
+  ]);
 
   const activeSection =
     SETTINGS_SECTIONS.find((section) => section.id === tab) ??
@@ -1985,6 +3149,10 @@ export function SettingsScreen({
       style={{
         ...overlayStyle,
         opacity: entered && !closing ? 1 : 0,
+        transition:
+          entered && !closing
+            ? "opacity var(--motion-panel-open) var(--easing-enter)"
+            : "opacity var(--motion-panel-close) var(--easing-exit)",
       }}
     >
       <nav aria-label="Settings sections" style={sidebarStyle}>
@@ -2018,6 +3186,7 @@ export function SettingsScreen({
           {tab === "playbooks" && (
             <SettingsScreen.PlaybooksTab playbooksTab={playbooksTab} />
           )}
+          {tab === "vault" && <SettingsScreen.VaultTab vaultTab={vaultTab} />}
           {tab === "remote" && (
             <SettingsScreen.RemoteTab
               tunnelState={tunnelState}
@@ -2098,6 +3267,21 @@ export function SettingsScreen({
           }}
         />
       )}
+
+      {vaultTab.deleteTarget && (
+        <VaultDeleteConfirm
+          keySummary={vaultTab.deleteTarget}
+          onClose={vaultTab.closeDelete}
+          onDeleted={() => {
+            vaultTab.closeDelete();
+            vaultTab.closeValueEditor();
+            vaultTab.closePurposeEditor();
+            void vaultTab.reload();
+          }}
+        />
+      )}
+
+      {vaultTab.importConfirmOpen && <VaultImportConfirm vault={vaultTab} />}
     </div>
   );
 }
@@ -2107,6 +3291,7 @@ SettingsScreen.FiltersTab = FiltersTabSection;
 SettingsScreen.ModelsTab = ModelsTabSection;
 SettingsScreen.WorkspacesTab = WorkspacesTabSection;
 SettingsScreen.PlaybooksTab = PlaybooksTabSection;
+SettingsScreen.VaultTab = VaultTabSection;
 SettingsScreen.RemoteTab = RemoteTabSection;
 SettingsScreen.NotificationsTab = NotificationsTabSection;
 SettingsScreen.CleanupTab = CleanupTabSection;

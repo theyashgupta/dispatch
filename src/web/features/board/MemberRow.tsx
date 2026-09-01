@@ -1,12 +1,10 @@
 import { ExternalLink } from "lucide-react";
 import type {
   Card as CardModel,
-  PrInfo,
   PreviewInfo,
   ProbeUnknown,
 } from "../../../shared/types.js";
 import {
-  PrBadge,
   PreviewBadge,
   SourceBadge,
   UnknownProbeBadge,
@@ -18,9 +16,7 @@ interface MemberRowProps {
   member: CardModel;
   dense?: boolean;
   actionable: boolean;
-  groupPr?: PrInfo[];
   groupPreviews?: PreviewInfo[];
-  groupPrsUnknown?: ProbeUnknown;
   groupPreviewsUnknown?: ProbeUnknown;
 }
 
@@ -28,9 +24,7 @@ export function MemberRow({
   member,
   dense = true,
   actionable,
-  groupPr,
   groupPreviews,
-  groupPrsUnknown,
   groupPreviewsUnknown,
 }: MemberRowProps) {
   return (
@@ -61,16 +55,6 @@ export function MemberRow({
       >
         {member.title}
       </span>
-      {groupPr?.map((pr) => (
-        <PrBadge key={pr.url} pr={pr} />
-      ))}
-      {groupPrsUnknown != null && (
-        <UnknownProbeBadge
-          signal="pr"
-          category={groupPrsUnknown.category}
-          partial={(groupPr?.length ?? 0) > 0}
-        />
-      )}
       {groupPreviews?.map((preview) => (
         <PreviewBadge key={preview.port} preview={preview} />
       ))}

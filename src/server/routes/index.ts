@@ -10,6 +10,9 @@ import { imagesRouter } from "./images.route.js";
 import { playbooksRouter } from "./playbooks.route.js";
 import { remoteRouter } from "./remote.route.js";
 import { terminalThemeRouter } from "./terminal-theme.route.js";
+import { vaultRouter } from "./vault.route.js";
+import { pushRouter } from "./push.route.js";
+import { viewerRouter } from "./viewer.route.js";
 
 /**
  * Plain composition of the sub-routers — no nested gate here. The single enforcement point for
@@ -30,3 +33,6 @@ apiRouter.use(imagesRouter);
 apiRouter.use(playbooksRouter);
 apiRouter.use(remoteRouter);
 apiRouter.use(terminalThemeRouter);
+apiRouter.use(vaultRouter);
+apiRouter.use(pushRouter);
+apiRouter.use(viewerRouter);

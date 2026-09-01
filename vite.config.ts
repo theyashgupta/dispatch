@@ -27,6 +27,7 @@ export default defineConfig({
       input: {
         main: resolve(import.meta.dirname, "src/web/index.html"),
         terminal: resolve(import.meta.dirname, "src/web/terminal.html"),
+        viewer: resolve(import.meta.dirname, "src/web/viewer.html"),
       },
     },
   },
@@ -46,6 +47,12 @@ export default defineConfig({
         target: "http://localhost:4700",
         changeOrigin: true,
         ws: true,
+      },
+      // Same anchoring rationale as /api/ above; no ws needed, the viewer page
+      // has no WebSocket, only its HTML/asset GETs and the /api/ file fetch.
+      "^/viewer/": {
+        target: "http://localhost:4700",
+        changeOrigin: true,
       },
     },
   },

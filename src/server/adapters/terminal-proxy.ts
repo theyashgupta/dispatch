@@ -4,6 +4,7 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import type { Request, Response } from "express";
 import { store } from "../store/board.store.js";
+import { armFlickTelemetry, telemetryOn } from "./terminal-telemetry.js";
 import { getLiveTtydPort } from "./ttyd.js";
 
 /**
@@ -113,6 +114,8 @@ export function httpForward(req: Request, res: Response, port: number): void {
  * cleared on the first `data` event so an established, merely-idle interactive session is never
  * killed for silence. Client disconnect (`close`) is wired to abort the upstream leg immediately
  * rather than leaving it running until ttyd notices (WR-02).
+ * @remarks Arms the opt-in per-flick telemetry recorder (TERM-04) only when its flag is set; the
+ * forward path is byte-identical to a build without that module when it is unset.
  */
 export function upgradeForward(
   req: IncomingMessage,
@@ -129,6 +132,7 @@ export function upgradeForward(
     if (head.length > 0) upstream.write(head);
     upstream.pipe(clientSocket);
     clientSocket.pipe(upstream);
+    if (telemetryOn) armFlickTelemetry(clientSocket, upstream);
   });
   upstream.setTimeout(UPSTREAM_TIMEOUT_MS);
   upstream.once("timeout", () =>

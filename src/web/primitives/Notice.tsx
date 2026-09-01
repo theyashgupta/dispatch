@@ -14,14 +14,13 @@ const destructiveHeadingStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: "var(--space-xs)",
-  color: "var(--destructive)",
+  color: "var(--destructive-text)",
   fontSize: "var(--font-label)",
   fontWeight: "var(--weight-semibold)",
   lineHeight: "var(--line-label)",
 };
 
 const mutedLabelledContainer: CSSProperties = {
-  marginTop: "var(--space-lg)",
   display: "flex",
   flexDirection: "column",
   gap: "var(--space-xs)",

@@ -1,74 +1,18 @@
-import {
-  GitMerge,
-  GitPullRequest,
-  GitPullRequestClosed,
-  GitPullRequestDraft,
-} from "lucide-react";
 import { useState } from "react";
 import type { PrInfo } from "../../../shared/types.js";
+import { prCiDotColor, prStateLabel, prStyleFor } from "./pr-style.js";
 
-function styleFor(pr: PrInfo): {
-  icon: typeof GitPullRequest;
-  border: string;
-  background: string;
-  color: string;
-} {
-  if (pr.isDraft) {
-    return {
-      icon: GitPullRequestDraft,
-      border: "1px solid var(--border)",
-      background: "transparent",
-      color: "var(--text-muted)",
-    };
-  }
-  if (pr.state === "merged") {
-    return {
-      icon: GitMerge,
-      border: "none",
-      background:
-        "color-mix(in srgb, var(--col-in-review) 16%, var(--surface-card))",
-      color: "var(--col-in-review)",
-    };
-  }
-  if (pr.state === "closed") {
-    return {
-      icon: GitPullRequestClosed,
-      border: "none",
-      background:
-        "color-mix(in srgb, var(--col-done) 16%, var(--surface-card))",
-      color: "var(--col-done)",
-    };
-  }
-  return {
-    icon: GitPullRequest,
-    border: "none",
-    background: "color-mix(in srgb, var(--status-ok) 16%, var(--surface-card))",
-    color: "var(--status-ok)",
-  };
-}
-
-function stateLabelFor(pr: PrInfo): string {
-  if (pr.isDraft) return "Draft";
-  if (pr.state === "merged") return "Merged";
-  if (pr.state === "closed") return "Closed";
-  return "Open";
-}
-
-function ciDotColor(ci: PrInfo["ci"]): string {
-  if (ci === "fail") return "var(--destructive)";
-  if (ci === "pending") return "var(--status-stale)";
-  return "var(--status-ok)";
-}
-
-export function PrBadge({ pr }: { pr: PrInfo }) {
+export function PrBadge({ pr, showRepo }: { pr: PrInfo; showRepo?: boolean }) {
   const [hovered, setHovered] = useState(false);
-  const { icon: Icon, border, background, color } = styleFor(pr);
+  const { icon: Icon, border, background, color } = prStyleFor(pr);
   const showCiDot = !pr.isDraft && pr.state === "open" && pr.ci != null;
+  const showRepoTag = showRepo === true && pr.repo != null && pr.repo !== "";
+  const repoPrefix = showRepoTag ? `${pr.repo} ` : "";
   const ciLabel =
     pr.ci != null
       ? ` · Checks ${pr.ci === "pass" ? "passing" : pr.ci === "fail" ? "failing" : "pending"}`
       : "";
-  const label = `PR #${pr.number} — ${stateLabelFor(pr)}${ciLabel}`;
+  const label = `PR ${repoPrefix}#${pr.number} — ${prStateLabel(pr)}${ciLabel}`;
   return (
     <button
       type="button"
@@ -101,6 +45,16 @@ export function PrBadge({ pr }: { pr: PrInfo }) {
       }}
     >
       <Icon size={12} strokeWidth={2} aria-hidden="true" />
+      {showRepoTag && (
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--font-micro)",
+          }}
+        >
+          {pr.repo}
+        </span>
+      )}
       {`#${pr.number}`}
       {showCiDot && (
         <span
@@ -109,7 +63,7 @@ export function PrBadge({ pr }: { pr: PrInfo }) {
             height: "5px",
             borderRadius: "50%",
             flex: "0 0 auto",
-            background: ciDotColor(pr.ci),
+            background: prCiDotColor(pr.ci),
           }}
         />
       )}

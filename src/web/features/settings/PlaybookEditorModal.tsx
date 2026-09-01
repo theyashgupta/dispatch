@@ -196,7 +196,7 @@ export function PlaybookEditorModal({
                   fontSize: "var(--font-label)",
                   fontWeight: "var(--weight-semibold)",
                   lineHeight: "var(--line-label)",
-                  color: "var(--destructive)",
+                  color: "var(--destructive-text)",
                 }}
               >
                 {nameError}
@@ -230,8 +230,6 @@ export function PlaybookEditorModal({
                   background: "var(--surface-card)",
                   border: "1px solid var(--border)",
                   borderRadius: "var(--radius)",
-                  transition:
-                    "opacity 150ms ease-out, transform 150ms ease-out",
                 }}
               >
                 <textarea
@@ -411,7 +409,7 @@ export function PlaybookEditorModal({
                   fontSize: "var(--font-label)",
                   fontWeight: "var(--weight-semibold)",
                   lineHeight: "var(--line-label)",
-                  color: "var(--destructive)",
+                  color: "var(--destructive-text)",
                 }}
               >
                 {FOOTGUN_MESSAGE}

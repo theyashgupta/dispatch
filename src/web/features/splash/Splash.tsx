@@ -42,8 +42,8 @@ export function Splash() {
         opacity: 1,
         animation:
           phase === "in"
-            ? "splash-in 400ms ease-out forwards"
-            : "splash-out 300ms ease-in forwards",
+            ? "splash-in var(--motion-splash-in) ease-out forwards"
+            : "splash-out var(--motion-splash-out) ease-in forwards",
       }}
     >
       <Glyph size={72} />
