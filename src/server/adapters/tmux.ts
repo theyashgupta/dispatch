@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { run } from "./exec.js";
 
 /**
@@ -10,7 +13,10 @@ import { run } from "./exec.js";
  * never receives the OSC 8 bytes without this terminal-feature, so xterm.js's `OscLinkProvider`
  * has nothing to resolve regardless of any browser-side patch.
  */
-const HYPERLINKS_FEATURE_ENTRY = "xterm-256color:hyperlinks";
+const HYPERLINKS_FEATURE_ENTRIES = [
+  "xterm-256color:hyperlinks",
+  "tmux-256color:hyperlinks",
+] as const;
 
 /**
  * tmux stderr signatures for "no server to talk to": `no server running on <sock>` and
@@ -21,8 +27,31 @@ const HYPERLINKS_FEATURE_ENTRY = "xterm-256color:hyperlinks";
 const NO_SERVER_STDERR = /no server running|error connecting/;
 
 /**
+ * The entries of a tmux ARRAY server option as an exact-match Set (`show -g -v <name>` prints one
+ * unquoted entry per line).
+ *
+ * @remarks Exact entries, never a substring scan of the raw `show` output: a user's own superset
+ * entry (`tmux-256color:smcup@:rmcup@:hyperlinks`) contains Dispatch's entry as a substring and
+ * would make a substring guard skip a grant that was never actually made. An empty Set on any
+ * failure is the no-server-yet state every caller already treats as "not configured".
+ */
+async function serverOptionEntries(name: string): Promise<Set<string>> {
+  try {
+    const { stdout } = await run("tmux", ["show", "-g", "-v", name]);
+    return new Set(
+      stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+/**
  * Idempotently grant the tmux SERVER (a global, not per-session, option) the
- * {@link HYPERLINKS_FEATURE_ENTRY} terminal-feature. Checked-then-appended rather than
+ * {@link HYPERLINKS_FEATURE_ENTRIES} terminal-feature. Checked-then-appended rather than
  * unconditionally appended, because `set -ag` on an array option duplicates the entry on every
  * call and the tmux server outlives many backend boots (tmux is the app's own source of truth
  * for session survival across restarts) — an unconditional per-boot append would grow the option
@@ -46,25 +75,88 @@ const NO_SERVER_STDERR = /no server running|error connecting/;
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 export async function ensureHyperlinksTerminalFeature(): Promise<void> {
-  let current = "";
+  const current = await serverOptionEntries("terminal-features");
+  const missing = HYPERLINKS_FEATURE_ENTRIES.filter(
+    (entry) => !current.has(entry),
+  );
+  if (missing.length === 0) return;
   try {
-    current = (await run("tmux", ["show", "-g", "terminal-features"])).stdout;
-  } catch {}
-  if (current.includes(HYPERLINKS_FEATURE_ENTRY)) return;
+    for (const entry of missing) {
+      await run("tmux", ["set", "-ag", "terminal-features", entry]);
+    }
+  } catch (err) {
+    const failure = err as Error & { stderr?: string };
+    if (NO_SERVER_STDERR.test(failure.stderr ?? "")) return;
+    console.warn(
+      `[tmux] could not grant xterm-256color the hyperlinks terminal-feature, Cmd+Click on real Claude Code OSC-8 links may not work: ${failure.message}`,
+    );
+  }
+}
+
+/**
+ * The terminal-overrides entry that stops tmux from switching Dispatch's web clients to the
+ * alternate screen.
+ *
+ * @remarks TERM-05: `tmux attach` itself owns the outer terminal's alt screen, and xterm.js
+ * keeps no scrollback there, so an attached web client could never scroll locally regardless of
+ * what the pane runs. Cancelling smcup/rmcup keeps tmux drawing on the primary screen, where
+ * linefeed scrolling feeds the client's local scrollback. Keyed to `tmux-256color` because that is
+ * the TERM ttyd.ts spawns with (`-T tmux-256color`), which narrows the blast radius but does NOT
+ * eliminate it: `tmux-256color` is also the TERM tmux exports inside its own panes, so a nested
+ * `tmux attach` run from inside any pane on this shared server, and any user whose own terminal is
+ * configured to that TERM, matches the override too and loses smcup/rmcup (vim/less/man stop
+ * restoring the screen on exit). That is a known, accepted cost of mutating a shared server, not an
+ * exclusivity guarantee. Nothing removes the entry either; like every server option it dies only
+ * with the tmux server.
+ */
+const NO_ALT_SCREEN_OVERRIDE_ENTRY = "tmux-256color:smcup@:rmcup@";
+
+/**
+ * Idempotently append {@link NO_ALT_SCREEN_OVERRIDE_ENTRY} to the server's terminal-overrides.
+ *
+ * @remarks Same shape and call sites as {@link ensureHyperlinksTerminalFeature}: server options
+ * die with the tmux server, and immediately after `new-session` (plus boot) is the only moment a
+ * live server is guaranteed.
+ */
+export async function ensureNoAltScreenOverride(): Promise<void> {
+  const current = await serverOptionEntries("terminal-overrides");
+  if (current.has(NO_ALT_SCREEN_OVERRIDE_ENTRY)) return;
   try {
     await run("tmux", [
       "set",
       "-ag",
-      "terminal-features",
-      HYPERLINKS_FEATURE_ENTRY,
+      "terminal-overrides",
+      NO_ALT_SCREEN_OVERRIDE_ENTRY,
     ]);
   } catch (err) {
     const failure = err as Error & { stderr?: string };
     if (NO_SERVER_STDERR.test(failure.stderr ?? "")) return;
     console.warn(
-      `[tmux] could not grant xterm-256color the hyperlinks terminal-feature — Cmd+Click on real Claude Code OSC-8 links may not work: ${failure.message}`,
+      `[tmux] could not cancel smcup/rmcup for tmux-256color clients: mobile terminal scrollback stays pinned to the visible screen: ${failure.message}`,
     );
   }
+}
+
+/**
+ * `~/.dispatch/pty-shim.py`, derived locally following terminal-telemetry.ts's precedent: the
+ * adapters layer may not import `services/infra/paths.ts`, so this and paths.ts's
+ * `PTY_SHIM_PATH` (the writer side, used by bootstrap) derive the same location independently.
+ */
+const PTY_SHIM_PATH = path.join(os.homedir(), ".dispatch", "pty-shim.py");
+
+/**
+ * Wraps the pane command in the ?2026-stripping pty shim boot installed under `~/.dispatch`.
+ *
+ * @remarks TERM-05: Claude Code wraps every classic-renderer frame in synchronized-output
+ * markers (DECSET 2026) because tmux answers its DECRQM probe with "supported". tmux then
+ * repaints the pane per frame instead of scrolling, so an attached web client never accumulates
+ * local scrollback. Stripping the markers restores linefeed scrolling, which is what makes
+ * zero-round-trip touch scrolling possible on the phone. File absence means boot's python3
+ * probe failed (see pty-shim-setup.ts) and the spawn degrades to unwrapped.
+ */
+function wrapWithPtyShim(commandArgv: string[]): string[] {
+  if (!existsSync(PTY_SHIM_PATH)) return commandArgv;
+  return [PTY_SHIM_PATH, ...commandArgv];
 }
 
 /**
@@ -146,14 +238,53 @@ export async function panePidsBySession(): Promise<Map<
 }
 
 /**
+ * Forces Claude Code's classic main-screen renderer, with mouse tracking off, in every Dispatch pane.
+ *
+ * @remarks TERM-05: the fullscreen renderer (`tui: "fullscreen"`, the default for installs first
+ * launched on 2.1.239+) owns the alt screen with mouse tracking on, so a phone flick becomes one
+ * round-trip mouse report per row and tmux history stays at 0. The classic renderer writes the
+ * transcript to the normal buffer, where xterm.js scrolls it locally with zero round trips.
+ * @remarks Mouse tracking is disabled outright, not left to the renderer choice: tmux forwards the
+ * active pane's mouse mode to every attached client even with tmux `mouse off`, and once xterm.js
+ * is in that mode a drag is handed to Claude Code instead of making a native selection, so
+ * copy in the web terminal silently stops working (LOCAL-3).
+ */
+const CLAUDE_PANE_ENV = {
+  CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN: "1",
+  CLAUDE_CODE_DISABLE_MOUSE: "1",
+} as const;
+
+/**
+ * Lines of pane history every Dispatch pane is given, matching the scrollback seed budget the
+ * endpoint and the web client's xterm buffer are both sized to.
+ *
+ * @remarks TERM-05: tmux's default is 2,000, and it allocates a pane's history buffer AT PANE
+ * CREATION, so this has to be set before `new-session` builds the window, not after it like the
+ * two `ensure*` grants. It rides in the SAME tmux invocation as `new-session` (`set ... ; ...`, a
+ * tmux command sequence) because that is the only form that works from cold: `set -g` needs a live
+ * server, and tmux's `exit-empty on` kills a sessionless one, so a separate pre-call would fail on
+ * exactly the boot where it matters. Honest shared-server consequence: `history-limit` is a
+ * server-global option, so every pane created on this tmux server afterwards, including the
+ * user's own, gets the same 10,000-line buffer (more memory per pane) until the server exits.
+ */
+const HISTORY_LIMIT = "10000";
+
+/**
  * Create a detached session running `commandArgv` in `cwd`:
- *   `tmux new-session -d -s <name> -c <cwd> -x 200 -y 50 [-e KEY=VALUE ...] <...commandArgv>`
+ *   `tmux set -g history-limit <n> ';' new-session -d -s <name> -c <cwd> -x 200 -y 50
+ *   [-e KEY=VALUE ...] <...commandArgv>`
+ * The leading `set` is a tmux command sequence, not a second process, and it MUST precede
+ * `new-session` in the same invocation (see {@link HISTORY_LIMIT}).
  * The explicit -x/-y geometry is required for sane capture-pane output BEFORE any client
  * attaches (probe-verified — without it the pane has a tiny default size and readiness
  * detection is unreliable). Trailing args become the window command. Optional `env` entries
  * become `-e KEY=VALUE` pairs (tmux ≥3.2, probe-verified on 3.6a) placed after the geometry
  * and before the command, so per-session values reach the spawned process without ever
- * appearing in its argv. Ends by re-running the idempotent hyperlinks grant: session creation is
+ * appearing in its argv. The session then gets `mouse off` pinned at session scope: a later
+ * `set -g mouse on` from anyone else on the shared server would otherwise make tmux capture the
+ * mouse for this pane, turning every drag in the web terminal into a tmux copy-mode selection
+ * (the yellow `mode-style` highlight) whose text only reaches a tmux buffer, never the clipboard.
+ * Ends by re-running the idempotent hyperlinks grant: session creation is
  * the one moment a live tmux server is guaranteed, which closes the cold-boot and
  * server-restart gaps the boot-time call alone cannot cover (see
  * {@link ensureHyperlinksTerminalFeature}).
@@ -166,11 +297,15 @@ export async function newSession(
   commandArgv: string[],
   env?: Record<string, string>,
 ): Promise<void> {
-  const envArgs = Object.entries(env ?? {}).flatMap(([key, value]) => [
-    "-e",
-    `${key}=${value}`,
-  ]);
+  const envArgs = Object.entries({ ...CLAUDE_PANE_ENV, ...env }).flatMap(
+    ([key, value]) => ["-e", `${key}=${value}`],
+  );
   await run("tmux", [
+    "set",
+    "-g",
+    "history-limit",
+    HISTORY_LIMIT,
+    ";",
     "new-session",
     "-d",
     "-s",
@@ -182,9 +317,11 @@ export async function newSession(
     "-y",
     "50",
     ...envArgs,
-    ...commandArgv,
+    ...wrapWithPtyShim(commandArgv),
   ]);
+  await run("tmux", ["set", "-t", name, "mouse", "off"]);
   await ensureHyperlinksTerminalFeature();
+  await ensureNoAltScreenOverride();
 }
 
 /**
@@ -205,6 +342,40 @@ export async function capturePane(
   if (opts.join) args.push("-J");
   args.push("-t", name);
   const { stdout } = await run("tmux", args);
+  return stdout;
+}
+
+/**
+ * stdout ceiling for one scrollback capture, following `ttyd.ts`'s `PS_MAX_BUFFER` precedent.
+ *
+ * @remarks `run()` is `promisify(execFile)`, whose default 1 MiB ceiling REJECTS the whole call
+ * rather than truncating, so an over-budget capture answers the seed endpoint 502 and the client
+ * silently gets nothing. A colour-preserving (`-e`) capture of a 10,000-line, 200-column pane
+ * exceeds 1 MiB routinely (about 105 bytes/line is all 1 MiB buys), so the ceiling is sized to the
+ * documented budget instead of the Node default.
+ */
+const SCROLLBACK_MAX_BUFFER = 32 * 1024 * 1024;
+
+/**
+ * Capture the pane's HISTORY, the rows above the visible screen, as colour-preserving ANSI text
+ * (`capture-pane -p -e -S -<limit> -E -1`).
+ *
+ * @remarks TERM-05: the attach-time scrollback seed. `-E -1` deliberately excludes the visible
+ * rows because tmux's attach redraw paints those; including them would duplicate one screenful at
+ * the seam between seeded history and the live stream. The `timeout` is not optional hardening:
+ * the web client awaits this response BEFORE it opens its WebSocket, so a tmux server that accepts
+ * the connection and never answers would leave the terminal permanently unconnected with no
+ * reconnect path (`panePidsBySession`'s own 5s bound exists for the same tmux state).
+ */
+export async function captureHistory(
+  name: string,
+  limit: number,
+): Promise<string> {
+  const { stdout } = await run(
+    "tmux",
+    ["capture-pane", "-p", "-e", "-t", name, "-S", `-${limit}`, "-E", "-1"],
+    { timeout: 5000, maxBuffer: SCROLLBACK_MAX_BUFFER },
+  );
   return stdout;
 }
 
@@ -290,13 +461,16 @@ export async function sendKeys(target: string, keys: string[]): Promise<void> {
 }
 
 /**
- * Kill session `name` (`kill-session -t <name>`). Swallows failure — the rollback/undo
- * path must be idempotent (killing an already-gone session is a no-op success for us).
+ * Kill session `name` (`kill-session -t <name>`), reporting whether tmux accepted it. Never
+ * throws: the rollback/undo path must be idempotent (killing an already-gone session is a no-op).
  * @remarks Tolerant swallow-to-default (NEW-10): idempotent no-op if the session is already gone.
  * @see docs/ARCHITECTURE.md#resilience-and-reconcile
  */
-export async function killSession(name: string): Promise<void> {
+export async function killSession(name: string): Promise<boolean> {
   try {
     await run("tmux", ["kill-session", "-t", name]);
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }

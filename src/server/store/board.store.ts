@@ -24,6 +24,7 @@ import {
   BOARD_DB_PATH,
   type BoardDb,
   type BoardMeta,
+  type PushSubscriptionRow,
   openBoardDb,
 } from "./board-db.js";
 import {
@@ -96,17 +97,14 @@ export function compareDoneOrder(a: Card, b: Card): number {
 /**
  * Strip a card's secrets before it leaves the process — the SINGLE sanctioned place a card loses
  * them. Every new read path (windowed `snapshot()`, and any future one) must call this rather than
- * duplicate the strip, so the redaction boundary can never drift. Four responsibilities:
+ * duplicate the strip, so the redaction boundary can never drift. Three responsibilities:
  * (1) remove the card's own secret field; (2) remove `sessions` outright — the full array is
- * server-side only and carries every session's own secret field; (3) resolve the ACTIVE
- * session by `card.activeSessionId` and, when one resolves, FIELD-PICK exactly the two
- * `ActiveSessionWire` keys (`id`, `ttydPort` — F-96-F narrowed this from six; the other four
- * duplicated the flat mirror below for zero reader benefit) onto `wireCard.activeSession` — never
- * spread the session object, so the secret is omitted by construction and a future field added to
- * `Session` cannot leak through this path; (4) at two or more sessions, FIELD-PICK the
- * `SessionSummary` keys per session onto
- * `wireCard.sessionSummaries`, sorted by `createdAt` ascending, following the identical
- * never-spread discipline as `activeSession` — this is the only place a non-active session's own
+ * server-side only and carries every session's own secret field (the active session's own
+ * `ttydPort`/`activeSessionId` already ride the wire unconditionally via the card's own flat
+ * mirror fields, so no separate active-session projection is needed here, Phase 102); (3) at two
+ * or more sessions, FIELD-PICK the `SessionSummary` keys per session onto
+ * `wireCard.sessionSummaries`, sorted by `createdAt` ascending, never spreading the session
+ * object — this is the only place a non-active session's own
  * `prs`/`previews`/`prsUnknown`/`previewsUnknown` become observable on the wire (`ARTIFACT-01`),
  * since `Card`'s own four fields stay a mirror of the active session only. Also resolves each
  * summary's `parentOrdinal` from `s.builtFrom` against the SAME sorted-by-`createdAt` array that
@@ -122,10 +120,6 @@ export function redactCard(card: Card): Card {
   const wireCard = { ...card };
   delete wireCard.hookToken;
   delete wireCard.sessions;
-  const active = card.sessions?.find((s) => s.id === card.activeSessionId);
-  wireCard.activeSession = active
-    ? { id: active.id, ttydPort: active.ttydPort }
-    : undefined;
   const hasMultipleSessions = (card.sessions?.length ?? 0) >= 2;
   wireCard.sessionCount = hasMultipleSessions
     ? card.sessions!.length
@@ -233,11 +227,11 @@ function assertSchemaOpenable(persistedSchemaVersion: number): void {
     `[store] ${BOARD_DB_PATH} was written by a NEWER version of dispatch than this one ` +
       `(board schema version ${persistedSchemaVersion}, this build understands ${SESSION_SCHEMA_VERSION}). ` +
       `Opening it with this build would let it write a shape it cannot read back, silently ` +
-      `desyncing your sessions, so it refused. Nothing was changed — board.db and every backup ` +
+      `desyncing your sessions, so it refused. Nothing was changed. board.db and every backup ` +
       `were left exactly as they were. Fix it by updating dispatch: run ` +
       `\`npx @theyashgupta/dispatch@latest\` (or restart the machine's dispatch service after ` +
       `updating) and start again. If you instead mean to stay on this older build, restore the ` +
-      `pre-upgrade copy at ${BOARD_DB_PATH}.pre-v3 over ${BOARD_DB_PATH} first — that file is ` +
+      `pre-upgrade copy at ${BOARD_DB_PATH}.pre-v3 over ${BOARD_DB_PATH} first. That file is ` +
       `your board as of before the newer version migrated it.`,
   );
 }
@@ -607,13 +601,13 @@ class BoardStore extends EventEmitter {
   ): string | undefined {
     if (promoteTarget && targetSessionId === undefined) {
       console.error(
-        `[store] card ${card.id} — promoteTarget requires an explicit targetSessionId, refusing to project`,
+        `[store] card ${card.id}: promoteTarget requires an explicit targetSessionId, refusing to project`,
       );
       return undefined;
     }
     if (mintSibling && targetSessionId !== undefined) {
       console.error(
-        `[store] card ${card.id} — mintSibling requires targetSessionId to be omitted, refusing to project`,
+        `[store] card ${card.id}: mintSibling requires targetSessionId to be omitted, refusing to project`,
       );
       return undefined;
     }
@@ -651,7 +645,7 @@ class BoardStore extends EventEmitter {
       card.workspacePath != null
     ) {
       console.error(
-        `[store] card ${card.id} — no session resolves for ${targetSessionId !== undefined ? `explicit target ${targetSessionId}` : "the active pointer, but flat session fields are set"} — refusing to project`,
+        `[store] card ${card.id}: no session resolves for ${targetSessionId !== undefined ? `explicit target ${targetSessionId}` : "the active pointer, but flat session fields are set"}, refusing to project`,
       );
       return undefined;
     }
@@ -887,7 +881,7 @@ class BoardStore extends EventEmitter {
         );
       } catch (err) {
         console.warn(
-          `[store] board.json at ${BOARD_PATH} was unreadable/unparseable — skipping import, starting from the database:`,
+          `[store] board.json at ${BOARD_PATH} was unreadable/unparseable, skipping import, starting from the database:`,
           (err as Error).message,
         );
       }
@@ -924,7 +918,7 @@ class BoardStore extends EventEmitter {
     if (repaired.length > 0) {
       console.warn(
         `[store] downgrade repair: ${repaired.length} card(s) had flat session fields that ` +
-          `disagreed with their active session record — an older dispatch build wrote this ` +
+          `disagreed with their active session record, an older dispatch build wrote this ` +
           `board. Reconciled the record to the flat value for: ${repaired.join("; ")}.`,
       );
     }
@@ -976,7 +970,7 @@ class BoardStore extends EventEmitter {
           card.startError = {
             step: "interrupted",
             stderr:
-              "The server restarted while this start was still provisioning. Any partially-created worktrees or session were left in place — Retry to reconcile and continue.",
+              "The server restarted while this start was still provisioning. Any partially-created worktrees or session were left in place. Retry to reconcile and continue.",
             variant: "generic",
           };
           card.provisioningStep = null;
@@ -1036,7 +1030,7 @@ class BoardStore extends EventEmitter {
    * SECURITY: this is the single outbound chokepoint — each kept card is redacted via
    * {@link redactCard}, so the per-session hook-auth secret never rides an SSE frame or a REST
    * response, from the card OR from any session copy (only the persisted board.json carries it).
-   * `activeSession` is a field-picked projection, never a spread, so a future `Session` field
+   * `sessionSummaries` is a field-picked projection, never a spread, so a future `Session` field
    * cannot leak through it. Redact future secret-adjacent card fields there (hookRoutedAt was
    * considered and deliberately rides the wire — a non-secret timestamp).
    * @see docs/ARCHITECTURE.md#sse-transport
@@ -1192,6 +1186,32 @@ class BoardStore extends EventEmitter {
    */
   listEvents(cardId: string | null, limit: number): ActivityEvent[] {
     return this.db.listEvents(cardId, limit);
+  }
+
+  /**
+   * Upsert a push subscription row. A pure synchronous write delegated to the BoardDb surface
+   * (listEvents precedent) so the route never imports node:sqlite; not enqueued.
+   * @returns Whether the row was stored; `false` means the subscription cap refused a new
+   * endpoint.
+   */
+  addPushSubscription(sub: PushSubscriptionRow): boolean {
+    return this.db.addPushSubscription(sub);
+  }
+
+  /**
+   * Remove a push subscription row by endpoint. A pure synchronous write delegated to the BoardDb
+   * surface (listEvents precedent) so the route never imports node:sqlite; not enqueued.
+   */
+  removePushSubscription(endpoint: string): boolean {
+    return this.db.removePushSubscription(endpoint);
+  }
+
+  /**
+   * List all push subscription rows. A pure synchronous read delegated to the BoardDb surface
+   * (listEvents precedent) so the route never imports node:sqlite; not enqueued.
+   */
+  listPushSubscriptions(): PushSubscriptionRow[] {
+    return this.db.listPushSubscriptions();
   }
 
   /**
@@ -1729,7 +1749,7 @@ class BoardStore extends EventEmitter {
       const target = card.sessions?.find((sess) => sess.id === resolvedId);
       if (sessionId !== undefined && !target) {
         console.error(
-          `[store] card ${id} — attach target ${sessionId} does not resolve, refusing`,
+          `[store] card ${id}: attach target ${sessionId} does not resolve, refusing`,
         );
         return [];
       }
@@ -1748,7 +1768,7 @@ class BoardStore extends EventEmitter {
       if (card.activeSessionId === resolvedId) card.branch = s.branch;
       card.column = "in_progress";
       this.mirrorMemberColumn(card, "in_progress");
-      card.statusReason = "Already running — reattached";
+      card.statusReason = "Already running, reattached";
       card.provisioningStep = null;
       card.startError = null;
       card.sessionLost = false;
@@ -1793,14 +1813,23 @@ class BoardStore extends EventEmitter {
    * Reconcile a tracked ttyd exit: clear the port AND set the terminal error in ONE mutation.
    * Must stay atomic — two sequential mutations would broadcast an intermediate frame with
    * port-null/error-null, which the DetailPanel's ensure-on-open effect reads as "needs a
-   * terminal" and silently auto-respawns a deliberately killed ttyd. No-op if the id is unknown.
+   * terminal" and silently auto-respawns a deliberately killed ttyd. No-op if no session names
+   * `session`.
+   * @remarks (LOCAL-2) Keyed by the tmux session NAME and resolved across EVERY record each card
+   * owns, not the card-level active mirror: a non-active sibling's ttyd dying used to leave a
+   * stale `ttydPort` on that record with no `terminalError`, so switching back to it rendered a
+   * dead iframe the panel's ensure-on-open effect would never respawn (the stuck-terminal bug).
+   * `terminalError` is card-level UI state, so it is set only when the dead ttyd belonged to the
+   * ACTIVE session.
    */
-  recordTtydExit(id: string, e: TerminalError): Promise<void> {
+  recordTtydExit(session: string, e: TerminalError): Promise<void> {
     return this.enqueue(() => {
-      const card = this.cards.get(id);
-      if (card) {
-        this.setActiveSession(card, { ttydPort: undefined });
-        card.terminalError = e;
+      for (const card of this.cards.values()) {
+        const target = card.sessions?.find((s) => s.tmuxSession === session);
+        if (!target) continue;
+        this.setActiveSession(card, { ttydPort: undefined }, target.id);
+        if (target.id === card.activeSessionId) card.terminalError = e;
+        break;
       }
       return [];
     });
@@ -1930,7 +1959,7 @@ class BoardStore extends EventEmitter {
       const target = card.sessions?.find((s) => s.id === sessionId);
       if (!target) {
         console.error(
-          `[store] card ${cardId} — switch target ${sessionId} does not resolve, refusing`,
+          `[store] card ${cardId}: switch target ${sessionId} does not resolve, refusing`,
         );
         return [];
       }
@@ -1997,7 +2026,7 @@ class BoardStore extends EventEmitter {
         !card.sessions?.some((s) => s.id === card.activeSessionId)
       ) {
         console.error(
-          `[store] card ${cardId} — reserveNewSession requires an existing active session, refusing`,
+          `[store] card ${cardId}: reserveNewSession requires an existing active session, refusing`,
         );
         return [];
       }
@@ -2007,7 +2036,7 @@ class BoardStore extends EventEmitter {
           : undefined;
       if (inheritFrom != null && inheritedParent == null) {
         console.error(
-          `[store] card ${cardId} — reserveNewSession inheritFrom ${inheritFrom} does not resolve, refusing`,
+          `[store] card ${cardId}: reserveNewSession inheritFrom ${inheritFrom} does not resolve, refusing`,
         );
         return [];
       }
@@ -2064,7 +2093,7 @@ class BoardStore extends EventEmitter {
       const target = card.sessions?.find((s) => s.id === sessionId);
       if (!target) {
         console.error(
-          `[store] card ${cardId} — rollback target ${sessionId} does not resolve, refusing`,
+          `[store] card ${cardId}: rollback target ${sessionId} does not resolve, refusing`,
         );
         return [];
       }
@@ -2314,6 +2343,12 @@ class BoardStore extends EventEmitter {
    * `markSessionLost` cannot resolve it either, so it degrades to its documented undefined-target
    * default and derives the card-level loss flag — the pre-Phase-91 behaviour — rather than
    * clearing some unrelated sibling's fields.
+   * @remarks The synthetic record also carries the four ARTIFACT fields (`prs`, `prsUnknown`,
+   * `previews`, `previewsUnknown`) off the same flat mirror. `artifact-detect.ts` reads them off
+   * this record to decide whether a tick actually CHANGED anything, so omitting them made every
+   * diff miss: `prsUnknown` read as undefined and `prs` as `[]` on every tick, so a standing
+   * failure re-broadcast a full SSE board snapshot every 10s for this card class, the exact cost
+   * those write-skip diffs exist to avoid.
    * @returns Pairs whose `session.tmuxSession` is carried in the TYPE, so consumers narrow without
    * a runtime guard the iteration source has already made unreachable (`IN-01`).
    */
@@ -2338,7 +2373,7 @@ class BoardStore extends EventEmitter {
       if (!this.warnedOrphanFlatSessions.has(card.id)) {
         this.warnedOrphanFlatSessions.add(card.id);
         console.error(
-          `[store] card ${card.id} — flat tmuxSession is set but no session record carries it; scanning the flat mirror so the dead-session repair path still runs`,
+          `[store] card ${card.id}: flat tmuxSession is set but no session record carries it; scanning the flat mirror so the dead-session repair path still runs`,
         );
       }
       out.push({
@@ -2355,6 +2390,10 @@ class BoardStore extends EventEmitter {
           workspace: card.workspace,
           lastMarker: card.lastMarker,
           hookRoutedAt: card.hookRoutedAt,
+          prs: card.prs,
+          prsUnknown: card.prsUnknown,
+          previews: card.previews,
+          previewsUnknown: card.previewsUnknown,
         },
       });
     }
@@ -2405,7 +2444,7 @@ class BoardStore extends EventEmitter {
         if (!this.warnedOrphanDueCards.has(card.id)) {
           this.warnedOrphanDueCards.add(card.id);
           console.error(
-            `[store] card ${card.id} — due cleanupDueAt is set at the card level but no session record carries it; scanning the flat mirror so cleanup still runs`,
+            `[store] card ${card.id}: due cleanupDueAt is set at the card level but no session record carries it; scanning the flat mirror so cleanup still runs`,
           );
         }
         out.push({ card, sessionId: undefined, dueAt: card.cleanupDueAt });
@@ -2519,7 +2558,7 @@ class BoardStore extends EventEmitter {
       const target = card.sessions?.find((sess) => sess.id === resolvedId);
       if (sessionId !== undefined && !target) {
         console.error(
-          `[store] card ${id} — complete-start target ${sessionId} does not resolve, refusing`,
+          `[store] card ${id}: complete-start target ${sessionId} does not resolve, refusing`,
         );
         return [];
       }
@@ -2561,20 +2600,33 @@ class BoardStore extends EventEmitter {
    * session-setters which force `in_progress` and would yank an In Review card out of its column.
    * A column-preserving mutation performs no non-drag promotion, so it coexists safely with the
    * reconcile/watcher IN-03 hazard. No-op if the id is unknown. SECURITY: never logs card contents.
+   * @remarks `sessionId` (LOCAL-2) is the saga's captured target, resolved the way
+   * `markSessionLost` resolves its own: an omitted/stale id degrades to `card.activeSessionId`.
+   * Without it, an active-pointer switch during the resume would stamp the fresh tmux name onto
+   * whichever sibling happens to be active at completion time.
    * @see docs/ARCHITECTURE.md#in-review-lifecycle
    */
-  resumeSession(id: string, { session }: { session: string }): Promise<void> {
+  resumeSession(
+    id: string,
+    { session }: { session: string },
+    sessionId?: string,
+  ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card) return [];
-      this.setActiveSession(card, {
-        tmuxSession: session,
-        ttydPort: undefined,
-      });
+      const target = card.sessions?.find((s) => s.id === sessionId);
+      this.setActiveSession(
+        card,
+        {
+          tmuxSession: session,
+          ttydPort: undefined,
+        },
+        target ? sessionId : undefined,
+      );
       card.sessionLost = false;
       card.terminalError = null;
       card.resumeError = null;
-      card.statusReason = "Resumed — reattached";
+      card.statusReason = "Resumed, reattached";
       return [
         this.event("session_resume", {
           cardId: id,
@@ -2607,25 +2659,40 @@ class BoardStore extends EventEmitter {
    * panel's "Resuming…" state would be permanent. The copy is a constant, so no tmux/claude
    * stderr or pane text can leak (SECURITY, matches setStartError). `hookToken` is cleared AND
    * unregistered with the session fields (clearHookToken). No-op if the id is unknown.
+   * @remarks `sessionId` (LOCAL-2) is the saga's captured target, resolved like
+   * {@link resumeSession}'s own. `sessionLost` is DERIVED from every session the card owns
+   * (markSessionLost's rule) rather than asserted: a failed sub-session resume on a card with a
+   * live sibling must not flip the whole card to Lost, and the card-level artifact clears are
+   * gated on that same derived full loss.
    * @see docs/ARCHITECTURE.md#in-review-lifecycle
    */
-  recordResumeFailure(id: string): Promise<void> {
+  recordResumeFailure(id: string, sessionId?: string): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card) return [];
-      card.sessionLost = true;
-      this.setActiveSession(card, {
-        tmuxSession: undefined,
-        ttydPort: undefined,
-      });
-      card.terminalError = null;
-      card.prs = undefined;
-      card.prsUnknown = undefined;
-      card.previews = undefined;
-      card.previewsUnknown = undefined;
-      this.clearHookToken(card);
+      const target = card.sessions?.find((s) => s.id === sessionId);
+      const resolvedId = target ? sessionId : undefined;
+      this.setActiveSession(
+        card,
+        {
+          tmuxSession: undefined,
+          ttydPort: undefined,
+        },
+        resolvedId,
+      );
+      this.clearHookToken(card, resolvedId);
+      const sessions = card.sessions ?? [];
+      card.sessionLost =
+        sessions.length === 0 || sessions.every((s) => s.tmuxSession == null);
+      if (card.sessionLost) {
+        card.terminalError = null;
+        card.prs = undefined;
+        card.prsUnknown = undefined;
+        card.previews = undefined;
+        card.previewsUnknown = undefined;
+      }
       card.resumeError =
-        "Resume failed — the worktree may be gone. Use Restart to begin a fresh session in the same branch.";
+        "Resume failed. The worktree may be gone. Use Restart to begin a fresh session in the same branch.";
       return [this.event("resume_failed", { cardId: id })];
     });
   }
@@ -2666,7 +2733,7 @@ class BoardStore extends EventEmitter {
       const target = card.sessions?.find((s) => s.id === resolvedId);
       if (sessionId !== undefined && !target) {
         console.error(
-          `[store] card ${id} — record-cleanup-warning target ${sessionId} does not resolve, refusing`,
+          `[store] card ${id}: record-cleanup-warning target ${sessionId} does not resolve, refusing`,
         );
         return [];
       }
@@ -2736,7 +2803,7 @@ class BoardStore extends EventEmitter {
       const target = c.sessions?.find((s) => s.id === resolvedId);
       if (sessionId !== undefined && !target) {
         console.error(
-          `[store] card ${id} — finish-cleanup target ${sessionId} does not resolve, refusing`,
+          `[store] card ${id}: finish-cleanup target ${sessionId} does not resolve, refusing`,
         );
         return [];
       }
@@ -2829,6 +2896,154 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Scan for warned-but-retained session records past their retention window WITHOUT mutating or
+   * enqueueing anything, so {@link pruneStaleWarnedSessions} can learn whether it has any work
+   * before it takes the single-writer queue. {@link sessionsDueForCleanup} is the in-file
+   * precedent for the shape: a plain read over `this.cards`.
+   * @remarks The pre-scan is not an optimization, it is the difference between an idle timer and a
+   * permanent one. `enqueue` has no no-op path: every call runs `backupTick`, persists the FULL
+   * card set and emits `change`, which makes `sse.route.ts` build and write a whole board snapshot
+   * to every connected client. An unconditional enqueue on the one-minute cleanup tick would
+   * charge a board write and a full SSE fan-out per minute forever to a board with nothing
+   * prunable. `runDueCleanups` already behaves this way, enqueueing only when its own scan yields
+   * work.
+   * @remarks Card guards are the same three every other cleanup dispatcher takes: `done` only,
+   * never mid-{@link isStarting} (which covers start AND resume sagas), never
+   * mid-{@link isCleaningUp}. The last one matters most here. `cleanupWorkspace` does seconds of
+   * `git worktree` work between store calls, and a prune tick landing inside that window would
+   * splice out the very record the teardown is operating on, after which every terminal cleanup
+   * mutator ({@link finishCleanup}, {@link recordCleanupWarning}, {@link recordCleanupBlocked})
+   * takes its "target does not resolve, refusing" branch and the teardown's outcome is discarded.
+   * @remarks The caller re-runs this scan INSIDE the mutator rather than trusting the pre-scan's
+   * snapshot, matching how `runDueCleanups` re-validates against a fresh `store.getCard` before it
+   * dispatches.
+   */
+  private stalePrunableSessions(
+    now: number,
+  ): { card: Card; sessionId: string }[] {
+    const out: { card: Card; sessionId: string }[] = [];
+    for (const card of this.cards.values()) {
+      if (
+        card.column !== "done" ||
+        this.isStarting(card.id) ||
+        this.isCleaningUp(card.id)
+      ) {
+        continue;
+      }
+      for (const session of card.sessions ?? []) {
+        if (!session.cleanupWarning || session.tmuxSession != null) continue;
+        if (session.workspacePath != null || session.claudeSessionId != null) {
+          continue;
+        }
+        const updatedAtMs = Date.parse(session.updatedAt);
+        if (!Number.isFinite(updatedAtMs)) continue;
+        if (now - updatedAtMs < this.cleanupDelayMs) continue;
+        out.push({ card, sessionId: session.id });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Prune stale warned-but-retained session records (Phase 93 residual R3). A warned
+   * teardown ({@link recordCleanupWarning}) deliberately keeps its record so the user can act on
+   * the warning, but nothing removed it afterward, so every failed teardown was a permanent leak
+   * in `card.sessions` until this method.
+   *
+   * The rule: a session record is pruned when all four hold: `cleanupWarning` is set,
+   * `tmuxSession` is absent, `workspacePath` and `claudeSessionId` are BOTH absent, and
+   * `now - Date.parse(session.updatedAt) >= cleanupDelayMs`. Every removal returns a `cleanup`
+   * activity event, so this path is auditable in `GET /api/events` like every other cleanup
+   * branch.
+   * @remarks `cleanupWarning` set identifies the warned-but-retained class; `tmuxSession` absent
+   * excludes {@link noteCleanupWarning}'s preflight-refusal records, whose tmux session, ttyd and
+   * hookToken are deliberately still alive and usable; and the `cleanupDelayMs` window gives the
+   * warning at least as long to be seen as the successful cleanup it replaced would itself have
+   * waited before firing.
+   * @remarks The `workspacePath`/`claudeSessionId` clause is what keeps this from being silent
+   * amnesia. {@link finishCleanup} removes a record only after the teardown SUCCEEDED, so nothing
+   * on disk survives it; this method removes records precisely because their teardown FAILED,
+   * which is exactly when the worktree named by `workspacePath` may still exist
+   * (`cleanup.ts`'s "Cleanup incomplete - some worktrees may remain."). `claudeSessionId` is the
+   * whole `--resume` affordance {@link recordResumeFailure} deliberately keeps, and neither
+   * {@link moveCardManual} nor `recordResumeFailure` clears `cleanupWarning`, so a card warned,
+   * dragged out of Done, failed to resume and dragged back would otherwise have its only recovery
+   * handle deleted a week later. What remains prunable is the population the residual was actually
+   * about: legacy-workspace and folder-already-removed warnings whose only remaining state IS the
+   * warning.
+   * @remarks Fails closed on a bad timestamp: an absent `updatedAt`, or one `Date.parse` cannot
+   * resolve to a finite number, is never pruned. `NaN` comparisons are false in JavaScript, which
+   * happens to give the right answer here, but the finite check is written explicitly so the
+   * safety is stated rather than incidental.
+   * @remarks Selection lives in {@link stalePrunableSessions}, which is run TWICE: once before the
+   * `enqueue` so an idle tick costs no board write and no SSE frame, and once inside the mutator
+   * so the removal acts on freshly resolved state rather than the pre-scan's snapshot. The removal
+   * repeats {@link finishCleanup}'s FULL removal order for every
+   * qualifying record, not merely its `card.*` mirror block: the flat projection is cleared
+   * through {@link setActiveSession} and the token through {@link clearHookToken} BEFORE the
+   * record goes, which is the precondition {@link removeSessionRecord}'s own contract names.
+   * Omitting it drives the pointer repair into `setActiveSession`'s refusing-to-project branch and
+   * leaves the card holding an empty `sessions` array beside a live `workspacePath`, the exact
+   * shape that projection chokepoint calls corrupt: `isAwaitingCleanup` then pins the card
+   * forever, manual recovery re-enters the same refusal, and the next boot's
+   * {@link repairDowngradeDrift} mints an anonymous phantom record from the orphaned flat fields.
+   * `wasActive` is captured BEFORE {@link removeSessionRecord} runs and the matching `card.*`
+   * mirrors are cleared only under that guard.
+   * @remarks The three cleanup mirrors are RE-DERIVED from whatever record is active after the
+   * removal, not merely cleared. {@link setActiveSession} mirrors the six projection fields only,
+   * so a bare clear would leave a card advertising "no warning, no block, no countdown" while its
+   * newly promoted session carries all three, and `CardView` renders every one of them off the
+   * card level. The same gap exists in {@link finishCleanup}, but this is the first path that
+   * reaches it on a timer with no user action, which turns a rare consequence of an explicit
+   * teardown into a background drift source.
+   */
+  pruneStaleWarnedSessions(now: number): Promise<void> {
+    if (this.stalePrunableSessions(now).length === 0) return Promise.resolve();
+    return this.enqueue(() => {
+      const events: Omit<ActivityEvent, "id">[] = [];
+      for (const { card, sessionId } of this.stalePrunableSessions(now)) {
+        const wasActive = sessionId === card.activeSessionId;
+        this.setActiveSession(
+          card,
+          {
+            tmuxSession: undefined,
+            ttydPort: undefined,
+            workspacePath: undefined,
+            workspace: undefined,
+            claudeSessionId: undefined,
+          },
+          sessionId,
+        );
+        this.clearHookToken(card, sessionId);
+        if (wasActive) {
+          card.sessionLost = false;
+          card.terminalError = null;
+          card.prs = undefined;
+          card.prsUnknown = undefined;
+          card.previews = undefined;
+          card.previewsUnknown = undefined;
+        }
+        this.removeSessionRecord(card, sessionId);
+        const promoted = card.sessions?.find(
+          (s) => s.id === card.activeSessionId,
+        );
+        card.cleanupWarning = promoted?.cleanupWarning;
+        card.cleanupBlocked = promoted?.cleanupBlocked;
+        card.cleanupDueAt = promoted?.cleanupDueAt;
+        events.push(
+          this.event("cleanup", {
+            cardId: card.id,
+            fromCol: "done",
+            toCol: "done",
+            reason: "Stale cleanup warning pruned after the retention window.",
+          }),
+        );
+      }
+      return events;
+    });
+  }
+
+  /**
    * Record a non-forced Done-cleanup refusal (PRE-01): a dirty-worktree preflight blocked teardown,
    * so set the per-repo `cleanupBlocked` list and touch NOTHING else. Unlike recordCleanupWarning
    * (which runs only AFTER teardown and clears the session fields), this fires BEFORE any
@@ -2858,7 +3073,7 @@ class BoardStore extends EventEmitter {
       const target = card.sessions?.find((s) => s.id === resolvedId);
       if (sessionId !== undefined && !target) {
         console.error(
-          `[store] card ${id} — cleanup-blocked target ${sessionId} does not resolve, refusing`,
+          `[store] card ${id}: cleanup-blocked target ${sessionId} does not resolve, refusing`,
         );
         return [];
       }
@@ -2887,7 +3102,7 @@ class BoardStore extends EventEmitter {
       const target = card.sessions?.find((s) => s.id === resolvedId);
       if (sessionId !== undefined && !target) {
         console.error(
-          `[store] card ${id} — clear-cleanup-blocked target ${sessionId} does not resolve, refusing`,
+          `[store] card ${id}: clear-cleanup-blocked target ${sessionId} does not resolve, refusing`,
         );
         return [];
       }
@@ -2911,7 +3126,7 @@ class BoardStore extends EventEmitter {
       const target = card.sessions?.find((s) => s.id === resolvedId);
       if (sessionId !== undefined && !target) {
         console.error(
-          `[store] card ${id} — clear-cleanup-due target ${sessionId} does not resolve, refusing`,
+          `[store] card ${id}: clear-cleanup-due target ${sessionId} does not resolve, refusing`,
         );
         return [];
       }
@@ -2947,7 +3162,7 @@ class BoardStore extends EventEmitter {
       const target = card.sessions?.find((s) => s.id === resolvedId);
       if (sessionId !== undefined && !target) {
         console.error(
-          `[store] card ${id} — restore-cleanup-due target ${sessionId} does not resolve, refusing`,
+          `[store] card ${id}: restore-cleanup-due target ${sessionId} does not resolve, refusing`,
         );
         return [];
       }
@@ -2978,7 +3193,7 @@ class BoardStore extends EventEmitter {
       const target = card.sessions?.find((s) => s.id === resolvedId);
       if (sessionId !== undefined && !target) {
         console.error(
-          `[store] card ${id} — note-cleanup-warning target ${sessionId} does not resolve, refusing`,
+          `[store] card ${id}: note-cleanup-warning target ${sessionId} does not resolve, refusing`,
         );
         return [];
       }
@@ -3161,9 +3376,9 @@ class BoardStore extends EventEmitter {
       );
       if (unsafe) {
         console.warn(
-          `[store] sync dedup refused adoption for ${id} — duplicate ${unsafe.id} is active or has a session`,
+          `[store] sync dedup refused adoption for ${id}, duplicate ${unsafe.id} is active or has a session`,
         );
-        card.syncError = `Synced to Linear as ${adopted.identifier}, but another card for that issue is already active on the board — resolve the duplicate manually, then retry.`;
+        card.syncError = `Synced to Linear as ${adopted.identifier}, but another card for that issue is already active on the board. Resolve the duplicate manually, then retry.`;
         card.syncing = undefined;
         return [];
       }
@@ -3244,7 +3459,7 @@ class BoardStore extends EventEmitter {
         const existing = this.cards.get(card.id);
         if (existing && (existing.source ?? "linear") !== src) {
           console.warn(
-            `[store] skipped upsert of ${card.id} from source ${src} — id already owned by source ${existing.source ?? "linear"}.`,
+            `[store] skipped upsert of ${card.id} from source ${src}, id already owned by source ${existing.source ?? "linear"}.`,
           );
           continue;
         }
@@ -3260,7 +3475,7 @@ class BoardStore extends EventEmitter {
       }
       if (opts.partial) {
         this.syncWarning =
-          "Linear pull was truncated (pagination cap) — removals skipped this cycle.";
+          "Linear pull was truncated (pagination cap), removals skipped this cycle.";
       } else {
         for (const id of r.removeIds) this.cards.delete(id);
         for (const id of r.goneIds) {

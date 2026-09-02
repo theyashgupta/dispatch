@@ -1,3 +1,4 @@
+import path from "node:path";
 import { DEFAULT_CLAUDE_ARGS } from "../../../shared/types.js";
 import { store } from "../../store/board.store.js";
 import { hasSession, killSession, newSession } from "../../adapters/tmux.js";
@@ -53,17 +54,29 @@ import { ensureTerminal } from "./terminal.js";
  * `card.hookToken` in place: reading it after the mint would hand `registerHookToken` the token it
  * is about to register, degenerating re-mint hygiene into `delete(token)` then `set(token)` and
  * leaving the genuinely stale credential resolving forever.
+ * @remarks (LOCAL-2) Resume targets the ACTIVE session record, whatever its ordinal: the tmux
+ * name derives from that record's own `branch` (fallback: the workspacePath basename, identical
+ * for every generation of card), NEVER from `card.identifier`, which is only session 1's name and
+ * would cross-wire a sub-session's resume onto the primary's tmux. The failure-path kill targets
+ * the SAME derived name, and every store write carries the session id captured at saga entry, so
+ * a mid-resume active-pointer switch can neither kill a live sibling nor stamp the resumed tmux
+ * onto the wrong record.
  * @see docs/ARCHITECTURE.md#in-review-lifecycle
  */
 export async function resumeSession(cardId: string): Promise<void> {
   if (store.isStarting(cardId)) return;
   store.beginStart(cardId);
+  let killTarget: string | null = null;
+  let sessionId: string | undefined;
   try {
     const card = store.getCard(cardId);
     if (!card?.workspacePath || !card.activeSessionId) return;
-    const sessionId = card.activeSessionId;
+    sessionId = card.activeSessionId;
     await store.clearResumeError(cardId);
-    const session = "dsp-" + card.identifier;
+    const active = card.sessions?.find((s) => s.id === sessionId);
+    const session =
+      "dsp-" + (active?.branch ?? path.basename(card.workspacePath));
+    killTarget = session;
     const resumeArgs = card.claudeSessionId
       ? ["--resume", card.claudeSessionId]
       : ["--continue"];
@@ -72,7 +85,7 @@ export async function resumeSession(cardId: string): Promise<void> {
       if (card.hookToken && card.activeSessionId) {
         registerHookToken(card.hookToken, cardId, card.activeSessionId);
       }
-      await store.resumeSession(cardId, { session });
+      await store.resumeSession(cardId, { session }, sessionId);
       setTimeout(
         () => void store.setStatusReason(cardId, null),
         REATTACH_STATUS_CLEAR_MS,
@@ -91,7 +104,11 @@ export async function resumeSession(cardId: string): Promise<void> {
     if (runtime?.capable && runtime.statusChannel !== "pane") {
       const previousToken = card.hookToken;
       const token = newHookTokenValue();
-      const mintedSessionId = await store.mintHookChannel(cardId, token);
+      const mintedSessionId = await store.mintHookChannel(
+        cardId,
+        token,
+        sessionId,
+      );
       if (mintedSessionId !== undefined) {
         registerHookToken(token, cardId, mintedSessionId, previousToken);
         await newSession(
@@ -122,16 +139,15 @@ export async function resumeSession(cardId: string): Promise<void> {
       ]);
     }
     await awaitReplReady(session);
-    await store.resumeSession(cardId, { session });
+    await store.resumeSession(cardId, { session }, sessionId);
     setTimeout(
       () => void store.setStatusReason(cardId, null),
       REATTACH_STATUS_CLEAR_MS,
     );
     await ensureTerminal(cardId, sessionId, session);
   } catch (err) {
-    const card = store.getCard(cardId);
-    if (card) await killSession(`=dsp-${card.identifier}`);
-    await store.recordResumeFailure(cardId);
+    if (killTarget != null) await killSession(`=${killTarget}`);
+    await store.recordResumeFailure(cardId, sessionId);
     const step = err instanceof StartStepError ? err.step : "unknown step";
     console.error(`[resume] failed for card ${cardId} (${step})`);
   } finally {

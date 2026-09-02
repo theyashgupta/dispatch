@@ -29,7 +29,7 @@ export function SessionLostSection({
   let helper: string;
   if (canResume) {
     helper =
-      "The tmux session ended (likely after a reboot). Resume continues the same Claude conversation in the same worktree — no kickoff prompt is re-sent.";
+      "The tmux session ended (likely after a reboot). Resume continues the same Claude conversation in the same worktree. No kickoff prompt is re-sent.";
   } else {
     helper =
       "The workspace is no longer available. Restart begins a fresh session in the same branch.";

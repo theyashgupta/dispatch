@@ -1,17 +1,22 @@
 import { HelpCircle } from "lucide-react";
 import type { ProbeFailureCategory } from "../../../shared/types.js";
 import { unknownProbeCopy } from "../badges/index.js";
+import { formatAge, nowMs } from "../../lib/format-age.js";
 
 export function UnknownProbeRow({
   signal,
   category,
   partial,
+  checkedAt,
 }: {
   signal: "pr" | "preview";
   category: ProbeFailureCategory;
   partial?: boolean;
+  checkedAt?: string;
 }) {
   const { label, detail } = unknownProbeCopy(signal, category, partial);
+  const age = checkedAt != null ? formatAge(checkedAt, nowMs()) : "";
+  const fullDetail = age !== "" ? `${detail}, Last checked ${age}` : detail;
   return (
     <div
       style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}
@@ -51,7 +56,7 @@ export function UnknownProbeRow({
             color: "var(--text-muted)",
           }}
         >
-          {detail}
+          {fullDetail}
         </span>
       </div>
     </div>

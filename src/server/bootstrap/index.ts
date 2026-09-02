@@ -14,17 +14,24 @@ import {
 import { sweepStrayTunnels } from "../adapters/cloudflared.js";
 import { disableTunnel } from "../services/orchestration/tunnel.js";
 import { terminalProxyRouter } from "../routes/terminal-proxy.route.js";
+import { viewerPageRouter } from "../routes/viewer-page.route.js";
 import {
   rejectUpgrade,
   terminalProxyUpgrade,
 } from "../adapters/terminal-proxy.js";
 import { probePreflight } from "../services/infra/preflight.js";
+import { loadOrCreateVapidKeys } from "../services/infra/push-keys.js";
+import { VAPID_KEYS_PATH } from "../services/infra/paths.js";
 import {
   setHooksRuntime,
   setOrchestrationConfig,
 } from "../services/infra/config-holder.js";
 import { checkHooksCapability, installHookArtifacts } from "./hook-setup.js";
-import { ensureHyperlinksTerminalFeature } from "../adapters/tmux.js";
+import { installPtyShim } from "./pty-shim-setup.js";
+import {
+  ensureHyperlinksTerminalFeature,
+  ensureNoAltScreenOverride,
+} from "../adapters/tmux.js";
 import { unregisterHookToken } from "../services/domain/hook-tokens.js";
 import {
   reapActivityThrottle,
@@ -32,13 +39,19 @@ import {
 } from "../services/domain/hook-events.js";
 import { seedPlaybooks } from "../services/domain/playbooks.js";
 import { startPoller } from "../adapters/poller.js";
+import { sendPushForCard } from "../services/domain/push-send.js";
 import { startArtifactDetectionLoop } from "../adapters/artifact-detect.js";
 import { buildRegistry, getLinearSource } from "../sources/registry.js";
 import { startMarkerWatcher } from "../adapters/markers/watcher.js";
 import { reconcileSessions } from "./reconcile.js";
 import { resolveEditors } from "../adapters/editors.js";
-import { startUpdateCheckLoop } from "../services/orchestration/update.js";
+import {
+  isPackagedInstall,
+  startUpdateCheckLoop,
+} from "../services/orchestration/update.js";
 import { startCleanupScheduler } from "../services/orchestration/cleanup-scheduler.js";
+import { healServicePlist } from "../services/orchestration/service.js";
+import type { ActivityEvent } from "../../shared/types.js";
 import { DEFAULT_CLEANUP_DELAY_DAYS } from "../../shared/types.js";
 
 const DEFAULT_PORT = 4700;
@@ -50,6 +63,17 @@ const DEFAULT_POLL_INTERVAL_MS = 60_000;
  * in dev — the sibling `../../web` shape is identical in both layouts and independent of cwd.
  */
 const webRoot = fileURLToPath(new URL("../../web", import.meta.url));
+
+/**
+ * Basenames under `webRoot` exempted from the production static handler's default 1-year
+ * immutable cache.
+ *
+ * @remarks
+ * Everything else under `webRoot` is served with `maxAge: "1y", immutable: true`; an immutably
+ * cached service worker would never re-fetch, so a later `sw.js` fix would never reach an
+ * already-installed client.
+ */
+const NO_CACHE_BASENAMES = new Set(["index.html", "sw.js"]);
 
 /**
  * Serve the built SPA's index.html for client-routed deep links in production. Registered after
@@ -80,10 +104,16 @@ const spaFallback: express.RequestHandler = (req, res, next) => {
  * `DENY`/`'none'`) is deliberate: the app frames its OWN same-origin terminal at
  * `/sessions/<id>/terminal/`, so a same-origin allowance must survive while every third-party
  * origin is refused — the relevant threat once Phase 74 makes the app publicly reachable.
+ * `nosniff` rides along here rather than on one route: `/sessions/:id/terminal/scrollback` serves
+ * raw, pane-derived bytes as a document-loadable same-origin `text/plain` response, and that
+ * content is transitively attacker-influenced (anything the agent echoed). Modern browsers do not
+ * sniff `text/plain; charset=utf-8` into HTML, so this is hardening rather than a live hole, but a
+ * global header costs one line and covers every future byte-serving route too.
  */
 const frameGuardHeaders: express.RequestHandler = (_req, res, next) => {
   res.setHeader("X-Frame-Options", "SAMEORIGIN");
   res.setHeader("Content-Security-Policy", "frame-ancestors 'self'");
+  res.setHeader("X-Content-Type-Options", "nosniff");
   next();
 };
 
@@ -115,6 +145,32 @@ const jsonBodyErrorHandler: express.ErrorRequestHandler = (
           ? shaped.statusCode
           : 400;
     res.status(status).json({ error: "invalid request body" });
+    return;
+  }
+  next(err);
+};
+
+/**
+ * Scoped parse-error handler for the `/api` mount, placed between `express.json` and `apiRouter`
+ * so it catches a bad body before any route handler runs. Express 5's default handler renders
+ * V8's `JSON.parse` error message, and for a body that is valid UTF-8 but not JSON at all, that
+ * message quotes the submitted bytes back, so a client that POSTs a bare secret to any `/api`
+ * route would have it reflected in the 400 body and in the server's stderr (T-103-03). Scoped to
+ * the whole `/api` mount deliberately: every `/api` route shares the one `express.json` parser, so
+ * a vault-only handler would leave the identical leak on `/api/cards` and every other route.
+ */
+const apiJsonParseErrorHandler: express.ErrorRequestHandler = (
+  err,
+  _req,
+  res,
+  next,
+) => {
+  const shaped = err as { type?: unknown } | undefined;
+  if (
+    shaped?.type === "entity.parse.failed" ||
+    shaped?.type === "entity.too.large"
+  ) {
+    res.status(400).json({ error: "malformed-body" });
     return;
   }
   next(err);
@@ -159,7 +215,7 @@ function handleUpgrade(
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
 function shutdown(signal: NodeJS.Signals): void {
-  console.log(`[shutdown] ${signal} received — tearing down remote access`);
+  console.log(`[shutdown] ${signal} received, tearing down remote access`);
   disableTunnel();
   process.exit(0);
 }
@@ -209,14 +265,14 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
     );
   } else {
     console.warn(
-      `[preflight] Node ${preflight.node.version} is below the supported floor (${preflight.node.floor}) — continuing; upgrade Node if you hit issues`,
+      `[preflight] Node ${preflight.node.version} is below the supported floor (${preflight.node.floor}), continuing; upgrade Node if you hit issues`,
     );
   }
   if (preflight.storage.ok) {
-    console.log(`[preflight] storage OK — ${preflight.storage.path}`);
+    console.log(`[preflight] storage OK: ${preflight.storage.path}`);
   } else {
     console.warn(
-      `[preflight] storage check FAILED — ${preflight.storage.path} did not open cleanly (continuing; the store recovers on load)`,
+      `[preflight] storage check FAILED: ${preflight.storage.path} did not open cleanly (continuing; the store recovers on load)`,
     );
   }
   const missing = preflight.binaries.filter((p) => !p.present);
@@ -233,15 +289,18 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   const config = loadConfig();
   setOrchestrationConfig(config);
   buildRegistry(config);
+  loadOrCreateVapidKeys();
+  console.log(`[push] VAPID keypair loaded from ${VAPID_KEYS_PATH}`);
 
   const statusChannel = config.statusChannel ?? "auto";
   await installHookArtifacts();
+  await installPtyShim();
   const { capable, version } = await checkHooksCapability();
   if (statusChannel === "hooks" && !capable) {
     console.warn(
       `[hooks] statusChannel is "hooks" but ${
         version ? `claude ${version}` : "the claude CLI"
-      } lacks hook support — status routing is disabled: sessions launch ` +
+      } lacks hook support. Status routing is disabled: sessions launch ` +
         "without hooks and the watcher never scans, so no card will move " +
         "or flip this run",
     );
@@ -261,7 +320,15 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
     config.cleanupDelayDays ?? DEFAULT_CLEANUP_DELAY_DAYS,
   );
   await ensureHyperlinksTerminalFeature();
+  await ensureNoAltScreenOverride();
   await reconcileSessions();
+  if (isPackagedInstall()) {
+    await healServicePlist({ repointNode: false }).catch((err: unknown) => {
+      console.warn(
+        `[service] boot plist self-heal rejected unexpectedly: ${(err as Error).message}`,
+      );
+    });
+  }
   startCleanupScheduler();
   await sweepStrayTunnels().catch((err: unknown) => {
     console.warn(
@@ -275,8 +342,14 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   const app = express();
   app.use(frameGuardHeaders);
   app.use(remoteAuthRouter);
-  app.use("/api", express.json({ limit: "1mb" }), apiRouter);
+  app.use(
+    "/api",
+    express.json({ limit: "1mb" }),
+    apiJsonParseErrorHandler,
+    apiRouter,
+  );
   app.use("/sessions", terminalProxyRouter);
+  app.use("/viewer", viewerPageRouter);
 
   if (process.env.NODE_ENV === "production") {
     app.use(
@@ -285,7 +358,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
         maxAge: "1y",
         immutable: true,
         setHeaders: (res, filePath) => {
-          if (path.basename(filePath) === "index.html") {
+          if (NO_CACHE_BASENAMES.has(path.basename(filePath))) {
             res.setHeader("Cache-Control", "no-cache");
           }
         },
@@ -312,6 +385,18 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
     startPoller(config, getLinearSource());
   }
   startMarkerWatcher(statusChannel);
+  store.on("activity", (event: ActivityEvent) => {
+    if (event.type !== "status_needs_input" || event.cardId == null) return;
+    const card = store.getCard(event.cardId);
+    if (!card) return;
+    void sendPushForCard(card, event.reason ?? undefined).catch(
+      (err: unknown) => {
+        console.error(
+          `[push] fan-out rejected unexpectedly: ${(err as Error).message}`,
+        );
+      },
+    );
+  });
   startArtifactDetectionLoop(port);
   if (config.updateCheck !== false) startUpdateCheckLoop(config);
   return { port };

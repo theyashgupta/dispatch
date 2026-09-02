@@ -32,7 +32,7 @@ export function getLinearSource(): TicketSource {
   const linear = getSource("linear");
   if (!linear) {
     throw new Error(
-      "linear source not built — buildRegistry() must run at boot",
+      "linear source not built, buildRegistry() must run at boot",
     );
   }
   return linear;

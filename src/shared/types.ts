@@ -66,6 +66,37 @@ export interface PrInfo {
   state: "open" | "merged" | "closed";
   isDraft: boolean;
   ci: "pass" | "fail" | "pending" | null;
+  /**
+   * The workspace repo folder BASENAME this PR was found in, e.g. `"frontend"`: never GitHub's
+   * `nameWithOwner` and never the repo's absolute path. Stamped server-side from
+   * `workspace.repos[i].path`, the only path the server already holds for this card; a basename
+   * is passed rather than the path itself so no absolute path or org name reaches the wire
+   * (T-98-01). The single exception is a card whose own `workspace.repos` holds two folders with
+   * the SAME basename, where the colliding entries alone are qualified with their parent folder
+   * name (`"acme/api"`): without that, the two collapse into one identity and the repo tag is
+   * suppressed in precisely the case it exists to disambiguate. Still a folder name, never an org.
+   * REQUIRED, not optional: every `PrInfo` that reaches the wire names the repo it came from.
+   * NON-SECRET: rides `snapshot()` UNREDACTED like the rest of this interface.
+   */
+  repo: string;
+}
+
+/**
+ * Why a detected dev-server port was attributed to this card's workspace. `matchedCwd` is a
+ * BASENAME produced by `repoDisplayNames`, the same de-collision helper `PrInfo.repo` already
+ * uses, never an absolute path and never `session.workspace.folder` itself (T-99-01). `pid` and
+ * `bindAddress` are non-secret, a process id and a loopback bind token, and ride the
+ * wire like the rest of `PreviewInfo`. Carries no timestamp deliberately: the preview write path
+ * is fenced by a `JSON.stringify` write-skip diff, and a per-tick value would rebroadcast the
+ * whole board on a tick where nothing about this preview changed.
+ * @see docs/ARCHITECTURE.md#security-threat-model
+ */
+export interface PreviewEvidence {
+  pid: number;
+  source: "cwd" | "pane ancestry";
+  matchedCwd?: string;
+  bindAddress: string;
+  cwdMismatch?: boolean;
 }
 
 /**
@@ -76,6 +107,12 @@ export interface PrInfo {
 export interface PreviewInfo {
   port: number;
   url: string;
+  /**
+   * Attribution evidence for this port, optional only defensively, matching the `prs?`/
+   * `previews?` absent-means-nothing idiom used elsewhere on the wire, never because a live tick
+   * withholds it once a `PreviewInfo` is produced.
+   */
+  evidence?: PreviewEvidence;
 }
 
 /**
@@ -88,6 +125,7 @@ export type ProbeFailureCategory =
   | "repo path missing"
   | "gh not authenticated"
   | "gh repo not accessible"
+  | "gh rate limited"
   | "gh pr list failed"
   | "detection unavailable";
 
@@ -104,6 +142,15 @@ export type ProbeFailureCategory =
  */
 export interface ProbeUnknown {
   category: ProbeFailureCategory;
+  /**
+   * ISO timestamp of the most recent probe attempt for this signal, OPTIONAL. Both the PR and
+   * preview write paths stamp a minute-truncated time when a probe genuinely ran; a skip carries
+   * the prior value forward or omits it, so absence never means "just checked", only that no
+   * fresh probe wrote this record (a negative-cache skip, or a record predating this field).
+   * Required would force a call site to invent a timestamp for a signal it did not stamp, so
+   * optional is deliberate, not an oversight.
+   */
+  checkedAt?: string;
 }
 
 export interface Card {
@@ -255,22 +302,6 @@ export interface Card {
    */
   nextSessionOrdinal?: number;
   /**
-   * Wire-only projection of the session named by `activeSessionId`, populated exclusively by the
-   * store's `redactCard` chokepoint and absent from the persisted row. The full `sessions` array is
-   * deliberately not part of the wire shape.
-   * @remarks `TerminalRegion` renders the terminal `<iframe>` on `activeSession.ttydPort`, keyed by
-   * `activeSession.id`, so `DetailPanel`'s "a terminal already exists, do not spawn" gate reads
-   * `activeSession.ttydPort` too — the ONLY two fields either client reader ever touches (F-96-F,
-   * `96-11-SUMMARY.md`). `ActiveSessionWire` field-picks exactly those two; `tmuxSession`,
-   * `claudeSessionId`, `workspacePath` and `workspace` are NOT re-projected here because the six
-   * flat fields above already carry the identical values for the SAME active session (`KEEP-02`'s
-   * own wire-parity contract requires those flat fields present regardless), so nesting them a
-   * second time was pure duplicated payload weight, not a second source of truth — confirmed a real
-   * ~35% N=1 board-payload regression by `96-10`'s baseline re-run before this fix.
-   * @see docs/ARCHITECTURE.md#session-projection-chokepoint
-   */
-  activeSession?: ActiveSessionWire;
-  /**
    * How many session records this card owns. NON-SECRET: rides `snapshot()`/`redactCard`
    * UNREDACTED, same policy class as `hookRoutedAt`/`claudeSessionId`/`prs` (an integer count
    * carries no credential and no pane content). ABSENT (never `1`) when the card owns zero or one
@@ -279,8 +310,8 @@ export interface Card {
    * more otherwise. Counts every session record the card owns INCLUDING one whose session has been
    * marked lost — `markSessionLost` clears a record's fields in place and never deletes it (cleanup
    * is a later phase), so the multiplicity signal does not silently drop when a sibling dies.
-   * Populated exclusively inside `redactCard`, `activeSession`'s own chokepoint, so it has exactly
-   * one writer like every other session-projection field.
+   * Populated exclusively inside `redactCard`, the same chokepoint `sessionSummaries` uses, so it
+   * has exactly one writer like every other session-projection field.
    * @see docs/ARCHITECTURE.md#session-projection-chokepoint
    */
   sessionCount?: number;
@@ -555,30 +586,12 @@ export interface Session {
 }
 
 /**
- * Wire-only projection of the active `Session` record, built by the store's `redactCard`
- * chokepoint via a field pick (never a spread) so the secret field is omitted BY CONSTRUCTION — a
- * future field added to `Session` cannot silently reintroduce it through this type. Never the
- * persisted shape; the full record (with the secret) is what lives on disk.
- * @remarks Deliberately narrow: `id` and `ttydPort` are the only two fields any client reader
- * touches (`TerminalRegion`, `DetailPanel`'s spawn gate). `tmuxSession`/`claudeSessionId`/
- * `workspacePath`/`workspace` were dropped by F-96-F's fix — they duplicated the six flat fields
- * `Card` already carries for the same active session, adding ~35% to the N=1 board payload for
- * data no reader ever used. See `docs/ARCHITECTURE.md#session-projection-chokepoint`.
- */
-export interface ActiveSessionWire {
-  /** Mirrors `Session.id`. */
-  id: string;
-  /** Mirrors `Session.ttydPort`. */
-  ttydPort?: number;
-}
-
-/**
  * Wire-only per-session digest for the detail panel's session switcher, built by the store's
- * `redactCard` chokepoint via a field pick (never a spread) — the same discipline
- * {@link ActiveSessionWire} already establishes, so a future `Session` field cannot silently
- * widen this array to carry a secret. Deliberately carries no `active` flag: `Card.activeSessionId`
- * is already the one field naming the active session, and a second field claiming the same fact
- * could disagree under a race; the client compares `entry.id === card.activeSessionId` instead.
+ * `redactCard` chokepoint via a field pick (never a spread) so a future `Session` field cannot
+ * silently widen this array to carry a secret. Deliberately carries no `active` flag:
+ * `Card.activeSessionId` is already the one field naming the active session, and a second field
+ * claiming the same fact could disagree under a race; the client compares
+ * `entry.id === card.activeSessionId` instead.
  * @see docs/ARCHITECTURE.md#session-projection-chokepoint
  */
 export interface SessionSummary {
@@ -792,6 +805,14 @@ export interface Playbook {
 export interface InvalidPlaybook {
   name: string;
   reason: string;
+}
+
+export interface VaultKeySummary {
+  name: string;
+  purpose: string;
+  createdAt: string;
+  updatedAt: string;
+  filled: boolean;
 }
 
 /**

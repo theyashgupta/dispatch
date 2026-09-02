@@ -65,7 +65,7 @@ export function ImageWithFallback({ src, alt }: ImageWithFallbackProps) {
           style={placeholderIconStyle}
         />
         <span style={placeholderLabelStyle}>
-          {alt ? `Image unavailable — ${alt}` : "Image unavailable"}
+          {alt ? `Image unavailable: ${alt}` : "Image unavailable"}
         </span>
       </span>
     );

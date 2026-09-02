@@ -252,7 +252,7 @@ export function loadConfig(): Config {
     fs.chmodSync(CONFIG_PATH, 0o600);
     process.stderr.write(
       `No config found. Wrote a template to ${CONFIG_PATH}.\n` +
-        `Dispatch will boot into first-run setup — add your Linear API key in the browser.\n`,
+        `Dispatch will boot into first-run setup. Add your Linear API key in the browser.\n`,
     );
   }
 
@@ -310,7 +310,7 @@ export function loadConfig(): Config {
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code ?? "write failed";
       process.stderr.write(
-        `[config] could not rewrite ${CONFIG_PATH} to the nested shape (${code}) — continuing with the flat key.\n`,
+        `[config] could not rewrite ${CONFIG_PATH} to the nested shape (${code}), continuing with the flat key.\n`,
       );
     }
   }
@@ -319,7 +319,7 @@ export function loadConfig(): Config {
 
   if (parsed.repoPaths !== undefined || parsed.baseBranches !== undefined) {
     process.stderr.write(
-      "[config] repoPaths is no longer used — add a workspace folder from the start modal.\n",
+      "[config] repoPaths is no longer used. Add a workspace folder from the start modal.\n",
     );
   }
 

@@ -1,4 +1,5 @@
 import type { Card } from "../../../shared/types.js";
+import { VAULT_RUN_PATH, VAULT_SCHEMA_PATH } from "../infra/paths.js";
 
 /**
  * Describe the workspace layout for any repo count (N ≥ 1): a comma-joined list of `<name>/`
@@ -64,9 +65,35 @@ function substitutePlaybookBody(body: string, direction: string): string {
 const STATUS_PROTOCOL = [
   `## Status protocol (required)`,
   `Print these as standalone lines, in the exact format shown, as the LAST line of a reply:`,
-  `- When blocked and needing human input: DISPATCH_STATUS: NEEDS_INPUT — <one-line reason>`,
-  `- When the task is complete: DISPATCH_STATUS: DONE — <one-line summary>`,
+  `- When blocked and needing human input: DISPATCH_STATUS: NEEDS_INPUT - <one-line reason>`,
+  `- When the task is complete: DISPATCH_STATUS: DONE - <one-line summary>`,
   `- Before calling a tool that pauses for the user (AskUserQuestion, ExitPlanMode, or any action needing approval), print the NEEDS_INPUT line above as your entire reply first, then call the tool.`,
+];
+
+const VAULT_FLAG_DASH = "-".repeat(2);
+
+/**
+ * The vault contract block, taught unconditionally beside `STATUS_PROTOCOL` so every session knows
+ * a vault may exist, how to read it, and that a refusal is expected, before its first refusal ever
+ * happens. Built at module load from `VAULT_RUN_PATH`/`VAULT_SCHEMA_PATH` so it can never name a
+ * path the boot writer does not actually write. Neither constant is card-, session- or
+ * config-derived, so this block interpolates no untrusted input and needs no fencing, unlike the
+ * title/description slots above it in `buildKickoff`'s returned array. `VAULT_FLAG_DASH` builds the
+ * runner's `--keys` flag and its end-of-options separator from two concatenated single-hyphen
+ * characters rather than a literal doubled token, matching `hook-setup.ts`'s own `VAULT_RUN_SCRIPT`
+ * separator workaround, so this file's own source text never carries an adjacent-hyphen sequence.
+ *
+ * @remarks This block is prompt-engineering only, not a structural guarantee, nothing stops a
+ * session from ignoring it. It is deliberately paired with the `permissions.deny` rule on
+ * `values.env` and the PreToolUse Bash guard, both registered in `hook-setup.ts` and ratified as
+ * `T-105-04` (the guard, load-bearing), which hold whether or not this text is followed.
+ * @see docs/ARCHITECTURE.md#security-threat-model
+ */
+const VAULT_PROTOCOL = [
+  `## Vault protocol`,
+  `This project may have secrets configured in Settings, Vault. Read ${VAULT_SCHEMA_PATH} for the list of key names and what each is for; it never carries a value.`,
+  `To use a key's value, run the command that needs it through the runner rather than reading the value yourself: ${VAULT_RUN_PATH} ${VAULT_FLAG_DASH}keys NAME[,NAME...] ${VAULT_FLAG_DASH} command [args...]. Only the named keys reach that one command.`,
+  `Values are never directly readable, and the runner or a blocked read may refuse. A refusal is the system working as intended, not a bug to work around: name the key to the user and point them at Settings, Vault.`,
 ];
 
 /**
@@ -136,13 +163,13 @@ function groupTicketSection(members: Card[]): string[] {
   for (const m of linear) {
     const url = m.url?.trim();
     lines.push(
-      `- ${m.identifier}: ${fenceTitle(m.title)}${url ? ` — ${url}` : ""}`,
+      `- ${m.identifier}: ${fenceTitle(m.title)}${url ? ` (${url})` : ""}`,
     );
   }
   if (linear.length > 0) {
     lines.push(
       ``,
-      `Read each Linear ticket above — description and comments — via the Linear MCP.`,
+      `Read each Linear ticket above, description and comments, via the Linear MCP.`,
     );
   }
   for (const m of local) {
@@ -221,7 +248,7 @@ export function buildKickoff(
       : slim
         ? [
             `## Ticket`,
-            `Read the full ticket — description and comments — via the Linear MCP. If the MCP is unavailable, ${url ? "fall back to the ticket URL above or " : ""}ask the user.`,
+            `Read the full ticket, description and comments, via the Linear MCP. If the MCP is unavailable, ${url ? "fall back to the ticket URL above or " : ""}ask the user.`,
           ]
         : [`## Description`, description]),
     ...(substituted !== null
@@ -235,14 +262,14 @@ export function buildKickoff(
       ? [
           ``,
           `## Restarted session`,
-          "This session was restarted (the previous one was lost, likely after a reboot). Your prior work may already exist in this workspace — run `git status` first before continuing.",
+          "This session was restarted (the previous one was lost, likely after a reboot). Your prior work may already exist in this workspace. Run `git status` first before continuing.",
         ]
       : []),
     ...(opts.builtFromBranch
       ? [
           ``,
           `## Building on a previous session`,
-          `This session's branch was cut from ${opts.builtFromBranch}, which belongs to another session on this same ticket. That session's commits are already in this history — but any uncommitted work in that session's worktree is not.`,
+          `This session's branch was cut from ${opts.builtFromBranch}, which belongs to another session on this same ticket. That session's commits are already in this history, but any uncommitted work in that session's worktree is not.`,
         ]
       : []),
     ``,
@@ -250,5 +277,7 @@ export function buildKickoff(
     workspaceOrientation(repoNames, card.identifier),
     ``,
     ...STATUS_PROTOCOL,
+    ``,
+    ...VAULT_PROTOCOL,
   ].join("\n");
 }

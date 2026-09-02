@@ -56,7 +56,6 @@ export function CardTimeline({
   return (
     <div
       style={{
-        marginTop: "var(--space-lg)",
         paddingTop: "var(--space-lg)",
         borderTop: "1px solid var(--border)",
         display: "flex",
@@ -93,7 +92,9 @@ export function CardTimeline({
             aria-hidden
             style={{
               transform: expanded ? "none" : "rotate(180deg)",
-              transition: "transform 150ms ease-out",
+              transition: expanded
+                ? "transform var(--motion-panel-close) var(--easing-enter)"
+                : "transform var(--motion-panel-close) var(--easing-exit)",
             }}
           />
         </IconButton>

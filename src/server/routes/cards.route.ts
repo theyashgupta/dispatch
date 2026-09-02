@@ -74,9 +74,9 @@ function inboxTransitionError(card: Card, column: Column): string | null {
 function manualMoveTransitionError(card: Card, column: Column): string | null {
   if (isManualMoveAllowed(card.column, column)) return null;
   if (blocksAgentDoneManualEntry(column))
-    return "Agent Done is set automatically by a real agent completion signal — it is never a manual move target";
+    return "Agent Done is set automatically by a real agent completion signal. It is never a manual move target";
   if (blocksTodoToInProgressManualMove(card.column, column))
-    return "starting a To Do card requires the start flow — drag it to In Progress (or use Start) rather than posting a bare move";
+    return "starting a To Do card requires the start flow: drag it to In Progress (or use Start) rather than posting a bare move";
   return `moving ${card.column} → ${column} is not an allowed manual transition`;
 }
 
@@ -90,7 +90,7 @@ function manualMoveTransitionError(card: Card, column: Column): string | null {
  */
 function groupedMemberError(card: Card): string | null {
   if (card.groupId == null) return null;
-  return `card is grouped under ${card.groupId} — act on the group card`;
+  return `card is grouped under ${card.groupId}, act on the group card`;
 }
 
 /**
@@ -201,7 +201,7 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
 
   if (card.column === "inbox") {
     res.status(409).json({
-      error: "cannot start a session from the Inbox — promote to To Do first",
+      error: "cannot start a session from the Inbox: promote to To Do first",
     });
     return;
   }
@@ -292,7 +292,7 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
     }
     if (!(await restatRepos(repos))) {
       res.status(400).json({
-        error: "Can't start — a selected repo is missing",
+        error: "Can't start: a selected repo is missing",
         variant: "config",
       });
       return;
@@ -345,7 +345,10 @@ cardsRouter.post("/cards/:id/resume", (req, res) => {
     return;
   }
 
-  if (card.sessionLost !== true) {
+  const activeRecord = card.sessions?.some(
+    (s) => s.id === card.activeSessionId,
+  );
+  if (card.sessionLost !== true && activeRecord !== true) {
     res.status(409).json({ error: "card has no lost session to resume" });
     return;
   }
@@ -658,7 +661,7 @@ async function createGroupHandler(req: Request, res: Response): Promise<void> {
   }
   if (!(await restatRepos(repos))) {
     res.status(400).json({
-      error: "Can't start — a selected repo is missing",
+      error: "Can't start: a selected repo is missing",
       variant: "config",
     });
     return;
@@ -990,7 +993,7 @@ async function syncLinearHandler(
     );
     await store.recordSyncError(
       id,
-      "Sync to Linear failed — retrying is safe, no duplicate will be created.",
+      "Sync to Linear failed. Retrying is safe, no duplicate will be created.",
     );
     res.status(502).json({ error: "sync-failed" });
   } finally {

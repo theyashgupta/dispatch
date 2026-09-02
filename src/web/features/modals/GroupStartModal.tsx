@@ -219,7 +219,7 @@ export function GroupStartModal({
             onFocus={() => setTextareaFocus(true)}
             onBlur={() => setTextareaFocus(false)}
             aria-label="Prompt for Claude"
-            placeholder="Optional direction for Claude — applies to the whole group. Press Start to launch."
+            placeholder="Optional direction for Claude. Applies to the whole group. Press Start to launch."
             style={{
               minHeight: "96px",
               resize: "vertical",
@@ -251,7 +251,7 @@ export function GroupStartModal({
               <>
                 <Notice
                   tone="destructive"
-                  label="Can't start — a selected repo is missing"
+                  label="Can't start: a selected repo is missing"
                 />
                 <div
                   style={{
@@ -268,7 +268,7 @@ export function GroupStartModal({
               <>
                 <Notice
                   tone="destructive"
-                  label="Can't start — that playbook is gone"
+                  label="Can't start: that playbook is gone"
                 />
                 <div
                   style={{
@@ -277,15 +277,15 @@ export function GroupStartModal({
                     color: "var(--text-muted)",
                   }}
                 >
-                  The selected playbook was deleted. The list has refreshed —
-                  pick another and press Start again.
+                  The selected playbook was deleted. The list has refreshed.
+                  Pick another and press Start again.
                 </div>
               </>
             ) : error.variant === "ineligible" ? (
               <>
                 <Notice
                   tone="destructive"
-                  label="Can't start — some members are no longer eligible"
+                  label="Can't start: some members are no longer eligible"
                 />
                 <div
                   style={{
@@ -302,7 +302,7 @@ export function GroupStartModal({
                 style={{
                   fontSize: "var(--font-body)",
                   lineHeight: "var(--line-body)",
-                  color: "var(--destructive)",
+                  color: "var(--destructive-text)",
                 }}
               >
                 {error.text}

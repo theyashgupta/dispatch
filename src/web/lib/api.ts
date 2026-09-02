@@ -13,6 +13,7 @@ import type {
   SourceFilters,
   UpdateRunResult,
   UpdateStatus,
+  VaultKeySummary,
 } from "../../shared/types.js";
 import type { CardSearchResult } from "../../shared/search.js";
 
@@ -365,6 +366,121 @@ export async function generatePlaybookDraft(input: {
   } catch {
     return { ok: false };
   }
+}
+
+/** Discriminated result of a vault mutation, carrying the server's own error vocabulary verbatim. */
+export type VaultMutationResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * List every vault key plus env-vault import detectability: GET /api/vault. Throws on non-2xx,
+ * mirroring `getPlaybooks`. Never carries a value, `VaultKeySummary` has none.
+ */
+export async function getVaultKeys(): Promise<{
+  keys: VaultKeySummary[];
+  envVaultAvailable: boolean;
+}> {
+  const res = await fetch("/api/vault");
+  if (!res.ok) {
+    throw new Error(`getVaultKeys failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as {
+    keys: VaultKeySummary[];
+    envVaultAvailable: boolean;
+  };
+}
+
+/**
+ * Import keys from the standalone `~/.claude/env-vault`: POST /api/vault/import, no body. Skips any
+ * name already present in Dispatch's store. Names and counts only, `ImportResult` has no value field.
+ */
+export async function importFromEnvVault(): Promise<
+  | { ok: true; imported: string[]; skipped: string[] }
+  | { ok: false; error: string }
+> {
+  const res = await fetch("/api/vault/import", { method: "POST" });
+  if (res.ok) {
+    const body = (await res.json()) as {
+      imported: string[];
+      skipped: string[];
+    };
+    return { ok: true, imported: body.imported, skipped: body.skipped };
+  }
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  return { ok: false, error: body.error ?? "generic" };
+}
+
+/**
+ * Create a vault key: POST /api/vault. The body carries only `name` and `purpose`, never `value`,
+ * per the locked decision that creation never takes a value. The server's error string
+ * (`invalid-name`/`name-exists`/`invalid-purpose`/`vault-write-failed`) passes through verbatim so
+ * the add form's copy table can key directly off it.
+ */
+export async function addVaultKey(input: {
+  name: string;
+  purpose: string;
+}): Promise<VaultMutationResult> {
+  const res = await fetch("/api/vault", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.ok) {
+    return { ok: true };
+  }
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  return { ok: false, error: body.error ?? "generic" };
+}
+
+/**
+ * Set or rotate a key's value: PUT /api/vault/:name/value.
+ * @remarks Set and rotate are the same endpoint; the value is interpolated only into
+ * `JSON.stringify({ value })`, never into the URL, which is built from `name` alone. See
+ * `T-104-01`, docs/ARCHITECTURE.md#security-threat-model.
+ */
+export async function setVaultValue(
+  name: string,
+  value: string,
+): Promise<VaultMutationResult> {
+  const res = await fetch(`/api/vault/${encodeURIComponent(name)}/value`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+  if (res.ok) {
+    return { ok: true };
+  }
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  return { ok: false, error: body.error ?? "generic" };
+}
+
+/**
+ * Edit a key's purpose: PATCH /api/vault/:name.
+ */
+export async function editVaultPurpose(
+  name: string,
+  purpose: string,
+): Promise<VaultMutationResult> {
+  const res = await fetch(`/api/vault/${encodeURIComponent(name)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ purpose }),
+  });
+  if (res.ok) {
+    return { ok: true };
+  }
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  return { ok: false, error: body.error ?? "generic" };
+}
+
+/**
+ * Delete a vault key: DELETE /api/vault/:name. Resolves a bare `{ok}`, matching `deletePlaybook`,
+ * since the delete confirm has one shared failure Notice.
+ */
+export async function deleteVaultKey(name: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`/api/vault/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+  return { ok: res.ok };
 }
 
 /**

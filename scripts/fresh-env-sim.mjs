@@ -718,7 +718,7 @@ function uninstallCleanBoxAssert(r) {
       expectCode: 0,
       present: [
         "Removed 3 file(s), stopped 0 session(s).",
-        "/root/.dispatch/board.db  (board data — pass --purge to delete)",
+        "/root/.dispatch/board.db  (board data, pass --purge to delete)",
         "npm uninstall -g @theyashgupta/dispatch",
         "Removed 0 file(s), stopped 0 session(s).",
         "Nothing left to stop or remove",

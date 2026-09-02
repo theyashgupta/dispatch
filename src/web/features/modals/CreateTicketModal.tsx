@@ -21,7 +21,7 @@ const captionStyle: CSSProperties = {
 const inlineErrorStyle: CSSProperties = {
   fontSize: "var(--font-body)",
   lineHeight: "var(--line-body)",
-  color: "var(--destructive)",
+  color: "var(--destructive-text)",
 };
 
 function acceptErrorCopy(error: string | null): string {
@@ -160,7 +160,7 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
                 onFocus={() => setPromptFocus(true)}
                 onBlur={() => setPromptFocus(false)}
                 aria-label="What do you want to build or fix?"
-                placeholder="Describe the ticket in as much detail as you can — Claude will draft the title and description."
+                placeholder="Describe the ticket in as much detail as you can. Claude will draft the title and description."
                 style={{
                   minHeight: "160px",
                   resize: "vertical",
@@ -181,14 +181,14 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
 
           {phase === "generating" && (
             <span style={captionStyle}>
-              Drafting your ticket — this can take up to a couple of minutes.
+              Drafting your ticket. This can take up to a couple of minutes.
             </span>
           )}
 
           {phase !== "review" && generateFailed && (
             <Notice
               tone="destructive"
-              label="Couldn't generate a ticket — try again."
+              label="Couldn't generate a ticket. Try again."
             />
           )}
 
@@ -196,7 +196,7 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
             <>
               {draftNotice && (
                 <Notice tone="muted">
-                  Generated — review and edit before accepting.
+                  Generated. Review and edit before accepting.
                 </Notice>
               )}
 
@@ -271,7 +271,7 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
               {generateFailed && (
                 <Notice
                   tone="destructive"
-                  label="Couldn't generate a ticket — try again."
+                  label="Couldn't generate a ticket. Try again."
                 />
               )}
 
