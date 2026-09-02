@@ -765,19 +765,15 @@ export interface TerminalTheme {
 }
 
 /**
- * Wire shape for `GET /api/terminal-theme`: the resolved color theme plus the font block the
- * native terminal client applies to `Terminal` options. `fontFamily` always names the bundled
- * self-hosted Nerd Font, never the user's raw Ghostty `font-family` string, since the client can
- * only render fonts it self-hosts.
+ * The resolved color theme plus the fixed cursor and weight block the native terminal client
+ * applies to `Terminal` options, built by `toTerminalTheme`; font family and size come straight
+ * from the appearance.
  */
 export interface TerminalThemeResponse {
   theme: TerminalTheme;
-  fontFamily: string;
-  fontSize: number;
   fontWeight: number;
   cursorStyle: "block" | "underline" | "bar";
   cursorBlink: boolean;
-  letterSpacing?: number;
 }
 
 /**
@@ -941,6 +937,17 @@ export interface Config {
    * login. Added accounts are registry ids under `claude-accounts/`.
    */
   activeClaudeAccountId?: string;
+  /** Terminal appearance chosen in Settings; absent or invalid resolves to the shipped translucent default. */
+  terminal?: TerminalAppearance;
+}
+
+export interface TerminalAppearance {
+  background: string;
+  opacity: number;
+  foreground: string;
+  cursor: string;
+  fontFamily: string;
+  fontSize: number;
 }
 
 export const DEFAULT_CLAUDE_ACCOUNT_ID = "default";

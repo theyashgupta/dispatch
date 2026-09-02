@@ -11,7 +11,7 @@ the [MIT License](LICENSE).
 - **File a bug.** Use the bug report form. A reliable repro is worth more than anything else.
 - **Suggest a feature.** Use the feature form, or float it in [Discussions](https://github.com/theyashgupta/dispatch/discussions) first if it's open-ended.
 - **Send a PR.** Small and focused merges fastest. For anything large, open an issue first so we agree on the shape before you build it.
-- **Add tests.** Dispatch has no test suite yet and wants one. Unit and end-to-end tests are wide-open, welcome contributions. Pick any module and start.
+- **Add tests.** Unit tests run on Node's built-in runner (`npm test`, `*.test.ts` next to the code). Coverage is thin and end-to-end tests are wide-open, welcome contributions. Pick any module and start.
 - **Improve docs or triage.** Fixing a typo, clarifying the README, or reproducing an open bug all count. You don't have to write code to help.
 
 ## Finding something to work on
@@ -58,6 +58,7 @@ It runs, in order:
 | Types       | `tsc --noEmit`                          | Strict TypeScript, no `any` escapes                              |
 | Dead code   | `knip`                                  | No unused exports, deps, or files                                |
 | Replay gate | `tsx scripts/replay-watcher.ts --check` | Watcher decisions still match the recorded golden, byte for byte |
+| Tests       | `npm test`                              | Unit suites under `src/**/*.test.ts` on `node:test` via `tsx`    |
 
 CI runs the same command on every PR. A green `npm run check` locally means a green CI run.
 
@@ -78,10 +79,9 @@ you can contribute. Until that suite exists, behavior is held in place by:
 So today a PR proves itself two ways: `npm run check` is green, and you've run the change against the
 live app and can describe what you saw. The PR template asks for both.
 
-**Adding tests?** Even better. There's no runner wired up yet, so a test PR can bring its own. Pick a
-framework that fits (Vitest pairs naturally with this Vite and TypeScript stack), add the dev dependency
-and an `npm test` script, and note how to run it in the PR. Start with whatever module you know best.
-A small focused test PR is easier to review than a sweeping one.
+**Adding tests?** Even better. Drop a `<name>.test.ts` next to the module using `node:test` and
+`node:assert/strict` (no extra dependency; `npm test` runs every `src/**/*.test.ts` through `tsx`).
+Start with whatever module you know best. A small focused test PR is easier to review than a sweeping one.
 
 ### If you change watcher decision logic
 

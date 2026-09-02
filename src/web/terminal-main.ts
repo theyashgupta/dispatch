@@ -1,8 +1,15 @@
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type ITerminalOptions } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import type { TerminalThemeResponse } from "../shared/types.js";
+import type { TerminalAppearance } from "../shared/types.js";
+import {
+  DEFAULT_TERMINAL_APPEARANCE,
+  TERMINAL_APPEARANCE_CHANNEL,
+  terminalFontStack,
+  toTerminalTheme,
+  validateTerminalAppearance,
+} from "../shared/terminal-appearance.js";
 import {
   FONT_FAMILY,
   FONT_SPEC,
@@ -105,18 +112,64 @@ function sendHandshake(ws: WebSocket, term: Terminal): void {
 }
 
 /**
- * Fetch the resolved Ghostty-parity theme/font block. Returns `null` on any network/non-ok
- * failure — the backend resolver itself never throws, but the client must still open with plain
- * xterm defaults if the fetch itself cannot complete.
+ * Fetch the persisted terminal appearance. Any network failure, non-ok status, or malformed body
+ * resolves to the shipped default so the terminal always opens themed.
  */
-async function fetchTheme(): Promise<TerminalThemeResponse | null> {
+async function fetchAppearance(): Promise<TerminalAppearance> {
   try {
-    const res = await fetch("/api/terminal-theme");
-    if (!res.ok) return null;
-    return (await res.json()) as TerminalThemeResponse;
+    const res = await fetch("/api/config/terminal");
+    if (!res.ok) return DEFAULT_TERMINAL_APPEARANCE;
+    const result = validateTerminalAppearance(await res.json());
+    return result.ok ? result.value : DEFAULT_TERMINAL_APPEARANCE;
   } catch {
-    return null;
+    return DEFAULT_TERMINAL_APPEARANCE;
   }
+}
+
+/**
+ * Paint the page background for an appearance and return the matching xterm options.
+ * @remarks Translucency only works when the page behind the terminal is see-through, so the body
+ * goes transparent whenever the browser accepts the rgba background; otherwise the body and the
+ * terminal both fall back to the solid hex, which is the ticket's degrade rule.
+ */
+function applyAppearance(appearance: TerminalAppearance): ITerminalOptions {
+  const theme = toTerminalTheme(appearance);
+  const translucent =
+    appearance.opacity < 1 &&
+    typeof CSS !== "undefined" &&
+    CSS.supports("background-color", theme.theme.background);
+  document.body.style.background = translucent
+    ? "transparent"
+    : appearance.background;
+  return {
+    theme: translucent
+      ? theme.theme
+      : { ...theme.theme, background: appearance.background },
+    fontFamily: terminalFontStack(appearance.fontFamily),
+    fontWeight: theme.fontWeight,
+    cursorStyle: theme.cursorStyle,
+    cursorBlink: theme.cursorBlink,
+  };
+}
+
+/**
+ * Restyle the running terminal whenever Settings ▸ Terminal saves, without a reload.
+ * @remarks The zoom controller multiplies from `baseFontSize`, so the new size becomes the base
+ * and the current zoom is re-applied on top; a payload that fails validation is ignored.
+ */
+function watchAppearance(term: Terminal, fit: FitAddon): void {
+  if (typeof BroadcastChannel === "undefined") return;
+  new BroadcastChannel(TERMINAL_APPEARANCE_CHANNEL).onmessage = (event) => {
+    const result = validateTerminalAppearance(event.data);
+    if (!result.ok) return;
+    Object.assign(term.options, applyAppearance(result.value));
+    baseFontSize = result.value.fontSize;
+    term.options.fontSize = Math.max(
+      ZOOM.minFontPx,
+      baseFontSize * currentZoom,
+    );
+    fit.fit();
+  };
 }
 
 /**
@@ -143,11 +196,11 @@ function injectFontFace(): void {
 }
 
 /**
- * Un-zoomed font size in px, captured once by `createTerminal` from the resolved theme (or
- * xterm's own default) so the zoom controller always multiplies from a stable base rather than
- * compounding zoom-on-zoom across repeated commits.
+ * Un-zoomed font size in px, set by `createTerminal` from the appearance and replaced on every
+ * live appearance update, so the zoom controller always multiplies from a stable base rather
+ * than compounding zoom-on-zoom across repeated commits.
  */
-let baseFontSize = 15;
+let baseFontSize = DEFAULT_TERMINAL_APPEARANCE.fontSize;
 
 /**
  * Live zoom level, seeded from `readZoom()` at the top of `main()` before any pinch/chip handler
@@ -161,8 +214,7 @@ let currentZoom = 1;
  * Builds the terminal instance and the reverse-tabnabbing-safe link handlers, wired to BOTH
  * `WebLinksAddon` (plain-text URLs) and `linkHandler` (OSC-8, the code path real Claude Code `⏺`
  * output uses and `WebLinksAddon` never fires for) so cmd-click parity holds for either link
- * source. `theme` is `null` when the theme fetch failed — the terminal then opens with plain
- * xterm defaults instead of a half-applied theme.
+ * source. `allowTransparency` must be set here, before `open()`, for the translucent background.
  * @remarks `smoothScrollDuration: 120` is set unconditionally rather than gated to desktop: a
  * media-query gate would leave hybrid devices (touchscreen laptops, iPad + trackpad) with an
  * instant jump, and the value is harmless on its own during a touch gesture. It is also inert for
@@ -184,30 +236,20 @@ let currentZoom = 1;
  * @see docs/ARCHITECTURE.md#terminal-ttyd
  */
 function createTerminal(
-  theme: TerminalThemeResponse | null,
+  appearance: TerminalAppearance,
   zoom: number,
 ): {
   term: Terminal;
   fit: FitAddon;
 } {
-  baseFontSize = theme?.fontSize ?? 15;
+  baseFontSize = appearance.fontSize;
   const term = new Terminal({
     allowProposedApi: true,
+    allowTransparency: true,
     scrollback: 10000,
-    cursorBlink: theme?.cursorBlink ?? false,
     smoothScrollDuration: 120,
     fontSize: Math.max(ZOOM.minFontPx, baseFontSize * zoom),
-    ...(theme
-      ? {
-          theme: theme.theme,
-          fontFamily: `"${theme.fontFamily}", monospace`,
-          fontWeight: theme.fontWeight,
-          cursorStyle: theme.cursorStyle,
-          ...(theme.letterSpacing !== undefined
-            ? { letterSpacing: theme.letterSpacing }
-            : {}),
-        }
-      : {}),
+    ...applyAppearance(appearance),
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
@@ -982,13 +1024,14 @@ function attachZoomControl(term: Terminal, fit: FitAddon): void {
 async function main(): Promise<void> {
   const mount = document.getElementById("terminal");
   if (!mount) return;
-  const theme = await fetchTheme();
+  const appearance = await fetchAppearance();
   injectFontFace();
   const zoom = readZoom();
   currentZoom = zoom;
-  const { term, fit } = createTerminal(theme, zoom);
+  const { term, fit } = createTerminal(appearance, zoom);
   await fontsReady();
   mountTerminal(term, mount, fit);
+  watchAppearance(term, fit);
   if (window.matchMedia("(pointer: coarse)").matches) {
     attachKineticScroll(term);
     attachZoomControl(term, fit);

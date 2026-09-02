@@ -6,12 +6,17 @@ import type {
   Config,
   SourceFilters,
   StatusChannel,
+  TerminalAppearance,
 } from "../../shared/types.js";
 import {
   DEFAULT_CLAUDE_ARGS,
   DEFAULT_CLEANUP_DELAY_DAYS,
   DEFAULT_FILTERS,
 } from "../../shared/types.js";
+import {
+  DEFAULT_TERMINAL_APPEARANCE,
+  validateTerminalAppearance,
+} from "../../shared/terminal-appearance.js";
 import { StartupError } from "./binary-check.js";
 import { CONFIG_PATH, DISPATCH_DIR } from "../services/infra/paths.js";
 
@@ -46,6 +51,9 @@ const CONFIG_TEMPLATE = {
   "// claudeArgs":
     "Extra CLI arguments passed to `claude` every time a session starts, resumes, or restarts. Leave empty for Claude's normal permission prompts.",
   claudeArgs: DEFAULT_CLAUDE_ARGS,
+  "// terminal":
+    "Terminal appearance (Settings > Terminal): background, opacity (0.3 to 1), foreground, cursor, fontFamily, fontSize (8 to 32). Remove the block to restore the defaults.",
+  terminal: DEFAULT_TERMINAL_APPEARANCE,
 };
 
 /**
@@ -94,6 +102,15 @@ function readCleanupDelayDays(parsed: Record<string, unknown>): number {
     return value;
   }
   return DEFAULT_CLEANUP_DELAY_DAYS;
+}
+
+/**
+ * Read the `terminal` appearance block: absent, partial, or invalid resolves to the shipped
+ * default, same tolerance posture as {@link readCleanupDelayDays}.
+ */
+function readTerminal(parsed: Record<string, unknown>): TerminalAppearance {
+  const result = validateTerminalAppearance(parsed.terminal);
+  return result.ok ? result.value : DEFAULT_TERMINAL_APPEARANCE;
 }
 
 /**
@@ -342,6 +359,7 @@ export function loadConfig(): Config {
     cleanupDelayDays: readCleanupDelayDays(parsed),
     claudeArgs: readClaudeArgs(parsed),
     ...(activeClaudeAccountId !== undefined ? { activeClaudeAccountId } : {}),
+    terminal: readTerminal(parsed),
   };
 
   const hasKey = config.linearApiKey.length > 0;

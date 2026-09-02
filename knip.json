@@ -11,5 +11,12 @@
   ],
   "project": ["src/**/*.{ts,tsx}"],
   "ignoreExportsUsedInFile": true,
-  "ignoreBinaries": ["which", "ttyd", "cloudflared", "launchctl"]
+  "ignoreBinaries": [
+    "which",
+    "ttyd",
+    "cloudflared",
+    "launchctl",
+    "lsof",
+    "tmux"
+  ]
 }

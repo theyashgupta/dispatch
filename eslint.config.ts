@@ -655,6 +655,17 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    files: ["src/**/*.test.ts"],
+    rules: {
+      "check-file/filename-naming-convention": [
+        "error",
+        { "src/**/*.test.ts": `${KEBAB}.test` },
+        { ignoreMiddleExtensions: false },
+      ],
+      "@typescript-eslint/no-floating-promises": "off",
+    },
+  },
 
   prettier,
 );

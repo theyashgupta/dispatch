@@ -40,6 +40,7 @@
     "dev": "concurrently -k -n api,web -c blue,magenta \"tsx watch src/server/bootstrap/index.ts\" \"vite\"",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test 'src/**/*.test.ts'",
+    "terminal-e2e": "node scripts/terminal-appearance-e2e.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
