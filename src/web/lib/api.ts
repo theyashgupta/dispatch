@@ -13,6 +13,9 @@ import type {
   UpdateRunResult,
   UpdateStatus,
   VaultKeySummary,
+  ClaudeAccountSummary,
+  ClaudeUsageSnapshot,
+  ClaudeLoginView,
 } from "../../shared/types.js";
 import type { CardSearchResult } from "../../shared/search.js";
 
@@ -1111,4 +1114,161 @@ export async function getCard(
     throw new Error(`getCard failed: ${res.status} ${res.statusText}`);
   }
   return (await res.json()) as { card: Card; members: Card[] };
+}
+
+/**
+ * Every Claude account with its usage snapshot plus the active pointer: GET /api/accounts.
+ * Throws on non-2xx, mirroring `getVaultKeys`.
+ */
+export async function getAccounts(): Promise<{
+  activeId: string;
+  accounts: ClaudeAccountSummary[];
+}> {
+  const res = await fetch("/api/accounts");
+  if (!res.ok) {
+    throw new Error(`getAccounts failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as {
+    activeId: string;
+    accounts: ClaudeAccountSummary[];
+  };
+}
+
+/**
+ * Make an account the one new sessions launch on: PUT /api/accounts/active.
+ */
+export async function setActiveAccount(
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await fetch("/api/accounts/active", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  if (res.ok) return { ok: true };
+  if (res.status === 404) {
+    return { ok: false, error: "That account is no longer registered." };
+  }
+  return { ok: false, error: "Couldn't switch the Claude account." };
+}
+
+/**
+ * Fetch an account's usage now: POST /api/accounts/:id/usage/refresh. A 429 means the 30 second
+ * limiter refused; the caller shows a wait notice rather than an error.
+ */
+export async function refreshAccountUsage(
+  id: string,
+): Promise<
+  { ok: true; usage: ClaudeUsageSnapshot } | { ok: false; error: string }
+> {
+  const res = await fetch(
+    `/api/accounts/${encodeURIComponent(id)}/usage/refresh`,
+    {
+      method: "POST",
+    },
+  );
+  if (res.ok) {
+    const body = (await res.json()) as { usage: ClaudeUsageSnapshot };
+    return { ok: true, usage: body.usage };
+  }
+  if (res.status === 429) {
+    return { ok: false, error: "Wait 30 seconds between refreshes." };
+  }
+  return { ok: false, error: "Couldn't refresh usage." };
+}
+
+/**
+ * Start a Claude login for a new account, or for `accountId` to repair its token:
+ * POST /api/accounts/login. A 409 means one is already running.
+ */
+export async function startLogin(
+  accountId?: string,
+): Promise<
+  | { ok: true; accountId: string | null }
+  | { ok: false; error: string; inFlight?: boolean }
+> {
+  const res = await fetch("/api/accounts/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(accountId ? { accountId } : {}),
+  });
+  if (res.ok) {
+    const view = (await res.json().catch(() => null)) as ClaudeLoginView | null;
+    return {
+      ok: true,
+      accountId:
+        view && "accountId" in view ? view.accountId : (accountId ?? null),
+    };
+  }
+  if (res.status === 409) {
+    return {
+      ok: false,
+      error: "A Claude login is already in progress.",
+      inFlight: true,
+    };
+  }
+  if (res.status === 404) {
+    return { ok: false, error: "That account is no longer registered." };
+  }
+  return { ok: false, error: "Couldn't start the Claude login." };
+}
+
+/**
+ * The login state machine's current view: GET /api/accounts/login.
+ */
+export async function getLoginState(): Promise<ClaudeLoginView> {
+  const res = await fetch("/api/accounts/login");
+  if (!res.ok) {
+    throw new Error(`getLoginState failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as ClaudeLoginView;
+}
+
+/**
+ * Hand the pasted sign-in code to the waiting CLI: POST /api/accounts/login/code.
+ */
+export async function submitLoginCode(
+  code: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await fetch("/api/accounts/login/code", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (res.ok) return { ok: true };
+  if (res.status === 409) {
+    return { ok: false, error: "No login is waiting for a code." };
+  }
+  if (res.status === 400) {
+    return { ok: false, error: "Paste the whole code on one line." };
+  }
+  return { ok: false, error: "Couldn't submit the code." };
+}
+
+/**
+ * Abort an in-flight login or clear a finished one: DELETE /api/accounts/login.
+ */
+export async function cancelLogin(): Promise<void> {
+  await fetch("/api/accounts/login", { method: "DELETE" }).catch(
+    () => undefined,
+  );
+}
+
+/**
+ * Remove an added account: DELETE /api/accounts/:id. Default cannot be removed.
+ */
+export async function removeAccount(
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await fetch(`/api/accounts/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (res.ok) return { ok: true };
+  if (res.status === 404) {
+    return { ok: false, error: "That account is no longer registered." };
+  }
+  if (res.status === 400) {
+    return { ok: false, error: "The Default account cannot be removed." };
+  }
+  return { ok: false, error: "Couldn't remove the account." };
 }
