@@ -82,15 +82,16 @@ Feature folders never import from sibling feature folders — cross-feature shar
 
 One convention spans the whole tree. Every artifact kind has a fixed pattern and folder home:
 
-| Artifact kind                 | Location             | Pattern                     | Example              |
-| ----------------------------- | -------------------- | --------------------------- | -------------------- |
-| React component               | `src/web/**`         | `PascalCase.tsx`            | `SettingsScreen.tsx` |
-| React hook                    | `src/web/hooks`      | `useX.ts` (camelCase)       | `useBoardStream.ts`  |
-| Web util / client             | `src/web/lib`        | `kebab-case.ts`             | `card-badges.ts`     |
-| HTTP route module             | `src/server/routes`  | `<resource>.route.ts`       | `cards.route.ts`     |
-| Store module                  | `src/server/store`   | `<domain>.store.ts`         | `board.store.ts`     |
-| Ticket source                 | `src/server/sources` | `<name>.source.ts`          | `linear.source.ts`   |
-| Service / adapter / bootstrap | `src/server/**`      | `kebab-case.ts` (no suffix) | `start-session.ts`   |
+| Artifact kind                 | Location             | Pattern                     | Example               |
+| ----------------------------- | -------------------- | --------------------------- | --------------------- |
+| React component               | `src/web/**`         | `PascalCase.tsx`            | `SettingsScreen.tsx`  |
+| React hook                    | `src/web/hooks`      | `useX.ts` (camelCase)       | `useBoardStream.ts`   |
+| Web util / client             | `src/web/lib`        | `kebab-case.ts`             | `card-badges.ts`      |
+| HTTP route module             | `src/server/routes`  | `<resource>.route.ts`       | `cards.route.ts`      |
+| Store module                  | `src/server/store`   | `<domain>.store.ts`         | `board.store.ts`      |
+| Ticket source                 | `src/server/sources` | `<name>.source.ts`          | `linear.source.ts`    |
+| Service / adapter / bootstrap | `src/server/**`      | `kebab-case.ts` (no suffix) | `start-session.ts`    |
+| Test (node:test)              | `src/**`             | `<subject>.test.ts`         | `attachments.test.ts` |
 
 The enforceable rule: `.tsx` → PascalCase; `hooks/*.ts` → `useX` camelCase; every other `.ts` → kebab-case; `route`/`store`/`source` suffixes layered on via glob. Role suffixes apply **only** where a folder groups by resource (`routes/`, `store/`, `sources/`) — everywhere else the folder already encodes the layer, so the suffix is dropped (the Angular v20 lesson: no redundant type suffixes). Helpers that live inside a resource folder but are not themselves the resource module (`store/mapping.ts`, `sources/registry.ts`, `sources/linear/filter.ts`, `routes/loopback.ts`) stay plain kebab-case.
 

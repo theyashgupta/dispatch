@@ -48,7 +48,7 @@ const ID_RE =
  * @remarks Moved from 122 to 123 for the deliberate one-ID attention single-source
  * re-freeze (`NEW-22`) — see docs/ARCHITECTURE.md#design-system-invariants.
  */
-const FROZEN_COUNT = 123;
+const FROZEN_COUNT = 127;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");
