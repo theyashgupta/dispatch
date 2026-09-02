@@ -4,9 +4,10 @@
     "src/server/bootstrap/cli.ts",
     "src/web/main.tsx",
     "src/web/index.html",
-    "src/web/terminal-main.ts"
+    "src/web/terminal-main.ts",
+    "src/**/*.test.ts"
   ],
   "project": ["src/**/*.{ts,tsx}"],
   "ignoreExportsUsedInFile": true,
-  "ignoreBinaries": ["which", "ttyd", "cloudflared"]
+  "ignoreBinaries": ["which", "ttyd", "cloudflared", "lsof", "tmux"]
 }

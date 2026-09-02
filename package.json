@@ -39,6 +39,8 @@
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,magenta \"tsx watch src/server/bootstrap/index.ts\" \"vite\"",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "terminal-e2e": "node scripts/terminal-appearance-e2e.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
@@ -56,7 +58,7 @@
     "migration-diff": "node scripts/migration-diff-v3.mjs",
     "downgrade-guard": "node scripts/downgrade-guard-v3.mjs",
     "redaction-capture": "node scripts/redaction-capture-v3.mjs",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants && npm test",
     "prepack": "npm run build"
   },
   "dependencies": {
