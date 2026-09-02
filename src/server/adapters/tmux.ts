@@ -138,14 +138,19 @@ export async function ensureNoAltScreenOverride(): Promise<void> {
 }
 
 /**
- * `~/.dispatch/pty-shim.py`, derived locally following terminal-telemetry.ts's precedent: the
- * adapters layer may not import `services/infra/paths.ts`, so this and paths.ts's
- * `PTY_SHIM_PATH` (the writer side, used by bootstrap) derive the same location independently.
+ * `<data dir>/pty-shim.py`, derived locally: the subprocess adapters may only import themselves
+ * and shared, so this mirrors `store/data-dir.ts` (the `DISPATCH_DIR` override, else `~/.dispatch`)
+ * instead of importing it.
  */
-const PTY_SHIM_PATH = path.join(os.homedir(), ".dispatch", "pty-shim.py");
+const PTY_SHIM_PATH = path.join(
+  process.env.DISPATCH_DIR && process.env.DISPATCH_DIR.trim() !== ""
+    ? path.resolve(process.env.DISPATCH_DIR)
+    : path.join(os.homedir(), ".dispatch"),
+  "pty-shim.py",
+);
 
 /**
- * Wraps the pane command in the ?2026-stripping pty shim boot installed under `~/.dispatch`.
+ * Wraps the pane command in the ?2026-stripping pty shim boot installed under the data dir.
  *
  * @remarks TERM-05: Claude Code wraps every classic-renderer frame in synchronized-output
  * markers (DECSET 2026) because tmux answers its DECRQM probe with "supported". tmux then

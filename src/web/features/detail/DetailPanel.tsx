@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, GripVertical, RotateCw } from "lucide-react";
+import { DEFAULT_CLAUDE_ACCOUNT_ID } from "../../../shared/types.js";
 import type {
+  ClaudeAccountSummary,
   ActivityEvent,
   Card as CardModel,
 } from "../../../shared/types.js";
@@ -23,6 +25,7 @@ import { UnknownProbeRow } from "./UnknownProbeRow.js";
 import { ReferenceBlocks } from "./ReferenceBlocks.js";
 import { SessionLostSection } from "./SessionLostSection.js";
 import { SessionSwitcher } from "./SessionSwitcher.js";
+import { Field } from "../../primitives/Field.js";
 import { StartAnotherSessionButton } from "./StartAnotherSessionButton.js";
 import { TerminalRegion } from "./TerminalRegion.js";
 
@@ -48,6 +51,7 @@ interface DetailPanelProps {
   onStartRequest?: (req: string | StartRequest) => void;
   onCleanupRequest?: (id: string) => void;
   docked?: boolean;
+  accounts?: ClaudeAccountSummary[];
 }
 
 export function DetailPanel({
@@ -64,6 +68,7 @@ export function DetailPanel({
   onStartRequest,
   onCleanupRequest,
   docked = false,
+  accounts,
 }: DetailPanelProps) {
   const open = card != null;
 
@@ -325,6 +330,13 @@ export function DetailPanel({
   }, [card]);
 
   const c = shown;
+  const sessionAccountEmail =
+    c?.claudeAccountId != null
+      ? (accounts?.find((a) => a.id === c.claudeAccountId)?.email ??
+        (c.claudeAccountId === DEFAULT_CLAUDE_ACCOUNT_ID
+          ? "Default"
+          : c.claudeAccountId))
+      : null;
 
   const showStartAnother =
     c != null &&
@@ -508,6 +520,31 @@ export function DetailPanel({
               onCleanupRequest={onCleanupRequest}
             />
 
+            {sessionAccountEmail != null && (
+              <div
+                data-testid="session-account"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--space-xs)",
+                  padding: "var(--space-xs) var(--space-lg)",
+                  paddingLeft: "var(--space-xl)",
+                  borderBottom: "1px solid var(--border)",
+                  fontFamily: "var(--font-ui)",
+                  fontSize: "var(--font-label)",
+                  lineHeight: "var(--line-label)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                <Field>Account</Field>
+                <span
+                  style={{ color: "var(--text)" }}
+                  title={sessionAccountEmail}
+                >
+                  {sessionAccountEmail}
+                </span>
+              </div>
+            )}
             {(c?.sessionSummaries != null || showStartAnother) && (
               <div
                 style={{

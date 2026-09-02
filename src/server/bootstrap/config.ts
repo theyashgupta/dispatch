@@ -127,6 +127,20 @@ function readClaudeArgs(parsed: Record<string, unknown>): string {
 }
 
 /**
+ * Read the `activeClaudeAccountId` pointer: a non-empty string is carried through verbatim, since
+ * membership in the registry is checked at launch, not at boot; anything else resolves to absent
+ * (the home login).
+ */
+function readActiveClaudeAccountId(
+  parsed: Record<string, unknown>,
+): string | undefined {
+  return typeof parsed.activeClaudeAccountId === "string" &&
+    parsed.activeClaudeAccountId.trim() !== ""
+    ? parsed.activeClaudeAccountId
+    : undefined;
+}
+
+/**
  * Read the remembered kickoff-picker default: a plain string preference, absent or any
  * non-string value resolves to `undefined` (no `StartupError` — mirrors {@link readUpdateCheck},
  * never a closed enum like `statusChannel`). A name that no longer resolves to a valid playbook
@@ -329,6 +343,7 @@ export function loadConfig(): Config {
       ? parsed.workspaceRoot.trim()
       : DEFAULT_WORKSPACE_ROOT;
 
+  const activeClaudeAccountId = readActiveClaudeAccountId(parsed);
   const config: Config = {
     linearApiKey: rawKey,
     port: typeof parsed.port === "number" ? parsed.port : DEFAULT_PORT,
@@ -343,6 +358,7 @@ export function loadConfig(): Config {
     lastUsedPlaybook: readLastUsedPlaybook(parsed),
     cleanupDelayDays: readCleanupDelayDays(parsed),
     claudeArgs: readClaudeArgs(parsed),
+    ...(activeClaudeAccountId !== undefined ? { activeClaudeAccountId } : {}),
     terminal: readTerminal(parsed),
   };
 

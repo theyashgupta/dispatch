@@ -12,6 +12,9 @@ import {
 import { useTransitionNotifications } from "./hooks/useTransitionNotifications.js";
 import { AppShell } from "./AppShell.js";
 import { SyncStrip } from "./features/sync/index.js";
+import { UsageChip } from "./features/accounts/index.js";
+import { useClaudeAccounts } from "./hooks/useClaudeAccounts.js";
+import { useMediaQuery } from "./hooks/useMediaQuery.js";
 import { Glyph, wordmarkStyle } from "./primitives/Glyph.js";
 import {
   actionablePinnedCard,
@@ -88,6 +91,8 @@ function BootScreen({ connection }: { connection: ConnectionStatus }) {
 
 export function App() {
   const feed = useActivityFeed();
+  const claudeAccounts = useClaudeAccounts();
+  const chipCompact = useMediaQuery("(max-width: 1023px)");
   const [tunnelState, setTunnelState] = useState<TunnelState>({
     status: "off",
   });
@@ -413,6 +418,21 @@ export function App() {
               setViewMode(mode);
               if (mode === "workspace") setInboxOpen(false);
             }}
+            accountSlot={
+              claudeAccounts.loaded ? (
+                <UsageChip
+                  accounts={claudeAccounts.accounts}
+                  activeId={claudeAccounts.activeId}
+                  compact={chipCompact}
+                  onSwitch={claudeAccounts.switchAccount}
+                  onRefresh={claudeAccounts.refreshUsage}
+                  onOpenSettings={() => {
+                    setSettingsInitialTab("accounts");
+                    setSettingsOpen(true);
+                  }}
+                />
+              ) : null
+            }
           />
         </>
       }
@@ -450,6 +470,7 @@ export function App() {
       }
       detail={
         <DetailPanel
+          accounts={claudeAccounts.accounts}
           card={selectedCard}
           hydrating={pinnedHydrating && !selectedCardInWindow}
           pinFetchError={pinFetchErrorKind}
@@ -514,6 +535,7 @@ export function App() {
       )}
       {settingsOpen && (
         <SettingsScreen
+          claudeAccounts={claudeAccounts}
           initialTab={settingsInitialTab}
           tunnelState={tunnelState}
           soundEnabled={soundEnabled}

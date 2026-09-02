@@ -31,6 +31,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Panel Iframe Identity](#panel-iframe-identity)
   - [Second Session Affordance](#second-session-affordance)
   - [Tmux Invocations](#tmux-invocations)
+  - [Claude Accounts](#claude-accounts)
   - [Orchestration Saga](#orchestration-saga)
   - [Exec Chokepoint](#exec-chokepoint)
   - [Linear Sync](#linear-sync)
@@ -80,18 +81,19 @@ research). The backend is layered `bootstrap → routes → services → adapter
 [docs/standards/backend-design.md](standards/backend-design.md) — this table names the layers
 and roles only, it does not restate the layering policy.
 
-| Layer               | Modules                                                                                                                                                        | Role                                                                                                                                                                                                                                                |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bootstrap           | `bootstrap/index.ts`, `bootstrap/cli.ts`, `bootstrap/binary-check.ts`, `bootstrap/config.ts`, `bootstrap/reconcile.ts`                                         | CLI entry (`doctor`/`uninstall`/boot), informative startup preflight lines (via `services/infra/preflight.ts`), `StartupError` for config failures, config load/bootstrap, boot session reconcile, then wire routes + SSE and start poller/watcher. |
-| Routes              | `routes/index.ts`, `routes/cards.route.ts`, `routes/board.route.ts`, `routes/sse.route.ts`, `routes/loopback.ts`                                               | Loopback-gated REST router, the hand-rolled SSE broadcast endpoint, and the loopback request guard.                                                                                                                                                 |
-| Linear + mapping    | `adapters/poller.ts`, `store/mapping.ts`                                                                                                                       | GraphQL poll loop and the pure issue-versus-card reconcile mapping.                                                                                                                                                                                 |
-| Store               | `store/board.store.ts`                                                                                                                                         | Single-writer card store: serialized mutation queue, atomic persist, snapshot ordering.                                                                                                                                                             |
-| Services (start)    | `services/orchestration/start-session.ts`, `services/orchestration/steps.ts`, `services/domain/kickoff.ts`                                                     | Start-saga runner, its do/undo steps, and the pure kickoff-prompt builder.                                                                                                                                                                          |
-| Services (sessions) | `services/orchestration/cleanup.ts`, `services/infra/config-holder.ts`, `services/domain/workspace-paths.ts`                                                   | Teardown saga, the orchestration-config holder (routes read config through it, value-free 400 when unset), and the canonical worktree-path builder.                                                                                                 |
-| Markers             | `adapters/markers/parse.ts`, `adapters/markers/scan-decision.ts`, `adapters/markers/pane-view.ts`, `adapters/markers/watcher.ts`                               | Pure marker parser, the pure per-tick decision core, the pane-view helpers, and the I/O-shell pane watcher applying one card decision per tick.                                                                                                     |
-| Adapters            | `adapters/exec.ts`, `adapters/git.ts`, `adapters/tmux.ts`, `adapters/ttyd.ts`, `adapters/claude-trust.ts`, `adapters/editors.ts`, `adapters/resolve-binary.ts` | The argv-only subprocess chokepoint, the git / tmux / ttyd / claude-trust adapters over it, editor launch, and binary-path resolution.                                                                                                              |
-| Shared              | `shared/types.ts`                                                                                                                                              | Pure cross-half contracts; `BoardSnapshot` is both the SSE payload and the on-disk board file.                                                                                                                                                      |
-| Frontend            | `web/App.tsx`, `web/features/board/Board.tsx`, `web/features/board/Card.tsx`, `web/features/detail/DetailPanel.tsx`, plus hooks, dialogs, and sync strip       | React board: optimistic drag-and-drop, the detail slide-over with the terminal iframe, SSE hooks.                                                                                                                                                   |
+| Layer               | Modules                                                                                                                                                                                                                                                                                                                                         | Role                                                                                                                                                                                                                                                                                                                 |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bootstrap           | `bootstrap/index.ts`, `bootstrap/cli.ts`, `bootstrap/binary-check.ts`, `bootstrap/config.ts`, `bootstrap/reconcile.ts`                                                                                                                                                                                                                          | CLI entry (`doctor`/`uninstall`/boot), informative startup preflight lines (via `services/infra/preflight.ts`), `StartupError` for config failures, config load/bootstrap, boot session reconcile, then wire routes + SSE and start poller/watcher.                                                                  |
+| Routes              | `routes/index.ts`, `routes/cards.route.ts`, `routes/board.route.ts`, `routes/sse.route.ts`, `routes/loopback.ts`                                                                                                                                                                                                                                | Loopback-gated REST router, the hand-rolled SSE broadcast endpoint, and the loopback request guard.                                                                                                                                                                                                                  |
+| Linear + mapping    | `adapters/poller.ts`, `store/mapping.ts`                                                                                                                                                                                                                                                                                                        | GraphQL poll loop and the pure issue-versus-card reconcile mapping.                                                                                                                                                                                                                                                  |
+| Store               | `store/board.store.ts`                                                                                                                                                                                                                                                                                                                          | Single-writer card store: serialized mutation queue, atomic persist, snapshot ordering.                                                                                                                                                                                                                              |
+| Services (start)    | `services/orchestration/start-session.ts`, `services/orchestration/steps.ts`, `services/domain/kickoff.ts`                                                                                                                                                                                                                                      | Start-saga runner, its do/undo steps, and the pure kickoff-prompt builder.                                                                                                                                                                                                                                           |
+| Services (sessions) | `services/orchestration/cleanup.ts`, `services/infra/config-holder.ts`, `services/domain/workspace-paths.ts`                                                                                                                                                                                                                                    | Teardown saga, the orchestration-config holder (routes read config through it, value-free 400 when unset), and the canonical worktree-path builder.                                                                                                                                                                  |
+| Claude accounts     | `services/domain/claude-accounts.ts`, `services/domain/claude-launch.ts`, `services/orchestration/claude-login.ts`, `services/orchestration/claude-usage.ts`, `services/orchestration/claude-account-ops.ts`, `adapters/claude-cli.ts`, `adapters/claude-login.ts`, `adapters/claude-usage.ts`, `routes/accounts.route.ts`, `store/data-dir.ts` | The account registry, per-account config dirs and the pure launch builder (domain); the CLI login state machine, the usage poll and cache, and the account operations that compose CLI calls (orchestration); the CLI, login-process and usage adapters; their routes; and the data-dir resolver every layer shares. |
+| Markers             | `adapters/markers/parse.ts`, `adapters/markers/scan-decision.ts`, `adapters/markers/pane-view.ts`, `adapters/markers/watcher.ts`                                                                                                                                                                                                                | Pure marker parser, the pure per-tick decision core, the pane-view helpers, and the I/O-shell pane watcher applying one card decision per tick.                                                                                                                                                                      |
+| Adapters            | `adapters/exec.ts`, `adapters/git.ts`, `adapters/tmux.ts`, `adapters/ttyd.ts`, `adapters/claude-trust.ts`, `adapters/editors.ts`, `adapters/resolve-binary.ts`                                                                                                                                                                                  | The argv-only subprocess chokepoint, the git / tmux / ttyd / claude-trust adapters over it, editor launch, and binary-path resolution.                                                                                                                                                                               |
+| Shared              | `shared/types.ts`                                                                                                                                                                                                                                                                                                                               | Pure cross-half contracts; `BoardSnapshot` is both the SSE payload and the on-disk board file.                                                                                                                                                                                                                       |
+| Frontend            | `web/App.tsx`, `web/features/board/Board.tsx`, `web/features/board/Card.tsx`, `web/features/detail/DetailPanel.tsx`, plus hooks, dialogs, and sync strip                                                                                                                                                                                        | React board: optimistic drag-and-drop, the detail slide-over with the terminal iframe, SSE hooks.                                                                                                                                                                                                                    |
 
 ## Cross-Module Invariants
 
@@ -1574,6 +1576,55 @@ each is scoped to a single function: `capturePane`'s `-J` soft-wrap rejoin (`NEW
 NAMED buffers (`NEW-09`). `paneSize`'s dual width+height fetch (`NEW-03`/`NEW-04`) is the
 false-flip guard homed in [Watcher Discriminator](#watcher-discriminator).
 
+### Claude Accounts
+
+Dispatch can launch sessions on more than one Claude login. The mechanism is isolation by
+config directory, never credential copying: each added account owns
+`~/.dispatch/claude-accounts/<uuid>/`, and a session on that account receives
+`CLAUDE_CONFIG_DIR=<that dir>` through the tmux `-e` env injection. Claude Code then stores and
+refreshes that account's OAuth tokens itself, in the keychain item it derives from the config dir
+(`Claude Code-credentials-<first 8 hex of sha256(dir)>` on Claude Code 2.1+). Dispatch never reads
+a token except inside the usage fetch (`adapters/claude-usage.ts`), never writes one, never
+refreshes one, and never touches the home login: the Default account is the user's own `~/.claude`
+and passes no variable at all. Copying tokens into the shared runtime on every switch is the
+design the reference implementation (Orca) uses, and it is where its re-login loops and
+token-wipe bugs live; do not reintroduce it.
+
+**The account dir is a symlink farm, home wins.** `materializeConfigDir` links every entry of
+`~/.claude` into the account dir except the blocklist in `services/domain/claude-accounts.ts`
+(`.claude.json` and its lock and backups, `.credentials.json`, and the per-login state dirs), and
+copies `.claude.json` once with `oauthAccount` removed so the account's first REPL skips onboarding
+and inherits the trust map. It re-runs before every launch, so a link Claude Code turned into a
+real file heals itself and edits made from inside an account session are discarded. Everything an
+account session sees (settings, skills, agents, plugins, projects, memory) is therefore the home
+copy; the account changes billing only.
+
+**Launch resolves the pointer, never guesses.** `config.activeClaudeAccountId` is a pointer, not
+a membership guarantee: the registry can be edited out of band. `resolveLaunchAccount` proves the
+id is registered and its dir exists before `buildClaudeLaunch` produces the argv and env for
+`newSession`; an unresolvable pointer fails the start step with a value-free error and creates no
+tmux session. A resume launches on the account recorded on the session (`Session.claudeAccountId`),
+not on the current pointer, so switching never moves a live conversation. Both the hooks branch and
+the no-hooks branch of every launch site pass the same env: the builder is the single place the
+variable is added, so one branch cannot drift.
+
+**Usage is polled, never refreshed.** `services/orchestration/claude-usage.ts` reads each account's
+access token into memory only, calls the OAuth usage endpoint every 15 minutes (the cadence the
+reference implementation settled on because tighter polling 429s), and caches a status-tagged
+snapshot. A 401 or 403 keeps the last windows and marks them `stale`; Dispatch does not rotate the
+refresh token, because a second rotator races the live REPL and logs both out. The manual refresh
+route is limited to one call per account per 30 seconds.
+
+**The data dir has one resolver.** `store/data-dir.ts` owns the `DISPATCH_DIR` override (else
+`~/.dispatch`) because the store and the adapters may not import `services/infra/paths.ts`; before
+it existed every layer re-derived `~/.dispatch` on its own and an isolated second instance opened
+the live instance's database. `adapters/tmux.ts` is the one documented duplicate, because the
+subprocess adapters may import only themselves and `shared`.
+
+**Trust is pre-seeded per config dir.** `preSeedTrust(workspacePath, configDir)` writes into
+`<configDir>/.claude.json` for an added account and into the home file for Default, since Claude
+Code reads the trust map from the config dir it runs under.
+
 ### Orchestration Saga
 
 Dragging a ticket into In Progress runs the start saga (`services/orchestration/start-session.ts` +
@@ -1662,6 +1713,11 @@ tmux/ttyd/git/claude call routes through the single argv-array exec adapter" wor
 carve-out: the ttyd spawn is still argv-array only, it just cannot be an awaited `execFile`. It uses
 argv **arrays** only — no shell strings, no template literals assembling command lines, and no
 synchronous spawns — because command injection is the top threat for this phase.
+
+**Three sanctioned spawn shapes, no fourth.** `run()` (capture and await), `runInherit()` (stdio
+inherited for interactive installs), and `spawnPiped()` (every stream piped, for the one adapter
+that must write to a child's stdin: the Claude login's pasted code, `adapters/claude-login.ts`).
+All three are argv arrays with no shell; a new caller picks one of them, never adds a fourth.
 
 The guarantee is **argv-array-only invocation**, and that is the whole of it. It is NOT that
 untrusted values stay out of argv, and no code should be written on that assumption. Two prompt

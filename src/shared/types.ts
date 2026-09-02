@@ -285,6 +285,11 @@ export interface Card {
    */
   sessions?: Session[];
   /**
+   * WIRE-ONLY: the active session's `claudeAccountId`, derived at the `redactCard` chokepoint
+   * from the session record so the detail panel can name the account. Never stored on the card.
+   */
+  claudeAccountId?: string;
+  /**
    * The id of this card's ACTIVE session within `sessions` — the one the six flat fields mirror.
    * Paired 1:1 with `sessions` being present; absent on a card that has never carried session
    * data. The store's `setActiveSession` chokepoint is the only writer of either field.
@@ -474,6 +479,12 @@ export interface Session {
   /** Port of the per-session ttyd instance. Mirrored onto `Card.ttydPort` while active. */
   ttydPort?: number;
   /**
+   * The Claude account this session was launched on (`default` or a registry id). Owned by the
+   * session, never projected onto the card's flat fields; a resume relaunches on this account.
+   * NON-SECRET: a uuid, rides `snapshot()` unredacted.
+   */
+  claudeAccountId?: string;
+  /**
    * Per-session hook-auth secret. NEVER serialized to the wire — the store's
    * `redactCard`/`snapshot()` chokepoint strips it from the card AND from every session copy,
    * matching `Card.hookToken`'s policy exactly.
@@ -601,6 +612,8 @@ export interface SessionSummary {
   ordinal: number;
   /** True when `Session.tmuxSession` is absent — this sibling's own terminal is dead. */
   lost: boolean;
+  /** Mirrors `Session.claudeAccountId`; absent for sessions that predate account tagging. */
+  claudeAccountId?: string;
   /**
    * Mirrors {@link Session.cleanupBlocked} for THIS session. Absent when this session is not
    * blocked — same absent-means-nothing-to-report idiom as `sessionSummaries` itself, which is
@@ -678,6 +691,8 @@ export interface SessionFields {
   tmuxSession: string;
   /** Port of the per-session ttyd instance (Phase 3). */
   ttydPort?: number;
+  /** The Claude account the session launched on; absent means the home login. */
+  claudeAccountId?: string;
 }
 
 /**
@@ -917,6 +932,11 @@ export interface Config {
    * arguments" (Claude's normal permission prompts) rather than falling back to the default.
    */
   claudeArgs?: string;
+  /**
+   * The Claude account new sessions launch on; absent or `default` means the user's own home
+   * login. Added accounts are registry ids under `claude-accounts/`.
+   */
+  activeClaudeAccountId?: string;
   /** Terminal appearance chosen in Settings; absent or invalid resolves to the shipped translucent default. */
   terminal?: TerminalAppearance;
 }
@@ -929,6 +949,46 @@ export interface TerminalAppearance {
   fontFamily: string;
   fontSize: number;
 }
+
+export const DEFAULT_CLAUDE_ACCOUNT_ID = "default";
+
+export const MAX_LOGIN_CODE_LEN = 512;
+
+export interface ClaudeUsageWindow {
+  kind: string;
+  label: string;
+  percent: number;
+  resetsAt: string | null;
+  isActive: boolean;
+}
+
+export type ClaudeUsageStatus =
+  "ok" | "stale" | "unavailable" | "rate-limited" | "error";
+
+export interface ClaudeUsageSnapshot {
+  status: ClaudeUsageStatus;
+  windows: ClaudeUsageWindow[];
+  fetchedAt: string | null;
+  error?: string;
+}
+
+export interface ClaudeAccountSummary {
+  id: string;
+  email: string;
+  orgName: string;
+  subscriptionType: string;
+  isDefault: boolean;
+  lastLoginAt?: string;
+  usage: ClaudeUsageSnapshot;
+}
+
+export type ClaudeLoginView =
+  | { state: "idle" }
+  | { state: "starting"; accountId: string }
+  | { state: "awaiting-code"; accountId: string; url: string }
+  | { state: "finishing"; accountId: string }
+  | { state: "done"; account: ClaudeAccountSummary }
+  | { state: "error"; message: string };
 
 /**
  * The runtime-mutable filter selection for a source. An empty array (or `currentCycle: false`) means

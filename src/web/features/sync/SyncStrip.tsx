@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import {
   Activity,
   Inbox,
@@ -123,6 +123,7 @@ interface SyncStripProps {
   onOpenCreateTicket: () => void;
   viewMode?: "board" | "workspace";
   onSelectViewMode?: (mode: "board" | "workspace") => void;
+  accountSlot?: ReactNode;
 }
 
 function formatSynced(syncedTs: number, now: number): string {
@@ -150,6 +151,7 @@ export function SyncStrip({
   onOpenCreateTicket,
   viewMode,
   onSelectViewMode,
+  accountSlot,
 }: SyncStripProps) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -328,6 +330,7 @@ export function SyncStrip({
         </div>
         <span aria-hidden="true" style={dividerStyle} />
         <div style={{ ...utilityClusterStyle, gap: itemGap }}>
+          {accountSlot}
           <div
             role="status"
             aria-live="polite"

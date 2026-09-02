@@ -92,3 +92,20 @@ test("the sibling flat-key writers each merge only their own key", () => {
   assert.equal(written.port, 4712);
   assert.deepEqual(written.terminal, DEFAULT_TERMINAL_APPEARANCE);
 });
+
+test("loadConfig carries a stored activeClaudeAccountId through to the runtime config", () => {
+  writeConfig({
+    activeClaudeAccountId: "11111111-1111-4111-8111-111111111111",
+  });
+  assert.equal(
+    loadConfig().activeClaudeAccountId,
+    "11111111-1111-4111-8111-111111111111",
+  );
+});
+
+test("loadConfig leaves the pointer absent when the key is missing, empty, or not a string", () => {
+  for (const value of [undefined, "", "   ", 7, null]) {
+    writeConfig(value === undefined ? {} : { activeClaudeAccountId: value });
+    assert.equal("activeClaudeAccountId" in loadConfig(), false, String(value));
+  }
+});

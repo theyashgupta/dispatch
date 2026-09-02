@@ -1,13 +1,27 @@
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { DISPATCH_DATA_DIR } from "../../store/data-dir.js";
 
 /**
  * Canonical `~/.dispatch` root — the single source of truth for on-disk config/playbook locations,
  * living in the services layer so both bootstrap (config.ts) and services (playbooks.ts) can import
  * it without either re-deriving `os.homedir()` or crossing the services→bootstrap boundary.
+ * `DISPATCH_DIR` in the environment relocates it so a second instance can boot isolated from the
+ * live one; the user's own Claude config never follows the override.
  */
-export const DISPATCH_DIR = path.join(os.homedir(), ".dispatch");
+export const DISPATCH_DIR = DISPATCH_DATA_DIR;
+
+export const CLAUDE_HOME_DIR = path.join(os.homedir(), ".claude");
+
+export const CLAUDE_HOME_JSON_PATH = path.join(os.homedir(), ".claude.json");
+
+export const CLAUDE_ACCOUNTS_DIR = path.join(DISPATCH_DIR, "claude-accounts");
+
+export const CLAUDE_ACCOUNTS_REGISTRY_PATH = path.join(
+  CLAUDE_ACCOUNTS_DIR,
+  "accounts.json",
+);
 
 /**
  * `config.json` location, homed in `services` so both the bootstrap loader and a future services-layer

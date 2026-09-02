@@ -202,6 +202,7 @@ export async function startSession(
         workspacePath: ctx.workspacePath,
         branch: sessionName,
         tmuxSession: session,
+        claudeAccountId: ctx.claudeAccountId,
       });
       if (card.workspace?.folder) {
         await store.setLastUsedFolder(card.workspace.folder);

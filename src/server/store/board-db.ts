@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { DISPATCH_DATA_DIR } from "./data-dir.js";
 import { DatabaseSync } from "node:sqlite";
 import type {
   ActivityEvent,
@@ -10,8 +10,7 @@ import type {
   EventType,
 } from "../../shared/types.js";
 
-const BOARD_DIR = path.join(os.homedir(), ".dispatch");
-export const BOARD_DB_PATH = path.join(BOARD_DIR, "board.db");
+export const BOARD_DB_PATH = path.join(DISPATCH_DATA_DIR, "board.db");
 
 /** Hardcoded snapshot-backup slot count (`.bak.1` .. `.bak.5`); no config surface (BAK-01). */
 export const BACKUP_SLOTS = 5;
@@ -434,7 +433,7 @@ function toMeta(parsed: Partial<BoardSnapshot>): BoardMeta {
  * @see docs/ARCHITECTURE.md#single-writer-store
  */
 export function openBoardDb(): BoardDb {
-  fs.mkdirSync(BOARD_DIR, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(DISPATCH_DATA_DIR, { recursive: true, mode: 0o700 });
   const db = connect();
   db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   db.exec("PRAGMA journal_mode = WAL");

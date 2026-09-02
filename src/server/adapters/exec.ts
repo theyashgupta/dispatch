@@ -60,7 +60,8 @@ function armKillEscalation(
  * with perfectly valid stdout when its `-p` list names a pid that has since died, so a caller must
  * be able to tell "exited 1, parse the stdout anyway" from "binary missing, give up".
  * `killEscalationMs` (opt-in, inert when unset) arms {@link armKillEscalation} for callers whose
- * child may ignore the abort/timeout SIGTERM (headless `claude -p` drafts).
+ * child may ignore the abort/timeout SIGTERM (headless `claude -p` drafts). `env` adds variables on
+ * top of the inherited process environment (a per-account `CLAUDE_CONFIG_DIR`), never replaces it.
  * @remarks Uses the Node built-in `execFile`, NOT execa — execa is not installed and none is
  * added (NEW-11). The promisified `execFile` rejects with `.stderr`/`.stdout` populated on Node
  * 22, and that captured stderr IS the card's error payload; swapping in a library whose rejection
@@ -76,12 +77,17 @@ export async function run(
     maxBuffer?: number;
     signal?: AbortSignal;
     killEscalationMs?: number;
+    env?: Record<string, string>;
   } = {},
 ): Promise<ExecResult> {
   const t0 = perfExec ? performance.now() : 0;
   const shape = perfExec ? [cmd, ...args.slice(0, 2)].join(" ") : "";
-  const { killEscalationMs, ...execOpts } = opts;
-  const pending = execFileP(cmd, args, { ...execOpts, encoding: "utf8" });
+  const { killEscalationMs, env, ...execOpts } = opts;
+  const pending = execFileP(cmd, args, {
+    ...execOpts,
+    ...(env ? { env: { ...process.env, ...env } } : {}),
+    encoding: "utf8",
+  });
   const disarm =
     killEscalationMs === undefined
       ? null
@@ -152,5 +158,22 @@ export function runInherit(cmd: string, args: string[]): Promise<number> {
     const child = spawn(cmd, args, { stdio: "inherit" });
     child.on("error", () => resolve(-1));
     child.on("exit", (code) => resolve(code ?? -1));
+  });
+}
+
+/**
+ * Spawn a long-lived argv-only child with every stdio stream piped, for the one adapter that must
+ * write to a child's stdin (the Claude login's pasted code). Same no-shell guarantee as {@link run};
+ * the caller owns the lifetime.
+ */
+export function spawnPiped(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; env?: Record<string, string> } = {},
+): ChildProcess {
+  return spawn(cmd, args, {
+    ...(opts.cwd ? { cwd: opts.cwd } : {}),
+    env: opts.env ? { ...process.env, ...opts.env } : process.env,
+    stdio: ["pipe", "pipe", "pipe"],
   });
 }

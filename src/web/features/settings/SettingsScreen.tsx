@@ -1,3 +1,5 @@
+import { AccountsTab } from "../accounts/index.js";
+import type { ClaudeAccountsState } from "../../hooks/useClaudeAccounts.js";
 import {
   useCallback,
   useEffect,
@@ -27,6 +29,7 @@ import {
   Trash2,
   X,
   type LucideIcon,
+  Users,
 } from "lucide-react";
 import {
   DEFAULT_CLAUDE_ARGS,
@@ -100,6 +103,7 @@ export type SettingsTab =
   | "workspaces"
   | "playbooks"
   | "vault"
+  | "accounts"
   | "remote"
   | "notifications"
   | "cleanup"
@@ -3205,6 +3209,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "workspaces", label: "Workspaces", icon: FolderGit2 },
   { id: "playbooks", label: "Playbooks", icon: ClipboardList },
   { id: "vault", label: "Vault", icon: KeyRound },
+  { id: "accounts", label: "Accounts", icon: Users },
   { id: "remote", label: "Remote", icon: Globe },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "cleanup", label: "Cleanup", icon: Trash2 },
@@ -3370,6 +3375,7 @@ function SettingsNavItem({
 interface SettingsScreenProps {
   onClose: () => void;
   initialTab?: SettingsTab;
+  claudeAccounts: ClaudeAccountsState;
   tunnelState: TunnelState;
   soundEnabled: boolean;
   onToggleSound: (enabled: boolean) => void;
@@ -3378,6 +3384,7 @@ interface SettingsScreenProps {
 export function SettingsScreen({
   onClose,
   initialTab = "filters",
+  claudeAccounts,
   tunnelState,
   soundEnabled,
   onToggleSound,
@@ -3493,6 +3500,9 @@ export function SettingsScreen({
             <SettingsScreen.PlaybooksTab playbooksTab={playbooksTab} />
           )}
           {tab === "vault" && <SettingsScreen.VaultTab vaultTab={vaultTab} />}
+          {tab === "accounts" && (
+            <SettingsScreen.AccountsTab claudeAccounts={claudeAccounts} />
+          )}
           {tab === "remote" && (
             <SettingsScreen.RemoteTab
               tunnelState={tunnelState}
@@ -3613,6 +3623,7 @@ SettingsScreen.TerminalTab = TerminalTabSection;
 SettingsScreen.WorkspacesTab = WorkspacesTabSection;
 SettingsScreen.PlaybooksTab = PlaybooksTabSection;
 SettingsScreen.VaultTab = VaultTabSection;
+SettingsScreen.AccountsTab = AccountsTab;
 SettingsScreen.RemoteTab = RemoteTabSection;
 SettingsScreen.NotificationsTab = NotificationsTabSection;
 SettingsScreen.CleanupTab = CleanupTabSection;

@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { DISPATCH_DATA_DIR } from "./data-dir.js";
 import type {
   ActivityEvent,
   BoardSnapshot,
@@ -36,8 +36,7 @@ import {
 import { NEEDS_INPUT_MARKER_PREFIX } from "../../shared/marker-key.js";
 import { isStartingCard, reconcile } from "./mapping.js";
 
-const BOARD_DIR = path.join(os.homedir(), ".dispatch");
-export const BOARD_PATH = path.join(BOARD_DIR, "board.json");
+export const BOARD_PATH = path.join(DISPATCH_DATA_DIR, "board.json");
 
 /** Milliseconds in a day, for resolving `cleanupDelayMs` from a day count (`LIFE-02`). */
 const MS_PER_DAY = 86_400_000;
@@ -120,6 +119,10 @@ export function redactCard(card: Card): Card {
   const wireCard = { ...card };
   delete wireCard.hookToken;
   delete wireCard.sessions;
+  const activeAccount = card.sessions?.find(
+    (s) => s.id === card.activeSessionId,
+  )?.claudeAccountId;
+  if (activeAccount !== undefined) wireCard.claudeAccountId = activeAccount;
   const hasMultipleSessions = (card.sessions?.length ?? 0) >= 2;
   wireCard.sessionCount = hasMultipleSessions
     ? card.sessions!.length
@@ -136,6 +139,7 @@ export function redactCard(card: Card): Card {
       id: s.id,
       ordinal: i + 1,
       lost: s.tmuxSession == null,
+      claudeAccountId: s.claudeAccountId,
       cleanupBlocked: s.cleanupBlocked,
       prs: s.prs,
       prsUnknown: s.prsUnknown,
@@ -2570,6 +2574,7 @@ class BoardStore extends EventEmitter {
           tmuxSession: s.tmuxSession,
           ttydPort: s.ttydPort,
           branch: s.branch,
+          claudeAccountId: s.claudeAccountId,
         },
         sessionId,
         sessionId !== undefined,
@@ -2666,7 +2671,11 @@ class BoardStore extends EventEmitter {
    * gated on that same derived full loss.
    * @see docs/ARCHITECTURE.md#in-review-lifecycle
    */
-  recordResumeFailure(id: string, sessionId?: string): Promise<void> {
+  recordResumeFailure(
+    id: string,
+    sessionId?: string,
+    reason?: string,
+  ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card) return [];
@@ -2691,8 +2700,9 @@ class BoardStore extends EventEmitter {
         card.previews = undefined;
         card.previewsUnknown = undefined;
       }
-      card.resumeError =
-        "Resume failed. The worktree may be gone. Use Restart to begin a fresh session in the same branch.";
+      card.resumeError = reason
+        ? `Resume failed: ${reason}`
+        : "Resume failed. The worktree may be gone. Use Restart to begin a fresh session in the same branch.";
       return [this.event("resume_failed", { cardId: id })];
     });
   }
