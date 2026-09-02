@@ -1,3 +1,4 @@
+import path from "node:path";
 import { Router, type Request, type Response } from "express";
 import { COLUMNS, type Card, type Column } from "../../shared/types.js";
 import { isDemoteEligible } from "../../shared/demote-eligibility.js";
@@ -943,8 +944,9 @@ cardsRouter.post("/cards", async (req, res) => {
 /**
  * Serve one stored attachment from the card's own folder.
  *
- * @remarks Both params are regex-checked and the file is sent with the `root` option, so the
- * request can never name a path outside `attachmentsDir(id)`.
+ * @remarks Both params are regex-checked, the resolved path must stay under the card folder, and
+ * the file is sent with the `root` option, so the request can never name a path outside
+ * `attachmentsDir(id)`.
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
 function serveAttachment(req: Request, res: Response): void {
@@ -953,12 +955,18 @@ function serveAttachment(req: Request, res: Response): void {
     res.status(400).json({ error: "invalid-attachment" });
     return;
   }
+  const dir = attachmentsDir(id);
+  const file = path.resolve(dir, name);
+  if (!file.startsWith(dir + path.sep)) {
+    res.status(400).json({ error: "invalid-attachment" });
+    return;
+  }
   res.set({
     "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "sandbox",
     "Cache-Control": "private, max-age=31536000, immutable",
   });
-  res.sendFile(name, { root: attachmentsDir(id), dotfiles: "deny" }, (err) => {
+  res.sendFile(path.basename(file), { root: dir, dotfiles: "deny" }, (err) => {
     if (err && !res.headersSent) res.status(404).json({ error: "not-found" });
   });
 }
