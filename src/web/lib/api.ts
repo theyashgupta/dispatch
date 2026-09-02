@@ -376,11 +376,12 @@ export async function generatePlaybookDraft(input: {
 export async function generateTicketDraft(
   direction: string,
   signal: AbortSignal,
+  images: readonly string[] = [],
 ): Promise<{ ok: true; title: string; description: string } | { ok: false }> {
   const res = await fetch("/api/cards/draft", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ direction }),
+    body: JSON.stringify({ direction, images }),
     signal,
   });
   if (!res.ok) {
@@ -425,12 +426,13 @@ export async function generateGroupTitle(
 export async function createLocalTicket(
   title: string,
   description: string,
+  images: readonly string[] = [],
 ): Promise<{ ok: true; card: Card } | { ok: false; error: string | null }> {
   try {
     const res = await fetch("/api/cards", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, description }),
+      body: JSON.stringify({ title, description, images }),
     });
     if (res.status === 400) {
       const body = (await res.json().catch(() => ({}))) as { error?: string };
