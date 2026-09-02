@@ -42,11 +42,17 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 /**
  * Pre-seed `hasTrustDialogAccepted: true` for `workspacePath` (exact absolute path, no
- * trailing slash) in `~/.claude.json`. Returns true only if the write is verified by re-read;
+ * trailing slash) in the `.claude.json` Claude Code will read: the one inside `configDir` for an
+ * added account, else the home file. Returns true only if the write is verified by re-read;
  * returns false (without writing) on any read/parse failure. Never throws.
  */
-export function preSeedTrust(workspacePath: string): Promise<boolean> {
-  const claudeJsonPath = path.join(os.homedir(), ".claude.json");
+export function preSeedTrust(
+  workspacePath: string,
+  configDir?: string,
+): Promise<boolean> {
+  const claudeJsonPath = configDir
+    ? path.join(configDir, ".claude.json")
+    : path.join(os.homedir(), ".claude.json");
 
   return withSeedLock(async () => {
     for (let attempt = 1; attempt <= MAX_SEED_ATTEMPTS; attempt++) {

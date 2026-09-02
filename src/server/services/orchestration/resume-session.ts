@@ -1,8 +1,13 @@
 import path from "node:path";
-import { DEFAULT_CLAUDE_ARGS } from "../../../shared/types.js";
+import {
+  DEFAULT_CLAUDE_ACCOUNT_ID,
+  DEFAULT_CLAUDE_ARGS,
+} from "../../../shared/types.js";
 import { store } from "../../store/board.store.js";
 import { hasSession, killSession, newSession } from "../../adapters/tmux.js";
 import { preSeedTrust } from "../../adapters/claude-trust.js";
+import { resolveLaunchAccount } from "../domain/claude-accounts.js";
+import { buildClaudeLaunch } from "../domain/claude-launch.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { awaitReplReady, StartStepError } from "./steps.js";
 import { parseClaudeArgs } from "../domain/claude-args.js";
@@ -14,6 +19,8 @@ import { newHookTokenValue, registerHookToken } from "../domain/hook-tokens.js";
 import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
 import { REATTACH_STATUS_CLEAR_MS } from "./start-session.js";
 import { ensureTerminal } from "./terminal.js";
+
+const ACCOUNT_STEP = "resolving Claude account";
 
 /**
  * Column-preserving Resume for a dead In Review session (REV-04): relaunch `claude --continue` in
@@ -94,7 +101,17 @@ export async function resumeSession(cardId: string): Promise<void> {
       return;
     }
 
-    await preSeedTrust(card.workspacePath);
+    const recorded = card.sessions?.find((s) => s.id === sessionId);
+    const account = await resolveLaunchAccount(
+      recorded?.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID,
+    ).catch((err: unknown) => {
+      throw new StartStepError(
+        ACCOUNT_STEP,
+        err instanceof Error ? err.message : String(err),
+        "config",
+      );
+    });
+    await preSeedTrust(card.workspacePath, account.configDir);
     const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
     const claudeArgs = parseClaudeArgs(
       getOrchestrationConfig()?.claudeArgs ?? DEFAULT_CLAUDE_ARGS,
@@ -111,32 +128,29 @@ export async function resumeSession(cardId: string): Promise<void> {
       );
       if (mintedSessionId !== undefined) {
         registerHookToken(token, cardId, mintedSessionId, previousToken);
-        await newSession(
-          session,
-          card.workspacePath,
-          [
-            claudePath,
-            ...resumeArgs,
-            "--settings",
-            HOOK_SETTINGS_PATH,
-            ...claudeArgs,
-          ],
-          {
-            DISPATCH_HOOK_PORT: String(runtime.port),
-            DISPATCH_HOOK_TOKEN: token,
-            DISPATCH_CARD_ID: cardId,
-          },
-        );
+        const launch = buildClaudeLaunch({
+          claudePath,
+          claudeArgs,
+          leadingArgs: resumeArgs,
+          settingsPath: HOOK_SETTINGS_PATH,
+          hooks: { port: runtime.port, token, cardId },
+          configDir: account.configDir,
+        });
+        await newSession(session, card.workspacePath, launch.argv, launch.env);
         launchedHooksCapable = true;
       }
     }
     if (!launchedHooksCapable) {
       await store.clearHookChannel(cardId);
-      await newSession(session, card.workspacePath, [
+      const launch = buildClaudeLaunch({
         claudePath,
-        ...resumeArgs,
-        ...claudeArgs,
-      ]);
+        claudeArgs,
+        leadingArgs: resumeArgs,
+        settingsPath: HOOK_SETTINGS_PATH,
+        hooks: null,
+        configDir: account.configDir,
+      });
+      await newSession(session, card.workspacePath, launch.argv, launch.env);
     }
     await awaitReplReady(session);
     await store.resumeSession(cardId, { session }, sessionId);
@@ -147,8 +161,14 @@ export async function resumeSession(cardId: string): Promise<void> {
     await ensureTerminal(cardId, sessionId, session);
   } catch (err) {
     if (killTarget != null) await killSession(`=${killTarget}`);
-    await store.recordResumeFailure(cardId, sessionId);
     const step = err instanceof StartStepError ? err.step : "unknown step";
+    await store.recordResumeFailure(
+      cardId,
+      sessionId,
+      err instanceof StartStepError && err.step === ACCOUNT_STEP
+        ? err.stderr
+        : undefined,
+    );
     console.error(`[resume] failed for card ${cardId} (${step})`);
   } finally {
     store.endStart(cardId);
