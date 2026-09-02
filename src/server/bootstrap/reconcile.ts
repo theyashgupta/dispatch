@@ -19,10 +19,11 @@ import { registerHookToken } from "../services/domain/hook-tokens.js";
  * two sibling sessions collide on one derived name at N greater than 1) and no null-guard either:
  * `sessionsWithTmux()` now carries the non-null `tmuxSession` in its RETURN TYPE, so the
  * narrowing costs no dead runtime branch — the same justification that removed the fallback; IN-02 empty-map baseline
- * recovery (a dead server degrades to an empty live Set, never a crash); IN-03 skips To Do and
- * Done ONLY for session-lost marking/Restart-promotion — a card with a live session in either
- * column still falls through to hookToken re-registration and ttyd candidacy below, which a
- * deferred-cleanup Done card now legitimately needs for days; IN-04 orphaned-ttyd teardown, now
+ * recovery (a dead server degrades to an empty live Set, never a crash); IN-03 skips ONLY To Do
+ * for session-lost marking. Done is marked lost like any live column: a Done card whose tmux
+ * died while the backend was down must offer Resume, not a stale `tmuxSession` whose Reconnect
+ * dead-ends on a vanished pane (the deferred-cleanup case is guarded by `isCleaningUp`, not by
+ * column); IN-04 orphaned-ttyd teardown, now
  * adopt-then-narrow-sweep rather than reap-everything; tolerant swallow-to-default (NEW-10) via
  * `listSessions`; a session whose adoption attempt fails clears its own stale `ttydPort` and
  * degrades to exactly the pre-ROBU-01 reap+respawn behavior.
@@ -52,7 +53,7 @@ export async function reconcileSessions(): Promise<void> {
   for (const { card, session } of store.sessionsWithTmux()) {
     const sessionName = session.tmuxSession;
     if (!live.has(sessionName)) {
-      if (card.column !== "todo" && card.column !== "done") {
+      if (card.column !== "todo") {
         await store.markSessionLost(card.id, session.id);
         lost++;
       }

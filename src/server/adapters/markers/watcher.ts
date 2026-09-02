@@ -151,7 +151,7 @@ async function scanSession(
     warnedCaptures.delete(tmuxName);
     captureFailures.delete(tmuxName);
   } catch (err) {
-    if (card.column === "done") return;
+    if (store.isCleaningUp(card.id)) return;
     const fails = (captureFailures.get(tmuxName) ?? 0) + 1;
     if (fails >= 3) {
       captureFailures.delete(tmuxName);

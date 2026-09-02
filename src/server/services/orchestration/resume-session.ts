@@ -23,6 +23,25 @@ import { ensureTerminal } from "./terminal.js";
 const ACCOUNT_STEP = "resolving Claude account";
 
 /**
+ * Reconnect a card's terminal, relaunching the session when its tmux pane is gone.
+ *
+ * @remarks `ensureTerminal` can only respawn ttyd. When the pane itself has vanished (tmux server
+ * killed, reboot) the session is marked lost and the resume saga relaunches `claude --resume` in
+ * the same worktree, so one Reconnect click recovers instead of dead-ending.
+ */
+export async function reconnectTerminal(cardId: string): Promise<void> {
+  const card = store.getCard(cardId);
+  if (!card?.tmuxSession || !card.activeSessionId) return;
+  if (await hasSession(`=${card.tmuxSession}`)) {
+    await ensureTerminal(cardId, card.activeSessionId, card.tmuxSession);
+    return;
+  }
+  if (store.isCleaningUp(cardId)) return;
+  await store.markSessionLost(cardId, card.activeSessionId);
+  await resumeSession(cardId);
+}
+
+/**
  * Column-preserving Resume for a dead In Review session (REV-04): relaunch `claude --continue` in
  * the surviving `card.workspacePath` cwd and reattach its terminal, WITHOUT re-sending a kickoff
  * prompt and WITHOUT ever writing the card's column. Deliberately NOT the start saga — that path

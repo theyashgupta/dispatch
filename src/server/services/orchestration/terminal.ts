@@ -13,6 +13,9 @@ import { captureHistory, hasSession } from "../../adapters/tmux.js";
  * NEW `sessionId` threads separately, only into `ensureTtyd`, so ttyd spawns with the
  * `-b /sessions/<sessionId>/terminal` base-path the session-keyed reverse proxy routes to
  * (PROXY-01) — this is not the same id as `cardId`, and the two must never be conflated.
+ * A vanished tmux pane is recorded as session-lost (skipped while a cleanup is tearing it down),
+ * never as a `died` terminal error: the error variant only offers Reconnect, which can never
+ * bring back a pane that no longer exists, while session-lost offers Resume, which can.
  * SECURITY: no ticket text, port, or secret is echoed in any response or log.
  * @see docs/ARCHITECTURE.md#single-writer-store
  */
@@ -23,10 +26,9 @@ export async function ensureTerminal(
 ): Promise<void> {
   try {
     if (!(await hasSession(`=${session}`))) {
-      await store.setTerminalError(cardId, {
-        variant: "died",
-        stderr: "tmux session no longer exists",
-      });
+      if (!store.isCleaningUp(cardId)) {
+        await store.markSessionLost(cardId, sessionId);
+      }
       return;
     }
     const port = await ensureTtyd(session, sessionId);
