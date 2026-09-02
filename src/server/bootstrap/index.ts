@@ -20,6 +20,7 @@ import {
   terminalProxyUpgrade,
 } from "../adapters/terminal-proxy.js";
 import { probePreflight } from "../services/infra/preflight.js";
+import { startUsagePollLoop } from "../services/orchestration/claude-usage.js";
 import { loadOrCreateVapidKeys } from "../services/infra/push-keys.js";
 import { VAPID_KEYS_PATH } from "../services/infra/paths.js";
 import {
@@ -399,6 +400,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   });
   startArtifactDetectionLoop(port);
   if (config.updateCheck !== false) startUpdateCheckLoop(config);
+  startUsagePollLoop();
   return { port };
 }
 
