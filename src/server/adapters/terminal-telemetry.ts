@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync, statSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { DISPATCH_DATA_DIR } from "../store/data-dir.js";
 import type { Duplex } from "node:stream";
 
 /**
@@ -14,14 +14,7 @@ import type { Duplex } from "node:stream";
  */
 export const telemetryOn = process.env.DISPATCH_TERM_TELEMETRY === "1";
 
-/**
- * Local `.dispatch` sink directory, following `board-db.ts`'s own
- * `path.join(os.homedir(), ".dispatch")` precedent (TERM-04): the `adapters` layer may not import
- * `services/infra/paths.ts` for `DISPATCH_DIR`, so both modules derive the same directory
- * independently rather than sharing a forbidden cross-layer import.
- */
-const TELEMETRY_DIR = path.join(os.homedir(), ".dispatch");
-const TELEMETRY_PATH = path.join(TELEMETRY_DIR, "terminal-telemetry.jsonl");
+const TELEMETRY_PATH = path.join(DISPATCH_DATA_DIR, "terminal-telemetry.jsonl");
 
 const SCHEMA_VERSION = 1;
 
@@ -53,7 +46,7 @@ let connCounter = 0;
  * only disk read this module ever makes, and it runs only when {@link telemetryOn} is true.
  */
 function armSink(): void {
-  mkdirSync(TELEMETRY_DIR, { recursive: true });
+  mkdirSync(DISPATCH_DATA_DIR, { recursive: true });
   try {
     bytesWritten = statSync(TELEMETRY_PATH).size;
   } catch {
