@@ -39,10 +39,17 @@ import { reconcileSessions } from "./reconcile.js";
 import { resolveEditors } from "../adapters/editors.js";
 import { startUpdateCheckLoop } from "../services/orchestration/update.js";
 import { startCleanupScheduler } from "../services/orchestration/cleanup-scheduler.js";
-import { DEFAULT_CLEANUP_DELAY_DAYS } from "../../shared/types.js";
+import {
+  DEFAULT_CLEANUP_DELAY_DAYS,
+  MAX_ATTACHMENTS,
+  MAX_ATTACHMENT_BYTES,
+} from "../../shared/types.js";
 
 const DEFAULT_PORT = 4700;
 const DEFAULT_POLL_INTERVAL_MS = 60_000;
+const ATTACHMENT_BODY_LIMIT = Math.ceil(
+  MAX_ATTACHMENTS * MAX_ATTACHMENT_BYTES * 1.4,
+);
 
 /**
  * Absolute path to the built SPA, resolved relative to this module so it is
@@ -275,6 +282,10 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   const app = express();
   app.use(frameGuardHeaders);
   app.use(remoteAuthRouter);
+  app.post(
+    ["/api/cards", "/api/cards/draft"],
+    express.json({ limit: ATTACHMENT_BODY_LIMIT }),
+  );
   app.use("/api", express.json({ limit: "1mb" }), apiRouter);
   app.use("/sessions", terminalProxyRouter);
 

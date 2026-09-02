@@ -24,6 +24,15 @@ import {
   type GroupTitleMember,
 } from "../services/orchestration/group-title-generate.js";
 import { syncCardToLinear } from "../services/orchestration/linear-sync.js";
+import {
+  ATTACHMENT_NAME_RE,
+  CARD_ID_RE,
+  decodeImages,
+  screenshotsSection,
+  stageAttachments,
+  commitAttachments,
+} from "../services/domain/attachments.js";
+import { attachmentsDir } from "../services/infra/paths.js";
 
 export const cardsRouter = Router();
 
@@ -704,11 +713,18 @@ cardsRouter.post("/cards/group", createGroupHandler);
 let draftInFlight = false;
 
 cardsRouter.post("/cards/draft", (req, res) => {
-  const rawDirection = (req.body as { direction?: unknown } | undefined)
-    ?.direction;
+  const body = req.body as
+    { direction?: unknown; images?: unknown } | undefined;
+  const rawDirection = body?.direction;
   const direction = typeof rawDirection === "string" ? rawDirection.trim() : "";
   if (direction === "" || direction.length > MAX_DIRECTION_LEN) {
     res.status(400).json({ error: "invalid-direction" });
+    return;
+  }
+
+  const images = body?.images === undefined ? [] : decodeImages(body.images);
+  if (images === null) {
+    res.status(400).json({ error: "invalid-images" });
     return;
   }
 
@@ -723,7 +739,7 @@ cardsRouter.post("/cards/draft", (req, res) => {
     if (!res.writableEnded) controller.abort();
   });
 
-  generateTicketDraft(direction, controller.signal)
+  generateTicketDraft(direction, controller.signal, images)
     .then((draft) => {
       if (controller.signal.aborted) return;
       res.status(200).json(draft);
@@ -862,7 +878,7 @@ cardsRouter.post("/cards/group-title", (req, res) => {
 
 cardsRouter.post("/cards", async (req, res) => {
   const body = req.body as
-    { title?: unknown; description?: unknown } | undefined;
+    { title?: unknown; description?: unknown; images?: unknown } | undefined;
 
   const title = typeof body?.title === "string" ? body.title.trim() : "";
   if (title === "" || title.length > MAX_TITLE_LEN) {
@@ -884,9 +900,67 @@ cardsRouter.post("/cards", async (req, res) => {
     return;
   }
 
-  const card = await store.createLocalCard(title, description);
+  const images = body?.images === undefined ? [] : decodeImages(body.images);
+  if (images === null) {
+    res.status(400).json({ error: "invalid-images" });
+    return;
+  }
+
+  const fullDescription =
+    description + screenshotsSection(images.map((i) => i.name));
+  if (fullDescription.length > MAX_DESCRIPTION_LEN) {
+    res.status(400).json({ error: "invalid-description" });
+    return;
+  }
+
+  let staged: string | null;
+  try {
+    staged = await stageAttachments(images);
+  } catch (err) {
+    console.warn("[cards] attachment write failed:", (err as Error).message);
+    res.status(500).json({ error: "attachment-write-failed" });
+    return;
+  }
+  const card = await store.createLocalCard(title, fullDescription);
+  if (staged !== null) {
+    try {
+      await commitAttachments(staged, card.id);
+    } catch (err) {
+      console.warn(
+        `[cards] attachment commit failed for ${card.id}:`,
+        (err as Error).message,
+      );
+      res.status(500).json({ error: "attachment-write-failed" });
+      return;
+    }
+  }
   res.status(201).json(redactCard(card));
 });
+
+/**
+ * Serve one stored attachment from the card's own folder.
+ *
+ * @remarks Both params are regex-checked and the file is sent with the `root` option, so the
+ * request can never name a path outside `attachmentsDir(id)`.
+ * @see docs/ARCHITECTURE.md#security-threat-model
+ */
+function serveAttachment(req: Request, res: Response): void {
+  const { id, name } = req.params as { id: string; name: string };
+  if (!CARD_ID_RE.test(id) || !ATTACHMENT_NAME_RE.test(name)) {
+    res.status(400).json({ error: "invalid-attachment" });
+    return;
+  }
+  res.set({
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "sandbox",
+    "Cache-Control": "private, max-age=31536000, immutable",
+  });
+  res.sendFile(name, { root: attachmentsDir(id), dotfiles: "deny" }, (err) => {
+    if (err && !res.headersSent) res.status(404).json({ error: "not-found" });
+  });
+}
+
+cardsRouter.get("/cards/:id/attachments/:name", serveAttachment);
 
 /**
  * Adoption-time footgun screen (RESEARCH pitfall 4): the adopted title/description come back from
