@@ -620,7 +620,7 @@ export default tseslint.config(
     rules: {
       "check-file/filename-naming-convention": [
         "error",
-        { "src/server/routes/**/*.ts": `${KEBAB}?(.route)` },
+        { "src/server/routes/**/*.ts": `${KEBAB}?(.route)?(.test)` },
         { ignoreMiddleExtensions: false },
       ],
     },
@@ -630,7 +630,7 @@ export default tseslint.config(
     rules: {
       "check-file/filename-naming-convention": [
         "error",
-        { "src/server/store/**/*.ts": `${KEBAB}?(.store)` },
+        { "src/server/store/**/*.ts": `${KEBAB}?(.store)?(.test)` },
         { ignoreMiddleExtensions: false },
       ],
     },
