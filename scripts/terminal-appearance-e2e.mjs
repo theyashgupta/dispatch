@@ -606,7 +606,7 @@ async function main() {
     const APP_HELPERS = `
       const sleepMs = (ms) => new Promise((res) => setTimeout(res, ms));
       const openCard = async () => {
-        localStorage.setItem('dsp.terminal.zoom', '1'); const el = [...document.querySelectorAll('*')].find((e) => e.childElementCount === 0 && e.textContent === ${JSON.stringify(CARD_TITLE)}); el.click(); await sleepMs(2500); };
+        localStorage.setItem('dsp.terminal.zoom', '1'); const el = [...document.querySelectorAll('*')].find((e) => e.childElementCount === 0 && e.textContent === 'Terminal appearance e2e card'); el.click(); await sleepMs(2500); };
       const iframe = () => document.querySelector('iframe[title="Live terminal for E2E-6"]');
       const readIframe = () => { const d = iframe().contentDocument, w = iframe().contentWindow; const cs = (e) => w.getComputedStyle(e); const rows = d.querySelector('.xterm-rows'); return { viewport: cs(d.querySelector('.xterm-viewport')).backgroundColor, fg: cs(rows).color, size: cs(rows).fontSize, font: cs(rows).fontFamily, marker: w.__marker }; };
       const openTab = async () => { if (!document.querySelector('[role=dialog][aria-label=Settings]')) { [...document.querySelectorAll('button,[role=button]')].find((b) => (b.getAttribute('aria-label') || b.textContent || '').trim() === 'Sync filters').click(); await sleepMs(800); } const dlg = document.querySelector('[role=dialog][aria-label=Settings]'); [...dlg.querySelectorAll('nav[aria-label="Settings sections"] button')].find((b) => b.textContent.trim() === 'Terminal').click(); await sleepMs(600); return dlg; };
