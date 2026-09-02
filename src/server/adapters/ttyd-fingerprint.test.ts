@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
+import { run } from "./exec.js";
 import test from "node:test";
 import {
   TTYD_INSTANCE_RETAINED_KEY,
@@ -62,4 +65,21 @@ void test("an unrewritten KEY=1 token still yields the bare instance id", () => 
   const raw = `201 ttyd -b /sessions/abc/terminal -t ${TTYD_RUNTIME_REVISION_RETAINED_KEY}=1 -t ${TTYD_INSTANCE_RETAINED_KEY}=1 tmux attach`;
   const r = classifyDspTtydProcesses(raw, new Set());
   assert.ok(r.compatible.has(201));
+});
+
+void test("the instance key follows DISPATCH_DIR, so two instances under one HOME never share it", async () => {
+  const script =
+    'import("./src/server/adapters/ttyd-fingerprint.ts").then((m) => console.log(m.TTYD_INSTANCE_RETAINED_KEY))';
+  const keyFor = async (dir: string) =>
+    (
+      await run(process.execPath, ["--import", "tsx", "-e", script], {
+        cwd: process.cwd(),
+        env: { ...(process.env as Record<string, string>), DISPATCH_DIR: dir },
+      })
+    ).stdout.trim();
+  const home = await keyFor("");
+  const override = await keyFor(path.join(os.tmpdir(), "dispatch-fp-test"));
+  assert.match(home, /^DISPATCH_TTYD_INSTANCE_[0-9a-f]{12}$/);
+  assert.match(override, /^DISPATCH_TTYD_INSTANCE_[0-9a-f]{12}$/);
+  assert.notEqual(home, override);
 });

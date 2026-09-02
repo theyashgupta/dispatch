@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import os from "node:os";
+import { DISPATCH_DATA_DIR } from "../store/data-dir.js";
 import path from "node:path";
 
 /**
@@ -31,15 +31,16 @@ export const TTYD_RUNTIME_REVISION_RETAINED_KEY = `${TTYD_RUNTIME_REVISION_KEY}_
 const TTYD_INSTANCE_KEY = "DISPATCH_TTYD_INSTANCE";
 
 /**
- * Short stable id of THIS Dispatch instance, derived from its data directory.
+ * Short stable id of THIS Dispatch instance, derived from its resolved data directory.
  *
- * @remarks Two instances on one machine (a dev checkout, a sandbox `HOME`) each own a distinct
- * data directory, so hashing it is what keeps their ttyd processes apart in a machine-wide `ps`
- * scan. The path is re-derived here rather than imported from `services/infra/paths.ts` because
- * adapters may not depend on services; it must stay byte-identical to `DISPATCH_DIR` there.
+ * @remarks Two instances on one machine (a dev checkout, a sandbox `HOME`, a `DISPATCH_DIR`
+ * override) each own a distinct data directory, so hashing it is what keeps their ttyd processes
+ * apart in a machine-wide `ps` scan. It hashes `DISPATCH_DATA_DIR`, the one resolver every layer
+ * shares, never a re-derived `~/.dispatch`: a literal home path ignores `DISPATCH_DIR`, so two
+ * instances under one HOME shared a key and swept each other's terminals on every boot.
  */
 const TTYD_INSTANCE_ID = createHash("sha256")
-  .update(path.join(os.homedir(), ".dispatch"))
+  .update(DISPATCH_DATA_DIR)
   .digest("hex")
   .slice(0, 12);
 
