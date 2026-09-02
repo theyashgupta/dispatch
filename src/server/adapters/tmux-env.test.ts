@@ -33,7 +33,9 @@ void test(
       assert.equal(await tmux.hasSession(name), true);
     } finally {
       await tmux.killSession(`=${name}`);
-      await run("tmux", ["kill-server"]).catch(() => undefined);
+      await run("tmux", [...tmux.TMUX_SERVER_ARGS, "kill-server"]).catch(
+        () => undefined,
+      );
     }
   },
 );

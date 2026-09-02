@@ -933,6 +933,8 @@ cleaned up once after upgrade. `compatible` now requires BOTH keys, which only n
 re-adoption fingerprint. `uninstall` counts and kills through the same classification, so it also
 leaves another instance's ttyd alone.
 
+**tmux servers are scoped per Dispatch instance too.** Every tmux call goes through one wrapper in `adapters/tmux.ts` that prepends `TMUX_SERVER_ARGS`, and the ttyd attach argv carries the same prefix. The home instance (`~/.dispatch`) keeps tmux's default server, so its existing sessions survive an upgrade. Every `DISPATCH_DIR` override instance runs on its own server, `-L dsp-<instance id>`, so a test instance can never capture, resume, or kill the real instance's sessions even when both instances name a session `dsp-LOCAL-9`. To inspect a test instance by hand, pass the same label: `tmux -L dsp-<id> ls`.
+
 **Phase 92 re-keyed the base path from the card to the session (`PROXY-01`), and
 `TTYD_RUNTIME_REVISION` bumped to 6 in the same commit.** `resolveLiveTtydPort`
 (`adapters/terminal-proxy.ts`) now resolves a SESSION id against `store.sessionsWithTmux()` — every
