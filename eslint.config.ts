@@ -410,6 +410,7 @@ export default tseslint.config(
       "eslint-local/**",
       "scripts/**",
       ".claude/**",
+      ".planning/**",
     ],
   },
 
@@ -616,6 +617,17 @@ export default tseslint.config(
         { "src/**/*.d.ts": `${KEBAB}.d` },
         { ignoreMiddleExtensions: false },
       ],
+    },
+  },
+  {
+    files: ["src/**/*.test.ts"],
+    rules: {
+      "check-file/filename-naming-convention": [
+        "error",
+        { "src/**/*.test.ts": "+([a-zA-Z0-9-]).test" },
+        { ignoreMiddleExtensions: false },
+      ],
+      "@typescript-eslint/no-floating-promises": "off",
     },
   },
 
