@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import writeFileAtomic from "write-file-atomic";
-import type {
-  Config,
-  SourceFilters,
-  StatusChannel,
+import {
+  DEFAULT_CLAUDE_ACCOUNT_ID,
+  type Config,
+  type SourceFilters,
+  type StatusChannel,
 } from "../../../shared/types.js";
 import { CONFIG_PATH } from "./paths.js";
 
@@ -284,5 +285,50 @@ export function updateClaudeArgs(args: string): void {
 
   if (orchestrationConfig) {
     orchestrationConfig.claudeArgs = args;
+  }
+}
+
+/**
+ * Persist the active Claude account id (Settings ▸ Accounts, header switcher) and make it live for
+ * the next session start.
+ *
+ * @remarks Same flat top-level shape as {@link updateClaudeArgs}. `default` is stored as an
+ * absent key so an un-migrated config and a reset-to-default config are byte-identical. The
+ * caller has already checked the id exists in the registry; this function never validates it.
+ */
+export function updateActiveClaudeAccountId(id: string): void {
+  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
+  let parsed: Record<string, unknown>;
+  try {
+    const p = JSON.parse(raw) as unknown;
+    if (typeof p !== "object" || p === null || Array.isArray(p)) {
+      throw new Error("not an object");
+    }
+    parsed = p as Record<string, unknown>;
+  } catch (err) {
+    const pos = /position (\d+)/.exec((err as Error).message)?.[1];
+    throw new Error(
+      `config at ${CONFIG_PATH} is not valid JSON${pos ? ` (near position ${pos})` : ""}`,
+      { cause: err },
+    );
+  }
+
+  const next = { ...parsed };
+  delete next.activeClaudeAccountId;
+  if (id !== DEFAULT_CLAUDE_ACCOUNT_ID) {
+    next.activeClaudeAccountId = id;
+  }
+
+  writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
+    mode: 0o600,
+  });
+  fs.chmodSync(CONFIG_PATH, 0o600);
+
+  if (orchestrationConfig) {
+    if (id === DEFAULT_CLAUDE_ACCOUNT_ID) {
+      delete orchestrationConfig.activeClaudeAccountId;
+    } else {
+      orchestrationConfig.activeClaudeAccountId = id;
+    }
   }
 }
