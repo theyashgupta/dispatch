@@ -6,12 +6,17 @@ import type {
   Config,
   SourceFilters,
   StatusChannel,
+  TerminalAppearance,
 } from "../../shared/types.js";
 import {
   DEFAULT_CLAUDE_ARGS,
   DEFAULT_CLEANUP_DELAY_DAYS,
   DEFAULT_FILTERS,
 } from "../../shared/types.js";
+import {
+  DEFAULT_TERMINAL_APPEARANCE,
+  validateTerminalAppearance,
+} from "../../shared/terminal-appearance.js";
 import { StartupError } from "./binary-check.js";
 import { CONFIG_PATH, DISPATCH_DIR } from "../services/infra/paths.js";
 
@@ -46,6 +51,9 @@ const CONFIG_TEMPLATE = {
   "// claudeArgs":
     "Extra CLI arguments passed to `claude` every time a session starts, resumes, or restarts. Leave empty for Claude's normal permission prompts.",
   claudeArgs: DEFAULT_CLAUDE_ARGS,
+  "// terminal":
+    "Terminal appearance (Settings > Terminal): background, opacity (0.3 to 1), foreground, cursor, fontFamily, fontSize (8 to 32). Remove the block to restore the defaults.",
+  terminal: DEFAULT_TERMINAL_APPEARANCE,
 };
 
 /**
@@ -97,6 +105,15 @@ function readCleanupDelayDays(parsed: Record<string, unknown>): number {
 }
 
 /**
+ * Read the `terminal` appearance block: absent, partial, or invalid resolves to the shipped
+ * default, same tolerance posture as {@link readCleanupDelayDays}.
+ */
+function readTerminal(parsed: Record<string, unknown>): TerminalAppearance {
+  const result = validateTerminalAppearance(parsed.terminal);
+  return result.ok ? result.value : DEFAULT_TERMINAL_APPEARANCE;
+}
+
+/**
  * Read the `claudeArgs` preference: a plain string preference, absent or any non-string value
  * resolves to {@link DEFAULT_CLAUDE_ARGS}. Unlike {@link readCleanupDelayDays} there is no range
  * to reject — any string is a valid argv source once tokenized — so a present string is always
@@ -107,6 +124,20 @@ function readClaudeArgs(parsed: Record<string, unknown>): string {
   return typeof parsed.claudeArgs === "string"
     ? parsed.claudeArgs
     : DEFAULT_CLAUDE_ARGS;
+}
+
+/**
+ * Read the `activeClaudeAccountId` pointer: a non-empty string is carried through verbatim, since
+ * membership in the registry is checked at launch, not at boot; anything else resolves to absent
+ * (the home login).
+ */
+function readActiveClaudeAccountId(
+  parsed: Record<string, unknown>,
+): string | undefined {
+  return typeof parsed.activeClaudeAccountId === "string" &&
+    parsed.activeClaudeAccountId.trim() !== ""
+    ? parsed.activeClaudeAccountId
+    : undefined;
 }
 
 /**
@@ -235,7 +266,7 @@ export function loadConfig(): Config {
     fs.chmodSync(CONFIG_PATH, 0o600);
     process.stderr.write(
       `No config found. Wrote a template to ${CONFIG_PATH}.\n` +
-        `Dispatch will boot into first-run setup — add your Linear API key in the browser.\n`,
+        `Dispatch will boot into first-run setup. Add your Linear API key in the browser.\n`,
     );
   }
 
@@ -293,7 +324,7 @@ export function loadConfig(): Config {
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code ?? "write failed";
       process.stderr.write(
-        `[config] could not rewrite ${CONFIG_PATH} to the nested shape (${code}) — continuing with the flat key.\n`,
+        `[config] could not rewrite ${CONFIG_PATH} to the nested shape (${code}), continuing with the flat key.\n`,
       );
     }
   }
@@ -302,7 +333,7 @@ export function loadConfig(): Config {
 
   if (parsed.repoPaths !== undefined || parsed.baseBranches !== undefined) {
     process.stderr.write(
-      "[config] repoPaths is no longer used — add a workspace folder from the start modal.\n",
+      "[config] repoPaths is no longer used. Add a workspace folder from the start modal.\n",
     );
   }
 
@@ -312,6 +343,7 @@ export function loadConfig(): Config {
       ? parsed.workspaceRoot.trim()
       : DEFAULT_WORKSPACE_ROOT;
 
+  const activeClaudeAccountId = readActiveClaudeAccountId(parsed);
   const config: Config = {
     linearApiKey: rawKey,
     port: typeof parsed.port === "number" ? parsed.port : DEFAULT_PORT,
@@ -326,6 +358,8 @@ export function loadConfig(): Config {
     lastUsedPlaybook: readLastUsedPlaybook(parsed),
     cleanupDelayDays: readCleanupDelayDays(parsed),
     claudeArgs: readClaudeArgs(parsed),
+    ...(activeClaudeAccountId !== undefined ? { activeClaudeAccountId } : {}),
+    terminal: readTerminal(parsed),
   };
 
   const hasKey = config.linearApiKey.length > 0;

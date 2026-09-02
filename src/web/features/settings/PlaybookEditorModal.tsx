@@ -15,7 +15,7 @@ import { Notice } from "../../primitives/Notice.js";
 import { FolderBrowserModal } from "../workspaces/index.js";
 
 const FOOTGUN_MESSAGE =
-  "Playbook body can't contain the text DISPATCH_STATUS: — remove it and try again.";
+  "Remove the text DISPATCH_STATUS: from the playbook body and try again.";
 const COLLISION_MESSAGE = "A playbook with that name already exists";
 
 interface PlaybookEditorModalProps {
@@ -196,7 +196,7 @@ export function PlaybookEditorModal({
                   fontSize: "var(--font-label)",
                   fontWeight: "var(--weight-semibold)",
                   lineHeight: "var(--line-label)",
-                  color: "var(--destructive)",
+                  color: "var(--destructive-text)",
                 }}
               >
                 {nameError}
@@ -230,8 +230,6 @@ export function PlaybookEditorModal({
                   background: "var(--surface-card)",
                   border: "1px solid var(--border)",
                   borderRadius: "var(--radius)",
-                  transition:
-                    "opacity 150ms ease-out, transform 150ms ease-out",
                 }}
               >
                 <textarea
@@ -350,7 +348,7 @@ export function PlaybookEditorModal({
                 {generateFailed && (
                   <Notice
                     tone="destructive"
-                    label="Couldn't generate a draft — try again."
+                    label="Couldn't generate a draft. Try again."
                   />
                 )}
               </div>
@@ -376,7 +374,7 @@ export function PlaybookEditorModal({
             <Field>Body</Field>
             {draftNotice && (
               <Notice tone="muted">
-                Draft generated — review and edit before saving.
+                Draft generated. Review and edit before saving.
               </Notice>
             )}
             <textarea
@@ -411,7 +409,7 @@ export function PlaybookEditorModal({
                   fontSize: "var(--font-label)",
                   fontWeight: "var(--weight-semibold)",
                   lineHeight: "var(--line-label)",
-                  color: "var(--destructive)",
+                  color: "var(--destructive-text)",
                 }}
               >
                 {FOOTGUN_MESSAGE}
@@ -422,7 +420,7 @@ export function PlaybookEditorModal({
           {saveError && (
             <Notice
               tone="destructive"
-              label="Couldn't save playbook — try again."
+              label="Couldn't save playbook. Try again."
             />
           )}
         </div>

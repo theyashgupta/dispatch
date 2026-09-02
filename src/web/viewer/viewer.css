@@ -1,0 +1,148 @@
+/*
+ * Viewer-scoped design tokens and layout. Values are ratified in
+ * .planning/phases/112-markdown-viewer-frontend-terminal-integration/112-UI-SPEC.md;
+ * this file is its implementation. Re-scopes tokens.css font tokens the same way
+ * .reading-surface re-scopes --line-body, never touching the global :root block.
+ */
+
+.viewer-root {
+  --font-md-h1: 24px;
+  --font-md-h2: 19px;
+  --font-body: 15px;
+  --font-label: 13px;
+  --line-body: 1.6;
+
+  /* Syntax highlight theme: maps rehype-highlight's hljs-* classes to CSS variables
+     built from the app's existing signal-palette hues, never a bundled hljs theme. */
+  --hl-keyword: #a371f7;
+  --hl-string: #3fb950;
+  --hl-number: #d9b23c;
+  --hl-comment: #8a8f98;
+  --hl-title: #6ea8fe;
+  --hl-attr: #ef8e3b;
+
+  display: flex;
+  gap: var(--space-2xl);
+  align-items: flex-start;
+  max-width: calc(720px + var(--space-2xl) + 220px);
+  margin: 0 auto;
+  padding: var(--space-xl) var(--space-lg);
+}
+
+.viewer-content {
+  max-width: 720px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.viewer-root:has(.viewer-toc) .viewer-content {
+  margin: 0;
+}
+
+.viewer-root:not(:has(.viewer-toc)) {
+  justify-content: center;
+}
+
+.viewer-content h1,
+.viewer-content h2,
+.viewer-content h3,
+.viewer-content h4,
+.viewer-content h5,
+.viewer-content h6 {
+  scroll-margin-top: var(--space-xl);
+}
+
+.viewer-content a:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.viewer-toc {
+  flex: 0 0 220px;
+  width: 220px;
+  position: sticky;
+  top: var(--space-xl);
+  max-height: calc(100vh - 2 * var(--space-xl));
+  overflow-y: auto;
+  font-size: var(--font-label);
+  color: var(--text-muted);
+}
+
+.viewer-toc-entry {
+  display: block;
+  padding: var(--space-xs) 0;
+  color: var(--text-muted);
+  border-left: 2px solid transparent;
+  padding-left: var(--space-sm);
+  text-decoration: none;
+}
+
+.viewer-toc-entry:hover {
+  color: var(--text);
+}
+
+.viewer-toc-entry[data-active="true"] {
+  color: var(--accent);
+  border-left-color: var(--accent);
+}
+
+.viewer-toc-entry:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.viewer-toc-entry[data-depth="2"] {
+  padding-left: calc(var(--space-sm) + var(--space-lg));
+}
+
+.viewer-toc-entry[data-depth="3"],
+.viewer-toc-entry[data-depth="4"],
+.viewer-toc-entry[data-depth="5"],
+.viewer-toc-entry[data-depth="6"] {
+  padding-left: calc(var(--space-sm) + 2 * var(--space-lg));
+}
+
+@media (max-width: 1024px) {
+  .viewer-toc {
+    display: none;
+  }
+}
+
+/* hljs-* class map: unlisted classes fall through to the prose text color. */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in {
+  color: var(--hl-keyword);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-addition {
+  color: var(--hl-string);
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-symbol {
+  color: var(--hl-number);
+}
+
+.hljs-comment,
+.hljs-quote,
+.hljs-meta,
+.hljs-deletion {
+  color: var(--hl-comment);
+}
+
+.hljs-title,
+.hljs-function,
+.hljs-section,
+.hljs-name {
+  color: var(--hl-title);
+}
+
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-type {
+  color: var(--hl-attr);
+}

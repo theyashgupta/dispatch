@@ -731,7 +731,9 @@ pre-fix `20339`, a 55.2% reduction of the regression**); `sseFrameBytes` `15274`
 +15.42%**, same -2930/55.2% recovery); `loadCommits`/`commits` unaffected (PASS, as before).
 
 **Why a residual gap remains, and why it is not further reducible inside this plan's budget.** The
-remaining ~119 bytes/session-bearing card is the cost of `activeSession: {id, ttydPort}` itself —
+remaining ~119 bytes/session-bearing card is the whole `+2380` residual divided across the 20
+session-bearing cards, which `102-01` later decomposed exactly into `activeSession`'s own `62` plus
+`activeSessionId`'s `57`. The larger share is `activeSession: {id, ttydPort}` itself —
 not duplication, but the deliberate Phase 90 "canary" design (`src/shared/types.ts`'s
 `ActiveSessionWire` JSDoc): `TerminalRegion` renders the terminal `<iframe>` keyed on
 `activeSession.id`/`.ttydPort`, and `DetailPanel`'s "don't double-spawn" gate reads the SAME nested
@@ -760,3 +762,279 @@ window's byte accounting, not a second cause).
 **Environment:** `com.dispatch.app` confirmed stopped and `:4700` refusing throughout; no
 `dispatch-perf-board-*` directory or stray listener remained after either run; real
 `~/.dispatch/board.db` unchanged (`27d52060517adea9fe81712f9abe1da0`, `28672` bytes) throughout.
+
+### Phase 98, Plan 09, checkedAt standing-failure broadcast cost and wire re-measurement
+
+- **Date:** 2026-08-22
+- **Git SHA measured:** working tree with plans 98-01 through 98-08 landed (this measurement adds
+  only an additive, off-by-default `--pr-failing` leg to `scripts/perf-board.mjs`, no other `src/`
+  or `scripts/` file changed by it).
+- **Machine:** Apple Silicon, local (Node v22.23.1).
+
+**Threshold correction, stated explicitly (98-01's own finding, repeated here because this is the
+gate reader for this phase).** Plan 98-09's own `<interfaces>` pointer cites
+`initialBytes<=15029`/`sseFrameBytes<=15274` (the `6d2549f` / Phase 86 entry above), a stale number
+from before this phase started. `98-01-SUMMARY.md`'s own BEFORE capture for this phase (the correct
+starting point) measured `initialBytes=17410`/`sseFrameBytes=17655`, one byte above this file's
+`96-11` entry (`17409`/`17654`) directly above, already identified by 98-01 as ordinary run-to-run
+noise, not a regression this phase caused. The correct comparison for this phase's own gate is
+therefore against `98-01`'s own BEFORE numbers, `17410`/`17655`, not the older, superseded
+`15029`/`15274` numbers.
+
+**Wire re-measurement at N=1, single-session leg, same exact command:**
+`node scripts/perf-board.mjs --done=500 --runs=3`
+
+```
+run=1 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=6
+run=2 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=5 commits=7
+run=3 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=7
+
+PERF-BOARD mode=prod done=500 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=7
+```
+
+`initialBytes=17410` and `sseFrameBytes=17655`, BYTE-IDENTICAL to `98-01-SUMMARY.md`'s own BEFORE
+capture for this phase (`17410`/`17655`), zero delta. Both are ABOVE the older `15029`/`15274`
+numbers by the same, already-documented, out-of-scope `ActiveSessionWire` residual (98-01), a fact
+about the codebase before this phase started, not something this phase introduced. No regression:
+this phase's `PrInfo.repo` field and `cardPrs` client hook cost zero wire bytes at N=1, since
+`PrInfo.repo` only appears on cards that carry a PR, and none of these 500 seeded Done cards do.
+
+**Wire re-measurement at N=1, multi-session leg, same exact command:**
+`node scripts/perf-board.mjs --done=500 --runs=3 --sessions-per-card=3`
+
+```
+run=1 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=8 commits=5
+run=2 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=7 commits=5
+run=3 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=8 commits=5
+
+PERF-BOARD-MULTI mode=prod done=500 sessionsPerCard=3 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=8 commits=5
+```
+
+`20844` to `20845` and `21089` to `21090`, the same 1-byte noise band against `98-01-SUMMARY.md`'s
+own BEFORE capture for this leg (`20844`/`21089`, itself matching the `96-11` post-fix numbers
+directly above within noise). No regression.
+
+**Standing-failure `checkedAt` broadcast cost (PRLINK-05, Pitfall 5).**
+
+Command: `node scripts/perf-board.mjs --done=<N> --runs=1 --pr-failing`. Shim mode:
+`GH_SHIM_MODE=pr-list-failed` (`gh: unexpected error talking to github.com`), the TRANSIENT
+`"gh pr list failed"` category, deliberately not one of the four deterministic categories (98-04's
+negative cache never engages for it, so every fixture retries under the existing exponential
+backoff, `10s, 20s, 40s, 60s capped`, the worst realistic standing-failure case for the `checkedAt`
+write, a deterministic category would negative-cache after one tick and prove almost nothing). Every
+fixture carries one real, live tmux session (`sh -c "while true; do sleep 3600; done"`, matching
+`gh-reliability-98.mjs`'s own precedent) and one repo, matching the fan-out shape
+`artifact-detect.ts` reads; without a real tmux session `reconcileSessions()` would mark the fixture
+lost at boot and the fan-out this leg measures would never run.
+
+Two scales recorded:
+
+```
+PERF-BOARD-PRFAIL mode=prod done=2 failingCards=2 windowMs=150000 sseFrames=6 sseFrameBytes=1724
+PERF-BOARD-PRFAIL mode=prod done=50 failingCards=50 windowMs=150000 sseFrames=150 sseFrameBytes=35884
+```
+
+Derived frames-per-failing-card-per-minute (`sseFrames / failingCards / (windowMs / 60000)`):
+
+- `done=2`: `6 / 2 / 2.5 = 1.2`
+- `done=50`: `150 / 50 / 2.5 = 1.2`
+
+Both are AT or BELOW 1.5 and close to the 1-broadcast-per-failing-card-per-minute bound plan 98-04's
+minute-truncated `checkedAt` write claims. The mechanism: a session that fails every tick backs off
+exponentially (real `gh pr list` retries land at roughly `t=0, 20s, 60s, 120s` inside the 150s
+window, not every 10s), and the minute-truncated `checkedAt` write-skip guard
+(`rec.prsUnknown?.category !== category || rec.prsUnknown.checkedAt !== checkedAt`) suppresses any
+retry landing inside an already-broadcast minute. In this window that yields 3 real broadcasts per
+card (the initial category-set write, plus one at each of the two minute boundaries the backoff
+schedule crosses), giving `3 / 2.5 = 1.2` broadcasts per card per minute, independent of how many
+cards are failing (`done=2` and `done=50` measured the identical per-card figure).
+
+**Harness confound found and fixed before this measurement was recorded.** `--pr-failing` initially
+reused `makeSandboxHome`'s existing fake Linear API key (needed by every OTHER leg to clear the
+client-side "needs a Linear key" first-run gate so the board renders for the Chrome-driven commit
+leg). This leg never loads the web app, so the key is unnecessary, and an armed key starts
+`startPoller` (`config.linearApiKey` truthy), whose fake-key poll failure calls
+`store.setSyncUnreachable` on every `pollIntervalMs` (60s default) with NO write-skip guard
+(`board.store.ts`'s own JSDoc for `setSyncUnreachable`: "unlike setPollInterval/setEditors"), adding
+an SSE broadcast unrelated to `checkedAt` roughly once a minute. A `done=2` run with the key armed
+measured `sseFrames=9` (`1.8` per card per minute, ABOVE the 1.5 bound); disarming the key
+(`makeSandboxHome` gained a `withLinearKey` parameter, `--pr-failing` passes `false`) dropped the
+SAME run to `sseFrames=6` (`1.2` per card per minute), confirming the extra 3 frames were unrelated
+poller noise, not `checkedAt` cost. Recorded here rather than rounded away, per this file's own
+honesty standard.
+
+**Environment:** `com.dispatch.app` confirmed stopped and `:4700` refusing throughout every run
+above; every `dispatch-perf-board-*` sandbox directory, every `dsp-pbf98-*` tmux session, and port
+`47820` were confirmed gone after each run; real `~/.dispatch/board.db` remained absent throughout
+(this machine has no live install, matching Phase 97's own recorded diagnosis).
+
+### Phase 99, Plan 06, evidence wire re-measurement (PORT-01/PORT-02 closeout)
+
+- **Date:** 2026-08-22
+- **Git SHA measured:** `c73a54b` (plans 99-01 through 99-06's own doc task landed, no further
+  `src/` change since).
+- **Machine:** Apple Silicon (arm64), local (Node v24.19.0).
+
+**Comparison point, stated explicitly.** The correct starting point for this phase's own gate is
+`98-01-SUMMARY.md`'s own BEFORE capture, `initialBytes=17410`/`sseFrameBytes=17655` at N=1 and
+`initialBytes=20845`/`sseFrameBytes=21090` at N=1 multi-session (`--sessions-per-card=3`), the same
+numbers the Phase 98 closeout entry above already re-confirmed byte-identical. A future reader
+should not compare against the older, superseded `15029`/`15274` figures.
+
+**Wire re-measurement, single-session leg, same exact command:**
+`node scripts/perf-board.mjs --done=500 --runs=3`
+
+```
+run=1 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=5
+run=2 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=8 commits=5
+run=3 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=5
+
+PERF-BOARD mode=prod done=500 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=5
+```
+
+**Wire re-measurement, multi-session leg, same exact command:**
+`node scripts/perf-board.mjs --done=500 --runs=3 --sessions-per-card=3`
+
+```
+run=1 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=7 commits=5
+run=2 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=8 commits=5
+run=3 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=8 commits=5
+
+PERF-BOARD-MULTI mode=prod done=500 sessionsPerCard=3 initialBytes=20845 initialCards=50 sseFrameBytes=21090 loadCommits=8 commits=5
+```
+
+**Delta: zero on both legs, and the honest reason why, stated rather than assumed.**
+`initialBytes`/`sseFrameBytes` are BYTE-IDENTICAL to the `17410`/`17655` and `20845`/`21090`
+comparison points on both legs. This is not because evidence is free: `scripts/perf-board.mjs`
+seeds every fixture card's PR state directly but never seeds a `previews` array on any of them
+(confirmed: `grep -n "previews" scripts/perf-board.mjs` returns nothing), and `PreviewInfo.evidence`
+only ever appears on a card that carries a preview at all. The same "the field costs zero bytes at
+N=1 because none of these fixtures carry the state that triggers it" reasoning the `98-09` entry
+above already applied to `PrInfo.repo` applies identically here to `evidence`. **Verdict: PASS, no
+regression measured on this harness's own fixture shape**, with the honest caveat that this harness
+does not exercise a card carrying `previews`, so it cannot bound the per-preview evidence cost the
+phase's own CONTEXT.md asked to see measured; `panel-99.mjs`'s own three fixture cards (below) are
+the instrument that actually carries evidence on the wire, and its own `density-91.mjs --compare`
+leg (99-04) already confirmed the evidence surface changes no rendered card geometry.
+
+**Environment:** `com.dispatch.app` confirmed stopped and `:4700` refusing throughout both runs;
+no `dispatch-perf-board-*` sandbox directory or stray listener on `47820`/`9359` remained after
+either run; real `~/.dispatch/board.db` remained absent throughout (this machine has no live
+install, matching every prior entry's own recorded diagnosis).
+
+**Every gate run sequentially on one tree, this closeout:**
+
+| Gate                             | Command                                                                                           | Exit |
+| -------------------------------- | ------------------------------------------------------------------------------------------------- | ---- |
+| standing CI gate                 | `npm run check`                                                                                   | 0    |
+| UI evidence harness              | `node scripts/panel-99.mjs`                                                                       | 0    |
+| real-process attribution harness | `node scripts/port-attribution-99.mjs`                                                            | 0    |
+| card geometry                    | `node scripts/density-91.mjs --compare .planning/phases/99-port-detection/99-density-before.json` | 0    |
+| Phase 98 regression guard        | `node scripts/panel-98.mjs`                                                                       | 0    |
+
+No leaked tmux session, held sandbox port, or leftover sandbox directory was found between any two
+of the five runs above, and the real `~/.dispatch/board.db` (absent on this machine throughout,
+matching every entry above) was unaffected. No live `com.dispatch.app` service exists on this
+machine to restore.
+
+### Phase 102, Plan 01, canary removal wire re-measurement
+
+- **Date:** 2026-08-24
+- **Git SHA measured:** working tree at 102-01 Task 2 (base `48fe78c`, the nested `activeSession`
+  wire projection deleted from `redactCard`/`TerminalRegion.tsx`/`DetailPanel.tsx`/`types.ts`; no
+  other `src/` file changed since the Phase 99 entry above, confirmed by
+  `git log --oneline bad43f6..48fe78c -- src/shared/types.ts src/server/store/board.store.ts`
+  returning zero commits).
+
+**Comparison point, stated explicitly per this phase's own criterion.** This phase finally removes the `activeSession` residual Phase 98 told later phases to route around, so the
+correct comparison for THIS measurement is the original v2.9 `6d2549f` baseline (`initialBytes <=
+15029`, `sseFrameBytes <= 15274`, Phase 86 entry above), not the interim `17410`/`17655` numbers.
+
+**BEFORE leg, re-confirmed on this machine (canary still present, pristine `48fe78c`), same exact
+command:** `npm run build && node scripts/perf-board.mjs --done=500 --runs=3`
+
+```
+run=1 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=5
+run=2 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=8 commits=5
+run=3 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=5
+
+PERF-BOARD mode=prod done=500 initialBytes=17410 initialCards=50 sseFrameBytes=17655 loadCommits=7 commits=5
+```
+
+Byte-identical to `98-01`/`99-06`'s own recorded numbers on this same fixture shape, confirming
+this machine reproduces the documented history exactly before any code changed.
+
+**AFTER leg, canary fully removed, same exact command:**
+`npm run build && node scripts/perf-board.mjs --done=500 --runs=3`
+
+```
+run=1 initialBytes=16170 initialCards=50 sseFrameBytes=16415 loadCommits=7 commits=5
+run=2 initialBytes=16170 initialCards=50 sseFrameBytes=16415 loadCommits=8 commits=5
+run=3 initialBytes=16170 initialCards=50 sseFrameBytes=16415 loadCommits=7 commits=5
+
+PERF-BOARD mode=prod done=500 initialBytes=16170 initialCards=50 sseFrameBytes=16415 loadCommits=7 commits=5
+```
+
+**Verdict vs. the `6d2549f` thresholds: FAIL, criterion 1 not met.** `initialBytes` `15029` to
+`16170` (**+1141, +7.59%**); `sseFrameBytes` `15274` to `16415` (**+1141, +7.47%**). Both improved
+from the `17410`/`17655` pre-removal numbers by exactly `1240` bytes (`-7.12%`), confirming the
+canary removal itself worked and recovered its own full cost, but a `1141`-byte residual remains
+against the original v2.9 target.
+
+**Field-by-field attribution of both deltas, per this phase's own requirement (not estimated,
+counted).** `scripts/perf-board.mjs`'s `AWAITING_EVERY_NTH=25` seeds exactly `20` session-bearing
+cards inside the `done=500` fixture, all of which fall inside the `DONE_PAGE_SIZE=50` page window
+(the same 20-card population `96-10`/`96-11` measured against).
+
+1. **The `1240`-byte recovery IS the canary's own cost, confirmed by direct measurement of the
+   real wire card, not inferred.** A temporary debug dump of one session-bearing card's exact JSON
+   on the pre-removal tree showed the deleted field serialized as `"activeSession":{"id":"<36-char
+uuid>"}` only, `ttydPort` absent (`undefined`, dropped by `JSON.stringify`) because this
+   fixture's single-session leg never spawns a real ttyd process, so no port is ever assigned to
+   the seeded session record. That field's own byte length is `61` content bytes plus a `1`-byte
+   comma separator, `62` bytes per card. `62 * 20 = 1240`, exactly the measured recovery. (`96-11`'s
+   `~119` bytes/card figure directly above was never this field's own cost: it was that entry's
+   ENTIRE `+2380`-byte residual divided across the same 20 cards and labelled as one field. It
+   decomposes exactly into this field's `62` plus `activeSessionId`'s `57` from point 2 below:
+   `(62 + 57) * 20 = 2380`. A populated `ttydPort` could not have accounted for the gap either way,
+   since `,"ttydPort":38123` is about `16` bytes, taking this field to roughly `79`, not `119`.)
+
+2. **The remaining `1141`-byte residual is `Card.activeSessionId`, a field with no v2.9
+   equivalent, confirmed by direct measurement, not inferred.** The same debug dump, run again on
+   the POST-removal tree, showed the session-bearing card's wire shape as `{id, issueId,
+identifier, title, description, priority, column, updatedAt, tmuxSession, workspacePath,
+activeSessionId, terminalError}` against a same-fixture non-session card's `{id, issueId,
+identifier, title, description, priority, column, updatedAt, terminalError}` — a `200`-byte
+   total delta across three fields (`tmuxSession`, `workspacePath`, `activeSessionId`). Of those
+   three, `tmuxSession` and `workspacePath` are TWO of the original six flat fields the `6d2549f`
+   baseline already carried for a session-bearing card (present in v2.9 too, not new). Only
+   `activeSessionId` is new since v2.9 — it does not exist in the `6d2549f` shape at all, since
+   v2.9 predates the session-entity architecture (Phase 90) entirely. Its own serialized content
+   (`"activeSessionId":"<36-char uuid>"`) is `56` bytes plus the `1`-byte comma, `57` bytes per
+   card. `57 * 20 = 1140`. The measured residual is `1141`, and the extra byte is NOT a second
+   cause and NOT id-value noise: a UUID is fixed at 36 characters, so this field costs exactly `57`
+   bytes on all 20 cards with no variance possible, and both legs here are byte-identical across
+   three runs each. It is the same 1-byte BEFORE-leg difference `98-01` already diagnosed above
+   (this phase's BEFORE leg is `17410`, `96-11`'s was `17409`, see the threshold correction at the
+   Phase 98 entry). Against `96-11`'s own baseline the arithmetic is exact: `15029 + 2380 = 17409`.
+
+**Why this residual is not fixable inside this plan's scope, stated rather than assumed.**
+`Card.activeSessionId` is explicitly the field decision `D-A` (`STATE.md`) and this plan's own
+`<interfaces>` block name to LEAVE ALONE: "Leave `Card.activeSessionId`, `Card.sessionCount`,
+`Card.ttydPort` and `SessionSummary` alone." It is the incremental-migration pointer the whole
+session-entity architecture is built on, read unconditionally by the client render gate
+(`c.ttydPort != null`) and the iframe src (`c.activeSessionId`) this same plan's Task 2 wired up.
+Removing it would not be a canary-removal cleanup; it would be reversing Phase 90's own
+architecture, a change several orders larger than this plan's declared scope and explicitly
+out-of-bounds per the plan's own file list and the `<threat_model>`'s disposition for this task.
+
+**Reported as a blocking finding on criterion 1**, per the plan's own instruction: the measured
+number is honestly recorded above (`16170`/`16415`, still above `15029`/`15274`), attributed field
+by field rather than estimated, and left un-passed rather than the criterion being lowered to fit.
+
+**Environment:** `com.dispatch.app` confirmed stopped and `:4700` refusing throughout every run
+above; every `dispatch-perf-board-*` sandbox directory was confirmed gone after each run; real
+`~/.dispatch/board.db` remained absent throughout (this machine has no live install, matching every
+prior entry's own recorded diagnosis). The temporary debug-dump instrumentation used for the
+field-by-field attribution above was never committed; `git diff --stat scripts/perf-board.mjs`
+after the investigation showed zero changes to that file.

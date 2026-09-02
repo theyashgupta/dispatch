@@ -1,6 +1,6 @@
 import { store } from "../../store/board.store.js";
 import { ensureTtyd, killTtyd } from "../../adapters/ttyd.js";
-import { hasSession } from "../../adapters/tmux.js";
+import { captureHistory, hasSession } from "../../adapters/tmux.js";
 
 /**
  * Ensure a ttyd terminal for a card's `session` and record its port — the SINGLE TERM-01
@@ -38,4 +38,23 @@ export async function ensureTerminal(
       stderr: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+/**
+ * The pane HISTORY (rows above the visible screen) for a session id, as colour-preserving ANSI
+ * text, or null when no live session matches the id.
+ *
+ * @remarks TERM-05: the scrollback-seed transport. Lives here because routes may not call the
+ * subprocess adapters directly, and the session-id -> tmux-name lookup is the same
+ * `sessionsWithTmux()` scan the proxy's port resolution uses.
+ */
+export async function sessionScrollback(
+  sessionId: string,
+  limit: number,
+): Promise<string | null> {
+  const pair = store
+    .sessionsWithTmux()
+    .find((entry) => entry.session.id === sessionId);
+  if (!pair) return null;
+  return captureHistory(pair.session.tmuxSession, limit);
 }

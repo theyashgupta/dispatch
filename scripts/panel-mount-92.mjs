@@ -14,7 +14,7 @@
  * `assertNoLiveService()` is a FAIL-CLOSED preflight: it throws (never warns) if anything answers
  * on :4700, before this script boots any server or spawns any real tmux/ttyd. Unlike panel-92.mjs,
  * this instrument DOES spawn real tmux (a trivial `sleep`-loop shell, never `claude`) and real ttyd
- * — the terminal iframe only mounts when `activeSession.ttydPort` is set and only connects when a
+ * — the terminal iframe only mounts when `card.ttydPort` is set and only connects when a
  * real ttyd answers, so an inert fixture (panel-92.mjs's own approach) cannot exercise this file's
  * actual claim.
  *

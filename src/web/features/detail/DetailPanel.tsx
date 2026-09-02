@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, GripVertical, RotateCw } from "lucide-react";
+import { DEFAULT_CLAUDE_ACCOUNT_ID } from "../../../shared/types.js";
 import type {
+  ClaudeAccountSummary,
   ActivityEvent,
   Card as CardModel,
 } from "../../../shared/types.js";
@@ -18,12 +20,12 @@ import { Button } from "../../primitives/Button.js";
 import { Notice } from "../../primitives/Notice.js";
 import { CardTimeline } from "./CardTimeline.js";
 import { PanelHeader } from "./PanelHeader.js";
-import { PrRow } from "./PrRow.js";
 import { PreviewRow } from "./PreviewRow.js";
 import { UnknownProbeRow } from "./UnknownProbeRow.js";
 import { ReferenceBlocks } from "./ReferenceBlocks.js";
 import { SessionLostSection } from "./SessionLostSection.js";
 import { SessionSwitcher } from "./SessionSwitcher.js";
+import { Field } from "../../primitives/Field.js";
 import { StartAnotherSessionButton } from "./StartAnotherSessionButton.js";
 import { TerminalRegion } from "./TerminalRegion.js";
 
@@ -49,6 +51,7 @@ interface DetailPanelProps {
   onStartRequest?: (req: string | StartRequest) => void;
   onCleanupRequest?: (id: string) => void;
   docked?: boolean;
+  accounts?: ClaudeAccountSummary[];
 }
 
 export function DetailPanel({
@@ -65,6 +68,7 @@ export function DetailPanel({
   onStartRequest,
   onCleanupRequest,
   docked = false,
+  accounts,
 }: DetailPanelProps) {
   const open = card != null;
 
@@ -306,25 +310,33 @@ export function DetailPanel({
       spawnedForRef.current = null;
       return;
     }
-    if (card.activeSession?.ttydPort != null) {
+    if (card.ttydPort != null) {
       spawnedForRef.current = null;
       return;
     }
+    const spawnKey = `${card.id}:${card.activeSessionId ?? ""}`;
     if (
       card.tmuxSession &&
       !card.sessionLost &&
       card.terminalError == null &&
-      spawnedForRef.current !== card.id
+      spawnedForRef.current !== spawnKey
     ) {
-      spawnedForRef.current = card.id;
+      spawnedForRef.current = spawnKey;
       ensureTerminal(card.id).catch((err) => {
         console.error(err);
-        if (spawnedForRef.current === card.id) spawnedForRef.current = null;
+        if (spawnedForRef.current === spawnKey) spawnedForRef.current = null;
       });
     }
   }, [card]);
 
   const c = shown;
+  const sessionAccountEmail =
+    c?.claudeAccountId != null
+      ? (accounts?.find((a) => a.id === c.claudeAccountId)?.email ??
+        (c.claudeAccountId === DEFAULT_CLAUDE_ACCOUNT_ID
+          ? "Default"
+          : c.claudeAccountId))
+      : null;
 
   const showStartAnother =
     c != null &&
@@ -333,7 +345,7 @@ export function DetailPanel({
     c.workspacePath != null;
 
   const hasLiveSession = !!(c?.tmuxSession && !c.sessionLost);
-  const activeSessionLost = c?.activeSession != null && !c.tmuxSession;
+  const activeSessionLost = c?.activeSessionId != null && !c.tmuxSession;
 
   if (!hasLiveSession && (fullscreen || detailsExpanded)) {
     setFullscreen(false);
@@ -343,6 +355,13 @@ export function DetailPanel({
   if (docked && fullscreen) {
     setFullscreen(false);
   }
+
+  const scrimTransition = open
+    ? "opacity var(--motion-panel-open) var(--easing-enter)"
+    : "opacity var(--motion-panel-close) var(--easing-exit)";
+  const asideTransition = open
+    ? "transform var(--motion-panel-open) var(--easing-enter)"
+    : "transform var(--motion-panel-close) var(--easing-exit)";
 
   return (
     <>
@@ -356,7 +375,7 @@ export function DetailPanel({
             background: "rgba(0,0,0,0.4)",
             opacity: open ? 1 : 0,
             pointerEvents: open ? "auto" : "none",
-            transition: "opacity 150ms ease-out",
+            transition: scrimTransition,
             zIndex: 10,
           }}
         />
@@ -391,7 +410,7 @@ export function DetailPanel({
             : open
               ? "translateX(0)"
               : "translateX(100%)",
-          transition: docked ? "none" : "transform 150ms ease-out",
+          transition: docked ? "none" : asideTransition,
           zIndex: 11,
         }}
       >
@@ -425,10 +444,12 @@ export function DetailPanel({
               touchAction: "none",
               zIndex: 3,
               background: "transparent",
-              borderLeft:
-                hoveringHandle || resizing
-                  ? "2px solid var(--accent)"
+              borderLeft: resizing
+                ? "2px solid var(--accent)"
+                : hoveringHandle
+                  ? "2px solid var(--hover-resize-handle)"
                   : "2px solid transparent",
+              transition: "var(--resize-handle-transition)",
               ...focusRing(handleFocused),
             }}
           >
@@ -499,6 +520,31 @@ export function DetailPanel({
               onCleanupRequest={onCleanupRequest}
             />
 
+            {sessionAccountEmail != null && (
+              <div
+                data-testid="session-account"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--space-xs)",
+                  padding: "var(--space-xs) var(--space-lg)",
+                  paddingLeft: "var(--space-xl)",
+                  borderBottom: "1px solid var(--border)",
+                  fontFamily: "var(--font-ui)",
+                  fontSize: "var(--font-label)",
+                  lineHeight: "var(--line-label)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                <Field>Account</Field>
+                <span
+                  style={{ color: "var(--text)" }}
+                  title={sessionAccountEmail}
+                >
+                  {sessionAccountEmail}
+                </span>
+              </div>
+            )}
             {(c?.sessionSummaries != null || showStartAnother) && (
               <div
                 style={{
@@ -598,6 +644,9 @@ export function DetailPanel({
                           flex: "0 1 auto",
                           maxHeight: "40%",
                           overflowY: "auto",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "var(--panel-section-gap)",
                         }}
                       >
                         <ReferenceBlocks
@@ -620,6 +669,9 @@ export function DetailPanel({
                       style={{
                         flex: c?.tmuxSession ? "0 1 auto" : "1 1 auto",
                         overflowY: "auto",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "var(--panel-section-gap)",
                       }}
                     >
                       <ReferenceBlocks
@@ -638,9 +690,7 @@ export function DetailPanel({
                   )}
 
                   {c != null &&
-                    (c.prsUnknown != null ||
-                      c.previewsUnknown != null ||
-                      (c.prs != null && c.prs.length > 0) ||
+                    (c.previewsUnknown != null ||
                       (c.previews != null && c.previews.length > 0)) && (
                       <div
                         className="reading-surface"
@@ -651,16 +701,6 @@ export function DetailPanel({
                           borderBottom: "1px solid var(--border)",
                         }}
                       >
-                        {c.prs?.map((pr) => (
-                          <PrRow key={pr.url} pr={pr} />
-                        ))}
-                        {c.prsUnknown != null && (
-                          <UnknownProbeRow
-                            signal="pr"
-                            category={c.prsUnknown.category}
-                            partial={(c.prs?.length ?? 0) > 0}
-                          />
-                        )}
                         {c.previews?.map((preview) => (
                           <PreviewRow key={preview.port} preview={preview} />
                         ))}

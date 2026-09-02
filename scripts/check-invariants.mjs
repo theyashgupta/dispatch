@@ -47,8 +47,31 @@ const ID_RE =
  * chokepoint re-freeze (`NEW-21`) — see docs/ARCHITECTURE.md#session-projection-chokepoint.
  * @remarks Moved from 122 to 123 for the deliberate one-ID attention single-source
  * re-freeze (`NEW-22`) — see docs/ARCHITECTURE.md#design-system-invariants.
+ * @remarks Moved from 123 to 124 for the deliberate one-ID exec-chokepoint perf-record
+ * mitigation re-freeze (`T-98-05`), see docs/ARCHITECTURE.md#exec-chokepoint.
+ * @remarks Moved from 124 to 125 for the deliberate one-ID `PrInfo.repo` basename
+ * mitigation re-freeze (`T-98-01`), cited in `shared/types.ts` and `adapters/gh.ts`.
+ * @remarks Moved from 127 to 128 for the deliberate one-ID `PreviewEvidence` basename
+ * mitigation re-freeze (`T-99-01`), cited in `shared/types.ts`.
+ * @remarks Moved from 128 to 129 for the deliberate one-ID `cwdByPids` argv-only
+ * mitigation re-freeze (`T-99-02`), cited in `adapters/dev-server.ts`.
+ * @remarks Moved from 129 to 130 for the deliberate one-ID re-parented dev server
+ * residual re-freeze (`T-99-12`), see docs/ARCHITECTURE.md#known-residuals.
+ * @remarks Moved from 130 to 131 for the deliberate one-ID cleanup-mirror
+ * chokepoint re-freeze (`NEW-23`), see docs/ARCHITECTURE.md#cleanup-mirror-chokepoint.
+ * @remarks Moved from 131 to 135 for the deliberate four-ID re-freeze ratifying the
+ * write-only vault store's guarantees (`T-103-01` through `T-103-04`), see
+ * docs/ARCHITECTURE.md#security-threat-model.
+ * @remarks Moved from 135 to 139 for the deliberate four-ID re-freeze ratifying the vault
+ * page's client-side guarantees (`T-104-01` through `T-104-04`), see
+ * docs/ARCHITECTURE.md#security-threat-model.
+ * @remarks Moved from 139 to 145 for the deliberate six-ID re-freeze ratifying the runner
+ * (`T-105-01`, `T-105-02`), both guard layers (`T-105-03`, `T-105-04`) and the two accepted
+ * residuals (`T-105-05`, `T-105-06`), see docs/ARCHITECTURE.md#security-threat-model.
+ * @remarks Moved from 145 to 146 for the deliberate one-ID status-colour single-source
+ * re-freeze (`NEW-24`), see docs/ARCHITECTURE.md#design-system-invariants.
  */
-const FROZEN_COUNT = 127;
+const FROZEN_COUNT = 150;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");
@@ -58,6 +81,14 @@ const SYNC_STRIP_PATH = join("src", "web", "features", "sync", "SyncStrip.tsx");
 const TOKENS_PATH = join("src", "web", "styles", "tokens.css");
 const BOARD_DIR = join("src", "web", "features", "board");
 const WEB_DIR = join("src", "web");
+const COLUMN_META_PATH = join(
+  "src",
+  "web",
+  "features",
+  "board",
+  "column-meta.ts",
+);
+const CARD_VIEW_PATH = join("src", "web", "features", "board", "CardView.tsx");
 const TERMINAL_CLIENT_PATHS = [
   join("src", "web", "terminal-main.ts"),
   join("src", "web", "terminal.html"),
@@ -85,6 +116,30 @@ const ATTENTION_FIELDS = ["startError", "sessionLost", "cleanupBlocked"];
  * asserts no `src/web` file other than {@link CARD_ATTENTION_PATH} declares either.
  */
 const ATTENTION_EXPORTS = ["needsAttention", "attentionTitle"];
+
+/**
+ * The thirteen `--col-*`/`--prio-*`/`--status-*` custom-property names `NEW-24` requires present
+ * in {@link TOKENS_PATH} with a hex value. Named here rather than derived, so a silently emptied
+ * or renamed token is itself a detectable defect, not an empty denylist: the missing-subject
+ * sentinel in `checkStatusColorSingleSource` fires per absent name. The hex VALUES themselves are
+ * never hardcoded here; they are read from `tokens.css` at run time, so a palette retune cannot
+ * leave a stale denylist behind.
+ */
+const STATUS_COLOR_PALETTE_TOKENS = [
+  "--prio-urgent",
+  "--prio-high",
+  "--prio-medium",
+  "--prio-low",
+  "--col-todo",
+  "--col-in-progress",
+  "--col-needs-input",
+  "--col-agent-done",
+  "--col-in-review",
+  "--col-done",
+  "--status-ok",
+  "--status-stale",
+  "--status-down",
+];
 const STEPS_PATH = join(
   "src",
   "server",
@@ -135,18 +190,57 @@ const SANCTIONED_WRITERS = [
 ];
 
 /**
- * Recursively list every .ts/.tsx source file, skipping the built web bundle.
+ * The three Card-mirrors-Session cleanup-lifecycle fields invariant `NEW-23` fences. Unlike
+ * {@link SESSION_FIELDS}, these do NOT funnel through one chokepoint (`setActiveSession`): the
+ * cleanup lifecycle writes each field from whichever step of teardown, blocking, or restoration it
+ * is in, so the sanctioned-writer set below is a set of NINE functions, not three.
+ */
+const CLEANUP_MIRROR_FIELDS = [
+  "cleanupDueAt",
+  "cleanupWarning",
+  "cleanupBlocked",
+];
+
+/**
+ * The DECLARED writers of {@link CLEANUP_MIRROR_FIELDS}, each with the exact subset it is allowed
+ * to write. Every other write anywhere in `src/` is a violation. Deliberately NOT a reuse of
+ * {@link SANCTIONED_WRITERS}: none of `NEW-21`'s three functions writes a cleanup-mirror field, so
+ * reusing that list would make {@link checkCleanupMirrorChokepoint} fire on every legitimate
+ * existing write site on its first run.
+ */
+const CLEANUP_SANCTIONED_WRITERS = [
+  { name: "moveCardManual", fields: ["cleanupDueAt"] },
+  { name: "recordCleanupWarning", fields: ["cleanupWarning", "cleanupDueAt"] },
+  {
+    name: "finishCleanup",
+    fields: ["cleanupWarning", "cleanupBlocked", "cleanupDueAt"],
+  },
+  { name: "recordCleanupBlocked", fields: ["cleanupBlocked"] },
+  { name: "clearCleanupBlocked", fields: ["cleanupBlocked"] },
+  { name: "clearCleanupDue", fields: ["cleanupDueAt"] },
+  { name: "restoreCleanupDue", fields: ["cleanupDueAt"] },
+  { name: "noteCleanupWarning", fields: ["cleanupWarning"] },
+  {
+    name: "pruneStaleWarnedSessions",
+    fields: ["cleanupWarning", "cleanupBlocked", "cleanupDueAt"],
+  },
+];
+
+/**
+ * Recursively list matching source files, skipping the built web bundle.
  * @param dir Directory to walk.
+ * @param extRe Extension filter; defaults to .ts/.tsx, the shape every code
+ * check wants, so only style-aware callers (NEW-24) pass their own.
  * @returns Absolute-from-cwd file paths.
  */
-function walkSrc(dir) {
+function walkSrc(dir, extRe = /\.(ts|tsx)$/) {
   const out = [];
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     if (full === SKIP_DIR) continue;
     const st = statSync(full);
-    if (st.isDirectory()) out.push(...walkSrc(full));
-    else if (/\.(ts|tsx)$/.test(full)) out.push(full);
+    if (st.isDirectory()) out.push(...walkSrc(full, extRe));
+    else if (extRe.test(full)) out.push(full);
   }
   return out;
 }
@@ -517,7 +611,11 @@ function parseSource(file, content) {
     content,
     ts.ScriptTarget.Latest,
     true,
-    file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    file.endsWith(".tsx")
+      ? ts.ScriptKind.TSX
+      : file.endsWith(".mjs")
+        ? ts.ScriptKind.JS
+        : ts.ScriptKind.TS,
   );
 }
 
@@ -577,12 +675,15 @@ function isAssignmentToken(kind) {
  * positive on the redaction chokepoint itself. Both residues are recorded here rather than left
  * implied, because an undocumented gap reads as coverage.
  * @param sourceFile Parsed file.
+ * @param fields The fenced field list to scan for — {@link SESSION_FIELDS} for `NEW-21`,
+ * {@link CLEANUP_MIRROR_FIELDS} for `NEW-23` — so the ~70-line AST walk itself is never
+ * duplicated for a second field set.
  * @returns One entry per write: 1-based line number, character offset (for the tier-2
  * span-containment check), the receiver's source text (so `ctx.workspacePath` — `SagaContext`'s
  * own unrelated field, not `card.workspacePath` — can be excluded by name), and the fenced field
  * name (so a sanctioned writer can be granted a SUBSET of the fenced fields, not all of them).
  */
-function scanSessionFieldAssignments(sourceFile) {
+function scanSessionFieldAssignments(sourceFile, fields) {
   const results = [];
   const record = (node, field, receiver) => {
     const pos = node.getStart(sourceFile);
@@ -605,13 +706,13 @@ function scanSessionFieldAssignments(sourceFile) {
     } else if (
       ts.isPropertyAccessExpression(node) &&
       ts.isIdentifier(node.name) &&
-      SESSION_FIELDS.includes(node.name.text)
+      fields.includes(node.name.text)
     ) {
       record(node, node.name.text, node.expression.getText(sourceFile));
     } else if (
       ts.isElementAccessExpression(node) &&
       ts.isStringLiteralLike(node.argumentExpression) &&
-      SESSION_FIELDS.includes(node.argumentExpression.text)
+      fields.includes(node.argumentExpression.text)
     ) {
       record(
         node,
@@ -661,7 +762,7 @@ function scanSessionFieldAssignments(sourceFile) {
             ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name)
               ? prop.name.text
               : null;
-          if (name && SESSION_FIELDS.includes(name)) {
+          if (name && fields.includes(name)) {
             record(prop, name, receiver);
           }
         }
@@ -741,6 +842,7 @@ function checkSessionProjectionChokepoint() {
     if (content === null) continue;
     for (const match of scanSessionFieldAssignments(
       parseSource(file, content),
+      SESSION_FIELDS,
     )) {
       if (file === STEPS_PATH && match.receiver === "ctx") continue;
       if (file === BOARD_STORE_PATH) {
@@ -761,6 +863,328 @@ function checkSessionProjectionChokepoint() {
       }
     }
   }
+  return violations;
+}
+
+/**
+ * Cleanup-mirror chokepoint gate (`NEW-23`). The fenced set is the three
+ * {@link CLEANUP_MIRROR_FIELDS} the cleanup lifecycle mirrors onto `Card`: `cleanupDueAt`,
+ * `cleanupWarning`, `cleanupBlocked`. Unlike `NEW-21`'s single-chokepoint fields, these do not
+ * funnel through one function, so the sanctioned set is {@link CLEANUP_SANCTIONED_WRITERS}, nine
+ * functions each granted only the subset it actually writes.
+ * @remarks Structurally identical two-tier check to {@link checkSessionProjectionChokepoint}:
+ * Tier 1 is a repo-wide fence (any match outside `src/server/store/board.store.ts` is a violation
+ * by construction), and Tier 2 is an in-file slice (inside `board.store.ts`, a match is exempt
+ * only when it falls within a sanctioned writer's own declaration span AND the field it writes is
+ * in that writer's own allowed subset).
+ * @remarks Carries the same missing-subject sentinel discipline as `NEW-21`: if a sanctioned
+ * writer's declaration cannot be found (renamed, deleted), this emits a violation naming the
+ * missing subject rather than silently reporting zero violations, so widening the carve-out by
+ * deleting a writer fails loudly instead of passing vacuously.
+ * @see docs/ARCHITECTURE.md#cleanup-mirror-chokepoint
+ * @returns Violation report lines, one per illegal assignment, plus one missing-subject sentinel
+ * per sanctioned writer that cannot be located.
+ */
+function checkCleanupMirrorChokepoint() {
+  const violations = [];
+  const boardStoreContent = existsSync(BOARD_STORE_PATH)
+    ? readFileSync(BOARD_STORE_PATH, "utf8")
+    : null;
+
+  const boardStoreSpans =
+    boardStoreContent !== null
+      ? declarationSpans(parseSource(BOARD_STORE_PATH, boardStoreContent))
+      : new Map();
+
+  const writers = [];
+  for (const writer of CLEANUP_SANCTIONED_WRITERS) {
+    const slice = boardStoreSpans.get(writer.name);
+    if (slice === undefined) {
+      violations.push(
+        `${BOARD_STORE_PATH}: ${writer.name} not found, NEW-23's cleanup-mirror-chokepoint subject is missing or renamed`,
+      );
+      continue;
+    }
+    writers.push({ ...writer, slice });
+  }
+
+  for (const file of walkSrc(SRC_DIR)) {
+    const content =
+      file === BOARD_STORE_PATH
+        ? boardStoreContent
+        : readFileSync(file, "utf8");
+    if (content === null) continue;
+    for (const match of scanSessionFieldAssignments(
+      parseSource(file, content),
+      CLEANUP_MIRROR_FIELDS,
+    )) {
+      if (file === BOARD_STORE_PATH) {
+        const owner = writers.find(
+          (w) =>
+            match.charOffset >= w.slice[0] &&
+            match.charOffset <= w.slice[1] &&
+            w.fields.includes(match.field),
+        );
+        if (owner) continue;
+        violations.push(
+          `${file}:${match.lineNumber}: retired pattern NEW-23, \`${match.field}\` assigned outside the sanctioned writers (${CLEANUP_SANCTIONED_WRITERS.map((w) => w.name).join(", ")})`,
+        );
+      } else {
+        violations.push(
+          `${file}:${match.lineNumber}: retired pattern NEW-23, \`${match.field}\` assigned outside the cleanup-mirror chokepoint (${BOARD_STORE_PATH})`,
+        );
+      }
+    }
+  }
+  return violations;
+}
+
+/**
+ * The sandbox harnesses that may only ever READ launchd. A sandboxed `HOME` redirects the plist
+ * file and `~/.dispatch`, but `launchctl bootstrap`'s `gui/<uid>/<Label>` registration is a real,
+ * per-user OS registry, so any mutating verb from inside a harness would clobber the researcher's
+ * own live `com.dispatch.app` agent regardless of the sandbox.
+ */
+const LAUNCHCTL_READONLY_HARNESSES = [
+  join("scripts", "reinstall-sim.mjs"),
+  join("scripts", "session-liveness-v3.mjs"),
+];
+
+/**
+ * launchctl-read-only gate over {@link LAUNCHCTL_READONLY_HARNESSES}, two arms over the AST. Arm 1,
+ * the binary: a string literal whose text is `launchctl` or ends in `/launchctl` must be the first
+ * argument of a call whose second argument is an array literal starting with `"print"`. Arm 2, the
+ * command string: any other string or template literal whose text contains the token `launchctl`
+ * (an `execSync` one-liner, a `sh -c` payload, a message) must follow EVERY occurrence inline with
+ * `print`. Comments are never matched because the walk is over the AST, not the text.
+ * @remarks Requiring the verb INLINE is deliberate: a `spawnSync("launchctl", args)` whose verb
+ * lives in a variable cannot be audited by a pattern gate, and a gate that cannot see the verb
+ * cannot fail for the reason it exists. Arm 2 exists because arm 1 alone was blind to the most
+ * idiomatic shell form, `execSync("launchctl bootout ...")`. Out of scope on purpose: a binary
+ * assembled at runtime (`"launch" + "ctl"`), which is evasion rather than accident.
+ * @returns Violation report lines, one per offending occurrence, with line numbers from the original
+ * buffer.
+ */
+function checkLaunchctlReadOnly() {
+  const violations = [];
+  for (const file of LAUNCHCTL_READONLY_HARNESSES) {
+    if (!existsSync(file)) {
+      violations.push(`${file}: missing, cannot audit launchctl usage`);
+      continue;
+    }
+    const sourceFile = parseSource(file, readFileSync(file, "utf8"));
+    const report = (node, reason) => {
+      const { line } = sourceFile.getLineAndCharacterOfPosition(
+        node.getStart(sourceFile),
+      );
+      violations.push(`${file}:${line + 1}: ${reason}`);
+    };
+    const visit = (node) => {
+      const isBinary =
+        ts.isStringLiteralLike(node) &&
+        (node.text === "launchctl" || node.text.endsWith("/launchctl"));
+      if (isBinary) {
+        const call = node.parent;
+        const argv =
+          ts.isCallExpression(call) && call.arguments[0] === node
+            ? call.arguments[1]
+            : undefined;
+        const verb =
+          argv && ts.isArrayLiteralExpression(argv)
+            ? argv.elements[0]
+            : undefined;
+        if (!(verb && ts.isStringLiteralLike(verb) && verb.text === "print")) {
+          report(
+            node,
+            `"launchctl" must be spawned with an argv array whose first element is the read-only "print" verb`,
+          );
+        }
+      } else if (ts.isStringLiteralLike(node) || ts.isTemplateLiteral(node)) {
+        const text = node.getText(sourceFile);
+        if (/\blaunchctl\b(?!\s+print\b)/.test(text)) {
+          report(
+            node,
+            `a string mentioning "launchctl" must follow every occurrence inline with the read-only "print" verb`,
+          );
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+  return violations;
+}
+
+/**
+ * Parse {@link TOKENS_PATH} for `--col-*`/`--prio-*`/`--status-*` custom-property declarations
+ * holding a hex value.
+ * @returns A map from declared name to its lowercased hex value, for every such declaration found
+ * (not filtered to {@link STATUS_COLOR_PALETTE_TOKENS}, so the caller can still detect a stray
+ * unlisted declaration if one is ever added).
+ */
+function readStatusColorPalette() {
+  const tokens = readFileSync(TOKENS_PATH, "utf8");
+  const declRe = /(-{2}(?:prio|col|status)-[a-z-]+):\s*(#[0-9a-fA-F]{3,8})\b/g;
+  const found = new Map();
+  let match;
+  while ((match = declRe.exec(tokens)) !== null) {
+    found.set(match[1], match[2].toLowerCase());
+  }
+  return found;
+}
+
+/**
+ * The mechanism half of `NEW-24`: `COLUMN_ACCENT` ({@link COLUMN_META_PATH}) and `PRIORITY_DOT`
+ * ({@link CARD_VIEW_PATH}) are each fenced as the single definition of "which colour a column or
+ * priority renders", asserted still exported and still holding only `var(--col-*)`/`var(--accent)`
+ * or `var(--prio-*)` string values. A missing/renamed export is a sentinel violation, not a silent
+ * pass: a literal-only fence would pass unchanged against a build that deleted either map and
+ * inlined its `var()` strings by hand at every former call site.
+ * @returns Violation report lines, one per defect.
+ */
+function checkStatusColorMechanism() {
+  const violations = [];
+
+  if (!existsSync(COLUMN_META_PATH)) {
+    violations.push(
+      `${COLUMN_META_PATH}: file not found, NEW-24's COLUMN_ACCENT subject is missing or renamed`,
+    );
+  } else {
+    const content = readFileSync(COLUMN_META_PATH, "utf8");
+    const columnAccentMatch = /export const COLUMN_ACCENT\b/.exec(content);
+    if (!columnAccentMatch) {
+      violations.push(
+        `${COLUMN_META_PATH}: export const COLUMN_ACCENT not found, NEW-24's single-source mechanism is missing or renamed`,
+      );
+    } else {
+      const tail = content.slice(columnAccentMatch.index);
+      const body = tail.slice(0, tail.indexOf("};") + 2);
+      const values = [...body.matchAll(/:\s*"([^"]*)"/g)].map((m) => m[1]);
+      if (values.length === 0) {
+        violations.push(
+          `${COLUMN_META_PATH}: COLUMN_ACCENT holds no string values, NEW-24's single-source mechanism is malformed`,
+        );
+      }
+      for (const value of values) {
+        if (
+          !/^var\(-{2}col-[a-z-]+\)$/.test(value) &&
+          value !== "var(--accent)"
+        ) {
+          violations.push(
+            `${COLUMN_META_PATH}: COLUMN_ACCENT value "${value}" is not a var(--col-*) or var(--accent) reference, NEW-24's single-source mechanism is broken`,
+          );
+        }
+      }
+    }
+  }
+
+  if (!existsSync(CARD_VIEW_PATH)) {
+    violations.push(
+      `${CARD_VIEW_PATH}: file not found, NEW-24's PRIORITY_DOT subject is missing or renamed`,
+    );
+  } else {
+    const content = readFileSync(CARD_VIEW_PATH, "utf8");
+    const priorityDotMatch = /export const PRIORITY_DOT\b/.exec(content);
+    if (!priorityDotMatch) {
+      violations.push(
+        `${CARD_VIEW_PATH}: export const PRIORITY_DOT not found, NEW-24's single-source mechanism is missing or renamed`,
+      );
+    } else {
+      const tail = content.slice(priorityDotMatch.index);
+      const body = tail.slice(0, tail.indexOf("};") + 2);
+      const values = [...body.matchAll(/color:\s*"([^"]*)"/g)].map((m) => m[1]);
+      if (values.length === 0) {
+        violations.push(
+          `${CARD_VIEW_PATH}: PRIORITY_DOT holds no color values, NEW-24's single-source mechanism is malformed`,
+        );
+      }
+      for (const value of values) {
+        if (!/^var\(-{2}prio-[a-z-]+\)$/.test(value)) {
+          violations.push(
+            `${CARD_VIEW_PATH}: PRIORITY_DOT color "${value}" is not a var(--prio-*) reference, NEW-24's single-source mechanism is broken`,
+          );
+        }
+      }
+    }
+  }
+
+  return violations;
+}
+
+/**
+ * Status-colour single-source fence (`NEW-24`). Deliberately NOT a `RETIRED_PATTERNS` entry: that
+ * array scans all of `src/**`, hardcodes its literals, and this gate's subject is `src/web` with a
+ * denylist derived from {@link TOKENS_PATH} at run time, not a fixed literal list.
+ * @remarks Asserts the MECHANISM as well as the literal, the same discipline `NEW-18`'s and
+ * `NEW-22`'s own JSDoc argue for: `COLUMN_ACCENT` (`column-meta.ts`) and `PRIORITY_DOT`
+ * (`CardView.tsx`) are each the single definition of "which colour a column or priority renders",
+ * consumed by `Column.tsx`, `SearchBox.tsx` and `StatusPillSwitcher.tsx` (columns) and `CardView.tsx`
+ * itself (priority). A gate that only fenced literals would pass unchanged against a build that
+ * deleted either map and inlined its `var()` strings by hand.
+ * @remarks All thirteen {@link STATUS_COLOR_PALETTE_TOKENS} names must be present in `tokens.css`
+ * with a hex value; any absent one is a named missing-subject sentinel violation, never a silently
+ * shrunk denylist.
+ * @remarks The literal scan covers `.ts`/`.tsx`/`.css`/`.html` under `src/web`, since a
+ * stylesheet can reintroduce a palette hex just as easily as a component (a `.css`-blind walk
+ * passed while `viewer.css` carried `#ef8e3b`). Two exemptions: {@link TOKENS_PATH} itself (the
+ * palette's single legitimate home) and `viewer.css`'s `hl`-prefixed custom properties, whose
+ * values carry syntax-HIGHLIGHT meaning, not status meaning; that file's `#ef8e3b` collision
+ * with the stale/high value is coincidental hue reuse, documented in `docs/ARCHITECTURE.md`.
+ * BREAK EVIDENCE for all three legs (literal reintroduction, deleted palette declaration, renamed
+ * `COLUMN_ACCENT`) is recorded in
+ * `.planning/phases/114-board-density-states-motion-accents/114-MEASUREMENTS.md` under
+ * "NEW-24 break legs".
+ * @returns Violation report lines: the missing-subject sentinel(s) if the palette or the mechanism
+ * subjects are gone or renamed, one per retired literal found in `src/web`, and one per mechanism
+ * defect.
+ */
+function checkStatusColorSingleSource() {
+  const violations = [];
+
+  if (!existsSync(TOKENS_PATH)) {
+    return [`${TOKENS_PATH}: file not found, NEW-24 cannot verify the palette`];
+  }
+
+  const palette = readStatusColorPalette();
+  const missingTokens = STATUS_COLOR_PALETTE_TOKENS.filter(
+    (name) => !palette.has(name),
+  );
+  if (missingTokens.length) {
+    for (const name of missingTokens) {
+      violations.push(
+        `${TOKENS_PATH}: ${name} not found, NEW-24 cannot verify the palette`,
+      );
+    }
+    return violations;
+  }
+
+  const namesByValue = new Map();
+  for (const name of STATUS_COLOR_PALETTE_TOKENS) {
+    const value = palette.get(name);
+    if (!namesByValue.has(value)) namesByValue.set(value, []);
+    namesByValue.get(value).push(name);
+  }
+
+  const viewerCssPath = join(WEB_DIR, "viewer", "viewer.css");
+  const hlVarRe = new RegExp(`^\\s*${"-".repeat(2)}hl-[a-z]+\\s*:`);
+  for (const file of walkSrc(WEB_DIR, /\.(ts|tsx|css|html)$/)) {
+    if (file === TOKENS_PATH) continue;
+    const isViewerCss = file === viewerCssPath;
+    const lines = readFileSync(file, "utf8").split("\n");
+    lines.forEach((line, i) => {
+      if (isViewerCss && hlVarRe.test(line)) return;
+      const lower = line.toLowerCase();
+      for (const [value, names] of namesByValue) {
+        if (lower.includes(value)) {
+          violations.push(
+            `${file}:${i + 1}: retired pattern NEW-24, a status-meaning colour literal (${value}, the value of ${names.join(", ")}) must read var(${names[0]}) instead`,
+          );
+        }
+      }
+    });
+  }
+
+  violations.push(...checkStatusColorMechanism());
   return violations;
 }
 
@@ -886,7 +1310,8 @@ function generateBaseline() {
  * sentinels.
  * @returns Nothing; exits 0 iff MISSING, ORPHAN, EXTRA, RETIRED, STRIP
  * CASCADES, BOARD READING RHYTHM, TERMINAL FENCE, SESSION PROJECTION
- * CHOKEPOINT, and ATTENTION SINGLE SOURCE are all empty.
+ * CHOKEPOINT, ATTENTION SINGLE SOURCE, LAUNCHCTL READ-ONLY, and STATUS COLOR
+ * SINGLE SOURCE are all empty.
  */
 function run() {
   const home = new Set();
@@ -909,7 +1334,10 @@ function run() {
   const boardReadingRhythm = checkBoardReadingRhythm();
   const terminalFence = checkTerminalFence();
   const sessionChokepoint = checkSessionProjectionChokepoint();
+  const cleanupMirrorChokepoint = checkCleanupMirrorChokepoint();
   const attentionSingleSource = checkAttentionSingleSource();
+  const launchctlReadOnly = checkLaunchctlReadOnly();
+  const statusColorSingleSource = checkStatusColorSingleSource();
 
   report("MISSING (baseline - home)", missing);
   report("ORPHAN  (present - baseline)", orphan);
@@ -919,7 +1347,10 @@ function run() {
   report("BOARD READING RHYTHM (NEW-19)", boardReadingRhythm);
   report("TERMINAL FENCE (NEW-20)", terminalFence);
   report("SESSION PROJECTION CHOKEPOINT (NEW-21)", sessionChokepoint);
+  report("CLEANUP MIRROR CHOKEPOINT (NEW-23)", cleanupMirrorChokepoint);
   report("ATTENTION SINGLE SOURCE (NEW-22)", attentionSingleSource);
+  report("LAUNCHCTL READ-ONLY (harnesses)", launchctlReadOnly);
+  report("STATUS COLOR SINGLE SOURCE (NEW-24)", statusColorSingleSource);
 
   const defects =
     missing.length +
@@ -930,7 +1361,10 @@ function run() {
     boardReadingRhythm.length +
     terminalFence.length +
     sessionChokepoint.length +
-    attentionSingleSource.length;
+    cleanupMirrorChokepoint.length +
+    attentionSingleSource.length +
+    launchctlReadOnly.length +
+    statusColorSingleSource.length;
   console.log(
     `\n${defects === 0 ? "PASS" : "FAIL"}: ${baseline.size - missing.length}/${baseline.size} invariants homed` +
       (missing.length ? ` (${missing.length} missing a home)` : "") +
@@ -952,8 +1386,17 @@ function run() {
       (sessionChokepoint.length
         ? ` (${sessionChokepoint.length} session-projection-chokepoint violation(s))`
         : "") +
+      (cleanupMirrorChokepoint.length
+        ? ` (${cleanupMirrorChokepoint.length} cleanup-mirror-chokepoint violation(s))`
+        : "") +
       (attentionSingleSource.length
         ? ` (${attentionSingleSource.length} attention-single-source violation(s))`
+        : "") +
+      (launchctlReadOnly.length
+        ? ` (${launchctlReadOnly.length} launchctl read-only violation(s))`
+        : "") +
+      (statusColorSingleSource.length
+        ? ` (${statusColorSingleSource.length} status-color-single-source violation(s))`
         : ""),
   );
   process.exit(defects === 0 ? 0 : 1);

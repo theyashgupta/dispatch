@@ -1,7 +1,13 @@
-import { DEFAULT_CLAUDE_ARGS } from "../../../shared/types.js";
+import path from "node:path";
+import {
+  DEFAULT_CLAUDE_ACCOUNT_ID,
+  DEFAULT_CLAUDE_ARGS,
+} from "../../../shared/types.js";
 import { store } from "../../store/board.store.js";
 import { hasSession, killSession, newSession } from "../../adapters/tmux.js";
 import { preSeedTrust } from "../../adapters/claude-trust.js";
+import { resolveLaunchAccount } from "../domain/claude-accounts.js";
+import { buildClaudeLaunch } from "../domain/claude-launch.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { awaitReplReady, StartStepError } from "./steps.js";
 import { parseClaudeArgs } from "../domain/claude-args.js";
@@ -13,6 +19,8 @@ import { newHookTokenValue, registerHookToken } from "../domain/hook-tokens.js";
 import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
 import { REATTACH_STATUS_CLEAR_MS } from "./start-session.js";
 import { ensureTerminal } from "./terminal.js";
+
+const ACCOUNT_STEP = "resolving Claude account";
 
 /**
  * Column-preserving Resume for a dead In Review session (REV-04): relaunch `claude --continue` in
@@ -53,17 +61,29 @@ import { ensureTerminal } from "./terminal.js";
  * `card.hookToken` in place: reading it after the mint would hand `registerHookToken` the token it
  * is about to register, degenerating re-mint hygiene into `delete(token)` then `set(token)` and
  * leaving the genuinely stale credential resolving forever.
+ * @remarks (LOCAL-2) Resume targets the ACTIVE session record, whatever its ordinal: the tmux
+ * name derives from that record's own `branch` (fallback: the workspacePath basename, identical
+ * for every generation of card), NEVER from `card.identifier`, which is only session 1's name and
+ * would cross-wire a sub-session's resume onto the primary's tmux. The failure-path kill targets
+ * the SAME derived name, and every store write carries the session id captured at saga entry, so
+ * a mid-resume active-pointer switch can neither kill a live sibling nor stamp the resumed tmux
+ * onto the wrong record.
  * @see docs/ARCHITECTURE.md#in-review-lifecycle
  */
 export async function resumeSession(cardId: string): Promise<void> {
   if (store.isStarting(cardId)) return;
   store.beginStart(cardId);
+  let killTarget: string | null = null;
+  let sessionId: string | undefined;
   try {
     const card = store.getCard(cardId);
     if (!card?.workspacePath || !card.activeSessionId) return;
-    const sessionId = card.activeSessionId;
+    sessionId = card.activeSessionId;
     await store.clearResumeError(cardId);
-    const session = "dsp-" + card.identifier;
+    const active = card.sessions?.find((s) => s.id === sessionId);
+    const session =
+      "dsp-" + (active?.branch ?? path.basename(card.workspacePath));
+    killTarget = session;
     const resumeArgs = card.claudeSessionId
       ? ["--resume", card.claudeSessionId]
       : ["--continue"];
@@ -72,7 +92,7 @@ export async function resumeSession(cardId: string): Promise<void> {
       if (card.hookToken && card.activeSessionId) {
         registerHookToken(card.hookToken, cardId, card.activeSessionId);
       }
-      await store.resumeSession(cardId, { session });
+      await store.resumeSession(cardId, { session }, sessionId);
       setTimeout(
         () => void store.setStatusReason(cardId, null),
         REATTACH_STATUS_CLEAR_MS,
@@ -81,7 +101,17 @@ export async function resumeSession(cardId: string): Promise<void> {
       return;
     }
 
-    await preSeedTrust(card.workspacePath);
+    const recorded = card.sessions?.find((s) => s.id === sessionId);
+    const account = await resolveLaunchAccount(
+      recorded?.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID,
+    ).catch((err: unknown) => {
+      throw new StartStepError(
+        ACCOUNT_STEP,
+        err instanceof Error ? err.message : String(err),
+        "config",
+      );
+    });
+    await preSeedTrust(card.workspacePath, account.configDir);
     const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
     const claudeArgs = parseClaudeArgs(
       getOrchestrationConfig()?.claudeArgs ?? DEFAULT_CLAUDE_ARGS,
@@ -91,48 +121,54 @@ export async function resumeSession(cardId: string): Promise<void> {
     if (runtime?.capable && runtime.statusChannel !== "pane") {
       const previousToken = card.hookToken;
       const token = newHookTokenValue();
-      const mintedSessionId = await store.mintHookChannel(cardId, token);
+      const mintedSessionId = await store.mintHookChannel(
+        cardId,
+        token,
+        sessionId,
+      );
       if (mintedSessionId !== undefined) {
         registerHookToken(token, cardId, mintedSessionId, previousToken);
-        await newSession(
-          session,
-          card.workspacePath,
-          [
-            claudePath,
-            ...resumeArgs,
-            "--settings",
-            HOOK_SETTINGS_PATH,
-            ...claudeArgs,
-          ],
-          {
-            DISPATCH_HOOK_PORT: String(runtime.port),
-            DISPATCH_HOOK_TOKEN: token,
-            DISPATCH_CARD_ID: cardId,
-          },
-        );
+        const launch = buildClaudeLaunch({
+          claudePath,
+          claudeArgs,
+          leadingArgs: resumeArgs,
+          settingsPath: HOOK_SETTINGS_PATH,
+          hooks: { port: runtime.port, token, cardId },
+          configDir: account.configDir,
+        });
+        await newSession(session, card.workspacePath, launch.argv, launch.env);
         launchedHooksCapable = true;
       }
     }
     if (!launchedHooksCapable) {
       await store.clearHookChannel(cardId);
-      await newSession(session, card.workspacePath, [
+      const launch = buildClaudeLaunch({
         claudePath,
-        ...resumeArgs,
-        ...claudeArgs,
-      ]);
+        claudeArgs,
+        leadingArgs: resumeArgs,
+        settingsPath: HOOK_SETTINGS_PATH,
+        hooks: null,
+        configDir: account.configDir,
+      });
+      await newSession(session, card.workspacePath, launch.argv, launch.env);
     }
     await awaitReplReady(session);
-    await store.resumeSession(cardId, { session });
+    await store.resumeSession(cardId, { session }, sessionId);
     setTimeout(
       () => void store.setStatusReason(cardId, null),
       REATTACH_STATUS_CLEAR_MS,
     );
     await ensureTerminal(cardId, sessionId, session);
   } catch (err) {
-    const card = store.getCard(cardId);
-    if (card) await killSession(`=dsp-${card.identifier}`);
-    await store.recordResumeFailure(cardId);
+    if (killTarget != null) await killSession(`=${killTarget}`);
     const step = err instanceof StartStepError ? err.step : "unknown step";
+    await store.recordResumeFailure(
+      cardId,
+      sessionId,
+      err instanceof StartStepError && err.step === ACCOUNT_STEP
+        ? err.stderr
+        : undefined,
+    );
     console.error(`[resume] failed for card ${cardId} (${step})`);
   } finally {
     store.endStart(cardId);

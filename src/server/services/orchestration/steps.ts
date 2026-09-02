@@ -29,6 +29,11 @@ import {
   sendKeys,
 } from "../../adapters/tmux.js";
 import { preSeedTrust } from "../../adapters/claude-trust.js";
+import {
+  getActiveAccountId,
+  resolveLaunchAccount,
+} from "../domain/claude-accounts.js";
+import { buildClaudeLaunch } from "../domain/claude-launch.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { store } from "../../store/board.store.js";
 import { buildKickoff } from "../domain/kickoff.js";
@@ -100,6 +105,8 @@ export interface SagaContext {
   createdWorktrees: { repoPath: string; worktreePath: string }[];
   createdBranches: { repoPath: string; branch: string }[];
   tmuxSessionCreated: boolean;
+  /** The Claude account the REPL launched on, set by the start-claude step for `completeStart`. */
+  claudeAccountId?: string;
   /**
    * True when this saga run is a RESTART of a previously-lost session (card.sessionLost). Threads
    * into the kickoff so the agent is told to `git status` first; also the condition under which an
@@ -256,7 +263,7 @@ const createWorktrees: SagaStep = {
       } else {
         if (ctx.inheritBaseRef != null) {
           ctx.warnings.push(
-            `inherited branch ${ctx.inheritBaseRef} not found in ${path.basename(repoPath)} — cut from ${base}`,
+            `inherited branch ${ctx.inheritBaseRef} not found in ${path.basename(repoPath)}, cut from ${base}`,
           );
         }
         try {
@@ -264,7 +271,7 @@ const createWorktrees: SagaStep = {
           baseRef = "origin/" + base;
         } catch (err) {
           ctx.warnings.push(
-            `git fetch origin ${base} failed in ${path.basename(repoPath)} — cut from local ${base}`,
+            `git fetch origin ${base} failed in ${path.basename(repoPath)}, cut from local ${base}`,
           );
           const hasLocalBase = await revParseVerify(
             repoPath,
@@ -412,7 +419,9 @@ const startClaude: SagaStep = {
   statusText: "Starting Claude…",
   async run(ctx) {
     const session = "dsp-" + ctx.sessionName;
-    await preSeedTrust(ctx.workspacePath);
+    const account = await resolveLaunchAccount(getActiveAccountId());
+    ctx.claudeAccountId = account.id;
+    await preSeedTrust(ctx.workspacePath, account.configDir);
     await store.resetClaudeSessionId(ctx.card.id, ctx.sessionId);
 
     const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
@@ -434,22 +443,27 @@ const startClaude: SagaStep = {
       );
       if (sessionId !== undefined) {
         registerHookToken(token, ctx.card.id, sessionId, previousToken);
-        await newSession(
-          session,
-          ctx.workspacePath,
-          [claudePath, "--settings", HOOK_SETTINGS_PATH, ...claudeArgs],
-          {
-            DISPATCH_HOOK_PORT: String(runtime.port),
-            DISPATCH_HOOK_TOKEN: token,
-            DISPATCH_CARD_ID: ctx.card.id,
-          },
-        );
+        const launch = buildClaudeLaunch({
+          claudePath,
+          claudeArgs,
+          settingsPath: HOOK_SETTINGS_PATH,
+          hooks: { port: runtime.port, token, cardId: ctx.card.id },
+          configDir: account.configDir,
+        });
+        await newSession(session, ctx.workspacePath, launch.argv, launch.env);
         launchedHooksCapable = true;
       }
     }
     if (!launchedHooksCapable) {
       await store.clearHookChannel(ctx.card.id);
-      await newSession(session, ctx.workspacePath, [claudePath, ...claudeArgs]);
+      const launch = buildClaudeLaunch({
+        claudePath,
+        claudeArgs,
+        settingsPath: HOOK_SETTINGS_PATH,
+        hooks: null,
+        configDir: account.configDir,
+      });
+      await newSession(session, ctx.workspacePath, launch.argv, launch.env);
     }
     ctx.tmuxSessionCreated = true;
 

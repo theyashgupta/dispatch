@@ -1,5 +1,7 @@
 import { ExternalLink, Globe } from "lucide-react";
 import type { PreviewInfo } from "../../../shared/types.js";
+import { previewEvidenceLine } from "../badges/index.js";
+import { Field } from "../../primitives/Field.js";
 import { IconButton } from "../../primitives/IconButton.js";
 
 export function PreviewRow({ preview }: { preview: PreviewInfo }) {
@@ -44,6 +46,22 @@ export function PreviewRow({ preview }: { preview: PreviewInfo }) {
         >
           Dev server
         </span>
+        {preview.evidence != null && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--space-xs)",
+            }}
+          >
+            <Field mono>{previewEvidenceLine(preview.evidence)}</Field>
+            {preview.evidence.cwdMismatch === true && (
+              <Field mono style={{ color: "var(--status-stale)" }}>
+                cwd mismatch
+              </Field>
+            )}
+          </div>
+        )}
       </div>
       <IconButton
         aria-label={`Open localhost:${preview.port} in browser`}

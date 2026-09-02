@@ -57,10 +57,10 @@ export function SessionSwitcher({ card }: SessionSwitcherProps) {
         {entries.map((entry) => {
           const active = entry.id === activeId;
           let label = entry.lost
-            ? `Session ${entry.ordinal} — lost`
+            ? `Session ${entry.ordinal} (lost)`
             : `Session ${entry.ordinal}`;
           if (entry.parentOrdinal != null) {
-            label += ` — built from Session ${entry.parentOrdinal}`;
+            label += `, built from Session ${entry.parentOrdinal}`;
           }
           return (
             <IconButton
@@ -77,7 +77,7 @@ export function SessionSwitcher({ card }: SessionSwitcherProps) {
                 color: active
                   ? "var(--accent)"
                   : entry.lost
-                    ? "var(--destructive)"
+                    ? "var(--destructive-text)"
                     : "var(--text-muted)",
                 ...(active ? { background: activeSegmentTint } : {}),
               }}

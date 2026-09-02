@@ -22,7 +22,7 @@ const ATTENTION_TITLES: ReadonlyArray<(card: CardModel) => string | null> = [
     card.sessionLost === true && card.column !== "done" ? "Session lost" : null,
   (card) =>
     card.cleanupBlocked != null && card.cleanupBlocked.length > 0
-      ? "Uncommitted work — cleanup blocked"
+      ? "Uncommitted work: cleanup blocked"
       : null,
 ];
 
@@ -52,13 +52,13 @@ export function errorCopy(
   switch (err.variant) {
     case "branch-conflict":
       return {
-        heading: "Start failed — branch checked out elsewhere",
+        heading: "Start failed: branch checked out elsewhere",
         detail: `Branch ${identifier} is attached to another worktree.`,
       };
     case "repl-timeout":
-      return { heading: "Start failed — Claude didn't start" };
+      return { heading: "Start failed: Claude didn't start" };
     default:
-      return { heading: `Start failed — ${err.step}` };
+      return { heading: `Start failed: ${err.step}` };
   }
 }
 

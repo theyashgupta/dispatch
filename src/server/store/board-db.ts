@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { DISPATCH_DATA_DIR } from "./data-dir.js";
 import { DatabaseSync } from "node:sqlite";
 import type {
   ActivityEvent,
@@ -10,13 +10,14 @@ import type {
   EventType,
 } from "../../shared/types.js";
 
-const BOARD_DIR = path.join(os.homedir(), ".dispatch");
-export const BOARD_DB_PATH = path.join(BOARD_DIR, "board.db");
+export const BOARD_DB_PATH = path.join(DISPATCH_DATA_DIR, "board.db");
 
 /** Hardcoded snapshot-backup slot count (`.bak.1` .. `.bak.5`); no config surface (BAK-01). */
 export const BACKUP_SLOTS = 5;
 
 const HOUR_MS = 3_600_000;
+
+const MAX_PUSH_SUBSCRIPTIONS = 20;
 
 /**
  * Swallow ONLY node:sqlite's `ExperimentalWarning` — never any other warning — so normal
@@ -126,6 +127,35 @@ export interface BoardDb {
    * preserves the `existsSync` guard's intent a second time over.
    */
   snapshotPreV3(): void;
+  /**
+   * Upsert a subscription row, keyed by `endpoint`. A re-subscribe from the same device refreshes
+   * `p256dh`/`auth`/`origin` AND `created_at` in place rather than accumulating a duplicate row,
+   * so `created_at` means "last subscribed at" and eviction targets the least-recently-subscribed
+   * device, not the first device ever registered.
+   * @returns Whether the row was stored. For a NEW endpoint an at-or-over-cap table evicts
+   * exactly as many oldest `created_at` rows as the insert needs (an existing endpoint never
+   * evicts), so a permanently-failing endpoint (never pruned by the 404/410 rule) cannot wedge
+   * the {@link MAX_PUSH_SUBSCRIPTIONS} cap forever; `false` survives only as a defensive signal.
+   * @remarks Safe outside the `persist` write queue: `push_subscriptions` shares no rows with the
+   * card/meta/event write path, and the evict + upsert pair runs back-to-back on the process's
+   * single synchronous `DatabaseSync` handle (`busy_timeout = 5000`), so no other statement can
+   * interleave between them.
+   */
+  addPushSubscription(sub: PushSubscriptionRow): boolean;
+  /**
+   * Delete a subscription row by endpoint.
+   * @returns Whether a row was actually deleted, so the caller can answer honestly instead of
+   * always claiming success.
+   * @remarks Safe outside the `persist` write queue for the same reasons as
+   * {@link BoardDb.addPushSubscription}.
+   */
+  removePushSubscription(endpoint: string): boolean;
+  /**
+   * All subscription rows, for the send-time fan-out.
+   * @remarks Safe outside the `persist` write queue for the same reasons as
+   * {@link BoardDb.addPushSubscription}.
+   */
+  listPushSubscriptions(): PushSubscriptionRow[];
 }
 
 /**
@@ -143,6 +173,15 @@ interface EventRow {
   reason: string | null;
   source: string | null;
   ts: string;
+}
+
+/** A `push_subscriptions` row, keyed by endpoint (PUSH-09). */
+export interface PushSubscriptionRow {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  origin: string;
+  createdAt: string;
 }
 
 /** Slot path for the Nth snapshot backup in the `.bak.N` chain. */
@@ -287,7 +326,7 @@ export function readWorkspaceRegistry(): {
  */
 function quarantineAndRecover(cause: unknown): DatabaseSync {
   console.warn(
-    `[store] board.db failed to open cleanly (${(cause as Error).message}) — quarantining and walking the backup chain.`,
+    `[store] board.db failed to open cleanly (${(cause as Error).message}), quarantining and walking the backup chain.`,
   );
   try {
     if (fs.existsSync(BOARD_DB_PATH)) {
@@ -312,7 +351,7 @@ function quarantineAndRecover(cause: unknown): DatabaseSync {
     }
   }
   console.warn(
-    `[store] board.db and every backup slot were unreadable — starting with an empty database.`,
+    `[store] board.db and every backup slot were unreadable, starting with an empty database.`,
   );
   try {
     fs.rmSync(BOARD_DB_PATH, { force: true });
@@ -356,7 +395,7 @@ function connect(): DatabaseSync {
       `[store] board.db at ${BOARD_DB_PATH} could not be opened and this is NOT corruption ` +
         `(${(err as Error).message}). board.db and every backup were left untouched. ` +
         `Fix the underlying problem (file permissions on ~/.dispatch, free disk space, or a ` +
-        `stuck lock) and restart — dispatch will not quarantine or overwrite your data on a ` +
+        `stuck lock) and restart, dispatch will not quarantine or overwrite your data on a ` +
         `non-corruption error.`,
       { cause: err },
     );
@@ -394,7 +433,7 @@ function toMeta(parsed: Partial<BoardSnapshot>): BoardMeta {
  * @see docs/ARCHITECTURE.md#single-writer-store
  */
 export function openBoardDb(): BoardDb {
-  fs.mkdirSync(BOARD_DIR, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(DISPATCH_DATA_DIR, { recursive: true, mode: 0o700 });
   const db = connect();
   db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   db.exec("PRAGMA journal_mode = WAL");
@@ -433,6 +472,13 @@ export function openBoardDb(): BoardDb {
       ts       TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_events_card_id ON events(card_id);
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint   TEXT PRIMARY KEY,
+      p256dh     TEXT NOT NULL,
+      auth       TEXT NOT NULL,
+      origin     TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
 
   const upsertCard = db.prepare(
@@ -460,6 +506,29 @@ export function openBoardDb(): BoardDb {
   const selectEventsByCard = db.prepare(
     `SELECT id, card_id, type, from_col, to_col, reason, source, ts
        FROM events WHERE card_id = ? ORDER BY id DESC LIMIT ?`,
+  );
+  const evictExcessPushSubscriptions = db.prepare(
+    `DELETE FROM push_subscriptions
+      WHERE NOT EXISTS (SELECT 1 FROM push_subscriptions WHERE endpoint = @endpoint)
+        AND endpoint IN (
+          SELECT endpoint FROM push_subscriptions
+           ORDER BY created_at
+           LIMIT MAX(0, (SELECT COUNT(*) FROM push_subscriptions) - ${MAX_PUSH_SUBSCRIPTIONS - 1}))`,
+  );
+  const upsertPushSubscription = db.prepare(
+    `INSERT INTO push_subscriptions (endpoint, p256dh, auth, origin, created_at)
+     SELECT @endpoint, @p256dh, @auth, @origin, @createdAt
+     WHERE (SELECT COUNT(*) FROM push_subscriptions) < ${MAX_PUSH_SUBSCRIPTIONS}
+        OR EXISTS (SELECT 1 FROM push_subscriptions WHERE endpoint = @endpoint)
+     ON CONFLICT(endpoint) DO UPDATE SET
+       p256dh = excluded.p256dh, auth = excluded.auth, origin = excluded.origin,
+       created_at = excluded.created_at`,
+  );
+  const deletePushSubscription = db.prepare(
+    `DELETE FROM push_subscriptions WHERE endpoint = ?`,
+  );
+  const selectPushSubscriptions = db.prepare(
+    `SELECT endpoint, p256dh, auth, origin, created_at FROM push_subscriptions`,
   );
 
   function persistTxn(
@@ -573,6 +642,37 @@ export function openBoardDb(): BoardDb {
           (err as Error).message,
         );
       }
+    },
+    addPushSubscription(sub) {
+      evictExcessPushSubscriptions.run({ endpoint: sub.endpoint });
+      const info = upsertPushSubscription.run({
+        endpoint: sub.endpoint,
+        p256dh: sub.p256dh,
+        auth: sub.auth,
+        origin: sub.origin,
+        createdAt: sub.createdAt,
+      });
+      return Number(info.changes) > 0;
+    },
+    removePushSubscription(endpoint) {
+      const info = deletePushSubscription.run(endpoint);
+      return Number(info.changes) > 0;
+    },
+    listPushSubscriptions() {
+      const rows = selectPushSubscriptions.all() as {
+        endpoint: string;
+        p256dh: string;
+        auth: string;
+        origin: string;
+        created_at: string;
+      }[];
+      return rows.map((r) => ({
+        endpoint: r.endpoint,
+        p256dh: r.p256dh,
+        auth: r.auth,
+        origin: r.origin,
+        createdAt: r.created_at,
+      }));
     },
   };
 }

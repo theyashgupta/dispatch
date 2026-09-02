@@ -14,11 +14,13 @@ export interface ExecResult {
  * `DISPATCH_PERF_EXEC` is unset, and neither is read nor written anywhere else in {@link run}.
  * @remarks This is the sole subprocess chokepoint (NEW-11: execa was never installed), so wrapping
  * `run()` alone captures effectively all `git`/`tmux`/`ttyd` load system-wide without touching those
- * adapters individually.
+ * adapters individually. `shape` bounds each record to `cmd` plus the first two args (`gh pr list`,
+ * `git worktree`), enough to count an invocation kind and never enough to carry a branch name, a
+ * repo path, or a token (T-98-05); `opts.cwd` is deliberately never recorded here.
  * @see docs/ARCHITECTURE.md#exec-chokepoint
  */
 const perfExec = process.env.DISPATCH_PERF_EXEC === "1";
-const perfCalls: { cmd: string; ms: number }[] = [];
+const perfCalls: { cmd: string; shape: string; ms: number }[] = [];
 
 /**
  * Arm SIGTERM→grace→SIGKILL escalation for one child: schedule a `SIGKILL` `graceMs` after each
@@ -58,7 +60,8 @@ function armKillEscalation(
  * with perfectly valid stdout when its `-p` list names a pid that has since died, so a caller must
  * be able to tell "exited 1, parse the stdout anyway" from "binary missing, give up".
  * `killEscalationMs` (opt-in, inert when unset) arms {@link armKillEscalation} for callers whose
- * child may ignore the abort/timeout SIGTERM (headless `claude -p` drafts).
+ * child may ignore the abort/timeout SIGTERM (headless `claude -p` drafts). `env` adds variables on
+ * top of the inherited process environment (a per-account `CLAUDE_CONFIG_DIR`), never replaces it.
  * @param input written to the child's stdin, which is then closed; for stream-json requests. The
  * stdin error event is swallowed because a child that exits before draining a large input raises
  * EPIPE outside the awaited promise, which would otherwise take the whole server down.
@@ -77,12 +80,18 @@ export async function run(
     maxBuffer?: number;
     signal?: AbortSignal;
     killEscalationMs?: number;
+    env?: Record<string, string>;
     input?: string;
   } = {},
 ): Promise<ExecResult> {
   const t0 = perfExec ? performance.now() : 0;
-  const { killEscalationMs, input, ...execOpts } = opts;
-  const pending = execFileP(cmd, args, { ...execOpts, encoding: "utf8" });
+  const shape = perfExec ? [cmd, ...args.slice(0, 2)].join(" ") : "";
+  const { killEscalationMs, env, input, ...execOpts } = opts;
+  const pending = execFileP(cmd, args, {
+    ...execOpts,
+    ...(env ? { env: { ...process.env, ...env } } : {}),
+    encoding: "utf8",
+  });
   if (input !== undefined) {
     pending.child.stdin?.on("error", () => {});
     pending.child.stdin?.end(input);
@@ -93,10 +102,10 @@ export async function run(
       : armKillEscalation(pending.child, execOpts, killEscalationMs);
   try {
     const { stdout, stderr } = await pending;
-    if (perfExec) perfCalls.push({ cmd, ms: performance.now() - t0 });
+    if (perfExec) perfCalls.push({ cmd, shape, ms: performance.now() - t0 });
     return { stdout, stderr };
   } catch (err) {
-    if (perfExec) perfCalls.push({ cmd, ms: performance.now() - t0 });
+    if (perfExec) perfCalls.push({ cmd, shape, ms: performance.now() - t0 });
     const e = err as Error & {
       stderr?: string;
       stdout?: string;
@@ -124,10 +133,10 @@ function registerPerfExecDump(): void {
   process.on("SIGTERM", () => {
     const byCmd: Record<string, { count: number; ms: number }> = {};
     for (const c of perfCalls) {
-      const entry = byCmd[c.cmd] ?? { count: 0, ms: 0 };
+      const entry = byCmd[c.shape] ?? { count: 0, ms: 0 };
       entry.count += 1;
       entry.ms += c.ms;
-      byCmd[c.cmd] = entry;
+      byCmd[c.shape] = entry;
     }
     const total = perfCalls.reduce((sum, c) => sum + c.ms, 0);
     process.stderr.write(
@@ -157,5 +166,22 @@ export function runInherit(cmd: string, args: string[]): Promise<number> {
     const child = spawn(cmd, args, { stdio: "inherit" });
     child.on("error", () => resolve(-1));
     child.on("exit", (code) => resolve(code ?? -1));
+  });
+}
+
+/**
+ * Spawn a long-lived argv-only child with every stdio stream piped, for the one adapter that must
+ * write to a child's stdin (the Claude login's pasted code). Same no-shell guarantee as {@link run};
+ * the caller owns the lifetime.
+ */
+export function spawnPiped(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; env?: Record<string, string> } = {},
+): ChildProcess {
+  return spawn(cmd, args, {
+    ...(opts.cwd ? { cwd: opts.cwd } : {}),
+    env: opts.env ? { ...process.env, ...opts.env } : process.env,
+    stdio: ["pipe", "pipe", "pipe"],
   });
 }

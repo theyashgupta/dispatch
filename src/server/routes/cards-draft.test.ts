@@ -22,7 +22,7 @@ await fsp.writeFile(
     "#!/bin/sh",
     'printf "%s\\n" "$@" > "$FAKE_CLAUDE_ARGV"',
     'case "$2" in',
-    `--*) cat > "$FAKE_CLAUDE_STDIN"; printf '%s\\n' '{"type":"result","result":"## Title\\nFake title\\n\\n## Description\\nFake description"}' ;;`,
+    `*input-format*) cat > "$FAKE_CLAUDE_STDIN"; printf '%s\\n' '{"type":"result","result":"## Title\\nFake title\\n\\n## Description\\nFake description"}' ;;`,
     `*) : > "$FAKE_CLAUDE_STDIN"; printf '## Title\\nFake title\\n\\n## Description\\nFake description\\n' ;;`,
     "esac",
   ].join("\n"),

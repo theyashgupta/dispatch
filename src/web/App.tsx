@@ -12,6 +12,9 @@ import {
 import { useTransitionNotifications } from "./hooks/useTransitionNotifications.js";
 import { AppShell } from "./AppShell.js";
 import { SyncStrip } from "./features/sync/index.js";
+import { UsageChip } from "./features/accounts/index.js";
+import { useClaudeAccounts } from "./hooks/useClaudeAccounts.js";
+import { useMediaQuery } from "./hooks/useMediaQuery.js";
 import { Glyph, wordmarkStyle } from "./primitives/Glyph.js";
 import {
   actionablePinnedCard,
@@ -35,6 +38,7 @@ import { SettingsScreen, type SettingsTab } from "./features/settings/index.js";
 import { FirstRunSetup } from "./features/setup/index.js";
 import { UpdateBanner } from "./features/update/index.js";
 import { cleanupCard as cleanupCardApi, getCard, getSetup } from "./lib/api.js";
+import { refreshPushSubscription } from "./lib/push.js";
 import type { StartRequest } from "./lib/start-request.js";
 import type { PrerequisiteStatus, TunnelState } from "../shared/types.js";
 import type { CardSearchResult } from "../shared/search.js";
@@ -43,7 +47,7 @@ import { DONE_PAGE_SIZE } from "../shared/done-limit.js";
 function BootScreen({ connection }: { connection: ConnectionStatus }) {
   const statusText =
     connection === "disconnected"
-      ? "Disconnected — reconnecting…"
+      ? "Disconnected, reconnecting…"
       : "Connecting…";
   return (
     <div
@@ -75,7 +79,7 @@ function BootScreen({ connection }: { connection: ConnectionStatus }) {
           fontWeight: "var(--weight-semibold)",
           color:
             connection === "disconnected"
-              ? "var(--destructive)"
+              ? "var(--destructive-text)"
               : "var(--text-muted)",
         }}
       >
@@ -87,6 +91,8 @@ function BootScreen({ connection }: { connection: ConnectionStatus }) {
 
 export function App() {
   const feed = useActivityFeed();
+  const claudeAccounts = useClaudeAccounts();
+  const chipCompact = useMediaQuery("(max-width: 1023px)");
   const [tunnelState, setTunnelState] = useState<TunnelState>({
     status: "off",
   });
@@ -145,6 +151,40 @@ export function App() {
       localStorage.setItem("dsp.sound", soundEnabled ? "on" : "off");
     } catch {}
   }, [soundEnabled]);
+
+  useEffect(() => {
+    void refreshPushSubscription();
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("card");
+    if (id == null || id === "") return;
+    setSelectedCardId(id);
+    hydratePinned(id);
+    params.delete("card");
+    const search = params.toString();
+    const next =
+      window.location.pathname +
+      (search ? `?${search}` : "") +
+      window.location.hash;
+    window.history.replaceState(null, "", next);
+  }, []);
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    function onMessage(event: MessageEvent) {
+      const data: unknown = event.data;
+      if (typeof data !== "object" || data === null) return;
+      const { type, cardId } = data as { type?: unknown; cardId?: unknown };
+      if (type !== "dsp-open-card" || typeof cardId !== "string") return;
+      setSelectedCardId(cardId);
+      hydratePinned(cardId);
+    }
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () =>
+      navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, []);
 
   const lastOpened = useLastOpened();
   const newestTs = feed.events[0]?.ts;
@@ -378,6 +418,21 @@ export function App() {
               setViewMode(mode);
               if (mode === "workspace") setInboxOpen(false);
             }}
+            accountSlot={
+              claudeAccounts.loaded ? (
+                <UsageChip
+                  accounts={claudeAccounts.accounts}
+                  activeId={claudeAccounts.activeId}
+                  compact={chipCompact}
+                  onSwitch={claudeAccounts.switchAccount}
+                  onRefresh={claudeAccounts.refreshUsage}
+                  onOpenSettings={() => {
+                    setSettingsInitialTab("accounts");
+                    setSettingsOpen(true);
+                  }}
+                />
+              ) : null
+            }
           />
         </>
       }
@@ -415,6 +470,7 @@ export function App() {
       }
       detail={
         <DetailPanel
+          accounts={claudeAccounts.accounts}
           card={selectedCard}
           hydrating={pinnedHydrating && !selectedCardInWindow}
           pinFetchError={pinFetchErrorKind}
@@ -479,6 +535,7 @@ export function App() {
       )}
       {settingsOpen && (
         <SettingsScreen
+          claudeAccounts={claudeAccounts}
           initialTab={settingsInitialTab}
           tunnelState={tunnelState}
           soundEnabled={soundEnabled}

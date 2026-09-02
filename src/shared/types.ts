@@ -66,6 +66,37 @@ export interface PrInfo {
   state: "open" | "merged" | "closed";
   isDraft: boolean;
   ci: "pass" | "fail" | "pending" | null;
+  /**
+   * The workspace repo folder BASENAME this PR was found in, e.g. `"frontend"`: never GitHub's
+   * `nameWithOwner` and never the repo's absolute path. Stamped server-side from
+   * `workspace.repos[i].path`, the only path the server already holds for this card; a basename
+   * is passed rather than the path itself so no absolute path or org name reaches the wire
+   * (T-98-01). The single exception is a card whose own `workspace.repos` holds two folders with
+   * the SAME basename, where the colliding entries alone are qualified with their parent folder
+   * name (`"acme/api"`): without that, the two collapse into one identity and the repo tag is
+   * suppressed in precisely the case it exists to disambiguate. Still a folder name, never an org.
+   * REQUIRED, not optional: every `PrInfo` that reaches the wire names the repo it came from.
+   * NON-SECRET: rides `snapshot()` UNREDACTED like the rest of this interface.
+   */
+  repo: string;
+}
+
+/**
+ * Why a detected dev-server port was attributed to this card's workspace. `matchedCwd` is a
+ * BASENAME produced by `repoDisplayNames`, the same de-collision helper `PrInfo.repo` already
+ * uses, never an absolute path and never `session.workspace.folder` itself (T-99-01). `pid` and
+ * `bindAddress` are non-secret, a process id and a loopback bind token, and ride the
+ * wire like the rest of `PreviewInfo`. Carries no timestamp deliberately: the preview write path
+ * is fenced by a `JSON.stringify` write-skip diff, and a per-tick value would rebroadcast the
+ * whole board on a tick where nothing about this preview changed.
+ * @see docs/ARCHITECTURE.md#security-threat-model
+ */
+export interface PreviewEvidence {
+  pid: number;
+  source: "cwd" | "pane ancestry";
+  matchedCwd?: string;
+  bindAddress: string;
+  cwdMismatch?: boolean;
 }
 
 /**
@@ -76,6 +107,12 @@ export interface PrInfo {
 export interface PreviewInfo {
   port: number;
   url: string;
+  /**
+   * Attribution evidence for this port, optional only defensively, matching the `prs?`/
+   * `previews?` absent-means-nothing idiom used elsewhere on the wire, never because a live tick
+   * withholds it once a `PreviewInfo` is produced.
+   */
+  evidence?: PreviewEvidence;
 }
 
 /**
@@ -88,6 +125,7 @@ export type ProbeFailureCategory =
   | "repo path missing"
   | "gh not authenticated"
   | "gh repo not accessible"
+  | "gh rate limited"
   | "gh pr list failed"
   | "detection unavailable";
 
@@ -104,6 +142,15 @@ export type ProbeFailureCategory =
  */
 export interface ProbeUnknown {
   category: ProbeFailureCategory;
+  /**
+   * ISO timestamp of the most recent probe attempt for this signal, OPTIONAL. Both the PR and
+   * preview write paths stamp a minute-truncated time when a probe genuinely ran; a skip carries
+   * the prior value forward or omits it, so absence never means "just checked", only that no
+   * fresh probe wrote this record (a negative-cache skip, or a record predating this field).
+   * Required would force a call site to invent a timestamp for a signal it did not stamp, so
+   * optional is deliberate, not an oversight.
+   */
+  checkedAt?: string;
 }
 
 export interface Card {
@@ -238,6 +285,11 @@ export interface Card {
    */
   sessions?: Session[];
   /**
+   * WIRE-ONLY: the active session's `claudeAccountId`, derived at the `redactCard` chokepoint
+   * from the session record so the detail panel can name the account. Never stored on the card.
+   */
+  claudeAccountId?: string;
+  /**
    * The id of this card's ACTIVE session within `sessions` — the one the six flat fields mirror.
    * Paired 1:1 with `sessions` being present; absent on a card that has never carried session
    * data. The store's `setActiveSession` chokepoint is the only writer of either field.
@@ -255,22 +307,6 @@ export interface Card {
    */
   nextSessionOrdinal?: number;
   /**
-   * Wire-only projection of the session named by `activeSessionId`, populated exclusively by the
-   * store's `redactCard` chokepoint and absent from the persisted row. The full `sessions` array is
-   * deliberately not part of the wire shape.
-   * @remarks `TerminalRegion` renders the terminal `<iframe>` on `activeSession.ttydPort`, keyed by
-   * `activeSession.id`, so `DetailPanel`'s "a terminal already exists, do not spawn" gate reads
-   * `activeSession.ttydPort` too — the ONLY two fields either client reader ever touches (F-96-F,
-   * `96-11-SUMMARY.md`). `ActiveSessionWire` field-picks exactly those two; `tmuxSession`,
-   * `claudeSessionId`, `workspacePath` and `workspace` are NOT re-projected here because the six
-   * flat fields above already carry the identical values for the SAME active session (`KEEP-02`'s
-   * own wire-parity contract requires those flat fields present regardless), so nesting them a
-   * second time was pure duplicated payload weight, not a second source of truth — confirmed a real
-   * ~35% N=1 board-payload regression by `96-10`'s baseline re-run before this fix.
-   * @see docs/ARCHITECTURE.md#session-projection-chokepoint
-   */
-  activeSession?: ActiveSessionWire;
-  /**
    * How many session records this card owns. NON-SECRET: rides `snapshot()`/`redactCard`
    * UNREDACTED, same policy class as `hookRoutedAt`/`claudeSessionId`/`prs` (an integer count
    * carries no credential and no pane content). ABSENT (never `1`) when the card owns zero or one
@@ -279,8 +315,8 @@ export interface Card {
    * more otherwise. Counts every session record the card owns INCLUDING one whose session has been
    * marked lost — `markSessionLost` clears a record's fields in place and never deletes it (cleanup
    * is a later phase), so the multiplicity signal does not silently drop when a sibling dies.
-   * Populated exclusively inside `redactCard`, `activeSession`'s own chokepoint, so it has exactly
-   * one writer like every other session-projection field.
+   * Populated exclusively inside `redactCard`, the same chokepoint `sessionSummaries` uses, so it
+   * has exactly one writer like every other session-projection field.
    * @see docs/ARCHITECTURE.md#session-projection-chokepoint
    */
   sessionCount?: number;
@@ -443,6 +479,12 @@ export interface Session {
   /** Port of the per-session ttyd instance. Mirrored onto `Card.ttydPort` while active. */
   ttydPort?: number;
   /**
+   * The Claude account this session was launched on (`default` or a registry id). Owned by the
+   * session, never projected onto the card's flat fields; a resume relaunches on this account.
+   * NON-SECRET: a uuid, rides `snapshot()` unredacted.
+   */
+  claudeAccountId?: string;
+  /**
    * Per-session hook-auth secret. NEVER serialized to the wire — the store's
    * `redactCard`/`snapshot()` chokepoint strips it from the card AND from every session copy,
    * matching `Card.hookToken`'s policy exactly.
@@ -555,30 +597,12 @@ export interface Session {
 }
 
 /**
- * Wire-only projection of the active `Session` record, built by the store's `redactCard`
- * chokepoint via a field pick (never a spread) so the secret field is omitted BY CONSTRUCTION — a
- * future field added to `Session` cannot silently reintroduce it through this type. Never the
- * persisted shape; the full record (with the secret) is what lives on disk.
- * @remarks Deliberately narrow: `id` and `ttydPort` are the only two fields any client reader
- * touches (`TerminalRegion`, `DetailPanel`'s spawn gate). `tmuxSession`/`claudeSessionId`/
- * `workspacePath`/`workspace` were dropped by F-96-F's fix — they duplicated the six flat fields
- * `Card` already carries for the same active session, adding ~35% to the N=1 board payload for
- * data no reader ever used. See `docs/ARCHITECTURE.md#session-projection-chokepoint`.
- */
-export interface ActiveSessionWire {
-  /** Mirrors `Session.id`. */
-  id: string;
-  /** Mirrors `Session.ttydPort`. */
-  ttydPort?: number;
-}
-
-/**
  * Wire-only per-session digest for the detail panel's session switcher, built by the store's
- * `redactCard` chokepoint via a field pick (never a spread) — the same discipline
- * {@link ActiveSessionWire} already establishes, so a future `Session` field cannot silently
- * widen this array to carry a secret. Deliberately carries no `active` flag: `Card.activeSessionId`
- * is already the one field naming the active session, and a second field claiming the same fact
- * could disagree under a race; the client compares `entry.id === card.activeSessionId` instead.
+ * `redactCard` chokepoint via a field pick (never a spread) so a future `Session` field cannot
+ * silently widen this array to carry a secret. Deliberately carries no `active` flag:
+ * `Card.activeSessionId` is already the one field naming the active session, and a second field
+ * claiming the same fact could disagree under a race; the client compares
+ * `entry.id === card.activeSessionId` instead.
  * @see docs/ARCHITECTURE.md#session-projection-chokepoint
  */
 export interface SessionSummary {
@@ -588,6 +612,8 @@ export interface SessionSummary {
   ordinal: number;
   /** True when `Session.tmuxSession` is absent — this sibling's own terminal is dead. */
   lost: boolean;
+  /** Mirrors `Session.claudeAccountId`; absent for sessions that predate account tagging. */
+  claudeAccountId?: string;
   /**
    * Mirrors {@link Session.cleanupBlocked} for THIS session. Absent when this session is not
    * blocked — same absent-means-nothing-to-report idiom as `sessionSummaries` itself, which is
@@ -665,6 +691,8 @@ export interface SessionFields {
   tmuxSession: string;
   /** Port of the per-session ttyd instance (Phase 3). */
   ttydPort?: number;
+  /** The Claude account the session launched on; absent means the home login. */
+  claudeAccountId?: string;
 }
 
 /**
@@ -737,19 +765,15 @@ export interface TerminalTheme {
 }
 
 /**
- * Wire shape for `GET /api/terminal-theme`: the resolved color theme plus the font block the
- * native terminal client applies to `Terminal` options. `fontFamily` always names the bundled
- * self-hosted Nerd Font, never the user's raw Ghostty `font-family` string, since the client can
- * only render fonts it self-hosts.
+ * The resolved color theme plus the fixed cursor and weight block the native terminal client
+ * applies to `Terminal` options, built by `toTerminalTheme`; font family and size come straight
+ * from the appearance.
  */
 export interface TerminalThemeResponse {
   theme: TerminalTheme;
-  fontFamily: string;
-  fontSize: number;
   fontWeight: number;
   cursorStyle: "block" | "underline" | "bar";
   cursorBlink: boolean;
-  letterSpacing?: number;
 }
 
 /**
@@ -796,6 +820,14 @@ export interface Playbook {
 export interface InvalidPlaybook {
   name: string;
   reason: string;
+}
+
+export interface VaultKeySummary {
+  name: string;
+  purpose: string;
+  createdAt: string;
+  updatedAt: string;
+  filled: boolean;
 }
 
 /**
@@ -900,7 +932,63 @@ export interface Config {
    * arguments" (Claude's normal permission prompts) rather than falling back to the default.
    */
   claudeArgs?: string;
+  /**
+   * The Claude account new sessions launch on; absent or `default` means the user's own home
+   * login. Added accounts are registry ids under `claude-accounts/`.
+   */
+  activeClaudeAccountId?: string;
+  /** Terminal appearance chosen in Settings; absent or invalid resolves to the shipped translucent default. */
+  terminal?: TerminalAppearance;
 }
+
+export interface TerminalAppearance {
+  background: string;
+  opacity: number;
+  foreground: string;
+  cursor: string;
+  fontFamily: string;
+  fontSize: number;
+}
+
+export const DEFAULT_CLAUDE_ACCOUNT_ID = "default";
+
+export const MAX_LOGIN_CODE_LEN = 512;
+
+export interface ClaudeUsageWindow {
+  kind: string;
+  label: string;
+  percent: number;
+  resetsAt: string | null;
+  isActive: boolean;
+}
+
+export type ClaudeUsageStatus =
+  "ok" | "stale" | "unavailable" | "rate-limited" | "error";
+
+export interface ClaudeUsageSnapshot {
+  status: ClaudeUsageStatus;
+  windows: ClaudeUsageWindow[];
+  fetchedAt: string | null;
+  error?: string;
+}
+
+export interface ClaudeAccountSummary {
+  id: string;
+  email: string;
+  orgName: string;
+  subscriptionType: string;
+  isDefault: boolean;
+  lastLoginAt?: string;
+  usage: ClaudeUsageSnapshot;
+}
+
+export type ClaudeLoginView =
+  | { state: "idle" }
+  | { state: "starting"; accountId: string }
+  | { state: "awaiting-code"; accountId: string; url: string }
+  | { state: "finishing"; accountId: string }
+  | { state: "done"; account: ClaudeAccountSummary }
+  | { state: "error"; message: string };
 
 /**
  * The runtime-mutable filter selection for a source. An empty array (or `currentCycle: false`) means

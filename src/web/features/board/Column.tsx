@@ -5,6 +5,7 @@ import type {
   Column as ColumnId,
 } from "../../../shared/types.js";
 import { Card } from "./Card.js";
+import { isForceDimmed } from "./drag-selection.js";
 import { EmptyState } from "./EmptyState.js";
 import { COLUMN_ACCENT, COLUMN_LABELS } from "./column-meta.js";
 import {
@@ -13,6 +14,7 @@ import {
   useColumnWidths,
 } from "../../hooks/useColumnWidths.js";
 import { Button } from "../../primitives/Button.js";
+import { focusRing } from "../../primitives/focus-ring.js";
 import { DONE_PAGE_SIZE } from "../../../shared/done-limit.js";
 
 const MIN_COL_WIDTH = 220;
@@ -24,6 +26,7 @@ interface ColumnProps {
   groupMembersById?: Map<string, CardModel[]>;
   selectedCardId?: string | null;
   selectedIds?: Set<string>;
+  activeCardId?: string | null;
   onSelectCard?: (id: string) => void;
   onStartRequest?: (id: string) => void;
   onToggleSelect?: (id: string) => void;
@@ -47,6 +50,7 @@ export function Column({
   groupMembersById,
   selectedCardId,
   selectedIds,
+  activeCardId,
   onSelectCard,
   onStartRequest,
   onToggleSelect,
@@ -215,6 +219,17 @@ export function Column({
     doneLimit > cards.length &&
     doneRemaining > 0;
 
+  const count =
+    column === "done" && doneTotal != null ? doneTotal : cards.length;
+  const prevCountRef = useRef(count);
+  const [countPulse, setCountPulse] = useState(0);
+  useEffect(() => {
+    if (prevCountRef.current !== count) {
+      prevCountRef.current = count;
+      setCountPulse((n) => n + 1);
+    }
+  }, [count]);
+
   function renderCard(card: CardModel) {
     return (
       <Card
@@ -222,6 +237,11 @@ export function Column({
         card={card}
         selected={card.id === selectedCardId}
         multiSelected={selectedIds?.has(card.id) ?? false}
+        forceDimmed={isForceDimmed(
+          card.id,
+          activeCardId ?? null,
+          selectedIds ?? new Set(),
+        )}
         members={groupMembersById?.get(card.id)}
         onSelect={onSelectCard}
         onStartRequest={onStartRequest}
@@ -301,11 +321,13 @@ export function Column({
             cursor: "col-resize",
             zIndex: 2,
             background: "transparent",
-            outline: "none",
-            borderRight:
-              hoveringHandle || resizing || handleFocused
-                ? "2px solid var(--accent)"
+            borderRight: resizing
+              ? "2px solid var(--accent)"
+              : hoveringHandle
+                ? "2px solid var(--hover-resize-handle)"
                 : "2px solid transparent",
+            transition: "var(--resize-handle-transition)",
+            ...focusRing(handleFocused, true),
           }}
         />
       )}
@@ -337,19 +359,26 @@ export function Column({
           {COLUMN_LABELS[column]}
         </span>
         <span
+          key={countPulse}
           style={{
             background: `color-mix(in srgb, ${COLUMN_ACCENT[column]} 16%, var(--surface-column))`,
             color: COLUMN_ACCENT[column],
             borderRadius: "var(--radius-sm)",
             padding: "0 var(--space-xs)",
             fontSize: "var(--font-micro)",
+            ...(countPulse > 0
+              ? {
+                  animation:
+                    "count-pulse var(--motion-count-change) var(--easing-enter)",
+                }
+              : {}),
           }}
         >
-          {column === "done" && doneTotal != null ? doneTotal : cards.length}
+          {count}
         </span>
         {manualEntryBlocked && (
           <span
-            title="Agent Done is set automatically by a real agent completion signal — it is never a manual drop target"
+            title="Agent Done is set automatically by a real agent completion signal. It is never a manual drop target"
             style={{
               color: "var(--text-muted)",
               fontSize: "var(--font-label)",
@@ -382,7 +411,7 @@ export function Column({
             lineHeight: "var(--line-label)",
           }}
         >
-          Can&rsquo;t drop here — a card only reaches Agent Done on a real agent
+          Can&rsquo;t drop here. A card only reaches Agent Done on a real agent
           completion signal.
         </div>
       )}
@@ -394,7 +423,7 @@ export function Column({
           overflowY: "auto",
           display: "flex",
           flexDirection: "column",
-          gap: "var(--space-sm)",
+          gap: "var(--inter-card-gap)",
         }}
       >
         {cards.length === 0 ? (

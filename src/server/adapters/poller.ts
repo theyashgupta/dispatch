@@ -35,7 +35,7 @@ async function pollOnce(): Promise<void> {
     if (gen !== generation) return;
     if (truncated) {
       console.warn(
-        `[poller] partial ${source.id} pull (pages remained beyond the source page cap or the cursor was missing) — applying upserts only, skipping removals/gone-flags this cycle.`,
+        `[poller] partial ${source.id} pull (pages remained beyond the source page cap or the cursor was missing), applying upserts only, skipping removals/gone-flags this cycle.`,
       );
     }
     await store.applyIssues(issues, new Date().toISOString(), {
@@ -50,7 +50,7 @@ async function pollOnce(): Promise<void> {
     if (err instanceof RateLimited) {
       backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
       console.warn(
-        `[poller] ${source.id} rate-limited — backing off ${Math.round(backoffMs / 1000)}s, keeping last-known-good.`,
+        `[poller] ${source.id} rate-limited, backing off ${Math.round(backoffMs / 1000)}s, keeping last-known-good.`,
       );
       void store.setSyncUnreachable(false);
       scheduleNext(backoffMs);
@@ -59,13 +59,13 @@ async function pollOnce(): Promise<void> {
       (err as { cause?: unknown }).cause != null
     ) {
       console.error(
-        `[poller] network-level poll failure — keeping last-known-good: ${err.message}`,
+        `[poller] network-level poll failure, keeping last-known-good: ${err.message}`,
       );
       void store.setSyncUnreachable(true);
       scheduleNext(baseIntervalMs);
     } else {
       console.error(
-        `[poller] poll failed — keeping last-known-good: ${(err as Error).message}`,
+        `[poller] poll failed, keeping last-known-good: ${(err as Error).message}`,
       );
       void store.setSyncUnreachable(false);
       scheduleNext(baseIntervalMs);

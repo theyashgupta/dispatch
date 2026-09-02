@@ -10,7 +10,7 @@ const DESCRIPTION_HEADER = "## Description";
 function buildPrompt(direction: string): string {
   return `You are drafting a ticket for Dispatch, a local kanban tool. Turn the user's freeform direction into a concise title and a well-structured markdown description for a coding ticket.
 
-Output rules — follow exactly:
+Output rules (follow exactly):
 - Output ONLY two markdown sections, in this exact order, with no preamble, no closing remarks, and no code fence wrapping the whole output.
 - Start with the exact literal header line:
 

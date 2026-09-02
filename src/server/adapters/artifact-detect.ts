@@ -1,8 +1,18 @@
+import { realpathSync } from "node:fs";
 import net from "node:net";
+import { basename, join, sep } from "node:path";
 import type { Card, PreviewInfo, Session } from "../../shared/types.js";
-import { listPrsForBranch, type PrProbeResult } from "./gh.js";
+import {
+  probePrsForBranch,
+  pruneGhReliability,
+  type GhProbeResult,
+} from "./gh-reliability.js";
 import { panePidsBySession } from "./tmux.js";
-import { listeningPortsBySession, type DiscoveredPort } from "./dev-server.js";
+import {
+  cwdByPids,
+  listeningPortsBySession,
+  type DiscoveredPort,
+} from "./dev-server.js";
 import { store } from "../store/board.store.js";
 
 /**
@@ -20,8 +30,8 @@ const PREVIEW_PROBE_TIMEOUT_MS = 500;
  *
  * @remarks
  * The same threshold `RESIL-01` already uses for three consecutive capture failures, applied here
- * to a second signal. A counter increments ONLY on a genuine detection-tool failure — an
- * `{ ok: false }` result from `listPrsForBranch`, or a `null` return from
+ * to a second signal. A counter increments ONLY on a genuine detection-tool failure: a
+ * non-skipped `{ ok: false }` result from `probePrsForBranch` (PRLINK-05), or a `null` return from
  * `panePidsBySession`/`listeningPortsBySession` — never on a `confirmReachable`-rejected
  * candidate, which is a SUCCESSFUL tick that confirmed zero previews and resets the counter
  * instead. The unknown status is set on the first failure so a silent tooling failure is visible
@@ -129,6 +139,170 @@ function connectOnce(
 }
 
 /**
+ * The most segments a de-collided repo label may carry: the basename plus one parent, so no
+ * wire-bound label can ever hold more than one path separator.
+ */
+const QUALIFIED_LABEL_MAX_SEGMENTS = 2;
+
+/**
+ * The display name to stamp onto `PrInfo.repo`, keyed by repo path, de-collided across every path
+ * given.
+ *
+ * @remarks
+ * A bare basename is the whole identity on the wire (T-98-01) and the only thing the chip tag and
+ * the panel's grouping disambiguate by, so two registered repos named `api` under different
+ * parents collapsed into one: `new Set(prs.map((pr) => pr.repo)).size > 1` read false, the tag was
+ * suppressed as a single-repo card, and `PrList` merged two distinct repos into one ungrouped
+ * list, failing in exactly the case the tag exists for.
+ * @remarks The caller must pass every path the CARD owns across ALL its sessions, never one
+ * session's `workspace.repos`: `cardPrs` unions `card.prs` with every `sessionSummaries[].prs` and
+ * all three render sites compute their tag and their grouping over THAT union, so a per-session
+ * pass sees no duplicate for two sessions each holding one `api` and stamps both the same name.
+ * @remarks A colliding basename is qualified with ONE parent segment at most
+ * ({@link QUALIFIED_LABEL_MAX_SEGMENTS}), falling back to a numeric suffix whenever that single
+ * segment does not separate the paths, so the returned names stay unique by construction. The cap
+ * is load-bearing, not cosmetic: without it, two paths that normalize to the same segment list
+ * (`/Users/x/code/api` and `/Users/x/code/api/`, both of which the start route accepts) exhausted
+ * the loop and emitted the whole path minus its leading slash, putting the home directory and the
+ * username on the wire through `PrInfo.repo` and `PreviewEvidence.matchedCwd`, the exact leak both
+ * T-98-01 and T-99-01 forbid. A non-colliding repo keeps the short basename the
+ * board's density budget was measured against, and no absolute path reaches the wire either way.
+ */
+function repoDisplayNames(repoPaths: string[]): Map<string, string> {
+  const unique = [...new Set(repoPaths)];
+  const byBasename = new Map<string, string[]>();
+  for (const path of unique) {
+    const key = basename(path);
+    const group = byBasename.get(key);
+    if (group) group.push(path);
+    else byBasename.set(key, [path]);
+  }
+  const names = new Map<string, string>();
+  for (const [key, paths] of byBasename) {
+    if (paths.length === 1) {
+      names.set(paths[0], key);
+      continue;
+    }
+    const segments = paths.map((path) =>
+      path.split(sep).filter((part) => part !== ""),
+    );
+    const maxDepth = Math.max(...segments.map((parts) => parts.length));
+    let depth = 2;
+    while (
+      depth <= maxDepth &&
+      new Set(segments.map((parts) => parts.slice(-depth).join("/"))).size <
+        paths.length
+    ) {
+      depth++;
+    }
+    const cap = Math.min(maxDepth, QUALIFIED_LABEL_MAX_SEGMENTS);
+    paths.forEach((path, i) => {
+      const label = segments[i].slice(-Math.min(depth, cap)).join("/");
+      names.set(path, depth <= cap ? label : `${label} (${i + 1})`);
+    });
+  }
+  return names;
+}
+
+/**
+ * The worktree directory `services/domain/workspace-paths.ts`'s `worktreePath()` would compute for
+ * `repoPath` under `workspacePath`, reproduced locally rather than imported.
+ *
+ * @remarks
+ * `boundaries/dependencies` allows the `adapters` tier to import only
+ * `adapters|sources|store|shared` (`eslint.config.ts`), so importing a `services/domain` helper
+ * from this file is a lint error, not a style choice; `store/board-db.ts`'s
+ * `readWorkspaceRegistry` sets the identical "the caller owns the join" precedent for the same
+ * tier gap.
+ */
+function worktreeDirFor(workspacePath: string, repoPath: string): string {
+  return join(workspacePath, basename(repoPath));
+}
+
+/**
+ * `realpathSync`, degraded to `null` on any failure instead of throwing.
+ * @remarks A path can vanish between the `lsof` scan that reported it and this check; a single
+ * stale symlink must never throw a whole detection tick.
+ */
+function safeRealpath(p: string): string | null {
+  try {
+    return realpathSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether `cwd` IS `base` or sits under it, compared case-insensitively off Linux.
+ * @remarks `realpath(3)` resolves symlinks but does not canonicalize case on a case-insensitive
+ * volume, which macOS and Windows both default to. `lsof` reports the kernel's on-disk case while
+ * `workspaceRoot` is a user-typed string in `~/.dispatch/config.json`, so a user who writes
+ * `/Users/x/Dispatch-Workspaces` for a directory created as `dispatch-workspaces` made both sides
+ * realpath to different strings and every preview render a positive `cwdMismatch` from a
+ * comparison that simply could not decide. The residual, two sibling directories
+ * differing only in case on a case-SENSITIVE volume, would read as a match here; that is the
+ * strictly safer direction, since the pane-pid walk stays the primary attribution either way.
+ */
+function pathIsWithin(cwd: string, base: string): boolean {
+  const fold = (s: string): string =>
+    process.platform === "linux" ? s : s.toLowerCase();
+  const a = fold(cwd);
+  const b = fold(base);
+  return a === b || a.startsWith(b + sep);
+}
+
+/**
+ * Whether `rawCwd` resolves inside `workspacePath`, the cwd cross-check for the pane-pid walk's
+ * attribution.
+ *
+ * @remarks
+ * `workspacePath` is the session's OWN per-ticket worktree root (`Session.workspacePath`,
+ * `workspaceRoot/<sessionName>`), never `Session.workspace.folder`, which is the folder the user
+ * picked in the start modal and holds the ORIGINAL checkouts. The two trees are disjoint under the
+ * default configuration, so comparing against `folder` stamped `cwdMismatch` on every correctly
+ * attributed preview and reported a cwd match for a process sitting in a DIFFERENT ticket's source
+ * checkout under the same registered folder. A session carrying no `workspacePath` at all is
+ * inconclusive at the call site, never a mismatch.
+ *
+ * Both sides are realpath-normalized before comparison: macOS resolves `/tmp` and
+ * `os.tmpdir()` through `/private/...`, `lsof` reports the realpath, and `workspaceRoot` is
+ * user-configurable, so a naive string-prefix compare would fail on any symlinked path
+ * component in production, not just in this repo's own sandbox harness convention (T-99-01).
+ * Returns `null` (inconclusive) when either side fails to resolve, the caller must degrade to
+ * pane-ancestry evidence, never synthesize a mismatch from an unresolved path. That covers the
+ * case where NO worktree path resolves at all (a worktree removed mid-cleanup, an `EACCES` on a
+ * path component, an ejected volume): falling through to the workspace-root check there would
+ * turn a transient filesystem state into a positive "this process runs somewhere else" claim.
+ * `displayNames` is a PARAMETER: the caller must compute it over every repo path the CARD owns
+ * across all its sessions, the same scope `repoDisplayNames` already requires for `PrInfo.repo`, never one
+ * session's own `workspace.repos` alone (the 98-REVIEW WR-04 defect).
+ * @see docs/ARCHITECTURE.md#dev-server-preview-detection
+ */
+function matchWorkspace(
+  rawCwd: string,
+  workspacePath: string,
+  repos: { path: string; base: string }[],
+  displayNames: Map<string, string>,
+): { inWorkspace: boolean; repoBasename?: string } | null {
+  const cwd = safeRealpath(rawCwd);
+  if (cwd == null) return null;
+
+  let anyWorktreeResolved = false;
+  for (const repo of repos) {
+    const worktree = safeRealpath(worktreeDirFor(workspacePath, repo.path));
+    if (worktree == null) continue;
+    anyWorktreeResolved = true;
+    if (pathIsWithin(cwd, worktree)) {
+      return { inWorkspace: true, repoBasename: displayNames.get(repo.path) };
+    }
+  }
+
+  const root = safeRealpath(workspacePath);
+  if (root == null || !anyWorktreeResolved) return null;
+  return { inWorkspace: pathIsWithin(cwd, root) };
+}
+
+/**
  * Confirm a discovered port actually accepts a TCP connection before it is advertised as a
  * preview (F-07: a bound-but-unreachable LISTEN-only port is not the same claim as "answers").
  *
@@ -203,6 +377,15 @@ async function detectCardArtifacts(backendPort: number): Promise<void> {
  * the backoff expires — `prsUnknown` is deliberately left standing while skipping, since nothing
  * has been re-checked.
  *
+ * A tick whose failures were ALL skips (`gh-reliability.ts` served a negative-cache hit or a
+ * breaker pause, so no `gh` ran) spends no strike and arms no backoff, but still writes
+ * `prsUnknown`. The negative cache is keyed by the SOURCE repo path that every card started from
+ * one registered folder shares, so a card that never experienced the failure itself is served a
+ * skip on its very first probe; without this write it would render an empty, unqualified PR list,
+ * stating with full confidence that the ticket has no PR while `gh` was never asked. `checkedAt`
+ * is carried over from the standing record rather than re-stamped, precisely because nothing was
+ * re-checked.
+ *
  * Preview exclusion (F-09) is a `Set<number>` built ONCE per tick — `backendPort` plus EVERY live
  * session's `ttydPort`, across every card, not only a probed one's own field — so a stale, freed
  * ttyd port picked up moments later by a DIFFERENT session's real dev server can no longer leak
@@ -213,6 +396,15 @@ async function detectCardArtifacts(backendPort: number): Promise<void> {
  * `panePidsBySession`/`listeningPortsBySession` is a genuine tool failure, which advances the
  * counter for every live session, latches `previewsUnknown` on the first failure, and forces
  * `previews` to `[]` once the ceiling is reached.
+ *
+ * An INCONCLUSIVE cwd cross-check holds the previous tick's evidence for that port when the pid
+ * and bind address are unchanged, rather than rebuilding a degraded one. `PreviewEvidence` carries
+ * no timestamp specifically so an unchanged preview never rebroadcasts, but `source` is itself
+ * per-tick: one `lsof -d cwd` timeout, one pid that exited between the port scan and the cwd call,
+ * or one `EACCES` flipped `"cwd"` to `"pane ancestry"` and dropped `matchedCwd`, which changes the
+ * `JSON.stringify` diff and rebroadcasts the whole board, then flips back on the next tick.
+ * Holding is scoped to the inconclusive case alone: a conclusive result, in either direction,
+ * always overwrites.
  *
  * An idle board short-circuits before any subprocess runs: with no PROBED live session (all-Done or
  * genuinely empty) there is nothing to attribute a port to, yet the tick would still spawn
@@ -268,40 +460,84 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
       ) {
         const branch = rec.branch;
         const repos = rec.workspace.repos;
+        const displayNames = repoDisplayNames([
+          ...repos.map((repo) => repo.path),
+          ...(card.sessions ?? [])
+            .flatMap((s) => s.workspace?.repos ?? [])
+            .map((repo) => repo.path),
+        ]);
+        const repoNames = repos.map(
+          (repo) => displayNames.get(repo.path) ?? basename(repo.path),
+        );
         const results = await Promise.all(
-          repos.map((repo) => listPrsForBranch(repo.path, branch)),
+          repos.map((repo, i) =>
+            probePrsForBranch(repo.path, branch, repoNames[i]),
+          ),
         );
         const answered = results.filter(
-          (r): r is Extract<PrProbeResult, { ok: true }> => r.ok,
+          (r): r is Extract<GhProbeResult, { ok: true }> => r.ok,
         );
         const failed = results.filter(
-          (r): r is Extract<PrProbeResult, { ok: false }> => !r.ok,
+          (r): r is Extract<GhProbeResult, { ok: false }> => !r.ok,
         );
-        const finalPrs = answered.flatMap((r) => r.prs);
+        // A skip is "we did not ask", never a strike toward PROBE_FAILURE_CEILING (PRLINK-05).
+        const realFailures = failed.filter((f) => f.skipped !== true);
+        const skippedRepoNames = new Set(
+          results.flatMap((r, i) =>
+            !r.ok && r.skipped === true ? [repoNames[i]] : [],
+          ),
+        );
+        // PRLINK-05: written list is answered repos PLUS last-known-good of every SKIPPED repo.
+        // PRLINK-05: a skip spends no strike, so a sibling answering must not delete its PRs.
+        const finalPrs = [
+          ...answered.flatMap((r) => r.prs),
+          ...(rec.prs ?? []).filter(
+            (pr) => pr.repo != null && skippedRepoNames.has(pr.repo),
+          ),
+        ];
         let holdLastKnownPrs = false;
 
         if (failed.length > 0) {
-          const count = (prFailureCounts.get(rec.id) ?? 0) + 1;
-          prFailureCounts.set(rec.id, count);
           const category = failed[0].category;
-          if (rec.prsUnknown?.category !== category) {
-            await store.setPrsUnknownIfSession(card.id, session, {
-              category,
-            });
-          }
-          holdLastKnownPrs =
-            answered.length === 0 && count < PROBE_FAILURE_CEILING;
-          if (answered.length === 0) {
-            prRetryNotBefore.set(
-              rec.id,
-              Date.now() +
-                Math.min(
-                  ARTIFACT_DETECT_INTERVAL_MS * 2 ** count,
-                  PR_RETRY_MAX_MS,
-                ),
-            );
+          if (realFailures.length > 0) {
+            const count = (prFailureCounts.get(rec.id) ?? 0) + 1;
+            prFailureCounts.set(rec.id, count);
+            // checkedAt bounds a standing failure to one broadcast per minute (PRLINK-05).
+            const checkedAt = new Date(
+              Math.floor(Date.now() / 60_000) * 60_000,
+            ).toISOString();
+            if (
+              rec.prsUnknown?.category !== category ||
+              rec.prsUnknown.checkedAt !== checkedAt
+            ) {
+              await store.setPrsUnknownIfSession(card.id, session, {
+                category,
+                checkedAt,
+              });
+            }
+            holdLastKnownPrs =
+              answered.length === 0 && count < PROBE_FAILURE_CEILING;
+            if (answered.length === 0) {
+              prRetryNotBefore.set(
+                rec.id,
+                Date.now() +
+                  Math.min(
+                    ARTIFACT_DETECT_INTERVAL_MS * 2 ** count,
+                    PR_RETRY_MAX_MS,
+                  ),
+              );
+            } else {
+              prRetryNotBefore.delete(rec.id);
+            }
           } else {
-            prRetryNotBefore.delete(rec.id);
+            const checkedAt = rec.prsUnknown?.checkedAt;
+            if (rec.prsUnknown?.category !== category) {
+              await store.setPrsUnknownIfSession(card.id, session, {
+                category,
+                ...(checkedAt != null ? { checkedAt } : {}),
+              });
+            }
+            holdLastKnownPrs = answered.length === 0;
           }
         } else {
           prFailureCounts.delete(rec.id);
@@ -322,9 +558,17 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
       if (portsBySession == null) {
         const count = (previewFailureCounts.get(rec.id) ?? 0) + 1;
         previewFailureCounts.set(rec.id, count);
-        if (rec.previewsUnknown?.category !== "detection unavailable") {
+        // checkedAt bounds a standing failure to one broadcast per minute (PORT-02).
+        const checkedAt = new Date(
+          Math.floor(Date.now() / 60_000) * 60_000,
+        ).toISOString();
+        if (
+          rec.previewsUnknown?.category !== "detection unavailable" ||
+          rec.previewsUnknown.checkedAt !== checkedAt
+        ) {
           await store.setPreviewsUnknownIfSession(card.id, session, {
             category: "detection unavailable",
+            checkedAt,
           });
         }
         if (
@@ -348,15 +592,70 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
       const reachable = await Promise.all(
         candidates.map((candidate) => confirmReachable(candidate)),
       );
-      const next: PreviewInfo[] = candidates
-        .filter((_candidate, i) => reachable[i])
-        .map(({ port }) => ({ port, url: `http://localhost:${port}` }));
+      const confirmedCandidates = candidates.filter(
+        (_candidate, i) => reachable[i],
+      );
+      const cwdByPid = await cwdByPids(
+        confirmedCandidates.map((candidate) => candidate.pid),
+      );
+      const previewWorkspace = rec.workspace;
+      const previewDisplayNames =
+        previewWorkspace != null
+          ? repoDisplayNames([
+              ...previewWorkspace.repos.map((repo) => repo.path),
+              ...(card.sessions ?? [])
+                .flatMap((s) => s.workspace?.repos ?? [])
+                .map((repo) => repo.path),
+            ])
+          : new Map<string, string>();
+      const next: PreviewInfo[] = confirmedCandidates.map((candidate) => {
+        const rawCwd = cwdByPid.get(candidate.pid);
+        const workspacePath = rec.workspacePath;
+        const matched =
+          rawCwd != null && previewWorkspace != null && workspacePath != null
+            ? matchWorkspace(
+                rawCwd,
+                workspacePath,
+                previewWorkspace.repos,
+                previewDisplayNames,
+              )
+            : null;
+        const prior = (rec.previews ?? []).find(
+          (preview) => preview.port === candidate.port,
+        )?.evidence;
+        const held =
+          matched == null &&
+          prior?.pid === candidate.pid &&
+          prior.bindAddress === candidate.bindAddress
+            ? prior
+            : null;
+        return {
+          port: candidate.port,
+          url: `http://localhost:${candidate.port}`,
+          evidence: held ?? {
+            pid: candidate.pid,
+            bindAddress: candidate.bindAddress,
+            source: matched?.inWorkspace === true ? "cwd" : "pane ancestry",
+            ...(matched?.inWorkspace === true && matched.repoBasename != null
+              ? { matchedCwd: matched.repoBasename }
+              : {}),
+            ...(matched?.inWorkspace === false ? { cwdMismatch: true } : {}),
+          },
+        };
+      });
       if (JSON.stringify(rec.previews ?? []) === JSON.stringify(next)) return;
       await store.setPreviewsIfSession(card.id, session, next);
     }),
   );
 
   const liveIds = new Set(probedSessions().map(({ session }) => session.id));
+  // Negative cache is keyed by repo path, not session id, so liveIds is the wrong set (PRLINK-05).
+  const liveRepoPaths = new Set(
+    probedSessions().flatMap(
+      ({ session }) => session.workspace?.repos.map((r) => r.path) ?? [],
+    ),
+  );
+  pruneGhReliability(liveRepoPaths);
   for (const id of prFailureCounts.keys()) {
     if (!liveIds.has(id)) prFailureCounts.delete(id);
   }
@@ -385,7 +684,7 @@ export function startArtifactDetectionLoop(backendPort: number): void {
       await detectCardArtifacts(backendPort);
     } catch (err) {
       console.error(
-        `[artifact-detect] tick failed — continuing: ${(err as Error).message}`,
+        `[artifact-detect] tick failed, continuing: ${(err as Error).message}`,
       );
     } finally {
       scheduleNext();

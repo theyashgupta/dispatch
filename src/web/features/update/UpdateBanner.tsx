@@ -128,7 +128,7 @@ export function UpdateBanner() {
           }}
         >
           <Dot color="var(--status-ok)" />
-          {`Updated to v${successVersion} — restart dispatch to use it`}
+          {`Updated to v${successVersion}. Restart dispatch to use it`}
         </div>
       </div>
     );
@@ -145,10 +145,10 @@ export function UpdateBanner() {
   const message = pending
     ? "Running update…"
     : status.installMode === "global"
-      ? `Update available — v${status.latest}`
+      ? `Update available: v${status.latest}`
       : status.installMode === "npx"
-        ? `Update available — v${status.latest}. Run:`
-        : `Update available — v${status.latest}. This is a dev checkout — pull the latest changes to update.`;
+        ? `Update available: v${status.latest}. Run:`
+        : `Update available: v${status.latest}. This is a dev checkout. Pull the latest changes to update.`;
 
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>

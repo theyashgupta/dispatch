@@ -6,6 +6,7 @@ import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { Markdown } from "../../primitives/Markdown.js";
 import { Notice } from "../../primitives/Notice.js";
+import { PrList } from "./PrList.js";
 
 interface ReferenceBlocksProps {
   card: CardModel | null;
@@ -24,7 +25,6 @@ export function ReferenceBlocks({
       {c != null && c.source === "group" && members != null && (
         <div
           style={{
-            marginBottom: "var(--space-lg)",
             display: "flex",
             flexDirection: "column",
             gap: "var(--space-xs)",
@@ -37,14 +37,14 @@ export function ReferenceBlocks({
               member={member}
               dense={false}
               actionable={membersActionable}
-              groupPr={c.prs}
               groupPreviews={c.previews}
-              groupPrsUnknown={c.prsUnknown}
               groupPreviewsUnknown={c.previewsUnknown}
             />
           ))}
         </div>
       )}
+
+      {c != null && <PrList card={c} />}
 
       {c != null && c.description != null && c.description.trim() !== "" ? (
         <div
@@ -107,7 +107,6 @@ export function ReferenceBlocks({
       {c?.startError != null && (
         <div
           style={{
-            marginTop: "var(--space-lg)",
             paddingTop: "var(--space-lg)",
             borderTop: "1px solid var(--border)",
             display: "flex",
@@ -125,7 +124,7 @@ export function ReferenceBlocks({
                 style={{ flex: "0 0 auto" }}
               />
             }
-            label={`Provisioning error — ${c.startError.step}`}
+            label={`Provisioning error: ${c.startError.step}`}
           />
           <Notice tone="destructive" mono>
             {c.startError.stderr}

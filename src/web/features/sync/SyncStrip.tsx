@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import {
   Activity,
   Inbox,
@@ -123,6 +123,7 @@ interface SyncStripProps {
   onOpenCreateTicket: () => void;
   viewMode?: "board" | "workspace";
   onSelectViewMode?: (mode: "board" | "workspace") => void;
+  accountSlot?: ReactNode;
 }
 
 function formatSynced(syncedTs: number, now: number): string {
@@ -150,6 +151,7 @@ export function SyncStrip({
   onOpenCreateTicket,
   viewMode,
   onSelectViewMode,
+  accountSlot,
 }: SyncStripProps) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -176,7 +178,7 @@ export function SyncStrip({
 
   let text: string;
   if (disconnected) {
-    text = "Disconnected — reconnecting…";
+    text = "Disconnected, reconnecting…";
   } else if (syncedAt === null) {
     text = "Syncing…";
   } else if (syncUnreachable) {
@@ -207,7 +209,7 @@ export function SyncStrip({
         ? "var(--status-stale)"
         : "var(--status-ok)";
   const dotTitle = disconnected
-    ? "Disconnected — reconnecting…"
+    ? "Disconnected, reconnecting…"
     : syncUnreachable && syncedTsValid
       ? "Reconnecting…"
       : stale
@@ -289,7 +291,7 @@ export function SyncStrip({
                 }
                 title={
                   inboxCount != null && inboxCount > 0
-                    ? `Inbox — ${inboxCount} ticket${inboxCount === 1 ? "" : "s"}`
+                    ? `Inbox: ${inboxCount} ticket${inboxCount === 1 ? "" : "s"}`
                     : "Inbox"
                 }
                 aria-expanded={inboxOpen}
@@ -328,6 +330,7 @@ export function SyncStrip({
         </div>
         <span aria-hidden="true" style={dividerStyle} />
         <div style={{ ...utilityClusterStyle, gap: itemGap }}>
+          {accountSlot}
           <div
             role="status"
             aria-live="polite"
@@ -338,7 +341,9 @@ export function SyncStrip({
               whiteSpace: "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",
-              color: disconnected ? "var(--destructive)" : "var(--text-muted)",
+              color: disconnected
+                ? "var(--destructive-text)"
+                : "var(--text-muted)",
               fontWeight: "var(--weight-medium)",
             }}
           >
@@ -359,7 +364,7 @@ export function SyncStrip({
             <IconButton
               id="activity-toggle"
               aria-label="Activity feed"
-              title={activityUnseen ? "Activity — unseen" : "Activity"}
+              title={activityUnseen ? "Activity: unseen" : "Activity"}
               aria-expanded={activityOpen}
               aria-controls="activity-drawer"
               onClick={onOpenActivity}

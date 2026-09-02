@@ -82,7 +82,7 @@ function warnUnrecognizedChildren(children: ReactNode): void {
         : null;
     if (type !== ModalHeader && type !== ModalBody && type !== ModalActions) {
       console.warn(
-        "Modal: unrecognized child ignored — wrap content in Modal.Header, Modal.Body, or Modal.Actions (fragments are not traversed)",
+        "Modal: unrecognized child ignored. Wrap content in Modal.Header, Modal.Body, or Modal.Actions (fragments are not traversed)",
         child,
       );
     }
@@ -107,7 +107,6 @@ const scrimStyle: CSSProperties = {
   position: "fixed",
   inset: 0,
   background: "rgba(0,0,0,0.4)",
-  transition: "opacity 150ms ease-out",
   zIndex: 20,
 };
 
@@ -134,7 +133,6 @@ const dialogBaseStyle: CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: "var(--radius-lg)",
   boxShadow: "var(--shadow-float)",
-  transition: "opacity 150ms ease-out, transform 150ms ease-out",
 };
 
 const headerStyle: CSSProperties = {
@@ -215,10 +213,11 @@ export function Modal({
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       if (modalStack[modalStack.length - 1] !== idRef.current) return;
+      event.preventDefault();
       control.current.requestClose();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
   useEffect(() => {
@@ -250,6 +249,9 @@ export function Modal({
   }, []);
 
   const active = entered && !closing;
+  const modalTransition = active
+    ? "var(--motion-panel-open) var(--easing-enter)"
+    : "var(--motion-panel-close) var(--easing-exit)";
   if (import.meta.env.DEV) warnUnrecognizedChildren(children);
   const headerContent = extractSlot(children, ModalHeader);
   const bodyContent = extractSlot(children, ModalBody);
@@ -260,7 +262,11 @@ export function Modal({
       <div
         onClick={() => control.current.requestClose()}
         aria-hidden="true"
-        style={{ ...scrimStyle, opacity: active ? 1 : 0 }}
+        style={{
+          ...scrimStyle,
+          opacity: active ? 1 : 0,
+          transition: `opacity ${modalTransition}`,
+        }}
       />
 
       <div style={centerStyle}>
@@ -274,6 +280,7 @@ export function Modal({
             ...dialogStyle,
             opacity: active ? 1 : 0,
             transform: active ? "scale(1)" : "scale(0.98)",
+            transition: `opacity ${modalTransition}, transform ${modalTransition}`,
           }}
         >
           <div style={headerStyle}>

@@ -410,6 +410,7 @@ export default tseslint.config(
       "eslint-local/**",
       "scripts/**",
       ".claude/**",
+      "src/web/public/**",
       ".planning/**",
     ],
   },
@@ -519,6 +520,31 @@ export default tseslint.config(
     rules: { "no-restricted-imports": "off" },
   },
 
+  /**
+   * Copy guard: no em dash, spaced en dash, or free-standing double hyphen
+   * in any string literal, template chunk, or JSX text. Flags (`--yes`) and
+   * CSS custom properties (`--color`) pass because the hyphens touch a word
+   * character; regex literals are exempt so the marker parser can keep
+   * accepting the dash variants older agents still emit.
+   */
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...[
+          "Literal:not([regex])[value=",
+          "TemplateElement[value.raw=",
+          "JSXText[value=",
+        ].map((prefix) => ({
+          selector: `${prefix}/\u2014| \u2013 |(^|[^-\\w])--($|[^-\\w])/]`,
+          message:
+            "No em dashes, spaced en dashes, or double hyphens in copy. Use a comma, period, colon, or rephrase.",
+        })),
+      ],
+    },
+  },
+
   {
     files: ["src/**/*.{ts,tsx}"],
     rules: {
@@ -537,8 +563,9 @@ export default tseslint.config(
 
   /**
    * File/folder naming enforcement (docs/standards/folder-structure.md):
-   * PascalCase .tsx everywhere (main.tsx exempt ONLY at src/web root via the
-   * root-scoped !(main) key — a nested main.tsx still fails PascalCase),
+   * PascalCase .tsx everywhere (main.tsx and viewer-main.tsx exempt ONLY at
+   * src/web root via the root-scoped !(main|viewer-main) key: a nested
+   * main.tsx still fails PascalCase),
    * kebab-case .ts, kebab-case folders. Layered override blocks exist because
    * overlapping glob keys inside ONE check-file options object require ALL
    * matching patterns to pass — a hook file would fail the broad kebab key.
@@ -556,7 +583,7 @@ export default tseslint.config(
       "check-file/filename-naming-convention": [
         "error",
         {
-          "src/web/!(main).tsx": "PASCAL_CASE",
+          "src/web/!(main|viewer-main).tsx": "PASCAL_CASE",
           "src/web/*/**/*.tsx": "PASCAL_CASE",
           "src/!(web)/**/*.tsx": "PASCAL_CASE",
           "src/**/*.ts": "KEBAB_CASE",
@@ -580,11 +607,21 @@ export default tseslint.config(
     },
   },
   {
+    files: ["src/**/*.test.ts"],
+    rules: {
+      "check-file/filename-naming-convention": [
+        "error",
+        { "src/**/*.test.ts": `${KEBAB}.test` },
+        { ignoreMiddleExtensions: false },
+      ],
+    },
+  },
+  {
     files: ["src/server/routes/**/*.ts"],
     rules: {
       "check-file/filename-naming-convention": [
         "error",
-        { "src/server/routes/**/*.ts": `${KEBAB}?(.route)` },
+        { "src/server/routes/**/*.ts": `${KEBAB}?(.route)?(.test)` },
         { ignoreMiddleExtensions: false },
       ],
     },
@@ -594,7 +631,7 @@ export default tseslint.config(
     rules: {
       "check-file/filename-naming-convention": [
         "error",
-        { "src/server/store/**/*.ts": `${KEBAB}?(.store)` },
+        { "src/server/store/**/*.ts": `${KEBAB}?(.store)?(.test)` },
         { ignoreMiddleExtensions: false },
       ],
     },
@@ -624,7 +661,7 @@ export default tseslint.config(
     rules: {
       "check-file/filename-naming-convention": [
         "error",
-        { "src/**/*.test.ts": "+([a-zA-Z0-9-]).test" },
+        { "src/**/*.test.ts": `${KEBAB}.test` },
         { ignoreMiddleExtensions: false },
       ],
       "@typescript-eslint/no-floating-promises": "off",

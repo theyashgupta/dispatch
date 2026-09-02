@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import writeFileAtomic from "write-file-atomic";
-import type {
-  Config,
-  SourceFilters,
-  StatusChannel,
+import {
+  DEFAULT_CLAUDE_ACCOUNT_ID,
+  type Config,
+  type SourceFilters,
+  type StatusChannel,
+  type TerminalAppearance,
 } from "../../../shared/types.js";
 import { CONFIG_PATH } from "./paths.js";
 
@@ -174,52 +176,11 @@ export function updateLinearApiKey(apiKey: string): void {
 }
 
 /**
- * Persist the remembered kickoff-picker default to `~/.dispatch/config.json` and make it live
- * immediately.
- *
- * @remarks Called only from `start-session.ts` after a start saga succeeds with an explicitly
- * chosen, already-validated playbook name — never from the route layer, so an unvalidated
- * client string can never reach disk. Simpler than {@link updateLinearApiKey}: `lastUsedPlaybook`
- * is a flat top-level key with no nested object to preserve. Same atomic-write-at-0600 + in-memory
- * mutation discipline as the other writers in this file.
+ * Read `~/.dispatch/config.json`, merge the flat top-level keys in `patch`, and write it back
+ * atomically at mode 0600, mutating the in-memory config the same way so the change is live.
+ * @remarks Shared by every flat-key writer below; nested `sources` writers keep their own merge.
  */
-export function updateLastUsedPlaybook(name: string): void {
-  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
-  let parsed: Record<string, unknown>;
-  try {
-    const p = JSON.parse(raw) as unknown;
-    if (typeof p !== "object" || p === null || Array.isArray(p)) {
-      throw new Error("not an object");
-    }
-    parsed = p as Record<string, unknown>;
-  } catch (err) {
-    const pos = /position (\d+)/.exec((err as Error).message)?.[1];
-    throw new Error(
-      `config at ${CONFIG_PATH} is not valid JSON${pos ? ` (near position ${pos})` : ""}`,
-    );
-  }
-
-  const next = { ...parsed, lastUsedPlaybook: name };
-
-  writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
-    mode: 0o600,
-  });
-  fs.chmodSync(CONFIG_PATH, 0o600);
-
-  if (orchestrationConfig) {
-    orchestrationConfig.lastUsedPlaybook = name;
-  }
-}
-
-/**
- * Persist the cleanup delay (`LIFE-04`) to `~/.dispatch/config.json` and make it live immediately.
- *
- * @remarks Called only from the validated `PUT /config/cleanup-delay` route, which has already
- * rejected a non-integer or out-of-range value with 400 — this function never re-validates.
- * Flat top-level key, same shape as {@link updateLastUsedPlaybook}: no nested object to preserve.
- * Every other top-level key survives verbatim.
- */
-export function updateCleanupDelayDays(days: number): void {
+function patchConfig(patch: Partial<Config>): void {
   const raw = fs.readFileSync(CONFIG_PATH, "utf8");
   let parsed: Record<string, unknown>;
   try {
@@ -236,7 +197,7 @@ export function updateCleanupDelayDays(days: number): void {
     );
   }
 
-  const next = { ...parsed, cleanupDelayDays: days };
+  const next = { ...parsed, ...patch };
 
   writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
     mode: 0o600,
@@ -244,8 +205,34 @@ export function updateCleanupDelayDays(days: number): void {
   fs.chmodSync(CONFIG_PATH, 0o600);
 
   if (orchestrationConfig) {
-    orchestrationConfig.cleanupDelayDays = days;
+    Object.assign(orchestrationConfig, patch);
   }
+}
+
+/**
+ * Persist the remembered kickoff-picker default to `~/.dispatch/config.json` and make it live
+ * immediately.
+ *
+ * @remarks Called only from `start-session.ts` after a start saga succeeds with an explicitly
+ * chosen, already-validated playbook name — never from the route layer, so an unvalidated
+ * client string can never reach disk. Simpler than {@link updateLinearApiKey}: `lastUsedPlaybook`
+ * is a flat top-level key with no nested object to preserve. Same atomic-write-at-0600 + in-memory
+ * mutation discipline as the other writers in this file.
+ */
+export function updateLastUsedPlaybook(name: string): void {
+  patchConfig({ lastUsedPlaybook: name });
+}
+
+/**
+ * Persist the cleanup delay (`LIFE-04`) to `~/.dispatch/config.json` and make it live immediately.
+ *
+ * @remarks Called only from the validated `PUT /config/cleanup-delay` route, which has already
+ * rejected a non-integer or out-of-range value with 400 — this function never re-validates.
+ * Flat top-level key, same shape as {@link updateLastUsedPlaybook}: no nested object to preserve.
+ * Every other top-level key survives verbatim.
+ */
+export function updateCleanupDelayDays(days: number): void {
+  patchConfig({ cleanupDelayDays: days });
 }
 
 /**
@@ -259,6 +246,28 @@ export function updateCleanupDelayDays(days: number): void {
  * `services/orchestration/resume-session.ts`) — no restart required.
  */
 export function updateClaudeArgs(args: string): void {
+  patchConfig({ claudeArgs: args });
+}
+
+/**
+ * Persist the terminal appearance (Settings ▸ Terminal) to `~/.dispatch/config.json` and make it
+ * live for the next `GET /api/config/terminal` read.
+ * @remarks Called only from the validated `PUT /config/terminal` route; the whole object is
+ * replaced, never merged, so a stale field can never survive a save.
+ */
+export function updateTerminalAppearance(appearance: TerminalAppearance): void {
+  patchConfig({ terminal: appearance });
+}
+
+/**
+ * Persist the active Claude account id (Settings ▸ Accounts, header switcher) and make it live for
+ * the next session start.
+ *
+ * @remarks Same flat top-level shape as {@link updateClaudeArgs}. `default` is stored as an
+ * absent key so an un-migrated config and a reset-to-default config are byte-identical. The
+ * caller has already checked the id exists in the registry; this function never validates it.
+ */
+export function updateActiveClaudeAccountId(id: string): void {
   const raw = fs.readFileSync(CONFIG_PATH, "utf8");
   let parsed: Record<string, unknown>;
   try {
@@ -275,7 +284,11 @@ export function updateClaudeArgs(args: string): void {
     );
   }
 
-  const next = { ...parsed, claudeArgs: args };
+  const next = { ...parsed };
+  delete next.activeClaudeAccountId;
+  if (id !== DEFAULT_CLAUDE_ACCOUNT_ID) {
+    next.activeClaudeAccountId = id;
+  }
 
   writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
     mode: 0o600,
@@ -283,6 +296,10 @@ export function updateClaudeArgs(args: string): void {
   fs.chmodSync(CONFIG_PATH, 0o600);
 
   if (orchestrationConfig) {
-    orchestrationConfig.claudeArgs = args;
+    if (id === DEFAULT_CLAUDE_ACCOUNT_ID) {
+      delete orchestrationConfig.activeClaudeAccountId;
+    } else {
+      orchestrationConfig.activeClaudeAccountId = id;
+    }
   }
 }
