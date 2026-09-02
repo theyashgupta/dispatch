@@ -940,6 +940,17 @@ export const DEFAULT_CLEANUP_DELAY_DAYS = 7;
  */
 export const DEFAULT_CLAUDE_ARGS = "--dangerously-skip-permissions";
 
+export const MAX_ATTACHMENTS = 10;
+
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+export const ATTACHMENT_MIME_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+] as const;
+
 /**
  * A filter dimension a source can constrain on. `cycle` is a boolean toggle (no option list); the
  * rest are multi-select id lists. Shared so the settings UI renders only what a source declares in

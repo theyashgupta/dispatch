@@ -74,3 +74,12 @@ export const SERVICE_PLIST_PATH = path.join(
  */
 export const SERVICE_LOG_PATH = path.join(DISPATCH_DIR, "service.log");
 export const SERVICE_ERR_LOG_PATH = path.join(DISPATCH_DIR, "service.err.log");
+
+export const ATTACHMENTS_DIR = path.join(DISPATCH_DIR, "attachments");
+
+/**
+ * Resolve the absolute folder holding one card's pasted images.
+ */
+export function attachmentsDir(cardId: string): string {
+  return path.join(ATTACHMENTS_DIR, cardId);
+}
