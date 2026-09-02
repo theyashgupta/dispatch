@@ -2,6 +2,7 @@ import { run } from "../../adapters/exec.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { DISPATCH_DIR } from "../infra/paths.js";
 import { hasDispatchMarker } from "../domain/playbooks.js";
+import type { DecodedImage } from "../domain/attachments.js";
 
 const TITLE_HEADER = "## Title";
 const DESCRIPTION_HEADER = "## Description";
@@ -71,6 +72,49 @@ export function parseTicketDraft(stdout: string): {
 }
 
 /**
+ * Build one stream-json user message carrying the prompt as a text block plus one base64 image block per
+ * pasted image, so the zero-tools draft run sees the pixels directly.
+ */
+export function buildDraftInput(
+  prompt: string,
+  images: readonly DecodedImage[],
+): string {
+  const content = [
+    { type: "text", text: prompt },
+    ...images.map((img) => ({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: `image/${img.ext === "jpg" ? "jpeg" : img.ext}`,
+        data: img.bytes.toString("base64"),
+      },
+    })),
+  ];
+  return `${JSON.stringify({ type: "user", message: { role: "user", content } })}\n`;
+}
+
+/**
+ * Extract the assistant's final text from a stream-json stdout, taken from the `result` event.
+ *
+ * @remarks Throws when no result event is present so the caller's 502 path handles a truncated run.
+ */
+export function extractResultText(stdout: string): string {
+  for (const line of stdout.split("\n")) {
+    if (!line.startsWith("{")) continue;
+    let event: { type?: unknown; result?: unknown };
+    try {
+      event = JSON.parse(line) as { type?: unknown; result?: unknown };
+    } catch {
+      continue;
+    }
+    if (event.type === "result" && typeof event.result === "string") {
+      return event.result;
+    }
+  }
+  throw new Error("missing result event in stream-json output");
+}
+
+/**
  * Generate a ticket draft (title + description) via a headless `claude -p` subprocess, mirroring
  * `playbook-generate.ts`'s invocation contract EXACTLY (same binary resolution, `--tools ""` —
  * which is what lets `-p` skip the interactive trust dialog entirely, verified live on claude
@@ -88,14 +132,43 @@ export function parseTicketDraft(stdout: string): {
  * and wedge the route's `draftInFlight` single-flight guard into permanent 409s. The
  * `hasDispatchMarker` check inside {@link parseTicketDraft} is defense-in-depth alongside the
  * accept-time route guard in `cards.route.ts` (POST /cards), which covers a user editing the
- * marker back in during State 3 review.
+ * marker back in during State 3 review. With `images`, the prompt moves off argv into a
+ * stream-json stdin message that also carries the image blocks (`--verbose` is mandatory with
+ * stream-json output in print mode); the no-image invocation is unchanged.
  */
 export async function generateTicketDraft(
   direction: string,
   signal?: AbortSignal,
+  images: readonly DecodedImage[] = [],
 ): Promise<{ title: string; description: string }> {
   const prompt = buildPrompt(direction);
   const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
+  const execOpts = {
+    cwd: DISPATCH_DIR,
+    timeout: 150_000,
+    maxBuffer: 10 * 1024 * 1024,
+    signal,
+    killEscalationMs: 5_000,
+  };
+  if (images.length > 0) {
+    const { stdout } = await run(
+      claudePath,
+      [
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--tools",
+        "",
+        "--strict-mcp-config",
+        "--no-session-persistence",
+      ],
+      { ...execOpts, input: buildDraftInput(prompt, images) },
+    );
+    return parseTicketDraft(extractResultText(stdout));
+  }
   const { stdout } = await run(
     claudePath,
     [
@@ -108,13 +181,7 @@ export async function generateTicketDraft(
       "--strict-mcp-config",
       "--no-session-persistence",
     ],
-    {
-      cwd: DISPATCH_DIR,
-      timeout: 150_000,
-      maxBuffer: 10 * 1024 * 1024,
-      signal,
-      killEscalationMs: 5_000,
-    },
+    execOpts,
   );
 
   return parseTicketDraft(stdout);
