@@ -1,4 +1,6 @@
 import type { Card } from "../../../shared/types.js";
+import { attachmentLinks, withAbsoluteAttachments } from "./attachments.js";
+import { attachmentsDir } from "../infra/paths.js";
 
 /**
  * Describe the workspace layout for any repo count (N ≥ 1): a comma-joined list of `<name>/`
@@ -149,7 +151,10 @@ function groupTicketSection(members: Card[]): string[] {
     lines.push(
       ``,
       `## ${m.identifier}: ${fenceTitle(m.title)}`,
-      m.description?.trim() || "(no description provided)",
+      withAbsoluteAttachments(
+        m.description?.trim() || "(no description provided)",
+        attachmentsDir(m.id),
+      ),
     );
   }
   return lines;
@@ -204,7 +209,14 @@ export function buildKickoff(
 ): string {
   const slim = (card.source ?? "linear") === "linear";
   const isGroup = card.source === "group";
-  const description = card.description?.trim() || "(no description provided)";
+  const rawDescription =
+    card.description?.trim() || "(no description provided)";
+  const imageNames = slim || isGroup ? [] : attachmentLinks(rawDescription);
+  const imageDir = attachmentsDir(card.id);
+  const description =
+    imageNames.length > 0
+      ? withAbsoluteAttachments(rawDescription, imageDir)
+      : rawDescription;
   const extra = extraDirection.trim();
   const url = card.url?.trim();
   const substituted =
@@ -224,6 +236,15 @@ export function buildKickoff(
             `Read the full ticket — description and comments — via the Linear MCP. If the MCP is unavailable, ${url ? "fall back to the ticket URL above or " : ""}ask the user.`,
           ]
         : [`## Description`, description]),
+    ...(imageNames.length > 0
+      ? [
+          ``,
+          `## Attached images`,
+          ...imageNames.map((n) => `${imageDir}/${n}`),
+          ``,
+          `Read every file listed above with the Read tool before doing anything else. They are part of the ticket.`,
+        ]
+      : []),
     ...(substituted !== null
       ? substituted
         ? [``, ...substituted.split("\n")]
