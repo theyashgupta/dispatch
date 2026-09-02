@@ -1,4 +1,5 @@
 import type {
+  TerminalAppearance,
   ActivityEvent,
   Card,
   Column,
@@ -899,6 +900,44 @@ export async function saveCleanupDelay(
     return { ok: false, error: body.error ?? "Couldn't save cleanup delay." };
   }
   throw new Error(`saveCleanupDelay failed: ${res.status} ${res.statusText}`);
+}
+
+/**
+ * Read the persisted terminal appearance: GET /api/config/terminal. Fired once on the Settings
+ * Terminal tab's mount to seed the draft. Throws on any non-2xx, mirroring `getCleanupDelay`.
+ */
+export async function getTerminalAppearance(): Promise<TerminalAppearance> {
+  const res = await fetch("/api/config/terminal");
+  if (!res.ok) {
+    throw new Error(
+      `getTerminalAppearance failed: ${res.status} ${res.statusText}`,
+    );
+  }
+  return (await res.json()) as TerminalAppearance;
+}
+
+/**
+ * Persist the terminal appearance: PUT /api/config/terminal. Same 200/400/throw discrimination
+ * as `saveCleanupDelay` so the Terminal tab can show the server's field-named error verbatim.
+ */
+export async function saveTerminalAppearance(
+  appearance: TerminalAppearance,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await fetch("/api/config/terminal", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(appearance),
+  });
+  if (res.ok) {
+    return { ok: true };
+  }
+  if (res.status === 400) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: body.error ?? "invalid terminal appearance" };
+  }
+  throw new Error(
+    `saveTerminalAppearance failed: ${res.status} ${res.statusText}`,
+  );
 }
 
 /**

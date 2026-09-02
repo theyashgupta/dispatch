@@ -7,6 +7,10 @@ import {
 } from "../../shared/types.js";
 import { DONE_PAGE_SIZE, parseDoneLimit } from "../../shared/done-limit.js";
 import {
+  DEFAULT_TERMINAL_APPEARANCE,
+  validateTerminalAppearance,
+} from "../../shared/terminal-appearance.js";
+import {
   SEARCH_QUERY_MAX,
   SEARCH_QUERY_MIN,
   SEARCH_RESULT_LIMIT,
@@ -16,6 +20,7 @@ import {
   getOrchestrationConfig,
   updateClaudeArgs,
   updateCleanupDelayDays,
+  updateTerminalAppearance,
   updateSourceFilters,
 } from "../services/infra/config-holder.js";
 import {
@@ -285,6 +290,22 @@ boardRouter.put("/config/cleanup-delay", (req, res) => {
   updateCleanupDelayDays(days);
   store.setCleanupDelayDays(days);
   res.status(200).json({ cleanupDelayDays: days });
+});
+
+boardRouter.get("/config/terminal", (_req, res) => {
+  res
+    .status(200)
+    .json(getOrchestrationConfig()?.terminal ?? DEFAULT_TERMINAL_APPEARANCE);
+});
+
+boardRouter.put("/config/terminal", (req, res) => {
+  const result = validateTerminalAppearance(req.body);
+  if (!result.ok) {
+    res.status(400).json({ error: result.error });
+    return;
+  }
+  updateTerminalAppearance(result.value);
+  res.status(200).json(result.value);
 });
 
 /** Same body-shape guard as {@link isValidCleanupDelayDays}, but for the free-text argv string (Settings ▸ Models). Bounded length only — any string tokenizes into a valid argv (`parseClaudeArgs`), including empty. */

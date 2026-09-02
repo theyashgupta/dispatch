@@ -989,10 +989,15 @@ false` on the HTTP leg, and the `writableFinished` premature-disconnect guard al
 they were.
 
 **The client owns theme, font, links, and scroll — none of it is a string patch anymore.**
-`GET /api/terminal-theme` (`services/infra/terminal-theme.ts`) resolves the user's real Ghostty
-config live (`ghostty +show-config`, parsed into an xterm `ITheme` plus font block) and falls back
-to a bundled Catppuccin Mocha constant on any failure — the resolver never throws, so the terminal
-always opens themed rather than in raw xterm defaults. The bundled Nerd Font is self-hosted from a
+The terminal client fetches `GET /api/config/terminal` and builds the xterm `ITheme` plus font
+block itself (`toTerminalTheme`) from the shipped translucent default (`shared/terminal-appearance.ts`: #111111 at 0.93
+opacity, #e8e9ea foreground and cursor, the bundled Nerd Font at 14 px, weight 600, block cursor,
+a fixed Catppuccin Mocha ANSI palette) overridden by the `terminal` block Settings ▸ Terminal
+persists in `config.json` (`PUT /api/config/terminal`, validated by the same shared function the
+startup reader uses, so a hand-edited invalid block falls back to the default instead of blocking
+boot). No external terminal config is ever read, so the terminal always opens themed on every
+machine. A save is also posted on the same-origin `dsp.terminal-appearance` BroadcastChannel and
+every open terminal iframe restyles itself without a reload. The bundled Nerd Font is self-hosted from a
 base64 data-URI `@font-face` with `font-feature-settings: "ss01" 1, "calt" 1, "liga" 1` on `.xterm`
 under the DOM renderer (no WebGL addon needed — the DOM renderer shapes font features natively).
 Cmd-click (plain-text via `WebLinksAddon` AND OSC-8 via `linkHandler`, both sharing one
@@ -1029,8 +1034,8 @@ client dispatches the wheel events itself, so granting the browser vertical pann
 and `none` additionally removes Chrome's "scroll already started, preventDefault ignored" race.
 `html, body { -webkit-text-size-adjust: 100% }` is load-bearing for the same reason: without it,
 iOS text inflation breaks the `charWidth ∝ fontSize` relationship the zoom / effective-column-width
-feature's math depends on. The theme resolver's never-throws contract (above) is part of the same
-invariant — a themed terminal must open even when Ghostty is absent or its config fails to parse.
+feature's math depends on. The settings-backed theme's fall-back-to-default contract (above) is part of the same
+invariant: a themed terminal must open even when the persisted `terminal` block is invalid.
 
 **Selection in the web terminal stays native because Dispatch pins mouse ownership at session
 creation (LOCAL-3).** xterm.js only makes a native selection while no program owns the mouse, and
