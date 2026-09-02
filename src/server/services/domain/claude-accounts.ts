@@ -111,7 +111,11 @@ export function accountDir(id: string): string {
   if (!isAccountId(id)) {
     throw new Error("invalid claude account id");
   }
-  return path.join(CLAUDE_ACCOUNTS_DIR, id);
+  const dir = path.resolve(CLAUDE_ACCOUNTS_DIR, id);
+  if (!dir.startsWith(CLAUDE_ACCOUNTS_DIR + path.sep)) {
+    throw new Error("invalid claude account id");
+  }
+  return dir;
 }
 
 /**

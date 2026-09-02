@@ -280,7 +280,7 @@ function stubFetch(
         : input instanceof URL
           ? input.href
           : input.url;
-    if (!url.includes("api.anthropic.com")) {
+    if (new URL(url).hostname !== "api.anthropic.com") {
       return realFetch(input, init);
     }
     calls += 1;
@@ -458,7 +458,9 @@ void test("usage: an added account reads its sha8-suffixed keychain item and nev
   const service = accounts.keychainServiceName(accounts.accountDir(ID_A));
   assert.match(service, /^Claude Code-credentials-[0-9a-f]{8}$/);
   fs.writeFileSync(
-    path.join(env.keychainDir, service),
+    process.platform === "darwin"
+      ? path.join(env.keychainDir, service)
+      : path.join(accounts.accountDir(ID_A), ".credentials.json"),
     '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-FAKE-ACCT-A"}}',
   );
   const calls = stubFetch(200, GRILL_PAYLOAD);

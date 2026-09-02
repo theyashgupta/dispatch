@@ -117,7 +117,10 @@ export function isolateEnv(): IsolatedEnv {
   fs.mkdirSync(path.join(home, ".claude", "statsig"), { recursive: true });
   fs.writeFileSync(path.join(home, ".claude", "settings.json"), "{}\n");
   fs.writeFileSync(path.join(home, ".claude", "history.jsonl"), "");
-  fs.writeFileSync(path.join(home, ".claude", ".credentials.json"), "{}\n");
+  fs.writeFileSync(
+    path.join(home, ".claude", ".credentials.json"),
+    '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-FAKE-HOME-FILE"}}\n',
+  );
   fs.writeFileSync(
     path.join(home, ".claude.json"),
     JSON.stringify({
