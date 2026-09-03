@@ -775,9 +775,20 @@ transient cases and is why neither can false-trip it: a `tsx watch` reload kills
 process before three failures can accrue, and boot reconcile re-validates a still-live session at
 startup — so only a REAL mid-run kill ever reaches 3. Any successful capture resets the streak to
 zero. Accepted tradeoff: a session wedged (uncapturable) for >6s but eventually recoverable is
-marked lost, which the user simply Restarts — never destructive to the workspace or branch. Done
-cards get NO dead-session detection: a mid-cleanup kill must never be marked session-lost, because
-the cleanup mutation clears `tmuxSession` moments later anyway.
+marked lost, which the user simply Restarts — never destructive to the workspace or branch. The
+detector runs in every column except To Do, Done included: a Done card awaiting deferred cleanup
+holds a live session for days, and if that pane dies (tmux server killed, reboot) the card must
+offer Resume rather than keep a stale `tmuxSession` whose Reconnect dead-ends. The one exclusion is
+a card whose cleanup is in flight (`store.isCleaningUp`): a deliberate cleanup kills the session
+seconds before clearing `tmuxSession`, and the detector must not race that into a spurious
+session-lost.
+
+**Reconnect on a vanished pane resumes.** `ensureTerminal` can only respawn ttyd. When
+the tmux pane itself is gone it marks the session lost instead of recording a `died` terminal error
+(which only offers Reconnect, an affordance that can never bring back a pane that no longer
+exists). The `/terminal` route goes through `reconnectTerminal`, which reattaches when the pane is
+live and otherwise marks the session lost and runs the resume saga, so one Reconnect click
+relaunches `claude --resume` in the same worktree.
 
 **Bounded consecutive probe-failure ceiling — 3 consecutive detection-tool failures (`RESIL-02`).**
 The same shape as `RESIL-01`, applied to the artifact-detection probes (`adapters/artifact-detect.ts`):
@@ -813,20 +824,17 @@ poller upserts the new identifier while `tmuxSession` still names the old, live 
 derived-name comparison would diverge and mark a running card lost. Comparing against the recorded
 truth avoids that.
 
-**Boot reconcile — skip To Do and Done (`IN-03`).** A card the user parked in Done, or an
-interrupted-saga card still in To Do, must never receive the destructive "Session lost" + Restart
-line: Restart's `completeStart`/`attachExistingSession` would promote it to `in_progress` — the only
-path that yanks a card out of Done without a drag. The watcher's runtime detector never
-dead-session-detects todo or done cards — todo is skipped outright at step 0, before any capture is
-spent, while done cards still GET the step-1 capture so the ATTN-02 unseen-activity stamp works in
-any column, but stay marker-ineligible and bail out of dead-session detection on capture failure (a
-deliberate cleanup kills the session moments before clearing `tmuxSession`, and the detector must
-not race that into a spurious session-lost). Reconcile mirrors this guard NARROWLY: it skips only
-the session-lost-marking/Restart-promotion branch for To Do and Done, protecting both columns
-symmetrically even though a todo card cannot hold a live session post-load. A Done card awaiting
-deferred cleanup (`LIFE-02`) now legitimately holds a live session for days, so it still has its
-ttyd adopted and its hook token re-registered on every restart — skipping those too would sweep a
-live terminal as an orphan on every boot.
+**Boot reconcile — skip To Do only (`IN-03`).** An interrupted-saga card still in To Do must never
+receive the "Session lost" + Restart line: Restart's `completeStart`/`attachExistingSession` would
+promote it to `in_progress` without a drag. The watcher's runtime detector mirrors this: todo is
+skipped outright at step 0, before any capture is spent. Done cards are NOT skipped by either pass.
+Session-lost marking is column-preserving (see `REVIEW-01`), so a Done card whose pane died stays
+in Done and simply gains the Resume affordance; before this, a Done card awaiting deferred cleanup
+(`LIFE-02`) whose tmux died while the backend was down kept a stale `tmuxSession` forever, its
+Reconnect button looping on "tmux session no longer exists" and its `/resume` route 409ing with
+"session is already live". Done cards still get the step-1 capture so the ATTN-02 unseen-activity
+stamp works in any column, stay marker-ineligible, and still have their ttyd adopted and hook token
+re-registered on every restart.
 
 **Empty-map baseline recovery (`IN-02`).** Two in-memory maps are empty after any backend restart,
 and both recover by SEEDING on first observation rather than firing. `listSessions()` returns an
@@ -867,7 +875,7 @@ exclusion-based column guards WITHOUT special-casing `in_review` in any of them.
 and/or `done`, `in_review` inherits the same treatment as `in_progress`/`agent_done` for free:
 it is marker-ELIGIBLE (a fresh `NEEDS_INPUT`/`DONE` marker still moves the card OUT to
 needs_input/agent_done — the `applyMarker` guard excludes only `todo`/`done`), runtime
-dead-session detection stays ON (the watcher's 3-strike detector skips only `done`, so a killed
+dead-session detection stays ON (the watcher's 3-strike detector skips only `todo`, so a killed
 In Review session is marked session-lost like any live column — this is what powers the Resume
 affordance), `/start` (Restart) is NOT blocked (only `done` 409s), and the past-To-Do reconcile
 rules apply (the poller never re-upserts it and keeps + gone-flags it if the Linear issue
@@ -924,6 +932,8 @@ instance key (spawned by a pre-instance-key build) → sweep candidate only, so 
 cleaned up once after upgrade. `compatible` now requires BOTH keys, which only narrows the
 re-adoption fingerprint. `uninstall` counts and kills through the same classification, so it also
 leaves another instance's ttyd alone.
+
+**tmux servers are scoped per Dispatch instance too.** Every tmux call goes through one wrapper in `adapters/tmux.ts` that prepends `TMUX_SERVER_ARGS`, and the ttyd attach argv carries the same prefix. The home instance (`~/.dispatch`) keeps tmux's default server, so its existing sessions survive an upgrade. Every `DISPATCH_DIR` override instance runs on its own server, `-L dsp-<instance id>`, so a test instance can never capture, resume, or kill the real instance's sessions even when both instances name a session `dsp-LOCAL-9`. To inspect a test instance by hand, pass the same label: `tmux -L dsp-<id> ls`.
 
 **Phase 92 re-keyed the base path from the card to the session (`PROXY-01`), and
 `TTYD_RUNTIME_REVISION` bumped to 6 in the same commit.** `resolveLiveTtydPort`

@@ -60,6 +60,13 @@ const TRUST_DIALOG =
  */
 const BYPASS_DIALOG = /Bypass Permissions mode/;
 /**
+ * Resume-mode dialog Claude Code shows for a large or old `--resume` target (summary vs full).
+ *
+ * @remarks Enter takes the recommended default (resume from summary). Left unanswered it looks
+ * like a hang, and the readiness poll used to time out and tear the resumed session down.
+ */
+const RESUME_DIALOG = /Resume from summary|Resume full session as-is/;
+/**
  * REPL-ready footer — present only once the input box is live; absent in the trust dialog.
  * Claude Code changes this hint text between releases (v2.1.200 showed "? for shortcuts";
  * v2.1.201 shows "bypass permissions on (shift+tab to cycle)"), so match ANY known
@@ -354,10 +361,15 @@ export async function awaitReplReady(session: string): Promise<void> {
   const deadline = Date.now() + READINESS_TIMEOUT_MS;
   let trustAccepted = false;
   let bypassAccepted = false;
+  let resumeAccepted = false;
   let lastPane = "";
   while (Date.now() < deadline) {
     lastPane = await capturePane(paneTarget);
     if (READY.test(lastPane)) return;
+    if (!resumeAccepted && RESUME_DIALOG.test(lastPane)) {
+      await sendKeys(paneTarget, ["Enter"]);
+      resumeAccepted = true;
+    }
     if (!trustAccepted && TRUST_DIALOG.test(lastPane)) {
       await sendKeys(paneTarget, ["Enter"]);
       trustAccepted = true;

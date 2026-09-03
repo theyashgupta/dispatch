@@ -7,6 +7,7 @@ import {
   TTYD_RUNTIME_REVISION_RETAINED_KEY,
   classifyDspTtydProcesses,
 } from "./ttyd-fingerprint.js";
+import { TMUX_SERVER_ARGS } from "./tmux.js";
 
 const execFileP = promisify(execFile);
 /**
@@ -163,6 +164,7 @@ async function spawnTtyd(session: string, sessionId: string): Promise<number> {
       "-t",
       `${TTYD_INSTANCE_RETAINED_KEY}=1`,
       "tmux",
+      ...TMUX_SERVER_ARGS,
       "-u",
       "attach",
       "-t",

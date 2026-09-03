@@ -1,7 +1,39 @@
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { run } from "./exec.js";
+
+/**
+ * Leading tmux argv that pins this instance to its own tmux server.
+ *
+ * @remarks Empty for the home instance (`~/.dispatch`), so its existing sessions on the default
+ * server survive an upgrade. Every `DISPATCH_DIR` override instance gets `-L dsp-<id>`, a private
+ * server, so a test instance can never capture, attach to, or kill the real instance's sessions
+ * even when both name a session `dsp-LOCAL-9`. The id is the same 12-hex sha256 of the resolved
+ * data directory the ttyd instance key uses; re-derived here because this adapter may import
+ * nothing but itself and shared.
+ */
+export const TMUX_SERVER_ARGS: readonly string[] = (() => {
+  const home = path.join(os.homedir(), ".dispatch");
+  const override = process.env.DISPATCH_DIR?.trim();
+  const dir = override ? path.resolve(override) : home;
+  if (dir === home) return [];
+  const id = createHash("sha256").update(dir).digest("hex").slice(0, 12);
+  return ["-L", `dsp-${id}`];
+})();
+
+/**
+ * Run tmux against this instance's server.
+ *
+ * @remarks Single chokepoint for the per-instance `-L` server label, see `TMUX_SERVER_ARGS`.
+ */
+function tmux(
+  args: string[],
+  opts?: Parameters<typeof run>[2],
+): ReturnType<typeof run> {
+  return run("tmux", [...TMUX_SERVER_ARGS, ...args], opts);
+}
 
 /**
  * The tmux terminal-features entry that grants the `xterm-256color` terminal type (ttyd's
@@ -37,7 +69,7 @@ const NO_SERVER_STDERR = /no server running|error connecting/;
  */
 async function serverOptionEntries(name: string): Promise<Set<string>> {
   try {
-    const { stdout } = await run("tmux", ["show", "-g", "-v", name]);
+    const { stdout } = await tmux(["show", "-g", "-v", name]);
     return new Set(
       stdout
         .split("\n")
@@ -82,7 +114,7 @@ export async function ensureHyperlinksTerminalFeature(): Promise<void> {
   if (missing.length === 0) return;
   try {
     for (const entry of missing) {
-      await run("tmux", ["set", "-ag", "terminal-features", entry]);
+      await tmux(["set", "-ag", "terminal-features", entry]);
     }
   } catch (err) {
     const failure = err as Error & { stderr?: string };
@@ -122,7 +154,7 @@ export async function ensureNoAltScreenOverride(): Promise<void> {
   const current = await serverOptionEntries("terminal-overrides");
   if (current.has(NO_ALT_SCREEN_OVERRIDE_ENTRY)) return;
   try {
-    await run("tmux", [
+    await tmux([
       "set",
       "-ag",
       "terminal-overrides",
@@ -173,7 +205,7 @@ function wrapWithPtyShim(commandArgv: string[]): string[] {
  */
 export async function hasSession(name: string): Promise<boolean> {
   try {
-    await run("tmux", ["has-session", "-t", name]);
+    await tmux(["has-session", "-t", name]);
     return true;
   } catch {
     return false;
@@ -192,11 +224,7 @@ export async function hasSession(name: string): Promise<boolean> {
  */
 export async function listSessions(): Promise<Set<string>> {
   try {
-    const { stdout } = await run("tmux", [
-      "list-sessions",
-      "-F",
-      "#{session_name}",
-    ]);
+    const { stdout } = await tmux(["list-sessions", "-F", "#{session_name}"]);
     return new Set(
       stdout
         .split("\n")
@@ -223,8 +251,7 @@ export async function panePidsBySession(): Promise<Map<
   number[]
 > | null> {
   try {
-    const { stdout } = await run(
-      "tmux",
+    const { stdout } = await tmux(
       ["list-panes", "-a", "-F", "#{session_name} #{pane_pid}"],
       { timeout: 5000 },
     );
@@ -305,7 +332,7 @@ export async function newSession(
   const envArgs = Object.entries({ ...CLAUDE_PANE_ENV, ...env }).flatMap(
     ([key, value]) => ["-e", `${key}=${value}`],
   );
-  await run("tmux", [
+  await tmux([
     "set",
     "-g",
     "history-limit",
@@ -324,7 +351,7 @@ export async function newSession(
     ...envArgs,
     ...wrapWithPtyShim(commandArgv),
   ]);
-  await run("tmux", ["set", "-t", name, "mouse", "off"]);
+  await tmux(["set", "-t", name, "mouse", "off"]);
   await ensureHyperlinksTerminalFeature();
   await ensureNoAltScreenOverride();
 }
@@ -346,7 +373,7 @@ export async function capturePane(
   const args = ["capture-pane", "-p"];
   if (opts.join) args.push("-J");
   args.push("-t", name);
-  const { stdout } = await run("tmux", args);
+  const { stdout } = await tmux(args);
   return stdout;
 }
 
@@ -376,8 +403,7 @@ export async function captureHistory(
   name: string,
   limit: number,
 ): Promise<string> {
-  const { stdout } = await run(
-    "tmux",
+  const { stdout } = await tmux(
     ["capture-pane", "-p", "-e", "-t", name, "-S", `-${limit}`, "-E", "-1"],
     { timeout: 5000, maxBuffer: SCROLLBACK_MAX_BUFFER },
   );
@@ -400,7 +426,7 @@ export async function captureHistory(
 export async function paneSize(
   target: string,
 ): Promise<{ width: number; height: number }> {
-  const { stdout } = await run("tmux", [
+  const { stdout } = await tmux([
     "display",
     "-t",
     target,
@@ -427,7 +453,7 @@ export async function loadBuffer(
   bufferName: string,
   filePath: string,
 ): Promise<void> {
-  await run("tmux", ["load-buffer", "-b", bufferName, filePath]);
+  await tmux(["load-buffer", "-b", bufferName, filePath]);
 }
 
 /**
@@ -442,15 +468,7 @@ export async function pasteBuffer(
   bufferName: string,
   target: string,
 ): Promise<void> {
-  await run("tmux", [
-    "paste-buffer",
-    "-b",
-    bufferName,
-    "-t",
-    target,
-    "-p",
-    "-d",
-  ]);
+  await tmux(["paste-buffer", "-b", bufferName, "-t", target, "-p", "-d"]);
 }
 
 /**
@@ -462,7 +480,7 @@ export async function pasteBuffer(
  * @see docs/ARCHITECTURE.md#tmux-invocations
  */
 export async function sendKeys(target: string, keys: string[]): Promise<void> {
-  await run("tmux", ["send-keys", "-t", target, ...keys]);
+  await tmux(["send-keys", "-t", target, ...keys]);
 }
 
 /**
@@ -473,7 +491,7 @@ export async function sendKeys(target: string, keys: string[]): Promise<void> {
  */
 export async function killSession(name: string): Promise<boolean> {
   try {
-    await run("tmux", ["kill-session", "-t", name]);
+    await tmux(["kill-session", "-t", name]);
     return true;
   } catch {
     return false;

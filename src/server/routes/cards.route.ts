@@ -8,9 +8,11 @@ import {
   isManualMoveAllowed,
 } from "../../shared/column-transitions.js";
 import { startSession } from "../services/orchestration/start-session.js";
-import { resumeSession } from "../services/orchestration/resume-session.js";
+import {
+  reconnectTerminal,
+  resumeSession,
+} from "../services/orchestration/resume-session.js";
 import { cleanupWorkspace } from "../services/orchestration/cleanup.js";
-import { ensureTerminal } from "../services/orchestration/terminal.js";
 import { editorPath, launchEditor } from "../adapters/editors.js";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
 import { restatRepos } from "../services/domain/workspaces.js";
@@ -388,7 +390,7 @@ cardsRouter.post("/cards/:id/terminal", (req, res) => {
     return;
   }
 
-  void ensureTerminal(card.id, card.activeSessionId, card.tmuxSession);
+  void reconnectTerminal(card.id);
   res.status(202).json({ ensuring: true });
 });
 
