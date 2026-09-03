@@ -71,7 +71,7 @@ const ID_RE =
  * @remarks Moved from 145 to 146 for the deliberate one-ID status-colour single-source
  * re-freeze (`NEW-24`), see docs/ARCHITECTURE.md#design-system-invariants.
  */
-const FROZEN_COUNT = 146;
+const FROZEN_COUNT = 150;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");

@@ -273,8 +273,9 @@ trading one generic look for another rather than buying a genuinely distinct one
 every component in `src/web/primitives/` and `src/web/features/` for zero functional change is the
 same diff-churn trade `frontend-design-system.md`'s `## Styling approach — DECISIVE` section
 already rejected for CSS Modules, vanilla-extract, and styled-components — made larger here, and in
-a repo with no test code, where verification is a smoke-tester exercising the running app rather
-than a suite that could catch a regression automatically.
+a repo whose only automated tests are a small `node:test` suite, where UI verification is a
+smoke-tester exercising the running app rather than a suite that could catch a regression
+automatically.
 
 Honest caveat: a future milestone that wants a genuinely different visual language —
 illustration, marketing surfaces, a public-facing site — would make Tailwind defensible. This

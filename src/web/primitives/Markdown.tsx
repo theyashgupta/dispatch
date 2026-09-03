@@ -1,4 +1,4 @@
-import { type CSSProperties } from "react";
+import { useMemo, type CSSProperties } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { isLinearUploadUrl } from "../../shared/linear-asset-url.js";
@@ -6,6 +6,7 @@ import { ImageWithFallback } from "./ImageWithFallback.js";
 
 interface MarkdownProps {
   source: string;
+  attachmentBase?: string;
 }
 
 const blockMargin = "0 0 var(--space-sm)";
@@ -157,6 +158,34 @@ const hrStyle: CSSProperties = {
   margin: "var(--space-lg) 0",
 };
 
+function renderImage(src: unknown, alt: string | undefined, base?: string) {
+  if (typeof src !== "string" || src === "") return <>{alt}</>;
+  const label = alt != null && alt !== "" ? alt : undefined;
+  if (base !== undefined && src.startsWith("attachments/")) {
+    return (
+      <ImageWithFallback
+        key={src}
+        src={`${base}/${src.slice("attachments/".length)}`}
+        alt={label}
+      />
+    );
+  }
+  if (isLinearUploadUrl(src)) {
+    return (
+      <ImageWithFallback
+        key={src}
+        src={`/api/images?url=${encodeURIComponent(src)}`}
+        alt={label}
+      />
+    );
+  }
+  return (
+    <a href={src} target="_blank" rel="noopener noreferrer" style={anchorStyle}>
+      {label ?? src}
+    </a>
+  );
+}
+
 const components: Components = {
   h1: ({ children }) => <h1 style={h1Style}>{children}</h1>,
   h2: ({ children }) => <h2 style={h2Style}>{children}</h2>,
@@ -197,27 +226,7 @@ const components: Components = {
     ) : (
       <span>{children}</span>
     ),
-  img: ({ src, alt }) =>
-    typeof src === "string" && src !== "" ? (
-      isLinearUploadUrl(src) ? (
-        <ImageWithFallback
-          key={src}
-          src={`/api/images?url=${encodeURIComponent(src)}`}
-          alt={alt != null && alt !== "" ? alt : undefined}
-        />
-      ) : (
-        <a
-          href={src}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={anchorStyle}
-        >
-          {alt != null && alt !== "" ? alt : src}
-        </a>
-      )
-    ) : (
-      <>{alt}</>
-    ),
+  img: ({ src, alt }) => renderImage(src, alt),
   input: ({ checked }) => (
     <input
       type="checkbox"
@@ -256,14 +265,21 @@ const components: Components = {
   hr: () => <hr style={hrStyle} />,
 };
 
-export function Markdown({ source }: MarkdownProps) {
+function attachmentAware(base: string): Components {
+  return { ...components, img: ({ src, alt }) => renderImage(src, alt, base) };
+}
+
+export function Markdown({ source, attachmentBase }: MarkdownProps) {
+  const resolved = useMemo(
+    () =>
+      attachmentBase === undefined
+        ? components
+        : attachmentAware(attachmentBase),
+    [attachmentBase],
+  );
   return (
     <div className="md-body">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        skipHtml
-        components={components}
-      >
+      <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={resolved}>
         {source}
       </ReactMarkdown>
     </div>

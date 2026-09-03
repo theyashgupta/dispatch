@@ -411,6 +411,7 @@ export default tseslint.config(
       "scripts/**",
       ".claude/**",
       "src/web/public/**",
+      ".planning/**",
     ],
   },
 

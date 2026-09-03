@@ -2,9 +2,12 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { createLocalTicket, generateTicketDraft } from "../../lib/api.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
+import { IconButton } from "../../primitives/IconButton.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { Modal, type ModalControl } from "../../primitives/Modal.js";
 import { Notice } from "../../primitives/Notice.js";
+import { usePastedImages } from "../../hooks/usePastedImages.js";
+import { MAX_ATTACHMENTS } from "../../../shared/types.js";
 
 interface CreateTicketModalProps {
   onClose: () => void;
@@ -16,6 +19,29 @@ const captionStyle: CSSProperties = {
   fontSize: "var(--font-body)",
   lineHeight: "var(--line-body)",
   color: "var(--text-muted)",
+};
+
+const thumbStyle: CSSProperties = {
+  width: "64px",
+  height: "64px",
+  objectFit: "cover",
+  borderRadius: "var(--radius)",
+  border: "1px solid var(--border)",
+  display: "block",
+};
+
+const removeThumbStyle: CSSProperties = {
+  position: "absolute",
+  top: "-6px",
+  right: "-6px",
+  width: "20px",
+  height: "20px",
+  borderRadius: "var(--radius-sm)",
+  border: "1px solid var(--border)",
+  background: "var(--surface-card)",
+  color: "var(--text)",
+  fontSize: "var(--font-label)",
+  lineHeight: "var(--line-label)",
 };
 
 const inlineErrorStyle: CSSProperties = {
@@ -32,6 +58,8 @@ function acceptErrorCopy(error: string | null): string {
       return "Description is too long (max 20,000 characters).";
     case "content contains the DISPATCH_STATUS marker":
       return "The ticket can't contain the reserved DISPATCH_STATUS marker.";
+    case "invalid-images":
+      return "Only PNG, JPEG, GIF, and WebP images can be attached (up to 10, 10 MB each).";
     default:
       return "Couldn't reach the server. Try again.";
   }
@@ -58,6 +86,9 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
   const [titleFocus, setTitleFocus] = useState(false);
   const [descriptionFocus, setDescriptionFocus] = useState(false);
 
+  const pasted = usePastedImages();
+  const imagePayload = pasted.images.map((img) => img.base64);
+
   useEffect(() => {
     return () => {
       abortControllerRef.current?.abort();
@@ -70,7 +101,11 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
     setPhase("generating");
     setGenerateFailed(false);
     try {
-      const result = await generateTicketDraft(direction, controller.signal);
+      const result = await generateTicketDraft(
+        direction,
+        controller.signal,
+        imagePayload,
+      );
       if (result.ok) {
         setTitle(result.title);
         setDescription(result.description);
@@ -114,7 +149,11 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
     setAccepting(true);
     titleInputRef.current?.focus();
     setAcceptError(null);
-    const result = await createLocalTicket(trimmedTitle, trimmedDescription);
+    const result = await createLocalTicket(
+      trimmedTitle,
+      trimmedDescription,
+      imagePayload,
+    );
     if (result.ok) {
       onClose();
       return;
@@ -157,6 +196,7 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
                 value={prompt}
                 disabled={phase === "generating"}
                 onChange={(e) => setPrompt(e.target.value)}
+                onPaste={(e) => pasted.onPaste(e.clipboardData?.items ?? null)}
                 onFocus={() => setPromptFocus(true)}
                 onBlur={() => setPromptFocus(false)}
                 aria-label="What do you want to build or fix?"
@@ -177,6 +217,42 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
                 }}
               />
             </div>
+          )}
+
+          {pasted.images.length > 0 && (
+            <div
+              data-testid="pasted-images"
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "var(--space-sm)",
+                padding: "var(--space-xs) 0",
+              }}
+            >
+              {pasted.images.map((img, i) => (
+                <div key={img.id} style={{ position: "relative" }}>
+                  <img
+                    src={img.url}
+                    alt={`Pasted image ${i + 1}`}
+                    style={thumbStyle}
+                  />
+                  <IconButton
+                    aria-label={`Remove pasted image ${i + 1}`}
+                    onClick={() => pasted.remove(img.id)}
+                    disabled={phase === "generating" || accepting}
+                    style={removeThumbStyle}
+                  >
+                    ×
+                  </IconButton>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {pasted.limitHit && (
+            <Notice tone="muted">
+              You can attach up to {MAX_ATTACHMENTS} images.
+            </Notice>
           )}
 
           {phase === "generating" && (

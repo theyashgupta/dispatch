@@ -55,7 +55,10 @@ export function ReferenceBlocks({
             wordBreak: "break-word",
           }}
         >
-          <Markdown source={c.description} />
+          <Markdown
+            source={c.description}
+            attachmentBase={`/api/cards/${encodeURIComponent(c.id)}/attachments`}
+          />
         </div>
       ) : (
         <div
