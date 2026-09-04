@@ -937,13 +937,12 @@ export interface Config {
    * login. Added accounts are registry ids under `claude-accounts/`.
    */
   activeClaudeAccountId?: string;
-  /** Terminal appearance chosen in Settings; absent or invalid resolves to the shipped translucent default. */
+  /** Terminal appearance chosen in Settings; absent or invalid resolves to the shipped default. */
   terminal?: TerminalAppearance;
 }
 
 export interface TerminalAppearance {
   background: string;
-  opacity: number;
   foreground: string;
   cursor: string;
   fontFamily: string;

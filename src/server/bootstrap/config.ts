@@ -52,7 +52,7 @@ const CONFIG_TEMPLATE = {
     "Extra CLI arguments passed to `claude` every time a session starts, resumes, or restarts. Leave empty for Claude's normal permission prompts.",
   claudeArgs: DEFAULT_CLAUDE_ARGS,
   "// terminal":
-    "Terminal appearance (Settings > Terminal): background, opacity (0.3 to 1), foreground, cursor, fontFamily, fontSize (8 to 32). Remove the block to restore the defaults.",
+    "Terminal appearance (Settings > Terminal): background, foreground, cursor, fontFamily, fontSize (8 to 32). Remove the block to restore the defaults.",
   terminal: DEFAULT_TERMINAL_APPEARANCE,
 };
 

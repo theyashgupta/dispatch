@@ -1,6 +1,11 @@
 import { store } from "../../store/board.store.js";
 import { ensureTtyd, killTtyd } from "../../adapters/ttyd.js";
-import { captureHistory, hasSession } from "../../adapters/tmux.js";
+import {
+  captureHistory,
+  hasSession,
+  pinMouseOff,
+  pinStatusOff,
+} from "../../adapters/tmux.js";
 
 /**
  * Ensure a ttyd terminal for a card's `session` and record its port — the SINGLE TERM-01
@@ -31,6 +36,8 @@ export async function ensureTerminal(
       }
       return;
     }
+    await pinMouseOff(session);
+    await pinStatusOff(session);
     const port = await ensureTtyd(session, sessionId);
     const recorded = await store.setTtydPortIfSession(cardId, session, port);
     if (!recorded) killTtyd(session);
