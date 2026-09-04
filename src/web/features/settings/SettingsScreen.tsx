@@ -47,10 +47,13 @@ import {
   TERMINAL_FONT_FAMILIES,
   TERMINAL_FONT_SIZE_MAX,
   TERMINAL_FONT_SIZE_MIN,
-  TERMINAL_OPACITY_MIN,
   validateTerminalAppearance,
 } from "../../../shared/terminal-appearance.js";
 import { FONT_FAMILY } from "../../../shared/nerd-font-mono.js";
+import {
+  detectInstalledFonts,
+  fontOptionLabel,
+} from "../../lib/terminal-fonts.js";
 import {
   addVaultKey,
   addWorkspaceFolder,
@@ -2628,6 +2631,9 @@ function TerminalTabSection({ terminalTab }: TerminalTabSectionProps) {
     validationError,
   } = terminalTab;
   const [focused, setFocused] = useState<string | null>(null);
+  const [installedFonts] = useState<Set<string>>(() =>
+    detectInstalledFonts(TERMINAL_FONT_FAMILIES),
+  );
   const field = (name: string) => ({
     onFocus: () => setFocused(name),
     onBlur: () => setFocused(null),
@@ -2685,46 +2691,6 @@ function TerminalTabSection({ terminalTab }: TerminalTabSectionProps) {
         </span>
       )}
       {row("Background color", colorField("background"))}
-      {row(
-        "Background opacity",
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            gap: "var(--space-sm)",
-          }}
-        >
-          <input
-            type="range"
-            min={TERMINAL_OPACITY_MIN}
-            max={1}
-            step={0.01}
-            value={draft.opacity}
-            onChange={(e) => setField("opacity", Number(e.target.value))}
-            aria-label="Terminal background opacity"
-            {...field("opacity")}
-            style={{
-              flex: "1 1 auto",
-              minWidth: "48px",
-              maxWidth: "200px",
-              ...focusRing(focused === "opacity"),
-            }}
-          />
-          <span
-            aria-live="polite"
-            style={{
-              minWidth: "3.5em",
-              fontSize: "var(--font-label)",
-              lineHeight: "var(--line-label)",
-              color: "var(--text-muted)",
-            }}
-          >
-            {Math.round(draft.opacity * 100)}%
-          </span>
-        </div>,
-        "Lower values let the app background show through the terminal.",
-      )}
       {row("Text color", colorField("foreground"))}
       {row("Cursor color", colorField("cursor"))}
       {row(
@@ -2742,11 +2708,11 @@ function TerminalTabSection({ terminalTab }: TerminalTabSectionProps) {
         >
           {TERMINAL_FONT_FAMILIES.map((name) => (
             <option key={name} value={name}>
-              {FONT_FAMILY_LABELS[name] ?? name}
+              {fontOptionLabel(name, installedFonts, FONT_FAMILY_LABELS)}
             </option>
           ))}
         </select>,
-        "The bundled Nerd Font always stays as the fallback so Claude Code's glyphs keep rendering.",
+        "Fonts marked not installed fall back to the bundled Nerd Font, which always stays as the fallback so Claude Code's glyphs keep rendering.",
       )}
       {row(
         "Font size (px)",

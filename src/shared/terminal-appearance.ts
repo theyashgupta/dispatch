@@ -13,7 +13,6 @@ export const TERMINAL_FONT_FAMILIES = [
 
 export const DEFAULT_TERMINAL_APPEARANCE: TerminalAppearance = {
   background: "#111111",
-  opacity: 0.93,
   foreground: "#e8e9ea",
   cursor: "#e8e9ea",
   fontFamily: FONT_FAMILY,
@@ -22,7 +21,6 @@ export const DEFAULT_TERMINAL_APPEARANCE: TerminalAppearance = {
 
 export const TERMINAL_APPEARANCE_CHANNEL = "dsp.terminal-appearance";
 
-export const TERMINAL_OPACITY_MIN = 0.3;
 export const TERMINAL_FONT_SIZE_MIN = 8;
 export const TERMINAL_FONT_SIZE_MAX = 32;
 
@@ -78,17 +76,6 @@ export function validateTerminalAppearance(input: unknown): Validation {
   const cursor = hexField(o, "cursor");
   if (!cursor) return { ok: false, error: hexError("cursor") };
   if (
-    typeof o.opacity !== "number" ||
-    !Number.isFinite(o.opacity) ||
-    o.opacity < TERMINAL_OPACITY_MIN ||
-    o.opacity > 1
-  ) {
-    return {
-      ok: false,
-      error: `opacity must be a number between ${TERMINAL_OPACITY_MIN} and 1`,
-    };
-  }
-  if (
     typeof o.fontSize !== "number" ||
     !Number.isInteger(o.fontSize) ||
     o.fontSize < TERMINAL_FONT_SIZE_MIN ||
@@ -109,29 +96,12 @@ export function validateTerminalAppearance(input: unknown): Validation {
     ok: true,
     value: {
       background,
-      opacity: o.opacity,
       foreground,
       cursor,
       fontFamily: o.fontFamily,
       fontSize: o.fontSize,
     },
   };
-}
-
-/**
- * CSS background for the terminal: `rgba(...)` below full opacity, the plain hex at 1.
- * @remarks Emitting hex at opacity 1 keeps a fully opaque terminal on the exact solid-color path,
- * so "no translucency" never depends on alpha compositing.
- */
-export function terminalBackgroundCss(
-  background: string,
-  opacity: number,
-): string {
-  if (opacity >= 1) return background;
-  const r = parseInt(background.slice(1, 3), 16);
-  const g = parseInt(background.slice(3, 5), 16);
-  const b = parseInt(background.slice(5, 7), 16);
-  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 }
 
 /**
@@ -156,10 +126,7 @@ export function toTerminalTheme(
 ): TerminalThemeResponse {
   return {
     theme: {
-      background: terminalBackgroundCss(
-        appearance.background,
-        appearance.opacity,
-      ),
+      background: appearance.background,
       foreground: appearance.foreground,
       cursor: appearance.cursor,
       ...ANSI_PALETTE,
