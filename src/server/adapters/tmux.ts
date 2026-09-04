@@ -197,6 +197,34 @@ function wrapWithPtyShim(commandArgv: string[]): string[] {
 }
 
 /**
+ * Pin tmux `mouse off` at session scope for `name`, idempotently.
+ *
+ * @remarks LOCAL-3/LOCAL-7: the session-scope pin overrides a later server-global `set -g mouse on`
+ * from anyone on the shared server, which would otherwise make tmux capture the mouse and turn a
+ * web-terminal drag into a copy-mode selection (the yellow `mode-style` highlight) that never
+ * reaches the clipboard. Re-asserted on every reattach so a session created before the pin existed
+ * (a pane resumed from an older Dispatch) is healed without relaunching its Claude process.
+ */
+export async function pinMouseOff(name: string): Promise<void> {
+  await tmux(["set", "-t", name, "mouse", "off"]);
+}
+
+/**
+ * Pin tmux `status off` at session scope for `name`, idempotently.
+ *
+ * @remarks LOCAL-7: Dispatch cancels the alternate screen (see {@link ensureNoAltScreenOverride})
+ * so the web client keeps local scrollback, but that leaves tmux drawing its status bar on the
+ * primary screen's bottom row. A scroll then carries that row up into xterm's scrollback, freezing
+ * a green `[session] window` bar in the middle of long output. The web terminal has no use for the
+ * bar (the app shows session identity in its own UI), so it is turned off at session scope, which
+ * leaves the shared server's other clients' status bars untouched. Re-asserted on every reattach so
+ * a session created before this pin is healed on reconnect.
+ */
+export async function pinStatusOff(name: string): Promise<void> {
+  await tmux(["set", "-t", name, "status", "off"]);
+}
+
+/**
  * True if tmux session `name` exists (`has-session -t <name>` exits 0).
  * Swallows failure into `false` (never rethrows) — a dead tmux server means "no session",
  * and this is the idempotency probe (an existing `dsp-<id>` session → reattach, never recreate).
@@ -351,7 +379,8 @@ export async function newSession(
     ...envArgs,
     ...wrapWithPtyShim(commandArgv),
   ]);
-  await tmux(["set", "-t", name, "mouse", "off"]);
+  await pinMouseOff(name);
+  await pinStatusOff(name);
   await ensureHyperlinksTerminalFeature();
   await ensureNoAltScreenOverride();
 }

@@ -10,8 +10,11 @@
  *      would forward to the browser client even with tmux `mouse off`).
  *   2. The session keeps `mouse off` after a global `set -g mouse on`, the state that turns a drag
  *      into tmux copy-mode (yellow selection, text stuck in a tmux buffer).
+ *   3. The session keeps `status off` after a global `set -g status on`, so the green tmux status
+ *      bar cannot scroll into the web terminal's local scrollback and cut through long output
+ *      (LOCAL-7).
  *
- * Usage: `npm run selection-guard` (exit 0 iff both hold). Needs tmux on PATH.
+ * Usage: `npm run selection-guard` (exit 0 iff all three hold). Needs tmux on PATH.
  */
 import { execFile } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -49,6 +52,13 @@ try {
       `session mouse is "${mouse}" after a global \`set -g mouse on\``,
     );
   }
+  await tmux("set", "-g", "status", "on");
+  const status = await tmux("show", "-Av", "-t", name, "status");
+  if (status !== "off") {
+    failures.push(
+      `session status is "${status}" after a global \`set -g status on\`; the status bar would leak into the web terminal scrollback (LOCAL-7)`,
+    );
+  }
 } catch (err) {
   failures.push(`guard could not run: ${(err as Error).message}`);
 } finally {
@@ -63,5 +73,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  "selection-guard PASS: pane env pins mouse off and session ignores global mouse on",
+  "selection-guard PASS: pane env pins mouse off, session ignores global mouse on, and status stays off",
 );
