@@ -49,6 +49,27 @@ void test("mapUsageResponse falls back to five_hour and seven_day, converts nume
   );
 });
 
+void test("mapUsageResponse maps the enterprise spend budget when there are no rate-limit windows", () => {
+  const windows = usage.mapUsageResponse({
+    five_hour: null,
+    seven_day: null,
+    limits: [],
+    spend: { percent: 14, severity: "normal", enabled: true },
+    extra_usage: { is_enabled: true, utilization: 14.48 },
+  });
+  assert.deepEqual(
+    windows.map((w) => [w.kind, w.label, w.percent, w.resetsAt, w.isActive]),
+    [["spend", "Usage credits", 14, null, true]],
+  );
+  assert.deepEqual(
+    usage.mapUsageResponse({
+      limits: [],
+      spend: { percent: 14, enabled: false },
+    }),
+    [],
+  );
+});
+
 void test("readAccessToken tries the keychain service first, then the credentials file, never throws", async () => {
   const dir = path.join(env.root, "usage-dir");
   fs.mkdirSync(dir, { recursive: true });
