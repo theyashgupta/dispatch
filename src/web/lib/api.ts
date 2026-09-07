@@ -457,6 +457,22 @@ export async function setVaultValue(
 }
 
 /**
+ * Read the value a key held before its latest rotate: GET /api/vault/:name/previous. The only
+ * vault read that carries a value; called on an explicit reveal click, never on list load.
+ */
+export async function getVaultPrevious(
+  name: string,
+): Promise<{ ok: true; value: string } | { ok: false; error: string }> {
+  const res = await fetch(`/api/vault/${encodeURIComponent(name)}/previous`);
+  if (res.ok) {
+    const body = (await res.json()) as { value: string };
+    return { ok: true, value: body.value };
+  }
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  return { ok: false, error: body.error ?? "generic" };
+}
+
+/**
  * Edit a key's purpose: PATCH /api/vault/:name.
  */
 export async function editVaultPurpose(

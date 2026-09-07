@@ -18,6 +18,8 @@ import {
   Check,
   ClipboardList,
   Copy,
+  Eye,
+  EyeOff,
   Filter,
   FolderGit2,
   Globe,
@@ -25,6 +27,7 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  Search,
   SquareTerminal,
   Trash2,
   X,
@@ -66,6 +69,7 @@ import {
   getPlaybooks,
   getTerminalAppearance,
   getVaultKeys,
+  getVaultPrevious,
   getWorkspaceFolders,
   importFromEnvVault,
   previewLinearFilters,
@@ -1137,7 +1141,6 @@ function VaultValueEditor({ keySummary, vault }: VaultValueEditorProps) {
         flexDirection: "column",
         gap: "var(--space-sm)",
         padding: "var(--space-sm)",
-        marginLeft: "var(--space-sm)",
         background: "var(--surface-column)",
         border: "1px solid var(--border)",
         borderRadius: "var(--radius)",
@@ -1204,6 +1207,95 @@ function VaultValueEditor({ keySummary, vault }: VaultValueEditorProps) {
   );
 }
 
+const MASKED_VALUE = "\u2022".repeat(12);
+
+function VaultPreviousValue({ keySummary }: { keySummary: VaultKeySummary }) {
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  const [pending, setPending] = useState(false);
+
+  async function toggle() {
+    if (pending) return;
+    if (revealed !== null) {
+      setRevealed(null);
+      return;
+    }
+    setPending(true);
+    setError(false);
+    try {
+      const result = await getVaultPrevious(keySummary.name);
+      if (result.ok) {
+        setRevealed(result.value);
+      } else {
+        setError(true);
+      }
+    } catch {
+      setError(true);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div
+      data-testid={`vault-previous-${keySummary.name}`}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--space-xs)",
+        minWidth: 0,
+      }}
+    >
+      <span
+        style={{
+          flex: "0 0 auto",
+          fontFamily: "var(--font-ui)",
+          fontSize: "var(--font-micro)",
+          fontWeight: "var(--weight-semibold)",
+          lineHeight: "var(--line-label)",
+          color: "var(--text-muted)",
+        }}
+      >
+        Previous
+      </span>
+      <span
+        data-revealed={revealed !== null ? "true" : "false"}
+        style={{
+          flex: "1 1 auto",
+          minWidth: 0,
+          fontFamily: "var(--font-mono)",
+          fontSize: "var(--font-label)",
+          lineHeight: "var(--line-label)",
+          color: revealed !== null ? "var(--text)" : "var(--text-muted)",
+          whiteSpace: "normal",
+          wordBreak: "break-all",
+          userSelect: revealed !== null ? "text" : "none",
+        }}
+      >
+        {error
+          ? "Couldn't load previous value, try again."
+          : (revealed ?? MASKED_VALUE)}
+      </span>
+      <IconButton
+        aria-label={
+          revealed !== null
+            ? `Hide previous value for ${keySummary.name}`
+            : `Show previous value for ${keySummary.name}`
+        }
+        aria-pressed={revealed !== null}
+        disabled={pending}
+        onClick={() => void toggle()}
+      >
+        {revealed !== null ? (
+          <EyeOff size={14} strokeWidth={2} aria-hidden="true" />
+        ) : (
+          <Eye size={14} strokeWidth={2} aria-hidden="true" />
+        )}
+      </IconButton>
+    </div>
+  );
+}
+
 interface VaultKeyRowProps {
   keySummary: VaultKeySummary;
   vault: VaultTab;
@@ -1255,129 +1347,130 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
   }
 
   return (
-    <>
+    <div
+      data-testid={`vault-row-${keySummary.name}`}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-sm)",
+        padding: "var(--space-md)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+        background: hover ? "var(--surface-card-hover)" : "var(--surface-card)",
+        transition: "var(--hover-transition)",
+      }}
+    >
       <div
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
         style={{
           display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-xs)",
-          padding: "var(--space-sm)",
-          borderRadius: "var(--radius)",
-          background: hover ? "var(--surface-card-hover)" : "transparent",
+          alignItems: "center",
+          gap: "var(--space-sm)",
         }}
       >
+        <span
+          style={{
+            flex: "1 1 auto",
+            minWidth: 0,
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--font-label)",
+            fontWeight: "var(--weight-semibold)",
+            lineHeight: "var(--line-label)",
+            color: "var(--text)",
+            whiteSpace: "normal",
+            wordBreak: "break-all",
+          }}
+        >
+          {keySummary.name}
+        </span>
+        <VaultBadge filled={keySummary.filled} />
+        <Button
+          variant="secondary"
+          aria-label={
+            keySummary.filled
+              ? `Rotate value for ${keySummary.name}`
+              : `Fill value for ${keySummary.name}`
+          }
+          onClick={() => vault.openValueEditor(keySummary.name)}
+          style={{
+            flex: "0 0 auto",
+            height: "24px",
+            padding: "0 var(--space-sm)",
+            fontSize: "var(--font-label)",
+          }}
+        >
+          {keySummary.filled ? "Rotate" : "Set value"}
+        </Button>
+        <IconButton
+          aria-label={`Edit purpose for ${keySummary.name}`}
+          onClick={() => vault.openPurposeEditor(keySummary.name)}
+        >
+          <Pencil size={14} strokeWidth={2} aria-hidden="true" />
+        </IconButton>
+        <IconButton
+          aria-label={`Delete ${keySummary.name}`}
+          onClick={() => vault.openDelete(keySummary)}
+        >
+          <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+        </IconButton>
+      </div>
+      {editingPurpose ? (
         <div
           style={{
             display: "flex",
-            alignItems: "flex-start",
-            gap: "var(--space-sm)",
+            alignItems: "center",
+            gap: "var(--space-xs)",
           }}
         >
-          <span
+          <input
+            type="text"
+            aria-label={`Purpose for ${keySummary.name}`}
+            value={draftPurpose}
+            onChange={(e) => setDraftPurpose(e.target.value)}
+            onFocus={() => setPurposeFocused(true)}
+            onBlur={() => setPurposeFocused(false)}
             style={{
               flex: "1 1 auto",
-              minWidth: 0,
-              fontFamily: "var(--font-mono)",
-              fontSize: "var(--font-label)",
-              fontWeight: "var(--weight-semibold)",
-              lineHeight: "var(--line-label)",
-              color: "var(--text)",
-              whiteSpace: "normal",
-              wordBreak: "break-all",
-            }}
-          >
-            {keySummary.name}
-          </span>
-          <VaultBadge filled={keySummary.filled} />
-          <Button
-            variant="secondary"
-            aria-label={
-              keySummary.filled
-                ? `Rotate value for ${keySummary.name}`
-                : `Fill value for ${keySummary.name}`
-            }
-            onClick={() => vault.openValueEditor(keySummary.name)}
-            style={{
-              flex: "0 0 auto",
-              height: "24px",
+              height: "32px",
               padding: "0 var(--space-sm)",
-              fontSize: "var(--font-label)",
+              background: "var(--surface-column)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              color: "var(--text)",
+              fontFamily: "var(--font-ui)",
+              fontSize: "var(--font-body)",
+              lineHeight: "var(--line-body)",
+              ...focusRing(purposeFocused),
             }}
-          >
-            {keySummary.filled ? "Rotate" : "Set value"}
-          </Button>
+          />
           <IconButton
-            aria-label={`Edit purpose for ${keySummary.name}`}
-            onClick={() => vault.openPurposeEditor(keySummary.name)}
+            aria-label={`Save purpose for ${keySummary.name}`}
+            onClick={() => void handleSavePurpose()}
           >
-            <Pencil size={14} strokeWidth={2} aria-hidden="true" />
+            <Check size={14} strokeWidth={2} aria-hidden="true" />
           </IconButton>
           <IconButton
-            aria-label={`Delete ${keySummary.name}`}
-            onClick={() => vault.openDelete(keySummary)}
+            aria-label={`Cancel purpose edit for ${keySummary.name}`}
+            onClick={vault.closePurposeEditor}
           >
-            <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+            <X size={14} strokeWidth={2} aria-hidden="true" />
           </IconButton>
         </div>
-        {editingPurpose ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "var(--space-xs)",
-            }}
-          >
-            <input
-              type="text"
-              aria-label={`Purpose for ${keySummary.name}`}
-              value={draftPurpose}
-              onChange={(e) => setDraftPurpose(e.target.value)}
-              onFocus={() => setPurposeFocused(true)}
-              onBlur={() => setPurposeFocused(false)}
-              style={{
-                flex: "1 1 auto",
-                height: "32px",
-                padding: "0 var(--space-sm)",
-                background: "var(--surface-column)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius)",
-                color: "var(--text)",
-                fontFamily: "var(--font-ui)",
-                fontSize: "var(--font-body)",
-                lineHeight: "var(--line-body)",
-                ...focusRing(purposeFocused),
-              }}
-            />
-            <IconButton
-              aria-label={`Save purpose for ${keySummary.name}`}
-              onClick={() => void handleSavePurpose()}
-            >
-              <Check size={14} strokeWidth={2} aria-hidden="true" />
-            </IconButton>
-            <IconButton
-              aria-label={`Cancel purpose edit for ${keySummary.name}`}
-              onClick={vault.closePurposeEditor}
-            >
-              <X size={14} strokeWidth={2} aria-hidden="true" />
-            </IconButton>
-          </div>
-        ) : (
-          <span
-            style={{
-              fontFamily: "var(--font-ui)",
-              fontSize: "var(--font-label)",
-              lineHeight: "var(--line-label)",
-              color: "var(--text-muted)",
-              whiteSpace: "normal",
-              wordBreak: "break-word",
-            }}
-          >
-            {keySummary.purpose}
-          </span>
-        )}
-      </div>
+      ) : (
+        <span
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--font-label)",
+            lineHeight: "var(--line-label)",
+            color: "var(--text-muted)",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+          }}
+        >
+          {keySummary.purpose}
+        </span>
+      )}
       {purposeError !== null && (
         <div
           role="alert"
@@ -1391,10 +1484,16 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
           {purposeError}
         </div>
       )}
+      {keySummary.hasPrevious && (
+        <VaultPreviousValue
+          key={keySummary.updatedAt}
+          keySummary={keySummary}
+        />
+      )}
       {vault.valueEditorFor === keySummary.name && (
         <VaultValueEditor keySummary={keySummary} vault={vault} />
       )}
-    </>
+    </div>
   );
 }
 
@@ -1558,6 +1657,19 @@ function VaultImportOutcomeNotice({
 
 function VaultTabSection({ vaultTab }: VaultTabSectionProps) {
   const { keys, loading, loadError } = vaultTab;
+  const [search, setSearch] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
+  const query = search.trim().toLowerCase();
+  const visible =
+    keys === null
+      ? null
+      : query === ""
+        ? keys
+        : keys.filter(
+            (k) =>
+              k.name.toLowerCase().includes(query) ||
+              k.purpose.toLowerCase().includes(query),
+          );
 
   return (
     <div
@@ -1582,6 +1694,48 @@ function VaultTabSection({ vaultTab }: VaultTabSectionProps) {
       )}
 
       <VaultImportOutcomeNotice outcome={vaultTab.importOutcome} />
+
+      {keys !== null && keys.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--space-sm)",
+            height: "32px",
+            padding: "0 var(--space-sm)",
+            background: "var(--surface-column)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius)",
+            color: "var(--text-muted)",
+            ...focusRing(searchFocused),
+          }}
+        >
+          <Search size={14} strokeWidth={2} aria-hidden="true" />
+          <input
+            type="search"
+            aria-label="Search keys"
+            placeholder="Search by name or purpose"
+            spellCheck={false}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+            style={{
+              flex: "1 1 auto",
+              minWidth: 0,
+              height: "100%",
+              padding: 0,
+              background: "transparent",
+              border: "none",
+              outline: "none",
+              color: "var(--text)",
+              fontFamily: "var(--font-ui)",
+              fontSize: "var(--font-body)",
+              lineHeight: "var(--line-body)",
+            }}
+          />
+        </div>
+      )}
 
       {loading && (
         <span
@@ -1613,9 +1767,34 @@ function VaultTabSection({ vaultTab }: VaultTabSectionProps) {
         </div>
       )}
 
-      {!loading && !loadError && keys !== null && keys.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          {keys.map((k) => (
+      {!loading &&
+        !loadError &&
+        keys !== null &&
+        keys.length > 0 &&
+        visible !== null &&
+        visible.length === 0 && (
+          <span
+            data-testid="vault-search-empty"
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: "var(--font-label)",
+              lineHeight: "var(--line-label)",
+              color: "var(--text-muted)",
+            }}
+          >
+            No keys match "{search.trim()}".
+          </span>
+        )}
+
+      {!loading && !loadError && visible !== null && visible.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-sm)",
+          }}
+        >
+          {visible.map((k) => (
             <VaultKeyRow key={k.name} keySummary={k} vault={vaultTab} />
           ))}
         </div>
