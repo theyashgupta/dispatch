@@ -15268,7 +15268,7 @@ async function collectSseFrames(built, ms, during) {
  * `--check vault-no-read-back`: the phase's headline check (T-103-01/T-103-03/T-103-06). Seeds one
  * sentinel-bearing key, then sweeps every vault route, eight read-back path shapes, `GET
  * /api/board`, a live SSE stream and all four error paths, scanning every collected response body
- * for the sentinel and asserting the listed key object carries exactly the five allowed fields,
+ * for the sentinel and asserting the listed key object carries exactly the six allowed fields,
  * the structural form of "never a length hint proportional to the real value".
  */
 async function checkVaultNoReadBack(built) {
@@ -15338,7 +15338,7 @@ async function checkVaultNoReadBack(built) {
     } else {
       const observedKeysJson = JSON.stringify(Object.keys(entry).sort());
       const expectedKeysJson =
-        '["createdAt","filled","name","purpose","updatedAt"]';
+        '["createdAt","filled","hasPrevious","name","purpose","updatedAt"]';
       if (observedKeysJson !== expectedKeysJson) {
         violations.push(
           `leg 2: SEAL_KEY entry has fields ${observedKeysJson}, expected exactly ${expectedKeysJson}`,
