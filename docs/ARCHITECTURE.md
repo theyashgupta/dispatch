@@ -1002,8 +1002,8 @@ they were.
 
 **The client owns theme, font, links, and scroll — none of it is a string patch anymore.**
 The terminal client fetches `GET /api/config/terminal` and builds the xterm `ITheme` plus font
-block itself (`toTerminalTheme`) from the shipped translucent default (`shared/terminal-appearance.ts`: #111111 at 0.93
-opacity, #e8e9ea foreground and cursor, the bundled Nerd Font at 14 px, weight 600, block cursor,
+block itself (`toTerminalTheme`) from the shipped default (`shared/terminal-appearance.ts`: solid #111111
+background, #e8e9ea foreground and cursor, the bundled Nerd Font at 14 px, weight 600, block cursor,
 a fixed Catppuccin Mocha ANSI palette) overridden by the `terminal` block Settings ▸ Terminal
 persists in `config.json` (`PUT /api/config/terminal`, validated by the same shared function the
 startup reader uses, so a hand-edited invalid block falls back to the default instead of blocking

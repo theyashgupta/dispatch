@@ -37,7 +37,7 @@ test("absent terminal block resolves to the default", () => {
 });
 
 test("a valid terminal block is honored", () => {
-  const custom = { ...DEFAULT_TERMINAL_APPEARANCE, fontSize: 18, opacity: 1 };
+  const custom = { ...DEFAULT_TERMINAL_APPEARANCE, fontSize: 18 };
   writeConfig({ terminal: custom });
   assert.deepEqual(loadConfig().terminal, custom);
 });

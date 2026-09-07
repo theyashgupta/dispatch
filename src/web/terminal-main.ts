@@ -128,23 +128,12 @@ async function fetchAppearance(): Promise<TerminalAppearance> {
 
 /**
  * Paint the page background for an appearance and return the matching xterm options.
- * @remarks Translucency only works when the page behind the terminal is see-through, so the body
- * goes transparent whenever the browser accepts the rgba background; otherwise the body and the
- * terminal both fall back to the solid hex, which is the ticket's degrade rule.
  */
 function applyAppearance(appearance: TerminalAppearance): ITerminalOptions {
   const theme = toTerminalTheme(appearance);
-  const translucent =
-    appearance.opacity < 1 &&
-    typeof CSS !== "undefined" &&
-    CSS.supports("background-color", theme.theme.background);
-  document.body.style.background = translucent
-    ? "transparent"
-    : appearance.background;
+  document.body.style.background = appearance.background;
   return {
-    theme: translucent
-      ? theme.theme
-      : { ...theme.theme, background: appearance.background },
+    theme: theme.theme,
     fontFamily: terminalFontStack(appearance.fontFamily),
     fontWeight: theme.fontWeight,
     cursorStyle: theme.cursorStyle,
@@ -214,7 +203,7 @@ let currentZoom = 1;
  * Builds the terminal instance and the reverse-tabnabbing-safe link handlers, wired to BOTH
  * `WebLinksAddon` (plain-text URLs) and `linkHandler` (OSC-8, the code path real Claude Code `⏺`
  * output uses and `WebLinksAddon` never fires for) so cmd-click parity holds for either link
- * source. `allowTransparency` must be set here, before `open()`, for the translucent background.
+ * source.
  * @remarks `smoothScrollDuration: 120` is set unconditionally rather than gated to desktop: a
  * media-query gate would leave hybrid devices (touchscreen laptops, iPad + trackpad) with an
  * instant jump, and the value is harmless on its own during a touch gesture. It is also inert for
@@ -245,7 +234,6 @@ function createTerminal(
   baseFontSize = appearance.fontSize;
   const term = new Terminal({
     allowProposedApi: true,
-    allowTransparency: true,
     scrollback: 10000,
     smoothScrollDuration: 120,
     fontSize: Math.max(ZOOM.minFontPx, baseFontSize * zoom),

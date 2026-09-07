@@ -3,10 +3,10 @@
  * code): boots a sandboxed production build under a throwaway HOME, seeds one card with a live
  * tmux session so the server spawns a real ttyd, drives headless Chrome over raw CDP (Node's
  * global WebSocket and fetch, zero new dependency, same lineage as panel-92.mjs), and asserts
- * every client-side branch that has no node:test runner: the translucent default paint, live
- * BroadcastChannel apply with refit, malformed payloads ignored, the opacity-1 and unsupported-rgba
- * solid fallbacks, persisted changes on reload, the mobile zoom base recompute, and the Settings
- * Terminal tab's save, validation, double-click guard, and failure notices.
+ * every client-side branch that has no node:test runner: the solid default paint, live
+ * BroadcastChannel apply with refit, malformed payloads ignored, persisted changes on reload, the
+ * mobile zoom base recompute, and the Settings Terminal tab's save, validation, double-click guard,
+ * and failure notices.
  *
  * Requirements: Google Chrome, tmux, ttyd. Ports are checked before use and never killed; a held
  * port is a hard error naming the port so another instance is never touched.
@@ -37,7 +37,6 @@ const CHROME_CANDIDATES = [
 ];
 const DEFAULTS = {
   background: "#111111",
-  opacity: 0.93,
   foreground: "#e8e9ea",
   cursor: "#e8e9ea",
   fontFamily: "JetBrains Mono Nerd Font Mono",
@@ -338,21 +337,21 @@ async function main() {
     await sleep(2500);
 
     let r = await evalIn(cdp, term, TERMINAL_READ);
-    assert.equal(r.body, "rgba(0, 0, 0, 0)");
-    assert.equal(r.viewport, "rgba(17, 17, 17, 0.93)");
+    assert.equal(r.body, "rgb(17, 17, 17)");
+    assert.equal(r.viewport, "rgb(17, 17, 17)");
     assert.equal(r.fg, "rgb(232, 233, 234)");
     assert.equal(r.font, '"JetBrains Mono Nerd Font Mono", monospace');
     assert.equal(r.size, "14px");
     assert.equal(r.blink, false);
+    assert.deepEqual(r.rgbaInside, []);
     const rowsAt14 = r.rows;
-    pass("T1 default translucent paint");
+    pass("T1 default solid paint");
 
     r = await evalIn(cdp, term, async () => {
       window.__marker = 1;
       const ch = new BroadcastChannel("dsp.terminal-appearance");
       ch.postMessage({
         background: "#ff0000",
-        opacity: 0.5,
         foreground: "#00ff00",
         cursor: "#e8e9ea",
         fontFamily: "Menlo",
@@ -374,7 +373,7 @@ async function main() {
           .width,
       };
     });
-    assert.equal(r.viewport, "rgba(255, 0, 0, 0.5)");
+    assert.equal(r.viewport, "rgb(255, 0, 0)");
     assert.equal(r.fg, "rgb(0, 255, 0)");
     assert.equal(r.font, 'Menlo, "JetBrains Mono Nerd Font Mono", monospace');
     assert.equal(r.size, "18px");
@@ -398,10 +397,9 @@ async function main() {
         "hello",
         null,
         42,
-        { opacity: 3 },
+        { fontSize: 3 },
         {
           background: "#111111",
-          opacity: 0.93,
           foreground: "#e8e9ea",
           cursor: "#e8e9ea",
           fontFamily: "Comic Sans",
@@ -418,60 +416,10 @@ async function main() {
         errors,
       };
     });
-    assert.equal(r.viewport, "rgba(255, 0, 0, 0.5)");
+    assert.equal(r.viewport, "rgb(255, 0, 0)");
     assert.equal(r.size, "18px");
     assert.deepEqual(r.errors, []);
     pass("T3 malformed broadcasts are ignored");
-
-    r = await evalIn(cdp, term, async () => {
-      const ch = new BroadcastChannel("dsp.terminal-appearance");
-      ch.postMessage({
-        background: "#223344",
-        opacity: 1,
-        foreground: "#e8e9ea",
-        cursor: "#e8e9ea",
-        fontFamily: "JetBrains Mono Nerd Font Mono",
-        fontSize: 14,
-      });
-      ch.close();
-      await new Promise((res) => setTimeout(res, 700));
-      return (() => {
-        const cs = (e) => getComputedStyle(e);
-        return {
-          body: document.body.style.background,
-          viewport: cs(document.querySelector(".xterm-viewport"))
-            .backgroundColor,
-          rgbaInside: [...document.querySelectorAll("#terminal, #terminal *")]
-            .map((e) => cs(e).backgroundColor)
-            .filter((v) => v.startsWith("rgba(") && !v.endsWith(", 0)")),
-        };
-      })();
-    });
-    assert.equal(r.body, "rgb(34, 51, 68)");
-    assert.equal(r.viewport, "rgb(34, 51, 68)");
-    assert.deepEqual(r.rgbaInside, []);
-    pass("T4 opacity 1 takes the solid hex path");
-
-    const { identifier: stub } = await cdp.send(
-      "Page.addScriptToEvaluateOnNewDocument",
-      {
-        source:
-          "const real = CSS.supports.bind(CSS); CSS.supports = (a, b) => (a === 'background-color' && /rgba\\(/.test(String(b))) ? false : real(a, b);",
-      },
-      term,
-    );
-    await navigate(cdp, term, termUrl);
-    await sleep(1500);
-    r = await evalIn(cdp, term, TERMINAL_READ);
-    assert.equal(r.bodyInline, "rgb(17, 17, 17)");
-    assert.equal(r.viewport, "rgb(17, 17, 17)");
-    assert.deepEqual(r.rgbaInside, []);
-    await cdp.send(
-      "Page.removeScriptToEvaluateOnNewDocument",
-      { identifier: stub },
-      term,
-    );
-    pass("T5 unsupported rgba falls back to a solid body and terminal");
 
     assert.equal(
       await putAppearance({ ...DEFAULTS, background: "#223344", fontSize: 18 }),
@@ -480,7 +428,8 @@ async function main() {
     await navigate(cdp, term, termUrl);
     await sleep(1500);
     r = await evalIn(cdp, term, TERMINAL_READ);
-    assert.equal(r.viewport, "rgba(34, 51, 68, 0.93)");
+    assert.equal(r.viewport, "rgb(34, 51, 68)");
+    assert.deepEqual(r.rgbaInside, []);
     assert.equal(r.size, "18px");
     assert.ok(
       r.rows < rowsAt14,
@@ -571,7 +520,6 @@ async function main() {
       const ch = new BroadcastChannel("dsp.terminal-appearance");
       ch.postMessage({
         background: "#004400",
-        opacity: 0.93,
         foreground: "#e8e9ea",
         cursor: "#e8e9ea",
         fontFamily: "JetBrains Mono Nerd Font Mono",
@@ -598,7 +546,7 @@ async function main() {
     assert.equal(r.afterApply.label, "140%");
     assert.equal(r.afterApply.zoom, "1.4");
     assert.equal(r.afterApply.size, "28px");
-    assert.equal(r.afterApply.viewport, "rgba(0, 68, 0, 0.93)");
+    assert.equal(r.afterApply.viewport, "rgb(0, 68, 0)");
     pass("T7 mobile: pinch, chip, drag, and live apply keep the zoom base");
 
     const app = await open(`${BASE}/`);
@@ -642,33 +590,29 @@ async function main() {
       const dlg = await openTab();
       const prefilled = vals(dlg);
       iframe().contentWindow.__marker = 1;
-      setNative(dlg, 'Terminal background color', '#223344'); setNative(dlg, 'Terminal background opacity', '0.8'); setNative(dlg, 'Terminal foreground color', '#ffffff'); setNative(dlg, 'Terminal cursor color', '#00ff00'); setNative(dlg, 'Terminal font family', 'Menlo', 'select'); setNative(dlg, 'Terminal font size in pixels', '16');
+      setNative(dlg, 'Terminal background color', '#223344'); setNative(dlg, 'Terminal foreground color', '#ffffff'); setNative(dlg, 'Terminal cursor color', '#00ff00'); setNative(dlg, 'Terminal font family', 'Menlo', 'select'); setNative(dlg, 'Terminal font size in pixels', '16');
       await sleepMs(150);
-      const pct = (dlg.textContent.match(/\\d+%/) || [])[0];
       saveBtn(dlg).click();
       await sleepMs(1500);
-      return { before, prefilled, pct, closed: !document.querySelector('[role=dialog][aria-label=Settings]'), cfg: JSON.parse(await cfg()), after: readIframe() };
+      return { before, prefilled, closed: !document.querySelector('[role=dialog][aria-label=Settings]'), cfg: JSON.parse(await cfg()), after: readIframe() };
     `);
-    assert.equal(r.before.viewport, "rgba(17, 17, 17, 0.93)");
+    assert.equal(r.before.viewport, "rgb(17, 17, 17)");
     assert.deepEqual(r.prefilled, [
       "#111111",
-      "0.93",
       "#e8e9ea",
       "#e8e9ea",
       "JetBrains Mono Nerd Font Mono",
       "14",
     ]);
-    assert.equal(r.pct, "80%");
     assert.equal(r.closed, true);
     assert.deepEqual(r.cfg, {
       background: "#223344",
-      opacity: 0.8,
       foreground: "#ffffff",
       cursor: "#00ff00",
       fontFamily: "Menlo",
       fontSize: 16,
     });
-    assert.equal(r.after.viewport, "rgba(34, 51, 68, 0.8)");
+    assert.equal(r.after.viewport, "rgb(34, 51, 68)");
     assert.equal(r.after.fg, "rgb(255, 255, 255)");
     assert.equal(r.after.size, "16px");
     assert.equal(r.after.marker, 1);
@@ -717,7 +661,6 @@ async function main() {
     `);
     assert.deepEqual(r.prefilled, [
       "#223344",
-      "0.8",
       "#ffffff",
       "#00ff00",
       "Menlo",

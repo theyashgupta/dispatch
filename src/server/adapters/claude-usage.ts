@@ -124,6 +124,32 @@ interface RawBucket {
   resets_at?: unknown;
 }
 
+interface RawSpend {
+  percent?: unknown;
+  enabled?: unknown;
+}
+
+/**
+ * Map the `spend` block to a single usage window, or null when spend tracking is off.
+ *
+ * @remarks Enterprise and team seats have no per-account rate-limit windows (`limits` is empty and
+ * the legacy buckets are null); their usage is a monthly credit budget reported under `spend`.
+ * Without this the endpoint's 200 yields zero windows and the UI mislabels it as stale.
+ */
+function mapSpendWindow(spend: unknown): ClaudeUsageWindow | null {
+  const s = (spend ?? {}) as RawSpend;
+  if (s.enabled !== true) return null;
+  const percent = clampPercent(s.percent);
+  if (percent === null) return null;
+  return {
+    kind: "spend",
+    label: "Usage credits",
+    percent,
+    resetsAt: null,
+    isActive: true,
+  };
+}
+
 function labelFor(kind: string, limit: RawLimit): string {
   if (kind === "session") return "Session";
   if (kind === "weekly_all") return "Weekly";
@@ -136,14 +162,15 @@ function labelFor(kind: string, limit: RawLimit): string {
 
 /**
  * Map a usage endpoint payload to the wire windows: the `limits` array when present, else the
- * legacy `five_hour` and `seven_day` buckets. Unknown kinds are kept with a humanised label so a
- * new limit type shows up instead of vanishing.
+ * legacy `five_hour` and `seven_day` buckets, else the enterprise `spend` credit budget. Unknown
+ * kinds are kept with a humanised label so a new limit type shows up instead of vanishing.
  */
 export function mapUsageResponse(body: unknown): ClaudeUsageWindow[] {
   const root = (body ?? {}) as {
     limits?: unknown;
     five_hour?: RawBucket | null;
     seven_day?: RawBucket | null;
+    spend?: unknown;
   };
   if (Array.isArray(root.limits) && root.limits.length > 0) {
     const out: ClaudeUsageWindow[] = [];
@@ -159,7 +186,7 @@ export function mapUsageResponse(body: unknown): ClaudeUsageWindow[] {
         isActive: entry.is_active === true,
       });
     }
-    return out;
+    if (out.length > 0) return out;
   }
   const out: ClaudeUsageWindow[] = [];
   const buckets: [string, string, RawBucket | null | undefined][] = [
@@ -176,6 +203,10 @@ export function mapUsageResponse(body: unknown): ClaudeUsageWindow[] {
       resetsAt: toIso(bucket?.resets_at),
       isActive: true,
     });
+  }
+  if (out.length === 0) {
+    const spend = mapSpendWindow(root.spend);
+    if (spend) out.push(spend);
   }
   return out;
 }
