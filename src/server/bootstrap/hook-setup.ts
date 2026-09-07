@@ -11,6 +11,7 @@ import {
   VAULT_RUN_PATH,
   VAULT_GUARD_PATH,
   VAULT_VALUES_PATH,
+  VAULT_PREVIOUS_PATH,
 } from "../services/infra/paths.js";
 
 /**
@@ -184,8 +185,16 @@ import { writeSync } from "node:fs";
 import { text } from "node:stream/consumers";
 
 const VALUES_PATH = ${JSON.stringify(VAULT_VALUES_PATH)};
-const VALUES_MARKERS = [VALUES_PATH, "vault/values.env"];
-const VALUES_BASENAME = basename(VALUES_PATH).toLowerCase();
+const PREVIOUS_PATH = ${JSON.stringify(VAULT_PREVIOUS_PATH)};
+const VALUES_MARKERS = [
+  VALUES_PATH,
+  "vault/values.env",
+  PREVIOUS_PATH,
+  "vault/previous.env",
+];
+const VALUES_BASENAMES = [VALUES_PATH, PREVIOUS_PATH].map((p) =>
+  basename(p).toLowerCase(),
+);
 const VAULT_DIRNAME = basename(dirname(VALUES_PATH)).toLowerCase();
 
 const READ_OUT =
@@ -289,11 +298,14 @@ function isRunnerMediatedDump(tokens) {
 }
 
 /**
- * Whether any token's basename is the values file, compared case-insensitively so a case-variant
- * spelling on a case-insensitive volume (macOS APFS/HFS+) still counts as a reference (105-CR-02).
+ * Whether any token's basename is a sealed values file (current or previous), compared
+ * case-insensitively so a case-variant spelling on a case-insensitive volume (macOS APFS/HFS+)
+ * still counts as a reference (105-CR-02).
  */
 function namesValuesFile(tokens) {
-  return tokens.some((t) => basename(t).toLowerCase() === VALUES_BASENAME);
+  return tokens.some((t) =>
+    VALUES_BASENAMES.includes(basename(t).toLowerCase()),
+  );
 }
 
 /**
@@ -308,7 +320,8 @@ function entersVaultThenNamesValues(cmd, tokens) {
       tokens[i + 1] !== undefined &&
       basename(tokens[i + 1]).toLowerCase() === VAULT_DIRNAME,
   );
-  return entersVault && cmd.toLowerCase().includes(VALUES_BASENAME);
+  const lower = cmd.toLowerCase();
+  return entersVault && VALUES_BASENAMES.some((b) => lower.includes(b));
 }
 
 let payload;
