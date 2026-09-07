@@ -6,6 +6,7 @@ import {
   VAULT_DIR,
   VAULT_METADATA_PATH,
   VAULT_VALUES_PATH,
+  VAULT_PREVIOUS_PATH,
   VAULT_SCHEMA_PATH,
   ENV_VAULT_SCHEMA_PATH,
   ENV_VAULT_VALUES_PATH,
@@ -69,22 +70,31 @@ async function readMetadata(): Promise<VaultKeySummary[]> {
   ) {
     throw new Error("vault metadata is malformed");
   }
-  return keys as VaultKeySummary[];
+  return (keys as VaultKeySummary[]).map((k) => ({
+    ...k,
+    hasPrevious: k.hasPrevious === true,
+  }));
 }
 
 /**
- * Read the values file as raw, unparsed `NAME=value` lines. Never splits a line on `=`, so no
+ * Read a sealed env file as raw, unparsed `NAME=value` lines. Never splits a line on `=`, so no
  * value ever exists as a standalone variable outside the mutator that received it from its caller.
  */
-async function readValueLines(): Promise<string[]> {
+async function readEnvLines(file: string): Promise<string[]> {
   let raw: string;
   try {
-    raw = await fsp.readFile(VAULT_VALUES_PATH, "utf8");
+    raw = await fsp.readFile(file, "utf8");
   } catch {
     return [];
   }
   return raw.split("\n").filter((line) => line.length > 0);
 }
+
+const readValueLines = () => readEnvLines(VAULT_VALUES_PATH);
+const readPreviousLines = () => readEnvLines(VAULT_PREVIOUS_PATH);
+
+const isLineFor = (name: string) => (line: string) =>
+  line.startsWith(`${name}=`);
 
 /**
  * Wrap `value` as a POSIX single-quoted shell literal.
@@ -155,6 +165,7 @@ function serializeSchema(keys: VaultKeySummary[]): string {
 async function writeStore(
   keys: VaultKeySummary[],
   valueLines: string[],
+  previousLines: string[],
 ): Promise<void> {
   await fsp.mkdir(VAULT_DIR, { recursive: true, mode: 0o700 });
   fs.chmodSync(VAULT_DIR, 0o700);
@@ -165,6 +176,11 @@ async function writeStore(
     mode: 0o600,
   });
   fs.chmodSync(VAULT_VALUES_PATH, 0o600);
+
+  await writeFileAtomic(VAULT_PREVIOUS_PATH, previousLines.join("\n") + "\n", {
+    mode: 0o600,
+  });
+  fs.chmodSync(VAULT_PREVIOUS_PATH, 0o600);
 
   await writeFileAtomic(
     VAULT_METADATA_PATH,
@@ -212,16 +228,17 @@ export async function createKey(input: {
       createdAt: now,
       updatedAt: now,
       filled: input.value !== undefined,
+      hasPrevious: false,
     };
 
-    const lines = (await readValueLines()).filter(
-      (line) => !line.startsWith(`${input.name}=`),
-    );
+    const mine = isLineFor(input.name);
+    const lines = (await readValueLines()).filter((line) => !mine(line));
     if (input.value !== undefined) {
       lines.push(valueLineFor(input.name, input.value));
     }
+    const previous = (await readPreviousLines()).filter((line) => !mine(line));
 
-    await writeStore([...keys, key], lines);
+    await writeStore([...keys, key], lines, previous);
     return { ok: true, key };
   });
 }
@@ -345,13 +362,16 @@ export async function ensureVaultScaffold(): Promise<void> {
   if (fs.existsSync(VAULT_VALUES_PATH) || fs.existsSync(VAULT_SCHEMA_PATH)) {
     return;
   }
-  await writeStore([], []);
+  await writeStore([], [], []);
 }
 
 /**
  * Set (or rotate) a key's value. Setting a value on an already-filled key IS the rotate, purpose
- * and createdAt stay untouched, only updatedAt and filled move, this is what makes set and rotate
- * the same endpoint.
+ * and createdAt stay untouched, only updatedAt, filled and hasPrevious move, this is what makes
+ * set and rotate the same endpoint.
+ * @remarks On a rotate the outgoing `NAME=value` line is moved verbatim from `values.env` into
+ * `previous.env`, replacing any older line for that name, so exactly one previous value per key
+ * ever exists and it never passes through a parsed variable here.
  */
 export async function setValue(
   name: string,
@@ -365,20 +385,27 @@ export async function setValue(
       return { ok: false, error: "not-found" };
     }
 
+    const mine = isLineFor(name);
+    const allLines = await readValueLines();
+    const outgoing = allLines.find(mine);
+    const lines = allLines.filter((line) => !mine(line));
+    lines.push(valueLineFor(name, value));
+
+    let previous = await readPreviousLines();
+    if (outgoing !== undefined) {
+      previous = [...previous.filter((line) => !mine(line)), outgoing];
+    }
+
     const key: VaultKeySummary = {
       ...keys[index],
       filled: true,
+      hasPrevious: outgoing !== undefined || keys[index].hasPrevious,
       updatedAt: now,
     };
     const nextKeys = [...keys];
     nextKeys[index] = key;
 
-    const lines = (await readValueLines()).filter(
-      (line) => !line.startsWith(`${name}=`),
-    );
-    lines.push(valueLineFor(name, value));
-
-    await writeStore(nextKeys, lines);
+    await writeStore(nextKeys, lines, previous);
     return { ok: true, key };
   });
 }
@@ -407,7 +434,11 @@ export async function editPurpose(
     const nextKeys = [...keys];
     nextKeys[index] = key;
 
-    await writeStore(nextKeys, await readValueLines());
+    await writeStore(
+      nextKeys,
+      await readValueLines(),
+      await readPreviousLines(),
+    );
     return { ok: true, key };
   });
 }
@@ -423,12 +454,38 @@ export async function deleteKey(name: string): Promise<VaultDeleteResult> {
       return { ok: false, error: "not-found" };
     }
 
+    const mine = isLineFor(name);
     const nextKeys = keys.filter((k) => k.name !== name);
-    const lines = (await readValueLines()).filter(
-      (line) => !line.startsWith(`${name}=`),
-    );
+    const lines = (await readValueLines()).filter((line) => !mine(line));
+    const previous = (await readPreviousLines()).filter((line) => !mine(line));
 
-    await writeStore(nextKeys, lines);
+    await writeStore(nextKeys, lines, previous);
     return { ok: true };
   });
+}
+
+/**
+ * Result union for the previous-value read, the one deliberate read path in the vault.
+ */
+export type VaultPreviousResult =
+  { ok: true; value: string } | { ok: false; error: "not-found" };
+
+/**
+ * Read the single value a key held before its latest rotate. Opens only `previous.env`, never
+ * `values.env`, so the current value stays structurally unreachable from any GET.
+ * @remarks Callers must hand the value straight to the response body and nowhere else: no
+ * logging, no error text, no metadata. `parseEnvVaultValues` is the exact inverse of
+ * `quoteEnvValue`, which wrote the line.
+ */
+export async function readPrevious(name: string): Promise<VaultPreviousResult> {
+  assertVaultName(name);
+  const line = (await readPreviousLines()).find(isLineFor(name));
+  if (line === undefined) {
+    return { ok: false, error: "not-found" };
+  }
+  const value = parseEnvVaultValues(line).get(name);
+  if (value === undefined) {
+    return { ok: false, error: "not-found" };
+  }
+  return { ok: true, value };
 }

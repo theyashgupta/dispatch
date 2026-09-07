@@ -93,6 +93,12 @@ export const VAULT_METADATA_PATH = path.join(VAULT_DIR, "vault.json");
 export const VAULT_VALUES_PATH = path.join(VAULT_DIR, "values.env");
 
 /**
+ * The sealed previous-values file, one `NAME=value` line per rotated key at mode 0600. Holds the
+ * single value each key had before its latest rotate; never sourced by the runner, never listed.
+ */
+export const VAULT_PREVIOUS_PATH = path.join(VAULT_DIR, "previous.env");
+
+/**
  * The Claude-readable schema surface, listing key names and purposes in env-vault's own format.
  * Rewritten on every mutation; never carries a value.
  */

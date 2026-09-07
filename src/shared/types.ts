@@ -828,6 +828,7 @@ export interface VaultKeySummary {
   createdAt: string;
   updatedAt: string;
   filled: boolean;
+  hasPrevious: boolean;
 }
 
 /**
