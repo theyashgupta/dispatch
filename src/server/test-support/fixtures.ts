@@ -159,3 +159,90 @@ export function isolateEnv(): IsolatedEnv {
   };
   return { root, home, dispatchDir, binDir, keychainDir, cleanup };
 }
+
+export interface TmuxEnv extends IsolatedEnv {
+  canRunRealTmux: boolean;
+  killServer(): Promise<void>;
+}
+
+/**
+ * An isolated env whose tmux calls hit a private server: `TMUX_TMPDIR` under the sandbox root,
+ * `SHELL=/bin/zsh`, no inherited `TMUX`, and a `-L` label derived from the isolated DISPATCH_DIR.
+ *
+ * @remarks Call before the first dynamic import of `adapters/tmux.js`, which computes its `-L`
+ * label from `DISPATCH_DIR` at import time; the adapter is imported lazily here for that reason.
+ * Empty zsh rc files are written into the isolated HOME so a zsh with no rc never opens its
+ * first-run wizard (a builtin `read` that would swallow the typed launch line on Linux CI).
+ */
+export async function isolateTmuxEnv(): Promise<TmuxEnv> {
+  const env = isolateEnv();
+  process.env.TMUX_TMPDIR = env.root;
+  process.env.SHELL = "/bin/zsh";
+  delete process.env.TMUX;
+  for (const rc of [".zshenv", ".zshrc"]) {
+    fs.writeFileSync(path.join(env.home, rc), "");
+  }
+  const { resolveBinaryPath } = await import("../adapters/resolve-binary.js");
+  const canRunRealTmux =
+    (await resolveBinaryPath("tmux")) !== null && fs.existsSync("/bin/zsh");
+  if (!canRunRealTmux && process.env.CI) {
+    throw new Error(
+      "CI must provide tmux and /bin/zsh: the shell-session tests may not skip there",
+    );
+  }
+  return {
+    ...env,
+    canRunRealTmux,
+    async killServer() {
+      const tmux = await import("../adapters/tmux.js");
+      const { run } = await import("../adapters/exec.js");
+      await run("tmux", [...tmux.TMUX_SERVER_ARGS, "kill-server"]).catch(
+        () => undefined,
+      );
+    },
+  };
+}
+
+/**
+ * Install a fake `claude` REPL on the isolated PATH: it records its argv to `argvFile`, prints
+ * the READY footer, exits on SIGINT like the real one does on Ctrl-C, and refuses a
+ * `--resume missing-*` id with Claude's own "No conversation found" message.
+ */
+export function writeFakeRepl(env: IsolatedEnv, argvFile: string): void {
+  process.env.FAKE_CLAUDE_ARGV_FILE = argvFile;
+  fs.writeFileSync(
+    path.join(env.binDir, "claude"),
+    `#!/bin/sh
+printf '%s\\n' "$@" > "$FAKE_CLAUDE_ARGV_FILE"
+case " $* " in
+  *" --resume missing-"*) echo "No conversation found with session ID: $2"; exit 1 ;;
+esac
+echo "? for shortcuts"
+trap 'exit 0' INT
+while :; do sleep 1; done
+`,
+    { mode: 0o755 },
+  );
+}
+
+/** The argv the fake REPL recorded, or null when it has not run since the file was removed. */
+export function readArgv(file: string): string[] | null {
+  return fs.existsSync(file)
+    ? fs.readFileSync(file, "utf8").trim().split("\n")
+    : null;
+}
+
+/** Poll `probe` every 100ms until it is true, throwing with `label` at the deadline. */
+export async function waitFor(
+  probe: () => Promise<boolean>,
+  timeoutMs: number,
+  label: string,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await probe()) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (await probe()) return;
+  throw new Error(`timed out after ${timeoutMs}ms waiting for: ${label}`);
+}

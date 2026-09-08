@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildClaudeLaunch } from "./claude-launch.js";
+import { run } from "../../adapters/exec.js";
+import {
+  buildClaudeLaunch,
+  hasControlByte,
+  shellQuote,
+} from "./claude-launch.js";
 
 const base = {
   claudePath: "/bin/claude",
@@ -55,4 +60,46 @@ void test("resume args lead the argv, before the settings layer", () => {
     "--settings",
     "/data/hook-settings.json",
   ]);
+});
+
+const HOSTILE_TOKENS = [
+  "/Users/x y/.local/bin/claude",
+  "--append-system-prompt",
+  "be terse; $(id) `id` && rm -rf / | cat",
+  "it's",
+  "'quoted'",
+  "",
+  "line\nbreak",
+  "* glob ? and ~",
+];
+
+for (const shell of ["sh", "bash", "zsh"]) {
+  void test(`shellQuote delivers every token as one literal argument through ${shell}`, async (t) => {
+    const line = `printf '%s\\0' ${shellQuote(HOSTILE_TOKENS)}`;
+    let stdout: string;
+    try {
+      ({ stdout } = await run(shell, ["-c", line]));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        t.skip(`${shell} not installed`);
+        return;
+      }
+      throw err;
+    }
+    assert.deepEqual(stdout.split("\0").slice(0, -1), HOSTILE_TOKENS);
+  });
+}
+
+void test("shellQuote joins single-quoted tokens and escapes embedded quotes", () => {
+  assert.equal(shellQuote(["a b", "it's"]), `'a b' 'it'\\''s'`);
+  assert.equal(shellQuote([]), "");
+});
+
+void test("shellQuote refuses tokens carrying a control byte, which the line editor would act on before the parser", () => {
+  for (const bad of ["\x15touch /tmp/x; #", "\x04", "a\tb", "\x7f", "\x1b[A"]) {
+    assert.throws(() => shellQuote(["/bin/claude", bad]), /control character/);
+    assert.equal(hasControlByte(bad), true);
+  }
+  assert.equal(hasControlByte("plain 'text' $(id)\nwith a newline"), false);
+  assert.equal(hasControlByte("plain 'text' $(id) with spaces"), false);
 });
