@@ -3,10 +3,10 @@
  * `claude`, honoring single/double-quoted segments so a flag value containing spaces (e.g.
  * `--append-system-prompt "be terse"`) survives as one token.
  *
- * @remarks No shell is ever involved downstream — `tmux new-session` execs the resulting argv
- * array directly (`adapters/tmux.ts#newSession`) — so this is whitespace/quote tokenizing only,
- * never shell interpretation: no globbing, no `$VAR` expansion, no `;`/`&&` chaining, nothing a
- * malicious string could do beyond adding literal `claude` flags. An unmatched quote is tolerated
+ * @remarks This is whitespace/quote tokenizing only, never shell interpretation. The tokens are
+ * later single-quoted by `claude-launch.ts#shellQuote` before being typed into the ticket's
+ * login shell (`SHELL-01`), so no globbing, `$VAR` expansion, or `;`/`&&` chaining can occur;
+ * control bytes are rejected there and at the Settings route. An unmatched quote is tolerated
  * (the rest of the string becomes the final token) rather than throwing, because this runs on
  * every session launch and a launch must never hard-fail on a stray quote typed into Settings.
  */
