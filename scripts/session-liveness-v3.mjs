@@ -15266,7 +15266,7 @@ async function collectSseFrames(built, ms, during) {
 
 /**
  * `--check vault-no-read-back`: the phase's headline check (T-103-01/T-103-03/T-103-06). Seeds one
- * sentinel-bearing key, then sweeps every vault route, eight read-back path shapes, `GET
+ * sentinel-bearing key, then sweeps every vault route, seven read-back path shapes, `GET
  * /api/board`, a live SSE stream and all four error paths, scanning every collected response body
  * for the sentinel and asserting the listed key object carries exactly the six allowed fields,
  * the structural form of "never a length hint proportional to the real value".
@@ -15347,13 +15347,13 @@ async function checkVaultNoReadBack(built) {
     }
   }
 
-  // Leg 3: the read-back probe list. A 2xx on any of the first five is a violation naming the
+  // Leg 3: the read-back probe list. A 2xx on any of the first four is a violation naming the
   // path, none of these routes should exist at all. The last three hit the real GET /vault
   // handler (query strings the handler ignores) and are EXEMPT from the 2xx violation; they are
-  // scanned for the sentinel only, same as every other collected body.
+  // scanned for the sentinel only, same as every other collected body. GET /vault/:name/value
+  // and /previous are deliberate single-key reads (the rotate flow's old value) and not probed.
   const probesMustNotExist = [
     ["GET", "/vault/SEAL_KEY"],
-    ["GET", "/vault/SEAL_KEY/value"],
     ["GET", "/vault/SEAL_KEY/reveal"],
     ["POST", "/vault/SEAL_KEY/reveal"],
     ["GET", "/vault/values"],
