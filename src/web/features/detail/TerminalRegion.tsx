@@ -1,6 +1,6 @@
-import { AlertTriangle, RotateCw } from "lucide-react";
+import { AlertTriangle, Play, RotateCw } from "lucide-react";
 import type { Card as CardModel } from "../../../shared/types.js";
-import { ensureTerminal } from "../../lib/api.js";
+import { ensureTerminal, runClaude } from "../../lib/api.js";
 import { Button } from "../../primitives/Button.js";
 import { Notice } from "../../primitives/Notice.js";
 
@@ -91,12 +91,38 @@ export function TerminalRegion({ card }: TerminalRegionProps) {
             </Button>
           </div>
         ) : c.ttydPort != null && c.activeSessionId != null ? (
-          <iframe
-            src={`/sessions/${c.activeSessionId}/terminal/`}
-            title={`Live terminal for ${c.identifier}`}
-            sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-            style={{ width: "100%", height: "100%", border: 0 }}
-          />
+          <>
+            <div
+              style={{
+                flex: "0 0 auto",
+                display: "flex",
+                justifyContent: "flex-end",
+                padding: "var(--space-xs) var(--space-sm)",
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  void runClaude(c.id).catch(console.error);
+                }}
+              >
+                <Play size={12} strokeWidth={2} aria-hidden="true" />
+                Run Claude
+              </Button>
+            </div>
+            <iframe
+              src={`/sessions/${c.activeSessionId}/terminal/`}
+              title={`Live terminal for ${c.identifier}`}
+              sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+              style={{
+                width: "100%",
+                flex: "1 1 auto",
+                minHeight: 0,
+                border: 0,
+              }}
+            />
+          </>
         ) : (
           <div
             style={{
