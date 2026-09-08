@@ -14,6 +14,7 @@ import {
   resumeSession,
 } from "../services/orchestration/resume-session.js";
 import { cleanupWorkspace } from "../services/orchestration/cleanup.js";
+import { runClaude } from "../services/orchestration/run-claude.js";
 import { editorPath, launchEditor } from "../adapters/editors.js";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
 import { restatRepos } from "../services/domain/workspaces.js";
@@ -402,6 +403,50 @@ cardsRouter.post("/cards/:id/terminal", (req, res) => {
 
   void reconnectTerminal(card.id);
   res.status(202).json({ ensuring: true });
+});
+
+cardsRouter.post("/cards/:id/run-claude", async (req, res) => {
+  const { id } = req.params;
+
+  const card = store.getCard(id);
+  if (!card) {
+    res.status(400).json({ error: `unknown card id: ${id}` });
+    return;
+  }
+  const groupError = groupedMemberError(card);
+  if (groupError != null) {
+    res.status(409).json({ error: groupError });
+    return;
+  }
+
+  if (!card.tmuxSession || !card.activeSessionId) {
+    res.status(400).json({ error: "card has no live session" });
+    return;
+  }
+
+  const outcome = await runClaude(card.id);
+  if (outcome === "busy") {
+    res.status(409).json({ error: "the terminal is not at a shell prompt" });
+    return;
+  }
+  if (outcome === "legacy") {
+    res.status(409).json({
+      error:
+        "this session was started by an older Dispatch; it becomes a shell session after Claude exits and Resume runs",
+    });
+    return;
+  }
+  if (outcome === "account") {
+    res.status(409).json({
+      error: "the session's Claude account is no longer available",
+    });
+    return;
+  }
+  if (outcome === "no-session") {
+    res.status(400).json({ error: "card has no live session" });
+    return;
+  }
+  res.status(202).json({ launched: true });
 });
 
 cardsRouter.post("/cards/:id/session", async (req, res) => {
