@@ -1358,7 +1358,7 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
         display: "flex",
         flexDirection: "column",
         gap: "var(--space-sm)",
-        padding: "var(--space-md)",
+        padding: "var(--space-sm)",
         border: "1px solid var(--border)",
         borderRadius: "var(--radius)",
         background: hover ? "var(--surface-card-hover)" : "var(--surface-card)",
@@ -1710,7 +1710,7 @@ function VaultTabSection({ vaultTab }: VaultTabSectionProps) {
             border: "1px solid var(--border)",
             borderRadius: "var(--radius)",
             color: "var(--text-muted)",
-            ...focusRing(searchFocused),
+            ...focusRing(searchFocused, true),
           }}
         >
           <Search size={14} strokeWidth={2} aria-hidden="true" />
