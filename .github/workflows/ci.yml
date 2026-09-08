@@ -28,5 +28,8 @@ jobs:
       # ride preinstall/postinstall). Native-binary deps here (esbuild, unrs-resolver)
       # ship prebuilt optional packages, so nothing needs a build step.
       - run: npm ci --ignore-scripts
+      # The shell-session tests boot a private tmux server with a zsh login shell and skip
+      # themselves when either is missing, so install both or SHELL-01 is never verified in CI.
+      - run: sudo apt-get update && sudo apt-get install -y tmux zsh
       - name: npm run check
         run: npm run check
