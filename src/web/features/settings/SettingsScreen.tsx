@@ -73,6 +73,7 @@ import {
   getTerminalAppearance,
   getVaultKeys,
   getVaultPrevious,
+  getVaultValue,
   getWorkspaceFolders,
   importFromEnvVault,
   previewLinearFilters,
@@ -1102,6 +1103,25 @@ function VaultValueEditor({ keySummary, vault }: VaultValueEditorProps) {
   const [valueError, setValueError] = useState<string | null>(null);
   const [savePending, setSavePending] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [currentValue, setCurrentValue] = useState<string | null>(null);
+  const [currentError, setCurrentError] = useState(false);
+
+  useEffect(() => {
+    if (!keySummary.filled) return;
+    let cancelled = false;
+    getVaultValue(keySummary.name)
+      .then((result) => {
+        if (cancelled) return;
+        if (result.ok) setCurrentValue(result.value);
+        else setCurrentError(true);
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [keySummary.name, keySummary.filled]);
 
   async function handleSaveValue() {
     if (savePending) return;
@@ -1149,7 +1169,34 @@ function VaultValueEditor({ keySummary, vault }: VaultValueEditorProps) {
         borderRadius: "var(--radius)",
       }}
     >
-      <Field>Value</Field>
+      {keySummary.filled && (
+        <div
+          data-testid={`vault-current-${keySummary.name}`}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-xs)",
+          }}
+        >
+          <Field>Current value</Field>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--font-label)",
+              lineHeight: "var(--line-label)",
+              color: currentError ? "var(--destructive-text)" : "var(--text)",
+              whiteSpace: "normal",
+              wordBreak: "break-all",
+              userSelect: "text",
+            }}
+          >
+            {currentError
+              ? "Couldn't load the current value."
+              : (currentValue ?? "Loading...")}
+          </span>
+        </div>
+      )}
+      <Field>{keySummary.filled ? "New value" : "Value"}</Field>
       <input
         type="text"
         autoComplete="new-password"

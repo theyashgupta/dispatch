@@ -471,15 +471,18 @@ export type VaultPreviousResult =
   { ok: true; value: string } | { ok: false; error: "not-found" };
 
 /**
- * Read the single value a key held before its latest rotate. Opens only `previous.env`, never
- * `values.env`, so the current value stays structurally unreachable from any GET.
+ * Read one key's value out of a sealed env file, the only path that turns a stored line back
+ * into a value.
  * @remarks Callers must hand the value straight to the response body and nowhere else: no
  * logging, no error text, no metadata. `parseEnvVaultValues` is the exact inverse of
  * `quoteEnvValue`, which wrote the line.
  */
-export async function readPrevious(name: string): Promise<VaultPreviousResult> {
+async function readStoredValue(
+  file: string,
+  name: string,
+): Promise<VaultPreviousResult> {
   assertVaultName(name);
-  const line = (await readPreviousLines()).find(isLineFor(name));
+  const line = (await readEnvLines(file)).find(isLineFor(name));
   if (line === undefined) {
     return { ok: false, error: "not-found" };
   }
@@ -489,3 +492,17 @@ export async function readPrevious(name: string): Promise<VaultPreviousResult> {
   }
   return { ok: true, value };
 }
+
+/**
+ * Read the single value a key held before its latest rotate, from `previous.env`.
+ */
+export const readPrevious = (name: string) =>
+  readStoredValue(VAULT_PREVIOUS_PATH, name);
+
+/**
+ * Read a key's current value, from `values.env`.
+ * @remarks Exists for exactly one caller, the rotate flow, which must show the outgoing value so
+ * the user can revoke it upstream or roll back before the new one lands.
+ */
+export const readCurrent = (name: string) =>
+  readStoredValue(VAULT_VALUES_PATH, name);

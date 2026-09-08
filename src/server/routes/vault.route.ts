@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import {
   VAULT_NAME_RE,
   listKeys,
@@ -8,6 +8,7 @@ import {
   editPurpose,
   deleteKey,
   readPrevious,
+  readCurrent,
   importFromEnvVault,
 } from "../services/domain/vault.js";
 import {
@@ -21,11 +22,11 @@ const MAX_VALUE_BYTES = 8192;
 
 /**
  * Vault CRUD routes, mounted behind the single app-level gate hoisted in `bootstrap/index.ts`
- * (never a standalone router). These routes are write-only for current values: no handler, at
- * any path, ever returns a key's current value, a list entry carries only name, purpose,
- * timestamps and the `filled`/`hasPrevious` flags (T-103-01). The one deliberate read path,
- * `GET /vault/:name/previous`, returns the value a key held before its latest rotate and nothing
- * else, on explicit request only. Every mutating handler re-validates its own body independently of any
+ * (never a standalone router). A list entry carries only name, purpose, timestamps and the
+ * `filled`/`hasPrevious` flags (T-103-01). Exactly two read paths carry a value, each for one
+ * named key on explicit request only: `GET /vault/:name/value` (the current value, shown by the
+ * rotate flow before it is replaced) and `GET /vault/:name/previous` (the value held before the
+ * latest rotate). Every mutating handler re-validates its own body independently of any
  * client-side check (the route is gated by loopback OR a valid remote session, not trust-gated),
  * and a value is accepted from a JSON request body only, never a query string or a path segment.
  * Every unexpected throw maps to a generic 500 with no stack, path or filesystem-error text
@@ -180,25 +181,33 @@ vaultRouter.put("/vault/:name/value", async (req, res) => {
   }
 });
 
-vaultRouter.get("/vault/:name/previous", async (req, res) => {
-  const nameResult = validateName(req.params.name);
-  if (!nameResult.ok) {
-    res.status(400).json({ error: nameResult.error });
-    return;
-  }
-  const { name } = nameResult;
-
-  try {
-    const result = await readPrevious(name);
-    if (!result.ok) {
-      res.status(404).json({ error: result.error, name });
+/**
+ * Handler for the two single-key value reads; `read` is the domain reader for one sealed file.
+ */
+function readValueRoute(read: typeof readPrevious) {
+  return async (req: Request, res: Response) => {
+    const nameResult = validateName(req.params.name);
+    if (!nameResult.ok) {
+      res.status(400).json({ error: nameResult.error });
       return;
     }
-    res.status(200).json({ value: result.value });
-  } catch {
-    res.status(500).json({ error: "vault-read-failed" });
-  }
-});
+    const { name } = nameResult;
+
+    try {
+      const result = await read(name);
+      if (!result.ok) {
+        res.status(404).json({ error: result.error, name });
+        return;
+      }
+      res.status(200).json({ value: result.value });
+    } catch {
+      res.status(500).json({ error: "vault-read-failed" });
+    }
+  };
+}
+
+vaultRouter.get("/vault/:name/value", readValueRoute(readCurrent));
+vaultRouter.get("/vault/:name/previous", readValueRoute(readPrevious));
 
 vaultRouter.patch("/vault/:name", async (req, res) => {
   const nameResult = validateName(req.params.name);
