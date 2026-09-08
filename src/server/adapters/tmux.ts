@@ -191,8 +191,9 @@ const PTY_SHIM_PATH = path.join(
  * zero-round-trip touch scrolling possible on the phone. File absence means boot's python3
  * probe failed (see pty-shim-setup.ts) and the spawn degrades to unwrapped.
  */
-function wrapWithPtyShim(commandArgv: string[]): string[] {
-  if (!existsSync(PTY_SHIM_PATH)) return commandArgv;
+export function wrapWithPtyShim(commandArgv: string[]): string[] {
+  if (commandArgv.length === 0 || !existsSync(PTY_SHIM_PATH))
+    return commandArgv;
   return [PTY_SHIM_PATH, ...commandArgv];
 }
 
@@ -337,7 +338,9 @@ const HISTORY_LIMIT = "10000";
  * `new-session` in the same invocation (see {@link HISTORY_LIMIT}).
  * The explicit -x/-y geometry is required for sane capture-pane output BEFORE any client
  * attaches (probe-verified — without it the pane has a tiny default size and readiness
- * detection is unreliable). Trailing args become the window command. Optional `env` entries
+ * detection is unreliable). Trailing args become the window command; an EMPTY `commandArgv`
+ * makes tmux run its `default-shell` as a login shell, unwrapped, which is how ticket sessions
+ * are created (`SHELL-01`). Optional `env` entries
  * become `-e KEY=VALUE` pairs (tmux ≥3.2, probe-verified on 3.6a) placed after the geometry
  * and before the command, so per-session values reach the spawned process without ever
  * appearing in its argv. The session then gets `mouse off` pinned at session scope: a later
@@ -510,6 +513,66 @@ export async function pasteBuffer(
  */
 export async function sendKeys(target: string, keys: string[]): Promise<void> {
   await tmux(["send-keys", "-t", target, ...keys]);
+}
+
+/**
+ * Type `text` into a target verbatim (`send-keys -l -t <target> <text>`), never as key names.
+ *
+ * @remarks Without `-l` tmux would interpret a token that happens to spell a key name (`Enter`,
+ * `Space`, `C-c`) as that key. The claude launch line is typed with this call and submitted with
+ * a separate {@link sendKeys} `Enter`, mirroring the kickoff paste-then-submit shape.
+ * @see docs/ARCHITECTURE.md#tmux-invocations
+ */
+export async function sendLiteral(target: string, text: string): Promise<void> {
+  await tmux(["send-keys", "-l", "-t", target, text]);
+}
+
+/**
+ * Whether session `name` carries `key` in its tmux environment (`show-environment -t <name> KEY`).
+ *
+ * @remarks Tolerant swallow-to-default (`NEW-10`): an unknown variable exits 1 and reads as
+ * absent. Used to tell a login-shell session created by this build (`DISPATCH_SHELL_SESSION`)
+ * from a pre-upgrade session whose pane root is claude itself.
+ */
+export async function sessionEnvHas(
+  name: string,
+  key: string,
+): Promise<boolean> {
+  try {
+    const { stdout } = await tmux(["show-environment", "-t", name, key]);
+    return stdout.startsWith(`${key}=`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a pane's root process (`#{pane_pid}`, the login shell of a command-less session) owns
+ * the terminal's foreground process group, i.e. the shell is at its prompt.
+ *
+ * @remarks Read as `ps -o pgid=,tpgid= -p <pane_pid>`: at the prompt both ids are the shell's
+ * own. Process names are deliberately not compared: tmux reports the exec'd
+ * image (`bash` for macOS `/bin/sh`) while `ps` reports argv0 (`-sh`), so names disagree even
+ * when the shell is idle, whereas the foreground group is exact for any program the rc or the
+ * user runs (an ssh-agent PIN prompt, a pager, claude).
+ */
+export async function paneAtPrompt(target: string): Promise<boolean> {
+  const { stdout } = await tmux([
+    "display-message",
+    "-p",
+    "-t",
+    target,
+    "#{pane_pid}",
+  ]);
+  const pid = stdout.trim();
+  if (!/^\d+$/.test(pid)) return false;
+  try {
+    const ps = await run("ps", ["-o", "pgid=,tpgid=", "-p", pid]);
+    const m = ps.stdout.trim().match(/^(\d+)\s+(\d+)$/);
+    return m != null && m[1] === m[2];
+  } catch {
+    return false;
+  }
 }
 
 /**
