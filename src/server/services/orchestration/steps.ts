@@ -22,18 +22,23 @@ import {
 } from "../../adapters/git.js";
 import {
   capturePane,
+  hasSession,
   killSession,
   loadBuffer,
   newSession,
+  paneAtPrompt,
   pasteBuffer,
   sendKeys,
+  sendLiteral,
+  wrapWithPtyShim,
 } from "../../adapters/tmux.js";
 import { preSeedTrust } from "../../adapters/claude-trust.js";
 import {
   getActiveAccountId,
   resolveLaunchAccount,
+  type LaunchAccount,
 } from "../domain/claude-accounts.js";
-import { buildClaudeLaunch } from "../domain/claude-launch.js";
+import { buildClaudeLaunch, shellQuote } from "../domain/claude-launch.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { store } from "../../store/board.store.js";
 import { buildKickoff } from "../domain/kickoff.js";
@@ -78,6 +83,14 @@ const RESUME_DIALOG = /Resume from summary|Resume full session as-is/;
  * the trust prompt" property.
  */
 const READY = /\? for shortcuts|bypass permissions on|shift\+tab to cycle/;
+
+/**
+ * Claude's refusal when `--resume <id>` or `--continue` names a conversation whose transcript
+ * was never flushed (a session killed seconds after its first prompt). Claude prints it and exits,
+ * so the pane is back at the shell prompt; matching it fails the readiness poll at once instead
+ * of after the 30s budget, and lets the caller drop the recorded id.
+ */
+export const RESUME_MISSING = /No conversation found/;
 
 const READINESS_TIMEOUT_MS = 30_000;
 const POLL_INTERVAL_MS = 500;
@@ -366,6 +379,7 @@ export async function awaitReplReady(session: string): Promise<void> {
   while (Date.now() < deadline) {
     lastPane = await capturePane(paneTarget);
     if (READY.test(lastPane)) return;
+    if (RESUME_MISSING.test(lastPane)) break;
     if (!resumeAccepted && RESUME_DIALOG.test(lastPane)) {
       await sendKeys(paneTarget, ["Enter"]);
       resumeAccepted = true;
@@ -385,101 +399,189 @@ export async function awaitReplReady(session: string): Promise<void> {
 }
 
 /**
- * Saga Step 3: launch the claude REPL in a detached tmux session. When the installed CLI meets
- * the hooks capability floor, the launch carries the dispatch settings layer (`--settings`) plus
- * the three per-session `DISPATCH_*` env vars via tmux `-e`; the token is minted BEFORE the
- * session exists so the kickoff paste's UserPromptSubmit hook already authenticates (the
- * flip-back it triggers no-ops — the card is never in needs_input during the saga). The
- * `hookRoutedAt` routing latch is deliberately NOT stamped here (`WR-05`): it is evidence that
- * hook events arrive, and only that first authenticated event may write it. Below floor or under
- * `statusChannel: "pane"` the launch
- * is byte-identical to the pre-hooks argv (no settings, no token, no env), and the pane watcher
- * carries status alone; that branch first resets the card's hook-channel state so a stale
- * persisted latch/token from an earlier hook-capable session can never survive into a
- * hook-silent one.
- * @remarks (Phase 91) The mint/register sequencing hazard is closed structurally, not by
- * ordering discipline: `store.mintHookChannel` persists the token onto the session record AND
- * reports which session it landed on, and ONLY THEN is the token registered against that real
- * id — there is no path left that can register a token before the session it names exists. If
- * `mintHookChannel` reports no session — an unknown card id, or an active pointer naming no
- * record (`WR-03`) — registration is skipped and the launch falls through to the hook-silent
- * branch, the existing safe degradation for a card the store cannot resolve.
- * @remarks (Phase 94, corrected Phase 96 `R2`) tmux resolves a `-t` target by PREFIX when no exact
- * match exists, so once a suffixed sibling can coexist with the bare session (`dsp-PROJ-123-2`
- * beside `dsp-PROJ-123`), every target built from a name that can be a prefix of a sibling's must
- * use the `=` exact-match form — live-reproduced on tmux 3.6a, not theoretical. `undo` below
- * applies the session-level form (`=<name>`, no colon); `send-keys`/`capture-pane` need the SAME
- * exact-match protection but as pane-level targets require a TRAILING COLON (`=<name>:`) to
- * resolve at all — `awaitReplReady` and `sendKickoff` build that form once, internally.
- * @remarks (Phase 96 finding `F-96-A`) `ctx.sessionId` (the reserved session's id, `undefined` for
- * a card's first session) is threaded into `resetClaudeSessionId` and `mintHookChannel` so a
- * `newSession:true` launch targets the session actually being started rather than defaulting to
- * `card.activeSessionId` — the OLD, still-live session for exactly this launch, since
- * `reserveNewSession` does not promote the new session until `completeStart` succeeds
- * (`D-NOPROMOTE-ON-RESERVE`). Before this fix the default silently minted the new launch's
- * credential onto the wrong session (leaving the new session unauthenticated) and reset the wrong
- * session's `claudeSessionId` (wiping an unrelated sibling's `--resume` capability). The reserved
- * session's own previous token is always none (it has never held one), so `previousToken` is
- * computed only for the `ctx.sessionId === undefined` case — never read off the card's flat
- * mirror when targeting a reserved sibling, which would otherwise revoke the unrelated active
- * session's own still-valid token.
+ * Poll a pane until its root shell owns the terminal for two consecutive polls, throwing on the
+ * readiness budget with the pane contents.
+ *
+ * @remarks The launch line is typed, so it must not land while the shell's rc files still own
+ * the terminal: an ssh-agent PIN prompt or a `read` would swallow it as its own input. Two idle
+ * polls are required because a fresh pane reads idle for a few tens of milliseconds before the
+ * rc's first child takes the tty (measured 35ms to 72ms after `new-session`).
+ */
+async function awaitShellPrompt(session: string): Promise<void> {
+  const paneTarget = `=${session}:`;
+  const deadline = Date.now() + READINESS_TIMEOUT_MS;
+  let idlePolls = 0;
+  while (Date.now() < deadline) {
+    idlePolls = (await paneAtPrompt(paneTarget)) ? idlePolls + 1 : 0;
+    if (idlePolls >= 2) return;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new StartStepError(
+    "starting claude",
+    await capturePane(paneTarget).catch(() => ""),
+    "repl-timeout",
+  );
+}
+
+export interface LaunchClaudeInput {
+  cardId: string;
+  sessionId?: string;
+  tmuxSession: string;
+  cwd: string;
+  leadingArgs: string[];
+  account: LaunchAccount;
+  onCreated?: () => void;
+}
+
+/** Marks a tmux session whose pane root is the login shell, so a relaunch may type into it. */
+export const SHELL_SESSION_ENV = "DISPATCH_SHELL_SESSION";
+
+type LaunchHooks = { port: number; token: string; cardId: string } | null;
+
+/**
+ * Launch the claude REPL inside the ticket's login-shell tmux session, creating that session
+ * only when it is absent, and return whether this call created it.
+ *
+ * @remarks A hook token is minted only for a session this call creates, because the token
+ * reaches the shell solely through `new-session -e`; a reused session keeps the token its shell
+ * already holds (`SHELL-01`). `onCreated` fires the moment the session exists, before the
+ * readiness waits, so a caller's rollback bookkeeping covers a launch that times out.
  * @see docs/ARCHITECTURE.md#tmux-invocations
  * @see docs/ARCHITECTURE.md#hooks-status-channel
+ */
+export async function launchClaude(input: LaunchClaudeInput): Promise<boolean> {
+  const { cardId, sessionId, tmuxSession, cwd, leadingArgs, account } = input;
+  await preSeedTrust(cwd, account.configDir);
+  const created = !(await hasSession(`=${tmuxSession}`));
+  const hooks = created
+    ? await mintHooks(cardId, sessionId)
+    : existingHooks(store.getCard(cardId));
+  const launch = await buildLaunch(account, leadingArgs, hooks);
+  if (created) {
+    await newSession(tmuxSession, cwd, [], {
+      ...launch.env,
+      [SHELL_SESSION_ENV]: "1",
+    });
+    input.onCreated?.();
+  }
+  await awaitShellPrompt(tmuxSession);
+  await typeLaunchLine(tmuxSession, launch.argv);
+  await awaitReplReady(tmuxSession);
+  return created;
+}
+
+/**
+ * Mint and register a fresh hook token for the session about to be created, or clear the
+ * card's hook channel when hooks are off.
+ *
+ * @remarks `store.mintHookChannel` persists the token AND reports which session it landed on,
+ * and only then is it registered, so no token can be registered before its session exists
+ * (`WR-03`). The previous token is revoked only when the launch targets the ACTIVE session: a
+ * reserved sibling has never held one, and reading the card's flat mirror for it would revoke
+ * the live sibling's token (`F-96-A`).
+ */
+async function mintHooks(
+  cardId: string,
+  sessionId: string | undefined,
+): Promise<LaunchHooks> {
+  const runtime = getHooksRuntime();
+  if (runtime?.capable && runtime.statusChannel !== "pane") {
+    const card = store.getCard(cardId);
+    const previousToken =
+      sessionId === undefined || sessionId === card?.activeSessionId
+        ? card?.hookToken
+        : undefined;
+    const token = newHookTokenValue();
+    const mintedSessionId = await store.mintHookChannel(
+      cardId,
+      token,
+      sessionId,
+    );
+    if (mintedSessionId !== undefined) {
+      registerHookToken(token, cardId, mintedSessionId, previousToken);
+      return { port: runtime.port, token, cardId };
+    }
+  }
+  await store.clearHookChannel(cardId);
+  return null;
+}
+
+/**
+ * The hooks layer for a launch into a session that already exists: the card's current token,
+ * or none when hooks are off or the card holds no token.
+ */
+export function existingHooks(card: Card | undefined): LaunchHooks {
+  const runtime = getHooksRuntime();
+  return runtime?.capable && runtime.statusChannel !== "pane" && card?.hookToken
+    ? { port: runtime.port, token: card.hookToken, cardId: card.id }
+    : null;
+}
+
+/**
+ * Build the claude argv and env every launch site shares: the resolved binary, the Settings
+ * arguments, the hooks settings layer, and the account config dir.
+ */
+export async function buildLaunch(
+  account: LaunchAccount,
+  leadingArgs: string[],
+  hooks: LaunchHooks,
+): Promise<{ argv: string[]; env: Record<string, string> }> {
+  return buildClaudeLaunch({
+    claudePath: (await resolveBinaryPath("claude")) ?? "claude",
+    claudeArgs: parseClaudeArgs(
+      getOrchestrationConfig()?.claudeArgs ?? DEFAULT_CLAUDE_ARGS,
+    ),
+    leadingArgs,
+    settingsPath: HOOK_SETTINGS_PATH,
+    hooks,
+    configDir: account.configDir,
+  });
+}
+
+/**
+ * Type a claude argv into a session's shell as one pty-shimmed, fully quoted line and submit it
+ * with a separate `Enter`.
+ *
+ * @remarks `C-u` discards anything the person had half-typed at the prompt and `C-l` clears the
+ * screen so `awaitReplReady` cannot match a READY footer left over from the previous run; both
+ * are line-editor keys, never history entries. The caller decides that the pane is at its prompt.
+ */
+export async function typeLaunchLine(
+  session: string,
+  argv: string[],
+): Promise<void> {
+  const paneTarget = `=${session}:`;
+  const line = shellQuote(wrapWithPtyShim(argv));
+  await sendKeys(paneTarget, ["C-u", "C-l"]);
+  await sendLiteral(paneTarget, line);
+  await sendKeys(paneTarget, ["Enter"]);
+}
+
+/**
+ * Saga Step 3: resolve the launch account, reset the recorded conversation id, then delegate to
+ * {@link launchClaude}.
+ *
+ * @remarks `undo` kills with the session-level exact-match target (`=<name>`, no colon); the
+ * pane-level targets inside `launchClaude` carry the trailing colon (`NEW-13`).
  */
 const startClaude: SagaStep = {
   name: "starting claude",
   statusText: "Starting Claude…",
   async run(ctx) {
-    const session = "dsp-" + ctx.sessionName;
     const account = await resolveLaunchAccount(getActiveAccountId());
     ctx.claudeAccountId = account.id;
-    await preSeedTrust(ctx.workspacePath, account.configDir);
     await store.resetClaudeSessionId(ctx.card.id, ctx.sessionId);
-
-    const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
-    const claudeArgs = parseClaudeArgs(
-      getOrchestrationConfig()?.claudeArgs ?? DEFAULT_CLAUDE_ARGS,
-    );
-    const runtime = getHooksRuntime();
-    let launchedHooksCapable = false;
-    if (runtime?.capable && runtime.statusChannel !== "pane") {
-      const previousToken =
-        ctx.sessionId === undefined
-          ? store.getCard(ctx.card.id)?.hookToken
-          : undefined;
-      const token = newHookTokenValue();
-      const sessionId = await store.mintHookChannel(
-        ctx.card.id,
-        token,
-        ctx.sessionId,
-      );
-      if (sessionId !== undefined) {
-        registerHookToken(token, ctx.card.id, sessionId, previousToken);
-        const launch = buildClaudeLaunch({
-          claudePath,
-          claudeArgs,
-          settingsPath: HOOK_SETTINGS_PATH,
-          hooks: { port: runtime.port, token, cardId: ctx.card.id },
-          configDir: account.configDir,
-        });
-        await newSession(session, ctx.workspacePath, launch.argv, launch.env);
-        launchedHooksCapable = true;
-      }
-    }
-    if (!launchedHooksCapable) {
-      await store.clearHookChannel(ctx.card.id);
-      const launch = buildClaudeLaunch({
-        claudePath,
-        claudeArgs,
-        settingsPath: HOOK_SETTINGS_PATH,
-        hooks: null,
-        configDir: account.configDir,
-      });
-      await newSession(session, ctx.workspacePath, launch.argv, launch.env);
-    }
-    ctx.tmuxSessionCreated = true;
-
-    await awaitReplReady(session);
+    await launchClaude({
+      cardId: ctx.card.id,
+      sessionId: ctx.sessionId,
+      tmuxSession: "dsp-" + ctx.sessionName,
+      cwd: ctx.workspacePath,
+      leadingArgs: [],
+      account,
+      onCreated: () => {
+        ctx.tmuxSessionCreated = true;
+      },
+    });
   },
   async undo(ctx) {
     if (ctx.tmuxSessionCreated) {
