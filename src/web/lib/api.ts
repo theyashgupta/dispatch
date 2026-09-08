@@ -456,14 +456,14 @@ export async function setVaultValue(
   return { ok: false, error: body.error ?? "generic" };
 }
 
-/**
- * Read the value a key held before its latest rotate: GET /api/vault/:name/previous. The only
- * vault read that carries a value; called on an explicit reveal click, never on list load.
- */
-export async function getVaultPrevious(
+type VaultValueRead =
+  { ok: true; value: string } | { ok: false; error: string };
+
+async function readVaultValue(
   name: string,
-): Promise<{ ok: true; value: string } | { ok: false; error: string }> {
-  const res = await fetch(`/api/vault/${encodeURIComponent(name)}/previous`);
+  which: "value" | "previous",
+): Promise<VaultValueRead> {
+  const res = await fetch(`/api/vault/${encodeURIComponent(name)}/${which}`);
   if (res.ok) {
     const body = (await res.json()) as { value: string };
     return { ok: true, value: body.value };
@@ -471,6 +471,19 @@ export async function getVaultPrevious(
   const body = (await res.json().catch(() => ({}))) as { error?: string };
   return { ok: false, error: body.error ?? "generic" };
 }
+
+/**
+ * Read a key's current value: GET /api/vault/:name/value. Called only when the rotate editor
+ * opens for a filled key, never on list load.
+ */
+export const getVaultValue = (name: string) => readVaultValue(name, "value");
+
+/**
+ * Read the value a key held before its latest rotate: GET /api/vault/:name/previous. Called on
+ * an explicit reveal click, never on list load.
+ */
+export const getVaultPrevious = (name: string) =>
+  readVaultValue(name, "previous");
 
 /**
  * Edit a key's purpose: PATCH /api/vault/:name.
