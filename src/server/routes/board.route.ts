@@ -16,6 +16,7 @@ import {
   SEARCH_RESULT_LIMIT,
 } from "../../shared/search.js";
 import { store } from "../store/board.store.js";
+import { hasControlByte } from "../services/domain/claude-launch.js";
 import {
   getOrchestrationConfig,
   updateClaudeArgs,
@@ -311,7 +312,9 @@ boardRouter.put("/config/terminal", (req, res) => {
 /** Same body-shape guard as {@link isValidCleanupDelayDays}, but for the free-text argv string (Settings ▸ Models). Bounded length only — any string tokenizes into a valid argv (`parseClaudeArgs`), including empty. */
 const CLAUDE_ARGS_MAX = 4000;
 function isValidClaudeArgs(x: unknown): x is string {
-  return typeof x === "string" && x.length <= CLAUDE_ARGS_MAX;
+  return (
+    typeof x === "string" && x.length <= CLAUDE_ARGS_MAX && !hasControlByte(x)
+  );
 }
 
 boardRouter.get("/config/claude-args", (_req, res) => {
@@ -324,7 +327,7 @@ boardRouter.put("/config/claude-args", (req, res) => {
   const args = (req.body as { claudeArgs?: unknown } | undefined)?.claudeArgs;
   if (!isValidClaudeArgs(args)) {
     res.status(400).json({
-      error: `claude arguments must be a string of ${CLAUDE_ARGS_MAX} characters or fewer`,
+      error: `claude arguments must be a string of ${CLAUDE_ARGS_MAX} characters or fewer with no control characters`,
     });
     return;
   }

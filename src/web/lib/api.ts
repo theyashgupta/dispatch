@@ -702,6 +702,22 @@ export async function ensureTerminal(id: string): Promise<void> {
 }
 
 /**
+ * Relaunch claude inside a card's live shell session: POST /api/cards/:id/run-claude.
+ * Fire-and-forget (202 Accepted); the terminal itself shows the launch, so there is no response
+ * body to parse. Resolves on 2xx; throws on any non-2xx (a 409 means the pane is not at its shell
+ * prompt, so the server typed nothing) so the caller can log (mirrors ensureTerminal).
+ */
+export async function runClaude(id: string): Promise<void> {
+  const res = await fetch(`/api/cards/${encodeURIComponent(id)}/run-claude`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) {
+    throw new Error(`runClaude failed: ${res.status} ${res.statusText}`);
+  }
+}
+
+/**
  * Move a card's active pointer to a sibling session: POST /api/cards/:id/session.
  * Fire-and-forget — the store's single-writer switch runs server-side (202 Accepted) and the SSE
  * snapshot carries the outcome, so there is no response body to parse. Resolves on 2xx; throws on

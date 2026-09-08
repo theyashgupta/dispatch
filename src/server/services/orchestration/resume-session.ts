@@ -1,22 +1,10 @@
 import path from "node:path";
-import {
-  DEFAULT_CLAUDE_ACCOUNT_ID,
-  DEFAULT_CLAUDE_ARGS,
-} from "../../../shared/types.js";
+import { DEFAULT_CLAUDE_ACCOUNT_ID } from "../../../shared/types.js";
 import { store } from "../../store/board.store.js";
-import { hasSession, killSession, newSession } from "../../adapters/tmux.js";
-import { preSeedTrust } from "../../adapters/claude-trust.js";
+import { hasSession, killSession } from "../../adapters/tmux.js";
 import { resolveLaunchAccount } from "../domain/claude-accounts.js";
-import { buildClaudeLaunch } from "../domain/claude-launch.js";
-import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
-import { awaitReplReady, StartStepError } from "./steps.js";
-import { parseClaudeArgs } from "../domain/claude-args.js";
-import {
-  getHooksRuntime,
-  getOrchestrationConfig,
-} from "../infra/config-holder.js";
-import { newHookTokenValue, registerHookToken } from "../domain/hook-tokens.js";
-import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
+import { launchClaude, RESUME_MISSING, StartStepError } from "./steps.js";
+import { registerHookToken } from "../domain/hook-tokens.js";
 import { REATTACH_STATUS_CLEAR_MS } from "./start-session.js";
 import { ensureTerminal } from "./terminal.js";
 
@@ -130,48 +118,18 @@ export async function resumeSession(cardId: string): Promise<void> {
         "config",
       );
     });
-    await preSeedTrust(card.workspacePath, account.configDir);
-    const claudePath = (await resolveBinaryPath("claude")) ?? "claude";
-    const claudeArgs = parseClaudeArgs(
-      getOrchestrationConfig()?.claudeArgs ?? DEFAULT_CLAUDE_ARGS,
-    );
-    const runtime = getHooksRuntime();
-    let launchedHooksCapable = false;
-    if (runtime?.capable && runtime.statusChannel !== "pane") {
-      const previousToken = card.hookToken;
-      const token = newHookTokenValue();
-      const mintedSessionId = await store.mintHookChannel(
-        cardId,
-        token,
-        sessionId,
-      );
-      if (mintedSessionId !== undefined) {
-        registerHookToken(token, cardId, mintedSessionId, previousToken);
-        const launch = buildClaudeLaunch({
-          claudePath,
-          claudeArgs,
-          leadingArgs: resumeArgs,
-          settingsPath: HOOK_SETTINGS_PATH,
-          hooks: { port: runtime.port, token, cardId },
-          configDir: account.configDir,
-        });
-        await newSession(session, card.workspacePath, launch.argv, launch.env);
-        launchedHooksCapable = true;
-      }
-    }
-    if (!launchedHooksCapable) {
-      await store.clearHookChannel(cardId);
-      const launch = buildClaudeLaunch({
-        claudePath,
-        claudeArgs,
-        leadingArgs: resumeArgs,
-        settingsPath: HOOK_SETTINGS_PATH,
-        hooks: null,
-        configDir: account.configDir,
-      });
-      await newSession(session, card.workspacePath, launch.argv, launch.env);
-    }
-    await awaitReplReady(session);
+    killTarget = null;
+    await launchClaude({
+      cardId,
+      sessionId,
+      tmuxSession: session,
+      cwd: card.workspacePath,
+      leadingArgs: resumeArgs,
+      account,
+      onCreated: () => {
+        killTarget = session;
+      },
+    });
     await store.resumeSession(cardId, { session }, sessionId);
     setTimeout(
       () => void store.setStatusReason(cardId, null),
@@ -180,6 +138,9 @@ export async function resumeSession(cardId: string): Promise<void> {
     await ensureTerminal(cardId, sessionId, session);
   } catch (err) {
     if (killTarget != null) await killSession(`=${killTarget}`);
+    if (err instanceof StartStepError && RESUME_MISSING.test(err.stderr)) {
+      await store.resetClaudeSessionId(cardId, sessionId);
+    }
     const step = err instanceof StartStepError ? err.step : "unknown step";
     await store.recordResumeFailure(
       cardId,
