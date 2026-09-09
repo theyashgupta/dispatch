@@ -300,15 +300,25 @@ void test("usage: list carries a snapshot, refresh is limited to one call per 30
   assert.equal(first.status, 200, JSON.stringify(first.body));
   const usage = first.body.usage as {
     status: string;
-    windows: { kind: string; percent: number }[];
+    windows: {
+      kind: string;
+      percent: number;
+      periodStart: string | null;
+      periodEnd: string | null;
+    }[];
     fetchedAt: string;
   };
   assert.equal(usage.status, "ok");
   assert.deepEqual(
-    usage.windows.map((w) => [w.kind, w.percent]),
+    usage.windows.map((w) => [w.kind, w.percent, w.periodStart, w.periodEnd]),
     [
-      ["session", 53],
-      ["weekly_all", 11],
+      ["session", 53, "2026-09-01T17:50:00.000Z", "2026-09-01T22:50:00.000Z"],
+      [
+        "weekly_all",
+        11,
+        "2026-09-01T03:00:00.000Z",
+        "2026-09-08T03:00:00.000Z",
+      ],
     ],
   );
   assert.ok(usage.fetchedAt);
