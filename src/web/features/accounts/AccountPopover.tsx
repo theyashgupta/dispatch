@@ -1,9 +1,22 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { RefreshCw } from "lucide-react";
-import type { ClaudeAccountSummary } from "../../../shared/types.js";
+import type {
+  ClaudeAccountSummary,
+  ClaudeUsageWindow,
+} from "../../../shared/types.js";
 import { Button } from "../../primitives/Button.js";
 import { IconButton } from "../../primitives/IconButton.js";
-import { formatReset, statusCopy, toneColor, toneFor } from "./usage-format.js";
+import {
+  formatReset,
+  PACE_BADGE,
+  pacedAtFor,
+  paceTitle,
+  pacingFor,
+  projectionCopy,
+  statusCopy,
+  toneColor,
+  toneFor,
+} from "./usage-format.js";
 
 interface AccountPopoverProps {
   accounts: ClaudeAccountSummary[];
@@ -94,17 +107,99 @@ const windowStyle: CSSProperties = {
   color: "var(--text-muted)",
 };
 
+const windowBlockStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "var(--space-xs)",
+};
+
 const barTrackStyle: CSSProperties = {
+  position: "relative",
   height: "5px",
   borderRadius: "var(--radius-sm)",
   background: "var(--border)",
   overflow: "hidden",
 };
 
+const markerStyle: CSSProperties = {
+  position: "absolute",
+  top: 0,
+  bottom: 0,
+  width: "2px",
+  background: "var(--text-muted)",
+};
+
+const paceLineStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: "var(--space-xs)",
+};
+
 const mutedStyle: CSSProperties = {
   color: "var(--text-muted)",
   fontSize: "var(--font-micro)",
 };
+
+interface UsageWindowRowProps {
+  usageWindow: ClaudeUsageWindow;
+  pacedAt: number | null;
+}
+
+function UsageWindowRow({ usageWindow: w, pacedAt }: UsageWindowRowProps) {
+  const reset = formatReset(w.resetsAt);
+  const pacing = pacedAt === null ? null : pacingFor(w, pacedAt);
+  const badge = pacing ? PACE_BADGE[pacing.state] : null;
+  const title = pacing ? paceTitle(w, pacing) : undefined;
+  const projection = pacing ? projectionCopy(w, pacing) : null;
+  return (
+    <div style={windowBlockStyle} data-window-kind={w.kind}>
+      <div style={windowStyle} title={title}>
+        <span>{w.label}</span>
+        <div style={barTrackStyle} aria-hidden="true">
+          <div
+            style={{
+              width: `${w.percent}%`,
+              height: "100%",
+              background: toneColor(toneFor(w.percent)),
+            }}
+          />
+          {pacing && (
+            <div
+              data-testid="pace-elapsed-marker"
+              style={{
+                ...markerStyle,
+                left: `min(${pacing.percentElapsed}%, calc(100% - 2px))`,
+              }}
+            />
+          )}
+        </div>
+        <span style={{ color: "var(--text)" }}>{w.percent}%</span>
+        <span style={mutedStyle}>{reset ? `resets ${reset}` : ""}</span>
+      </div>
+      {badge && (
+        <div style={paceLineStyle}>
+          <span
+            data-testid="pace-badge"
+            title={title}
+            style={{
+              ...badgeStyle,
+              color: badge.text,
+              background: `color-mix(in srgb, ${toneColor(badge.tone)} 16%, var(--surface-column))`,
+            }}
+          >
+            {badge.label}
+          </span>
+          {projection && (
+            <span data-testid="pace-projection" style={mutedStyle}>
+              {projection}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function AccountPopover({
   accounts,
@@ -172,6 +267,7 @@ export function AccountPopover({
       {accounts.map((account) => {
         const isActive = account.id === activeId;
         const copy = statusCopy(account.usage);
+        const pacedAt = pacedAtFor(account.usage);
         return (
           <div key={account.id} style={rowStyle} data-account-id={account.id}>
             <div style={headerStyle}>
@@ -197,27 +293,13 @@ export function AccountPopover({
                 </Button>
               )}
             </div>
-            {account.usage.windows.map((w) => {
-              const reset = formatReset(w.resetsAt);
-              return (
-                <div key={`${w.kind}:${w.label}`} style={windowStyle}>
-                  <span>{w.label}</span>
-                  <div style={barTrackStyle} aria-hidden="true">
-                    <div
-                      style={{
-                        width: `${w.percent}%`,
-                        height: "100%",
-                        background: toneColor(toneFor(w.percent)),
-                      }}
-                    />
-                  </div>
-                  <span style={{ color: "var(--text)" }}>{w.percent}%</span>
-                  <span style={mutedStyle}>
-                    {reset ? `resets ${reset}` : ""}
-                  </span>
-                </div>
-              );
-            })}
+            {account.usage.windows.map((w) => (
+              <UsageWindowRow
+                key={`${w.kind}:${w.label}`}
+                usageWindow={w}
+                pacedAt={pacedAt}
+              />
+            ))}
             <span style={mutedStyle}>
               {copy ??
                 (account.usage.fetchedAt
