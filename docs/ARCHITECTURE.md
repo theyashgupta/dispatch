@@ -1027,8 +1027,12 @@ machine. A save is also posted on the same-origin `dsp.terminal-appearance` Broa
 every open terminal iframe restyles itself without a reload. The bundled Nerd Font is self-hosted from a
 base64 data-URI `@font-face` with `font-feature-settings: "ss01" 1, "calt" 1, "liga" 1` on `.xterm`
 under the DOM renderer (no WebGL addon needed — the DOM renderer shapes font features natively).
-Cmd-click (plain-text via `WebLinksAddon` AND OSC-8 via `linkHandler`, both sharing one
-reverse-tabnabbing-safe `activateLink`) and Shift+Enter newline insertion (raw LF on `keydown`,
+Cmd-click (plain-text URLs via `WebLinksAddon`, OSC-8 via `linkHandler`, both sharing one
+reverse-tabnabbing-safe `activateLink`, plus a third link provider for plain-text `.md` paths such
+as a `⎿ Wrote N lines to x.md` result line, which Claude Code prints with no OSC-8 at all; a
+relative one is resolved by `GET /sessions/:id/terminal/markdown?path=` against the session's
+workspace folder and its immediate subfolders before the viewer opens, because Claude prints paths
+relative to its own tracked cwd, which the server never learns) and Shift+Enter newline insertion (raw LF on `keydown`,
 both `keydown`/`keypress` swallowed for the same keystroke, IME-composition-safe) are first-class
 client functions in `web/terminal-main.ts`, not anchor-matched string patches into ttyd's own
 bundle. Mobile gets a kinetic (momentum) scroller and a persisted pinch/stepped zoom control that

@@ -1,4 +1,8 @@
-import { Terminal, type ITerminalOptions } from "@xterm/xterm";
+import {
+  Terminal,
+  type ILinkProvider,
+  type ITerminalOptions,
+} from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
@@ -15,6 +19,11 @@ import {
   FONT_SPEC,
   NERD_FONT_WOFF2_BASE64,
 } from "../shared/nerd-font-mono.js";
+import {
+  findMarkdownPaths,
+  markdownFilePath,
+  viewerUrl,
+} from "./lib/md-links.js";
 
 const OUTPUT = 0x30;
 const TITLE = 0x31;
@@ -27,31 +36,36 @@ const enc = new TextEncoder();
 const dec = new TextDecoder();
 
 /**
- * Extracts the decoded filesystem path from a `file:` URI when it targets a markdown file.
- *
- * @remarks Shape derived from a live capture of Claude Code 2.1.245's OSC-8 output
- * (112-RESEARCH.md, "THE BLOCKER, RESOLVED"): file:///abs/path with empty authority, percent
- * encoded spaces, no line or column suffix. URL.pathname excludes params and fragments, so the
- * extension test runs on the pure decoded path; the host is ignored because the viewer API's
- * realpath containment is the actual boundary.
+ * Reverse-tabnabbing-safe tab opener: open a blank tab, null its opener, THEN navigate —
+ * `window.open(url, "_blank")` does not reliably null the opener across browsers, which would
+ * let the opened page reach back into this terminal via `window.opener`.
+ * @remarks Accepts a pending target so a caller can open the tab synchronously inside the click
+ * gesture and fill it in after a fetch: a `window.open` issued after the fetch would fall outside
+ * the transient user activation and be popup-blocked. A target that resolves to null closes the tab.
  */
-function markdownFilePath(uri: string): string | null {
-  let url: URL;
-  try {
-    url = new URL(uri);
-  } catch {
-    return null;
+function openDetached(target: string | Promise<string | null>): void {
+  const win = window.open();
+  if (!win) {
+    console.warn("dispatch: cmd+click open blocked");
+    return;
   }
-  if (url.protocol !== "file:") return null;
-  const path = decodeURIComponent(url.pathname);
-  return /\.(md|markdown)$/i.test(path) ? path : null;
+  try {
+    win.opener = null;
+  } catch {}
+  if (typeof target === "string") {
+    win.location.href = target;
+    return;
+  }
+  void target.then((url) => {
+    if (url) win.location.href = url;
+    else win.close();
+  });
 }
 
 /**
- * Reverse-tabnabbing-safe, modifier-gated link activator shared by both the plain-text
- * (`WebLinksAddon`) and OSC-8 (`linkHandler`) code paths: open a blank tab, null its opener, THEN
- * navigate — `window.open(url, "_blank")` does not reliably null the opener across browsers, which
- * would let the opened page reach back into this terminal via `window.opener`.
+ * Modifier-gated link activator shared by both the plain-text (`WebLinksAddon`) and OSC-8
+ * (`linkHandler`) code paths: a `file:` URI to a markdown file opens the viewer, anything else
+ * opens as-is.
  * @remarks Non-markdown links open only when their scheme is http/https/mailto. Because
  * `linkHandler.allowNonHttpProtocols` is true, xterm hands EVERY OSC-8 URI here, so an agent-echoed
  * `javascript:` OSC-8 link would otherwise execute same-origin on the inherited about:blank origin.
@@ -60,29 +74,79 @@ function markdownFilePath(uri: string): string | null {
 function activateLink(event: MouseEvent, uri: string): void {
   if (!(event.metaKey || event.ctrlKey)) return;
   const mdPath = markdownFilePath(uri);
-  let target: string;
   if (mdPath != null) {
-    target = `${window.location.origin}/viewer/?path=${encodeURIComponent(mdPath)}`;
-  } else {
-    let protocol: string;
-    try {
-      protocol = new URL(uri).protocol;
-    } catch {
-      return;
-    }
-    if (protocol !== "http:" && protocol !== "https:" && protocol !== "mailto:")
-      return;
-    target = uri;
+    openDetached(viewerUrl(window.location.origin, mdPath));
+    return;
   }
-  const win = window.open();
-  if (win) {
-    try {
-      win.opener = null;
-    } catch {}
-    win.location.href = target;
-  } else {
-    console.warn("dispatch: cmd+click open blocked");
+  let protocol: string;
+  try {
+    protocol = new URL(uri).protocol;
+  } catch {
+    return;
   }
+  if (protocol !== "http:" && protocol !== "https:" && protocol !== "mailto:")
+    return;
+  openDetached(uri);
+}
+
+/**
+ * Cmd-click on a plain-text `.md` path (a `⎿ Wrote N lines to x.md` result line, or a path in
+ * prose), which xterm never links on its own. A relative path is resolved by the server against
+ * the session's workspace before the viewer opens.
+ */
+function activateMarkdownPath(event: MouseEvent, text: string): void {
+  if (!(event.metaKey || event.ctrlKey)) return;
+  const origin = window.location.origin;
+  if (text.startsWith("/")) {
+    openDetached(viewerUrl(origin, text));
+    return;
+  }
+  const base = window.location.pathname.replace(/\/$/, "");
+  openDetached(
+    fetch(`${base}/markdown?path=${encodeURIComponent(text)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body: { path?: string } | null) =>
+        body?.path ? viewerUrl(origin, body.path) : null,
+      )
+      .catch(() => null),
+  );
+}
+
+/**
+ * Link provider for plain-text markdown paths in a buffer line.
+ * @remarks Columns are mapped cell by cell rather than from the translated string's index: a wide
+ * glyph such as Claude Code's `⏺` takes two cells but one string position, which would shift every
+ * link range after it by one column.
+ */
+function markdownPathProvider(term: Terminal): ILinkProvider {
+  return {
+    provideLinks(y, callback) {
+      const line = term.buffer.active.getLine(y - 1);
+      if (!line) {
+        callback(undefined);
+        return;
+      }
+      let text = "";
+      const cols: number[] = [];
+      for (let x = 0; x < line.length; x++) {
+        const cell = line.getCell(x);
+        if (!cell || cell.getWidth() === 0) continue;
+        const chars = cell.getChars() || " ";
+        for (let i = 0; i < chars.length; i++) cols.push(x);
+        text += chars;
+      }
+      callback(
+        findMarkdownPaths(text).map(({ text: path, index }) => ({
+          text: path,
+          range: {
+            start: { x: cols[index] + 1, y },
+            end: { x: cols[index + path.length - 1] + 1, y },
+          },
+          activate: activateMarkdownPath,
+        })),
+      );
+    },
+  };
 }
 
 /**
@@ -203,7 +267,8 @@ let currentZoom = 1;
  * Builds the terminal instance and the reverse-tabnabbing-safe link handlers, wired to BOTH
  * `WebLinksAddon` (plain-text URLs) and `linkHandler` (OSC-8, the code path real Claude Code `⏺`
  * output uses and `WebLinksAddon` never fires for) so cmd-click parity holds for either link
- * source.
+ * source, plus a third provider that links plain-text `.md` paths (result lines, prose), which
+ * neither of the first two ever match.
  * @remarks `smoothScrollDuration: 120` is set unconditionally rather than gated to desktop: a
  * media-query gate would leave hybrid devices (touchscreen laptops, iPad + trackpad) with an
  * instant jump, and the value is harmless on its own during a touch gesture. It is also inert for
@@ -242,6 +307,7 @@ function createTerminal(
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.loadAddon(new WebLinksAddon(activateLink));
+  term.registerLinkProvider(markdownPathProvider(term));
   term.options.linkHandler = {
     activate: activateLink,
     allowNonHttpProtocols: true,
