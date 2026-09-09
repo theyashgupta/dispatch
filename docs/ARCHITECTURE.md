@@ -1727,7 +1727,12 @@ access token into memory only, calls the OAuth usage endpoint every 15 minutes (
 reference implementation settled on because tighter polling 429s), and caches a status-tagged
 snapshot. A 401 or 403 keeps the last windows and marks them `stale`; Dispatch does not rotate the
 refresh token, because a second rotator races the live REPL and logs both out. The manual refresh
-route is limited to one call per account per 30 seconds.
+route is limited to one call per account per 30 seconds. Every window on the wire also carries a
+derived period (`periodStart`, `periodEnd`): the known window length back from the reset for
+session (5h) and weekly (7d) limits, the local calendar month for the enterprise spend budget
+(the endpoint returns no billing boundaries), and null for unknown kinds, so the popover's pacing
+view can compare usage against elapsed time. `DISPATCH_USAGE_URL` overrides the endpoint at fetch
+time for local stubs; the bearer token goes wherever it points, the same trust as the shell env.
 
 **The data dir has one resolver.** `store/data-dir.ts` owns the `DISPATCH_DIR` override (else
 `~/.dispatch`) because the store and the adapters may not import `services/infra/paths.ts`; before
