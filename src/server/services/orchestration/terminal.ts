@@ -1,3 +1,5 @@
+import fsp from "node:fs/promises";
+import path from "node:path";
 import { store } from "../../store/board.store.js";
 import { ensureTtyd, killTtyd } from "../../adapters/ttyd.js";
 import {
@@ -68,4 +70,42 @@ export async function sessionScrollback(
     .find((entry) => entry.session.id === sessionId);
   if (!pair) return null;
   return captureHistory(pair.session.tmuxSession, limit);
+}
+
+/**
+ * Absolute path of a markdown file Claude printed as a relative path, or null.
+ *
+ * @remarks Claude Code prints paths relative to its own tracked cwd, which the server never
+ * learns (a `cd` inside the session moves it). The session's workspace folder and its immediate
+ * subfolders (one worktree per repo) cover every cwd a Dispatch session starts in or moves into,
+ * so the first candidate that exists wins. Only `.md` files inside the workspace resolve, so an
+ * existence probe cannot be used on anything else.
+ */
+export async function sessionMarkdownPath(
+  sessionId: string,
+  relPath: string,
+): Promise<string | null> {
+  const pair = store
+    .sessionsWithTmux()
+    .find((entry) => entry.session.id === sessionId);
+  const root = pair?.session.workspacePath;
+  if (!root || !/\.(md|markdown)$/i.test(relPath)) return null;
+  const dirs = [root];
+  try {
+    for (const entry of await fsp.readdir(root, { withFileTypes: true })) {
+      if (entry.isDirectory()) dirs.push(path.join(root, entry.name));
+    }
+  } catch {
+    return null;
+  }
+  for (const dir of dirs) {
+    const candidate = path.resolve(dir, relPath);
+    if (!candidate.startsWith(root + path.sep)) continue;
+    try {
+      if ((await fsp.stat(candidate)).isFile()) return candidate;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }

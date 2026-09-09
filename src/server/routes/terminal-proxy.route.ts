@@ -4,7 +4,10 @@ import {
   httpForward,
   resolveLiveTtydPort,
 } from "../adapters/terminal-proxy.js";
-import { sessionScrollback } from "../services/orchestration/terminal.js";
+import {
+  sessionMarkdownPath,
+  sessionScrollback,
+} from "../services/orchestration/terminal.js";
 import { WEB_DIST_DIR } from "../services/infra/paths.js";
 
 /**
@@ -45,6 +48,32 @@ function scrollbackHandler(req: Request<{ id: string }>, res: Response): void {
 }
 
 /**
+ * Resolve a relative `.md` path Claude printed into the session's workspace, as `{ path }`.
+ *
+ * @remarks The terminal page's plain-text link provider calls this on cmd-click before it opens
+ * the viewer, which only accepts absolute paths. 404 covers an unknown session, a non-markdown
+ * name, and a file that exists in none of the workspace candidates alike, so the status is never
+ * an existence oracle for paths outside the workspace.
+ */
+function markdownHandler(req: Request<{ id: string }>, res: Response): void {
+  const rel = req.query.path;
+  if (typeof rel !== "string") {
+    res.status(400).end();
+    return;
+  }
+  sessionMarkdownPath(req.params.id, rel).then(
+    (resolved) => {
+      if (resolved == null) {
+        res.status(404).end();
+        return;
+      }
+      res.set("Cache-Control", "no-store").json({ path: resolved });
+    },
+    () => res.status(404).end(),
+  );
+}
+
+/**
  * Card.id-keyed terminal reverse-proxy, mounted as a sibling top-level path (never nested under
  * `/api` — a byte-stream forward has no business behind the JSON-oriented `apiRouter` gate). No
  * auth gating of its own (nothing beyond loopback can reach it yet); this router is the single
@@ -72,6 +101,7 @@ function scrollbackHandler(req: Request<{ id: string }>, res: Response): void {
 export const terminalProxyRouter = Router();
 
 terminalProxyRouter.get("/:id/terminal/scrollback", scrollbackHandler);
+terminalProxyRouter.get("/:id/terminal/markdown", markdownHandler);
 
 terminalProxyRouter.all("/:id/terminal{/*rest}", (req, res) => {
   const port = resolveLiveTtydPort(req.params.id);
