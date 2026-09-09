@@ -68,6 +68,10 @@ export async function reconnectTerminal(cardId: string): Promise<void> {
  * `card.hookToken` in place: reading it after the mint would hand `registerHookToken` the token it
  * is about to register, degenerating re-mint hygiene into `delete(token)` then `set(token)` and
  * leaving the genuinely stale credential resolving forever.
+ * @remarks (LOCAL-13) The resume id is the session's `claudeSessionId` mirror, the newest
+ * conversation node by activity. A "No conversation found" refusal stamps THAT node missing via
+ * `store.markClaudeSessionMissing`, so the next Resume falls back to the previous node on the same
+ * branch and only reaches `--continue` when none is left.
  * @remarks (LOCAL-2) Resume targets the ACTIVE session record, whatever its ordinal: the tmux
  * name derives from that record's own `branch` (fallback: the workspacePath basename, identical
  * for every generation of card), NEVER from `card.identifier`, which is only session 1's name and
@@ -82,6 +86,7 @@ export async function resumeSession(cardId: string): Promise<void> {
   store.beginStart(cardId);
   let killTarget: string | null = null;
   let sessionId: string | undefined;
+  let attempted: string | undefined;
   try {
     const card = store.getCard(cardId);
     if (!card?.workspacePath || !card.activeSessionId) return;
@@ -91,9 +96,8 @@ export async function resumeSession(cardId: string): Promise<void> {
     const session =
       "dsp-" + (active?.branch ?? path.basename(card.workspacePath));
     killTarget = session;
-    const resumeArgs = card.claudeSessionId
-      ? ["--resume", card.claudeSessionId]
-      : ["--continue"];
+    attempted = card.claudeSessionId;
+    const resumeArgs = attempted ? ["--resume", attempted] : ["--continue"];
 
     if (await hasSession(`=${session}`)) {
       if (card.hookToken && card.activeSessionId) {
@@ -138,8 +142,12 @@ export async function resumeSession(cardId: string): Promise<void> {
     await ensureTerminal(cardId, sessionId, session);
   } catch (err) {
     if (killTarget != null) await killSession(`=${killTarget}`);
-    if (err instanceof StartStepError && RESUME_MISSING.test(err.stderr)) {
-      await store.resetClaudeSessionId(cardId, sessionId);
+    if (
+      attempted !== undefined &&
+      err instanceof StartStepError &&
+      RESUME_MISSING.test(err.stderr)
+    ) {
+      await store.markClaudeSessionMissing(cardId, sessionId, attempted);
     }
     const step = err instanceof StartStepError ? err.step : "unknown step";
     await store.recordResumeFailure(
