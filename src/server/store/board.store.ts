@@ -35,6 +35,7 @@ import {
 } from "../../shared/column-transitions.js";
 import { NEEDS_INPUT_MARKER_PREFIX } from "../../shared/marker-key.js";
 import { isStartingCard, reconcile } from "./mapping.js";
+import { latestClaudeSession, touchClaudeSession } from "./claude-sessions.js";
 
 export const BOARD_PATH = path.join(DISPATCH_DATA_DIR, "board.json");
 
@@ -183,7 +184,7 @@ function syncedFieldsChanged(prev: Card, next: Card): boolean {
  * knows a migration this one does not.
  * @see docs/ARCHITECTURE.md#downgrade-safety
  */
-const SESSION_SCHEMA_VERSION = 1;
+const SESSION_SCHEMA_VERSION = 2;
 
 /**
  * The six flat session fields that mirror the card's active session record, as a value the
@@ -328,6 +329,34 @@ function migrateCardsToSessionEntity(cards: Card[]): number {
     card.sessions = [session];
     card.activeSessionId = session.id;
     migrated += 1;
+  }
+  return migrated;
+}
+
+/**
+ * Schema version 2: seed a `claudeSessions` node for every record that already names a
+ * conversation id.
+ *
+ * @remarks Per-record idempotent and unconditioned on the persisted version, for the same reason
+ * {@link migrateCardsToSessionEntity} is: an older build's persist drops `schemaVersion`. The node
+ * is stamped `createdAt` = the record's `createdAt` and `lastActiveAt` = the record's `updatedAt`,
+ * the closest persisted evidence of when that conversation started and was last touched, which
+ * keeps the derived mirror equal to the id the record held before this pass.
+ */
+function migrateClaudeSessionNodes(cards: Card[]): number {
+  let migrated = 0;
+  for (const card of cards) {
+    for (const session of card.sessions ?? []) {
+      const id = session.claudeSessionId;
+      if (id === undefined) continue;
+      if (session.claudeSessions?.some((n) => n.id === id)) continue;
+      (session.claudeSessions ??= []).push({
+        id,
+        createdAt: session.createdAt,
+        lastActiveAt: session.updatedAt,
+      });
+      migrated += 1;
+    }
   }
   return migrated;
 }
@@ -496,9 +525,9 @@ class BoardStore extends EventEmitter {
    * through here, so a relaunched/resumed session always starts hook-silent and re-proves traffic.
    * @remarks Deliberately EXCLUDES `claudeSessionId` — the on-disk Claude transcript outlives a
    * dead tmux session, so a crashed card (markSessionLost calls this) and a failed resume
-   * (recordResumeFailure) must KEEP the id to `--resume` back into the original conversation. The
-   * field is RESET pre-spawn by the start saga's launch step (resetClaudeSessionId — a fresh
-   * kickoff is a new conversation) and CLEARED by Done cleanup (recordCleanupWarning, finishCleanup)
+   * (recordResumeFailure) must KEEP the id to `--resume` back into the original conversation. A
+   * Restart's fresh kickoff simply appends a new conversation node on its first hook event
+   * (LOCAL-13); the field is CLEARED only by Done cleanup (recordCleanupWarning, finishCleanup)
    * with explicit lines; every other session-clearing mutator KEEPS it.
    * @remarks `sessionId` (Phase 91) lets a caller clear a SPECIFIC session's token instead of the
    * card's active one, defaulting to `card.activeSessionId` when omitted — resolved the same way
@@ -536,8 +565,8 @@ class BoardStore extends EventEmitter {
    * @remarks `updatedAt` means what {@link Session} says it means — the timestamp of the record's
    * last FIELD MUTATION, not of the last mutator call. It is re-stamped only when the patch
    * actually changes a value, so the no-op patches this chokepoint legitimately receives
-   * (`clearHookToken` on a card whose token is already `undefined`, `resetClaudeSessionId` on a
-   * card with no id, `clearStaleTtydPort` on a card with no port) leave it alone. A consumer using
+   * (`clearHookToken` on a card whose token is already `undefined`, `clearStaleTtydPort` on a
+   * card with no port) leave it alone. A consumer using
    * `updatedAt` to detect real change — a diff, a staleness heuristic, a "last activity" line —
    * can therefore trust it. On the mint path it is not re-stamped at all, which is what keeps the
    * same-instant promise below literally true rather than true-unless-the-two-clock-reads-straddle-
@@ -903,6 +932,7 @@ class BoardStore extends EventEmitter {
     }
     this.schemaVersion = SESSION_SCHEMA_VERSION;
     const repaired = this.repairDowngradeDrift(cards);
+    const nodesMigrated = migrateClaudeSessionNodes(cards);
     this.hydrateFromParsed({
       cards,
       syncedAt: meta.syncedAt ?? null,
@@ -926,7 +956,13 @@ class BoardStore extends EventEmitter {
           `board. Reconciled the record to the flat value for: ${repaired.join("; ")}.`,
       );
     }
-    if (migrationDue || repaired.length > 0) await this.enqueue(() => []);
+    if (nodesMigrated > 0) {
+      console.log(
+        `[store] conversation-node migration: ${nodesMigrated} session record(s) gained a claudeSessions node.`,
+      );
+    }
+    if (migrationDue || repaired.length > 0 || nodesMigrated > 0)
+      await this.enqueue(() => []);
   }
 
   /**
@@ -1459,19 +1495,65 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Stamp the Claude CLI `session_id` first-event-wins so exact Resume can `--resume <id>` back
-   * into this conversation (SID-01). Single-field enqueue (setStatusReason precedent) with an
-   * in-queue `== null` re-check (markHookRouted precedent), so the never-overwrite decision is
-   * authoritative HERE: a racing second hook event finds the id already set and no-ops. The
-   * differing-id case is handled by the caller (a logged mismatch), never a silent overwrite.
-   * No-op if the id is unknown or already stamped.
-   * @remarks `sessionId` (Phase 91) is the RESOLVED session record's own id, required and
-   * defaulting to `card.activeSessionId` when the caller passes `undefined` — the never-overwrite
-   * re-check reads THAT session's own `claudeSessionId`, not the card's flat mirror, so a sibling
-   * that already stamped never suppresses this session's own first-event capture.
+   * Record that hook traffic named Claude conversation `sid` in a session: appends a
+   * `claudeSessions` node for a new id or bumps a known node's `lastActiveAt`, then re-derives the
+   * session's `claudeSessionId` mirror from the newest non-missing node.
+   *
+   * @remarks Peeks with the pure {@link touchClaudeSession} BEFORE enqueueing, because every
+   * enqueue persists the whole board and broadcasts a snapshot: a throttled bump on the node that
+   * is already latest returns without touching the queue at all. The queued mutator re-runs the
+   * touch against live state with a fresh clock, so a call that lost the race applies nothing.
    * @see docs/ARCHITECTURE.md#hooks-status-channel
    */
   setClaudeSessionId(
+    id: string,
+    sessionId: string | undefined,
+    sid: string,
+  ): Promise<void> {
+    const peek = this.cards.get(id);
+    const peekTarget = peek?.sessions?.find(
+      (s) => s.id === (sessionId ?? peek.activeSessionId),
+    );
+    if (
+      !peekTarget ||
+      touchClaudeSession(
+        peekTarget.claudeSessions,
+        sid,
+        new Date().toISOString(),
+      ) === undefined
+    )
+      return Promise.resolve();
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      const targetId = sessionId ?? card.activeSessionId;
+      const target = card.sessions?.find((s) => s.id === targetId);
+      if (!target) return [];
+      const next = touchClaudeSession(
+        target.claudeSessions,
+        sid,
+        new Date().toISOString(),
+      );
+      if (next === undefined) return [];
+      target.claudeSessions = next;
+      this.setActiveSession(
+        card,
+        { claudeSessionId: latestClaudeSession(next)?.id },
+        targetId,
+      );
+      return [];
+    });
+  }
+
+  /**
+   * Stamp conversation node `sid` missing and re-derive the session's `claudeSessionId` mirror.
+   *
+   * @remarks Claude refused the node on `--resume`, so Resume falls back to the previous node on
+   * the same branch and reaches `--continue` only when none is left; the node stays in the
+   * history.
+   * @see docs/ARCHITECTURE.md#hooks-status-channel
+   */
+  markClaudeSessionMissing(
     id: string,
     sessionId: string | undefined,
     sid: string,
@@ -1481,33 +1563,14 @@ class BoardStore extends EventEmitter {
       if (!card) return [];
       const targetId = sessionId ?? card.activeSessionId;
       const target = card.sessions?.find((s) => s.id === targetId);
-      if (target && target.claudeSessionId == null)
-        this.setActiveSession(card, { claudeSessionId: sid }, targetId);
-      return [];
-    });
-  }
-
-  /**
-   * Clear a session's recorded Claude session id BEFORE a fresh session spawns. Called by the
-   * start saga's launch step (a new kickoff is a new conversation) so the reset lands ahead of the
-   * kickoff paste's first hook event — otherwise a restart of a card that still holds its old id
-   * would make the new session's early events log a spurious `session_id mismatch` and drop the
-   * genuine first capture. Symmetric with the pre-spawn hook-token mint. Distinct from the
-   * first-event-wins setter and never called on the resume path, which must KEEP the id.
-   * No-op if the id is unknown.
-   * @remarks (Phase 96, found alongside F-96-A) `sessionId`, optional and defaulting to
-   * `card.activeSessionId`, is required for the same reason `mintHookChannel` needs it: a
-   * `newSession:true` launch's reserved session is not yet active
-   * (`D-NOPROMOTE-ON-RESERVE`), so the implicit default previously cleared the CURRENT active
-   * session's own `claudeSessionId` — wiping an unrelated, still-live sibling's `--resume`
-   * capability as a side effect of starting a second session.
-   * @see docs/ARCHITECTURE.md#hooks-status-channel
-   */
-  resetClaudeSessionId(id: string, sessionId?: string): Promise<void> {
-    return this.enqueue(() => {
-      const card = this.cards.get(id);
-      if (card)
-        this.setActiveSession(card, { claudeSessionId: undefined }, sessionId);
+      const node = target?.claudeSessions?.find((n) => n.id === sid);
+      if (!target || !node || node.missingAt != null) return [];
+      node.missingAt = new Date().toISOString();
+      this.setActiveSession(
+        card,
+        { claudeSessionId: latestClaudeSession(target.claudeSessions)?.id },
+        targetId,
+      );
       return [];
     });
   }
