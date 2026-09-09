@@ -1155,6 +1155,24 @@ imperative on purpose: a reader who only sees today's forced-classic, viewport-m
 otherwise mistake this path for dead code and delete a real degrade path out from under the users
 who still exercise it.
 
+**6. The pane must sit at row 0 and fill the client.** Local scrollback and follow-bottom both
+depend on tmux scrolling the WHOLE client screen: tmux forwards a pane's linefeed as a DECSTBM
+scroll region covering the pane's rows, and xterm.js only pushes a scrolled-off row into local
+scrollback when that region is the full screen. Any row tmux draws above or below the pane shrinks
+the region, and from then on the viewport stops growing, so a user who has scrolled up a few rows
+watches the live pane scroll beneath a frozen row with the newest output cut off below the
+viewport. Two tmux features put such a row there. The status bar is pinned off at session scope
+(`pinStatusOff`, `adapters/tmux.ts`, LOCAL-7). Claude Code's tmux teammate backend runs
+`set -w pane-border-status top` on the leader window when it spawns its first teammate and never
+reverts it, so after the team ends the window keeps a `0 "<pane title>"` border row above the pane
+(LOCAL-16). `pinPaneBorderOff` (`adapters/tmux.ts`) turns it back off the moment the window is
+back to one pane, from a session-scoped `window-layout-changed` hook, and runs the same reset
+directly on every `newSession` and `ensureTerminal` so a reattach heals a session that was already
+stuck. While a team is alive the option is deliberately left alone: the teammate panes are what
+the border titles label, and a multi-pane window cannot linefeed-scroll the client anyway.
+`tmux-pane-border.test.ts` fails if the pane does not return to `pane_top 0` after a simulated
+teammate split.
+
 **Known and accepted: two rough edges, recorded rather than fixed.** Seeded history is captured at
 the PANE's own width, so a narrower phone rewraps old lines oddly; this is cosmetic and accepted,
 not a bug to chase. A reconnect duplicates one screenful at the seam, because the seed runs once on

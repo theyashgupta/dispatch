@@ -226,6 +226,39 @@ export async function pinStatusOff(name: string): Promise<void> {
 }
 
 /**
+ * Reset `pane-border-status` to off whenever session `name`'s window is back to a single pane.
+ *
+ * @remarks LOCAL-16: Claude Code's tmux teammate backend runs `set -w pane-border-status top` on
+ * the leader window when it spawns its first teammate and never reverts it, which leaves a title
+ * row above the pane after the team ends, so tmux scrolls the pane as a partial region that
+ * xterm.js never pushes into local scrollback and the viewport stops following streamed output.
+ * The reset runs once now, so a reattach heals an already-affected session, and again from a
+ * session-scoped `window-layout-changed` hook, which fires when the last teammate pane closes.
+ * Targets use the `=name:` window form because a bare `=name` is an exact window-name match for
+ * window and pane targets, and the hook carries explicit targets because its default context is
+ * not guaranteed to be this session on a shared server.
+ */
+export async function pinPaneBorderOff(name: string): Promise<void> {
+  const window = `=${name}:`;
+  const onePane = "#{==:#{window_panes},1}";
+  const off = `set -w -t ${window} pane-border-status off`;
+  await tmux([
+    "set-hook",
+    "-t",
+    window,
+    "window-layout-changed",
+    `if -F -t ${window} '${onePane}' '${off}'`,
+    ";",
+    "if",
+    "-F",
+    "-t",
+    window,
+    onePane,
+    off,
+  ]);
+}
+
+/**
  * True if tmux session `name` exists (`has-session -t <name>` exits 0).
  * Swallows failure into `false` (never rethrows) — a dead tmux server means "no session",
  * and this is the idempotency probe (an existing `dsp-<id>` session → reattach, never recreate).
@@ -384,6 +417,7 @@ export async function newSession(
   ]);
   await pinMouseOff(name);
   await pinStatusOff(name);
+  await pinPaneBorderOff(name);
   await ensureHyperlinksTerminalFeature();
   await ensureNoAltScreenOverride();
 }
