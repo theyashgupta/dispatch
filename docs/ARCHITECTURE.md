@@ -163,6 +163,19 @@ reading byte-identical values while the entity lands underneath them. `branch` a
 sit adjacent to the six on `Card` but are card-only and stay OUT of the chokepoint's scope — they
 do not move onto the session record and are not projected from it.
 
+**`claudeSessionId` is itself derived (LOCAL-13).** A session record holds `claudeSessions`, one
+node per Claude conversation id the hooks reported in its pane (`{ id, createdAt, lastActiveAt,
+missingAt? }`, oldest first, never removed). The record's `claudeSessionId` is always the newest
+node by `lastActiveAt` that carries no `missingAt`, re-derived through `setActiveSession` by the two
+node mutators `setClaudeSessionId` and `markClaudeSessionMissing` (`src/server/store/claude-sessions.ts`
+holds the pure resolution and upsert). The card's flat field then mirrors the active record as
+before, so every reader of `claudeSessionId` is unchanged. The tree a ticket forms is card, then
+session records (branches), then conversation nodes. `claudeSessions` never rides the wire:
+`redactCard` drops `sessions` wholesale and field-picks `SessionSummary`. Boot migration schema
+version 2 (`migrateClaudeSessionNodes`) gives every record that already names an id one node
+stamped with the record's `createdAt`/`updatedAt`, so a migrated ticket resumes the same
+conversation it resumed before.
+
 Exactly one method may assign the six flat fields: `BoardStore#setActiveSession`
 (`src/server/store/board.store.ts`). Every other assignment of any of the six field names anywhere
 in `src/` is a defect. `scripts/check-invariants.mjs` polices this repo-wide, and it fences the two
@@ -1620,7 +1633,7 @@ Otherwise it types the same launch line a first start would, through `steps.ts#t
 conversation otherwise (never a guessed `--continue`: measured to refuse with "No conversation found
 to continue" even with a transcript on disk for the cwd, stranding the pane at the prompt; a person
 can type `claude --continue` there by hand), then drives the same readiness poll in the background
-so claude's resume-mode dialog is answered. A recorded id Claude refuses with "No conversation found" (a session killed before its transcript was flushed prints its own resume hint and then rejects it) fails the readiness poll at once (`RESUME_MISSING`), and both Run Claude and Resume then drop the recorded id, so the next click or Resume starts fresh instead of failing forever. The route awaits the outcome instead of the usual
+so claude's resume-mode dialog is answered. A recorded id Claude refuses with "No conversation found" (a session killed before its transcript was flushed prints its own resume hint and then rejects it) fails the readiness poll at once (`RESUME_MISSING`), and both Run Claude and Resume then stamp that conversation's node missing (`store.markClaudeSessionMissing`), so the next click or Resume falls back to the previous conversation on the same branch and reaches `--continue` only when no node is left. The route awaits the outcome instead of the usual
 fire-and-forget 202 because the 409 is the only feedback a refused click has; the check is a handful
 of tmux round trips. The browser terminal is a ttyd iframe, so this endpoint is how the panel's Run
 Claude button types; a person at the prompt gets the same result from Up-arrow then Enter.
@@ -2351,6 +2364,16 @@ script POSTs `Stop` and `UserPromptSubmit` payloads to the loopback-only `/api/h
 (`routes/hooks.route.ts`), which resolves the per-session token and delegates to
 `services/domain/hook-events.ts`. The channel changes the transport, never the contract — the kickoff
 wording, `MARKER_RE`, and the markers replay corpus stay frozen.
+
+**Conversation node history (LOCAL-13).** Every authenticated hook event carries Claude's own
+`session_id`. The hook path hands it to `store.setClaudeSessionId`, which keeps one node per id on
+the resolved session record: an unseen id appends a node (this is how a `/clear` in the pane, and
+the new conversation started from a handoff prompt, become visible), a known id bumps that node's
+`lastActiveAt`. The store peeks with the pure `touchClaudeSession` before enqueueing, so a bump on
+the node that is already newest is dropped for 60 seconds and never persists or broadcasts; a
+switch to any other node persists at once because it changes what Resume opens. There is no
+"session_id mismatch" log any more: a differing id is a new node, not an error. Nodes are never
+deleted; a conversation Claude refuses on `--resume` is stamped `missingAt` and skipped.
 
 **Edge-triggered vs level-triggered — how the two channels compose.** The hook channel is
 EDGE-triggered: one `Stop` = one event, delivered once, never re-observed. The pane watcher is

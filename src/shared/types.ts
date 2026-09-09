@@ -258,17 +258,12 @@ export interface Card {
    */
   hookRoutedAt?: string;
   /**
-   * The Claude CLI session id captured first-event-wins from the v1.8 hook payload (`session_id`).
-   * Drives exact Resume: `claude --resume <id>` reconnects to this exact conversation instead of
-   * `--continue` (which can pick up an unrelated manual claude session started in the same
-   * worktree). NON-SECRET by explicit decision: rides `snapshot()` UNREDACTED (like `hookRoutedAt`,
-   * unlike `hookToken`). Its lifecycle deliberately does NOT follow the `clearHookToken`
-   * chokepoint — markSessionLost and recordResumeFailure KEEP it (the on-disk transcript outlives a
-   * dead tmux session, and a failed resume must be retryable via `--resume`), the start saga's
-   * launch step RESETS it pre-spawn (a fresh kickoff is a new conversation — reset before the
-   * kickoff's first hook event so a restart never logs a spurious mismatch), Done cleanup CLEARS it.
-   * A genuinely gone conversation therefore wedges Resume on `--resume` until Restart (a new
-   * conversation) — intentional: falling back to `--continue` would resurrect the manual-pickup bug.
+   * Flat mirror of the active session's `claudeSessionId`, the conversation `claude --resume`
+   * reopens. NON-SECRET by explicit decision: rides `snapshot()` UNREDACTED like `hookRoutedAt`.
+   *
+   * @remarks Its lifecycle deliberately does NOT follow the `clearHookToken` chokepoint:
+   * markSessionLost and recordResumeFailure KEEP it, because the on-disk transcript outlives a dead
+   * tmux session and a failed resume must be retryable. Only Done cleanup clears it.
    * @see docs/ARCHITECTURE.md#hooks-status-channel
    */
   claudeSessionId?: string;
@@ -491,10 +486,21 @@ export interface Session {
    */
   hookToken?: string;
   /**
-   * The Claude CLI session id captured first-event-wins from the hook payload. NON-SECRET by
-   * explicit decision: rides `snapshot()` unredacted, matching `Card.claudeSessionId`.
+   * The Claude CLI conversation id Resume relaunches with. NON-SECRET by explicit decision: rides
+   * `snapshot()` unredacted, matching `Card.claudeSessionId`.
+   * @remarks Derived, never authored: always the newest {@link ClaudeSession} in `claudeSessions`
+   * by `lastActiveAt` that carries no `missingAt`, or absent when no such node exists. Kept as a
+   * field so every reader (resume, relaunch, wire) stays unchanged.
    */
   claudeSessionId?: string;
+  /**
+   * Every Claude conversation that ran in this session's pane, oldest first, one node per
+   * hook-reported `session_id`.
+   *
+   * @remarks A `/clear` starts a new conversation and appends a node; nodes are never removed.
+   * Never rides the wire, `redactCard` drops `sessions`.
+   */
+  claudeSessions?: ClaudeSession[];
   /** Per-ticket workspace folder containing the git worktrees. Mirrored onto `Card.workspacePath` while active. */
   workspacePath?: string;
   /** Chosen workspace snapshot at start — absolute repo paths. Mirrored onto `Card.workspace` while active. */
@@ -594,6 +600,17 @@ export interface Session {
    * @see docs/ARCHITECTURE.md#session-inheritance
    */
   builtFrom?: string;
+}
+
+export interface ClaudeSession {
+  /** The Claude CLI `session_id` from the hook payload. */
+  id: string;
+  /** ISO timestamp of the first hook event that named this conversation. */
+  createdAt: string;
+  /** ISO timestamp of the latest hook event that named this conversation. */
+  lastActiveAt: string;
+  /** ISO timestamp of the resume attempt that found this conversation's file gone. */
+  missingAt?: string;
 }
 
 /**
