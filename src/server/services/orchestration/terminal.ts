@@ -4,6 +4,7 @@ import {
   captureHistory,
   hasSession,
   pinMouseOff,
+  pinPaneBorderOff,
   pinStatusOff,
 } from "../../adapters/tmux.js";
 
@@ -38,6 +39,7 @@ export async function ensureTerminal(
     }
     await pinMouseOff(session);
     await pinStatusOff(session);
+    await pinPaneBorderOff(session);
     const port = await ensureTtyd(session, sessionId);
     const recorded = await store.setTtydPortIfSession(cardId, session, port);
     if (!recorded) killTtyd(session);
