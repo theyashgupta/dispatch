@@ -72,43 +72,6 @@ export function reapActivityThrottle(
 }
 
 /**
- * Composite-keyed ({@link throttleKey}) map of `"recorded|incoming"` tuple to the epoch ms it
- * last logged — the `session_id mismatch` dedupe state. Nested one level deeper than
- * {@link lastActivityStampMs} so the whole per-session bucket drops in O(1) at session death via
- * {@link reapMismatchThrottle}, matching that same map's reap discipline rather than a separate
- * TTL-sweep timer. `recorded` is first-event-wins for a session's life, so in practice at most
- * one tuple exists per session — but a token-holding client sending a distinct `incoming` on
- * every event would otherwise grow the inner map unboundedly for the life of a single session,
- * which the outer reap alone cannot bound; see {@link MISMATCH_MAX_TUPLES_PER_CARD}.
- * @see docs/ARCHITECTURE.md#hooks-status-channel
- */
-const mismatchLoggedAt = new Map<string, Map<string, number>>();
-
-/** Suppression window for a repeated identical `session_id mismatch` tuple. */
-const MISMATCH_LOG_WINDOW_MS = 60_000;
-
-/**
- * Upper bound on distinct `(recorded, incoming)` tuples tracked per session within a single live
- * session, enforced by evicting the oldest (lowest `lastLoggedMs`) entry before insertion would
- * exceed it. Bounds the inner map DURING a session, not only at session death.
- */
-const MISMATCH_MAX_TUPLES_PER_CARD = 16;
-
-/**
- * Drop a session's mismatch-dedupe bucket when its hook channel dies. Wired into the same
- * session-death chokepoint as {@link reapActivityThrottle} so the outer map is bounded by
- * construction — no separate timer. Composite-keyed ({@link throttleKey}), matching
- * {@link reapActivityThrottle}.
- * @see docs/ARCHITECTURE.md#hooks-status-channel
- */
-export function reapMismatchThrottle(
-  cardId: string,
-  sessionId: string | undefined,
-): void {
-  mismatchLoggedAt.delete(throttleKey(cardId, sessionId));
-}
-
-/**
  * Composite-keyed ({@link throttleKey}) monotonic counter used ONLY as the fallback discriminator
  * for a synthesized `PreToolUse` marker when the payload carries no usable `tool_use_id` (HOOK-03
  * follow-up): `markerKey` is entirely derived from `Marker.reason`, so a SECOND same-session pause
@@ -261,11 +224,14 @@ function resolvePreToolUseDiscriminator(
  * pause's synthesized marker distinct so a second same-session pause is never deduped against the
  * first's still-standing `lastMarker`. Unknown events end after the latch/stamp as no-ops.
  * @remarks `sessionId` (Phase 91) is the SOLE source of session identity, resolved by the route
- * exclusively from `resolveHookToken` — a body-claimed session id is never trusted, matching the
- * existing card-identity policy. The hook-routed latch gate and the `session_id` mismatch
- * comparison both read the RESOLVED session's own fields (`sessions.find(s => s.id === sessionId)`),
- * never the card's flat mirror — a sibling that already routed, or already recorded a Claude
- * session id, must never suppress or short-circuit this session's own first-event evidence.
+ * exclusively from `resolveHookToken`: a body-claimed session id is never trusted, matching the
+ * existing card-identity policy. The hook-routed latch gate reads the RESOLVED session's own
+ * fields (`sessions.find(s => s.id === sessionId)`), never the card's flat mirror, so a sibling
+ * that already routed can never suppress this session's own first-event evidence.
+ * @remarks Every valid `session_id` is handed to `store.setClaudeSessionId`, which keeps one
+ * conversation node per id on the resolved session (LOCAL-13): a `/clear` in the pane starts a new
+ * conversation whose first hook event appends a node, so Resume follows the user to it. The
+ * store's own throttle keeps the per-event call cheap.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 export async function applyHookEvent(
@@ -293,38 +259,7 @@ export async function applyHookEvent(
   const key = throttleKey(cardId, sessionId);
   const sid = body?.session_id;
   if (typeof sid === "string" && /^[\w-]{1,256}$/.test(sid)) {
-    const recorded = store
-      .getCard(cardId)
-      ?.sessions?.find((s) => s.id === sessionId)?.claudeSessionId;
-    if (recorded == null) {
-      await store.setClaudeSessionId(cardId, sessionId, sid);
-    } else if (recorded !== sid) {
-      const mismatchKey = `${recorded}|${sid}`;
-      const perSession = mismatchLoggedAt.get(key) ?? new Map<string, number>();
-      const last = perSession.get(mismatchKey);
-      const now = Date.now();
-      if (last === undefined || now - last >= MISMATCH_LOG_WINDOW_MS) {
-        console.warn(
-          `[hook] session_id mismatch card=${cardId} recorded=${recorded} incoming=${sid}`,
-        );
-        if (
-          !perSession.has(mismatchKey) &&
-          perSession.size >= MISMATCH_MAX_TUPLES_PER_CARD
-        ) {
-          let oldestKey: string | undefined;
-          let oldestMs = Infinity;
-          for (const [k, ms] of perSession) {
-            if (ms < oldestMs) {
-              oldestMs = ms;
-              oldestKey = k;
-            }
-          }
-          if (oldestKey !== undefined) perSession.delete(oldestKey);
-        }
-        perSession.set(mismatchKey, now);
-        mismatchLoggedAt.set(key, perSession);
-      }
-    }
+    await store.setClaudeSessionId(cardId, sessionId, sid);
   }
 
   const event = body?.hook_event_name;

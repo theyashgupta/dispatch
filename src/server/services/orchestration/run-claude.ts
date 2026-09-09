@@ -64,17 +64,26 @@ async function relaunch(
   ).catch(() => null);
   if (account == null) return "account";
 
+  const attempted = card.claudeSessionId;
   const { argv } = await buildLaunch(
     account,
-    card.claudeSessionId ? ["--resume", card.claudeSessionId] : [],
+    attempted ? ["--resume", attempted] : [],
     existingHooks(card),
   );
   await typeLaunchLine(tmuxSession, argv);
   void awaitReplReady(tmuxSession).catch(async (err: unknown) => {
-    if (err instanceof StartStepError && RESUME_MISSING.test(err.stderr)) {
-      await store.resetClaudeSessionId(card.id, card.activeSessionId);
+    if (
+      attempted !== undefined &&
+      err instanceof StartStepError &&
+      RESUME_MISSING.test(err.stderr)
+    ) {
+      await store.markClaudeSessionMissing(
+        card.id,
+        card.activeSessionId,
+        attempted,
+      );
       console.warn(
-        `[run-claude] recorded conversation missing for card ${card.id}; the next relaunch starts fresh`,
+        `[run-claude] recorded conversation missing for card ${card.id}; the next relaunch falls back to the previous conversation`,
       );
       return;
     }

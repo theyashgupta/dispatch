@@ -208,15 +208,22 @@ export async function isolateTmuxEnv(): Promise<TmuxEnv> {
  * the READY footer, exits on SIGINT like the real one does on Ctrl-C, and refuses a
  * `--resume missing-*` id with Claude's own "No conversation found" message.
  */
-export function writeFakeRepl(env: IsolatedEnv, argvFile: string): void {
+export function writeFakeRepl(
+  env: IsolatedEnv,
+  argvFile: string,
+  opts: { refuseContinue?: boolean } = {},
+): void {
   process.env.FAKE_CLAUDE_ARGV_FILE = argvFile;
+  const refuseContinue = opts.refuseContinue
+    ? `  *" --continue "*) echo "No conversation found to continue"; exit 1 ;;\n`
+    : "";
   fs.writeFileSync(
     path.join(env.binDir, "claude"),
     `#!/bin/sh
 printf '%s\\n' "$@" > "$FAKE_CLAUDE_ARGV_FILE"
 case " $* " in
   *" --resume missing-"*) echo "No conversation found with session ID: $2"; exit 1 ;;
-esac
+${refuseContinue}esac
 echo "? for shortcuts"
 trap 'exit 0' INT
 while :; do sleep 1; done

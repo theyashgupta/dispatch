@@ -126,4 +126,51 @@ void test(
   },
 );
 
+void test(
+  "launchClaude never clears a session's conversation nodes, so a Restart appends instead of resetting",
+  { skip: !env.canRunRealTmux },
+  async () => {
+    const argvFile = path.join(env.root, "claude-argv-restart.txt");
+    writeFakeRepl(env, argvFile);
+    await store.load();
+    const card = await store.createLocalCard("restart keeps nodes", "");
+    const tmuxSession = `dsp-restarttest-${process.pid}`;
+    const cwd = path.join(env.root, "worktree-restart");
+    fs.mkdirSync(cwd, { recursive: true });
+    await store.completeStart(card.id, undefined, {
+      workspacePath: cwd,
+      tmuxSession,
+      branch: "restart-keeps-nodes",
+    });
+    const sessionId = store.getCard(card.id)!.activeSessionId!;
+    await store.setClaudeSessionId(card.id, sessionId, "conv-before-restart");
+    try {
+      assert.equal(
+        await launchClaude({
+          cardId: card.id,
+          sessionId,
+          tmuxSession,
+          cwd,
+          leadingArgs: [],
+          account: { id: "default" },
+        }),
+        true,
+      );
+      assert.deepEqual(
+        store
+          .getCard(card.id)
+          ?.sessions?.find((s) => s.id === sessionId)
+          ?.claudeSessions?.map((n) => n.id),
+        ["conv-before-restart"],
+      );
+      assert.equal(
+        store.getCard(card.id)?.claudeSessionId,
+        "conv-before-restart",
+      );
+    } finally {
+      await env.killServer();
+    }
+  },
+);
+
 void test.after(() => env.cleanup());

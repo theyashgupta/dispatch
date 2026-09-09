@@ -34,10 +34,7 @@ import {
   ensureNoAltScreenOverride,
 } from "../adapters/tmux.js";
 import { unregisterHookToken } from "../services/domain/hook-tokens.js";
-import {
-  reapActivityThrottle,
-  reapMismatchThrottle,
-} from "../services/domain/hook-events.js";
+import { reapActivityThrottle } from "../services/domain/hook-events.js";
 import { seedPlaybooks } from "../services/domain/playbooks.js";
 import { startPoller } from "../adapters/poller.js";
 import { sendPushForCard } from "../services/domain/push-send.js";
@@ -316,7 +313,6 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   store.setHookTokenReleaser((token, cardId, sessionId) => {
     unregisterHookToken(token);
     reapActivityThrottle(cardId, sessionId);
-    reapMismatchThrottle(cardId, sessionId);
   });
 
   await seedPlaybooks();
