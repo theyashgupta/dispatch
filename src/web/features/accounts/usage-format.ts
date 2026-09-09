@@ -69,6 +69,160 @@ export function formatReset(
   return `${Math.max(1, minutes)}m`;
 }
 
+export const PACE_ON_TRACK_MAX = 1;
+export const PACE_AHEAD_MAX = 1.25;
+const MIN_ELAPSED_PERCENT = 1;
+
+export type PaceState = "on-track" | "ahead" | "will-run-out";
+
+export const PACE_BADGE: Record<
+  PaceState,
+  { label: string; tone: UsageTone; text: string }
+> = {
+  "on-track": { label: "On track", tone: "ok", text: "var(--status-ok)" },
+  ahead: {
+    label: "Ahead of budget",
+    tone: "stale",
+    text: "var(--status-stale)",
+  },
+  "will-run-out": {
+    label: "Will run out",
+    tone: "down",
+    text: "var(--destructive-text)",
+  },
+};
+
+export interface Pacing {
+  percentElapsed: number;
+  elapsedMs: number;
+  state: PaceState;
+  exhaustsAt: number | null;
+  capped: boolean;
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+/**
+ * The instant a snapshot's percentages were measured, the only honest anchor for elapsed time.
+ *
+ * @remarks Null for any snapshot that is not `ok`, so stale windows never grow a pace that drifts
+ * optimistic as the data ages.
+ */
+export function pacedAtFor(usage: ClaudeUsageSnapshot): number | null {
+  if (usage.status !== "ok" || !usage.fetchedAt) return null;
+  const at = Date.parse(usage.fetchedAt);
+  return Number.isNaN(at) ? null : at;
+}
+
+/**
+ * Compare a window's used percent with the share of its period elapsed at `now`.
+ *
+ * @remarks Exhaustion is a linear projection from the period start, capped at the period end.
+ * Under 1% elapsed there is no projection and the state is On track, so a fresh period never
+ * reads as a problem; a fully used window is always Will run out whatever the ratio says.
+ * @returns Null when the window has no usable period or its period has already ended.
+ */
+export function pacingFor(
+  usageWindow: ClaudeUsageWindow,
+  now: number = Date.now(),
+): Pacing | null {
+  if (!usageWindow.periodStart || !usageWindow.periodEnd) return null;
+  const start = Date.parse(usageWindow.periodStart);
+  const end = Date.parse(usageWindow.periodEnd);
+  if (
+    Number.isNaN(start) ||
+    Number.isNaN(end) ||
+    Number.isNaN(now) ||
+    end <= start ||
+    now >= end
+  ) {
+    return null;
+  }
+  const elapsedMs = Math.max(0, now - start);
+  const percentElapsed = (elapsedMs / (end - start)) * 100;
+  if (percentElapsed < MIN_ELAPSED_PERCENT) {
+    return {
+      percentElapsed,
+      elapsedMs,
+      state: "on-track",
+      exhaustsAt: null,
+      capped: false,
+    };
+  }
+  const used = usageWindow.percent;
+  const pace = used / percentElapsed;
+  const projected = used === 0 ? end : start + (elapsedMs * 100) / used;
+  const capped = projected >= end;
+  return {
+    percentElapsed,
+    elapsedMs,
+    state:
+      used >= 100 || pace > PACE_AHEAD_MAX
+        ? "will-run-out"
+        : pace <= PACE_ON_TRACK_MAX
+          ? "on-track"
+          : "ahead",
+    exhaustsAt: capped ? end : projected,
+    capped,
+  };
+}
+
+/**
+ * The one projection line under a bar.
+ *
+ * @remarks A date for the spend budget, a countdown for rolling windows, the "lasts" variant
+ * when the projection is capped at the period end, and a plain "reached" line at 100% used.
+ * @returns Null when there is no projection (under 1% elapsed).
+ */
+export function projectionCopy(
+  usageWindow: ClaudeUsageWindow,
+  pacing: Pacing,
+  now: number = Date.now(),
+): string | null {
+  if (pacing.exhaustsAt === null) return null;
+  const spend = usageWindow.kind === "spend";
+  if (usageWindow.percent >= 100) {
+    return spend ? "Credit used up" : "Limit reached";
+  }
+  if (pacing.capped) {
+    return spend
+      ? "At this rate, credit lasts the month"
+      : "At this rate, limit holds until reset";
+  }
+  if (spend) {
+    const date = new Date(pacing.exhaustsAt).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
+    return `At this rate, credit runs out on ${date}`;
+  }
+  const countdown = formatReset(new Date(pacing.exhaustsAt).toISOString(), now);
+  return countdown === "soon"
+    ? "At this rate, limit hits soon"
+    : `At this rate, limit hits in ${countdown}`;
+}
+
+/**
+ * The raw numbers behind a badge: used, elapsed, and burn rate per hour (session) or per day.
+ */
+export function paceTitle(
+  usageWindow: ClaudeUsageWindow,
+  pacing: Pacing,
+): string {
+  const parts = [
+    `Used ${usageWindow.percent}%`,
+    `Elapsed ${Math.round(pacing.percentElapsed)}%`,
+  ];
+  if (pacing.elapsedMs > 0) {
+    const perDay = usageWindow.kind !== "session";
+    const rate =
+      (usageWindow.percent / pacing.elapsedMs) * (perDay ? DAY_MS : HOUR_MS);
+    parts.push(`${rate.toFixed(1)}%/${perDay ? "day" : "hour"}`);
+  }
+  return parts.join(" · ");
+}
+
 /**
  * The part of an email before the at sign, the chip's short account name.
  */
