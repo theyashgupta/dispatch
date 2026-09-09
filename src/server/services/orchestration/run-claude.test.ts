@@ -102,16 +102,30 @@ void test(
       assert.deepEqual((await typed())?.slice(0, 2), ["--resume", "sess-123"]);
 
       await exitClaude();
-      await store.resetClaudeSessionId(card.id);
+      await new Promise((r) => setTimeout(r, 2));
       await store.setClaudeSessionId(card.id, undefined, "missing-777");
+      assert.equal(store.getCard(card.id)?.claudeSessionId, "missing-777");
       assert.equal(await runClaude(card.id), "launched");
       await waitFor(
         () =>
           Promise.resolve(
-            store.getCard(card.id)?.claudeSessionId === undefined,
+            store.getCard(card.id)?.claudeSessionId === "sess-123",
           ),
         10000,
-        "a refused --resume id is dropped from the card",
+        "a refused --resume id falls back to the previous conversation node",
+      );
+      const nodes = store
+        .getCard(card.id)
+        ?.sessions?.find(
+          (s) => s.id === store.getCard(card.id)?.activeSessionId,
+        )?.claudeSessions;
+      assert.deepEqual(
+        nodes?.map((n) => [n.id, typeof n.missingAt]),
+        [
+          ["sess-123", "undefined"],
+          ["missing-777", "string"],
+        ],
+        "the refused node is stamped missing and kept, the sibling untouched",
       );
       await waitFor(
         () => tmux.paneAtPrompt(target),
@@ -122,8 +136,13 @@ void test(
       assert.equal(await runClaude(card.id), "launched");
       assert.deepEqual(
         await typed(),
-        ["--settings", "--dangerously-skip-permissions"],
-        "the click after a refused resume starts a fresh conversation",
+        [
+          "--resume",
+          "sess-123",
+          "--settings",
+          "--dangerously-skip-permissions",
+        ],
+        "the click after a refused resume reopens the previous conversation",
       );
 
       await exitClaude();
