@@ -558,8 +558,7 @@ export async function typeLaunchLine(
 }
 
 /**
- * Saga Step 3: resolve the launch account, reset the recorded conversation id, then delegate to
- * {@link launchClaude}.
+ * Saga Step 3: resolve the launch account, then delegate to {@link launchClaude}.
  *
  * @remarks `undo` kills with the session-level exact-match target (`=<name>`, no colon); the
  * pane-level targets inside `launchClaude` carry the trailing colon (`NEW-13`).
@@ -570,7 +569,6 @@ const startClaude: SagaStep = {
   async run(ctx) {
     const account = await resolveLaunchAccount(getActiveAccountId());
     ctx.claudeAccountId = account.id;
-    await store.resetClaudeSessionId(ctx.card.id, ctx.sessionId);
     await launchClaude({
       cardId: ctx.card.id,
       sessionId: ctx.sessionId,
