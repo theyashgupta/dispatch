@@ -221,6 +221,9 @@ function srgbMix(hexA, hexB, pctA) {
  *    is excluded here. Measured for the record: at 16% over `--surface-card-hover` the mix would
  *    be #40272c and `--destructive-text` on it 4.48:1, BELOW the text floor, so any future
  *    re-base of the chip tint onto the hover tier must change the tint formula and this list.
+ * 3. The account popover's pace badges (AccountPopover.tsx): `--status-ok` and `--status-stale`
+ *    as text on their own 16% tint over `--surface-column`, and `--destructive-text` on the
+ *    `--status-down` 16% tint, because `--status-down` itself is below the text floor there.
  *
  * A referenced token missing from the parsed file is pushed as a violation, never silently
  * skipped, so deleting a token cannot retire its guard.
@@ -264,6 +267,34 @@ function buildDerivedTextPairs(tokens, violations) {
       bgHex: srgbMix(destructive, card, 0.16),
       role: "text",
     });
+  }
+  const column = need("surface-column");
+  const statusOk = need("status-ok");
+  const statusStale = need("status-stale");
+  const statusDown = need("status-down");
+  if (
+    column != null &&
+    statusOk != null &&
+    statusStale != null &&
+    statusDown != null &&
+    destructiveText != null
+  ) {
+    const badge = (name, fgName, fgHex, tintHex) =>
+      pairs.push({
+        fg: fgName,
+        fgHex,
+        bg: `${name}-badge-tint(computed)`,
+        bgHex: srgbMix(tintHex, column, 0.16),
+        role: "text",
+      });
+    badge("pace-on-track", PREFIX + "status-ok", statusOk, statusOk);
+    badge("pace-ahead", PREFIX + "status-stale", statusStale, statusStale);
+    badge(
+      "pace-will-run-out",
+      PREFIX + "destructive-text",
+      destructiveText,
+      statusDown,
+    );
   }
   return pairs;
 }

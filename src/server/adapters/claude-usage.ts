@@ -6,6 +6,12 @@ import { run } from "./exec.js";
 
 const USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const USAGE_TIMEOUT_MS = 10_000;
+const HOUR_MS = 60 * 60 * 1000;
+const WINDOW_LENGTH_MS: Record<string, number> = {
+  session: 5 * HOUR_MS,
+  weekly_all: 7 * 24 * HOUR_MS,
+  weekly_scoped: 7 * 24 * HOUR_MS,
+};
 
 export interface UsageFetchResult {
   status: number;
@@ -71,7 +77,7 @@ export async function fetchUsage(
   token: string,
   userAgent: string,
 ): Promise<UsageFetchResult> {
-  const res = await fetch(USAGE_URL, {
+  const res = await fetch(process.env.DISPATCH_USAGE_URL || USAGE_URL, {
     headers: {
       Authorization: `Bearer ${token}`,
       "anthropic-beta": "oauth-2025-04-20",
@@ -111,6 +117,36 @@ function toIso(raw: unknown): string | null {
   return null;
 }
 
+type Period = Pick<ClaudeUsageWindow, "periodStart" | "periodEnd">;
+
+/**
+ * The period a rolling window covers, its known length back from the reset instant.
+ *
+ * @remarks The API reports only the reset, so an unknown kind or a missing reset yields no
+ * period rather than a guessed one.
+ */
+function periodFor(kind: string, resetsAt: string | null): Period {
+  const length = WINDOW_LENGTH_MS[kind];
+  if (length === undefined || resetsAt === null) {
+    return { periodStart: null, periodEnd: null };
+  }
+  return {
+    periodStart: new Date(Date.parse(resetsAt) - length).toISOString(),
+    periodEnd: resetsAt,
+  };
+}
+
+/**
+ * The local calendar month around `now`, used as the spend budget's period because the API
+ * returns no billing boundaries for it.
+ */
+function monthPeriod(now: Date): Period {
+  return {
+    periodStart: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
+    periodEnd: new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString(),
+  };
+}
+
 interface RawLimit {
   kind?: unknown;
   percent?: unknown;
@@ -136,7 +172,7 @@ interface RawSpend {
  * the legacy buckets are null); their usage is a monthly credit budget reported under `spend`.
  * Without this the endpoint's 200 yields zero windows and the UI mislabels it as stale.
  */
-function mapSpendWindow(spend: unknown): ClaudeUsageWindow | null {
+function mapSpendWindow(spend: unknown, now: Date): ClaudeUsageWindow | null {
   const s = (spend ?? {}) as RawSpend;
   if (s.enabled !== true) return null;
   const percent = clampPercent(s.percent);
@@ -147,6 +183,7 @@ function mapSpendWindow(spend: unknown): ClaudeUsageWindow | null {
     percent,
     resetsAt: null,
     isActive: true,
+    ...monthPeriod(now),
   };
 }
 
@@ -165,7 +202,10 @@ function labelFor(kind: string, limit: RawLimit): string {
  * legacy `five_hour` and `seven_day` buckets, else the enterprise `spend` credit budget. Unknown
  * kinds are kept with a humanised label so a new limit type shows up instead of vanishing.
  */
-export function mapUsageResponse(body: unknown): ClaudeUsageWindow[] {
+export function mapUsageResponse(
+  body: unknown,
+  now: Date = new Date(),
+): ClaudeUsageWindow[] {
   const root = (body ?? {}) as {
     limits?: unknown;
     five_hour?: RawBucket | null;
@@ -178,12 +218,14 @@ export function mapUsageResponse(body: unknown): ClaudeUsageWindow[] {
       const kind = typeof entry?.kind === "string" ? entry.kind : "";
       const percent = clampPercent(entry?.percent);
       if (kind === "" || percent === null) continue;
+      const resetsAt = toIso(entry.resets_at);
       out.push({
         kind,
         label: labelFor(kind, entry),
         percent,
-        resetsAt: toIso(entry.resets_at),
+        resetsAt,
         isActive: entry.is_active === true,
+        ...periodFor(kind, resetsAt),
       });
     }
     if (out.length > 0) return out;
@@ -196,16 +238,18 @@ export function mapUsageResponse(body: unknown): ClaudeUsageWindow[] {
   for (const [kind, label, bucket] of buckets) {
     const percent = clampPercent(bucket?.utilization);
     if (percent === null) continue;
+    const resetsAt = toIso(bucket?.resets_at);
     out.push({
       kind,
       label,
       percent,
-      resetsAt: toIso(bucket?.resets_at),
+      resetsAt,
       isActive: true,
+      ...periodFor(kind, resetsAt),
     });
   }
   if (out.length === 0) {
-    const spend = mapSpendWindow(root.spend);
+    const spend = mapSpendWindow(root.spend, now);
     if (spend) out.push(spend);
   }
   return out;

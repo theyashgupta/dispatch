@@ -977,6 +977,8 @@ export interface ClaudeUsageWindow {
   percent: number;
   resetsAt: string | null;
   isActive: boolean;
+  periodStart: string | null;
+  periodEnd: string | null;
 }
 
 export type ClaudeUsageStatus =
