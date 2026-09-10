@@ -1,6 +1,8 @@
 import type {
   TerminalAppearance,
   ActivityEvent,
+  ArchivedGroupSummary,
+  UnwindDestination,
   Card,
   Column,
   DirListing,
@@ -1357,4 +1359,121 @@ export async function removeAccount(
     return { ok: false, error: "The Default account cannot be removed." };
   }
   return { ok: false, error: "Couldn't remove the account." };
+}
+
+/**
+ * Unwind a group (LOCAL-17): POST /api/cards/:id/unwind with the members' destination.
+ * @remarks `id` may be the group card or any member. 200 gives the redacted archive summary,
+ * 400/404/409 give the server's reason, any other status throws.
+ */
+export async function unwindGroup(
+  id: string,
+  to: UnwindDestination,
+): Promise<
+  | { ok: true; archived: ArchivedGroupSummary }
+  | { ok: false; status: number; error: string }
+> {
+  const res = await fetch(`/api/cards/${encodeURIComponent(id)}/unwind`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ to }),
+  });
+  if (res.ok) {
+    const body = (await res.json()) as { archived: ArchivedGroupSummary };
+    return { ok: true, archived: body.archived };
+  }
+  if (res.status === 400 || res.status === 404 || res.status === 409) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return {
+      ok: false,
+      status: res.status,
+      error: body.error ?? "Couldn't unwind this group.",
+    };
+  }
+  throw new Error(`unwindGroup failed: ${res.status} ${res.statusText}`);
+}
+
+/** Every archived group, newest first: GET /api/archive. Throws on any non-2xx. */
+export async function listArchive(): Promise<ArchivedGroupSummary[]> {
+  const res = await fetch("/api/archive");
+  if (!res.ok) {
+    throw new Error(`listArchive failed: ${res.status} ${res.statusText}`);
+  }
+  const body = (await res.json()) as { archived: ArchivedGroupSummary[] };
+  return body.archived;
+}
+
+/**
+ * Restore an archived group all-or-nothing: POST /api/archive/:id/restore. 404/409 → the
+ * server's reason (the member that moved on); any other failure throws.
+ */
+export async function restoreArchived(
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await fetch(`/api/archive/${encodeURIComponent(id)}/restore`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (res.ok) return { ok: true };
+  if (res.status === 404 || res.status === 409) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: body.error ?? "Couldn't restore this group." };
+  }
+  throw new Error(`restoreArchived failed: ${res.status} ${res.statusText}`);
+}
+
+/**
+ * Hard-delete an archived group's worktrees: DELETE /api/archive/:id. A 409 carries the reason
+ * the server recorded on the row; `force` overrides the dirty-worktree preflight.
+ */
+export async function deleteArchived(
+  id: string,
+  force: boolean,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await fetch(`/api/archive/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ force }),
+  });
+  if (res.ok) return { ok: true };
+  if (res.status === 404 || res.status === 409) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: body.error ?? "Couldn't delete this group." };
+  }
+  throw new Error(`deleteArchived failed: ${res.status} ${res.statusText}`);
+}
+
+/** Read the archive retention window: GET /api/config/archive-retention. Throws on non-2xx. */
+export async function getArchiveRetention(): Promise<{
+  archiveRetentionDays: number;
+}> {
+  const res = await fetch("/api/config/archive-retention");
+  if (!res.ok) {
+    throw new Error(
+      `getArchiveRetention failed: ${res.status} ${res.statusText}`,
+    );
+  }
+  return (await res.json()) as { archiveRetentionDays: number };
+}
+
+/** Persist the archive retention window: PUT /api/config/archive-retention, `saveCleanupDelay`'s shape. */
+export async function saveArchiveRetention(
+  days: number,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await fetch("/api/config/archive-retention", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ archiveRetentionDays: days }),
+  });
+  if (res.ok) return { ok: true };
+  if (res.status === 400) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return {
+      ok: false,
+      error: body.error ?? "Couldn't save archive retention.",
+    };
+  }
+  throw new Error(
+    `saveArchiveRetention failed: ${res.status} ${res.statusText}`,
+  );
 }

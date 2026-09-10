@@ -10,9 +10,15 @@ import {
   Trash2,
   Upload,
   X,
+  Undo2,
 } from "lucide-react";
 import { useState } from "react";
-import type { Card as CardModel } from "../../../shared/types.js";
+import { createPortal } from "react-dom";
+import type {
+  Card as CardModel,
+  UnwindDestination,
+} from "../../../shared/types.js";
+import { UnwindPicker } from "./UnwindPicker.js";
 import { moveCard, openEditor, syncCardToLinear } from "../../lib/api.js";
 import { isDemoteEligible } from "../../../shared/demote-eligibility.js";
 import { Button } from "../../primitives/Button.js";
@@ -55,6 +61,7 @@ interface PanelHeaderProps {
   takeover?: boolean;
   onStartRequest?: (id: string) => void;
   onCleanupRequest?: (id: string) => void;
+  onUnwindRequest?: (id: string, to: UnwindDestination) => void;
 }
 
 export function PanelHeader({
@@ -70,9 +77,13 @@ export function PanelHeader({
   takeover = false,
   onStartRequest,
   onCleanupRequest,
+  onUnwindRequest,
 }: PanelHeaderProps) {
   const c = card;
   const [syncPending, setSyncPending] = useState(false);
+  const [unwindRect, setUnwindRect] = useState<DOMRect | null>(null);
+  const unwindIdentifier = c?.source === "group" ? c.identifier : c?.groupId;
+  const unwindable = unwindIdentifier != null;
   const narrowViewport = useMediaQuery("(max-width: 520px)");
   const narrowPanel = (docked || takeover) && narrowViewport;
   const awaitingCleanup =
@@ -235,6 +246,37 @@ export function PanelHeader({
               (syncPending || c.syncing === true ? "Syncing…" : "Sync Linear")}
           </Button>
         )}
+        {unwindable && c && onUnwindRequest && (
+          <Button
+            variant="secondary"
+            onClick={(e) =>
+              setUnwindRect(e.currentTarget.getBoundingClientRect())
+            }
+            aria-expanded={unwindRect != null}
+            aria-label={narrowPanel ? "Unwind" : undefined}
+            title={
+              c.source === "group"
+                ? "Take this group apart; members return to the board"
+                : "Take this ticket's group apart"
+            }
+          >
+            <Undo2 size={12} strokeWidth={2} aria-hidden="true" />
+            {!narrowPanel && (c.source === "group" ? "Unwind" : "Unwind group")}
+          </Button>
+        )}
+        {unwindRect &&
+          c &&
+          unwindIdentifier != null &&
+          onUnwindRequest &&
+          createPortal(
+            <UnwindPicker
+              identifier={unwindIdentifier}
+              anchorRect={unwindRect}
+              onSelect={(to) => onUnwindRequest(c.id, to)}
+              onClose={() => setUnwindRect(null)}
+            />,
+            document.body,
+          )}
         {awaitingCleanup && (
           <Button
             variant="secondary"

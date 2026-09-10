@@ -5,6 +5,7 @@ import type {
   ClaudeAccountSummary,
   ActivityEvent,
   Card as CardModel,
+  UnwindDestination,
 } from "../../../shared/types.js";
 import { ensureTerminal } from "../../lib/api.js";
 import type { StartRequest } from "../../lib/start-request.js";
@@ -50,6 +51,7 @@ interface DetailPanelProps {
   onClose: () => void;
   onStartRequest?: (req: string | StartRequest) => void;
   onCleanupRequest?: (id: string) => void;
+  onUnwindRequest?: (id: string, to: UnwindDestination) => void;
   docked?: boolean;
   accounts?: ClaudeAccountSummary[];
 }
@@ -67,6 +69,7 @@ export function DetailPanel({
   onClose,
   onStartRequest,
   onCleanupRequest,
+  onUnwindRequest,
   docked = false,
   accounts,
 }: DetailPanelProps) {
@@ -518,6 +521,7 @@ export function DetailPanel({
               takeover={takeover}
               onStartRequest={onStartRequest}
               onCleanupRequest={onCleanupRequest}
+              onUnwindRequest={onUnwindRequest}
             />
 
             {sessionAccountEmail != null && (

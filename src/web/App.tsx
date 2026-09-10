@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   useBoardStream,
   type ConnectionStatus,
@@ -36,6 +36,14 @@ import {
 } from "./features/modals/index.js";
 import { SettingsScreen, type SettingsTab } from "./features/settings/index.js";
 import { FirstRunSetup } from "./features/setup/index.js";
+import { Toast } from "./primitives/Toast.js";
+import {
+  isToastVisible,
+  undoToastCopy,
+  useUndoToast,
+} from "./hooks/useUndoToast.js";
+import { unwindGroup as unwindGroupApi } from "./lib/api.js";
+import type { UnwindDestination } from "../shared/types.js";
 import { UpdateBanner } from "./features/update/index.js";
 import { cleanupCard as cleanupCardApi, getCard, getSetup } from "./lib/api.js";
 import { refreshPushSubscription } from "./lib/push.js";
@@ -275,6 +283,28 @@ export function App() {
     cardIdentifiers[card.id] = card.identifier;
   }
 
+  const undoToast = useUndoToast();
+  const requestUnwind = useCallback(
+    (id: string, to: UnwindDestination) => {
+      void unwindGroupApi(id, to)
+        .then((result) => {
+          if (result.ok) {
+            undoToast.show(result.archived);
+            setSelectedCardId((current) =>
+              current === result.archived.id ? null : current,
+            );
+            return;
+          }
+          undoToast.notice(result.error);
+        })
+        .catch((err: unknown) => {
+          console.error("unwindGroup failed", err);
+          undoToast.notice("Couldn't unwind this group.");
+        });
+    },
+    [undoToast],
+  );
+
   const [startRequest, setStartRequest] = useState<StartRequest | null>(null);
   const startCard =
     board?.cards.find((card) => card.id === startRequest?.cardId) ??
@@ -489,6 +519,7 @@ export function App() {
           }}
           onStartRequest={requestStart}
           onCleanupRequest={setCleanupCardId}
+          onUnwindRequest={requestUnwind}
           docked={viewMode === "workspace"}
         />
       }
@@ -548,6 +579,20 @@ export function App() {
       )}
       {createTicketOpen && (
         <CreateTicketModal onClose={() => setCreateTicketOpen(false)} />
+      )}
+      {isToastVisible(undoToast.state) && (
+        <Toast
+          label={
+            undoToast.state.archived
+              ? undoToastCopy(undoToast.state.archived)
+              : undoToast.state.error
+          }
+          detail={undoToast.state.archived ? undoToast.state.error : undefined}
+          actionLabel={undoToast.state.archived ? "Undo" : undefined}
+          actionPending={undoToast.state.undoing}
+          onAction={undoToast.undo}
+          onClose={undoToast.dismiss}
+        />
       )}
     </AppShell>
   );

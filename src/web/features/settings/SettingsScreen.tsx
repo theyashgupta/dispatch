@@ -1,4 +1,5 @@
 import { AccountsTab } from "../accounts/index.js";
+import { ArchiveSection } from "./ArchiveSection.js";
 import type { ClaudeAccountsState } from "../../hooks/useClaudeAccounts.js";
 import {
   useCallback,
@@ -2715,6 +2716,7 @@ function CleanupTabSection({ cleanupTab }: CleanupTabSectionProps) {
           />
         )}
       </div>
+      <ArchiveSection inputStyle={settingsInputStyle} />
     </>
   );
 }
