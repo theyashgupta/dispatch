@@ -2,7 +2,11 @@ import path from "node:path";
 import { Router, type Request, type Response } from "express";
 import { COLUMNS, type Card, type Column } from "../../shared/types.js";
 import { isDemoteEligible } from "../../shared/demote-eligibility.js";
-import { redactCard, store } from "../store/board.store.js";
+import {
+  redactArchivedGroup,
+  redactCard,
+  store,
+} from "../store/board.store.js";
 import {
   blocksAgentDoneManualEntry,
   blocksTodoToInProgressManualMove,
@@ -14,6 +18,7 @@ import {
   resumeSession,
 } from "../services/orchestration/resume-session.js";
 import { cleanupWorkspace } from "../services/orchestration/cleanup.js";
+import { unwindGroup } from "../services/orchestration/unwind.js";
 import { runClaude } from "../services/orchestration/run-claude.js";
 import { editorPath, launchEditor } from "../adapters/editors.js";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
@@ -740,6 +745,30 @@ async function createGroupHandler(req: Request, res: Response): Promise<void> {
   void startSession(groupCard.id, extraDirection, config, { playbook });
   res.status(202).json({ started: true, card: redactCard(groupCard) });
 }
+
+/**
+ * `POST /cards/:id/unwind` (LOCAL-17): take a group apart from the group card or any member.
+ * @remarks `to` picks where the members land, To Do by default or the Inbox. The service owns
+ * every guard; this handler validates the body and maps the outcome to a status.
+ * @see docs/ARCHITECTURE.md#unwind-and-archive
+ */
+async function unwindHandler(req: Request, res: Response): Promise<void> {
+  const { id } = req.params as { id: string };
+  const rawTo = (req.body as { to?: unknown } | undefined)?.to;
+  const to = rawTo === undefined ? "todo" : rawTo;
+  if (to !== "todo" && to !== "inbox") {
+    res.status(400).json({ error: "to must be todo or inbox" });
+    return;
+  }
+  const outcome = await unwindGroup(id, to);
+  if (!outcome.ok) {
+    res.status(outcome.status).json({ error: outcome.error });
+    return;
+  }
+  res.status(200).json({ archived: redactArchivedGroup(outcome.row) });
+}
+
+cardsRouter.post("/cards/:id/unwind", unwindHandler);
 
 cardsRouter.post("/cards/group", createGroupHandler);
 
