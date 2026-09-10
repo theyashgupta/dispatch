@@ -127,3 +127,31 @@ void test("applyHookEvent on one session never touches a sibling session's nodes
   );
   assert.equal(store.getCard(cardId)?.claudeSessionId, "conv-primary");
 });
+
+void test("a Stop hook with a DONE marker leaves a parked card parked and records the marker", async () => {
+  const { cardId, sessionId } = await cardWithSession("hook-parked-stop");
+  await store.moveCardManual(cardId, "parked");
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "Stop",
+    session_id: "conv-parked",
+    last_assistant_message:
+      "all wrapped up\nDISPATCH_STATUS: DONE - shipped it",
+  });
+  const card = store.getCard(cardId)!;
+  assert.equal(card.column, "parked");
+  assert.ok(card.lastMarker, "marker consumed, key recorded");
+  assert.ok(
+    store.listEvents(cardId, 50).every((e) => e.type !== "status_agent_done"),
+    "no status event while parked",
+  );
+});
+
+void test("a UserPromptSubmit hook moves a parked card to in_progress", async () => {
+  const { cardId, sessionId } = await cardWithSession("hook-parked-prompt");
+  await store.moveCardManual(cardId, "parked");
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "UserPromptSubmit",
+    session_id: "conv-parked-prompt",
+  });
+  assert.equal(store.getCard(cardId)?.column, "in_progress");
+});

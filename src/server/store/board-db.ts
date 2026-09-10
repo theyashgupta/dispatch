@@ -8,6 +8,7 @@ import type {
   Card,
   Column,
   EventType,
+  ArchivedGroup,
 } from "../../shared/types.js";
 
 export const BOARD_DB_PATH = path.join(DISPATCH_DATA_DIR, "board.db");
@@ -99,6 +100,14 @@ export interface BoardDb {
   ): number[];
   importParsed(parsed: Partial<BoardSnapshot>): void;
   listEvents(cardId: string | null, limit: number): ActivityEvent[];
+  /** Write or replace one archived group row (LOCAL-17); the row id is the group card id. */
+  upsertArchive(row: ArchivedGroup): void;
+  /** Drop one archived group row; false when no row had that id. */
+  deleteArchive(id: string): boolean;
+  /** One archived group by id, or undefined. */
+  getArchive(id: string): ArchivedGroup | undefined;
+  /** Every archived group, newest first. */
+  listArchive(): ArchivedGroup[];
   /**
    * Fold a WAL-consistent snapshot into the rotating `.bak.N` chain, throttled to once per hour
    * unless `force` is set. Never throws — a failure is logged once and the primary write proceeds
@@ -472,6 +481,11 @@ export function openBoardDb(): BoardDb {
       ts       TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_events_card_id ON events(card_id);
+    CREATE TABLE IF NOT EXISTS archive (
+      id          TEXT PRIMARY KEY,
+      data        TEXT NOT NULL,
+      archived_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS push_subscriptions (
       endpoint   TEXT PRIMARY KEY,
       p256dh     TEXT NOT NULL,
@@ -526,6 +540,15 @@ export function openBoardDb(): BoardDb {
   );
   const deletePushSubscription = db.prepare(
     `DELETE FROM push_subscriptions WHERE endpoint = ?`,
+  );
+  const upsertArchive = db.prepare(
+    `INSERT INTO archive (id, data, archived_at) VALUES (@id, @data, @archivedAt)
+     ON CONFLICT(id) DO UPDATE SET data = excluded.data, archived_at = excluded.archived_at`,
+  );
+  const deleteArchive = db.prepare(`DELETE FROM archive WHERE id = ?`);
+  const selectArchiveById = db.prepare(`SELECT data FROM archive WHERE id = ?`);
+  const selectArchive = db.prepare(
+    `SELECT data FROM archive ORDER BY archived_at DESC, id ASC`,
   );
   const selectPushSubscriptions = db.prepare(
     `SELECT endpoint, p256dh, auth, origin, created_at FROM push_subscriptions`,
@@ -642,6 +665,25 @@ export function openBoardDb(): BoardDb {
           (err as Error).message,
         );
       }
+    },
+    upsertArchive(row) {
+      upsertArchive.run({
+        id: row.id,
+        data: JSON.stringify(row),
+        archivedAt: row.archivedAt,
+      });
+    },
+    deleteArchive(id) {
+      const info = deleteArchive.run(id);
+      return Number(info.changes) > 0;
+    },
+    getArchive(id) {
+      const row = selectArchiveById.get(id) as { data: string } | undefined;
+      return row ? (JSON.parse(row.data) as ArchivedGroup) : undefined;
+    },
+    listArchive() {
+      const rows = selectArchive.all() as { data: string }[];
+      return rows.map((r) => JSON.parse(r.data) as ArchivedGroup);
     },
     addPushSubscription(sub) {
       evictExcessPushSubscriptions.run({ endpoint: sub.endpoint });

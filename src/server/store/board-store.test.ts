@@ -334,3 +334,117 @@ void test("downgrade repair copies an older build's flat conversation id into th
   );
   assert.equal(repaired.claudeSessionId, "conv-old-build");
 });
+
+async function parkedCardWithSession(title: string) {
+  const { store } = await import("./board.store.js");
+  await store.load();
+  const created = await store.createLocalCard(title, "");
+  await store.completeStart(created.id, undefined, {
+    workspacePath: `/tmp/ws-${title}`,
+    tmuxSession: `dsp-${title}`,
+    branch: title,
+  });
+  await store.moveCardManual(created.id, "parked");
+  const card = store.getCard(created.id)!;
+  assert.equal(card.column, "parked");
+  return { store, cardId: card.id, sessionId: card.activeSessionId! };
+}
+
+void test("applyMarker while parked records the key, keeps the column and emits no event", async () => {
+  const { store, cardId, sessionId } =
+    await parkedCardWithSession("parked-consume");
+  const before = store.listEvents(cardId, 50).length;
+  await store.applyMarker(
+    cardId,
+    sessionId,
+    "agent_done",
+    "shipped",
+    "DONE|shipped",
+    "status_agent_done",
+  );
+  const card = store.getCard(cardId)!;
+  assert.equal(card.column, "parked");
+  assert.equal(card.statusReason, undefined);
+  assert.equal(card.lastMarker, "DONE|shipped");
+  assert.equal(
+    card.sessions?.find((s) => s.id === sessionId)?.lastMarker,
+    "DONE|shipped",
+  );
+  assert.equal(store.listEvents(cardId, 50).length, before, "no event");
+
+  await store.applyMarker(
+    cardId,
+    sessionId,
+    "agent_done",
+    "shipped",
+    "DONE|shipped",
+    "status_agent_done",
+  );
+  assert.equal(store.getCard(cardId)?.column, "parked", "identical key no-op");
+});
+
+void test("flipBack from parked lands in in_progress and keeps the consumed marker deduped", async () => {
+  const { store, cardId, sessionId } =
+    await parkedCardWithSession("parked-flip");
+  await store.applyMarker(
+    cardId,
+    sessionId,
+    "agent_done",
+    undefined,
+    "DONE|",
+    "status_agent_done",
+  );
+  assert.equal(await store.flipBack(cardId, sessionId), true);
+  const card = store.getCard(cardId)!;
+  assert.equal(card.column, "in_progress");
+  assert.equal(card.lastMarker, "DONE|", "flip from parked keeps lastMarker");
+
+  await store.applyMarker(
+    cardId,
+    sessionId,
+    "agent_done",
+    undefined,
+    "DONE|",
+    "status_agent_done",
+  );
+  assert.equal(
+    store.getCard(cardId)?.column,
+    "in_progress",
+    "stale pane marker stays deduped after the flip",
+  );
+
+  await store.applyMarker(
+    cardId,
+    sessionId,
+    "needs_input",
+    "which?",
+    "NEEDS_INPUT|which?",
+    "status_needs_input",
+  );
+  assert.equal(
+    store.getCard(cardId)?.column,
+    "needs_input",
+    "new marker applies",
+  );
+});
+
+void test("parked to done stamps every session's cleanup schedule and done to parked clears it", async () => {
+  const { store, cardId } = await parkedCardWithSession("parked-cleanup");
+  await store.moveCardManual(cardId, "done");
+  let card = store.getCard(cardId)!;
+  assert.equal(card.column, "done");
+  assert.equal(typeof card.cleanupDueAt, "number");
+  assert.ok(card.sessions?.every((s) => typeof s.cleanupDueAt === "number"));
+
+  await store.moveCardManual(cardId, "parked");
+  card = store.getCard(cardId)!;
+  assert.equal(card.column, "parked");
+  assert.equal(card.cleanupDueAt, undefined);
+  assert.ok(card.sessions?.every((s) => s.cleanupDueAt === undefined));
+});
+
+void test("parked is never a source for a manual move into agent_done", async () => {
+  const { store, cardId } = await parkedCardWithSession("parked-no-agent-done");
+  await store.moveCardManual(cardId, "agent_done");
+  assert.equal(store.getCard(cardId)?.column, "parked");
+});

@@ -17,6 +17,9 @@ import type {
   SourceIssue,
   StartError,
   TerminalError,
+  ArchivedGroup,
+  ArchivedGroupSummary,
+  UnwindDestination,
 } from "../../shared/types.js";
 import { DEFAULT_CLEANUP_DELAY_DAYS } from "../../shared/types.js";
 import type { CardSearchResult } from "../../shared/search.js";
@@ -31,9 +34,12 @@ import {
   APPLY_MARKER_EXCLUDED_SOURCES,
   FLIP_BACK_CLEARS_LAST_MARKER,
   FLIP_BACK_SOURCES,
+  MARKER_CONSUMED_SOURCES,
   isManualMoveAllowed,
 } from "../../shared/column-transitions.js";
 import { NEEDS_INPUT_MARKER_PREFIX } from "../../shared/marker-key.js";
+import { isDemoteEligible } from "../../shared/demote-eligibility.js";
+import { DEFAULT_ARCHIVE_RETENTION_DAYS } from "../../shared/types.js";
 import { isStartingCard, reconcile } from "./mapping.js";
 import { latestClaudeSession, touchClaudeSession } from "./claude-sessions.js";
 
@@ -92,6 +98,42 @@ export function compareDoneOrder(a: Card, b: Card): number {
   const byUpdated = b.updatedAt.localeCompare(a.updatedAt);
   if (byUpdated !== 0) return byUpdated;
   return a.id.localeCompare(b.id);
+}
+
+/**
+ * Why an archived group cannot be restored right now, or null when it can.
+ * @remarks Every member must be present, ungrouped, free of session history and in the destination
+ * column, and the group id must not be live. Pure so the all-or-nothing rule is unit-testable.
+ * @see docs/ARCHITECTURE.md#unwind-and-archive
+ */
+export function restoreBlocker(
+  row: ArchivedGroup,
+  live: ReadonlyMap<string, Card>,
+): string | null {
+  if (live.has(row.id)) return `${row.identifier} is already on the board`;
+  for (const m of row.members) {
+    const card = live.get(m.id);
+    if (!card) return `${m.identifier} no longer exists`;
+    if (card.groupId != null) return `${m.identifier} is in another group`;
+    if (!isDemoteEligible(card) || (card.sessions?.length ?? 0) > 0)
+      return `${m.identifier} has session history`;
+    if (card.column !== row.destination)
+      return `${m.identifier} moved to ${card.column}`;
+  }
+  return null;
+}
+
+/** Wire projection of an archived group: no card snapshot, no session records, no secrets. */
+export function redactArchivedGroup(row: ArchivedGroup): ArchivedGroupSummary {
+  return {
+    id: row.id,
+    identifier: row.identifier,
+    title: row.title,
+    archivedAt: row.archivedAt,
+    destination: row.destination,
+    members: row.members.map((m) => ({ id: m.id, identifier: m.identifier })),
+    deleteBlocked: row.deleteBlocked,
+  };
 }
 
 /**
@@ -407,6 +449,7 @@ class BoardStore extends EventEmitter {
    * arrival reads this field.
    */
   private cleanupDelayMs = DEFAULT_CLEANUP_DELAY_DAYS * MS_PER_DAY;
+  private archiveRetentionDays = DEFAULT_ARCHIVE_RETENTION_DAYS;
   /**
    * Editor availability flags surfaced on every snapshot so the client can render VS Code / Cursor
    * buttons. Set once at boot from resolveEditors via setEditors — boot-time static config, NOT a
@@ -1125,6 +1168,16 @@ class BoardStore extends EventEmitter {
    */
   setCleanupDelayDays(days: number): void {
     this.cleanupDelayMs = days * MS_PER_DAY;
+  }
+
+  /** Days an archived group survives before the automatic sweep deletes it; 0 means never. */
+  setArchiveRetentionDays(days: number): void {
+    this.archiveRetentionDays = days;
+  }
+
+  /** The live archive retention window, in days. */
+  getArchiveRetentionDays(): number {
+    return this.archiveRetentionDays;
   }
 
   /**
@@ -1958,40 +2011,7 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card) return [];
-      const wasAlreadyLost = card.sessionLost === true;
-      const targetId = sessionId ?? card.activeSessionId;
-      const target = card.sessions?.find((s) => s.id === targetId);
-      const resolvedTargetId = target ? targetId : undefined;
-      this.setActiveSession(
-        card,
-        { tmuxSession: undefined, ttydPort: undefined },
-        resolvedTargetId,
-      );
-      this.clearHookToken(card, resolvedTargetId);
-      if (target) target.lastMarker = undefined;
-      if (targetId === card.activeSessionId) card.lastMarker = undefined;
-      if (target && targetId === card.activeSessionId) {
-        const promoted = (card.sessions ?? [])
-          .filter((s) => s.id !== target.id && s.tmuxSession != null)
-          .sort((a, b) =>
-            a.updatedAt === b.updatedAt
-              ? a.id.localeCompare(b.id)
-              : b.updatedAt.localeCompare(a.updatedAt),
-          )[0];
-        if (promoted) this.setActiveSession(card, {}, promoted.id, true);
-      }
-      const sessions = card.sessions ?? [];
-      const derivedLost =
-        sessions.length === 0 || sessions.every((s) => s.tmuxSession == null);
-      card.sessionLost = derivedLost;
-      if (derivedLost) {
-        card.terminalError = null;
-        card.prs = undefined;
-        card.prsUnknown = undefined;
-        card.previews = undefined;
-        card.previewsUnknown = undefined;
-      }
-      const wasTransition = derivedLost && !wasAlreadyLost;
+      const wasTransition = this.loseSession(card, sessionId);
       return wasTransition
         ? [
             this.event("session_lost", {
@@ -2003,6 +2023,225 @@ class BoardStore extends EventEmitter {
           ]
         : [];
     });
+  }
+
+  /**
+   * The synchronous body of {@link markSessionLost}, shared with {@link unwindGroup} so a
+   * deliberate kill and an observed death clear a session identically (LOCAL-17).
+   * @returns true when the card as a whole just became session-lost.
+   */
+  private loseSession(card: Card, sessionId: string | undefined): boolean {
+    const wasAlreadyLost = card.sessionLost === true;
+    const targetId = sessionId ?? card.activeSessionId;
+    const target = card.sessions?.find((s) => s.id === targetId);
+    const resolvedTargetId = target ? targetId : undefined;
+    this.setActiveSession(
+      card,
+      { tmuxSession: undefined, ttydPort: undefined },
+      resolvedTargetId,
+    );
+    this.clearHookToken(card, resolvedTargetId);
+    if (target) target.lastMarker = undefined;
+    if (targetId === card.activeSessionId) card.lastMarker = undefined;
+    if (target && targetId === card.activeSessionId) {
+      const promoted = (card.sessions ?? [])
+        .filter((s) => s.id !== target.id && s.tmuxSession != null)
+        .sort((a, b) =>
+          a.updatedAt === b.updatedAt
+            ? a.id.localeCompare(b.id)
+            : b.updatedAt.localeCompare(a.updatedAt),
+        )[0];
+      if (promoted) this.setActiveSession(card, {}, promoted.id, true);
+    }
+    const sessions = card.sessions ?? [];
+    const derivedLost =
+      sessions.length === 0 || sessions.every((s) => s.tmuxSession == null);
+    card.sessionLost = derivedLost;
+    if (derivedLost) {
+      card.terminalError = null;
+      card.prs = undefined;
+      card.prsUnknown = undefined;
+      card.previews = undefined;
+      card.previewsUnknown = undefined;
+    }
+    return derivedLost && !wasAlreadyLost;
+  }
+
+  /**
+   * Unwind a group (LOCAL-17): every session is cleared through {@link loseSession}, the group
+   * card leaves the live map into the `archive` table as a whole snapshot, and each member is
+   * unlinked and sent to `destination`. Callers kill tmux/ttyd BEFORE this runs; the store only
+   * records the outcome.
+   * @remarks The archive row is written inside the mutator, before the card set persists without
+   * the group card, so a crash between the two leaves a restorable row rather than a vanished
+   * group. Emits one `group_unwound` event, never one per member.
+   * @see docs/ARCHITECTURE.md#unwind-and-archive
+   */
+  unwindGroup(
+    groupId: string,
+    destination: UnwindDestination,
+  ): Promise<{ ok: true; row: ArchivedGroup } | { ok: false; reason: string }> {
+    let result:
+      { ok: true; row: ArchivedGroup } | { ok: false; reason: string } = {
+      ok: false,
+      reason: "unknown card id",
+    };
+    return this.enqueue(() => {
+      const card = this.cards.get(groupId);
+      if (!card) return [];
+      if (card.source !== "group") {
+        result = { ok: false, reason: "only a group can be unwound" };
+        return [];
+      }
+      if (this.isStarting(card.id)) {
+        result = { ok: false, reason: "a start or resume is in flight" };
+        return [];
+      }
+      for (const s of card.sessions ?? []) this.loseSession(card, s.id);
+      if (!card.sessions?.length) this.loseSession(card, undefined);
+      const members = this.membersOf(card.id);
+      const row: ArchivedGroup = {
+        id: card.id,
+        identifier: card.identifier,
+        title: card.title,
+        archivedAt: new Date().toISOString(),
+        destination,
+        card: structuredClone(card),
+        members: members.map((m) => ({ id: m.id, identifier: m.identifier })),
+      };
+      this.db.upsertArchive(row);
+      this.cards.delete(card.id);
+      for (const m of members) {
+        m.groupId = undefined;
+        m.column = destination;
+        m.statusReason = undefined;
+        m.updatedAt = row.archivedAt;
+      }
+      result = { ok: true, row };
+      return [
+        this.event("group_unwound", {
+          cardId: card.id,
+          fromCol: card.column,
+          toCol: destination,
+          reason: `${members.length} tickets`,
+        }),
+      ];
+    }).then(() => result);
+  }
+
+  /**
+   * Restore an archived group all-or-nothing (LOCAL-17): the snapshot card is re-inserted as a
+   * whole object (the boot-hydration shape, so no flat session field is assigned here), every
+   * member is re-linked and returned to the group's column, and the archive row is dropped.
+   * @remarks Refuses, changing nothing, when {@link restoreBlocker} names a member that moved on
+   * or when the group id is live again. The archive row is dropped only after the card set has
+   * persisted with the group back in it, the mirror of {@link unwindGroup}'s ordering, so a crash
+   * in between leaves a duplicate row rather than a vanished group. A row whose group is already
+   * live (that duplicate) restores as a no-op that drops the stale row, the only exit such a row has.
+   * @see docs/ARCHITECTURE.md#unwind-and-archive
+   */
+  restoreGroup(
+    archiveId: string,
+  ): Promise<
+    { ok: true; card: Card } | { ok: false; status: 404 | 409; reason: string }
+  > {
+    let result:
+      | { ok: true; card: Card }
+      | { ok: false; status: 404 | 409; reason: string } = {
+      ok: false,
+      status: 404,
+      reason: "unknown archive id",
+    };
+    return this.enqueue(() => {
+      const row = this.db.getArchive(archiveId);
+      if (!row) return [];
+      if (this.isCleaningUp(archiveId)) {
+        result = { ok: false, status: 409, reason: "delete in progress" };
+        return [];
+      }
+      const live = this.cards.get(row.id);
+      if (live) {
+        result = { ok: true, card: live };
+        return [];
+      }
+      const blocker = restoreBlocker(row, this.cards);
+      if (blocker) {
+        result = { ok: false, status: 409, reason: blocker };
+        return [];
+      }
+      const card = structuredClone(row.card);
+      card.updatedAt = new Date().toISOString();
+      this.cards.set(card.id, card);
+      for (const m of row.members) {
+        const live = this.cards.get(m.id);
+        if (!live) continue;
+        live.groupId = card.id;
+        live.column = card.column;
+        live.updatedAt = card.updatedAt;
+      }
+      result = { ok: true, card };
+      return [
+        this.event("group_restored", {
+          cardId: card.id,
+          fromCol: row.destination,
+          toCol: card.column,
+          reason: `${row.members.length} tickets`,
+        }),
+      ];
+    }).then(() => {
+      if (result.ok) this.db.deleteArchive(archiveId);
+      return result;
+    });
+  }
+
+  /** Drop an archived group row after its files were removed; false when no row had that id. */
+  deleteArchived(archiveId: string): Promise<boolean> {
+    let removed = false;
+    return this.enqueue(() => {
+      removed = this.db.deleteArchive(archiveId);
+      return removed
+        ? [this.event("archive_deleted", { cardId: archiveId })]
+        : [];
+    }).then(() => removed);
+  }
+
+  /** Record why an archived group's hard delete refused, so the UI can offer Delete anyway. */
+  recordArchiveDeleteBlocked(archiveId: string, reason: string): Promise<void> {
+    return this.enqueue(() => {
+      const row = this.db.getArchive(archiveId);
+      if (!row) return [];
+      row.deleteBlocked = reason;
+      this.db.upsertArchive(row);
+      return [];
+    });
+  }
+
+  /** Synchronous archive read, newest first (the `listEvents` precedent: not enqueued). */
+  listArchive(): ArchivedGroup[] {
+    return this.db.listArchive();
+  }
+
+  /** One archived group by id, or undefined. */
+  getArchived(archiveId: string): ArchivedGroup | undefined {
+    return this.db.getArchive(archiveId);
+  }
+
+  /**
+   * Archived groups whose retention window has elapsed and whose delete is not already blocked.
+   * @remarks `retentionDays` of 0 means never, so it yields nothing. A row whose group id is live
+   * again is never due: its worktrees belong to a card on the board.
+   */
+  archiveDueForDelete(now: number, retentionDays: number): ArchivedGroup[] {
+    if (!(retentionDays > 0)) return [];
+    const windowMs = retentionDays * MS_PER_DAY;
+    return this.db
+      .listArchive()
+      .filter(
+        (r) =>
+          r.deleteBlocked == null &&
+          !this.cards.has(r.id) &&
+          Date.parse(r.archivedAt) + windowMs <= now,
+      );
   }
 
   /**
@@ -2200,6 +2439,9 @@ class BoardStore extends EventEmitter {
    * needs_input / agent_done / in_review remain eligible (an Agent Done card CAN move to Needs
    * Input on a new distinct marker — intended). SECURITY: never logs card, reason, or pane contents.
    *
+   * (LOCAL-17) A card in `MARKER_CONSUMED_SOURCES` consumes the marker: the key is recorded, the
+   * move, reason, mirror and event are skipped (see the Parked paragraph under In Review Lifecycle).
+   *
    * `WR-05`: `eventType` is supplied by the CALLER, not derived from `column` in here — a target
    * column and its activity-event type happen to correspond 1:1 today only because there are
    * exactly two attention targets; deriving it here would silently mislabel a future third target.
@@ -2231,15 +2473,19 @@ class BoardStore extends EventEmitter {
       const dedupKey = target ? target.lastMarker : c.lastMarker;
       if (dedupKey === markerKey) return [];
       const from = c.column;
-      c.column = column;
-      this.mirrorMemberColumn(c, column);
-      c.statusReason = statusReason;
+      const consumed = MARKER_CONSUMED_SOURCES.includes(from);
+      if (!consumed) {
+        c.column = column;
+        this.mirrorMemberColumn(c, column);
+        c.statusReason = statusReason;
+      }
       if (target) {
         target.lastMarker = markerKey;
         if (targetId === c.activeSessionId) c.lastMarker = markerKey;
       } else {
         c.lastMarker = markerKey;
       }
+      if (consumed) return [];
       return [
         this.event(eventType, {
           cardId: id,
