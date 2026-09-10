@@ -4,6 +4,7 @@ import {
   DEFAULT_CLEANUP_DELAY_DAYS,
   DEFAULT_FILTERS,
   type SourceFilters,
+  ARCHIVE_RETENTION_MAX_DAYS,
 } from "../../shared/types.js";
 import { DONE_PAGE_SIZE, parseDoneLimit } from "../../shared/done-limit.js";
 import {
@@ -21,6 +22,7 @@ import {
   getOrchestrationConfig,
   updateClaudeArgs,
   updateCleanupDelayDays,
+  updateArchiveRetentionDays,
   updateTerminalAppearance,
   updateSourceFilters,
 } from "../services/infra/config-holder.js";
@@ -264,12 +266,12 @@ boardRouter.put("/sources/:source/filters", (req, res) => {
 });
 
 /**
- * Validate an untrusted cleanup-delay write (`LIFE-04`) before it can reach the config file or the
- * live store: a whole number of days in `[0, 90]`. Deliberately a SIBLING of `isValidFilters`, not
- * an extension of it — that guard is scoped to the `SourceFilters` shape alone.
+ * Validate an untrusted whole-days write (`LIFE-04`) before it can reach the config file or the
+ * live store: an integer in `[0, max]`. Deliberately a SIBLING of `isValidFilters`, not an
+ * extension of it, since that guard is scoped to the `SourceFilters` shape alone.
  */
-function isValidCleanupDelayDays(x: unknown): x is number {
-  return typeof x === "number" && Number.isInteger(x) && x >= 0 && x <= 90;
+function isWholeDays(x: unknown, max: number): x is number {
+  return typeof x === "number" && Number.isInteger(x) && x >= 0 && x <= max;
 }
 
 boardRouter.get("/config/cleanup-delay", (_req, res) => {
@@ -282,7 +284,7 @@ boardRouter.get("/config/cleanup-delay", (_req, res) => {
 boardRouter.put("/config/cleanup-delay", (req, res) => {
   const days = (req.body as { cleanupDelayDays?: unknown } | undefined)
     ?.cleanupDelayDays;
-  if (!isValidCleanupDelayDays(days)) {
+  if (!isWholeDays(days, 90)) {
     res.status(400).json({
       error: "cleanup delay must be a whole number of days between 0 and 90",
     });
@@ -291,6 +293,27 @@ boardRouter.put("/config/cleanup-delay", (req, res) => {
   updateCleanupDelayDays(days);
   store.setCleanupDelayDays(days);
   res.status(200).json({ cleanupDelayDays: days });
+});
+
+boardRouter.get("/config/archive-retention", (_req, res) => {
+  res.status(200).json({
+    archiveRetentionDays: store.getArchiveRetentionDays(),
+  });
+});
+
+boardRouter.put("/config/archive-retention", (req, res) => {
+  const days = (req.body as { archiveRetentionDays?: unknown } | undefined)
+    ?.archiveRetentionDays;
+  if (!isWholeDays(days, ARCHIVE_RETENTION_MAX_DAYS)) {
+    res.status(400).json({
+      error:
+        "archive retention must be a whole number of days between 0 and 365",
+    });
+    return;
+  }
+  updateArchiveRetentionDays(days);
+  store.setArchiveRetentionDays(days);
+  res.status(200).json({ archiveRetentionDays: days });
 });
 
 boardRouter.get("/config/terminal", (_req, res) => {
@@ -309,7 +332,7 @@ boardRouter.put("/config/terminal", (req, res) => {
   res.status(200).json(result.value);
 });
 
-/** Same body-shape guard as {@link isValidCleanupDelayDays}, but for the free-text argv string (Settings ▸ Models). Bounded length only — any string tokenizes into a valid argv (`parseClaudeArgs`), including empty. */
+/** Same body-shape guard as {@link isWholeDays}, but for the free-text argv string (Settings ▸ Models). Bounded length only — any string tokenizes into a valid argv (`parseClaudeArgs`), including empty. */
 const CLAUDE_ARGS_MAX = 4000;
 function isValidClaudeArgs(x: unknown): x is string {
   return (

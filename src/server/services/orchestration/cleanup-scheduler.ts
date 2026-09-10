@@ -1,5 +1,6 @@
 import { store } from "../../store/board.store.js";
 import { cleanupWorkspace } from "./cleanup.js";
+import { deleteArchivedGroup } from "./archive-delete.js";
 
 /**
  * Tick cadence for the automatic due-cleanup sweep. One minute: the UI's finest countdown
@@ -72,6 +73,28 @@ async function runDueCleanups(): Promise<void> {
 }
 
 /**
+ * Delete every archived group whose retention window has elapsed (LOCAL-17).
+ * @remarks Sequential and never with `force`, so the dirty-worktree preflight still refuses
+ * uncommitted work. A blocked or failed row records its reason and leaves the due set for good.
+ * @see docs/ARCHITECTURE.md#unwind-and-archive
+ */
+export async function runArchiveSweep(): Promise<void> {
+  const due = store.archiveDueForDelete(
+    Date.now(),
+    store.getArchiveRetentionDays(),
+  );
+  for (const row of due) {
+    try {
+      await deleteArchivedGroup(row.id, false);
+    } catch (err) {
+      console.error(
+        `[cleanup-scheduler] archive delete failed for ${row.id}, continuing: ${(err as Error).message}`,
+      );
+    }
+  }
+}
+
+/**
  * Start the services-tier, self-rescheduling due-cleanup loop (`LIFE-03`). Mirrors
  * `artifact-detect.ts#startArtifactDetectionLoop`'s tick/scheduleNext/unref shape exactly, but
  * lives in `services/orchestration/` rather than `adapters/` because it calls `cleanupWorkspace` —
@@ -82,9 +105,10 @@ async function runDueCleanups(): Promise<void> {
  * code path exists. A fixed-interval timer is deliberately avoided, since an overlapping tick would
  * be a double-teardown-dispatch risk this loop cannot tolerate the way the cheap-store-mutation-only
  * marker/artifact loops can.
- * @remarks `tick()` also runs `store.pruneStaleWarnedSessions`, AFTER `runDueCleanups` but in its
- * OWN `try`, so a session cleanly torn down this tick is removed by `finishCleanup` rather than
- * raced by the prune path, while a throw out of the sweep no longer takes the prune down with it.
+ * @remarks `tick()` also runs `store.pruneStaleWarnedSessions` AFTER `runDueCleanups`, outside the
+ * sweep's own `try`, so a session cleanly torn down this tick is removed by `finishCleanup` rather
+ * than raced by the prune path, while a throw out of the sweep no longer takes the prune down with
+ * it; the archive sweep (LOCAL-17) then runs in its own `try` after the prune for the same reason.
  * The ordering is a preference; the coupling would have been a defect, since the prune is the
  * recovery mechanism for FAILED teardowns and gating it on the sweep's success would run it least
  * often exactly when it is needed most. Either failure is logged and both are rescheduled. The
@@ -103,6 +127,13 @@ export function startCleanupScheduler(): void {
         );
       }
       await store.pruneStaleWarnedSessions(Date.now());
+      try {
+        await runArchiveSweep();
+      } catch (err) {
+        console.error(
+          `[cleanup-scheduler] archive sweep failed, continuing: ${(err as Error).message}`,
+        );
+      }
     } catch (err) {
       console.error(
         `[cleanup-scheduler] prune failed, continuing: ${(err as Error).message}`,

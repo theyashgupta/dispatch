@@ -76,6 +76,7 @@
   --col-needs-input: #ef8e3b;
   --col-agent-done: #3fb950;
   --col-in-review: #a371f7;
+  --col-parked: #b08968;
   --col-done: #6b7280;
 
   /* Status signal palette (sync-strip dot) */

@@ -11,6 +11,7 @@ export const COLUMN_LABELS: Record<Column, string> = {
   needs_input: "Needs Input",
   agent_done: "Agent Done",
   in_review: "In Review",
+  parked: "Parked",
   done: "Done",
   inbox: "Inbox",
 };
@@ -74,6 +75,16 @@ export function describeEvent(event: ActivityEvent): string {
       return "synced to Linear";
     case "group_created":
       return "group created";
+    case "group_unwound":
+      return event.toCol
+        ? `unwound, members sent to ${COLUMN_LABELS[event.toCol]}`
+        : "unwound";
+    case "group_restored":
+      return event.toCol
+        ? `restored to ${COLUMN_LABELS[event.toCol]}`
+        : "restored";
+    case "archive_deleted":
+      return "archived workspace deleted";
     default:
       return describeUnknownEvent(event.type);
   }

@@ -31,8 +31,8 @@ import type { Column } from "./types.js";
  *    Same sources as #1.
  * 7. Watcher flip-back decision -> `in_progress` — owner same path (`watcher.ts#scanSession`), to
  *    `flipBack`. Source: ONLY `needs_input` — `decideScan` never emits a `flipBack` decision for
- *    an `agent_done`/`in_review` source, so the watcher does NOT drive those two edges; only the
- *    hook channel (#3, #5) does. Named fact, not a bug.
+ *    an `agent_done`/`in_review`/`parked` source, so the watcher does NOT drive those edges; only
+ *    the hook channel (#3, #5) does. Named fact, not a bug.
  * 8. Manual drag / `POST /cards/:id/move` — owner `board.store.ts#moveCardManual`, gated by
  *    `routes/cards.route.ts#manualMoveTransitionError`. NOT a blind set: the mutator consults
  *    {@link isManualMoveAllowed} inside its enqueue callback (`BOARD-07`), which refuses
@@ -57,6 +57,21 @@ import type { Column } from "./types.js";
  *     `board.store.ts#hydrateFromParsed`, one-way, deliberately skips `mirrorMemberColumn`.
  * 15. Start-saga success -> `in_progress` — owner `board.store.ts#completeStart` /
  *     `#attachExistingSession`.
+ * 16. Marker while Parked (LOCAL-17): column-PRESERVING. `applyMarker` records the marker key on
+ *     the session (and the card mirror) but never moves the card and emits no event. Sources:
+ *     `MARKER_CONSUMED_SOURCES`. Recording the key is what keeps the level-triggered pane scan
+ *     from applying the still-visible marker the moment a prompt flips the card back (#3), which
+ *     is why Parked is a consumed source rather than an excluded one.
+ *
+ * 17. Unwind (LOCAL-17) -> members to To Do or the Inbox, group card archived, owner
+ *     `services/orchestration/unwind.ts#unwindGroup` -> `board.store.ts#unwindGroup`.
+ * 18. Restore (LOCAL-17) -> the group's archived column, members mirror, all-or-nothing via
+ *     `board.store.ts#restoreBlocker`; owner `board.store.ts#restoreGroup`.
+ *
+ * Parked has NO automatic in-edge (manual drag only, #8) and exactly one automatic out-edge, the
+ * prompt-driven flip-back (#3, #5): it sits in `FLIP_BACK_SOURCES` but NOT in
+ * `FLIP_BACK_CLEARS_LAST_MARKER`, so the consumed key survives the flip and dedups the marker
+ * still on the pane.
  *
  * Agent Done and In Review carry OPPOSITE asymmetries. Agent Done has an automatic in-edge
  * (marker) and no automatic out-edge except the already-intentional `agent_done -> needs_input` on
@@ -82,7 +97,14 @@ export const FLIP_BACK_SOURCES: readonly Column[] = [
   "needs_input",
   "agent_done",
   "in_review",
+  "parked",
 ] as const;
+
+/**
+ * Source columns where `applyMarker` consumes a marker: the key is recorded, nothing moves (#16).
+ * @see docs/ARCHITECTURE.md#in-review-lifecycle
+ */
+export const MARKER_CONSUMED_SOURCES: readonly Column[] = ["parked"] as const;
 
 /**
  * The subset of {@link FLIP_BACK_SOURCES} whose flip ALSO clears `card.lastMarker`. `needs_input`

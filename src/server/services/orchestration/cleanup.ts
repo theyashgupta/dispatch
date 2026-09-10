@@ -22,6 +22,105 @@ import { worktreePath as buildWorktreePath } from "../domain/workspace-paths.js"
 const perfCleanup = process.env.DISPATCH_PERF_CLEANUP === "1";
 
 /**
+ * Kill a session's ttyd, then its tmux session by exact name (`NEW-14` order).
+ * @remarks Idempotent: an untracked ttyd or an already-gone tmux session is a no-op.
+ */
+export async function killSessionProcesses(
+  tmuxSession: string | undefined,
+): Promise<void> {
+  if (!tmuxSession) return;
+  killTtyd(tmuxSession);
+  await killSession(`=${tmuxSession}`);
+}
+
+/**
+ * The dirty-worktree preflight (CLEAN-07): which repos still hold uncommitted work.
+ * @remarks Fanned out across repos with `Promise.allSettled`. A missing worktree is clean; a
+ * status probe that throws or reports an error is flagged as `nonOrphanError`, never as clean.
+ */
+export async function dirtyRepos(
+  workspacePath: string,
+  repoPaths: string[],
+): Promise<{
+  blocked: { repo: string; count: number }[];
+  nonOrphanError: boolean;
+}> {
+  const blocked: { repo: string; count: number }[] = [];
+  let nonOrphanError = false;
+  const results = await Promise.allSettled(
+    repoPaths.map(async (repoPath) => {
+      const worktreePath = buildWorktreePath(workspacePath, repoPath);
+      const exists = await fsp.stat(worktreePath).then(
+        () => true,
+        () => false,
+      );
+      if (!exists) return null;
+      return worktreeStatus(worktreePath);
+    }),
+  );
+  results.forEach((r, i) => {
+    if (r.status === "rejected") {
+      nonOrphanError = true;
+      return;
+    }
+    const st = r.value;
+    if (!st) return;
+    if (st.kind === "dirty") {
+      blocked.push({ repo: path.basename(repoPaths[i]), count: st.count });
+    } else if (st.kind === "error") {
+      nonOrphanError = true;
+    }
+  });
+  return { blocked, nonOrphanError };
+}
+
+/**
+ * Remove a workspace's worktrees, then its folder, then prune, in the locked `NEW-14` order.
+ * @remarks Branches are never touched. Timings are populated only under `DISPATCH_PERF_CLEANUP`.
+ * @returns the basenames that failed, with `"workspace folder"` standing for the rm step.
+ */
+export async function removeWorkspaceFiles(
+  workspacePath: string,
+  repoPaths: string[],
+): Promise<{
+  failures: string[];
+  worktreeRemoveMs: number;
+  fsRmMs: number;
+  pruneMs: number;
+}> {
+  const failures: string[] = [];
+  const removeT0 = perfCleanup ? performance.now() : 0;
+  const removeResults = await Promise.allSettled(
+    repoPaths.map(async (repoPath) => {
+      const worktreePath = buildWorktreePath(workspacePath, repoPath);
+      const exists = await fsp.stat(worktreePath).then(
+        () => true,
+        () => false,
+      );
+      if (!exists) return;
+      await worktreeRemove(repoPath, worktreePath);
+    }),
+  );
+  removeResults.forEach((r, i) => {
+    if (r.status === "rejected") failures.push(path.basename(repoPaths[i]));
+  });
+  const worktreeRemoveMs = perfCleanup ? performance.now() - removeT0 : 0;
+
+  const rmT0 = perfCleanup ? performance.now() : 0;
+  await fsp
+    .rm(workspacePath, { recursive: true, force: true })
+    .catch(() => failures.push("workspace folder"));
+  const fsRmMs = perfCleanup ? performance.now() - rmT0 : 0;
+
+  const pruneT0 = perfCleanup ? performance.now() : 0;
+  await Promise.allSettled(
+    repoPaths.map((repoPath) => worktreePrune(repoPath)),
+  );
+  const pruneMs = perfCleanup ? performance.now() - pruneT0 : 0;
+  return { failures, worktreeRemoveMs, fsRmMs, pruneMs };
+}
+
+/**
  * Tear down ONE session's workspace: kill ttyd + the tmux session, remove each repo's worktree, and
  * remove the per-ticket workspace folder — ALWAYS keeping branches. Idempotent / no-op tolerant: a
  * session with no tmux and no workspace skips every step and still calls finishCleanup (quiet 202).
@@ -99,32 +198,10 @@ export async function cleanupWorkspace(
 
   const preflightT0 = perfCleanup ? performance.now() : 0;
   if (!opts.force && workspacePath) {
-    const blocked: { repo: string; count: number }[] = [];
-    let nonOrphanError = false;
-    const preflightResults = await Promise.allSettled(
-      repoPaths.map(async (repoPath) => {
-        const worktreePath = buildWorktreePath(workspacePath, repoPath);
-        const exists = await fsp.stat(worktreePath).then(
-          () => true,
-          () => false,
-        );
-        if (!exists) return null;
-        return worktreeStatus(worktreePath);
-      }),
+    const { blocked, nonOrphanError } = await dirtyRepos(
+      workspacePath,
+      repoPaths,
     );
-    preflightResults.forEach((r, i) => {
-      if (r.status === "rejected") {
-        nonOrphanError = true;
-        return;
-      }
-      const st = r.value;
-      if (!st) return;
-      if (st.kind === "dirty") {
-        blocked.push({ repo: path.basename(repoPaths[i]), count: st.count });
-      } else if (st.kind === "error") {
-        nonOrphanError = true;
-      }
-    });
     if (blocked.length > 0) {
       await store.recordCleanupBlocked(cardId, resolvedId, blocked);
       return;
@@ -143,47 +220,18 @@ export async function cleanupWorkspace(
   const failures: string[] = [];
 
   const killT0 = perfCleanup ? performance.now() : 0;
-  if (session) {
-    killTtyd(session);
-  }
-
-  if (session) {
-    await killSession(`=${session}`);
-  }
+  await killSessionProcesses(session);
   const killMs = perfCleanup ? performance.now() - killT0 : 0;
 
   let worktreeRemoveMs = 0;
   let fsRmMs = 0;
   let pruneMs = 0;
   if (workspacePath) {
-    const removeT0 = perfCleanup ? performance.now() : 0;
-    const removeResults = await Promise.allSettled(
-      repoPaths.map(async (repoPath) => {
-        const worktreePath = buildWorktreePath(workspacePath, repoPath);
-        const exists = await fsp.stat(worktreePath).then(
-          () => true,
-          () => false,
-        );
-        if (!exists) return;
-        await worktreeRemove(repoPath, worktreePath);
-      }),
-    );
-    removeResults.forEach((r, i) => {
-      if (r.status === "rejected") failures.push(path.basename(repoPaths[i]));
-    });
-    worktreeRemoveMs = perfCleanup ? performance.now() - removeT0 : 0;
-
-    const rmT0 = perfCleanup ? performance.now() : 0;
-    await fsp
-      .rm(workspacePath, { recursive: true, force: true })
-      .catch(() => failures.push("workspace folder"));
-    fsRmMs = perfCleanup ? performance.now() - rmT0 : 0;
-
-    const pruneT0 = perfCleanup ? performance.now() : 0;
-    await Promise.allSettled(
-      repoPaths.map((repoPath) => worktreePrune(repoPath)),
-    );
-    pruneMs = perfCleanup ? performance.now() - pruneT0 : 0;
+    const removed = await removeWorkspaceFiles(workspacePath, repoPaths);
+    failures.push(...removed.failures);
+    worktreeRemoveMs = removed.worktreeRemoveMs;
+    fsRmMs = removed.fsRmMs;
+    pruneMs = removed.pruneMs;
   }
 
   if (perfCleanup) {

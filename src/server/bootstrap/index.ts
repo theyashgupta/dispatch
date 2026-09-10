@@ -52,6 +52,7 @@ import { healServicePlist } from "../services/orchestration/service.js";
 import type { ActivityEvent } from "../../shared/types.js";
 import {
   DEFAULT_CLEANUP_DELAY_DAYS,
+  DEFAULT_ARCHIVE_RETENTION_DAYS,
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
 } from "../../shared/types.js";
@@ -322,6 +323,9 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   store.setPollInterval(config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
   store.setCleanupDelayDays(
     config.cleanupDelayDays ?? DEFAULT_CLEANUP_DELAY_DAYS,
+  );
+  store.setArchiveRetentionDays(
+    config.archiveRetentionDays ?? DEFAULT_ARCHIVE_RETENTION_DAYS,
   );
   await ensureHyperlinksTerminalFeature();
   await ensureNoAltScreenOverride();

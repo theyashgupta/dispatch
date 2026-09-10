@@ -9,16 +9,18 @@ export type Column =
   | "needs_input"
   | "agent_done"
   | "in_review"
+  | "parked"
   | "done"
   | "inbox";
 
-/** The six columns in board order, for the frontend to iterate. */
+/** The seven columns in board order, for the frontend to iterate. */
 export const COLUMNS: readonly Column[] = [
   "todo",
   "in_progress",
   "needs_input",
   "agent_done",
   "in_review",
+  "parked",
   "done",
 ] as const;
 
@@ -41,7 +43,10 @@ export type EventType =
   | "cleanup"
   | "local_created"
   | "sync_out"
-  | "group_created";
+  | "group_created"
+  | "group_unwound"
+  | "group_restored"
+  | "archive_deleted";
 
 /** One immutable board-activity log row; append-only; carries no secrets. */
 export interface ActivityEvent {
@@ -944,6 +949,8 @@ export interface Config {
    * resolves to {@link DEFAULT_CLEANUP_DELAY_DAYS}. `0` means clean up immediately on Done.
    */
   cleanupDelayDays?: number;
+  /** Days an archived group survives before the automatic sweep deletes it; absent resolves to {@link DEFAULT_ARCHIVE_RETENTION_DAYS}, `0` means never. */
+  archiveRetentionDays?: number;
   /**
    * Extra CLI arguments passed to `claude` every time a session starts, resumes, or restarts;
    * absent resolves to {@link DEFAULT_CLAUDE_ARGS}. An explicit empty string means "no extra
@@ -1040,6 +1047,12 @@ export const DEFAULT_FILTERS: SourceFilters = {
 /** Resolved deferred-cleanup delay (days) when `config.cleanupDelayDays` is absent (`LIFE-02`). */
 export const DEFAULT_CLEANUP_DELAY_DAYS = 7;
 
+/** Days an archived group survives before the automatic sweep deletes it (LOCAL-17); 0 means never. */
+export const DEFAULT_ARCHIVE_RETENTION_DAYS = 30;
+
+/** Upper bound for `archiveRetentionDays`, shared by the boot reader, the write route and the settings input. */
+export const ARCHIVE_RETENTION_MAX_DAYS = 365;
+
 /**
  * Resolved `claude` launch arguments when `config.claudeArgs` is absent — the flag Dispatch has
  * always launched with, so an un-migrated config keeps today's exact behavior. Settings ▸ Models
@@ -1108,4 +1121,34 @@ export interface ReconcileResult {
   goneIds: string[];
   /** Card ids to CLEAR goneFromLinear on (issue reappeared while the card was past To Do). */
   reappearedIds: string[];
+}
+
+/** Where Unwind sends a group's members: To Do by default, or straight out to the Inbox. */
+export type UnwindDestination = "todo" | "inbox";
+
+/**
+ * One archived group, the durable record Unwind writes and Restore reads back (LOCAL-17).
+ * `card` is the group card exactly as it left the board, every session already marked lost, so
+ * Restore re-inserts it whole and the existing Resume affordance brings Claude back.
+ */
+export interface ArchivedGroup {
+  id: string;
+  identifier: string;
+  title: string;
+  archivedAt: string;
+  destination: UnwindDestination;
+  card: Card;
+  members: { id: string; identifier: string }[];
+  deleteBlocked?: string;
+}
+
+/** The wire shape of an archived group: no card snapshot, no session records, no secrets. */
+export interface ArchivedGroupSummary {
+  id: string;
+  identifier: string;
+  title: string;
+  archivedAt: string;
+  destination: UnwindDestination;
+  members: { id: string; identifier: string }[];
+  deleteBlocked?: string;
 }

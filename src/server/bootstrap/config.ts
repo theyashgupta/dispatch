@@ -11,6 +11,8 @@ import type {
 import {
   DEFAULT_CLAUDE_ARGS,
   DEFAULT_CLEANUP_DELAY_DAYS,
+  DEFAULT_ARCHIVE_RETENTION_DAYS,
+  ARCHIVE_RETENTION_MAX_DAYS,
   DEFAULT_FILTERS,
 } from "../../shared/types.js";
 import {
@@ -48,6 +50,9 @@ const CONFIG_TEMPLATE = {
   "// cleanupDelayDays":
     "Days a finished card keeps its workspace before automatic cleanup. 0 = clean up immediately on Done. Default 7, max 90.",
   cleanupDelayDays: DEFAULT_CLEANUP_DELAY_DAYS,
+  "// archiveRetentionDays":
+    "Days an unwound group stays in the archive before its worktrees are removed automatically. 0 = never. Default 30, max 365.",
+  archiveRetentionDays: DEFAULT_ARCHIVE_RETENTION_DAYS,
   "// claudeArgs":
     "Extra CLI arguments passed to `claude` every time a session starts, resumes, or restarts. Leave empty for Claude's normal permission prompts.",
   claudeArgs: DEFAULT_CLAUDE_ARGS,
@@ -82,31 +87,27 @@ function readUpdateCheck(parsed: Record<string, unknown>): boolean {
 }
 
 /**
- * Read the `cleanupDelayDays` preference: a whole number of days in `[0, 90]`, defaulting to
- * {@link DEFAULT_CLEANUP_DELAY_DAYS}.
- * @remarks Deliberately does NOT throw `StartupError` the way {@link readStatusChannel} does for an
- * invalid enum literal — this is a plain numeric preference, not a closed set of routing literals,
- * so a malformed or out-of-range hand-edited value safely falls back to the default rather than
- * blocking boot. The RUNTIME write route (`PUT /config/cleanup-delay`) enforces the same range but
- * REJECTS an invalid value with 400 instead of defaulting it — that posture difference is
- * deliberate: a live user action gets visible feedback, a hand-edited file gets tolerance.
+ * Read a whole-days preference in `[0, max]`, tolerantly defaulting anything else to `fallback`
+ * (`LIFE-04` posture: boot never blocks on a hand-edited value; the write routes are the strict side).
  */
-function readCleanupDelayDays(parsed: Record<string, unknown>): number {
-  const value = parsed.cleanupDelayDays;
-  if (
-    typeof value === "number" &&
+function readWholeDays(
+  parsed: Record<string, unknown>,
+  key: "cleanupDelayDays" | "archiveRetentionDays",
+  max: number,
+  fallback: number,
+): number {
+  const value = parsed[key];
+  return typeof value === "number" &&
     Number.isInteger(value) &&
     value >= 0 &&
-    value <= 90
-  ) {
-    return value;
-  }
-  return DEFAULT_CLEANUP_DELAY_DAYS;
+    value <= max
+    ? value
+    : fallback;
 }
 
 /**
  * Read the `terminal` appearance block: absent, partial, or invalid resolves to the shipped
- * default, same tolerance posture as {@link readCleanupDelayDays}.
+ * default, same tolerance posture as {@link readWholeDays}.
  */
 function readTerminal(parsed: Record<string, unknown>): TerminalAppearance {
   const result = validateTerminalAppearance(parsed.terminal);
@@ -115,7 +116,7 @@ function readTerminal(parsed: Record<string, unknown>): TerminalAppearance {
 
 /**
  * Read the `claudeArgs` preference: a plain string preference, absent or any non-string value
- * resolves to {@link DEFAULT_CLAUDE_ARGS}. Unlike {@link readCleanupDelayDays} there is no range
+ * resolves to {@link DEFAULT_CLAUDE_ARGS}. Unlike {@link readWholeDays} there is no range
  * to reject — any string is a valid argv source once tokenized — so a present string is always
  * honored as-is, including an explicit `""` (no extra arguments), same posture as
  * {@link readLastUsedPlaybook} / {@link readUpdateCheck}.
@@ -356,7 +357,18 @@ export function loadConfig(): Config {
     updateCheck: readUpdateCheck(parsed),
     sources: { linear: { apiKey: rawKey, filters: readNestedFilters(parsed) } },
     lastUsedPlaybook: readLastUsedPlaybook(parsed),
-    cleanupDelayDays: readCleanupDelayDays(parsed),
+    cleanupDelayDays: readWholeDays(
+      parsed,
+      "cleanupDelayDays",
+      90,
+      DEFAULT_CLEANUP_DELAY_DAYS,
+    ),
+    archiveRetentionDays: readWholeDays(
+      parsed,
+      "archiveRetentionDays",
+      ARCHIVE_RETENTION_MAX_DAYS,
+      DEFAULT_ARCHIVE_RETENTION_DAYS,
+    ),
     claudeArgs: readClaudeArgs(parsed),
     ...(activeClaudeAccountId !== undefined ? { activeClaudeAccountId } : {}),
     terminal: readTerminal(parsed),
