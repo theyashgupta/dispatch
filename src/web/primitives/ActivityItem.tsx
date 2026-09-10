@@ -14,6 +14,8 @@ import {
   Unplug,
   Upload,
   Users,
+  Undo2,
+  RotateCcw,
   type LucideIcon,
 } from "lucide-react";
 import type { EventType } from "../../shared/types.js";
@@ -34,6 +36,9 @@ const EVENT_GLYPH: Record<EventType, LucideIcon> = {
   local_created: FilePlus,
   sync_out: Upload,
   group_created: Users,
+  group_unwound: Undo2,
+  group_restored: RotateCcw,
+  archive_deleted: Trash2,
 };
 
 const EVENT_TINT: Record<EventType, string> = {
@@ -52,6 +57,9 @@ const EVENT_TINT: Record<EventType, string> = {
   local_created: "var(--text-muted)",
   sync_out: "var(--text-muted)",
   group_created: "var(--text-muted)",
+  group_unwound: "var(--text-muted)",
+  group_restored: "var(--text-muted)",
+  archive_deleted: "var(--text-muted)",
 };
 
 const GLYPH_LOOKUP: Partial<Record<string, LucideIcon>> = EVENT_GLYPH;
