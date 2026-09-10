@@ -109,3 +109,16 @@ test("loadConfig leaves the pointer absent when the key is missing, empty, or no
     assert.equal("activeClaudeAccountId" in loadConfig(), false, String(value));
   }
 });
+
+test("archiveRetentionDays reads a valid value and falls back to 30 on anything else", () => {
+  writeConfig({ archiveRetentionDays: 12 });
+  assert.equal(loadConfig().archiveRetentionDays, 12);
+  writeConfig({ archiveRetentionDays: 0 });
+  assert.equal(loadConfig().archiveRetentionDays, 0);
+  for (const bad of [366, -1, 2.5, "12", null]) {
+    writeConfig({ archiveRetentionDays: bad });
+    assert.equal(loadConfig().archiveRetentionDays, 30, `bad ${String(bad)}`);
+  }
+  writeConfig({});
+  assert.equal(loadConfig().archiveRetentionDays, 30);
+});

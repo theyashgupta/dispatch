@@ -236,6 +236,14 @@ export function updateCleanupDelayDays(days: number): void {
 }
 
 /**
+ * Persist the archive retention window (LOCAL-17) to `~/.dispatch/config.json` and make it live
+ * immediately; called only from the validated `PUT /config/archive-retention` route.
+ */
+export function updateArchiveRetentionDays(days: number): void {
+  patchConfig({ archiveRetentionDays: days });
+}
+
+/**
  * Persist the `claude` launch arguments (Settings ▸ Models) to `~/.dispatch/config.json` and make
  * them live immediately.
  *
