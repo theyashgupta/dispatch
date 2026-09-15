@@ -269,14 +269,9 @@ let currentZoom = 1;
  * output uses and `WebLinksAddon` never fires for) so cmd-click parity holds for either link
  * source, plus a third provider that links plain-text `.md` paths (result lines, prose), which
  * neither of the first two ever match.
- * @remarks `smoothScrollDuration: 120` is set unconditionally rather than gated to desktop: a
- * media-query gate would leave hybrid devices (touchscreen laptops, iPad + trackpad) with an
- * instant jump, and the value is harmless on its own during a touch gesture. It is also inert for
- * the entirety of normal dispatch use — under `tmux attach` (the alternate buffer) mouse
- * reporting intercepts the wheel before `.xterm-viewport` ever scrolls, so the ~120ms animation
- * is only observable in the normal buffer. The mobile kinetic scroller zeroes this option for the
- * lifetime of a touch gesture and restores it on settle, so its animation cannot fight the
- * momentum loop's discrete ticks. `zoom` is folded into `fontSize` here, before `term.open()`, so
+ * @remarks Wheel smoothing is deliberately not xterm's: `smoothScrollDuration` is left at its
+ * default of 0 and `attachWheelScroll` eases fine-pointer wheel input itself (see its remarks for
+ * why). `zoom` is folded into `fontSize` here, before `term.open()`, so
  * the first WS handshake already carries the zoomed column count — no wrong-size first paint, no
  * redundant RESIZE, no reliance on microtask ordering against `ws.onopen`.
  * @remarks TERM-03: `html, body { -webkit-text-size-adjust: 100% }` (declared in `terminal.html`)
@@ -300,7 +295,6 @@ function createTerminal(
   const term = new Terminal({
     allowProposedApi: true,
     scrollback: 10000,
-    smoothScrollDuration: 120,
     fontSize: Math.max(ZOOM.minFontPx, baseFontSize * zoom),
     ...applyAppearance(appearance),
   });
@@ -582,6 +576,65 @@ function rowHeightPx(term: Terminal): number {
 }
 
 /**
+ * Fraction of the pending whole rows one wheel frame releases. Higher lands a mouse notch in one
+ * or two frames and reads as a jump; lower leaves a fast trackpad flick trailing the finger.
+ */
+const WHEEL_EASE = 0.5;
+
+/**
+ * Owns pixel-mode wheel input (trackpads, and every mouse wheel on macOS) in the normal buffer,
+ * easing the pending distance out as whole rows on animation frames.
+ * @remarks xterm's own `smoothScrollDuration` restarts its animation on every wheel event and
+ * writes fractional `scrollTop` values, which a trackpad's 60-120Hz stream of small deltas turns
+ * into stalled frames, lost distance, and overshoot that pins the viewport at a buffer edge. This
+ * handler never touches `scrollTop`: the pool is clamped to the scrollable range and drained
+ * through `term.scrollLines`, so the buffer position stays the single source of truth. Mouse-report
+ * and alternate-screen wheels, and line-mode wheels including the kinetic scroller's synthetic
+ * ticks, are left to xterm untouched.
+ */
+function attachWheelScroll(term: Terminal): void {
+  let pending = 0;
+  let frame: number | undefined;
+
+  const drain = (): void => {
+    frame = undefined;
+    if (scrollMode(term) !== "viewport") {
+      pending = 0;
+      return;
+    }
+    const rowH = rowHeightPx(term);
+    const rows = Math.round(pending / rowH);
+    if (rows === 0) return;
+    const step = Math.sign(rows) * Math.ceil(Math.abs(rows) * WHEEL_EASE);
+    term.scrollLines(step);
+    pending -= step * rowH;
+    frame = requestAnimationFrame(drain);
+  };
+
+  term.attachCustomWheelEventHandler((e) => {
+    if (
+      e.deltaMode !== WheelEvent.DOM_DELTA_PIXEL ||
+      e.deltaY === 0 ||
+      e.shiftKey ||
+      scrollMode(term) !== "viewport"
+    ) {
+      return true;
+    }
+    const buf = term.buffer.active;
+    const rowH = rowHeightPx(term);
+    const delta =
+      e.deltaY * (e.altKey ? (term.options.fastScrollSensitivity ?? 5) : 1);
+    pending = Math.max(
+      -buf.viewportY * rowH,
+      Math.min((buf.baseY - buf.viewportY) * rowH, pending + delta),
+    );
+    if (pending !== 0) e.preventDefault();
+    if (frame === undefined) frame = requestAnimationFrame(drain);
+    return false;
+  });
+}
+
+/**
  * Dispatches one discrete wheel tick. `deltaMode: 1` (`DOM_DELTA_LINE`) deliberately bypasses
  * xterm's internal `_wheelPartialScroll` pixel accumulator so each dispatch produces exactly one
  * mouse report (or exactly one viewport row) — the kinetic loop owns the sub-tick accumulation
@@ -612,9 +665,6 @@ function emitTick(term: Terminal, dir: 1 | -1, x: number, y: number): void {
  * ignores `preventDefault()` on passive listeners. `touchstart` is never `preventDefault()`ed,
  * which would suppress the synthesized `click`/`mousedown` and kill tap-to-focus; the `slopPx`
  * threshold before engaging is what keeps a plain tap indistinguishable from a drag's first pixel.
- * `smoothScrollDuration` is zeroed for the lifetime of a gesture and its momentum, then restored:
- * on the normal-buffer path a live 120ms animation's `startTime`/target would otherwise be reset by
- * the next tick 16ms later, so the viewport would permanently chase a moving target.
  * @remarks The touch-end path only acts when the gesture was actually tracked. It fires for EVERY
  * touchend on the document, including a zoom-chip tap that `touchstart` declined to track, and
  * without that guard a tap landing mid-decay would re-enter the momentum loop and overwrite the
@@ -664,7 +714,6 @@ function attachKineticScroll(term: Terminal): void {
   let momentumFrame: number | undefined;
   let pendingDy = 0;
   let dragFrame: number | undefined;
-  let restoreScrollDuration = term.options.smoothScrollDuration;
 
   const drain = (
     tickMode: "report" | "viewport",
@@ -694,14 +743,11 @@ function attachKineticScroll(term: Terminal): void {
   const engageGesture = (): void => {
     if (engaged) return;
     engaged = true;
-    restoreScrollDuration = term.options.smoothScrollDuration;
-    term.options.smoothScrollDuration = 0;
   };
 
   const settleGesture = (): void => {
     if (!engaged) return;
     engaged = false;
-    term.options.smoothScrollDuration = restoreScrollDuration;
   };
 
   const cancelMomentum = (): void => {
@@ -1086,6 +1132,7 @@ async function main(): Promise<void> {
   await fontsReady();
   mountTerminal(term, mount, fit);
   watchAppearance(term, fit);
+  attachWheelScroll(term);
   if (window.matchMedia("(pointer: coarse)").matches) {
     attachKineticScroll(term);
     attachZoomControl(term, fit);

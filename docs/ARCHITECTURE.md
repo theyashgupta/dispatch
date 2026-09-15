@@ -1088,6 +1088,18 @@ iOS text inflation breaks the `charWidth ∝ fontSize` relationship the zoom / e
 feature's math depends on. The settings-backed theme's fall-back-to-default contract (above) is part of the same
 invariant: a themed terminal must open even when the persisted `terminal` block is invalid.
 
+**Fine-pointer wheel scrolling is the client's own, not xterm's (LOCAL-19).**
+`smoothScrollDuration` stays at xterm's default of 0. `attachWheelScroll` registers a custom wheel
+handler that takes every pixel-mode wheel event (a trackpad, and every mouse wheel on macOS) while
+`scrollMode()` is `"viewport"`, pools the pixel delta clamped to the scrollable range, and drains
+the pool on animation frames as whole rows through `term.scrollLines()`, half of the pending rows
+per frame. xterm's own smoothing restarts its 120ms animation on every wheel event and writes
+fractional `scrollTop` values; under a trackpad's 60-120Hz stream that trailed the finger by
+~120ms and, after a push into a buffer edge, swallowed up to one viewport of reverse travel
+(measured 252px) before the viewport moved. Line-mode wheels, including the kinetic scroller's
+synthetic ticks, and every mouse-report or alternate-screen wheel still go to xterm untouched, so
+the touch path above and the report path are unchanged.
+
 **Selection in the web terminal stays native because Dispatch pins mouse ownership at session
 creation (LOCAL-3).** xterm.js only makes a native selection while no program owns the mouse, and
 two things can take it: the pane app requesting mouse tracking (tmux forwards the ACTIVE pane's
