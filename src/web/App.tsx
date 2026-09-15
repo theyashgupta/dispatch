@@ -46,6 +46,11 @@ import { unwindGroup as unwindGroupApi } from "./lib/api.js";
 import type { UnwindDestination } from "../shared/types.js";
 import { UpdateBanner } from "./features/update/index.js";
 import { cleanupCard as cleanupCardApi, getCard, getSetup } from "./lib/api.js";
+import {
+  cleanupAttemptEnded,
+  cleanupOutcomeCopy,
+  cleanupRequestFailedCopy,
+} from "./lib/cleanup-feedback.js";
 import { refreshPushSubscription } from "./lib/push.js";
 import type { StartRequest } from "./lib/start-request.js";
 import type { PrerequisiteStatus, TunnelState } from "../shared/types.js";
@@ -322,32 +327,32 @@ export function App() {
   };
 
   const [cleanupCardId, setCleanupCardId] = useState<string | null>(null);
-  const [cleanupAttempted, setCleanupAttempted] = useState(false);
   const cleanupCard =
     board?.cards.find((card) => card.id === cleanupCardId) ??
     actionablePinnedCard(cleanupCardId, pinned);
 
+  const cleanupWatchRef = useRef(new Map<string, number | undefined>());
+  const notifyCleanupOutcome = undoToast.notice;
   useEffect(() => {
-    setCleanupAttempted(false);
-  }, [cleanupCardId]);
-
-  const cleanupBlocked = cleanupCard?.cleanupBlocked;
-  const cleanupSummaries = cleanupCard?.sessionSummaries;
-  const cleanupSettled =
-    cleanupCard != null &&
-    (cleanupSummaries == null
-      ? (cleanupBlocked == null || cleanupBlocked.length === 0) &&
-        ((!cleanupCard.tmuxSession && !cleanupCard.workspacePath) ||
-          (cleanupCard.cleanupWarning != null &&
-            cleanupCard.cleanupWarning.trim() !== ""))
-      : cleanupSummaries.every((s) => (s.cleanupBlocked?.length ?? 0) === 0) &&
-        ((!cleanupCard.tmuxSession && !cleanupCard.workspacePath) ||
-          (cleanupCard.cleanupWarning != null &&
-            cleanupCard.cleanupWarning.trim() !== "")));
-  const cleanupResolved = cleanupAttempted && cleanupSettled;
-  useEffect(() => {
-    if (cleanupResolved) setCleanupCardId(null);
-  }, [cleanupResolved]);
+    if (board == null) return;
+    for (const [id, attempt] of cleanupWatchRef.current) {
+      const card = board.cards.find((c) => c.id === id);
+      if (card == null || !cleanupAttemptEnded(card, attempt)) continue;
+      cleanupWatchRef.current.delete(id);
+      const copy = cleanupOutcomeCopy(card);
+      if (copy != null) notifyCleanupOutcome(copy);
+    }
+  }, [board, notifyCleanupOutcome]);
+  const requestCleanup = (force: boolean) => {
+    if (cleanupCard == null) return;
+    const { id, identifier, cleanupAttempt } = cleanupCard;
+    cleanupWatchRef.current.set(id, cleanupAttempt);
+    void cleanupCardApi(id, force).catch((err: unknown) => {
+      console.error("cleanupCard failed", err);
+      cleanupWatchRef.current.delete(id);
+      notifyCleanupOutcome(cleanupRequestFailedCopy(identifier));
+    });
+  };
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] =
@@ -554,13 +559,7 @@ export function App() {
         <CleanupModal
           key={cleanupCardId}
           card={cleanupCard}
-          onConfirm={(force) => {
-            setCleanupAttempted(true);
-            return cleanupCardApi(cleanupCardId!, force).catch((err) => {
-              console.error("cleanupCard failed", err);
-              throw err;
-            });
-          }}
+          onConfirm={requestCleanup}
           onClose={() => setCleanupCardId(null)}
         />
       )}

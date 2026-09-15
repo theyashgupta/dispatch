@@ -34,6 +34,7 @@ import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { IconButton } from "../../primitives/IconButton.js";
 import { Notice } from "../../primitives/Notice.js";
+import { Spinner } from "../../primitives/Spinner.js";
 import {
   errorCopy,
   needsAttention as getNeedsAttention,
@@ -675,15 +676,26 @@ export function CardView({
           </div>
         )}
 
-        {card.cleanupBlocked == null && card.cleanupDueAt != null && (
-          <div style={{ marginTop: "var(--space-xs)" }}>
-            <Notice tone="muted">
-              <span title={new Date(card.cleanupDueAt).toLocaleString()}>
-                {formatCleanupCountdown(card.cleanupDueAt, nowMs())}
-              </span>
-            </Notice>
+        {card.cleaningUp && (
+          <div
+            data-testid="cleaning-up"
+            style={{ marginTop: "var(--space-xs)" }}
+          >
+            <Notice tone="muted" icon={<Spinner />} label="Cleaning up…" />
           </div>
         )}
+
+        {card.cleanupBlocked == null &&
+          card.cleanupDueAt != null &&
+          !card.cleaningUp && (
+            <div style={{ marginTop: "var(--space-xs)" }}>
+              <Notice tone="muted">
+                <span title={new Date(card.cleanupDueAt).toLocaleString()}>
+                  {formatCleanupCountdown(card.cleanupDueAt, nowMs())}
+                </span>
+              </Notice>
+            </div>
+          )}
 
         {isGroup && expanded && (
           <div

@@ -2227,7 +2227,17 @@ over every session the card owns, resolved fresh from the card at dispatch time 
 teardown is isolated in its own `try`/`catch`, so a session blocked by uncommitted work does not
 abort the siblings that already succeeded. Cleanup runs fire-and-forget off the `/cleanup` route
 AFTER the optimistic Done move and NEVER blocks the board; the route returns an immediate 202 before
-the fan-out settles. The outcome reaches the UI ONLY over SSE, per session: a clean run calls
+the fan-out settles. The client is fire-and-forget too (LOCAL-18): `CleanupModal` closes on the
+click itself and never waits for the outcome, because teardown latency is dominated by
+`git worktree remove` deleting the worktree's ignored files (`docs/BASELINES.md`'s `## Cleanup`
+section: linear in file count, seconds for a worktree carrying `node_modules`) and cannot be made
+reliably fast. While the fan-out runs, `snapshot()` projects a wire-only `cleaningUp: true` onto the
+card from the store's card-scoped in-flight guard (`beginCleanup`/`endCleanup` each emit a plain
+`change`, no persist, so every tab sees the flag flip and it survives a reload); the card and the
+panel header render a "Cleaning up" state from it instead of the Clean up button. The App keeps the
+`cleanupAttempt` counter it saw at click time and, once that counter moved AND `cleaningUp` dropped,
+raises a toast for a blocked or warned outcome (`cleanup-feedback.ts`); a rejected or unreachable
+POST raises its own toast. The outcome reaches the UI ONLY over SSE, per session: a clean run calls
 `finishCleanup` (a quiet state clear, no banner — see removal below), a partial failure calls
 `recordCleanupWarning` which surfaces a MUTED, never-destructive session-level warning (mirroring the
 Start warning; UI-SPEC lock). Every path is derived from the resolved session's own fields (or the

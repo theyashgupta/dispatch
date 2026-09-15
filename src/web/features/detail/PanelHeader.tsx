@@ -277,7 +277,17 @@ export function PanelHeader({
             />,
             document.body,
           )}
-        {awaitingCleanup && (
+        {awaitingCleanup && c?.cleaningUp && (
+          <Button
+            variant="secondary"
+            loading
+            aria-label={narrowPanel ? "Cleaning up" : undefined}
+            title={narrowPanel ? "Cleaning up" : undefined}
+          >
+            {!narrowPanel && "Cleaning up…"}
+          </Button>
+        )}
+        {awaitingCleanup && !c?.cleaningUp && (
           <Button
             variant="secondary"
             onClick={() => c && onCleanupRequest?.(c.id)}
