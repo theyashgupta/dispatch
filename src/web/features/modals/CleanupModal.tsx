@@ -1,21 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { Button } from "../../primitives/Button.js";
 import { Modal, type ModalControl } from "../../primitives/Modal.js";
-import { Notice } from "../../primitives/Notice.js";
 
 interface CleanupModalProps {
   card: CardModel;
-  onConfirm: (force: boolean) => Promise<void>;
+  onConfirm: (force: boolean) => void;
   onClose: () => void;
 }
 
 export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
   const keepRef = useRef<HTMLButtonElement>(null);
   const modalRef = useRef<ModalControl>(null);
-  const [pending, setPending] = useState(false);
-  const [confirmError, setConfirmError] = useState(false);
-  const attemptRef = useRef<number | undefined>(undefined);
 
   const blocked = card.cleanupBlocked;
   const summaries = card.sessionSummaries;
@@ -35,23 +31,9 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
           })),
         );
 
-  useEffect(() => {
-    if (pending && card.cleanupAttempt !== attemptRef.current)
-      setPending(false);
-  }, [card.cleanupAttempt, pending]);
-
-  const handleConfirm = async (force: boolean) => {
-    if (pending) return;
-    attemptRef.current = card.cleanupAttempt;
-    setPending(true);
-    setConfirmError(false);
-    keepRef.current?.focus();
-    try {
-      await onConfirm(force);
-    } catch {
-      setConfirmError(true);
-      setPending(false);
-    }
+  const handleConfirm = (force: boolean) => {
+    onConfirm(force);
+    modalRef.current?.requestClose();
   };
 
   return (
@@ -112,14 +94,6 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
               : `Clean up all ${summaries.length} sessions? Kills each session and removes its worktrees; branches are kept.`}
           </div>
         )}
-        {confirmError && (
-          <div role="alert" style={{ marginTop: "var(--space-sm)" }}>
-            <Notice
-              tone="destructive"
-              label="Couldn't reach the server. Try again."
-            />
-          </div>
-        )}
       </Modal.Body>
       <Modal.Actions>
         <div
@@ -142,22 +116,12 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
             Keep workspace
           </Button>
           {isBlocked ? (
-            <Button
-              variant="danger"
-              loading={pending}
-              onClick={() => void handleConfirm(true)}
-            >
-              {pending
-                ? "Cleaning up…"
-                : "Discard uncommitted changes and clean up"}
+            <Button variant="danger" onClick={() => handleConfirm(true)}>
+              Discard uncommitted changes and clean up
             </Button>
           ) : (
-            <Button
-              variant="primary"
-              loading={pending}
-              onClick={() => void handleConfirm(false)}
-            >
-              {pending ? "Cleaning up…" : "Clean up"}
+            <Button variant="primary" onClick={() => handleConfirm(false)}>
+              Clean up
             </Button>
           )}
         </div>
