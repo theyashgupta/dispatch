@@ -1146,7 +1146,11 @@ class BoardStore extends EventEmitter {
     }
     return {
       ...snap,
-      cards: kept.map(redactCard),
+      cards: kept.map((c) =>
+        this.inFlightCleanups.has(c.id)
+          ? { ...redactCard(c), cleaningUp: true }
+          : redactCard(c),
+      ),
       doneCounts,
     };
   }
@@ -1346,11 +1350,16 @@ class BoardStore extends EventEmitter {
    */
   beginCleanup(id: string): void {
     this.inFlightCleanups.add(id);
+    this.emit("change");
   }
 
-  /** Clear the in-flight marker when a cleanup dispatch settles (success, warning, or throw). */
+  /**
+   * Clear the in-flight marker when a cleanup dispatch settles (success, warning, or throw).
+   * @remarks Both markers emit a plain `change` (no persist) so every client sees `cleaningUp`
+   * flip on the card's wire projection; the marker itself is never card state (LOCAL-18).
+   */
   endCleanup(id: string): void {
-    this.inFlightCleanups.delete(id);
+    if (this.inFlightCleanups.delete(id)) this.emit("change");
   }
 
   /**

@@ -387,8 +387,8 @@ export interface Card {
    * UNREDACTED like `hookRoutedAt`/`cleanupBlocked` (only `hookToken` is redacted). Mirrors
    * {@link Session.cleanupAttempt}, but — UNLIKE `cleanupWarning`/`cleanupBlocked`/`cleanupDueAt`
    * — this mirror is deliberately UNGATED: it is bumped on the card regardless of which session
-   * resolved, because it drives `CleanupModal`'s busy-state reset and gating it would leave the
-   * modal spinning forever when a fan-out resolves a non-active session. At N=1 the resolved
+   * resolved, because it drives the App's cleanup-outcome toast (LOCAL-18) and gating it would
+   * leave a manual attempt unreported when a fan-out resolves a non-active session. At N=1 the resolved
    * session is always the active one, so the gated and ungated forms are byte-identical.
    */
   cleanupAttempt?: number;
@@ -403,6 +403,11 @@ export interface Card {
    * @see docs/ARCHITECTURE.md#cleanup-lifecycle
    */
   cleanupDueAt?: number;
+  /**
+   * Wire-only: a cleanup teardown is in flight for this card (LOCAL-18). Projected by
+   * `snapshot()` from the store's in-flight guard, never persisted; absent when idle.
+   */
+  cleaningUp?: true;
   /** Optional extra direction text captured at Start; reused by Retry and the Phase-3 detail panel. */
   extraDirection?: string | null;
   /** Structured ttyd (terminal) failure surfaced in the detail panel; null/absent when the terminal is healthy. */
