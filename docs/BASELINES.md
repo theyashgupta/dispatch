@@ -448,6 +448,38 @@ next task: the fan-out is scoped to the three per-repo git loops (preflight `wor
 teardown `worktreeRemove`, `worktreePrune`) and `fs.rm` stays a single call spanning the whole
 workspace folder, unchanged.
 
+### LOCAL-18: where the time goes (click to settle)
+
+- **Date:** 2026-09-15
+- **Git SHA measured:** `10d05c0` (pre-fix tree, `main` at v3.6.2)
+- **Machine:** Apple Silicon, local (Node v24.19.0)
+- **Method:** the `perf-cleanup.mjs` sandbox shape (fresh `board.db`, real git repo + worktree,
+  production build, real `POST /api/cards/:id/cleanup` with `force: false`), extended with three
+  knobs: ignored files per worktree (a committed `.gitignore` plus N files under `node_modules/`,
+  so the preflight stays clean), extra already-cleaned Done cards in `board.db`, and an
+  `/api/stream` reader timing the first frame where the card has no `workspacePath`.
+  `t_202` is POST to 202; `t_settle` is POST to that SSE frame, which is exactly what the
+  pre-fix `CleanupModal` waited for before closing. Means over 3 runs (2 for the 60k row).
+
+```
+  files/worktree  extra Done cards   t_202   t_settle   wt_remove   frame size
+               0                 0    18ms       88ms        22ms         6 KB
+               0               250    20ms       93ms        19ms       594 KB
+               0              1000    15ms      111ms        15ms      2375 KB
+          20,000                 0    16ms     1193ms      1131ms         6 KB
+          60,000                 0    21ms     5181ms      5103ms         6 KB
+```
+
+**Verdict:** Done-card count is not the cause (0 to 1000 cards adds ~25ms, all of it snapshot
+serialization for a 2.4 MB frame). The route itself answers in ~20ms regardless. The variable is
+the worktree's file count: `git worktree remove --force` unlinks every file in the worktree,
+ignored `node_modules` included, at roughly 85 microseconds per file, so a ticket whose worktree
+had `npm install` run in it takes 4 to 13 seconds to settle while an untouched worktree takes
+under 100ms. That is the "intermittent" slowness. `preflight`, `kill`, `fs.rm`, and `prune` stay
+flat (under 50ms) at every size. Multi-session cards multiply this by the session count because the
+fan-out is deliberately sequential. The deletion is real disk work in a child process, already off
+the event loop, so the fix (LOCAL-18) is to stop the modal waiting for it, not to speed it up.
+
 ## Board at scale
 
 - **Date:** 2026-08-03
