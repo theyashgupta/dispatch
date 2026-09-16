@@ -3173,6 +3173,71 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Reset a started card to a pristine Inbox card (LOCAL-20): every session record is released
+   * and removed, and every start, cleanup and artifact field is cleared, in one mutation.
+   * @remarks Callers kill tmux/ttyd and remove the workspace and branch BEFORE this runs. Each
+   * record is cleared through `setActiveSession` and `clearHookToken` before `removeSessionRecord`,
+   * the `finishCleanup` order, so the last removal never hits the refusing-to-project branch.
+   * @see docs/ARCHITECTURE.md#reset
+   */
+  resetCard(id: string): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      const from = card.column;
+      for (const s of [...(card.sessions ?? [])]) {
+        this.setActiveSession(
+          card,
+          {
+            tmuxSession: undefined,
+            ttydPort: undefined,
+            workspacePath: undefined,
+            workspace: undefined,
+            claudeSessionId: undefined,
+            branch: undefined,
+          },
+          s.id,
+        );
+        this.clearHookToken(card, s.id);
+        this.removeSessionRecord(card, s.id);
+      }
+      card.branch = undefined;
+      card.claudeAccountId = undefined;
+      card.nextSessionOrdinal = undefined;
+      card.sessionLost = undefined;
+      card.lastMarker = undefined;
+      card.statusReason = undefined;
+      card.promotedAt = undefined;
+      card.outputChangedAt = undefined;
+      card.provisioningStep = null;
+      card.startError = null;
+      card.startWarning = null;
+      card.startIntent = undefined;
+      card.extraDirection = undefined;
+      card.terminalError = null;
+      card.resumeError = null;
+      card.cleanupWarning = undefined;
+      card.cleanupBlocked = undefined;
+      card.cleanupDueAt = undefined;
+      card.cleanupAttempt = undefined;
+      card.prs = undefined;
+      card.prsUnknown = undefined;
+      card.previews = undefined;
+      card.previewsUnknown = undefined;
+      card.column = "inbox";
+      card.updatedAt = new Date().toISOString();
+      return [
+        this.event("session_reset", {
+          cardId: id,
+          fromCol: from,
+          toCol: "inbox",
+          source: "user",
+        }),
+      ];
+    });
+  }
+
+  /**
    * Splice a fully-cleaned session's record out of `card.sessions` and repair the active pointer in
    * the SAME synchronous mutator as the caller — the third sanctioned writer of the NEW-21 fenced
    * set, but of the two entity fields (`sessions`, `activeSessionId`, `scripts/check-invariants.mjs`'s
