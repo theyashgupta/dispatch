@@ -1393,6 +1393,25 @@ export async function unwindGroup(
   throw new Error(`unwindGroup failed: ${res.status} ${res.statusText}`);
 }
 
+/**
+ * Reset a started ticket (LOCAL-20): POST /api/cards/:id/reset.
+ * @remarks 200 means the card is back in the Inbox. Any JSON error body is returned as a refusal
+ * with the server's reason; a response without one throws.
+ */
+export async function resetCard(
+  id: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const res = await fetch(`/api/cards/${encodeURIComponent(id)}/reset`, {
+    method: "POST",
+  });
+  if (res.ok) return { ok: true };
+  const body = (await res.json().catch(() => null)) as {
+    error?: string;
+  } | null;
+  if (body?.error) return { ok: false, status: res.status, error: body.error };
+  throw new Error(`resetCard failed: ${res.status} ${res.statusText}`);
+}
+
 /** Every archived group, newest first: GET /api/archive. Throws on any non-2xx. */
 export async function listArchive(): Promise<ArchivedGroupSummary[]> {
   const res = await fetch("/api/archive");
