@@ -52,6 +52,7 @@ interface DetailPanelProps {
   onStartRequest?: (req: string | StartRequest) => void;
   onCleanupRequest?: (id: string) => void;
   onUnwindRequest?: (id: string, to: UnwindDestination) => void;
+  onResetRequest?: (id: string) => void;
   docked?: boolean;
   accounts?: ClaudeAccountSummary[];
 }
@@ -70,6 +71,7 @@ export function DetailPanel({
   onStartRequest,
   onCleanupRequest,
   onUnwindRequest,
+  onResetRequest,
   docked = false,
   accounts,
 }: DetailPanelProps) {
@@ -522,6 +524,7 @@ export function DetailPanel({
               onStartRequest={onStartRequest}
               onCleanupRequest={onCleanupRequest}
               onUnwindRequest={onUnwindRequest}
+              onResetRequest={onResetRequest}
             />
 
             {sessionAccountEmail != null && (

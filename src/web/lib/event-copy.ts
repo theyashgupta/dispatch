@@ -85,6 +85,8 @@ export function describeEvent(event: ActivityEvent): string {
         : "restored";
     case "archive_deleted":
       return "archived workspace deleted";
+    case "session_reset":
+      return "reset to Inbox";
     default:
       return describeUnknownEvent(event.type);
   }

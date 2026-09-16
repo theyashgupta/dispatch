@@ -19,6 +19,7 @@ import {
 } from "../services/orchestration/resume-session.js";
 import { cleanupWorkspace } from "../services/orchestration/cleanup.js";
 import { unwindGroup } from "../services/orchestration/unwind.js";
+import { resetCard } from "../services/orchestration/reset.js";
 import { runClaude } from "../services/orchestration/run-claude.js";
 import { editorPath, launchEditor } from "../adapters/editors.js";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
@@ -769,6 +770,23 @@ async function unwindHandler(req: Request, res: Response): Promise<void> {
 }
 
 cardsRouter.post("/cards/:id/unwind", unwindHandler);
+
+/**
+ * `POST /cards/:id/reset` (LOCAL-20): undo a start. The card returns to the Inbox with no session,
+ * workspace or local branch. The service owns every guard; this handler maps the outcome.
+ * @see docs/ARCHITECTURE.md#reset
+ */
+async function resetHandler(req: Request, res: Response): Promise<void> {
+  const { id } = req.params as { id: string };
+  const outcome = await resetCard(id);
+  if (!outcome.ok) {
+    res.status(outcome.status).json({ error: outcome.error });
+    return;
+  }
+  res.status(200).json({ reset: true });
+}
+
+cardsRouter.post("/cards/:id/reset", resetHandler);
 
 cardsRouter.post("/cards/group", createGroupHandler);
 

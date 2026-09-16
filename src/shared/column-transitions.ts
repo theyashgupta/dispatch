@@ -67,6 +67,8 @@ import type { Column } from "./types.js";
  *     `services/orchestration/unwind.ts#unwindGroup` -> `board.store.ts#unwindGroup`.
  * 18. Restore (LOCAL-17) -> the group's archived column, members mirror, all-or-nothing via
  *     `board.store.ts#restoreBlocker`; owner `board.store.ts#restoreGroup`.
+ * 19. Reset (LOCAL-20) -> `inbox` from any column, every session detached, owner
+ *     `services/orchestration/reset.ts#resetCard` -> `board.store.ts#resetCard`.
  *
  * Parked has NO automatic in-edge (manual drag only, #8) and exactly one automatic out-edge, the
  * prompt-driven flip-back (#3, #5): it sits in `FLIP_BACK_SOURCES` but NOT in
