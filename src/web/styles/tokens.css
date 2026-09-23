@@ -23,7 +23,7 @@
   --space-sm: 8px; /* inter-card gap, column inner gap, card padding */
   --space-lg: 16px; /* column inner padding, board gutter */
   --space-xl: 24px; /* slide-over/error screen block spacing */
-  --space-2xl: 32px; /* error/first-run outer padding; strip + header height */
+  --space-2xl: 32px; /* error/first-run outer padding */
   --space-3xl: 48px; /* empty-state vertical centering offset */
   --panel-section-gap: 16px; /* LUI-05: the detail panel's single reading-surface section rhythm, docs/standards/design-contract.md ## Spacing rhythm; replaces ReferenceBlocks/PrList/CardTimeline's own ad hoc per-block margins */
 
@@ -35,14 +35,14 @@
 
   /* Typography — 5 chrome sizes + 1 markdown heading cap, 3 weights. */
   --font-body: 13px; /* card title, description body */
-  --font-label: 12px; /* identifier, column header, count, sync strip, badges */
+  --font-label: 12px; /* identifier, column header, count, sidebar, badges */
   --font-micro: 11px; /* card timestamps, column count chips, mono one-step-down */
   --font-heading: 17px; /* panel title, modal heading */
   --font-md-h1: 14px; /* description-heading cap — held at 14px; the panel title moved to 17px so the old "one step below 15px" relationship no longer holds, but no replacement value was rendered and checked, so this is deliberately not retuned */
   --font-display: 22px; /* wordmark, first-run / startup-error title */
 
   --weight-regular: 400;
-  --weight-medium: 500; /* column headers, panel section labels, sync-strip status text */
+  --weight-medium: 500; /* column headers, panel section labels, sidebar sync status text */
   --weight-semibold: 600;
 
   --line-body: 1.45;
@@ -55,9 +55,6 @@
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 
   /* Chrome dimensions. */
-  --strip-height: 56px;
-  --strip-padding: 24px; /* sync-strip horizontal padding; swapped per breakpoint below */
-  --strip-grid-columns: minmax(0, 1fr) auto minmax(0, 1fr); /* sync-strip zone grid; swapped per breakpoint below */
   --column-header-height: 28px;
   --nav-width: 240px; /* sidebar, expanded */
   --nav-width-collapsed: 56px; /* sidebar, icons only; forced at or below 1023px */
@@ -82,7 +79,7 @@
   --col-parked: #b08968;
   --col-done: #6b7280;
 
-  /* Status signal palette (sync-strip dot) */
+  /* Status signal palette (sidebar sync status dot) */
   --status-ok: #3fb950;
   --status-stale: #ef8e3b;
   --status-down: #e5484d;
@@ -154,21 +151,9 @@
     --panel-width: 100vw;
     --drawer-width: 100vw;
     /* 56px costs a card row below 768px but zero rows at the three wider
-       breakpoints, so the strip only shrinks back to 44px here. */
-    --strip-height: 44px;
-    /* The page header keeps the same 44px the strip measured here, so no card
-       row is lost below 768px. */
+       breakpoints, so the page header only shrinks back to 44px here (the rule the
+       sync strip established before it retired). */
     --page-header-height: 44px;
-    /* 24px of horizontal padding put the two rightmost strip controls past the
-       viewport edge at 390px (Activity +14.53px, Settings +46.53px, measured),
-       so the strip drops to the low end of the researched 16-24px range here. */
-    --strip-padding: 16px;
-    /* Symmetric outer tracks mirror the slack the 16px glyph-only identity zone
-       does not use, starving the sync status to 7px at 390px (measured). Column 1
-       is a fixed 16px here, so an `auto` track cannot vary with column 3 and the
-       mode control keeps its positional invariance; only viewport centring is
-       traded, and only below 768px. */
-    --strip-grid-columns: auto auto minmax(0, 1fr);
   }
 }
 
