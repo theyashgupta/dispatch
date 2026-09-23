@@ -11,6 +11,7 @@ import { CAROUSEL_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
 import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { IconButton } from "../../primitives/IconButton.js";
+import { Kbd } from "../../primitives/Kbd.js";
 import { COLUMN_ACCENT, COLUMN_LABELS } from "./column-meta.js";
 
 const SEARCH_MIN_WIDTH = 280;
@@ -18,6 +19,7 @@ const SEARCH_MAX_WIDTH = 360;
 const ROW_HEIGHT = 44;
 const DEBOUNCE_MS = 200;
 const GAP = 4;
+const MOD_KEY = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 
 type SearchStatus = "idle" | "loading" | "ready" | "error";
 
@@ -181,7 +183,7 @@ export function SearchBox({
   const inputStyle = {
     width: "100%",
     height: "32px",
-    padding: "0 var(--space-sm) 0 26px",
+    padding: "0 calc(var(--space-sm) * 2 + 36px) 0 26px",
     background: "var(--surface-card)",
     border: "1px solid var(--border)",
     borderRadius: "var(--radius)",
@@ -212,11 +214,12 @@ export function SearchBox({
         type="text"
         role="combobox"
         aria-label="Search tickets"
+        aria-keyshortcuts="Meta+K Control+K"
         aria-expanded={open}
         aria-controls="search-results-listbox"
         aria-autocomplete="list"
         aria-activedescendant={activeId}
-        placeholder="Search tickets… (⌘K)"
+        placeholder="Search tickets…"
         maxLength={SEARCH_QUERY_MAX}
         value={query}
         onChange={(event) => {
@@ -232,6 +235,19 @@ export function SearchBox({
         onBlur={() => setInputFocused(false)}
         style={inputStyle}
       />
+      <span
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          right: "var(--space-sm)",
+          display: "inline-flex",
+          gap: "2px",
+          pointerEvents: "none",
+        }}
+      >
+        <Kbd>{MOD_KEY}</Kbd>
+        <Kbd>K</Kbd>
+      </span>
     </div>
   );
 
@@ -361,8 +377,9 @@ export function SearchBox({
       ) : (
         <span ref={triggerRef} style={{ display: "inline-flex" }}>
           <IconButton
-            aria-label="Search tickets (⌘K)"
-            title="Search tickets (⌘K)"
+            aria-label="Search tickets"
+            aria-keyshortcuts="Meta+K Control+K"
+            title="Search tickets"
             onClick={() => setOverlayOpen(true)}
           >
             <Search size={16} aria-hidden="true" />
