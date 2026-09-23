@@ -1,5 +1,6 @@
 export { StartModal } from "./StartModal.js";
 export { CleanupModal } from "./CleanupModal.js";
+export { ResetModal } from "./ResetModal.js";
 export { MultiSelect } from "./MultiSelect.js";
 export { CreateTicketModal } from "./CreateTicketModal.js";
 export { GroupStartModal } from "./GroupStartModal.js";

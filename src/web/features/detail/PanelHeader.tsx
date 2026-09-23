@@ -7,6 +7,7 @@ import {
   Maximize2,
   Minimize2,
   Play,
+  RotateCcw,
   Trash2,
   Upload,
   X,
@@ -21,6 +22,7 @@ import type {
 import { UnwindPicker } from "./UnwindPicker.js";
 import { moveCard, openEditor, syncCardToLinear } from "../../lib/api.js";
 import { isDemoteEligible } from "../../../shared/demote-eligibility.js";
+import { isResetEligible } from "../../../shared/reset-eligibility.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { IconButton } from "../../primitives/IconButton.js";
@@ -62,6 +64,7 @@ interface PanelHeaderProps {
   onStartRequest?: (id: string) => void;
   onCleanupRequest?: (id: string) => void;
   onUnwindRequest?: (id: string, to: UnwindDestination) => void;
+  onResetRequest?: (id: string) => void;
 }
 
 export function PanelHeader({
@@ -78,6 +81,7 @@ export function PanelHeader({
   onStartRequest,
   onCleanupRequest,
   onUnwindRequest,
+  onResetRequest,
 }: PanelHeaderProps) {
   const c = card;
   const [syncPending, setSyncPending] = useState(false);
@@ -277,6 +281,18 @@ export function PanelHeader({
             />,
             document.body,
           )}
+        {c && isResetEligible(c) && onResetRequest && (
+          <Button
+            variant="secondary"
+            disabled={c.cleaningUp === true}
+            onClick={() => onResetRequest(c.id)}
+            aria-label={narrowPanel ? "Reset" : undefined}
+            title="Undo the start: delete the session, workspace and branch, then return to Inbox"
+          >
+            <RotateCcw size={12} strokeWidth={2} aria-hidden="true" />
+            {!narrowPanel && "Reset"}
+          </Button>
+        )}
         {awaitingCleanup && c?.cleaningUp && (
           <Button
             variant="secondary"

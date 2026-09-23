@@ -193,7 +193,7 @@ const SANCTIONED_WRITERS = [
  * The three Card-mirrors-Session cleanup-lifecycle fields invariant `NEW-23` fences. Unlike
  * {@link SESSION_FIELDS}, these do NOT funnel through one chokepoint (`setActiveSession`): the
  * cleanup lifecycle writes each field from whichever step of teardown, blocking, or restoration it
- * is in, so the sanctioned-writer set below is a set of NINE functions, not three.
+ * is in, so the sanctioned-writer set below is a set of TEN functions, not three.
  */
 const CLEANUP_MIRROR_FIELDS = [
   "cleanupDueAt",
@@ -222,6 +222,10 @@ const CLEANUP_SANCTIONED_WRITERS = [
   { name: "noteCleanupWarning", fields: ["cleanupWarning"] },
   {
     name: "pruneStaleWarnedSessions",
+    fields: ["cleanupWarning", "cleanupBlocked", "cleanupDueAt"],
+  },
+  {
+    name: "resetCard",
     fields: ["cleanupWarning", "cleanupBlocked", "cleanupDueAt"],
   },
 ];

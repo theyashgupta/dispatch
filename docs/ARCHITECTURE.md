@@ -538,6 +538,7 @@ legal source column(s), target, and owning code path:
 | Manual drag into Parked                                      | any (no automatic in-edge exists)                                                | `parked`                                         | `board.store.ts#moveCardManual`, same `isManualMoveAllowed` gate                          |
 | Unwind (LOCAL-17)                                            | group card in any column                                                         | members to `todo` / `inbox`; group card archived | `services/orchestration/unwind.ts#unwindGroup` -> `board.store.ts#unwindGroup`            |
 | Restore (LOCAL-17)                                           | archived group, members in the unwind destination                                | group's archived column (members mirror)         | `board.store.ts#restoreGroup`, all-or-nothing via `#restoreBlocker`                       |
+| Reset (LOCAL-20)                                             | any column, card holds a session, workspace or branch                            | `inbox`, every session detached                  | `services/orchestration/reset.ts#resetCard` -> `board.store.ts#resetCard`                 |
 
 Every conflict this spec was written to name is now closed and reflected in the table above:
 `flipBack`'s guard is `FLIP_BACK_SOURCES` rather than `needs_input` alone; the Inbox marker-guard
@@ -2377,19 +2378,20 @@ lifecycle currently is (stamping a schedule, recording a warning, clearing a sch
 field or a tenth writer could otherwise be added with no gate noticing.
 
 `scripts/check-invariants.mjs`'s `checkCleanupMirrorChokepoint` fences all three fields against
-exactly NINE declared writers in `src/server/store/board.store.ts`, each granted only the subset
+exactly TEN declared writers in `src/server/store/board.store.ts`, each granted only the subset
 it actually writes: `moveCardManual` (`cleanupDueAt`), `recordCleanupWarning` (`cleanupWarning`,
 `cleanupDueAt`), `finishCleanup` (all three), `recordCleanupBlocked` (`cleanupBlocked`),
 `clearCleanupBlocked` (`cleanupBlocked`), `clearCleanupDue` (`cleanupDueAt`), `restoreCleanupDue`
-(`cleanupDueAt`), `noteCleanupWarning` (`cleanupWarning`), and `pruneStaleWarnedSessions` (all
-three, the warned-but-retained prune rule closing Phase 93 residual R3). It reuses `NEW-21`'s own
+(`cleanupDueAt`), `noteCleanupWarning` (`cleanupWarning`), `pruneStaleWarnedSessions` (all
+three, the warned-but-retained prune rule closing Phase 93 residual R3), and `resetCard` (all
+three, LOCAL-20). It reuses `NEW-21`'s own
 `scanSessionFieldAssignments` AST walk (generalized to accept a field list, rather than duplicated
 for a second field set) and the same two-tier shape: a repo-wide fence for every file outside
 `board.store.ts`, and an in-file declaration-span check inside it. It carries the same
 missing-subject sentinel as `NEW-21`: if a sanctioned writer's declaration cannot be found (renamed
 or deleted), the check FAILS rather than silently widening the exemption to nothing.
 
-Adding a fourth cleanup-mirror field, or a tenth writer of one of the existing three, requires a
+Adding a fourth cleanup-mirror field, or an eleventh writer of one of the existing three, requires a
 deliberate, human-ratified baseline re-freeze (`FROZEN_COUNT` bumped in the same commit) exactly
 like every other `NEW-`-prefixed structural fence in this file.
 
@@ -2455,6 +2457,23 @@ scheduler's tick runs `cleanup-scheduler.ts#runArchiveSweep`, which deletes rows
 row leaves the due set for good, matching `LIFE-03`. Archive rows never ride the SSE snapshot: the
 web reads them through `routes/archive.route.ts`, and every response passes through
 `board.store.ts#redactArchivedGroup`.
+
+### Reset
+
+Reset (LOCAL-20) is the only path that fully undoes a start on a single ticket. It is available
+whenever `shared/reset-eligibility.ts#isResetEligible` holds: the card still carries a session, a
+workspace path, a local branch, or is session-lost, and it is neither a group nor a member (Unwind
+owns those). `services/orchestration/reset.ts#resetCard` refuses with 409 while a start, resume or
+cleanup saga holds the card, then runs inside the card-scoped cleanup guard: it kills every
+session's ttyd and tmux through `cleanup.ts#killSessionProcesses`, removes every session's
+worktrees and workspace folder through `cleanup.ts#removeWorkspaceFiles` (no dirty preflight; the
+confirmation dialog is the consent), and deletes each session's LOCAL branch in each repo. Remote
+branches and open PRs are never touched. The store is written only after every step succeeded, so
+a failed step returns 500 naming the step and the card stays resettable; every step is idempotent,
+so a second Reset simply resumes. `board.store.ts#resetCard` then clears every record through the
+`finishCleanup` order (`setActiveSession`, `clearHookToken`, `removeSessionRecord`), clears every
+start, cleanup, marker and artifact field, and moves the card to `inbox` in one mutation. A later
+Start is therefore a first start: the workspace is picked again and the branch is cut fresh.
 
 ### Hooks Status Channel
 

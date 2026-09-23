@@ -32,6 +32,7 @@ import { ActivityDrawer } from "./features/activity/index.js";
 import {
   StartModal,
   CleanupModal,
+  ResetModal,
   CreateTicketModal,
 } from "./features/modals/index.js";
 import { SettingsScreen, type SettingsTab } from "./features/settings/index.js";
@@ -43,6 +44,7 @@ import {
   useUndoToast,
 } from "./hooks/useUndoToast.js";
 import { unwindGroup as unwindGroupApi } from "./lib/api.js";
+import { resetCard as resetCardApi } from "./lib/api.js";
 import type { UnwindDestination } from "../shared/types.js";
 import { UpdateBanner } from "./features/update/index.js";
 import { cleanupCard as cleanupCardApi, getCard, getSetup } from "./lib/api.js";
@@ -354,6 +356,25 @@ export function App() {
     });
   };
 
+  const [resetCardId, setResetCardId] = useState<string | null>(null);
+  const resetCard =
+    board?.cards.find((card) => card.id === resetCardId) ??
+    actionablePinnedCard(resetCardId, pinned);
+  const requestReset = () => {
+    if (resetCard == null) return;
+    const { id, identifier } = resetCard;
+    void resetCardApi(id)
+      .then((result) => {
+        notifyCleanupOutcome(
+          result.ok ? `${identifier} reset to Inbox.` : result.error,
+        );
+      })
+      .catch((err: unknown) => {
+        console.error("resetCard failed", err);
+        notifyCleanupOutcome(`Couldn't reset ${identifier}.`);
+      });
+  };
+
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] =
     useState<SettingsTab>("filters");
@@ -365,6 +386,7 @@ export function App() {
     settingsOpen ||
     createTicketOpen ||
     cleanupCard != null ||
+    resetCard != null ||
     (startCard != null && startRequest != null);
 
   useEffect(() => {
@@ -525,6 +547,7 @@ export function App() {
           onStartRequest={requestStart}
           onCleanupRequest={setCleanupCardId}
           onUnwindRequest={requestUnwind}
+          onResetRequest={setResetCardId}
           docked={viewMode === "workspace"}
         />
       }
@@ -561,6 +584,14 @@ export function App() {
           card={cleanupCard}
           onConfirm={requestCleanup}
           onClose={() => setCleanupCardId(null)}
+        />
+      )}
+      {resetCard && (
+        <ResetModal
+          key={resetCardId}
+          card={resetCard}
+          onConfirm={requestReset}
+          onClose={() => setResetCardId(null)}
         />
       )}
       {settingsOpen && (
