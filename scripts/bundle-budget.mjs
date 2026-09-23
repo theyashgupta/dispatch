@@ -34,12 +34,27 @@ const BUDGETS = [
   {
     label: "index.html",
     match: (f) => f === "index.html",
-    budgetGzipBytes: 388,
-  }, // seed: 352
+    budgetGzipBytes: 517, // seed: 470 (re-seeded 2026-09-24 with the sidebar shell)
+  },
   {
-    label: "assets/index-*.js",
-    match: (f) => f.startsWith(`assets${sep}index-`) && f.endsWith(".js"),
-    budgetGzipBytes: 166989, // seed: 151808
+    label: "assets/main-*.js",
+    match: (f) => f.startsWith(`assets${sep}main-`) && f.endsWith(".js"),
+    budgetGzipBytes: 80388, // seed: 73080 (the board plus shell; the inbox, orca and settings chunks below are lazy)
+  },
+  {
+    label: "assets/inbox-*.js",
+    match: (f) => f.startsWith(`assets${sep}inbox-`) && f.endsWith(".js"),
+    budgetGzipBytes: 2211, // seed: 2010
+  },
+  {
+    label: "assets/orca-*.js",
+    match: (f) => f.startsWith(`assets${sep}orca-`) && f.endsWith(".js"),
+    budgetGzipBytes: 3007, // seed: 2733
+  },
+  {
+    label: "assets/settings-*.js",
+    match: (f) => f.startsWith(`assets${sep}settings-`) && f.endsWith(".js"),
+    budgetGzipBytes: 21245, // seed: 19313
   },
   {
     label: "assets/index-*.css",
