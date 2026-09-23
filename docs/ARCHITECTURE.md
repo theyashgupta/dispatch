@@ -94,7 +94,7 @@ and roles only, it does not restate the layering policy.
 | Markers             | `adapters/markers/parse.ts`, `adapters/markers/scan-decision.ts`, `adapters/markers/pane-view.ts`, `adapters/markers/watcher.ts`                                                                                                                                                                                                                | Pure marker parser, the pure per-tick decision core, the pane-view helpers, and the I/O-shell pane watcher applying one card decision per tick.                                                                                                                                                                      |
 | Adapters            | `adapters/exec.ts`, `adapters/git.ts`, `adapters/tmux.ts`, `adapters/ttyd.ts`, `adapters/claude-trust.ts`, `adapters/editors.ts`, `adapters/resolve-binary.ts`                                                                                                                                                                                  | The argv-only subprocess chokepoint, the git / tmux / ttyd / claude-trust adapters over it, editor launch, and binary-path resolution.                                                                                                                                                                               |
 | Shared              | `shared/types.ts`                                                                                                                                                                                                                                                                                                                               | Pure cross-half contracts; `BoardSnapshot` is both the SSE payload and the on-disk board file.                                                                                                                                                                                                                       |
-| Frontend            | `web/App.tsx`, `web/features/board/Board.tsx`, `web/features/board/Card.tsx`, `web/features/detail/DetailPanel.tsx`, plus hooks, dialogs, and sync strip                                                                                                                                                                                        | React board: optimistic drag-and-drop, the detail slide-over with the terminal iframe, SSE hooks.                                                                                                                                                                                                                    |
+| Frontend            | `web/App.tsx`, `web/features/board/Board.tsx`, `web/features/board/Card.tsx`, `web/features/detail/DetailPanel.tsx`, plus hooks, dialogs, and the sidebar (`web/features/nav/SidebarNav.tsx`)                                                                                                                                                   | React board: optimistic drag-and-drop, the detail slide-over with the terminal iframe, SSE hooks.                                                                                                                                                                                                                    |
 
 ## Cross-Module Invariants
 
@@ -1996,7 +1996,7 @@ harmless no-op there. The muted "Gone from Linear" badge (`web/features/badges/G
 only on cards past To Do/Inbox) is INFORMATIONAL, not destructive: the issue disappearing from
 Linear on a card past that point is EXPECTED, so it uses muted text/border, never red.
 
-**Sync-strip precedence (`SYNC-04`).** The slim top strip (`web/features/sync/SyncStrip.tsx`) reports sync
+**Sync-status precedence (`SYNC-04`).** The sidebar footer status (`web/features/nav/SyncStatus.tsx`) reports sync
 freshness + connection health as TEXT only (no spinner — the board must feel instant), and its
 status copy follows a fixed precedence chain: `Disconnected` (red — a dropped SSE connection, the
 only destructive state) OUTRANKS the muted `stale` banner (last successful sync older than 2× the
@@ -2005,7 +2005,7 @@ poll interval), which outranks the muted truncation `syncWarning` (an incomplete
 `Synced` copy. Stale and truncation are MUTED, not destructive, precisely because last-known-good
 data remains fully on the board; only a dropped connection is red. An unparseable `syncedAt`
 degrades to the plain `Synced` label rather than computing a relative age or a stale banner from
-`NaN` (the least-lying option). The badge and strip `.tsx` sites are homed by this section, not by
+`NaN` (the least-lying option). The badge and status `.tsx` sites are homed by this section, not by
 JSDoc (the comment standard's tsx carve-out — [comments.md](standards/comments.md) rule 2 — forbids
 JSDoc in `src/web/**/*.tsx`, enforced by the `allowJsdoc: false` lint scoping in `eslint.config.ts`).
 
@@ -2978,7 +2978,7 @@ exemptions: `tokens.css` itself, the palette's single legitimate home, and the `
 properties in `src/web/viewer/viewer.css`, whose values carry syntax-highlight meaning rather
 than status meaning (`--hl-attr`'s `#ef8e3b` matches `--status-stale`/`--prio-high` by
 coincidental hue reuse, not by status semantics). A global `src/**` scan would be the wrong shape here, the same reasoning
-`NEW-18` and `NEW-19` already record above: this check's subject is `src/web` specifically. The
+the retired strip cascade check and `NEW-19` already record above: this check's subject is `src/web` specifically. The
 literal half alone is not the whole guarantee, so the check also fences the MECHANISM: the single
 definition of "which colour a column renders" is `COLUMN_ACCENT` in
 `src/web/features/board/column-meta.ts` (consumed by `Column.tsx`, `SearchBox.tsx` and
@@ -2999,161 +2999,85 @@ trips proving the check can fail: a reintroduced literal at a real consuming sit
 palette declaration hitting the missing-subject sentinel, and a renamed `COLUMN_ACCENT` hitting
 the mechanism half.
 
-`scripts/check-invariants.mjs` mechanically covers all six through four separate checks: a
+`scripts/check-invariants.mjs` mechanically covered all six through four separate checks, one of which has since retired: a
 global retired-pattern scan over `src/**/*.{ts,tsx}` catches the retired box-shadow focus
 expression, the retired float-shadow literal, and a hardcoded wordmark weight reappearing
-anywhere in source; a second, file-scoped check (`checkStripPadding`, `NEW-18`, see
-[App Shell Zones](#app-shell-zones)) covers a fourth retired literal that the global scan cannot
-safely reach, and additionally asserts the padding cascade's own mechanism so the check cannot pass
-against an implementation that quietly dropped it; a third, directory-scoped check (`checkBoardReadingRhythm`, `NEW-19`, above) covers
+anywhere in source; a second, file-scoped check (`checkStripCascades`, the retired strip cascade invariant) covered a fourth
+retired literal inside the sync strip until the strip retired with it (see
+[App Shell Zones](#app-shell-zones)); a third, directory-scoped check (`checkBoardReadingRhythm`, `NEW-19`, above) covers
 the fifth; and a fourth, file-scoped check (`checkTerminalFence`, `NEW-20`, above) covers the
 sixth — proving only the fenced subject set, never the fenced contents, as stated above.
 
 ### App Shell Zones
 
-**The zone grid.** `SyncStrip.tsx` renders its three top-level children through a CSS grid whose
-`gridTemplateColumns` reads `var(--strip-grid-columns)`: column 1 is the identity zone (`Glyph` plus
-the DISPATCH wordmark, the glyph alone below 768px — see "Narrow-width behaviour" below), column 2
-is the mode control and NOTHING else, and column 3 is the primary cluster (New Ticket, then Inbox
-while `viewMode === "board"`) followed by a hairline divider and the utility cluster (sync status,
-Activity, Settings). Column 2's exclusivity is load-bearing: because `justifySelf: "center"` places
-it against its own track rather than against its neighbors' combined width, its horizontal position
-stays invariant when anything in column 1 or column 3 mounts or unmounts — specifically, it stops
-the Inbox button's `viewMode === "board"` guard from shifting the view switch sideways when Orca
-view unmounts Inbox. A flex row with `justifyContent: "space-between"` cannot make this guarantee,
-because removing a sibling from either side changes that side's total width and the center-weighted
-middle drifts with it.
+**The two-column shell (reversed decision, 2026-09-23).** This section once recorded a written
+non-goal, "no persistent left sidebar", enforced by `AppShell.tsx` mounting exactly one chrome
+container above `content` and `detail`. That non-goal was correct for a single-board product.
+Dispatch is becoming a multi-page developer dispatcher (`docs/research/dispatch-platform-plan.md`,
+section 1), so the decision was reversed the same way it was made, and LOCAL-35 shipped the shell
+it describes. `AppShell.tsx` renders two columns: the `nav` slot (the sidebar,
+`src/web/features/nav/SidebarNav.tsx`) and a main column holding a measured chrome wrapper (the
+`banner` slot for `UpdateBanner` and the `header` slot for the page's `PageHeader`,
+`src/web/primitives/PageHeader.tsx`) above the `content` slot. `detail` and `children` render after
+the columns exactly as before, so the detail panel's PANEL-03 no-remount rule is untouched. The
+slot list is `nav`, `banner`, `header` per page, `content`, `detail`. The sync strip and its mode
+control are gone: pages are chosen by hash route, parsed by `parseRoute` in `src/web/lib/route.ts`
+and owned by `useRoute` in `src/web/hooks/useRoute.ts`, which also remembers the last route under
+`dsp.route` and maps the legacy `dsp.view` value once on first load. The sidebar dimensions
+(`--nav-width`, `--nav-width-collapsed`), the page header height (`--page-header-height`), the
+seven `--src-*` source colors and the "active sidebar row" accent job are ratified in
+`docs/standards/design-contract.md`.
 
-**The template is width-dependent, and the two properties it trades are not the same property.**
-`--strip-grid-columns` cascades in `src/web/styles/tokens.css`, in the same
-`@media (max-width: 767px)` block as `--strip-padding` and `--strip-height`:
+**Two custom properties carry the shell's geometry to the detail panel.** `AppShell.tsx` sets
+`--nav-current` (the live sidebar width: `var(--nav-width)`, `var(--nav-width-collapsed)`, or `0px`
+when the sidebar becomes a top bar) and `--chrome-top` (the measured height of the banner plus the
+page header, via `useChromeHeight`) inline on its root. The docked (Orca) `DetailPanel.tsx` reads
+both: `top: var(--chrome-top)`, `left: calc(var(--nav-current, 0px) + var(--orca-nav-width))` and
+`width: calc(100% - var(--nav-current, 0px) - var(--orca-nav-width))`, so collapsing the sidebar
+shifts the docked panel by style values alone and never remounts the terminal iframe. Measured at
+1280px with the sidebar expanded: left 520, top 52, width 760, right edge 1280.
 
-| Width   | Template                             | Column 2                                     |
-| ------- | ------------------------------------ | -------------------------------------------- |
-| >=768px | `minmax(0, 1fr) auto minmax(0, 1fr)` | positionally invariant AND viewport-centred  |
-| <768px  | `auto auto minmax(0, 1fr)`           | positionally invariant, NOT viewport-centred |
+**The active row indicator is one element.** `SidebarNav.tsx` renders every row through a memoized
+`NavRow` (`src/web/features/nav/NavRow.tsx`) that never paints its own active background. One
+absolutely positioned element inside the rows container carries the tint
+(`color-mix(in srgb, var(--accent) 16%, var(--surface-column))`, the formula the inbox count badge
+and the session switcher already use) and is translated by the active row's `offsetTop`, read from
+a per-row ref map in a layout effect when the route or the collapsed state changes. Switching pages
+moves one transform and re-renders no row; the active row only changes its text color to
+`var(--accent)`, the "active sidebar row" accent job. Rows are 32px tall, take keyboard focus
+through `focusRing()` only, and expose `aria-current="page"`. Groups with no rows are omitted, so
+Sources and System stay hidden until a page exists for them.
 
-Both outer tracks are written with an explicit `minmax(0, …)` lower bound rather than the shorthand
-`1fr`, because `1fr` is `minmax(auto, 1fr)`, whose automatic minimum is the track's own min-content
-size — a bare `1fr` track can never shrink below its content, and the strip overflows the viewport
-instead.
+**The footer status truncation chain moved with the status.** The sync status is the sidebar's only
+elastic text and the one piece that can be arbitrarily long (the server-supplied `syncWarning` has
+no length bound), so it still yields by truncating to one ellipsized line rather than wrapping or
+unmounting: `src/web/features/nav/SyncStatus.tsx` keeps `minWidth: 0`, `whiteSpace: "nowrap"`,
+`overflow: "hidden"` and `textOverflow: "ellipsis"` on the `role="status" aria-live="polite"`
+region, the dot keeps `flex: "0 0 auto"`, and when the sidebar is collapsed the text stays in the
+DOM visually hidden (a 1px clip) so the live region's `textContent` is always the complete string.
+The status precedence itself is unchanged and homed by `SYNC-04` above. The footer, top to bottom:
+sync status, the account usage chip (always compact at this width), New ticket (a contained
+`<button>` composed locally, for the same resting-fill-plus-hover reason the strip once recorded:
+neither `Button.tsx` nor `IconButton.tsx` can express a resting `--surface-card` fill that also
+lifts on hover), the Activity drawer toggle (`id="activity-toggle"`, the drawer's focus-return
+target) beside the collapse toggle, and the Settings row.
 
-At >=768px the two outer tracks are symmetric, so column 2 lands on the viewport's centerline.
-Below 768px they deliberately are not, and the reason is measured: symmetric tracks mirror whatever
-slack column 1 does not use into column 1 anyway, and since the narrow identity zone is a glyph-only
-16px, that mirrored slack starved the sync-status region to 7px of box and **zero painted
-characters** at 390px. An `auto` first track hands that slack to column 3 instead, which is where
-the only elastic element lives. **Positional invariance survives the change** — the property the
-paragraph above calls load-bearing is immunity to a column-3 mount/unmount, and below 768px column 1
-is a fixed 16px that cannot vary with column 3 at all, so toggling Orca view leaves column 2's rect
-identical. What is given up below 768px is viewport _centring_, a different and weaker property,
-and it is given up only there.
+**Responsive rule.** At or below 1023px (`CAROUSEL_QUERY`, the breakpoint the board carousel and
+the detail-panel takeover already share) the sidebar renders collapsed regardless of the
+remembered `dsp.nav` value. Below 768px the sidebar leaves the layout: the main column gains a 44px
+top bar (glyph, page title, menu button) and the same `SidebarNav` renders inside a left sheet
+with a scrim, closed by Escape or a row click, with focus returned to the menu button, following
+the `ActivityDrawer` pattern. `--nav-current` is `0px` in that mode so the docked panel spans the
+viewport. The pure decision is `effectiveNavState(stored, carousel, narrow)`.
 
-**The sync-status truncation chain.** The status string is the strip's only elastic element — every
-other item in the strip has a fixed width — and it is the one piece that can be arbitrarily long,
-since the server-supplied sync warning has no length bound. It is therefore the element that yields
-under pressure, and it does so by truncating to one ellipsized line rather than wrapping. That
-requires the WHOLE min-width chain to be able to shrink below min-content, not just the text node:
-the grid track column 3 resolves to (`minmax(0, …)` at every width, above), then `rightZoneStyle` and
-`utilityClusterStyle`, both flex containers whose default `min-width: auto` floors at min-content
-the same way, then the `role="status"` container itself, which carries `minWidth: 0` together with
-`whiteSpace: "nowrap"`, `overflow: "hidden"` and `textOverflow: "ellipsis"`. Any one link left out
-silently restores the min-content floor and the ellipsis never engages, which is why the chain is
-recorded here as a unit rather than as four independent style properties. The status dot keeps
-`flex: "0 0 auto"` so it is never the thing that truncates. The truncation is CSS-only and the
-region's `textContent` is always the complete string: `aria-live="polite"` announces the full text
-regardless of what is painted, so no `title` attribute and no shortened substitute string may be
-added here.
-
-**The weight tiers.** Within column 3, the primary cluster (New Ticket, Inbox) sits nearest the
-grid's center and the utility cluster (sync status, Activity, Settings) sits nearest the edge,
-separated by a 1px `--border` hairline (`dividerStyle`). Utility demotion is positional and
-color-based only — Activity and Settings stay at `IconButton`'s 16px glyph on `--text-muted` with
-no `style` override — never a size reduction: `IconButton.tsx`'s 28px box is the touch-target
-floor and this phase does not shrink it.
-
-**Why New Ticket is a local composition.** New Ticket left the `IconButton` primitive entirely and
-renders as a native `<button>` with its own `newTicketBaseStyle` / `newTicketLabelledStyle` /
-`newTicketIconOnlyStyle` constants and its own hover/focus state pair. Both `IconButton.tsx` and
-`Button.tsx` compute their resting `background` before spreading the caller's `style` prop, so
-neither primitive can express a resting fill (`--surface-card`) that also lifts on hover
-(`--surface-card-hover`) — a caller-supplied `style.background` would permanently pin one or the
-other. A contained control needs both at once, so it is composed locally rather than forcing a
-primitive change for a single consumer. Extraction to `src/web/primitives/` waits for a second
-consumer.
-
-**Narrow-width behaviour.** Exactly one thing is removed below 768px: the `DISPATCH` wordmark span,
-leaving the identity zone as the `Glyph` alone. The app name is not lost — below 768px the glyph is
-passed `title="Dispatch"`, which flips its `role` from `"presentation"` to `"img"`, drops its
-`aria-hidden`, and gives it an `aria-label`, so the name stays in the accessibility tree exactly as
-the wordmark's text node did. The wordmark is 136.5px wide, over a third of a 390px viewport, and
-the strip's remaining fixed elements do not fit beside it at that width even with the status text
-erased entirely, which is why this is a removal rather than a size reduction. `wordmarkStyle` itself
-is untouched and its other two consumers (`App.tsx`, `FirstRunSetup.tsx`) render unchanged, so the
-one-wordmark-definition rule is unaffected.
-
-Nothing else is removed. `useMediaQuery` in `SyncStrip.tsx` otherwise only compresses `clusterGap`
-(16px → 8px, the gap between the primary and utility clusters) and `itemGap` (8px → 4px, the gap
-within each cluster) — no control, no badge, and above all not the `role="status" aria-live="polite"`
-sync region is conditionally rendered away at any width. That region yields by truncating, never by
-unmounting.
-
-**The sidebar decision, reversed on 2026-09-23.** This section once recorded a written non-goal,
-"no persistent left sidebar", enforced by `AppShell.tsx` mounting exactly one chrome container
-above `content` and `detail`. That non-goal was correct for a single-board product. Dispatch is
-becoming a multi-page developer dispatcher (`docs/research/dispatch-platform-plan.md`, section 1),
-so the decision is reversed here the same way it was made: `AppShell.tsx` gains a `nav` slot beside
-`content` and `detail`, each page renders its own header through the `PageHeader` primitive, and the
-sync strip retires. The slot list is `nav`, `header` per page, `content`, `detail`. The strip
-paragraphs above describe chrome that LOCAL-35 (Unit 2 of the v3.7 roadmap) removes together with
-the `NEW-18` check; they stay until that code lands so this document never cites a file that does
-not exist. The sidebar dimensions (`--nav-width`, `--nav-width-collapsed`), the page header height
-(`--page-header-height`), the seven `--src-*` source colors and the "active sidebar row" accent job
-are ratified in `docs/standards/design-contract.md`.
-
-**`NEW-18`.** The strip carries two responsive token cascades, both defined in
-`src/web/styles/tokens.css` and both stepped inside the same `@media (max-width: 767px)` block that
-already steps `--strip-height`: `--strip-padding` (24px, stepped to 16px) and
-`--strip-grid-columns` (symmetric, stepped to the narrow asymmetric template above). Each is
-written once in `stripContainerStyle` in `SyncStrip.tsx` as a bare `var(…)` reference. Both cascades
-are CSS rather than a `useMediaQuery` branch, deliberately: a custom property re-resolves on a
-breakpoint cross with zero React re-render, whereas an inline `narrow ? … : …` would re-render the
-whole strip while passing every geometry check. The "written once" guarantee is unchanged — the
-component names the token, never a value. `scripts/check-invariants.mjs` fails the build unless the
-component consumes both tokens, `tokens.css` defines both cascade steps for each, and the retired
-`padding: "0 var(--space-lg)"` (16px) literal has not returned to that file. This check is
-deliberately file-scoped (`checkStripCascades`) rather than a `RETIRED_PATTERNS` entry, because the
-retired literal is a legitimate value in eight other files (`SearchBox.tsx`, `UpdateBanner.tsx`,
-`MoveToPicker.tsx`, `FirstRunSetup.tsx`, `CleanupModal.tsx`, `ActivityDrawer.tsx`, `Button.tsx`,
-`OrcaGroupSection.tsx`) and a global substring scan would false-positive on all of them. Mirroring
-`NEW-17`'s own resolution: `src/web/**/*.tsx` carries zero comments under this repo's comment
-standard (`docs/standards/comments.md` rule 2's tsx carve-out), so this section — not a JSDoc
-pointer on any `.tsx` file — is the durable home the invariant-audit gate reads for `NEW-18`.
-
-**The chosen view-switch rendering.** `modeControlStyle` in `SyncStrip.tsx` is a 28px-tall,
-2px-padded `role="group" aria-label="View"` container with a `--surface-card` fill, a 1px
-`--border` hairline, and `--radius` (6px) corners — the concentric outer curve to each segment's
-`--radius-sm` (4px) inner curve, since 6 minus the 2px inset equals 4. Each segment
-(`viewSegmentStyle`) is 24px tall by 28px wide, clearing WCAG 2.2 SC 2.5.8 Target Size
-(Minimum)'s 24×24 CSS-px floor — a deliberate, measured exception to the utility cluster's 28px
-touch-target floor described above, scoped to this control only. The active segment's whole box
-originally took `var(--accent)` as an opaque background (Candidate C, chosen over two other
-rendered candidates — an icon-color-only baseline and a labelled variant — because it was the
-only one that stayed identifiable "in well under a second" at every one of the four measured
-breakpoints; the icon-color-only baseline required close inspection to tell the segments apart,
-and the labelled candidate's advantage disappeared below 1024px, where it renders pixel-identical
-to the icon-color-only baseline). A later Phase 85 UI review found that opaque fill outweighed
-New Ticket, the control this same phase set out to elevate as "the single most-used control in
-the strip" — the mode control, which is used less often, was reading as the strip's most
-prominent element. The active segment now takes `activeSegmentTint`
-(`color-mix(in srgb, var(--accent) 16%, var(--surface-column))`, the same tint the inbox count
-badge already uses) as its background with `var(--accent)` icon color; the inactive segment stays
-transparent with `var(--text-muted)`. The Inbox toggle's open state was aligned to the same
-`activeSegmentTint` + accent-icon grammar in the same pass, so the primary cluster now expresses
-"active" one way, not two. `role="group"` with `aria-label="View"` was kept instead of
-`radiogroup`/`radio`, since that conversion would change keyboard semantics. See
-`docs/standards/design-contract.md`'s `## Deferred decisions` row 2 for the full rendered-evidence
-comparison and the later retuning.
+**Retired with the strip.** The strip cascade invariant (its two token cascades, formerly the
+eighteenth NEW-series ID) and its file-scoped check were deleted together with the strip component, and `FROZEN_COUNT` in `scripts/check-invariants.mjs`
+moved from 150 to 149 in the same commit. The three strip tokens (height, padding, grid
+columns) are gone; the banner, the drawer header and the sidebar identity row
+read `--page-header-height` (52px, stepped to 44px below 768px for the same card-row reason the
+strip once recorded). The strip's zone grid, its width-dependent template, the narrow-width
+wordmark removal and the view-switch rendering (Candidate C and its retune) are history, recorded
+in `docs/standards/design-contract.md`'s Deferred decisions rows 2 and 5.
 
 ### Modal Focus Containment
 
@@ -3482,7 +3406,7 @@ frontend restructure resolved the deferred wire-or-delete decision to DELETE it 
 importers). The invariant home for `BOARD-05` remains [Startup Preflight](#startup-preflight): the
 backend fails fast and EXITS on a missing binary or missing/incomplete config — it never serves a
 degraded state — so there is no backend signal for a mirrored error screen; a total connection
-failure surfaces as the SyncStrip "Disconnected" state instead. The component file and its
+failure surfaces as the sidebar footer `SyncStatus` "Disconnected" state instead. The component file and its
 knip-ignore entry are both gone. The `board === null` / disconnected pre-board state now renders a
 PRESENTATIONAL Dispatch brand lockup in `App.tsx` (a routing `Glyph`, the `DISPATCH` wordmark, and
 the current connection-status text) — this is purely cosmetic startup chrome, not a revived error
