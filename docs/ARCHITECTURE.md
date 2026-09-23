@@ -2965,11 +2965,12 @@ output is the proof. A reader who sees `PASS: 121/121` alone has not yet seen th
 run.
 
 **No file under `src/web` may carry a status-meaning colour literal (`NEW-24`).** The status,
-priority and column palettes each live once, in `src/web/styles/tokens.css`, as thirteen
-`--col-*`/`--prio-*`/`--status-*` custom properties. `checkStatusColorSingleSource` in
-`scripts/check-invariants.mjs` reads those thirteen declarations at run time and builds its
+priority, column and source palettes each live once, in `src/web/styles/tokens.css`, as twenty
+`--col-*`/`--prio-*`/`--status-*`/`--src-*` custom properties (thirteen status-meaning names plus
+the seven source colours ratified on 2026-09-23 in `docs/standards/design-contract.md`). `checkStatusColorSingleSource` in
+`scripts/check-invariants.mjs` reads those twenty declarations at run time and builds its
 denylist from the resulting hex values, rather than hardcoding them, so a future palette retune
-can never leave a stale denylist behind; the check requires all thirteen names present with a hex
+can never leave a stale denylist behind; the check requires all twenty names present with a hex
 value and reports a named missing-subject sentinel violation, not a silently emptied denylist, if
 any is absent or renamed. The literal scan covers `.ts`, `.tsx`, `.css` and `.html` under
 `src/web`, since a stylesheet reintroduces a palette hex as easily as a component, with two named
@@ -2982,9 +2983,14 @@ literal half alone is not the whole guarantee, so the check also fences the MECH
 definition of "which colour a column renders" is `COLUMN_ACCENT` in
 `src/web/features/board/column-meta.ts` (consumed by `Column.tsx`, `SearchBox.tsx` and
 `StatusPillSwitcher.tsx`), and the single definition of "which colour a priority renders" is
-`PRIORITY_DOT` in `src/web/features/board/CardView.tsx`. Both must still exist and still hold only
-`var(--col-*)`/`var(--accent)` or `var(--prio-*)` values, or the mechanism half reports a sentinel
-violation, matching `NEW-22`'s own two-half fence/claim discipline. A repo-wide audit at landing,
+`PRIORITY_DOT` in `src/web/features/board/CardView.tsx`, and the single definition of "which colour
+a source renders" is `SOURCE_ACCENT` in `src/web/features/badges/source-accent.ts` (consumed by
+`SourceBadge.tsx`; `local` and `group` map to the neutral `--text-muted`; every `--src-*` entry must
+name a declared token, and no other file under `src/web` except `tokens.css` may reference a
+`--src-` token at all, so the map cannot be bypassed by an inline `var()`). All three must still exist
+and still hold only `var(--col-*)`/`var(--accent)`, `var(--prio-*)` or `var(--src-*)`/`var(--text-muted)`
+values, or the mechanism half reports a sentinel violation, matching `NEW-22`'s own two-half
+fence/claim discipline. A repo-wide audit at landing,
 recorded in `.planning/phases/114-board-density-states-motion-accents/114-MEASUREMENTS.md` under
 "NEW-24 break legs", found zero status-meaning colour literals under `src/web` outside the
 `viewer.css` `--hl-*` exemption named above, so the gate is
@@ -3092,13 +3098,18 @@ within each cluster) — no control, no badge, and above all not the `role="stat
 sync region is conditionally rendered away at any width. That region yields by truncating, never by
 unmounting.
 
-**The written non-goal: no persistent left sidebar.** A single-board product gains no navigation
-value from a persistent left sidebar and pays for it in real board width with nothing to show for
-it, so this app shell does not have one. Its enforceable form: `AppShell.tsx` mounts exactly one
-chrome container (`chromeRef`, holding `header`) above `content` and `detail` — there is no second
-top-level chrome slot for a sidebar to occupy without a structural change to `AppShell.tsx` itself.
-This is recorded here, as a written decision with a durable artifact, specifically so it cannot
-silently reopen in a later phase the way an unrecorded non-action would.
+**The sidebar decision, reversed on 2026-09-23.** This section once recorded a written non-goal,
+"no persistent left sidebar", enforced by `AppShell.tsx` mounting exactly one chrome container
+above `content` and `detail`. That non-goal was correct for a single-board product. Dispatch is
+becoming a multi-page developer dispatcher (`docs/research/dispatch-platform-plan.md`, section 1),
+so the decision is reversed here the same way it was made: `AppShell.tsx` gains a `nav` slot beside
+`content` and `detail`, each page renders its own header through the `PageHeader` primitive, and the
+sync strip retires. The slot list is `nav`, `header` per page, `content`, `detail`. The strip
+paragraphs above describe chrome that LOCAL-35 (Unit 2 of the v3.7 roadmap) removes together with
+the `NEW-18` check; they stay until that code lands so this document never cites a file that does
+not exist. The sidebar dimensions (`--nav-width`, `--nav-width-collapsed`), the page header height
+(`--page-header-height`), the seven `--src-*` source colors and the "active sidebar row" accent job
+are ratified in `docs/standards/design-contract.md`.
 
 **`NEW-18`.** The strip carries two responsive token cascades, both defined in
 `src/web/styles/tokens.css` and both stepped inside the same `@media (max-width: 767px)` block that
