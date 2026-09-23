@@ -37,11 +37,11 @@ src/server/
 src/web/
 ├── main.tsx        # entry
 ├── App.tsx         # shell
-├── primitives/     # reusable presentational design-system parts: Button, IconButton, Notice, Modal, Field, Glyph, Markdown
+├── primitives/     # reusable presentational design-system parts: Button, IconButton, Notice, Modal, Field, Glyph, Markdown, PageHeader
 ├── features/       # feature folders: kebab-case directories, PascalCase components inside
 │   ├── board/      # Board, Column, Card, CardView, EmptyState
 │   ├── detail/     # DetailPanel, PanelHeader, ReferenceBlocks, SessionLostSection, TerminalRegion
-│   ├── sync/       # SyncStrip
+│   ├── nav/        # SidebarNav, NavRow, SyncStatus, nav-items
 │   ├── modals/     # StartModal, CleanupModal, MultiSelect
 │   ├── settings/   # SettingsScreen (full-screen, sidebar-nav), PlaybookEditorModal
 │   └── badges/     # GoneBadge, PlanReadyBadge, SourceBadge — shared leaf feature (see import direction)
@@ -57,7 +57,7 @@ src/web/
 | `main.tsx`, `App.tsx`                                                                                                    | web root (entry + shell)         |
 | `Board.tsx`, `Column.tsx`, `Card.tsx`, `CardView.tsx`, `EmptyState.tsx`                                                  | `features/board/`                |
 | `DetailPanel.tsx`, `PanelHeader.tsx`, `ReferenceBlocks.tsx`, `SessionLostSection.tsx`, `TerminalRegion.tsx`              | `features/detail/`               |
-| `SyncStrip.tsx`                                                                                                          | `features/sync/`                 |
+| `SidebarNav.tsx`, `NavRow.tsx`, `SyncStatus.tsx`                                                                         | `features/nav/`                  |
 | `StartModal.tsx`, `CleanupModal.tsx`, `MultiSelect.tsx`                                                                  | `features/modals/`               |
 | `SettingsScreen.tsx`, `PlaybookEditorModal.tsx`                                                                          | `features/settings/`             |
 | `GoneBadge.tsx`, `PlanReadyBadge.tsx`, `SourceBadge.tsx`                                                                 | `features/badges/` (shared leaf) |
