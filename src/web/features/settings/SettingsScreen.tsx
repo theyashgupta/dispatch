@@ -94,6 +94,8 @@ import {
 } from "../../lib/push.js";
 import { useMediaQuery } from "../../hooks/useMediaQuery.js";
 import { Button } from "../../primitives/Button.js";
+import { Chip } from "../../primitives/Chip.js";
+import { Collapsible } from "../../primitives/Collapsible.js";
 import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { IconButton } from "../../primitives/IconButton.js";
@@ -1051,36 +1053,6 @@ function useVaultTab(active: boolean): VaultTab {
   };
 }
 
-function VaultBadge({ filled }: { filled: boolean }) {
-  return (
-    <span
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "var(--space-xs)",
-        flex: "0 0 auto",
-        fontFamily: "var(--font-ui)",
-        fontSize: "var(--font-micro)",
-        fontWeight: "var(--weight-semibold)",
-        lineHeight: "var(--line-label)",
-        color: filled ? "var(--status-ok)" : "var(--text-muted)",
-      }}
-    >
-      <span
-        aria-hidden="true"
-        style={{
-          width: "6px",
-          height: "6px",
-          borderRadius: "50%",
-          background: filled ? "var(--status-ok)" : "var(--text-muted)",
-          flex: "0 0 auto",
-        }}
-      />
-      {filled ? "Filled" : "Empty"}
-    </span>
-  );
-}
-
 interface VaultValueEditorProps {
   keySummary: VaultKeySummary;
   vault: VaultTab;
@@ -1422,7 +1394,9 @@ function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
         >
           {keySummary.name}
         </span>
-        <VaultBadge filled={keySummary.filled} />
+        <Chip tone={keySummary.filled ? "success" : "warning"}>
+          {keySummary.filled ? "Filled" : "Empty"}
+        </Chip>
         <Button
           variant="secondary"
           aria-label={
@@ -2196,9 +2170,11 @@ function RemoteTabSection({ tunnelState, remoteTab }: RemoteTabSectionProps) {
             </IconButton>
           </div>
         </div>
-        <QrCode
-          value={`${tunnelState.url}?code=${encodeURIComponent(tunnelState.code)}`}
-        />
+        <Collapsible title="QR code">
+          <QrCode
+            value={`${tunnelState.url}?code=${encodeURIComponent(tunnelState.code)}`}
+          />
+        </Collapsible>
         <div style={remoteFieldBlockStyle}>
           <Field>Access code: enter this on a device without the QR</Field>
           <div style={remoteMonoRowStyle}>
