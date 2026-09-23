@@ -391,14 +391,16 @@ export function DetailPanel({
         ref={asideRef}
         style={{
           position: "fixed",
-          top: docked ? "var(--chrome-top, var(--strip-height))" : 0,
-          left: docked ? "var(--orca-nav-width)" : "auto",
+          top: docked ? "var(--chrome-top, var(--page-header-height))" : 0,
+          left: docked
+            ? "calc(var(--nav-current, 0px) + var(--orca-nav-width))"
+            : "auto",
           right: 0,
           height: docked
-            ? "calc(100dvh - var(--chrome-top, var(--strip-height)))"
+            ? "calc(100dvh - var(--chrome-top, var(--page-header-height)))"
             : "100dvh",
           width: docked
-            ? "calc(100% - var(--orca-nav-width))"
+            ? "calc(100% - var(--nav-current, 0px) - var(--orca-nav-width))"
             : effectiveFullscreen
               ? "100vw"
               : persistedWidth != null

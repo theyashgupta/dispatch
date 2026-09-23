@@ -27,12 +27,12 @@ function writeDismissedVersion(version: string): void {
 }
 
 const rowStyle = {
-  height: "var(--strip-height)",
-  flex: "0 0 var(--strip-height)",
+  height: "var(--page-header-height)",
+  flex: "0 0 var(--page-header-height)",
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  padding: "0 var(--strip-padding)",
+  padding: "0 var(--space-lg)",
   borderBottom: "1px solid var(--border)",
   background: "var(--surface-column)",
   fontSize: "var(--font-label)",
