@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 
 /**
- * Measures the rendered height of the header chrome (UpdateBanner + SyncStrip) so the docked
- * DetailPanel can anchor below the full stack via `--chrome-top`. Measured rather than derived
+ * Measures the rendered height of the main column chrome (UpdateBanner plus the page header) so the
+ * docked DetailPanel can anchor below the full stack via `--chrome-top`. Measured rather than derived
  * from banner state because the banner contributes a variable number of rows (hidden, update row,
  * success row, error row + alert block) that only it knows about.
  */

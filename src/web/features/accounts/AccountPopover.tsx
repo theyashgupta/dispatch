@@ -34,18 +34,18 @@ interface AccountPopoverProps {
 
 const compactPanelStyle: CSSProperties = {
   position: "fixed",
-  top: "calc(var(--strip-height) + var(--space-xs))",
-  left: "var(--strip-padding)",
-  right: "var(--strip-padding)",
+  bottom: "var(--space-sm)",
+  left: "var(--space-sm)",
+  right: "var(--space-sm)",
   width: "auto",
 };
 
 const panelStyle: CSSProperties = {
   position: "absolute",
-  top: "calc(100% + var(--space-xs))",
-  right: 0,
+  bottom: "calc(100% + var(--space-xs))",
+  left: 0,
   zIndex: 30,
-  width: "min(360px, calc(100vw - 2 * var(--strip-padding)))",
+  width: "min(360px, calc(100vw - 2 * var(--space-lg)))",
   maxHeight: "70vh",
   overflowY: "auto",
   background: "var(--surface-card)",

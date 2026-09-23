@@ -39,7 +39,11 @@ import { membersOf } from "./group-members.js";
 import { GroupStartModal } from "../modals/index.js";
 import type { StartRequest } from "../../lib/start-request.js";
 import { useLastOpened } from "../../hooks/useUnseenActivity.js";
-import { CAROUSEL_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
+import {
+  CAROUSEL_QUERY,
+  NARROW_QUERY,
+  useMediaQuery,
+} from "../../hooks/useMediaQuery.js";
 import { moveCard } from "../../lib/api.js";
 import { deriveShowDot, deriveShowGone } from "../../lib/card-badges.js";
 import { inboxWaitingCount } from "./inbox-count.js";
@@ -152,7 +156,7 @@ export function Board({
     activeCardId != null ? dragSelectionIds(activeCardId, selectedIds) : null;
 
   const isCarousel = useMediaQuery(CAROUSEL_QUERY);
-  const isPhone = useMediaQuery("(max-width: 767px)");
+  const isPhone = useMediaQuery(NARROW_QUERY);
   const isLarge = useMediaQuery("(min-width: 1600px)");
 
   const scrollRowRef = useRef<HTMLDivElement | null>(null);

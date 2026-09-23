@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Component,
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   useBoardStream,
   type ConnectionStatus,
@@ -11,10 +20,19 @@ import {
 } from "./hooks/useUnseenActivity.js";
 import { useTransitionNotifications } from "./hooks/useTransitionNotifications.js";
 import { AppShell } from "./AppShell.js";
-import { SyncStrip } from "./features/sync/index.js";
+import { NavSheet, SidebarNav, TopBar } from "./features/nav/index.js";
+import { effectiveNavState } from "./lib/nav-state.js";
+import {
+  CAROUSEL_QUERY,
+  NARROW_QUERY,
+  useMediaQuery,
+} from "./hooks/useMediaQuery.js";
+import { PageHeader } from "./primitives/PageHeader.js";
+import { useRoute } from "./hooks/useRoute.js";
+import type { Page } from "./lib/route.js";
+import { useNavState } from "./hooks/useNavState.js";
 import { UsageChip } from "./features/accounts/index.js";
 import { useClaudeAccounts } from "./hooks/useClaudeAccounts.js";
-import { useMediaQuery } from "./hooks/useMediaQuery.js";
 import { Glyph, wordmarkStyle } from "./primitives/Glyph.js";
 import {
   actionablePinnedCard,
@@ -25,19 +43,19 @@ import {
   type PinnedCard,
   stubToCard,
 } from "./features/board/index.js";
-import { InboxView } from "./features/inbox/index.js";
-import { OrcaView, mostRecentCardId } from "./features/orca/index.js";
 import { DetailPanel } from "./features/detail/index.js";
-import { ActivityDrawer } from "./features/activity/index.js";
+import { ActivityDrawer, ActivityPage } from "./features/activity/index.js";
 import {
   StartModal,
   CleanupModal,
   ResetModal,
   CreateTicketModal,
 } from "./features/modals/index.js";
-import { SettingsScreen, type SettingsTab } from "./features/settings/index.js";
+import { settingsTabFrom } from "./lib/settings-tab.js";
 import { FirstRunSetup } from "./features/setup/index.js";
 import { Toast } from "./primitives/Toast.js";
+import { Spinner } from "./primitives/Spinner.js";
+import { Button } from "./primitives/Button.js";
 import {
   isToastVisible,
   undoToastCopy,
@@ -58,6 +76,70 @@ import type { StartRequest } from "./lib/start-request.js";
 import type { PrerequisiteStatus, TunnelState } from "../shared/types.js";
 import type { CardSearchResult } from "../shared/search.js";
 import { DONE_PAGE_SIZE } from "../shared/done-limit.js";
+
+const InboxView = lazy(() =>
+  import("./features/inbox/index.js").then((m) => ({ default: m.InboxView })),
+);
+const OrcaView = lazy(() =>
+  import("./features/orca/index.js").then((m) => ({ default: m.OrcaView })),
+);
+const SettingsScreen = lazy(() =>
+  import("./features/settings/index.js").then((m) => ({
+    default: m.SettingsScreen,
+  })),
+);
+
+class PageErrorBoundary extends Component<
+  { children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div
+        role="alert"
+        style={{
+          flex: "1 1 auto",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "var(--space-sm)",
+          color: "var(--text-muted)",
+          fontSize: "var(--font-body)",
+        }}
+      >
+        <span>This page failed to load.</span>
+        <Button variant="secondary" onClick={() => window.location.reload()}>
+          Reload
+        </Button>
+      </div>
+    );
+  }
+}
+
+function PageFallback() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading page"
+      style={{
+        flex: "1 1 auto",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Spinner />
+    </div>
+  );
+}
 
 function BootScreen({ connection }: { connection: ConnectionStatus }) {
   const statusText =
@@ -107,7 +189,15 @@ function BootScreen({ connection }: { connection: ConnectionStatus }) {
 export function App() {
   const feed = useActivityFeed();
   const claudeAccounts = useClaudeAccounts();
-  const chipCompact = useMediaQuery("(max-width: 1023px)");
+  const { route, navigate } = useRoute();
+  const nav = useNavState();
+  const carousel = useMediaQuery(CAROUSEL_QUERY);
+  const narrow = useMediaQuery(NARROW_QUERY);
+  const navMode = effectiveNavState(
+    nav.collapsed ? "collapsed" : "expanded",
+    carousel,
+    narrow,
+  );
   const [tunnelState, setTunnelState] = useState<TunnelState>({
     status: "off",
   });
@@ -136,17 +226,7 @@ export function App() {
   });
 
   const [activityOpen, setActivityOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<"board" | "workspace">(() => {
-    try {
-      const stored = localStorage.getItem("dsp.view");
-      return stored === "workspace" || stored === "orca"
-        ? "workspace"
-        : "board";
-    } catch {
-      return "board";
-    }
-  });
-  const [inboxOpen, setInboxOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     try {
       return localStorage.getItem("dsp.sound") !== "off";
@@ -154,12 +234,6 @@ export function App() {
       return true;
     }
   });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("dsp.view", viewMode);
-    } catch {}
-  }, [viewMode]);
 
   useEffect(() => {
     try {
@@ -202,6 +276,25 @@ export function App() {
   }, []);
 
   const lastOpened = useLastOpened();
+  useEffect(() => {
+    if (route.page === "activity") stampLastOpened("__feed__");
+  }, [route.page, feed.events.length]);
+  useEffect(() => {
+    if (navMode !== "topbar") setSheetOpen(false);
+  }, [navMode]);
+  const firstRouteRef = useRef(true);
+  useEffect(() => {
+    if (route.page === "settings") {
+      setSelectedCardId(null);
+      setPinned(null);
+      setPinnedHydrating(false);
+    }
+    if (firstRouteRef.current) {
+      firstRouteRef.current = false;
+      return;
+    }
+    document.querySelector<HTMLElement>("header h1")?.focus();
+  }, [route.page]);
   const newestTs = feed.events[0]?.ts;
   const activityUnseen = isUnseen(newestTs, lastOpened["__feed__"]);
 
@@ -275,14 +368,6 @@ export function App() {
     hydratePinned(result.id);
   }
 
-  useEffect(() => {
-    if (viewMode !== "workspace" || selectedCard != null || board == null) {
-      return;
-    }
-    const id = mostRecentCardId(lastOpened, board.cards);
-    if (id != null) setSelectedCardId(id);
-  }, [viewMode, selectedCard, board, lastOpened]);
-
   useTransitionNotifications(board, connection, selectCard, soundEnabled);
 
   const cardIdentifiers: Record<string, string> = {};
@@ -316,6 +401,11 @@ export function App() {
   const startCard =
     board?.cards.find((card) => card.id === startRequest?.cardId) ??
     actionablePinnedCard(startRequest?.cardId, pinned);
+
+  const handleCloseSheet = useCallback(() => {
+    setSheetOpen(false);
+    requestAnimationFrame(() => document.getElementById("nav-menu")?.focus());
+  }, []);
 
   const requestStart = (req: string | StartRequest) => {
     const id = typeof req === "string" ? req : req.cardId;
@@ -375,29 +465,16 @@ export function App() {
       });
   };
 
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] =
-    useState<SettingsTab>("filters");
   const [createTicketOpen, setCreateTicketOpen] = useState(false);
 
   const overlayAboveContent =
     selectedCard != null ||
     activityOpen ||
-    settingsOpen ||
+    sheetOpen ||
     createTicketOpen ||
     cleanupCard != null ||
     resetCard != null ||
     (startCard != null && startRequest != null);
-
-  useEffect(() => {
-    if (!inboxOpen || overlayAboveContent) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      setInboxOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [inboxOpen, overlayAboveContent]);
 
   const [setupState, setSetupState] = useState<
     "loading" | "needsKey" | "ready"
@@ -448,82 +525,135 @@ export function App() {
     return <BootScreen connection={connection} />;
   }
 
+  const accountSlot = claudeAccounts.loaded ? (
+    <UsageChip
+      accounts={claudeAccounts.accounts}
+      activeId={claudeAccounts.activeId}
+      compact
+      onSwitch={claudeAccounts.switchAccount}
+      onRefresh={claudeAccounts.refreshUsage}
+      onOpenSettings={() => navigate("settings", "accounts")}
+    />
+  ) : null;
+
+  const inboxCount = inboxWaitingCount(board.cards);
+  const pageMeta: Record<Page, { title: string; count?: number }> = {
+    board: { title: "Board", count: board.cards.length },
+    inbox: { title: "Inbox", count: inboxCount },
+    workspace: { title: "Workspace" },
+    settings: { title: "Settings" },
+    activity: { title: "Activity", count: feed.events.length },
+  };
+  const pageTitle = pageMeta[route.page].title;
+
+  const sidebar = (
+    <SidebarNav
+      route={route}
+      onNavigate={(page) => {
+        navigate(page);
+        if (navMode === "topbar") handleCloseSheet();
+      }}
+      collapsed={navMode === "collapsed"}
+      onToggleCollapsed={nav.toggle}
+      inboxCount={inboxCount}
+      syncedAt={board.syncedAt ?? null}
+      connection={connection}
+      pollIntervalMs={board.pollIntervalMs ?? null}
+      syncWarning={board.syncWarning ?? null}
+      syncUnreachable={board.syncUnreachable ?? false}
+      accountSlot={accountSlot}
+      onOpenCreateTicket={() => {
+        setCreateTicketOpen(true);
+        if (navMode === "topbar") setSheetOpen(false);
+      }}
+      onOpenActivity={() => {
+        setActivityOpen(true);
+        stampLastOpened("__feed__");
+        if (navMode === "topbar") setSheetOpen(false);
+      }}
+      activityUnseen={activityUnseen}
+      activityOpen={activityOpen}
+      sheet={navMode === "topbar"}
+      collapsible={!carousel}
+    />
+  );
+
+  const pageHeader = (
+    <PageHeader title={pageTitle} count={pageMeta[route.page].count} />
+  );
+
   return (
     <AppShell
-      header={
-        <>
-          <UpdateBanner />
-          <SyncStrip
-            syncedAt={board?.syncedAt ?? null}
-            connection={connection}
-            pollIntervalMs={board?.pollIntervalMs ?? null}
-            syncWarning={board?.syncWarning ?? null}
-            syncUnreachable={board?.syncUnreachable ?? false}
-            onOpenSettings={() => setSettingsOpen(true)}
-            onOpenActivity={() => {
-              setActivityOpen(true);
-              stampLastOpened("__feed__");
-            }}
-            activityUnseen={activityUnseen}
-            activityOpen={activityOpen}
-            onOpenInbox={() => setInboxOpen((v) => !v)}
-            inboxCount={inboxWaitingCount(board.cards)}
-            inboxOpen={inboxOpen}
-            onOpenCreateTicket={() => setCreateTicketOpen(true)}
-            viewMode={viewMode}
-            onSelectViewMode={(mode) => {
-              setViewMode(mode);
-              if (mode === "workspace") setInboxOpen(false);
-            }}
-            accountSlot={
-              claudeAccounts.loaded ? (
-                <UsageChip
-                  accounts={claudeAccounts.accounts}
-                  activeId={claudeAccounts.activeId}
-                  compact={chipCompact}
-                  onSwitch={claudeAccounts.switchAccount}
-                  onRefresh={claudeAccounts.refreshUsage}
-                  onOpenSettings={() => {
-                    setSettingsInitialTab("accounts");
-                    setSettingsOpen(true);
-                  }}
-                />
-              ) : null
-            }
-          />
-        </>
+      navWidth={
+        navMode === "topbar"
+          ? "0px"
+          : navMode === "collapsed"
+            ? "var(--nav-width-collapsed)"
+            : "var(--nav-width)"
       }
+      nav={navMode === "topbar" ? null : sidebar}
+      contentInert={navMode === "topbar" && sheetOpen}
+      topBar={
+        navMode === "topbar" ? (
+          <TopBar
+            title={pageTitle}
+            menuOpen={sheetOpen}
+            onOpenMenu={() => setSheetOpen(true)}
+          />
+        ) : null
+      }
+      banner={<UpdateBanner />}
+      header={pageHeader}
       content={
-        viewMode === "workspace" ? (
-          <OrcaView
-            board={board}
-            selectedCardId={selectedCard ? selectedCardId : null}
-            onSelectCard={selectCard}
-          />
-        ) : inboxOpen ? (
-          <InboxView
-            board={board}
-            selectedCardId={selectedCard ? selectedCardId : null}
-            onSelectCard={selectCard}
-          />
-        ) : (
-          <Board
-            board={board}
-            selectedCardId={selectedCard ? selectedCardId : null}
-            onSelectCard={selectCard}
-            onStartRequest={requestStart}
-            onEditPlaybooks={() => {
-              setSettingsInitialTab("playbooks");
-              setSettingsOpen(true);
-            }}
-            onOpenInbox={() => setInboxOpen(true)}
-            doneTotal={board?.doneCounts?.total}
-            doneLimit={doneLimit}
-            onLoadMoreDone={() => setDoneLimit((n) => n + DONE_PAGE_SIZE)}
-            onSelectSearchResult={selectSearchResult}
-            overlayAboveContent={overlayAboveContent}
-          />
-        )
+        <PageErrorBoundary key={route.page}>
+          <Suspense fallback={<PageFallback />}>
+            {route.page === "workspace" ? (
+              <OrcaView
+                board={board}
+                selectedCardId={selectedCard ? selectedCardId : null}
+                onSelectCard={selectCard}
+              />
+            ) : route.page === "inbox" ? (
+              <InboxView
+                board={board}
+                selectedCardId={selectedCard ? selectedCardId : null}
+                onSelectCard={selectCard}
+              />
+            ) : route.page === "settings" ? (
+              <SettingsScreen
+                claudeAccounts={claudeAccounts}
+                tab={settingsTabFrom(route.id)}
+                onTabChange={(tab) =>
+                  navigate("settings", tab, { replace: true })
+                }
+                onSaved={() => notifyCleanupOutcome("Settings saved.")}
+                tunnelState={tunnelState}
+                soundEnabled={soundEnabled}
+                onToggleSound={setSoundEnabled}
+              />
+            ) : route.page === "activity" ? (
+              <ActivityPage
+                events={feed.events}
+                identifiers={cardIdentifiers}
+                onSelectCard={selectCard}
+              />
+            ) : (
+              <Board
+                board={board}
+                selectedCardId={selectedCard ? selectedCardId : null}
+                onSelectCard={selectCard}
+                onStartRequest={requestStart}
+                onEditPlaybooks={() => navigate("settings", "playbooks")}
+                onOpenInbox={() => navigate("inbox")}
+                doneTotal={board?.doneCounts?.total}
+                doneLimit={doneLimit}
+                onLoadMoreDone={() => setDoneLimit((n) => n + DONE_PAGE_SIZE)}
+                onSelectSearchResult={selectSearchResult}
+                overlayAboveContent={overlayAboveContent}
+              />
+            )}
+          </Suspense>
+        </PageErrorBoundary>
       }
       detail={
         <DetailPanel
@@ -548,10 +678,15 @@ export function App() {
           onCleanupRequest={setCleanupCardId}
           onUnwindRequest={requestUnwind}
           onResetRequest={setResetCardId}
-          docked={viewMode === "workspace"}
+          docked={route.page === "workspace"}
         />
       }
     >
+      {navMode === "topbar" && (
+        <NavSheet open={sheetOpen} onClose={handleCloseSheet}>
+          {sidebar}
+        </NavSheet>
+      )}
       <ActivityDrawer
         open={activityOpen}
         events={feed.events}
@@ -573,8 +708,7 @@ export function App() {
           onClose={() => setStartRequest(null)}
           onEditPlaybooks={() => {
             setStartRequest(null);
-            setSettingsInitialTab("playbooks");
-            setSettingsOpen(true);
+            navigate("settings", "playbooks");
           }}
         />
       )}
@@ -592,19 +726,6 @@ export function App() {
           card={resetCard}
           onConfirm={requestReset}
           onClose={() => setResetCardId(null)}
-        />
-      )}
-      {settingsOpen && (
-        <SettingsScreen
-          claudeAccounts={claudeAccounts}
-          initialTab={settingsInitialTab}
-          tunnelState={tunnelState}
-          soundEnabled={soundEnabled}
-          onToggleSound={setSoundEnabled}
-          onClose={() => {
-            setSettingsOpen(false);
-            setSettingsInitialTab("filters");
-          }}
         />
       )}
       {createTicketOpen && (
