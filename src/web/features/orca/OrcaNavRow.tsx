@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { useLastOpened } from "../../hooks/useUnseenActivity.js";
 import { deriveShowDot } from "../../lib/card-badges.js";
+import { Chip } from "../../primitives/Chip.js";
 import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { SourceBadge } from "../badges/index.js";
@@ -17,19 +18,6 @@ interface OrcaNavRowProps {
   selected: boolean;
   onSelect: (id: string) => void;
 }
-
-const chipStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "var(--space-xs)",
-  borderRadius: "var(--radius-sm)",
-  padding: "0 var(--space-xs)",
-  fontSize: "var(--font-label)",
-  fontWeight: "var(--weight-semibold)",
-  lineHeight: "var(--line-label)",
-  whiteSpace: "nowrap",
-  flex: "0 0 auto",
-};
 
 export function OrcaNavRow({ card, selected, onSelect }: OrcaNavRowProps) {
   const [hover, setHover] = useState(false);
@@ -119,16 +107,9 @@ export function OrcaNavRow({ card, selected, onSelect }: OrcaNavRowProps) {
         />
       )}
       {card.source === "group" ? (
-        <span
-          style={{
-            ...chipStyle,
-            border: "1px solid var(--border)",
-            color: "var(--text-muted)",
-          }}
-        >
-          <Users size={12} strokeWidth={2} aria-hidden="true" />
+        <Chip icon={<Users size={12} strokeWidth={2} aria-hidden="true" />}>
           {memberCount === 1 ? "1 ticket" : `${memberCount} tickets`}
-        </span>
+        </Chip>
       ) : (
         <SourceBadge source={card.source ?? "linear"} />
       )}

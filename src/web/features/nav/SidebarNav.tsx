@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import type { ConnectionStatus } from "../../hooks/useBoardStream.js";
 import type { Page, Route } from "../../lib/route.js";
+import { Chip } from "../../primitives/Chip.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { Glyph, wordmarkStyle } from "../../primitives/Glyph.js";
 import { IconButton } from "../../primitives/IconButton.js";
@@ -119,17 +120,6 @@ const footerRowStyle: CSSProperties = {
   alignItems: "center",
   gap: "var(--space-xs)",
   minWidth: 0,
-};
-
-const badgeStyle: CSSProperties = {
-  flex: "0 0 auto",
-  padding: "0 var(--space-xs)",
-  borderRadius: "var(--radius-sm)",
-  background: "color-mix(in srgb, var(--accent) 16%, var(--surface-column))",
-  color: "var(--accent)",
-  fontSize: "var(--font-label)",
-  fontWeight: "var(--weight-semibold)",
-  lineHeight: "var(--line-label)",
 };
 
 const newTicketStyle: CSSProperties = {
@@ -252,7 +242,7 @@ export function SidebarNav({
                 collapsed={collapsed}
                 badge={
                   item.page === "inbox" && inboxCount > 0 ? (
-                    <span style={badgeStyle}>{inboxCount}</span>
+                    <Chip tone="accent">{inboxCount}</Chip>
                   ) : undefined
                 }
                 onSelect={() => onNavigate(item.page)}
