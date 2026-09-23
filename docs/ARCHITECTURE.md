@@ -1111,10 +1111,15 @@ closed in `adapters/tmux.ts#newSession`: the pane environment carries
 `CLAUDE_CODE_DISABLE_MOUSE=1` next to the classic-renderer force, and the session gets `mouse off`
 pinned at session scope so a later `set -g mouse on` from anyone else on the shared server cannot
 reach a Dispatch pane. `scripts/terminal-selection-guard.ts` (`npm run selection-guard`) fails if
-either pin is lost, running against a private tmux server so the live one is never touched. The
-trade-off is deliberate: Claude Code's own drag-to-copy (its pbcopy path) is unreachable from the
-browser, but it only ever reached the Mac's clipboard, not a remote viewer's, and native selection
-plus the browser's copy works from every device.
+either pin is lost, running against a private tmux server so the live one is never touched. Pinning
+the mouse also puts Claude Code's own drag-to-copy (its pbcopy plus OSC 52 path) out of reach, and
+that path was the copy-on-select the web terminal had before LOCAL-3, so the client restores it
+itself (LOCAL-21): `terminal-main.ts#attachCopyOnSelect` writes the settled native selection to the
+viewer's clipboard through the browser Clipboard API, which reaches every device rather than only
+the Mac running the pane. A plain click clears the selection and is skipped, so it never clobbers
+the clipboard, and the API exists only in a secure context (localhost or https), so a plain-http
+LAN viewer keeps Cmd+C. `scripts/terminal-appearance-e2e.mjs` drives the drag in headless Chrome
+and reads the clipboard back.
 
 **A phone flick is local, not a round trip, because of five cooperating pieces (`TERM-05`).**
 

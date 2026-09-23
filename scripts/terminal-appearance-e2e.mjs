@@ -3,7 +3,8 @@
  * code): boots a sandboxed production build under a throwaway HOME, seeds one card with a live
  * tmux session so the server spawns a real ttyd, drives headless Chrome over raw CDP (Node's
  * global WebSocket and fetch, zero new dependency, same lineage as panel-92.mjs), and asserts
- * every client-side branch that has no node:test runner: the solid default paint, live
+ * every client-side branch that has no node:test runner: the solid default paint, copy-on-select
+ * (LOCAL-21), live
  * BroadcastChannel apply with refit, malformed payloads ignored, persisted changes on reload, the
  * mobile zoom base recompute, and the Settings Terminal tab's save, validation, double-click guard,
  * and failure notices.
@@ -44,6 +45,7 @@ const DEFAULTS = {
 };
 const BASE = `http://127.0.0.1:${SANDBOX_PORT}`;
 const CARD_TITLE = "Terminal appearance e2e card";
+const COPY_PROBE = `copy-on-select-probe-${process.pid}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function assertPortFree(port) {
@@ -248,6 +250,7 @@ async function main() {
       "120",
       "-y",
       "40",
+      "sh",
     ]);
     const now = new Date().toISOString();
     const card = {
@@ -287,6 +290,14 @@ async function main() {
       "INSERT INTO cards (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data",
     ).run(card.id, JSON.stringify(card));
     db.close();
+
+    execFileSync("tmux", [
+      "send-keys",
+      "-t",
+      tmuxSession,
+      `echo ${COPY_PROBE}`,
+      "Enter",
+    ]);
 
     server = bootServer(home);
     await waitFor(
@@ -343,6 +354,55 @@ async function main() {
     assert.equal(r.font, '"JetBrains Mono Nerd Font Mono", monospace');
     assert.equal(r.size, "14px");
     assert.equal(r.blink, false);
+
+    await cdp.send("Browser.grantPermissions", {
+      origin: BASE,
+      permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
+    });
+    const mouse = (type, x, y) =>
+      cdp.send(
+        "Input.dispatchMouseEvent",
+        { type, x, y, button: "left", buttons: 1, clickCount: 1 },
+        term,
+      );
+    await cdp.send(
+      "Runtime.evaluate",
+      { expression: `window.__copyProbe = ${JSON.stringify(COPY_PROBE)}` },
+      term,
+    );
+    const probeRow = await evalIn(cdp, term, () => {
+      const row = [...document.querySelectorAll(".xterm-rows > div")].find(
+        (d) => d.textContent.trim() === window.__copyProbe,
+      );
+      if (!row)
+        return {
+          rows: [...document.querySelectorAll(".xterm-rows > div")].map((d) =>
+            d.textContent.trim(),
+          ),
+        };
+      const b = row.getBoundingClientRect();
+      return { left: b.left, right: b.right, y: b.top + b.height / 2 };
+    });
+    assert.ok(
+      probeRow.left != null,
+      `pane row showing ${COPY_PROBE}, got ${JSON.stringify(probeRow)}`,
+    );
+    const readClipboard = () =>
+      evalIn(cdp, term, () => navigator.clipboard.readText());
+    await evalIn(cdp, term, () => navigator.clipboard.writeText("untouched"));
+    await mouse("mousePressed", probeRow.left + 2, probeRow.y);
+    await mouse("mouseMoved", probeRow.right - 2, probeRow.y);
+    await mouse("mouseReleased", probeRow.right - 2, probeRow.y);
+    await sleep(500);
+    assert.equal(await readClipboard(), COPY_PROBE);
+    await mouse("mousePressed", probeRow.left + 2, probeRow.y);
+    await mouse("mouseReleased", probeRow.left + 2, probeRow.y);
+    await sleep(500);
+    assert.equal(await readClipboard(), COPY_PROBE);
+    pass(
+      "T0 drag-select copies the selection to the clipboard; a plain click leaves it untouched",
+    );
+
     assert.deepEqual(r.rgbaInside, []);
     const rowsAt14 = r.rows;
     pass("T1 default solid paint");
