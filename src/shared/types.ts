@@ -46,7 +46,8 @@ export type EventType =
   | "group_created"
   | "group_unwound"
   | "group_restored"
-  | "archive_deleted";
+  | "archive_deleted"
+  | "session_reset";
 
 /** One immutable board-activity log row; append-only; carries no secrets. */
 export interface ActivityEvent {
