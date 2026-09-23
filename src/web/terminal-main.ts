@@ -1121,6 +1121,35 @@ function attachZoomControl(term: Terminal, fit: FitAddon): void {
   chip.addEventListener("touchstart", onChipTouchStart, { passive: false });
 }
 
+/**
+ * Quiet time after the last selection change before its text is copied, long enough to fold one
+ * drag's stream of changes into a single clipboard write.
+ */
+const COPY_ON_SELECT_SETTLE_MS = 150;
+
+/**
+ * Copies the native selection to the clipboard once it settles, the copy-on-select every native
+ * terminal offers.
+ *
+ * @remarks LOCAL-21: Dispatch pins the mouse to xterm.js (LOCAL-3), which also puts Claude Code's
+ * own drag-to-copy out of reach, so without this a selection went nowhere until Cmd+C. A plain
+ * click clears the selection and is skipped, so it never clobbers the clipboard. The Clipboard API
+ * exists only in a secure context (localhost or https), so a plain-http LAN viewer keeps Cmd+C.
+ */
+function attachCopyOnSelect(term: Terminal): void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  term.onSelectionChange(() => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = setTimeout(() => {
+      const text = term.getSelection();
+      if (text.length === 0) return;
+      try {
+        void navigator.clipboard.writeText(text).catch(() => {});
+      } catch {}
+    }, COPY_ON_SELECT_SETTLE_MS);
+  });
+}
+
 async function main(): Promise<void> {
   const mount = document.getElementById("terminal");
   if (!mount) return;
@@ -1133,6 +1162,7 @@ async function main(): Promise<void> {
   mountTerminal(term, mount, fit);
   watchAppearance(term, fit);
   attachWheelScroll(term);
+  attachCopyOnSelect(term);
   if (window.matchMedia("(pointer: coarse)").matches) {
     attachKineticScroll(term);
     attachZoomControl(term, fit);
