@@ -70,14 +70,15 @@ const ID_RE =
  * residuals (`T-105-05`, `T-105-06`), see docs/ARCHITECTURE.md#security-threat-model.
  * @remarks Moved from 145 to 146 for the deliberate one-ID status-colour single-source
  * re-freeze (`NEW-24`), see docs/ARCHITECTURE.md#design-system-invariants.
+ * @remarks Moved from 150 to 149 when `NEW-18` (the sync strip token cascades) retired with the
+ * strip on 2026-09-23, see docs/ARCHITECTURE.md#app-shell-zones.
  */
-const FROZEN_COUNT = 150;
+const FROZEN_COUNT = 149;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");
 const DOCS_PATH = join("docs", "ARCHITECTURE.md");
 const BASELINE_PATH = join("scripts", "invariant-baseline.txt");
-const SYNC_STRIP_PATH = join("src", "web", "features", "sync", "SyncStrip.tsx");
 const TOKENS_PATH = join("src", "web", "styles", "tokens.css");
 const BOARD_DIR = join("src", "web", "features", "board");
 const WEB_DIR = join("src", "web");
@@ -308,91 +309,6 @@ function checkRetiredPatterns() {
         }
       }
     });
-  }
-  return violations;
-}
-
-/**
- * The two sync-strip token cascades `SyncStrip.tsx` consumes, each asserted at both ends: the
- * component reads the token, and `tokens.css` defines the wide value in `:root` plus the narrow
- * value inside the 767px block.
- */
-const STRIP_CASCADES = [
-  {
-    token: "--strip-padding",
-    consumer: 'padding: "0 var(--strip-padding)"',
-    wide: "--strip-padding: 24px;",
-    narrow: "--strip-padding: 16px;",
-    what: "strip padding",
-  },
-  {
-    token: "--strip-grid-columns",
-    consumer: 'gridTemplateColumns: "var(--strip-grid-columns)"',
-    wide: "--strip-grid-columns: minmax(0, 1fr) auto minmax(0, 1fr);",
-    narrow: "--strip-grid-columns: auto auto minmax(0, 1fr);",
-    what: "the strip zone grid",
-  },
-];
-
-/**
- * File-scoped strip-cascade gate (`NEW-18`). Deliberately NOT a `RETIRED_PATTERNS` entry: the
- * retired 16px padding literal below is a legitimate value in eight other files, so a global scan
- * would false-positive on all of them — this reads only `SyncStrip.tsx`, where that same literal is
- * a retired regression back to the strip's hardcoded pre-cascade padding. See
- * docs/ARCHITECTURE.md#app-shell-zones for the durable home.
- * @remarks Asserts the MECHANISM, not just the absence of the retired literal. A check that only
- * fenced the retired literal would pass unchanged against any implementation at all — including one
- * that silently reverted a cascade to a flat inline value — so it could never fail for the reason
- * it exists. Both cascades are covered, because both encode a measured narrow-viewport fix that an
- * inline value would erase while still rendering correctly at desktop widths, where it would go
- * unnoticed.
- * @returns Violation report lines, one per defect; a single line if a subject file is missing.
- */
-function checkStripCascades() {
-  if (!existsSync(SYNC_STRIP_PATH)) {
-    return [
-      `${SYNC_STRIP_PATH}: file not found — NEW-18 cannot verify the strip cascades`,
-    ];
-  }
-  if (!existsSync(TOKENS_PATH)) {
-    return [
-      `${TOKENS_PATH}: file not found — NEW-18 cannot verify the strip cascades`,
-    ];
-  }
-  const violations = [];
-  const strip = readFileSync(SYNC_STRIP_PATH, "utf8");
-  strip.split("\n").forEach((line, i) => {
-    if (line.includes('padding: "0 var(--space-lg)"')) {
-      violations.push(
-        `${SYNC_STRIP_PATH}:${i + 1}: retired pattern NEW-18 — strip padding must read var(--strip-padding)`,
-      );
-    }
-  });
-
-  const tokens = readFileSync(TOKENS_PATH, "utf8");
-  const rootBlock = tokens.slice(0, tokens.indexOf("@media"));
-  const narrowStart = tokens.indexOf("@media (max-width: 767px)");
-  const narrowBlock =
-    narrowStart === -1
-      ? ""
-      : tokens.slice(narrowStart, tokens.indexOf("}\n}", narrowStart));
-
-  for (const cascade of STRIP_CASCADES) {
-    if (!strip.includes(cascade.consumer)) {
-      violations.push(
-        `${SYNC_STRIP_PATH}: retired pattern NEW-18 — ${cascade.what} must read var(${cascade.token})`,
-      );
-    }
-    if (!rootBlock.includes(cascade.wide)) {
-      violations.push(
-        `${TOKENS_PATH}: retired pattern NEW-18 — :root must define ${cascade.wide.replace(/;$/, "")}`,
-      );
-    }
-    if (!narrowBlock.includes(cascade.narrow)) {
-      violations.push(
-        `${TOKENS_PATH}: retired pattern NEW-18 — the max-width: 767px block must step ${cascade.narrow.replace(/;$/, "")}`,
-      );
-    }
   }
   return violations;
 }
@@ -1190,8 +1106,8 @@ function checkSourceAccentMechanism() {
  * Status-colour single-source fence (`NEW-24`). Deliberately NOT a `RETIRED_PATTERNS` entry: that
  * array scans all of `src/**`, hardcodes its literals, and this gate's subject is `src/web` with a
  * denylist derived from {@link TOKENS_PATH} at run time, not a fixed literal list.
- * @remarks Asserts the MECHANISM as well as the literal, the same discipline `NEW-18`'s and
- * `NEW-22`'s own JSDoc argue for: `COLUMN_ACCENT` (`column-meta.ts`) and `PRIORITY_DOT`
+ * @remarks Asserts the MECHANISM as well as the literal, the same discipline `NEW-22`'s own
+ * JSDoc argues for: `COLUMN_ACCENT` (`column-meta.ts`) and `PRIORITY_DOT`
  * (`CardView.tsx`) are each the single definition of "which colour a column or priority renders",
  * consumed by `Column.tsx`, `SearchBox.tsx` and `StatusPillSwitcher.tsx` (columns) and `CardView.tsx`
  * itself (priority). A gate that only fenced literals would pass unchanged against a build that
@@ -1357,8 +1273,8 @@ function generateBaseline() {
 }
 
 /**
- * Run the invariant-home diff, the global retired-pattern scan, the file-scoped
- * strip-cascade check, the directory-scoped board reading-rhythm check, the
+ * Run the invariant-home diff, the global retired-pattern scan, the
+ * directory-scoped board reading-rhythm check, the
  * file-scoped terminal-client fence, the session-projection chokepoint check,
  * and the attention single-source census, then set the process exit code.
  * @remarks All seven diff legs gate the exit, not just MISSING: in a
@@ -1366,14 +1282,14 @@ function generateBaseline() {
  * or an unratified new ID in JSDoc) and an ORPHAN (present in src but
  * unbaselined) are always defects, and an informational-only leg would let
  * them accumulate silently through the body-comment deletion phases. The
- * retired-pattern leg, the strip-cascade leg, the board reading-rhythm leg,
+ * retired-pattern leg, the board reading-rhythm leg,
  * the terminal-fence leg, the session-projection chokepoint leg, and the
  * attention single-source leg are all independent of the ID-baseline
  * arithmetic above — a design literal coming back, the terminal-client
  * subject set changing, a flat session field being assigned outside its sole
  * chokepoint, or a second independent computation of "does this card need
  * attention" is a defect regardless of whether any invariant ID also moved.
- * The strip-cascade leg (`NEW-18`), the board reading-rhythm leg (`NEW-19`),
+ * The board reading-rhythm leg (`NEW-19`),
  * the terminal-fence leg (`NEW-20`), the session-projection chokepoint leg
  * (`NEW-21`), and the attention single-source leg (`NEW-22`) are all
  * deliberately scoped (file- or directory-scoped) rather than folded into
@@ -1384,8 +1300,8 @@ function generateBaseline() {
  * `checkSessionProjectionChokepoint`'s and `checkAttentionSingleSource`'s own
  * JSDoc for their respective two-tier fence/slice split and missing-subject
  * sentinels.
- * @returns Nothing; exits 0 iff MISSING, ORPHAN, EXTRA, RETIRED, STRIP
- * CASCADES, BOARD READING RHYTHM, TERMINAL FENCE, SESSION PROJECTION
+ * @returns Nothing; exits 0 iff MISSING, ORPHAN, EXTRA, RETIRED,
+ * BOARD READING RHYTHM, TERMINAL FENCE, SESSION PROJECTION
  * CHOKEPOINT, ATTENTION SINGLE SOURCE, LAUNCHCTL READ-ONLY, and STATUS COLOR
  * SINGLE SOURCE are all empty.
  */
@@ -1406,7 +1322,6 @@ function run() {
   const orphan = diffSorted(present, baseline);
   const extra = diffSorted(home, baseline);
   const retired = checkRetiredPatterns();
-  const stripCascades = checkStripCascades();
   const boardReadingRhythm = checkBoardReadingRhythm();
   const terminalFence = checkTerminalFence();
   const sessionChokepoint = checkSessionProjectionChokepoint();
@@ -1419,7 +1334,6 @@ function run() {
   report("ORPHAN  (present - baseline)", orphan);
   report("EXTRA   (home - baseline)", extra);
   report("RETIRED (design literals that came back)", retired);
-  report("STRIP CASCADES (NEW-18)", stripCascades);
   report("BOARD READING RHYTHM (NEW-19)", boardReadingRhythm);
   report("TERMINAL FENCE (NEW-20)", terminalFence);
   report("SESSION PROJECTION CHOKEPOINT (NEW-21)", sessionChokepoint);
@@ -1433,7 +1347,6 @@ function run() {
     orphan.length +
     extra.length +
     retired.length +
-    stripCascades.length +
     boardReadingRhythm.length +
     terminalFence.length +
     sessionChokepoint.length +
@@ -1449,9 +1362,6 @@ function run() {
         : "") +
       (retired.length
         ? ` (${retired.length} retired pattern(s) reappeared)`
-        : "") +
-      (stripCascades.length
-        ? ` (${stripCascades.length} strip-cascade regression(s))`
         : "") +
       (boardReadingRhythm.length
         ? ` (${boardReadingRhythm.length} board reading-rhythm regression(s))`
