@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
   type CSSProperties,
+  useMemo,
 } from "react";
 import {
   useBoardStream,
@@ -67,8 +68,17 @@ import {
   undoToastCopy,
   useUndoToast,
 } from "./hooks/useUndoToast.js";
-import { unwindGroup as unwindGroupApi } from "./lib/api.js";
-import { resetCard as resetCardApi } from "./lib/api.js";
+import {
+  moveCard,
+  promoteItem,
+  resetCard as resetCardApi,
+  restoreArchived,
+  setItemState,
+  snoozeItem,
+  unwindGroup as unwindGroupApi,
+} from "./lib/api.js";
+import type { ActionServices } from "./lib/actions.js";
+import { useItems } from "./hooks/useItems.js";
 import type { UnwindDestination } from "../shared/types.js";
 import { UpdateBanner } from "./features/update/index.js";
 import { cleanupCard as cleanupCardApi, getCard, getSetup } from "./lib/api.js";
@@ -441,12 +451,33 @@ export function App() {
   ].map((type) => ({ id: type, label: type.replace(/_/g, " ") }));
 
   const undoToast = useUndoToast();
+  const items = useItems(board);
+  const { show: showUndo, notice: showNotice } = undoToast;
+  const actionServices = useMemo<ActionServices>(
+    () => ({
+      api: { promoteItem, setItemState, snoozeItem, moveCard },
+      showUndo,
+      notice: showNotice,
+      openUrl: (url) => {
+        window.open(url, "_blank", "noopener");
+      },
+      copyText: (text) =>
+        navigator.clipboard
+          ? navigator.clipboard.writeText(text)
+          : Promise.reject(new Error("Clipboard unavailable over http")),
+    }),
+    [showUndo, showNotice],
+  );
   const requestUnwind = useCallback(
     (id: string, to: UnwindDestination) => {
       void unwindGroupApi(id, to)
         .then((result) => {
           if (result.ok) {
-            undoToast.show(result.archived);
+            const archivedId = result.archived.id;
+            undoToast.show(undoToastCopy(result.archived), async () => {
+              const restored = await restoreArchived(archivedId);
+              if (!restored.ok) throw new Error(restored.error);
+            });
             setSelectedCardId((current) =>
               current === result.archived.id ? null : current,
             );
@@ -601,7 +632,7 @@ export function App() {
     />
   ) : null;
 
-  const inboxCount = inboxWaitingCount(board.cards);
+  const inboxCount = inboxWaitingCount(board.cards, items);
   const pageMeta: Record<Page, { title: string; count?: number }> = {
     board: { title: "Board", count: board.cards.length },
     inbox: { title: "Inbox", count: inboxCount },
@@ -737,8 +768,10 @@ export function App() {
             ) : route.page === "inbox" ? (
               <InboxView
                 board={board}
+                items={items}
                 selectedCardId={selectedCard ? selectedCardId : null}
                 onSelectCard={selectCard}
+                services={actionServices}
               />
             ) : route.page === "settings" ? (
               <SettingsScreen
@@ -866,13 +899,9 @@ export function App() {
       )}
       {isToastVisible(undoToast.state) && (
         <Toast
-          label={
-            undoToast.state.archived
-              ? undoToastCopy(undoToast.state.archived)
-              : undoToast.state.error
-          }
-          detail={undoToast.state.archived ? undoToast.state.error : undefined}
-          actionLabel={undoToast.state.archived ? "Undo" : undefined}
+          label={undoToast.state.toast?.label ?? undoToast.state.error}
+          detail={undoToast.state.toast ? undoToast.state.error : undefined}
+          actionLabel={undoToast.state.toast ? "Undo" : undefined}
           actionPending={undoToast.state.undoing}
           onAction={undoToast.undo}
           onClose={undoToast.dismiss}

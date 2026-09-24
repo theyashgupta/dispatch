@@ -1,4 +1,4 @@
-import type { Card } from "../../../shared/types.js";
+import type { Card, Item } from "../../../shared/types.js";
 
 /**
  * The single predicate for "this card is a ticket waiting in the Inbox".
@@ -13,7 +13,10 @@ export function isInboxWaiting(card: Card): boolean {
   return card.column === "inbox" && card.groupId == null;
 }
 
-/** Counts cards waiting in the Inbox, excluding group members. */
-export function inboxWaitingCount(cards: Card[]): number {
-  return cards.filter(isInboxWaiting).length;
+/** Counts the Inbox rows: cards waiting (group members excluded) plus the listed items. */
+export function inboxWaitingCount(
+  cards: readonly Card[],
+  items: readonly Item[] = [],
+): number {
+  return cards.filter(isInboxWaiting).length + items.length;
 }

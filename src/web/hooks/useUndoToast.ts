@@ -1,34 +1,41 @@
-import { useCallback, useEffect, useReducer } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { ArchivedGroupSummary } from "../../shared/types.js";
-import { restoreArchived } from "../lib/api.js";
 
 export const UNDO_TOAST_MS = 10_000;
 
+export interface UndoToastEntry {
+  id: number;
+  label: string;
+  undo: () => Promise<void>;
+}
+
 export interface UndoToastState {
-  archived: ArchivedGroupSummary | null;
+  toast: UndoToastEntry | null;
   undoing: boolean;
   error: string | null;
 }
 
 export type UndoToastAction =
-  | { type: "show"; archived: ArchivedGroupSummary }
+  | { type: "show"; toast: UndoToastEntry }
   | { type: "notice"; error: string }
-  | { type: "undo"; id: string }
-  | { type: "undone"; id: string }
-  | { type: "failed"; id: string; error: string }
+  | { type: "undo"; id: number }
+  | { type: "undone"; id: number }
+  | { type: "failed"; id: number; error: string }
   | { type: "dismiss" };
 
 export const IDLE_TOAST: UndoToastState = {
-  archived: null,
+  toast: null,
   undoing: false,
   error: null,
 };
 
 /**
- * The undo toast's state machine (LOCAL-17): a fresh `show` replaces whatever was on screen, a
- * failed undo keeps the toast open with the server's reason, and `dismiss` always clears it.
- * @remarks Undo outcomes carry the archive id they were started for and are ignored when a later
- * `show` has replaced the toast, so a slow restore can never dismiss or mislabel another group's toast.
+ * The undo toast's state machine (LOCAL-17).
+ *
+ * @remarks A fresh `show` replaces whatever was on screen, a failed undo keeps the toast open with
+ * the reason, and `dismiss` always clears it. Undo outcomes carry the id of the toast they started
+ * for and are ignored once a later `show` replaced it, and a second undo while one is in flight is
+ * a no-op.
  */
 export function reduceUndoToast(
   state: UndoToastState,
@@ -36,17 +43,17 @@ export function reduceUndoToast(
 ): UndoToastState {
   switch (action.type) {
     case "show":
-      return { archived: action.archived, undoing: false, error: null };
+      return { toast: action.toast, undoing: false, error: null };
     case "notice":
-      return { archived: null, undoing: false, error: action.error };
+      return { toast: null, undoing: false, error: action.error };
     case "undo":
-      return state.archived?.id === action.id
+      return state.toast?.id === action.id && !state.undoing
         ? { ...state, undoing: true, error: null }
         : state;
     case "undone":
-      return state.archived?.id === action.id ? IDLE_TOAST : state;
+      return state.toast?.id === action.id ? IDLE_TOAST : state;
     case "failed":
-      return state.archived?.id === action.id
+      return state.toast?.id === action.id
         ? { ...state, undoing: false, error: action.error }
         : state;
     case "dismiss":
@@ -63,22 +70,25 @@ export function undoToastCopy(archived: ArchivedGroupSummary): string {
 
 /** True while the toast has something to display. */
 export function isToastVisible(state: UndoToastState): boolean {
-  return state.archived != null || state.error != null;
+  return state.toast != null || state.error != null;
 }
 
 /**
- * Drive the undo toast: `show` after an unwind, `undo` calls Restore and closes on success,
- * `notice` shows a plain message with no Undo (a refused unwind), and anything visible dismisses
- * on its own after {@link UNDO_TOAST_MS} unless an undo is in flight.
+ * Drive the undo toast.
+ *
+ * @remarks `show(label, undo)` offers Undo and `undo` runs the closure, closing on success;
+ * `notice` shows a plain message with no Undo. Anything visible dismisses on its own after
+ * {@link UNDO_TOAST_MS} unless an undo is in flight.
  */
 export function useUndoToast(): {
   state: UndoToastState;
-  show: (archived: ArchivedGroupSummary) => void;
+  show: (label: string, undo: () => Promise<void>) => void;
   notice: (error: string) => void;
   undo: () => void;
   dismiss: () => void;
 } {
   const [state, dispatch] = useReducer(reduceUndoToast, IDLE_TOAST);
+  const nextId = useRef(0);
 
   useEffect(() => {
     if (!isToastVisible(state) || state.undoing) return;
@@ -90,27 +100,29 @@ export function useUndoToast(): {
   }, [state]);
 
   const undo = useCallback(() => {
-    const archived = state.archived;
-    if (!archived || state.undoing) return;
-    const id = archived.id;
+    const toast = state.toast;
+    if (!toast || state.undoing) return;
+    const id = toast.id;
     dispatch({ type: "undo", id });
-    void restoreArchived(id)
-      .then((result) => {
-        if (result.ok) dispatch({ type: "undone", id });
-        else dispatch({ type: "failed", id, error: result.error });
-      })
-      .catch((err: unknown) => {
-        console.error("restoreArchived failed", err);
-        dispatch({ type: "failed", id, error: "Couldn't restore this group." });
-      });
-  }, [state.archived, state.undoing]);
+    toast.undo().then(
+      () => dispatch({ type: "undone", id }),
+      (err: unknown) => {
+        console.error("undo failed", err);
+        dispatch({
+          type: "failed",
+          id,
+          error: err instanceof Error ? err.message : "Couldn't undo.",
+        });
+      },
+    );
+  }, [state.toast, state.undoing]);
 
   return {
     state,
-    show: useCallback(
-      (archived: ArchivedGroupSummary) => dispatch({ type: "show", archived }),
-      [],
-    ),
+    show: useCallback((label: string, undo: () => Promise<void>) => {
+      nextId.current += 1;
+      dispatch({ type: "show", toast: { id: nextId.current, label, undo } });
+    }, []),
     notice: useCallback(
       (error: string) => dispatch({ type: "notice", error }),
       [],
