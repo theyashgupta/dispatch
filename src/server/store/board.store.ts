@@ -2708,6 +2708,16 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Synchronous read of every card, unwindowed and unredacted.
+   *
+   * @remarks Returns live Map entries like getCard; callers must not mutate them and must redact
+   * before anything leaves the process.
+   */
+  listCards(): Card[] {
+    return [...this.cards.values()];
+  }
+
+  /**
    * Synchronous read of every (card, session) pair with a live tmux session — every SESSION a
    * card owns, not just the one `cardsWithSession()` reports via the ACTIVE projection. Deliberately
    * a SEPARATE method rather than a change to `cardsWithSession()`: that method stays card-scoped
