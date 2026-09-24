@@ -97,6 +97,7 @@ export function InboxView({
         totalCount={inboxCards.length}
       />
       <div
+        role={visibleCards.length > 0 ? "list" : undefined}
         className="scroll-stable-y"
         style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}
       >

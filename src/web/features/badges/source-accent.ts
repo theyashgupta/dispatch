@@ -10,7 +10,7 @@ export const SOURCE_ACCENT: Record<string, string> = {
   group: "var(--text-muted)",
 };
 
-const NEUTRAL_ACCENT = "var(--text-muted)";
+export const NEUTRAL_ACCENT = "var(--text-muted)";
 
 /**
  * Resolves a card source id to its badge color token, falling back to the neutral token for ids

@@ -34,6 +34,7 @@ import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { IconButton } from "../../primitives/IconButton.js";
 import { Notice } from "../../primitives/Notice.js";
+import { Chip } from "../../primitives/Chip.js";
 import { Spinner } from "../../primitives/Spinner.js";
 import {
   errorCopy,
@@ -111,18 +112,6 @@ export function CardView({
   const needsAttention = getNeedsAttention(card);
   const priorityDot = isGroup ? undefined : PRIORITY_DOT[card.priority];
   const memberCount = members?.length ?? 0;
-  const chipStyle: React.CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "var(--space-xs)",
-    borderRadius: "var(--radius-sm)",
-    padding: "0 var(--space-xs)",
-    fontSize: "var(--font-label)",
-    fontWeight: "var(--weight-semibold)",
-    lineHeight: "var(--line-label)",
-    whiteSpace: "nowrap",
-    flex: "0 0 auto",
-  };
   const sessionCountSuffix =
     card.sessionCount != null ? ` · ${card.sessionCount}` : "";
   const sessionChipTitle = (label: string): string | undefined =>
@@ -131,43 +120,28 @@ export function CardView({
       : undefined;
   const sessionChip =
     card.provisioningStep != null ? (
-      <span
-        style={{
-          ...chipStyle,
-          border: "1px solid var(--border)",
-          color: "var(--text-muted)",
-        }}
+      <Chip
+        icon={<RotateCw size={12} strokeWidth={2} aria-hidden="true" />}
         title={sessionChipTitle("Provisioning")}
       >
-        <RotateCw size={12} strokeWidth={2} aria-hidden="true" />
         {`Provisioning${sessionCountSuffix}`}
-      </span>
+      </Chip>
     ) : card.sessionLost === true ? (
-      <span
-        style={{
-          ...chipStyle,
-          background:
-            "color-mix(in srgb, var(--destructive) 16%, var(--surface-card))",
-          color: "var(--destructive-text)",
-        }}
+      <Chip
+        tone="danger"
+        icon={<AlertTriangle size={12} strokeWidth={2} aria-hidden="true" />}
         title={sessionChipTitle("Lost")}
       >
-        <AlertTriangle size={12} strokeWidth={2} aria-hidden="true" />
         {`Lost${sessionCountSuffix}`}
-      </span>
+      </Chip>
     ) : card.tmuxSession != null ? (
-      <span
-        style={{
-          ...chipStyle,
-          background:
-            "color-mix(in srgb, var(--status-ok) 16%, var(--surface-card))",
-          color: "var(--status-ok)",
-        }}
+      <Chip
+        tone="success"
+        icon={<Activity size={12} strokeWidth={2} aria-hidden="true" />}
         title={sessionChipTitle("Live")}
       >
-        <Activity size={12} strokeWidth={2} aria-hidden="true" />
         {`Live${sessionCountSuffix}`}
-      </span>
+      </Chip>
     ) : null;
 
   const hoverOrSelected = hover || selected;
@@ -329,15 +303,9 @@ export function CardView({
               />
             )}
             {isGroup && (
-              <span
-                style={{
-                  ...chipStyle,
-                  border: "1px solid var(--border)",
-                  color: "var(--text-muted)",
-                }}
-              >
+              <Chip>
                 {memberCount === 1 ? "1 ticket" : `${memberCount} tickets`}
-              </span>
+              </Chip>
             )}
             {showGone && <GoneBadge />}
             {isGroup && (
