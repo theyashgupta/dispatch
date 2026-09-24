@@ -1,3 +1,4 @@
+import { LinearConnectionCard } from "../connections/index.js";
 import {
   useCallback,
   useEffect,
@@ -1967,6 +1968,15 @@ const contentBodyStyle: CSSProperties = {
   width: "100%",
 };
 
+const connectionsScrollStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  flex: "1 1 auto",
+  minHeight: 0,
+  overflowY: "auto",
+  padding: "var(--space-xs)",
+};
+
 const footerStyle: CSSProperties = {
   flex: "0 0 auto",
   display: "flex",
@@ -2097,7 +2107,13 @@ export function SettingsScreen({
         </div>
 
         <div style={contentBodyStyle}>
-          {tab === "filters" && <SettingsScreen.FiltersTab filters={filters} />}
+          {tab === "filters" && (
+            <div className="scroll-stable-y" style={connectionsScrollStyle}>
+              <LinearConnectionCard>
+                <SettingsScreen.FiltersTab filters={filters} />
+              </LinearConnectionCard>
+            </div>
+          )}
           {tab === "models" && (
             <SettingsScreen.ModelsTab modelsTab={modelsTab} />
           )}
