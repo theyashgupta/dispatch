@@ -3123,6 +3123,25 @@ strip once recorded). The strip's zone grid, its width-dependent template, the n
 wordmark removal and the view-switch rendering (Candidate C and its retune) are history, recorded
 in `docs/standards/design-contract.md`'s Deferred decisions rows 2 and 5.
 
+**Keyboard.** Every key binding goes through one hook, `useShortcuts(bindings, { menuOpen,
+scopeId })` in `src/web/hooks/useShortcuts.ts`, over the pure `resolveShortcut` and the binding
+tables in `src/web/lib/shortcuts.ts`: `GLOBAL_SHORTCUTS` (Cmd or Ctrl+K opens the command
+palette, n opens New ticket, ? opens the cheat sheet), mounted once in App; `BOARD_SHORTCUTS`
+(j, k, h, l move the focused card, 1 to 7 move it to a column through the board's own move path;
+Enter stays with the focused card, a role button that opens itself, as the resolver leaves Enter
+to activatable targets);
+`INBOX_SHORTCUTS`; and `SESSIONS_SHORTCUTS`. The inert rule: a plain key never fires while the user types in an input, textarea, select or
+contentEditable, with a modifier held, outside the owning view, or while a Modal or a row menu is
+open; a meta binding fires only with Cmd or Ctrl and never with Shift. The global keys are also
+inert while the Activity drawer or the nav sheet is open and before setup finishes, and the board
+keys are inert while the undocked detail panel is open. Closing the palette, the cheat sheet or
+New ticket returns focus to the element that had it, unless a palette command ran.
+The palette (`features/palette/CommandPalette.tsx`) is a Modal, so its Escape and focus trap sit in
+the modal stack; its commands come from `buildCommands` in `src/web/lib/commands.ts` over the
+card actions in `src/web/lib/actions.ts`. The cheat sheet renders the four tables, so a binding
+cannot ship without its row. The sidebar sits above the detail panel scrim, and a change to any
+page other than Workspace closes the undocked panel, so one sidebar click navigates.
+
 ### Modal Focus Containment
 
 `Modal.tsx` traps `Tab`/`Shift+Tab` inside the TOPMOST dialog only, mirroring the discipline its
