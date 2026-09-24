@@ -836,6 +836,30 @@ export interface DiscoveredRepo {
   base: string;
 }
 
+export interface WorktreeRow {
+  cardId: string;
+  identifier: string;
+  title: string;
+  column: Column;
+  sessionId: string;
+  active: boolean;
+  lost: boolean;
+  workspacePath: string;
+  branch: string | null;
+  repos: string[];
+  sizeKb: number | null;
+  lastCommitAt: number | null;
+  cleanupDueAt: number | null;
+  blocked: { repo: string; count: number }[];
+}
+
+export interface WorkspacesInventory {
+  folders: { path: string; repos: DiscoveredRepo[] }[];
+  worktrees: WorktreeRow[];
+  totalKb: number;
+  unknownSizes: number;
+}
+
 /**
  * A directory entry surfaced by the folder-browser API: absolute path, display
  * name, whether it carries a `.git` marker, and whether its name is a dotfolder.
