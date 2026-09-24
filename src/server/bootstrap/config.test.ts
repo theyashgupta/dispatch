@@ -122,3 +122,90 @@ test("archiveRetentionDays reads a valid value and falls back to 30 on anything 
   writeConfig({});
   assert.equal(loadConfig().archiveRetentionDays, 30);
 });
+
+test("sources.linear.enabled and pollIntervalMs are read when well formed", () => {
+  writeConfig({
+    sources: { linear: { apiKey: "k", enabled: false, pollIntervalMs: 15000 } },
+  });
+  const linear = loadConfig().sources?.linear;
+  assert.equal(linear?.enabled, false);
+  assert.equal(linear?.pollIntervalMs, 15000);
+});
+
+test("a string enabled and a negative interval fall back", () => {
+  writeConfig({
+    sources: { linear: { apiKey: "k", enabled: "yes", pollIntervalMs: -5 } },
+  });
+  const linear = loadConfig().sources?.linear;
+  assert.equal(linear?.enabled, undefined);
+  assert.equal(linear?.pollIntervalMs, undefined);
+});
+
+test("a migrated flat key still resolves with no source settings", () => {
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, JSON.stringify({ linearApiKey: "flat" }));
+  const cfg = loadConfig();
+  assert.equal(cfg.linearApiKey, "flat");
+  assert.equal(cfg.sources?.linear?.enabled, undefined);
+  assert.equal(cfg.sources?.linear?.pollIntervalMs, undefined);
+});
+
+test("a zero source interval falls back to the global one", () => {
+  writeConfig({
+    pollIntervalMs: 20000,
+    sources: { linear: { apiKey: "k", pollIntervalMs: 0 } },
+  });
+  const cfg = loadConfig();
+  assert.equal(cfg.sources?.linear?.pollIntervalMs, undefined);
+  assert.equal(cfg.pollIntervalMs, 20000);
+});
+
+test("a non-positive global interval falls back to the default", () => {
+  writeConfig({ pollIntervalMs: -5 });
+  assert.equal(loadConfig().pollIntervalMs, 60000);
+});
+
+test("a malformed sources block falls back on every source field", () => {
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, JSON.stringify({ sources: "nope" }));
+  const cfg = loadConfig();
+  assert.equal(cfg.linearApiKey, "");
+  assert.equal(cfg.sources?.linear?.enabled, undefined);
+  assert.equal(cfg.sources?.linear?.pollIntervalMs, undefined);
+});
+
+test("a malformed filters block yields the default filters", () => {
+  writeConfig({ sources: { linear: { apiKey: "k", filters: ["x"] } } });
+  const filters = loadConfig().sources?.linear?.filters;
+  assert.deepEqual(filters, {
+    assignees: [],
+    projects: [],
+    teams: [],
+    currentCycle: false,
+    includeActive: false,
+  });
+});
+
+test("a filters block keeps only string ids and boolean flags", () => {
+  writeConfig({
+    sources: {
+      linear: {
+        apiKey: "k",
+        filters: {
+          assignees: ["a1", 7],
+          teams: "t",
+          currentCycle: "yes",
+          includeActive: true,
+        },
+      },
+    },
+  });
+  const filters = loadConfig().sources?.linear?.filters;
+  assert.deepEqual(filters, {
+    assignees: ["a1"],
+    projects: [],
+    teams: [],
+    currentCycle: false,
+    includeActive: true,
+  });
+});
