@@ -20,6 +20,10 @@ export interface ModalControl {
 let stackCounter = 0;
 const modalStack: number[] = [];
 
+export function modalDepth(): number {
+  return modalStack.length;
+}
+
 const FOCUSABLE_SELECTOR = [
   "a[href]",
   "button:not([disabled])",
