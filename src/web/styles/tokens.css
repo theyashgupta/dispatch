@@ -11,7 +11,7 @@
   --surface-card: #1a1b1f; /* Secondary (30%): elevated card surface */
   --surface-card-hover: #202126; /* Card hover lift (no accent) */
   --border: #26272b; /* Borders / dividers */
-  --accent: #5e6ad2; /* interactive/selected-state signal only: active view toggle, active inbox badge, drag-target highlight, needs-attention card border, resize-handle hover, active search result row */
+  --accent: #5e6ad2; /* interactive/selected-state signal only: active view toggle, active inbox badge, drag-target highlight, needs-attention card border, resize-handle hover, active search result row; the full job list is docs/standards/design-contract.md ## Color roles, Accent row */
   --destructive: #e5484d; /* Sync-failure / disconnected / config error: fills, stripes, borders, icon glyphs, status dots (non-text only) */
   --destructive-text: #ea6d71; /* Destructive TEXT role only, split from --destructive (LUI-07): white 20% lighten, measured 4.5:1+ on all elevation/pressed tiers and the real Lost-chip tint */
   --destructive-button-fill: #c03136; /* Danger Button fill only, split from --destructive (115 review WR-01): same 358deg hue darkened so the white label clears the 4.5:1 text floor at rest (5.62:1) and on the 12% white hover lighten (4.62:1); guarded by contrast-113's derived pair set */
@@ -59,6 +59,9 @@
   --strip-padding: 24px; /* sync-strip horizontal padding; swapped per breakpoint below */
   --strip-grid-columns: minmax(0, 1fr) auto minmax(0, 1fr); /* sync-strip zone grid; swapped per breakpoint below */
   --column-header-height: 28px;
+  --nav-width: 240px; /* sidebar, expanded */
+  --nav-width-collapsed: 56px; /* sidebar, icons only; forced at or below 1023px */
+  --page-header-height: 52px; /* per-page header row; swapped per breakpoint below */
   --radius-sm: 4px; /* chips and badges, up to ~19-27px tall */
   --radius: 6px;
   --radius-lg: 10px; /* modal dialog, ~200px tall and above */
@@ -83,6 +86,17 @@
   --status-ok: #3fb950;
   --status-stale: #ef8e3b;
   --status-down: #e5484d;
+
+  /* Source signal palette (SourceBadge text and tint), consumed only through
+     SOURCE_ACCENT in src/web/features/badges/source-accent.ts (NEW-24); see
+     docs/standards/design-contract.md ## Source colors for the contrast record. */
+  --src-github: #79c0ff;
+  --src-linear: #8b93ff;
+  --src-slack: #4ac78f;
+  --src-sentry: #f0708b;
+  --src-meeting: #c792ea;
+  --src-calendar: #efb14a;
+  --src-agent: #4fd1c5;
 
   /* Motion (v3.4), CSS-only transition/animation durations and easings, so the
      prefers-reduced-motion kill-switch above reaches every motion this phase
@@ -142,6 +156,9 @@
     /* 56px costs a card row below 768px but zero rows at the three wider
        breakpoints, so the strip only shrinks back to 44px here. */
     --strip-height: 44px;
+    /* The page header keeps the same 44px the strip measured here, so no card
+       row is lost below 768px. */
+    --page-header-height: 44px;
     /* 24px of horizontal padding put the two rightmost strip controls past the
        viewport edge at 390px (Activity +14.53px, Settings +46.53px, measured),
        so the strip drops to the low end of the researched 16-24px range here. */

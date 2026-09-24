@@ -89,6 +89,13 @@ const COLUMN_META_PATH = join(
   "column-meta.ts",
 );
 const CARD_VIEW_PATH = join("src", "web", "features", "board", "CardView.tsx");
+const SOURCE_ACCENT_PATH = join(
+  "src",
+  "web",
+  "features",
+  "badges",
+  "source-accent.ts",
+);
 const TERMINAL_CLIENT_PATHS = [
   join("src", "web", "terminal-main.ts"),
   join("src", "web", "terminal.html"),
@@ -118,7 +125,7 @@ const ATTENTION_FIELDS = ["startError", "sessionLost", "cleanupBlocked"];
 const ATTENTION_EXPORTS = ["needsAttention", "attentionTitle"];
 
 /**
- * The thirteen `--col-*`/`--prio-*`/`--status-*` custom-property names `NEW-24` requires present
+ * The twenty `--col-*`/`--prio-*`/`--status-*`/`--src-*` custom-property names `NEW-24` requires present
  * in {@link TOKENS_PATH} with a hex value. Named here rather than derived, so a silently emptied
  * or renamed token is itself a detectable defect, not an empty denylist: the missing-subject
  * sentinel in `checkStatusColorSingleSource` fires per absent name. The hex VALUES themselves are
@@ -139,6 +146,13 @@ const STATUS_COLOR_PALETTE_TOKENS = [
   "--status-ok",
   "--status-stale",
   "--status-down",
+  "--src-github",
+  "--src-linear",
+  "--src-slack",
+  "--src-sentry",
+  "--src-meeting",
+  "--src-calendar",
+  "--src-agent",
 ];
 const STEPS_PATH = join(
   "src",
@@ -1028,7 +1042,8 @@ function checkLaunchctlReadOnly() {
  */
 function readStatusColorPalette() {
   const tokens = readFileSync(TOKENS_PATH, "utf8");
-  const declRe = /(-{2}(?:prio|col|status)-[a-z-]+):\s*(#[0-9a-fA-F]{3,8})\b/g;
+  const declRe =
+    /(-{2}(?:prio|col|status|src)-[a-z-]+):\s*(#[0-9a-fA-F]{3,8})\b/g;
   const found = new Map();
   let match;
   while ((match = declRe.exec(tokens)) !== null) {
@@ -1116,6 +1131,62 @@ function checkStatusColorMechanism() {
 }
 
 /**
+ * The source-colour mechanism leg of `NEW-24`: `SOURCE_ACCENT` ({@link SOURCE_ACCENT_PATH}) is the
+ * single definition of "which colour a source renders". Three claims: the export exists, every
+ * value is `var(--text-muted)` or `var(--src-*)` for a name in {@link STATUS_COLOR_PALETTE_TOKENS}
+ * (so a typo cannot silently inherit the parent colour), and no other file under `src/web` except
+ * {@link TOKENS_PATH} and `*.test.ts` files references a `--src-` token at all (so the map cannot
+ * be bypassed by an inline `var()`). Mirrors `checkStatusColorMechanism` for the first two claims.
+ * @returns Violation report lines, one per defect.
+ */
+function checkSourceAccentMechanism() {
+  const violations = [];
+  if (!existsSync(SOURCE_ACCENT_PATH)) {
+    return [
+      `${SOURCE_ACCENT_PATH}: file not found, NEW-24's SOURCE_ACCENT subject is missing or renamed`,
+    ];
+  }
+  const content = readFileSync(SOURCE_ACCENT_PATH, "utf8");
+  const match = /export const SOURCE_ACCENT\b/.exec(content);
+  if (!match) {
+    return [
+      `${SOURCE_ACCENT_PATH}: export const SOURCE_ACCENT not found, NEW-24's single-source mechanism is missing or renamed`,
+    ];
+  }
+  const tail = content.slice(match.index);
+  const body = tail.slice(0, tail.indexOf("};") + 2);
+  const values = [...body.matchAll(/:\s*"([^"]*)"/g)].map((m) => m[1]);
+  if (values.length === 0) {
+    violations.push(
+      `${SOURCE_ACCENT_PATH}: SOURCE_ACCENT holds no string values, NEW-24's single-source mechanism is malformed`,
+    );
+  }
+  for (const value of values) {
+    const src = /^var\((-{2}src-[a-z]+)\)$/.exec(value);
+    const known = src !== null && STATUS_COLOR_PALETTE_TOKENS.includes(src[1]);
+    if (!known && value !== "var(--text-muted)") {
+      violations.push(
+        `${SOURCE_ACCENT_PATH}: SOURCE_ACCENT value "${value}" is not var(--text-muted) or a var(--src-*) reference to a declared token, NEW-24's single-source mechanism is broken`,
+      );
+    }
+  }
+  for (const file of walkSrc(WEB_DIR, /\.(ts|tsx|css|html)$/)) {
+    if (file === TOKENS_PATH || file === SOURCE_ACCENT_PATH) continue;
+    if (/\.test\.ts$/.test(file)) continue;
+    readFileSync(file, "utf8")
+      .split("\n")
+      .forEach((line, i) => {
+        if (line.includes("--src-")) {
+          violations.push(
+            `${file}:${i + 1}: retired pattern NEW-24, a --src-* token may only be referenced through SOURCE_ACCENT in ${SOURCE_ACCENT_PATH}`,
+          );
+        }
+      });
+  }
+  return violations;
+}
+
+/**
  * Status-colour single-source fence (`NEW-24`). Deliberately NOT a `RETIRED_PATTERNS` entry: that
  * array scans all of `src/**`, hardcodes its literals, and this gate's subject is `src/web` with a
  * denylist derived from {@link TOKENS_PATH} at run time, not a fixed literal list.
@@ -1125,7 +1196,7 @@ function checkStatusColorMechanism() {
  * consumed by `Column.tsx`, `SearchBox.tsx` and `StatusPillSwitcher.tsx` (columns) and `CardView.tsx`
  * itself (priority). A gate that only fenced literals would pass unchanged against a build that
  * deleted either map and inlined its `var()` strings by hand.
- * @remarks All thirteen {@link STATUS_COLOR_PALETTE_TOKENS} names must be present in `tokens.css`
+ * @remarks All twenty {@link STATUS_COLOR_PALETTE_TOKENS} names must be present in `tokens.css`
  * with a hex value; any absent one is a named missing-subject sentinel violation, never a silently
  * shrunk denylist.
  * @remarks The literal scan covers `.ts`/`.tsx`/`.css`/`.html` under `src/web`, since a
@@ -1189,6 +1260,7 @@ function checkStatusColorSingleSource() {
   }
 
   violations.push(...checkStatusColorMechanism());
+  violations.push(...checkSourceAccentMechanism());
   return violations;
 }
 
