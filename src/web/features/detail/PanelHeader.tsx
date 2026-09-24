@@ -20,6 +20,7 @@ import type {
   UnwindDestination,
 } from "../../../shared/types.js";
 import { UnwindPicker } from "./UnwindPicker.js";
+import { LinearStateChip, TeamCycleText } from "../badges/index.js";
 import { moveCard, openEditor, syncCardToLinear } from "../../lib/api.js";
 import { isDemoteEligible } from "../../../shared/demote-eligibility.js";
 import { isResetEligible } from "../../../shared/reset-eligibility.js";
@@ -116,6 +117,8 @@ export function PanelHeader({
         <Field mono style={{ flex: "0 0 auto" }}>
           {c?.identifier}
         </Field>
+        {c && <TeamCycleText card={c} />}
+        {c && <LinearStateChip card={c} />}
         <h1
           title={c?.title}
           style={{
