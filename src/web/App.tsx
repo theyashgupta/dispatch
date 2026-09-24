@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type CSSProperties,
 } from "react";
 import {
   useBoardStream,
@@ -44,12 +45,17 @@ import {
   stubToCard,
 } from "./features/board/index.js";
 import { DetailPanel } from "./features/detail/index.js";
-import { ActivityDrawer, ActivityPage } from "./features/activity/index.js";
+import {
+  ActivityDrawer,
+  ActivityPage,
+  type ActivityFilter,
+} from "./features/activity/index.js";
 import {
   StartModal,
   CleanupModal,
   ResetModal,
   CreateTicketModal,
+  MultiSelect,
 } from "./features/modals/index.js";
 import { settingsTabFrom } from "./lib/settings-tab.js";
 import { FirstRunSetup } from "./features/setup/index.js";
@@ -88,6 +94,45 @@ const SettingsScreen = lazy(() =>
     default: m.SettingsScreen,
   })),
 );
+const AccountsPage = lazy(() =>
+  import("./features/accounts/index.js").then((m) => ({
+    default: m.AccountsPage,
+  })),
+);
+const PlaybooksPage = lazy(() =>
+  import("./features/playbooks/index.js").then((m) => ({
+    default: m.PlaybooksPage,
+  })),
+);
+const VaultPage = lazy(() =>
+  import("./features/vault/index.js").then((m) => ({
+    default: m.VaultPage,
+  })),
+);
+const ArchivePage = lazy(() =>
+  import("./features/archive/index.js").then((m) => ({
+    default: m.ArchivePage,
+  })),
+);
+
+const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
+  "settings",
+  "accounts",
+  "playbooks",
+  "vault",
+  "archive",
+]);
+
+const activitySelectStyle: CSSProperties = {
+  height: "28px",
+  padding: "0 var(--space-sm)",
+  background: "var(--surface-card)",
+  border: "1px solid var(--border)",
+  borderRadius: "var(--radius)",
+  color: "var(--text)",
+  fontFamily: "var(--font-ui)",
+  fontSize: "var(--font-label)",
+};
 
 class PageErrorBoundary extends Component<
   { children: ReactNode },
@@ -193,6 +238,14 @@ export function App() {
   const nav = useNavState();
   const carousel = useMediaQuery(CAROUSEL_QUERY);
   const narrow = useMediaQuery(NARROW_QUERY);
+  const [archiveCount, setArchiveCount] = useState<number | undefined>();
+  const [playbookCount, setPlaybookCount] = useState<number | undefined>();
+  const [vaultCount, setVaultCount] = useState<number | undefined>();
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>({
+    cardId: null,
+    types: [],
+  });
+  const [playbookCreateRequest, setPlaybookCreateRequest] = useState(0);
   const navMode = effectiveNavState(
     nav.collapsed ? "collapsed" : "expanded",
     carousel,
@@ -284,7 +337,8 @@ export function App() {
   }, [navMode]);
   const firstRouteRef = useRef(true);
   useEffect(() => {
-    if (route.page === "settings") {
+    if (route.page !== "playbooks") setPlaybookCreateRequest(0);
+    if (PANEL_FREE_PAGES.has(route.page)) {
       setSelectedCardId(null);
       setPinned(null);
       setPinnedHydrating(false);
@@ -374,6 +428,17 @@ export function App() {
   for (const card of board?.cards ?? []) {
     cardIdentifiers[card.id] = card.identifier;
   }
+  const activityCardIds = new Set(
+    feed.events.map((e) => e.cardId).filter((id): id is string => id != null),
+  );
+  if (activityFilter.cardId != null) activityCardIds.add(activityFilter.cardId);
+  const activityCardOptions = [...activityCardIds].map((id) => ({
+    id,
+    label: cardIdentifiers[id] ?? id,
+  }));
+  const activityTypeOptions = [
+    ...new Set([...feed.events.map((e) => e.type), ...activityFilter.types]),
+  ].map((type) => ({ id: type, label: type.replace(/_/g, " ") }));
 
   const undoToast = useUndoToast();
   const requestUnwind = useCallback(
@@ -532,7 +597,7 @@ export function App() {
       compact
       onSwitch={claudeAccounts.switchAccount}
       onRefresh={claudeAccounts.refreshUsage}
-      onOpenSettings={() => navigate("settings", "accounts")}
+      onOpenSettings={() => navigate("accounts")}
     />
   ) : null;
 
@@ -543,6 +608,13 @@ export function App() {
     workspace: { title: "Workspace" },
     settings: { title: "Settings" },
     activity: { title: "Activity", count: feed.events.length },
+    accounts: {
+      title: "Accounts and Usage",
+      count: claudeAccounts.loaded ? claudeAccounts.accounts.length : undefined,
+    },
+    playbooks: { title: "Playbooks", count: playbookCount },
+    vault: { title: "Vault", count: vaultCount },
+    archive: { title: "Archive", count: archiveCount },
   };
   const pageTitle = pageMeta[route.page].title;
 
@@ -579,7 +651,56 @@ export function App() {
   );
 
   const pageHeader = (
-    <PageHeader title={pageTitle} count={pageMeta[route.page].count} />
+    <PageHeader
+      title={pageTitle}
+      count={pageMeta[route.page].count}
+      actions={
+        route.page === "playbooks" ? (
+          <Button
+            variant="primary"
+            onClick={() => setPlaybookCreateRequest((n) => n + 1)}
+          >
+            New playbook
+          </Button>
+        ) : route.page === "activity" ? (
+          <>
+            <select
+              aria-label="Filter by card"
+              value={activityFilter.cardId ?? ""}
+              onChange={(event) =>
+                setActivityFilter((f) => ({
+                  ...f,
+                  cardId: event.target.value === "" ? null : event.target.value,
+                }))
+              }
+              style={activitySelectStyle}
+            >
+              <option value="">All cards</option>
+              {activityCardOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <MultiSelect
+              label="Event types"
+              placeholder="All types"
+              options={activityTypeOptions}
+              selected={activityFilter.types}
+              loading={false}
+              loadError={false}
+              emptyText="No events yet"
+              onChange={(next) =>
+                setActivityFilter((f) => ({
+                  ...f,
+                  types: next as ActivityFilter["types"],
+                }))
+              }
+            />
+          </>
+        ) : undefined
+      }
+    />
   );
 
   return (
@@ -621,11 +742,11 @@ export function App() {
               />
             ) : route.page === "settings" ? (
               <SettingsScreen
-                claudeAccounts={claudeAccounts}
                 tab={settingsTabFrom(route.id)}
                 onTabChange={(tab) =>
                   navigate("settings", tab, { replace: true })
                 }
+                onOpenPage={(page) => navigate(page)}
                 onSaved={() => notifyCleanupOutcome("Settings saved.")}
                 tunnelState={tunnelState}
                 soundEnabled={soundEnabled}
@@ -635,15 +756,27 @@ export function App() {
               <ActivityPage
                 events={feed.events}
                 identifiers={cardIdentifiers}
+                filter={activityFilter}
                 onSelectCard={selectCard}
               />
+            ) : route.page === "accounts" ? (
+              <AccountsPage claudeAccounts={claudeAccounts} />
+            ) : route.page === "archive" ? (
+              <ArchivePage onCountChange={setArchiveCount} />
+            ) : route.page === "playbooks" ? (
+              <PlaybooksPage
+                createRequest={playbookCreateRequest}
+                onCountChange={setPlaybookCount}
+              />
+            ) : route.page === "vault" ? (
+              <VaultPage onCountChange={setVaultCount} />
             ) : (
               <Board
                 board={board}
                 selectedCardId={selectedCard ? selectedCardId : null}
                 onSelectCard={selectCard}
                 onStartRequest={requestStart}
-                onEditPlaybooks={() => navigate("settings", "playbooks")}
+                onEditPlaybooks={() => navigate("playbooks")}
                 onOpenInbox={() => navigate("inbox")}
                 doneTotal={board?.doneCounts?.total}
                 doneLimit={doneLimit}
@@ -708,7 +841,7 @@ export function App() {
           onClose={() => setStartRequest(null)}
           onEditPlaybooks={() => {
             setStartRequest(null);
-            navigate("settings", "playbooks");
+            navigate("playbooks");
           }}
         />
       )}
