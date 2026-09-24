@@ -10,6 +10,7 @@ import { buildLinearQuery, type LinearIssueFilter } from "./filter.js";
 const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 const MAX_PAGES = 20;
 const PAGE_SIZE = 250;
+const LINEAR_TIMEOUT_MS = 30_000;
 
 /**
  * Thrown by `postGraphQL` only when Linear rejects the credentials themselves — an HTTP 401/403 or a
@@ -108,6 +109,7 @@ async function postGraphQL(
 ): Promise<GraphQLData> {
   const res = await fetch(LINEAR_GRAPHQL_URL, {
     method: "POST",
+    signal: AbortSignal.timeout(LINEAR_TIMEOUT_MS),
     headers: { "Content-Type": "application/json", Authorization: apiKey },
     body: JSON.stringify({ query, variables }),
   });
@@ -274,6 +276,8 @@ const PROJECTS_QUERY = `query Projects { projects(first: ${PAGE_SIZE}) { nodes {
  */
 export class LinearSource implements TicketSource {
   readonly id = "linear";
+  readonly kind = "snapshot" as const;
+  readonly vaultKeys: readonly string[] = [];
 
   static capabilities: FilterCapabilities = {
     dimensions: ["assignees", "projects", "teams", "cycle"],
@@ -284,6 +288,7 @@ export class LinearSource implements TicketSource {
   constructor(
     private apiKey: string,
     private getFilters: () => SourceFilters,
+    readonly pollIntervalMs: number,
   ) {}
 
   fetch(): Promise<{ issues: SourceIssue[]; truncated: boolean }> {

@@ -14,6 +14,7 @@ import {
   DEFAULT_ARCHIVE_RETENTION_DAYS,
   ARCHIVE_RETENTION_MAX_DAYS,
   DEFAULT_FILTERS,
+  DEFAULT_POLL_INTERVAL_MS,
 } from "../../shared/types.js";
 import {
   DEFAULT_TERMINAL_APPEARANCE,
@@ -23,7 +24,6 @@ import { StartupError } from "./binary-check.js";
 import { CONFIG_PATH, DISPATCH_DIR } from "../services/infra/paths.js";
 
 const DEFAULT_PORT = 4700;
-const DEFAULT_POLL_INTERVAL_MS = 60_000;
 const DEFAULT_WORKSPACE_ROOT = path.join(os.homedir(), "dispatch-workspaces");
 
 /**
@@ -37,7 +37,8 @@ const CONFIG_TEMPLATE = {
   linearApiKey: "",
   "// port": "Backend HTTP port (loopback only). Default 4700.",
   port: DEFAULT_PORT,
-  "// pollIntervalMs": "Linear poll interval in ms. Default 60000 (60s).",
+  "// pollIntervalMs":
+    "Default poll interval in ms for every source; sources.<id>.pollIntervalMs overrides it. Default 60000 (60s).",
   pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
   "// workspaceRoot": "Root folder for per-ticket workspaces.",
   workspaceRoot: DEFAULT_WORKSPACE_ROOT,
@@ -156,43 +157,42 @@ function readLastUsedPlaybook(
 }
 
 /**
- * Read a non-empty `sources.linear.apiKey` from a parsed config object, or "" when the nested shape is
- * absent or blank. Checked FIRST during load so an already-migrated file is detected before the flat
- * key, which is what keeps the boot migration idempotent — a second boot never re-wraps an existing
- * `sources` block into `sources.linear.sources.linear`.
+ * Read the well-formed `sources.linear` object from a parsed config.
+ *
+ * @remarks Returns undefined when `sources` or `sources.linear` is absent, null, an array or not
+ * an object, so each caller applies its own fallback.
+ */
+function nestedLinear(
+  parsed: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const sources = parsed.sources;
+  if (typeof sources !== "object" || sources === null || Array.isArray(sources))
+    return undefined;
+  const linear = (sources as Record<string, unknown>).linear;
+  if (typeof linear !== "object" || linear === null || Array.isArray(linear))
+    return undefined;
+  return linear as Record<string, unknown>;
+}
+
+/**
+ * Read a non-empty `sources.linear.apiKey`, or "" when absent or blank.
+ *
+ * @remarks Checked FIRST during load so an already-migrated file is detected before the flat key,
+ * which keeps the boot migration idempotent.
  */
 function readNestedKey(parsed: Record<string, unknown>): string {
-  const sources = parsed.sources;
-  if (
-    typeof sources !== "object" ||
-    sources === null ||
-    Array.isArray(sources)
-  ) {
-    return "";
-  }
-  const linear = (sources as Record<string, unknown>).linear;
-  if (typeof linear !== "object" || linear === null || Array.isArray(linear)) {
-    return "";
-  }
-  const apiKey = (linear as Record<string, unknown>).apiKey;
+  const apiKey = nestedLinear(parsed)?.apiKey;
   return typeof apiKey === "string" ? apiKey.trim() : "";
 }
 
 /**
- * Read a `sources.linear.filters` block from a parsed config, coercing to the well-formed
- * SourceFilters shape (string arrays + boolean). Returns DEFAULT_FILTERS whenever the block is
- * absent or malformed, so a Phase-22-migrated config that has `apiKey` but no `filters` still yields
- * today's assigned-to-me pull (Pitfall P6 / FILT-05). Idempotent: a config already carrying a valid
- * block is echoed back unchanged.
+ * Read a `sources.linear.filters` block, coerced to a well-formed SourceFilters.
+ *
+ * @remarks Returns DEFAULT_FILTERS whenever the block is absent or malformed, so a config that has
+ * `apiKey` but no `filters` still yields the assigned-to-me pull.
  */
 function readNestedFilters(parsed: Record<string, unknown>): SourceFilters {
-  const sources = parsed.sources;
-  if (typeof sources !== "object" || sources === null || Array.isArray(sources))
-    return DEFAULT_FILTERS;
-  const linear = (sources as Record<string, unknown>).linear;
-  if (typeof linear !== "object" || linear === null || Array.isArray(linear))
-    return DEFAULT_FILTERS;
-  const filters = (linear as Record<string, unknown>).filters;
+  const filters = nestedLinear(parsed)?.filters;
   if (typeof filters !== "object" || filters === null || Array.isArray(filters))
     return DEFAULT_FILTERS;
   const f = filters as Record<string, unknown>;
@@ -205,6 +205,29 @@ function readNestedFilters(parsed: Record<string, unknown>): SourceFilters {
     currentCycle: f.currentCycle === true,
     includeActive: f.includeActive === true,
   };
+}
+
+/**
+ * Read the optional `enabled` and `pollIntervalMs` fields of `sources.linear`.
+ *
+ * @remarks A non-boolean `enabled` and a non-positive or non-finite interval are dropped, so the
+ * resolved config falls back to "enabled when a key is present" and the global interval.
+ */
+function readNestedSourceSettings(parsed: Record<string, unknown>): {
+  enabled?: boolean;
+  pollIntervalMs?: number;
+} {
+  const linear = nestedLinear(parsed);
+  if (!linear) return {};
+  const out: { enabled?: boolean; pollIntervalMs?: number } = {};
+  if (typeof linear.enabled === "boolean") out.enabled = linear.enabled;
+  if (
+    typeof linear.pollIntervalMs === "number" &&
+    Number.isFinite(linear.pollIntervalMs) &&
+    linear.pollIntervalMs > 0
+  )
+    out.pollIntervalMs = linear.pollIntervalMs;
+  return out;
 }
 
 /**
@@ -349,13 +372,21 @@ export function loadConfig(): Config {
     linearApiKey: rawKey,
     port: typeof parsed.port === "number" ? parsed.port : DEFAULT_PORT,
     pollIntervalMs:
-      typeof parsed.pollIntervalMs === "number"
+      typeof parsed.pollIntervalMs === "number" &&
+      Number.isFinite(parsed.pollIntervalMs) &&
+      parsed.pollIntervalMs > 0
         ? parsed.pollIntervalMs
         : DEFAULT_POLL_INTERVAL_MS,
     workspaceRoot,
     statusChannel: readStatusChannel(parsed),
     updateCheck: readUpdateCheck(parsed),
-    sources: { linear: { apiKey: rawKey, filters: readNestedFilters(parsed) } },
+    sources: {
+      linear: {
+        apiKey: rawKey,
+        filters: readNestedFilters(parsed),
+        ...readNestedSourceSettings(parsed),
+      },
+    },
     lastUsedPlaybook: readLastUsedPlaybook(parsed),
     cleanupDelayDays: readWholeDays(
       parsed,

@@ -857,6 +857,7 @@ export interface VaultKeySummary {
   updatedAt: string;
   filled: boolean;
   hasPrevious: boolean;
+  usedBy?: string[];
 }
 
 /**
@@ -934,6 +935,17 @@ export interface UpdateStatus {
 export type UpdateRunResult =
   { ok: true; version: string } | { ok: false; command: string };
 
+export type SourceKind = "snapshot" | "append";
+
+export const DEFAULT_POLL_INTERVAL_MS = 60_000;
+
+export interface SourceConfig {
+  apiKey: string;
+  filters?: SourceFilters;
+  enabled?: boolean;
+  pollIntervalMs?: number;
+}
+
 /** Contents of ~/.dispatch/config.json. */
 export interface Config {
   linearApiKey: string;
@@ -944,8 +956,7 @@ export interface Config {
   workspaceRoot?: string;
   /** Status-source selection (`hooks | pane | auto`); absent resolves to `auto` at load. */
   statusChannel?: StatusChannel;
-  /** Writable-config groundwork (Phase 23): nested per-source credentials plus the live filter block. `linearApiKey` stays the resolved read. */
-  sources?: { linear?: { apiKey: string; filters?: SourceFilters } };
+  sources?: { linear?: SourceConfig };
   /** On-boot update check; absent or any non-`false` value resolves to on. */
   updateCheck?: boolean;
   /** The playbook name remembered from the last successful kickoff; absent when never set. */
