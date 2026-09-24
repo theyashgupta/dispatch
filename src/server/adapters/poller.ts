@@ -43,7 +43,7 @@ async function pollOnce(loop: Loop): Promise<void> {
   const gen = loop.generation;
   const source = loop.source;
   try {
-    const { issues, truncated } = await source.fetch();
+    const { issues, items, truncated } = await source.fetch();
     if (gen !== loop.generation) return;
     if (truncated) {
       console.warn(
@@ -55,6 +55,12 @@ async function pollOnce(loop: Loop): Promise<void> {
       source: source.id,
       kind: source.kind,
     });
+    if (items !== undefined) {
+      await store.upsertItems(source.id, items, {
+        kind: source.kind,
+        partial: truncated,
+      });
+    }
     if (gen !== loop.generation) return;
     loop.backoffMs = baseInterval(source);
     scheduleNext(loop, loop.backoffMs);

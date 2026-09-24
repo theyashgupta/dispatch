@@ -9,6 +9,7 @@ import type {
   Column,
   EventType,
   ArchivedGroup,
+  Item,
 } from "../../shared/types.js";
 
 export const BOARD_DB_PATH = path.join(DISPATCH_DATA_DIR, "board.db");
@@ -84,6 +85,10 @@ export interface BoardMeta {
   schemaVersion?: number;
 }
 
+export interface ItemWrites {
+  upserts: Item[];
+}
+
 /**
  * The store-facing surface of the SQLite persistence layer — the only place
  * node:sqlite is touched. `persist` writes the FULL card set (including each
@@ -94,10 +99,12 @@ export interface BoardMeta {
 export interface BoardDb {
   cardCount(): number;
   readAll(): { cards: Card[]; meta: Partial<BoardMeta> };
+  readAllItems(): Item[];
   persist(
     cards: Card[],
     meta: BoardMeta,
     events: Omit<ActivityEvent, "id">[],
+    itemWrites?: ItemWrites,
   ): number[];
   importParsed(parsed: Partial<BoardSnapshot>): void;
   listEvents(cardId: string | null, limit: number): ActivityEvent[];
@@ -494,6 +501,13 @@ export function openBoardDb(): BoardDb {
       origin     TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS items (
+      id     TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      state  TEXT NOT NULL,
+      data   TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_items_source_state ON items(source, state);
   `);
 
   const upsertCard = db.prepare(
@@ -554,11 +568,17 @@ export function openBoardDb(): BoardDb {
   const selectPushSubscriptions = db.prepare(
     `SELECT endpoint, p256dh, auth, origin, created_at FROM push_subscriptions`,
   );
+  const upsertItem = db.prepare(
+    `INSERT INTO items (id, source, state, data) VALUES (@id, @source, @state, @data)
+     ON CONFLICT(id) DO UPDATE SET source = excluded.source, state = excluded.state, data = excluded.data`,
+  );
+  const selectItems = db.prepare(`SELECT id, data FROM items`);
 
   function persistTxn(
     cards: Card[],
     meta: BoardMeta,
     events: Omit<ActivityEvent, "id">[],
+    itemWrites?: ItemWrites,
   ): number[] {
     return withTxn(db, () => {
       const ids: string[] = [];
@@ -568,6 +588,14 @@ export function openBoardDb(): BoardDb {
       }
       deleteGone.run(JSON.stringify(ids));
       writeMeta.run({ data: JSON.stringify(meta) });
+      for (const item of itemWrites?.upserts ?? []) {
+        upsertItem.run({
+          id: item.id,
+          source: item.source,
+          state: item.state,
+          data: JSON.stringify(item),
+        });
+      }
       const eventIds: number[] = [];
       for (const e of events) {
         const info = insertEvent.run({
@@ -591,6 +619,17 @@ export function openBoardDb(): BoardDb {
     cardCount() {
       return (countCards.get() as { n: number }).n;
     },
+    readAllItems() {
+      const items: Item[] = [];
+      for (const row of selectItems.all() as { id: string; data: string }[]) {
+        try {
+          items.push(JSON.parse(row.data) as Item);
+        } catch {
+          console.error(`[board-db] skipping unreadable items row ${row.id}`);
+        }
+      }
+      return items;
+    },
     readAll() {
       const cards = (selectCards.all() as { data: string }[]).map(
         (row) => JSON.parse(row.data) as Card,
@@ -601,8 +640,8 @@ export function openBoardDb(): BoardDb {
         : {};
       return { cards, meta };
     },
-    persist(cards, meta, events) {
-      return persistTxn(cards, meta, events);
+    persist(cards, meta, events, itemWrites) {
+      return persistTxn(cards, meta, events, itemWrites);
     },
     importParsed(parsed) {
       const cards = Array.isArray(parsed.cards) ? parsed.cards : [];

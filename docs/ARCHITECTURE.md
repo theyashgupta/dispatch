@@ -154,6 +154,38 @@ own tracked and in-flight sessions when reconciling (`WR-02`), so a ttyd spawn r
 picture is complete. Finally, the store is content-free in its logging: a failed persist or a
 failed mutation logs only the error, never card fields, marker reasons, or pane text.
 
+### Items
+
+An `Item` (`shared/types.ts`) is the light row for things that are not tickets yet: a pull request
+asking for review, a mention, an error, a meeting action item. Its id is `<source>:<sourceKey>`; it
+carries `source`, `type`, `title`, `snippet`, `url`, `createdAt`, `priority` (0 to 100), `state`
+(`unread`, `read`, `snoozed`, `done`), `snoozedUntil`, a string `meta` map and `cardId` once
+promoted. Items live in the `items` table of `board.db` (`store/board-db.ts`), one JSON row per
+item with `source` and `state` columns for filtering, and they are written ONLY inside the store's
+mutation queue: an item mutator stages its changed rows and `persist` writes them in the same
+transaction as the cards, never the whole table.
+
+The upsert rules are pure (`store/items.ts`, `applyItemUpserts`), restated from fldsmdpr's inbox
+upsert: an existing row keeps `state`, `snoozedUntil` and `cardId`; `meta` merges with the
+connector's keys winning and app keys surviving; a complete pull of a `snapshot` source marks that
+source's missing rows `done`; an `append` source or a partial pull never does. A source hands
+items to the poller as an optional `items` field on its `fetch()` result and the poller calls
+`store.upsertItems(source.id, items, { kind, partial })` right after `applyIssues`. `promoteItem`
+mints a local Inbox card (`LOCAL-n`, `issueId` = the item id, description from the snippet, the
+source link and the meta pairs) and marks the item `done` with `cardId` in one mutation; a second
+promote returns the existing card. It is the only item mutation that emits an activity event
+(`item_promoted`).
+
+On the wire, `BoardSnapshot.items` carries every item whose state is not `done`, redacted through
+`redactItem` (a field pick, so a future field stays off the wire until named), with an expired
+snooze presented as `unread` by the pure `wakeItem` on the read path; the next write to that row
+persists the wake. `GET /api/board` and the SSE `data` frame share the array through
+`store.snapshot()`; `GET /api/items` lists every item, done rows included, with `state` and `source`
+filters. The routes live in `routes/items.route.ts`: `POST /api/items/:id/state` (unread, read,
+done; a promoted item stays done and answers 409), `POST /api/items/:id/snooze` (the route
+validates a future ISO time before any queue work; a promoted item answers 409 here too), `POST /api/items/:id/promote` (201 on the
+first call, 200 after).
+
 ### Session Projection Chokepoint
 
 A card's six flat session fields — `tmuxSession`, `ttydPort`, `hookToken`, `claudeSessionId`,
@@ -3125,7 +3157,7 @@ for a future accessibility-hardening pass rather than folded into this fix.
 These are seams that refactors must hold **byte/shape-identical**. A change to any of them
 is a behavior change, not a refactor.
 
-1. **`shared/types.ts` shape.** `Card`, `BoardSnapshot`, `Config`, `StartError`, `TerminalError`,
+1. **`shared/types.ts` shape.** `Card`, `Item`, `BoardSnapshot` (with its `items` field), `Config`, `StartError`, `TerminalError`,
    `SessionFields`, `ReconcileResult`, `Column`/`COLUMNS`. Consumed by both halves; **`BoardSnapshot`
    IS the SSE payload AND the on-disk `board.json`** — same FIELD SET both places (Plan 82-02
    deliberately broke the byte-identical shape this contract used to state: wire copies are now

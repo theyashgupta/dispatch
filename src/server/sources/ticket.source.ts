@@ -3,6 +3,7 @@ import type {
   FilterDimension,
   FilterOption,
   SourceFilters,
+  Item,
   SourceIssue,
   SourceKind,
 } from "../../shared/types.js";
@@ -36,7 +37,11 @@ export interface TicketSource {
   readonly kind: SourceKind;
   readonly pollIntervalMs: number;
   readonly vaultKeys: readonly string[];
-  fetch(): Promise<{ issues: SourceIssue[]; truncated: boolean }>;
+  fetch(): Promise<{
+    issues: SourceIssue[];
+    items?: Item[];
+    truncated: boolean;
+  }>;
   readonly capabilities: FilterCapabilities;
   listOptions(
     dimension: Exclude<FilterDimension, "cycle">,

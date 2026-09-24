@@ -40,6 +40,7 @@ const EVENT_GLYPH: Record<EventType, LucideIcon> = {
   group_restored: RotateCcw,
   archive_deleted: Trash2,
   session_reset: RotateCcw,
+  item_promoted: FilePlus,
 };
 
 const EVENT_TINT: Record<EventType, string> = {
@@ -62,6 +63,7 @@ const EVENT_TINT: Record<EventType, string> = {
   group_restored: "var(--text-muted)",
   archive_deleted: "var(--text-muted)",
   session_reset: "var(--text-muted)",
+  item_promoted: "var(--text-muted)",
 };
 
 const GLYPH_LOOKUP: Partial<Record<string, LucideIcon>> = EVENT_GLYPH;
