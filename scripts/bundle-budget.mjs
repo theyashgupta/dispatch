@@ -72,6 +72,11 @@ const BUDGETS = [
     budgetGzipBytes: 3943, // seed: 3584 (re-seeded 2026-09-25 with the sessions toolbar, bulk bar, confirm dialog and keyboard rows)
   },
   {
+    label: "assets/palette-*.js",
+    match: (f) => f.startsWith(`assets${sep}palette-`) && f.endsWith(".js"),
+    budgetGzipBytes: 2595, // seed: 2359 (the command palette and the cheat sheet, lazy)
+  },
+  {
     label: "assets/archive-*.js",
     match: (f) => f.startsWith(`assets${sep}archive-`) && f.endsWith(".js"),
     budgetGzipBytes: 2132, // seed: 1939 (the archive page, lazy; the accounts page rides main because the accounts barrel is eager)

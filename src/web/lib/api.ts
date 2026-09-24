@@ -700,6 +700,21 @@ export async function removeWorkspaceFolder(path: string): Promise<void> {
 }
 
 /**
+ * Ask the server to poll one source now: POST /api/sources/:id/poll.
+ *
+ * @remarks Throws on any non-2xx so Sync now can report a refused source; the poll result arrives
+ * over SSE like any scheduled poll.
+ */
+export async function pollSource(id: string): Promise<void> {
+  const res = await fetch(`/api/sources/${encodeURIComponent(id)}/poll`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    throw new Error(`pollSource failed: ${res.status} ${res.statusText}`);
+  }
+}
+
+/**
  * Ensure a ttyd terminal for a card's live session: POST /api/cards/:id/terminal.
  * Fire-and-forget — the backend spawns-or-reuses ttyd single-flight (202 Accepted)
  * and the SSE snapshot carries the outcome (`ttydPort` on success, `terminalError`

@@ -3,7 +3,7 @@ import { resolveShortcut, type ShortcutBinding } from "../lib/shortcuts.js";
 import { modalDepth } from "../primitives/Modal.js";
 
 /**
- * Fire single-key bindings from one window listener while the page is not typing.
+ * Fire key bindings from one window listener, gated by the pure resolver.
  *
  * @remarks The bindings live in a ref (written in a layout effect so a press right after a render
  * sees the new rows) and the listener is attached once per menu change; the pure resolver decides
@@ -33,6 +33,7 @@ export function useShortcuts(
           metaKey: event.metaKey,
           ctrlKey: event.ctrlKey,
           altKey: event.altKey,
+          shiftKey: event.shiftKey,
           target,
         },
         bindingsRef.current,

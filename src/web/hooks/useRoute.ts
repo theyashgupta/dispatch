@@ -27,6 +27,17 @@ function getHash(): string {
   return window.location.hash;
 }
 
+/** True when the first load will replace the current hash with the remembered route. */
+export function pendingRestore(): boolean {
+  return (
+    initialHash(
+      window.location.hash,
+      readStorage(ROUTE_KEY),
+      readStorage(LEGACY_VIEW_KEY),
+    ) !== window.location.hash
+  );
+}
+
 /**
  * Owns the hash route: parses `location.hash`, remembers the last route under `dsp.route`, and on
  * first load replaces an empty hash with the remembered one.

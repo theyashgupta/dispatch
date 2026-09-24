@@ -127,7 +127,8 @@ block went stale as `tokens.css` grew; the block is cited by name now so it cann
 Accent consumers added by G2 (LOCAL-39, LOCAL-40), same job as the rows above: a pressed filter
 toggle (`Button` with `aria-pressed`, used by Inbox Unread only and Sessions Live only) takes the
 16 percent accent tint and accent text, and the sidebar Sessions live count badge uses the same
-accent `Chip` as the inbox badge.
+accent `Chip` as the inbox badge. The command palette (LOCAL-33) marks its active palette row,
+the one Enter runs, with the same 16 percent accent tint and accent text.
 
 ## Source colors
 

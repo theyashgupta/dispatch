@@ -1,4 +1,4 @@
-import type { Card, Item } from "../../shared/types.js";
+import type { Card, Column, Item } from "../../shared/types.js";
 import type * as Api from "./api.js";
 import { SNOOZE_LABELS, snoozeUntil, type SnoozePreset } from "./snooze.js";
 
@@ -30,6 +30,7 @@ export type ActionApi = Pick<
   | "cleanupCard"
   | "switchSession"
   | "resumeCard"
+  | "pollSource"
 >;
 
 export interface ActionContext {
@@ -247,4 +248,42 @@ export function bulkOutcomeCopy(verb: string, outcome: BulkOutcome): string {
   const head = `${verb} ${outcome.done.length} of ${total}`;
   if (outcome.failed.length === 0) return head;
   return `${head}. Failed: ${outcome.failed.map((f) => `${f.identifier} (${f.error})`).join(", ")}`;
+}
+
+export interface CardActionContext {
+  api: Pick<ActionApi, "moveCard">;
+  requestStart: (cardId: string) => void;
+  requestCleanup: (cardId: string) => void;
+  openCard: (cardId: string) => void;
+}
+
+export const CARD_ACTIONS = {
+  start: (ctx: CardActionContext, card: Card) => ctx.requestStart(card.id),
+  openTerminal: (ctx: CardActionContext, card: Card) => ctx.openCard(card.id),
+  moveTo: (ctx: CardActionContext, card: Card, column: Column) =>
+    ctx.api.moveCard(card.id, column),
+  cleanup: (ctx: CardActionContext, card: Card) => ctx.requestCleanup(card.id),
+};
+
+/**
+ * Poll every enabled source now and say which ones were asked.
+ *
+ * @remarks With no enabled source nothing is posted; a refused source is named in the notice
+ * instead of failing the rest.
+ */
+export async function syncSources(
+  api: Pick<ActionApi, "pollSource">,
+  enabled: readonly string[],
+  notice: (text: string) => void,
+): Promise<void> {
+  if (enabled.length === 0) {
+    notice("No source is enabled");
+    return;
+  }
+  notice(`Syncing ${enabled.join(", ")}`);
+  const results = await Promise.allSettled(
+    enabled.map((id) => api.pollSource(id)),
+  );
+  const refused = enabled.filter((_, i) => results[i]?.status === "rejected");
+  if (refused.length > 0) notice(`Sync refused: ${refused.join(", ")}`);
 }

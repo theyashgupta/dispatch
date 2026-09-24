@@ -46,6 +46,8 @@ interface SidebarNavProps {
 }
 
 const navStyle: CSSProperties = {
+  position: "relative",
+  zIndex: 11,
   flex: "0 0 auto",
   display: "flex",
   flexDirection: "column",

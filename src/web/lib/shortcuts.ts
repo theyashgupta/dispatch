@@ -1,6 +1,13 @@
-export interface ShortcutBinding {
+import { COLUMNS } from "../../shared/types.js";
+import { COLUMN_LABELS } from "./event-copy.js";
+
+export interface ShortcutEntry {
   key: string;
   label: string;
+  meta?: boolean;
+}
+
+export interface ShortcutBinding extends ShortcutEntry {
   run: () => void;
 }
 
@@ -9,6 +16,7 @@ export interface ShortcutEvent {
   metaKey: boolean;
   ctrlKey: boolean;
   altKey: boolean;
+  shiftKey?: boolean;
   target: {
     tagName?: string;
     isContentEditable?: boolean;
@@ -22,7 +30,25 @@ interface ShortcutContext {
   inScope: boolean;
 }
 
-export const INBOX_SHORTCUTS: readonly { key: string; label: string }[] = [
+export const GLOBAL_SHORTCUTS: readonly ShortcutEntry[] = [
+  { key: "k", label: "Command palette", meta: true },
+  { key: "n", label: "New ticket" },
+  { key: "?", label: "Keyboard shortcuts" },
+];
+
+export const BOARD_SHORTCUTS: readonly ShortcutEntry[] = [
+  { key: "j", label: "Next card" },
+  { key: "k", label: "Previous card" },
+  { key: "h", label: "Previous column" },
+  { key: "l", label: "Next column" },
+  { key: "Enter", label: "Open card" },
+  ...COLUMNS.map((column, index) => ({
+    key: String(index + 1),
+    label: `Move to ${COLUMN_LABELS[column]}`,
+  })),
+];
+
+export const INBOX_SHORTCUTS: readonly ShortcutEntry[] = [
   { key: "j", label: "Next row" },
   { key: "k", label: "Previous row" },
   { key: "Enter", label: "Open" },
@@ -32,11 +58,27 @@ export const INBOX_SHORTCUTS: readonly { key: string; label: string }[] = [
   { key: "u", label: "Toggle read" },
 ];
 
-export const SESSIONS_SHORTCUTS: readonly { key: string; label: string }[] = [
+export const SESSIONS_SHORTCUTS: readonly ShortcutEntry[] = [
   { key: "j", label: "Next session" },
   { key: "k", label: "Previous session" },
   { key: "Enter", label: "Open" },
 ];
+
+/**
+ * Attach handlers to a shortcut table, dropping entries without one.
+ *
+ * @remarks Runs are keyed by the entry key with a "meta+" prefix for meta entries, so a plain and a
+ * meta binding on the same key never share a handler.
+ */
+export function bindShortcuts(
+  entries: readonly ShortcutEntry[],
+  runs: Partial<Record<string, () => void>>,
+): ShortcutBinding[] {
+  return entries.flatMap((entry) => {
+    const run = runs[`${entry.meta === true ? "meta+" : ""}${entry.key}`];
+    return run ? [{ ...entry, run }] : [];
+  });
+}
 
 const EDITABLE_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 const ACTIVATABLE_TAGS = new Set(["BUTTON", "A", "SUMMARY"]);
@@ -66,9 +108,9 @@ function isActivatable(target: ShortcutEvent["target"]): boolean {
 /**
  * Pick the binding a key event fires, or null.
  *
- * @remarks Inert while the user types, outside the owning view, while a modal or a row menu is
- * open, and while any modifier is held; Enter and Space stay with a focused button or link so a
- * row binding never steals a click.
+ * @remarks Inert outside the owning view and while a modal or a row menu is open. A plain binding
+ * never fires with a modifier held or while the user types; a meta binding fires only with Cmd or
+ * Ctrl held, even from an input. Enter and Space stay with a focused button or link.
  */
 export function resolveShortcut(
   event: ShortcutEvent,
@@ -76,7 +118,12 @@ export function resolveShortcut(
   context: ShortcutContext,
 ): ShortcutBinding | null {
   if (!context.inScope || context.modalOpen || context.menuOpen) return null;
-  if (event.metaKey || event.ctrlKey || event.altKey) return null;
+  if (event.altKey) return null;
+  if (event.metaKey || event.ctrlKey) {
+    if (event.shiftKey) return null;
+    const key = event.key.toLowerCase();
+    return bindings.find((b) => b.meta === true && b.key === key) ?? null;
+  }
   if (isEditableTarget(event.target)) return null;
   if (
     (event.key === "Enter" || event.key === " ") &&
@@ -84,5 +131,5 @@ export function resolveShortcut(
   ) {
     return null;
   }
-  return bindings.find((b) => b.key === event.key) ?? null;
+  return bindings.find((b) => b.meta !== true && b.key === event.key) ?? null;
 }

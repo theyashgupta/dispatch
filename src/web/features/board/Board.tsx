@@ -47,6 +47,16 @@ import {
 import { moveCard } from "../../lib/api.js";
 import { deriveShowDot, deriveShowGone } from "../../lib/card-badges.js";
 import { inboxWaitingCount } from "./inbox-count.js";
+import {
+  boardLanes,
+  focusCard,
+  focusedCardId,
+  nextFocusedCard,
+  type BoardDirection,
+} from "./board-keys.js";
+import { useShortcuts } from "../../hooks/useShortcuts.js";
+import { BOARD_SHORTCUTS, bindShortcuts } from "../../lib/shortcuts.js";
+import { modalDepth } from "../../primitives/Modal.js";
 
 interface BoardProps {
   board: BoardSnapshot | null;
@@ -59,7 +69,6 @@ interface BoardProps {
   doneLimit?: number;
   onLoadMoreDone?: () => void;
   onSelectSearchResult?: (result: CardSearchResult) => void;
-  overlayAboveContent?: boolean;
 }
 
 interface FailedMoveNotice {
@@ -84,7 +93,6 @@ export function Board({
   doneLimit,
   onLoadMoreDone,
   onSelectSearchResult,
-  overlayAboveContent,
 }: BoardProps) {
   const [cards, setCards] = useState<CardModel[]>(board?.cards ?? []);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -139,11 +147,45 @@ export function Board({
   useEffect(() => {
     if (selectedIds.size === 0 || groupModalMembers != null) return;
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setSelectedIds(new Set());
+      if (event.key === "Escape" && !event.defaultPrevented)
+        setSelectedIds(new Set());
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selectedIds.size, groupModalMembers]);
+
+  const navigateFocus = (direction: BoardDirection) => () =>
+    focusCard(
+      nextFocusedCard(
+        boardLanes(cards),
+        focusedCardId(),
+        direction,
+        isCarousel && activeColumn != null ? COLUMNS.indexOf(activeColumn) : 0,
+      ),
+    );
+  const boardRuns: Partial<Record<string, () => void>> = {
+    j: navigateFocus("j"),
+    k: navigateFocus("k"),
+    h: navigateFocus("h"),
+    l: navigateFocus("l"),
+    ...Object.fromEntries(
+      COLUMNS.map((column, index) => [
+        String(index + 1),
+        () => {
+          const id = focusedCardId();
+          if (id == null) return;
+          performMove(id, column);
+          requestAnimationFrame(() => {
+            if (modalDepth() === 0) focusCard(id);
+          });
+        },
+      ]),
+    ),
+  };
+  useShortcuts(bindShortcuts(BOARD_SHORTCUTS, boardRuns), {
+    menuOpen: groupModalMembers != null || selectedCardId != null,
+    scopeId: "board-page",
+  });
 
   const lastOpenedMap = useLastOpened();
   const overlaySelected =
@@ -520,6 +562,7 @@ export function Board({
         }}
       >
         <div
+          id="board-page"
           style={{
             flex: "1 1 auto",
             minHeight: 0,
@@ -539,7 +582,6 @@ export function Board({
           >
             <SearchBox
               onSelectResult={(result) => onSelectSearchResult?.(result)}
-              overlayAboveContent={overlayAboveContent}
             />
           </div>
           {isCarousel && (
