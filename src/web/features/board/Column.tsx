@@ -16,6 +16,7 @@ import {
 import { Button } from "../../primitives/Button.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { DONE_PAGE_SIZE } from "../../../shared/done-limit.js";
+import { awaitingCleanup } from "./board-keys.js";
 
 const MIN_COL_WIDTH = 220;
 const MAX_COL_WIDTH = 480;
@@ -199,12 +200,8 @@ export function Column({
   const doneGroups =
     column === "done"
       ? {
-          awaiting: cards.filter(
-            (c) => c.tmuxSession != null || c.workspacePath != null,
-          ),
-          cleaned: cards.filter(
-            (c) => c.tmuxSession == null && c.workspacePath == null,
-          ),
+          awaiting: cards.filter(awaitingCleanup),
+          cleaned: cards.filter((c) => !awaitingCleanup(c)),
         }
       : null;
 
@@ -424,6 +421,8 @@ export function Column({
           display: "flex",
           flexDirection: "column",
           gap: "var(--inter-card-gap)",
+          padding: "var(--space-xs)",
+          margin: "0 calc(var(--space-xs) * -1)",
         }}
       >
         {cards.length === 0 ? (
