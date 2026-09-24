@@ -173,11 +173,12 @@ export function startPollers(sources: readonly TicketSource[]): void {
 /**
  * Start the loops for every enabled source in the registry (boot and first-run setup).
  *
- * @remarks Also stamps the store's staleness interval with the slowest enabled source, so the
- * sidebar's stale banner follows the real cadence after a first-run setup as well as at boot.
+ * @remarks Also stamps the store with the enabled ids and the slowest interval, so the Inbox
+ * empty state and the stale banner follow the registry after a first-run setup as well as at boot.
  */
 export function startEnabledPollers(): void {
   const sources = enabledSources();
+  store.setEnabledSources(sources.map((s) => s.id));
   if (sources.length > 0) {
     store.setPollInterval(Math.max(...sources.map(baseInterval)));
   }
