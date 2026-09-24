@@ -53,3 +53,14 @@ test("unwind, restore and archive delete events read as prose with the destinati
     "archived workspace deleted",
   );
 });
+
+test("an item promotion names its source", () => {
+  assert.equal(
+    describeEvent({ ...at("item_promoted", null, "inbox"), source: "slack" }),
+    "promoted an item from slack",
+  );
+  assert.equal(
+    describeEvent(at("item_promoted", null, "inbox")),
+    "promoted an item from a source",
+  );
+});
