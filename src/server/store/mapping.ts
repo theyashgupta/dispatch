@@ -1,22 +1,65 @@
-import type { Card, ReconcileResult, SourceIssue } from "../../shared/types.js";
+import type {
+  Card,
+  ReconcileResult,
+  SourceIssue,
+  TrackedRefresh,
+} from "../../shared/types.js";
 
 /** Build a fresh Inbox card for a newly-seen source issue, stamped with its origin source. */
 function newInboxCard(issue: SourceIssue, sourceId: string): Card {
   return {
     id: issue.id,
     issueId: issue.id,
+    column: "inbox",
+    ...issueFields(issue),
+    goneFromLinear: false,
+    source: sourceId,
+  };
+}
+
+/** The fields a poll copies from an issue onto a card in To Do or Inbox, or a grouped card. */
+function issueFields(issue: SourceIssue) {
+  return {
     identifier: issue.identifier,
     title: issue.title,
     url: issue.url,
     description: issue.description,
     priority: issue.priority,
-    column: "inbox",
     updatedAt: issue.updatedAt,
     project: issue.project ?? undefined,
-    linearState: issue.state,
-    goneFromLinear: false,
-    source: sourceId,
+    ...displayFields(issue),
   };
+}
+
+/** The Linear-owned display fields a poll may refresh on a card in any column. */
+function displayFields(
+  issue: SourceIssue,
+): Pick<Card, "linearState" | "team" | "cycle" | "assignee"> {
+  return {
+    linearState: issue.state,
+    team: issue.team,
+    cycle: issue.cycle,
+    assignee: issue.assignee,
+  };
+}
+
+/**
+ * Whether any Linear-owned display field differs between a card and a fresh issue.
+ *
+ * @remarks Compares JSON, which drops undefined keys; every stored value was built by the same
+ * mapping, so key order matches, and a legacy row without a state id or color reads as changed.
+ */
+function displayFieldsChanged(card: Card, issue: SourceIssue): boolean {
+  const { linearState, team, cycle, assignee } = card;
+  return (
+    JSON.stringify({ linearState, team, cycle, assignee }) !==
+    JSON.stringify(displayFields(issue))
+  );
+}
+
+/** Whether a card sits past To Do and Inbox, where a poll refreshes only its display fields. */
+export function isPastTodo(card: Card): boolean {
+  return card.column !== "todo" && card.column !== "inbox";
 }
 
 /** CR-01 predicate: a start saga is in flight for the card, or it already carries provisioning/session state from one. Exported so `adoptLinearIdentity`'s poll-race dedup applies the SAME removal guard reconcile does. */
@@ -45,13 +88,11 @@ export function isStartingCard(
  *    (SYNC-02, 50-IN-04) — ONE widened rule, not a separate branch, so promoting a card to To Do
  *    simply changes which of the two columns keeps receiving refreshes. Identifier is included so
  *    a Linear team move (which changes the ticket's identifier prefix) is reflected on refresh.
- *  - Returned issue whose card is PAST To Do/Inbox -> NOT included in upserts; the poller never
- *    touches cards past that point (SYNC-02). Exception: a card currently flagged goneFromLinear
- *    emits a flag-only correction via `reappearedIds` — goneFromLinear is poller-owned derived
- *    state, not user board state, so clearing it does not violate the rule.
+ *  - Returned issue (main or `tracked`) whose card is PAST To Do/Inbox -> display fields only.
  *  - Current card whose issue is absent from the result: in To Do OR Inbox -> removeIds (SYNC-03:
  *    removed immediately, same as a vanished To Do ticket — Inbox does NOT inherit gone-flagging);
- *    past that point -> goneIds (kept, flagged goneFromLinear). CR-01 carve-out: a To Do card with
+ *    past that point -> goneIds only when `tracked` requested it by id and did not get it back
+ *    (no `tracked` keeps the plain rule). CR-01 carve-out: a To Do card with
  *    a start saga in flight (or already carrying provisioning/session state from one) is NEVER
  *    removed, only flagged — removing it mid-saga would orphan a live session and its worktrees
  *    with no card to reach them. An Inbox card is structurally never mid-saga (no session start is
@@ -67,10 +108,25 @@ export function reconcile(
   current: Map<string, Card>,
   inFlightStartIds: ReadonlySet<string> = new Set(),
   sourceId: string = "linear",
+  tracked?: TrackedRefresh,
 ): ReconcileResult {
   const seen = new Set(issues.map((i) => i.id));
+  const trackedById = new Map(
+    (tracked?.issues ?? []).map((i) => [i.id, i] as const),
+  );
   const upserts: Card[] = [];
   const reappearedIds: string[] = [];
+  const refreshPastTodo = (existing: Card, issue: SourceIssue): void => {
+    if (displayFieldsChanged(existing, issue)) {
+      upserts.push({
+        ...existing,
+        ...displayFields(issue),
+        goneFromLinear: false,
+      });
+    } else if (existing.goneFromLinear) {
+      reappearedIds.push(existing.id);
+    }
+  };
 
   for (const issue of issues) {
     const existing = current.get(issue.id);
@@ -78,34 +134,14 @@ export function reconcile(
       upserts.push(newInboxCard(issue, sourceId));
       continue;
     }
-    if (existing.groupId != null) {
+    if (existing.groupId != null || !isPastTodo(existing)) {
       upserts.push({
         ...existing,
-        identifier: issue.identifier,
-        title: issue.title,
-        url: issue.url,
-        description: issue.description,
-        priority: issue.priority,
-        updatedAt: issue.updatedAt,
-        project: issue.project ?? undefined,
-        linearState: issue.state,
+        ...issueFields(issue),
         goneFromLinear: false,
       });
-    } else if (existing.column === "todo" || existing.column === "inbox") {
-      upserts.push({
-        ...existing,
-        identifier: issue.identifier,
-        title: issue.title,
-        url: issue.url,
-        description: issue.description,
-        priority: issue.priority,
-        updatedAt: issue.updatedAt,
-        project: issue.project ?? undefined,
-        linearState: issue.state,
-        goneFromLinear: false,
-      });
-    } else if (existing.goneFromLinear) {
-      reappearedIds.push(existing.id);
+    } else {
+      refreshPastTodo(existing, issue);
     }
   }
 
@@ -113,13 +149,18 @@ export function reconcile(
   const goneIds: string[] = [];
   for (const card of current.values()) {
     if (seen.has(card.issueId)) continue;
-    if (
-      card.groupId == null &&
-      (card.column === "todo" || card.column === "inbox") &&
-      !isStartingCard(card, inFlightStartIds)
-    ) {
-      removeIds.push(card.id);
-    } else {
+    if (!isPastTodo(card)) {
+      if (card.groupId == null && !isStartingCard(card, inFlightStartIds)) {
+        removeIds.push(card.id);
+      } else {
+        goneIds.push(card.id);
+      }
+      continue;
+    }
+    const trackedIssue = trackedById.get(card.issueId);
+    if (trackedIssue) {
+      refreshPastTodo(card, trackedIssue);
+    } else if (!tracked || tracked.requested.has(card.issueId)) {
       goneIds.push(card.id);
     }
   }

@@ -2,6 +2,7 @@ import { run } from "../../adapters/exec.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { getOrchestrationConfig } from "../infra/config-holder.js";
 import { DISPATCH_DIR } from "../infra/paths.js";
+import { LINEAR_GRAPHQL_URL } from "../../adapters/source-gateway.js";
 
 /**
  * A run of line breaks plus the whitespace hugging it, as one flattenable unit. Kept wider than a
@@ -13,8 +14,6 @@ import { DISPATCH_DIR } from "../infra/paths.js";
 const LINE_BREAK_RUN_RE = /[\s\u0085]*[\n\r\u0085\u2028\u2029]+[\s\u0085]*/g;
 
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9]+-\d+$/;
-
-const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 
 const SYNC_MCP_TOOLS = [
   "mcp__linear__list_issues",

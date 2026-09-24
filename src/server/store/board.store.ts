@@ -23,6 +23,7 @@ import type {
   SessionFields,
   SourceIssue,
   SourceKind,
+  TrackedRefresh,
   Item,
   SettableItemState,
   StartError,
@@ -50,7 +51,7 @@ import {
 import { NEEDS_INPUT_MARKER_PREFIX } from "../../shared/marker-key.js";
 import { isDemoteEligible } from "../../shared/demote-eligibility.js";
 import { DEFAULT_ARCHIVE_RETENTION_DAYS } from "../../shared/types.js";
-import { isStartingCard, reconcile } from "./mapping.js";
+import { isPastTodo, isStartingCard, reconcile } from "./mapping.js";
 import { latestClaudeSession, touchClaudeSession } from "./claude-sessions.js";
 
 export const BOARD_PATH = path.join(DISPATCH_DATA_DIR, "board.json");
@@ -1280,6 +1281,33 @@ class BoardStore extends EventEmitter {
   /** Does a card with this id exist? Synchronous read for REST payload validation. */
   hasCard(id: string): boolean {
     return this.cards.has(id);
+  }
+
+  /**
+   * List the upstream ids the poller's by-id refresh should request, capped at `limit`.
+   *
+   * @remarks Cards not in Done come before Done, and cards not flagged gone before gone ones, so the
+   * cap drops old Done cards first; a gone card stays eligible so a found issue clears its flag.
+   */
+  trackedIssueIds(
+    sourceId: string,
+    returnedIds: ReadonlySet<string>,
+    limit = 1000,
+  ): string[] {
+    const tier = (c: Card): number =>
+      (c.column === "done" ? 2 : 0) + (c.goneFromLinear ? 1 : 0);
+    return [...this.cards.values()]
+      .filter(
+        (c) =>
+          (c.source ?? "linear") === sourceId &&
+          isPastTodo(c) &&
+          !returnedIds.has(c.issueId),
+      )
+      .sort(
+        (a, b) => tier(a) - tier(b) || b.updatedAt.localeCompare(a.updatedAt),
+      )
+      .slice(0, limit)
+      .map((c) => c.issueId);
   }
 
   /**
@@ -4036,6 +4064,9 @@ class BoardStore extends EventEmitter {
    * `append` source's fetch is a point-in-time slice, so its absences prove nothing
    * either: removals and gone-flags apply only to a complete pull of a `snapshot` source.
    *
+   * `tracked` is the by-id refresh of cards past To Do that the main pull did not return; a card
+   * past To Do is flagged gone only when its id was requested there and did not come back.
+   *
    * The cards Map stays keyed by raw upstream id, so the per-source reconcile filter
    * alone cannot stop a cross-source id collision: an upsert whose id already belongs
    * to a DIFFERENT source's card is skipped with a warning rather than clobbering that
@@ -4044,7 +4075,12 @@ class BoardStore extends EventEmitter {
   applyIssues(
     issues: SourceIssue[],
     syncedAt: string,
-    opts: { partial?: boolean; source?: string; kind?: SourceKind } = {},
+    opts: {
+      partial?: boolean;
+      source?: string;
+      kind?: SourceKind;
+      tracked?: TrackedRefresh;
+    } = {},
   ): Promise<void> {
     return this.enqueue(() => {
       const src = opts.source ?? "linear";
@@ -4053,7 +4089,13 @@ class BoardStore extends EventEmitter {
           .filter((c) => (c.source ?? "linear") === src)
           .map((c) => [c.issueId, c] as const),
       );
-      const r = reconcile(issues, current, this.inFlightStarts, src);
+      const r = reconcile(
+        issues,
+        current,
+        this.inFlightStarts,
+        src,
+        opts.tracked,
+      );
       const applied: string[] = [];
       const syncedIn: string[] = [];
       for (const card of r.upserts) {
@@ -4064,7 +4106,12 @@ class BoardStore extends EventEmitter {
           );
           continue;
         }
-        if (!existing || syncedFieldsChanged(existing, card)) {
+        const displayOnly =
+          existing != null && existing.groupId == null && isPastTodo(existing);
+        if (
+          !existing ||
+          (!displayOnly && syncedFieldsChanged(existing, card))
+        ) {
           syncedIn.push(card.id);
         }
         this.cards.set(card.id, card);

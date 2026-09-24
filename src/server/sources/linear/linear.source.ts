@@ -1,4 +1,8 @@
-import type { SourceFilters, SourceIssue } from "../../../shared/types.js";
+import type {
+  LinearTeam,
+  SourceFilters,
+  SourceIssue,
+} from "../../../shared/types.js";
 import {
   RateLimited,
   type FilterCapabilities,
@@ -7,10 +11,18 @@ import {
 } from "../ticket.source.js";
 import { buildLinearQuery, type LinearIssueFilter } from "./filter.js";
 
-const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
+export const LINEAR_GRAPHQL_URL =
+  process.env.DISPATCH_LINEAR_API_URL ?? "https://api.linear.app/graphql";
+if (process.env.DISPATCH_LINEAR_API_URL) {
+  console.warn(
+    `[linear] DISPATCH_LINEAR_API_URL is set; Linear requests go to ${new URL(LINEAR_GRAPHQL_URL).host}`,
+  );
+}
 const MAX_PAGES = 20;
 const PAGE_SIZE = 250;
 const LINEAR_TIMEOUT_MS = 30_000;
+const TRACKED_CHUNK = 250;
+const MAX_TRACKED = 1000;
 
 /**
  * Thrown by `postGraphQL` only when Linear rejects the credentials themselves — an HTTP 401/403 or a
@@ -42,7 +54,7 @@ function isAuthCode(code: string | undefined): boolean {
 }
 
 const ISSUE_NODE_FIELDS =
-  "id identifier title url description priority updatedAt state { id name type } project { id name }";
+  "id identifier title url description priority updatedAt state { id name type color } team { id key name } cycle { number } project { id name } assignee { id displayName }";
 
 /**
  * Build the paged board query for the active shape. `viewer.assignedIssues` keeps the implicit
@@ -78,7 +90,15 @@ interface IssueNode {
   priority: number;
   updatedAt: string;
   project: { id: string; name: string } | null;
-  state: { id: string; name: string; type: string } | null;
+  state: {
+    id: string;
+    name: string;
+    type: string;
+    color?: string | null;
+  } | null;
+  team?: LinearTeam | null;
+  cycle?: { number: number } | null;
+  assignee?: { id: string; displayName: string } | null;
 }
 
 interface Connection<N> {
@@ -224,7 +244,12 @@ async function fetchAllIssues(
     if (!hasNextPage || endCursor === null) break;
     after = endCursor;
   }
-  const issues = nodes.map((n) => ({
+  return { issues: nodes.map(mapIssueNode), truncated: lastHasNextPage };
+}
+
+/** Map one GraphQL issue node to a SourceIssue. */
+function mapIssueNode(n: IssueNode): SourceIssue {
+  return {
     id: n.id,
     identifier: n.identifier,
     title: n.title,
@@ -233,9 +258,50 @@ async function fetchAllIssues(
     priority: n.priority,
     updatedAt: n.updatedAt,
     project: n.project ?? null,
-    state: n.state ? { name: n.state.name, type: n.state.type } : null,
-  }));
-  return { issues, truncated: lastHasNextPage };
+    state: n.state
+      ? {
+          id: n.state.id,
+          name: n.state.name,
+          type: n.state.type,
+          color: n.state.color ?? undefined,
+        }
+      : null,
+    team: n.team ?? undefined,
+    cycle: n.cycle?.number,
+    assignee: n.assignee
+      ? { id: n.assignee.id, name: n.assignee.displayName }
+      : undefined,
+  };
+}
+
+const TRACKED_QUERY = `query Tracked($ids: [ID!]) { issues(first: ${TRACKED_CHUNK}, filter: { id: { in: $ids } }) { nodes { ${ISSUE_NODE_FIELDS} } } }`;
+
+/**
+ * Fetch issues by id in chunks, for the cards past To Do that the board query no longer returns.
+ *
+ * @remarks Ids travel only as the `$ids` variable. The store caps the list at {@link MAX_TRACKED};
+ * a longer list is refused before any request as a guard against a caller that skips the cap.
+ */
+async function fetchIssuesByIds(
+  apiKey: string,
+  ids: string[],
+): Promise<SourceIssue[]> {
+  if (ids.length > MAX_TRACKED) {
+    throw new Error(
+      `tracked refresh needs ${ids.length} ids, above the ${MAX_TRACKED} cap`,
+    );
+  }
+  const out: SourceIssue[] = [];
+  for (let i = 0; i < ids.length; i += TRACKED_CHUNK) {
+    const data = await postGraphQL(apiKey, TRACKED_QUERY, {
+      ids: ids.slice(i, i + TRACKED_CHUNK),
+    });
+    if (!Array.isArray(data.issues?.nodes)) {
+      throw new Error("Linear response missing issues connection");
+    }
+    out.push(...(data.issues.nodes as IssueNode[]).map(mapIssueNode));
+  }
+  return out;
 }
 
 const VIEWER_QUERY = `query Viewer { viewer { id } }`;
@@ -294,6 +360,11 @@ export class LinearSource implements TicketSource {
   fetch(): Promise<{ issues: SourceIssue[]; truncated: boolean }> {
     const { useViewerScope, filter } = buildLinearQuery(this.getFilters());
     return fetchAllIssues(this.apiKey, useViewerScope, filter);
+  }
+
+  /** Fetch issues by id for the poller's tracked refresh of cards past To Do. */
+  fetchByIds(ids: string[]): Promise<SourceIssue[]> {
+    return fetchIssuesByIds(this.apiKey, ids);
   }
 
   /**
