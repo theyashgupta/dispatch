@@ -1,10 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { X } from "lucide-react";
 import type { ActivityEvent } from "../../../shared/types.js";
-import { describeEvent } from "../../lib/event-copy.js";
-import { formatAge } from "../../lib/format-age.js";
-import { ActivityItem } from "../../primitives/ActivityItem.js";
 import { IconButton } from "../../primitives/IconButton.js";
+import { ActivityList } from "./ActivityList.js";
 
 interface ActivityDrawerProps {
   open: boolean;
@@ -21,15 +19,6 @@ export function ActivityDrawer({
   onClose,
   onSelectCard,
 }: ActivityDrawerProps) {
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (!open) return;
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [open]);
-
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -84,7 +73,7 @@ export function ActivityDrawer({
         <div
           style={{
             flex: "0 0 auto",
-            height: "var(--strip-height)",
+            height: "var(--page-header-height)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -122,43 +111,12 @@ export function ActivityDrawer({
             padding: "var(--space-sm) 0",
           }}
         >
-          {events.length === 0 ? (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                padding: "var(--space-xl)",
-                fontSize: "var(--font-body)",
-                lineHeight: "var(--line-body)",
-                fontStyle: "italic",
-                color: "var(--text-muted)",
-              }}
-            >
-              No activity yet.
-            </div>
-          ) : (
-            events.map((event, index) => (
-              <div
-                key={event.id}
-                style={{
-                  padding: "var(--space-sm) var(--space-lg)",
-                  borderBottom:
-                    index < events.length - 1
-                      ? "1px solid var(--border)"
-                      : "none",
-                }}
-              >
-                <ActivityItem
-                  type={event.type}
-                  cardId={event.cardId ?? undefined}
-                  description={describeEvent(event)}
-                  age={formatAge(event.ts, now)}
-                  identifiers={identifiers}
-                  onSelect={onSelectCard}
-                />
-              </div>
-            ))
-          )}
+          <ActivityList
+            events={events}
+            identifiers={identifiers}
+            onSelectCard={onSelectCard}
+            ticking={open}
+          />
         </div>
       </aside>
     </>

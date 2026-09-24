@@ -193,7 +193,7 @@ median: PERF-RERENDER mode=prod total=20 toggle=6 inbox=4 select=4 sse=6
 ```
 
 **Spread note:** three pre-commit dry runs (same harness, uncommitted) showed occasional
-`toggle=7`/`total=21` instead of `toggle=6`/`total=20` — traced to `SyncStrip`'s own 1s
+`toggle=7`/`total=21` instead of `toggle=6`/`total=20` - traced to `SyncStatus`'s own 1s
 `setInterval` tick (unrelated to the interaction script) occasionally landing inside the
 350ms toggle settle-window and contributing one extra whole-tree commit, since
 `onCommitFiberRoot` fires once per commit for the single React root regardless of which
@@ -521,7 +521,7 @@ before Plan 82-02 windows the wire. Both `initialBytes` and `sseFrameBytes` are 
 `BoardSnapshot` regardless of how many Done cards the client has actually loaded, so this number
 scales linearly with total card count and is the direct before-number SCALE-01/SCALE-05 need.
 `commits=5` is the React re-render cost of a single card move against a 500-card board, unadjusted
-for `SyncStrip`'s own 1s-interval tick noise (see `scripts/perf-board.mjs`'s `measureCommits` JSDoc
+for `SyncStatus`'s own 1s-interval tick noise (see `scripts/perf-board.mjs`'s `measureCommits` JSDoc
 for why an idle-noise-subtraction design was tried and dropped — it could round a real mutation's
 cost down to 0, which is a worse measurement than the small, already-documented tick noise itself).
 
@@ -555,10 +555,10 @@ true total of 500 via `doneCounts` (BOARD-08).
   across all 3 runs); after is `7, 5, 7` (median `7`). This is a real difference, not just report
   formatting, and this phase's windowing work never targeted this metric — windowing shrinks wire
   payload size, not the number of React commits one mutation causes. The most plausible cause is
-  the same `SyncStrip` 1s-interval-tick noise `docs/BASELINES.md`'s own `## Board re-renders`
+  the same `SyncStatus` 1s-interval-tick noise `docs/BASELINES.md`'s own `## Board re-renders`
   baseline already documented (its "Spread note" recorded a `toggle=6`→`7`/`total=20`→`21` swing
   from a tick landing inside a 350ms settle window) — here the `MUTATION_WAIT_MS` settle window is
-  1000ms, wide enough that 0, 1, or 2 of `SyncStrip`'s ticks can land inside it depending on timing
+  1000ms, wide enough that 0, 1, or 2 of `SyncStatus`'s ticks can land inside it depending on timing
   offset, each contributing one extra whole-tree commit. The BEFORE run's `5, 5, 5` with zero
   variance was itself the lucky case (no tick landed in any of the 3 windows); the AFTER run's
   `5, 7, 7` shows the noise landing on 2 of 3 runs instead. `scripts/perf-board.mjs`'s own
@@ -633,9 +633,9 @@ src/server/` names only pre-existing Phase-82-era commits already merged before 
   independent regressions.
 - **`loadCommits`:** `7` (before) → `8` (after, this run's own summary line). Both are raw,
   unadjusted single-sample reads of the initial page-load commit count, already known to carry
-  `SyncStrip`-tick noise per this section's own documented caveat; a swing of 1 between two
+  `SyncStatus`-tick noise per this section's own documented caveat; a swing of 1 between two
   single-number reports is within that known noise band, not a named finding on its own.
-- **`commits`:** `7` (before) → `5` (after). This is the same `SyncStrip`-tick noise this file's own
+- **`commits`:** `7` (before) → `5` (after). This is the same `SyncStatus`-tick noise this file's own
   `02af014` entry already named as the explanation for its own `5`→`7` swing against the
   pre-windowing baseline — the noise is bidirectional by construction (0, 1, or 2 ticks can land in
   the 1000ms `MUTATION_WAIT_MS` settle window depending on timing offset), so a `7`→`5` swing here is
@@ -644,7 +644,7 @@ src/server/` names only pre-existing Phase-82-era commits already merged before 
 
 **Conclusion:** no metric regressed. `initialBytes`/`sseFrameBytes` both improved by an equal,
 environment-attributable amount unrelated to this phase's radius-token diff; `loadCommits`/`commits`
-moved within the already-documented `SyncStrip`-tick noise band on both sides. Criterion 3's
+moved within the already-documented `SyncStatus`-tick noise band on both sides. Criterion 3's
 `perf-board.mjs` half is MET.
 
 ### Phase 96 — KEEP-05 audit (baseline re-run + multi-session leg)

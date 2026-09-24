@@ -1,1 +1,1 @@
-export { SettingsScreen, type SettingsTab } from "./SettingsScreen.js";
+export { SettingsScreen } from "./SettingsScreen.js";

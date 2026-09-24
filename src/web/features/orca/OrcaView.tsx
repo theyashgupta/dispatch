@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import type { BoardSnapshot } from "../../../shared/types.js";
+import { useLastOpened } from "../../hooks/useUnseenActivity.js";
 import { OrcaControls } from "./OrcaControls.js";
 import { OrcaGroupSection } from "./OrcaGroupSection.js";
 import {
   buildWorkspaceGroups,
+  mostRecentCardId,
   type GroupDimension,
   type SortKey,
   type SubgroupDimension,
@@ -53,6 +55,13 @@ export function OrcaView({
   const [subgroup, setSubgroup] =
     useState<SubgroupDimension>(readStoredSubgroup);
   const [sort, setSort] = useState<SortKey>(readStoredSort);
+  const lastOpened = useLastOpened();
+
+  useEffect(() => {
+    if (selectedCardId != null) return;
+    const id = mostRecentCardId(lastOpened, board.cards);
+    if (id != null) onSelectCard(id);
+  }, [selectedCardId, board.cards, lastOpened, onSelectCard]);
 
   useEffect(() => {
     try {

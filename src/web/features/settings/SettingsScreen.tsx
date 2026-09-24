@@ -9,11 +9,9 @@ import {
   type CSSProperties,
   type ReactNode,
   type Dispatch,
-  type Ref,
   type SetStateAction,
 } from "react";
 import {
-  ArrowLeft,
   Bell,
   Bot,
   Check,
@@ -105,18 +103,7 @@ import { QrCode } from "../../primitives/QrCode.js";
 import { MultiSelect } from "../modals/index.js";
 import { WorkspaceAdd } from "../workspaces/index.js";
 import { PlaybookEditorModal } from "./PlaybookEditorModal.js";
-
-export type SettingsTab =
-  | "filters"
-  | "models"
-  | "workspaces"
-  | "playbooks"
-  | "vault"
-  | "accounts"
-  | "remote"
-  | "notifications"
-  | "cleanup"
-  | "terminal";
+import type { SettingsTab } from "../../lib/settings-tab.js";
 
 interface PlaybookListRowProps {
   playbook: Playbook;
@@ -3409,10 +3396,9 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "cleanup", label: "Cleanup", icon: Trash2 },
 ];
 
-const overlayStyle: CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  zIndex: 18,
+const pageStyle: CSSProperties = {
+  flex: "1 1 auto",
+  minHeight: 0,
   display: "flex",
   background: "var(--bg)",
 };
@@ -3495,36 +3481,6 @@ const navButtonBaseStyle: CSSProperties = {
   outline: "none",
 };
 
-interface BackToAppButtonProps {
-  onClick: () => void;
-  ref?: Ref<HTMLButtonElement>;
-}
-
-function BackToAppButton({ onClick, ref }: BackToAppButtonProps) {
-  const [hover, setHover] = useState(false);
-  const [focused, setFocused] = useState(false);
-  return (
-    <button
-      ref={ref}
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      onFocus={(e) => setFocused(e.currentTarget.matches(":focus-visible"))}
-      onBlur={() => setFocused(false)}
-      style={{
-        ...navButtonBaseStyle,
-        background: hover ? "var(--surface-card-hover)" : "transparent",
-        color: "var(--text-muted)",
-        ...focusRing(focused),
-      }}
-    >
-      <ArrowLeft size={14} strokeWidth={2} aria-hidden="true" />
-      Back to app
-    </button>
-  );
-}
-
 interface SettingsNavItemProps {
   icon: LucideIcon;
   label: string;
@@ -3567,8 +3523,9 @@ function SettingsNavItem({
 }
 
 interface SettingsScreenProps {
-  onClose: () => void;
-  initialTab?: SettingsTab;
+  tab: SettingsTab;
+  onTabChange: (tab: SettingsTab) => void;
+  onSaved: () => void;
   claudeAccounts: ClaudeAccountsState;
   tunnelState: TunnelState;
   soundEnabled: boolean;
@@ -3576,91 +3533,30 @@ interface SettingsScreenProps {
 }
 
 export function SettingsScreen({
-  onClose,
-  initialTab = "filters",
+  tab,
+  onTabChange,
+  onSaved,
   claudeAccounts,
   tunnelState,
   soundEnabled,
   onToggleSound,
 }: SettingsScreenProps) {
-  const [tab, setTab] = useState<SettingsTab>(initialTab);
-  const [entered, setEntered] = useState(false);
-  const [closing, setClosing] = useState(false);
-  const closingRef = useRef(false);
-  const backButtonRef = useRef<HTMLButtonElement>(null);
-  const onCloseRef = useRef(onClose);
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  });
-
-  const requestClose = useCallback(() => {
-    if (closingRef.current) return;
-    closingRef.current = true;
-    setClosing(true);
-    setTimeout(() => onCloseRef.current(), 150);
-  }, []);
-
-  useEffect(() => {
-    backButtonRef.current?.focus();
-    const raf = requestAnimationFrame(() => setEntered(true));
-    return () => cancelAnimationFrame(raf);
-  }, []);
-
-  const filters = useFiltersTab(requestClose);
-  const modelsTab = useModelsTab(requestClose);
-  const terminalTab = useTerminalTab(requestClose);
+  const filters = useFiltersTab(onSaved);
+  const modelsTab = useModelsTab(onSaved);
+  const terminalTab = useTerminalTab(onSaved);
   const workspacesTab = useWorkspacesTab();
   const playbooksTab = usePlaybooksTab(tab === "playbooks");
   const vaultTab = useVaultTab(tab === "vault");
   const remoteTab = useRemoteTab();
-  const cleanupTab = useCleanupTab(requestClose);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      if (
-        playbooksTab.editorState ||
-        playbooksTab.deleteTarget ||
-        vaultTab.deleteTarget ||
-        vaultTab.valueEditorFor ||
-        vaultTab.purposeEditorFor ||
-        vaultTab.importConfirmOpen
-      )
-        return;
-      requestClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [
-    playbooksTab.editorState,
-    playbooksTab.deleteTarget,
-    vaultTab.deleteTarget,
-    vaultTab.valueEditorFor,
-    vaultTab.purposeEditorFor,
-    vaultTab.importConfirmOpen,
-    requestClose,
-  ]);
+  const cleanupTab = useCleanupTab(onSaved);
 
   const activeSection =
     SETTINGS_SECTIONS.find((section) => section.id === tab) ??
     SETTINGS_SECTIONS[0];
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Settings"
-      style={{
-        ...overlayStyle,
-        opacity: entered && !closing ? 1 : 0,
-        transition:
-          entered && !closing
-            ? "opacity var(--motion-panel-open) var(--easing-enter)"
-            : "opacity var(--motion-panel-close) var(--easing-exit)",
-      }}
-    >
+    <div style={pageStyle}>
       <nav aria-label="Settings sections" style={sidebarStyle}>
-        <SettingsScreen.BackToApp ref={backButtonRef} onClick={requestClose} />
         <div style={navListStyle}>
           {SETTINGS_SECTIONS.map((section) => (
             <SettingsNavItem
@@ -3668,7 +3564,7 @@ export function SettingsScreen({
               icon={section.icon}
               label={section.label}
               active={tab === section.id}
-              onClick={() => setTab(section.id)}
+              onClick={() => onTabChange(section.id)}
             />
           ))}
         </div>
@@ -3810,7 +3706,6 @@ export function SettingsScreen({
   );
 }
 
-SettingsScreen.BackToApp = BackToAppButton;
 SettingsScreen.FiltersTab = FiltersTabSection;
 SettingsScreen.ModelsTab = ModelsTabSection;
 SettingsScreen.TerminalTab = TerminalTabSection;
