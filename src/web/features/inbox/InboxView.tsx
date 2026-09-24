@@ -6,7 +6,12 @@ import { Glyph } from "../../primitives/Glyph.js";
 import { isInboxWaiting } from "../board/index.js";
 import { InboxToolbar } from "./InboxToolbar.js";
 import { InboxRow } from "./InboxRow.js";
-import { inboxProjectOptions, matchesSearch } from "./inbox-filters.js";
+import {
+  inboxProjectOptions,
+  inboxSourceOptions,
+  matchesSearch,
+  matchesSource,
+} from "./inbox-filters.js";
 
 interface InboxViewProps {
   board: BoardSnapshot;
@@ -42,16 +47,19 @@ export function InboxView({
 }: InboxViewProps) {
   const [search, setSearch] = useState("");
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
   const [promotedIds, setPromotedIds] = useState<Set<string>>(new Set());
 
   const inboxCards = board.cards
     .filter((c) => isInboxWaiting(c) && !promotedIds.has(c.id))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
-  const projectOptions = inboxProjectOptions(board.cards);
+  const projectOptions = inboxProjectOptions(inboxCards);
+  const sourceOptions = inboxSourceOptions(inboxCards);
 
   const visibleCards = inboxCards.filter((c) => {
     if (!matchesSearch(c, search)) return false;
+    if (!matchesSource(c, selectedSourceIds)) return false;
     if (selectedProjectIds.length > 0) {
       if (c.project == null || !selectedProjectIds.includes(c.project.id)) {
         return false;
@@ -75,6 +83,7 @@ export function InboxView({
   function handleClearFilters() {
     setSearch("");
     setSelectedProjectIds([]);
+    setSelectedSourceIds([]);
   }
 
   return (
@@ -93,6 +102,9 @@ export function InboxView({
         projectOptions={projectOptions}
         selectedProjectIds={selectedProjectIds}
         onProjectsChange={setSelectedProjectIds}
+        sourceOptions={sourceOptions}
+        selectedSourceIds={selectedSourceIds}
+        onSourcesChange={setSelectedSourceIds}
         visibleCount={visibleCards.length}
         totalCount={inboxCards.length}
       />

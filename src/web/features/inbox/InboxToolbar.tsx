@@ -9,6 +9,9 @@ interface InboxToolbarProps {
   projectOptions: FilterOption[];
   selectedProjectIds: string[];
   onProjectsChange: (ids: string[]) => void;
+  sourceOptions: FilterOption[];
+  selectedSourceIds: string[];
+  onSourcesChange: (ids: string[]) => void;
   visibleCount: number;
   totalCount: number;
 }
@@ -19,11 +22,17 @@ export function InboxToolbar({
   projectOptions,
   selectedProjectIds,
   onProjectsChange,
+  sourceOptions,
+  selectedSourceIds,
+  onSourcesChange,
   visibleCount,
   totalCount,
 }: InboxToolbarProps) {
   const [searchFocus, setSearchFocus] = useState(false);
-  const filtersActive = search.trim() !== "" || selectedProjectIds.length > 0;
+  const filtersActive =
+    search.trim() !== "" ||
+    selectedProjectIds.length > 0 ||
+    selectedSourceIds.length > 0;
 
   return (
     <div
@@ -31,6 +40,7 @@ export function InboxToolbar({
         flex: "0 0 auto",
         display: "flex",
         alignItems: "center",
+        flexWrap: "wrap",
         gap: "var(--space-sm)",
         padding: "var(--space-sm) var(--space-lg)",
         borderBottom: "1px solid var(--border)",
@@ -74,6 +84,18 @@ export function InboxToolbar({
           loadError={false}
           emptyText="No projects"
           onChange={onProjectsChange}
+        />
+      </div>
+      <div style={{ width: "180px", flex: "0 0 auto" }}>
+        <MultiSelect
+          label="Source filter"
+          placeholder="All sources"
+          options={sourceOptions}
+          selected={selectedSourceIds}
+          loading={false}
+          loadError={false}
+          emptyText="No sources"
+          onChange={onSourcesChange}
         />
       </div>
       <div style={{ flex: "1 1 auto" }} />
