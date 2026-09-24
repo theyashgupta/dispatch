@@ -14,7 +14,10 @@ export function CleanupModal({ card, onConfirm, onClose }: CleanupModalProps) {
   const modalRef = useRef<ModalControl>(null);
 
   const blocked = card.cleanupBlocked;
-  const summaries = card.sessionSummaries;
+  const summaries =
+    (card.sessionSummaries?.length ?? 0) >= 2
+      ? card.sessionSummaries
+      : undefined;
   const isBlocked =
     summaries == null
       ? blocked != null && blocked.length > 0

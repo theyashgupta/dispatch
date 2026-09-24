@@ -342,13 +342,11 @@ export interface Card {
    */
   sessionCount?: number;
   /**
-   * Per-session digest for the detail panel's session switcher. NON-SECRET, same policy class as
-   * `sessionCount` — rides `snapshot()`/`redactCard` UNREDACTED, carries no credential and no
-   * pane content. ABSENT (never an empty or single-element array) when the card owns zero or one
-   * session record, matching the `prs?`/`previews?` absent-means-nothing-to-report idiom; an
-   * array of length 2 or more otherwise, one entry per session ordered by `ordinal`. Carries no
-   * per-entry `active` flag by design — see {@link SessionSummary}. Populated exclusively inside
-   * `redactCard`, immediately after `sessionCount`, following the identical field-pick discipline.
+   * Per-session digest for the detail panel's switcher and the Sessions page.
+   *
+   * @remarks NON-SECRET like `sessionCount`: built only by `redactCard` through a field pick, so
+   * no credential or pane content rides along. Absent when the card owns no session record,
+   * otherwise one entry per session ordered by `ordinal` (LOCAL-39 widened it from two or more).
    * @see docs/ARCHITECTURE.md#session-projection-chokepoint
    */
   sessionSummaries?: SessionSummary[];
@@ -645,12 +643,11 @@ export interface ClaudeSession {
 }
 
 /**
- * Wire-only per-session digest for the detail panel's session switcher, built by the store's
- * `redactCard` chokepoint via a field pick (never a spread) so a future `Session` field cannot
- * silently widen this array to carry a secret. Deliberately carries no `active` flag:
- * `Card.activeSessionId` is already the one field naming the active session, and a second field
- * claiming the same fact could disagree under a race; the client compares
- * `entry.id === card.activeSessionId` instead.
+ * Wire-only per-session digest, built by the store's `redactCard` chokepoint via a field pick.
+ *
+ * @remarks Never a spread, so a future `Session` field cannot widen it to carry a secret. `active`
+ * is computed in the same pick from `Card.activeSessionId`, so the two cannot disagree within one
+ * snapshot.
  * @see docs/ARCHITECTURE.md#session-projection-chokepoint
  */
 export interface SessionSummary {
@@ -660,12 +657,20 @@ export interface SessionSummary {
   ordinal: number;
   /** True when `Session.tmuxSession` is absent — this sibling's own terminal is dead. */
   lost: boolean;
+  /** True for the card's active session; computed from `Card.activeSessionId` in the same pick. */
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  branch?: string;
+  /** The basename of `Session.workspace.folder`; the full path stays off the wire. */
+  workspaceFolder?: string;
+  lastMarker?: string;
   /** Mirrors `Session.claudeAccountId`; absent for sessions that predate account tagging. */
   claudeAccountId?: string;
   /**
    * Mirrors {@link Session.cleanupBlocked} for THIS session. Absent when this session is not
-   * blocked — same absent-means-nothing-to-report idiom as `sessionSummaries` itself, which is
-   * absent at N<=1, so a single-session ticket's wire shape carries this field nowhere at all.
+   * blocked, the same absent-means-nothing-to-report idiom as `sessionCount`, which stays absent
+   * at N<=1 while `sessionSummaries` is present for every card with a session (LOCAL-39).
    */
   cleanupBlocked?: { repo: string; count: number }[];
   /**
