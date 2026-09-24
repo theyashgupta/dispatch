@@ -1,4 +1,10 @@
-import { buildRegistry, getLinearSource } from "../sources/registry.js";
+import {
+  buildRegistry,
+  getLinearSource,
+  getSource,
+  isSourceEnabled,
+  listSources,
+} from "../sources/registry.js";
 import { testLinearConnection as testImpl } from "../sources/linear/linear.source.js";
 import type {
   FilterCapabilities,
@@ -63,4 +69,20 @@ export function rebuildSources(config: Config): void {
 /** Live Linear key check for the setup route (viewer query); the only seam routes may reach it through. */
 export function testLinearConnection(apiKey: string): Promise<boolean> {
   return testImpl(apiKey);
+}
+
+/** Whether a source id is registered and enabled, for routes that must answer 404 or 409. */
+export function sourceState(
+  sourceId: string,
+): "enabled" | "disabled" | "unknown" {
+  if (!getSource(sourceId)) return "unknown";
+  return isSourceEnabled(sourceId) ? "enabled" : "disabled";
+}
+
+/** Ids of the sources that declare a vault key name, for the Vault page's "Used by" line. */
+export function vaultKeyUsers(
+  name: string,
+  sources: readonly TicketSource[] = listSources(),
+): string[] {
+  return sources.filter((s) => s.vaultKeys.includes(name)).map((s) => s.id);
 }

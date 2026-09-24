@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { Router, type Request, type Response } from "express";
+import { vaultKeyUsers } from "../adapters/source-gateway.js";
 import {
   VAULT_NAME_RE,
   listKeys,
@@ -98,7 +99,11 @@ vaultRouter.get("/vault", async (_req, res) => {
     const envVaultAvailable =
       fs.existsSync(ENV_VAULT_SCHEMA_PATH) ||
       fs.existsSync(ENV_VAULT_VALUES_PATH);
-    res.status(200).json({ keys: await listKeys(), envVaultAvailable });
+    const keys = (await listKeys()).map((k) => ({
+      ...k,
+      usedBy: vaultKeyUsers(k.name),
+    }));
+    res.status(200).json({ keys, envVaultAvailable });
   } catch {
     res.status(500).json({ error: "vault-read-failed" });
   }

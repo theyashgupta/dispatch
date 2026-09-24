@@ -12,7 +12,7 @@ import {
   rebuildSources,
   testLinearConnection,
 } from "../adapters/source-gateway.js";
-import { startLinearPoller } from "../adapters/poller.js";
+import { startEnabledPollers } from "../adapters/poller.js";
 
 /**
  * First-run onboarding surface behind the shared `/api` loopback guard.
@@ -83,6 +83,6 @@ setupRouter.post("/setup", async (req, res) => {
   }
   updateLinearApiKey(apiKey.trim());
   rebuildSources(getOrchestrationConfig()!);
-  startLinearPoller(getOrchestrationConfig()!);
+  startEnabledPollers();
   res.status(200).json({ ok: true });
 });

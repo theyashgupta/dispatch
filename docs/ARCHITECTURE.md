@@ -1949,8 +1949,15 @@ only decides. The poller hands the raw issue list to the single-writer store
 (`store.applyIssues`), which runs `reconcile()` INSIDE its mutation queue against LIVE state —
 never against a snapshot the poller read earlier.
 
-**The poll loop — I/O only (`SYNC-01`).** `startPoller` fetches the assigned-unstarted issue set
-from Linear's GraphQL API and feeds it to the store; it is the ONLY I/O half of the sync. It never
+**The poll loop, I/O only (`SYNC-01`).** `startPollers` (`adapters/poller.ts`) runs one
+self-rescheduling loop per enabled source, each on its own `pollIntervalMs`, and feeds every fetch
+to the store; it is the ONLY I/O half of the sync. A per-source in-flight guard means a source
+never overlaps itself (a sync-now or restart that lands mid-fetch runs once more after settlement), and a
+per-source generation means `pollNow(sourceId)` discards only that source's stale fetch.
+`POST /api/sources/:id/poll` exposes `pollNow` for a manual sync. Every source declares a `kind`:
+a `snapshot` source's complete pull may remove or flag vanished cards, an `append` source only
+ever upserts, and `store.applyIssues` enforces that rule with the pull's partial flag. The Linear
+loop fetches the assigned-unstarted issue set from Linear's GraphQL API. It never
 computes column-sensitive decisions from a snapshot (a queued-but-unapplied user move could
 otherwise be reverted), never sorts (To Do ordering is owned by `store.snapshot()` in `store/board.store.ts`), and
 never touches cards past To Do (that rule lives in `reconcile()`). The set is filtered by

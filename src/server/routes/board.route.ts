@@ -31,6 +31,7 @@ import {
   listSourceOptions,
   countSourceMatches,
   SourceNotFound,
+  sourceState,
 } from "../adapters/source-gateway.js";
 import { pollNow } from "../adapters/poller.js";
 import {
@@ -244,6 +245,24 @@ boardRouter.post("/sources/:source/preview", async (req, res) => {
   }
 });
 
+boardRouter.post("/sources/:source/poll", (req, res) => {
+  const { source } = req.params;
+  const state = sourceState(source);
+  if (state === "unknown") {
+    res.status(404).json({ error: "unknown source" });
+    return;
+  }
+  if (state === "disabled") {
+    res.status(409).json({ error: "source disabled" });
+    return;
+  }
+  if (!pollNow(source)) {
+    res.status(409).json({ error: "source not polling" });
+    return;
+  }
+  res.status(202).json({ polling: source });
+});
+
 boardRouter.put("/sources/:source/filters", (req, res) => {
   const { source } = req.params;
   try {
@@ -261,7 +280,7 @@ boardRouter.put("/sources/:source/filters", (req, res) => {
     return;
   }
   updateSourceFilters(source, filters);
-  pollNow();
+  pollNow(source);
   res.status(200).json({ filters });
 });
 

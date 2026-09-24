@@ -4,6 +4,7 @@ import type {
   FilterOption,
   SourceFilters,
   SourceIssue,
+  SourceKind,
 } from "../../shared/types.js";
 
 export type {
@@ -32,6 +33,9 @@ export class RateLimited extends Error {
  */
 export interface TicketSource {
   readonly id: string;
+  readonly kind: SourceKind;
+  readonly pollIntervalMs: number;
+  readonly vaultKeys: readonly string[];
   fetch(): Promise<{ issues: SourceIssue[]; truncated: boolean }>;
   readonly capabilities: FilterCapabilities;
   listOptions(

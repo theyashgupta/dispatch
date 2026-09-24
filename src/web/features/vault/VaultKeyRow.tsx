@@ -19,6 +19,7 @@ interface VaultKeyRowProps {
 export function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
   const [hover, setHover] = useState(false);
   const editingPurpose = vault.purposeEditorFor === keySummary.name;
+  const usedBy = keySummary.usedBy ?? [];
   const [draftPurpose, setDraftPurpose] = useState(keySummary.purpose);
   const [purposeError, setPurposeError] = useState<string | null>(null);
   const [purposePending, setPurposePending] = useState(false);
@@ -186,6 +187,17 @@ export function VaultKeyRow({ keySummary, vault }: VaultKeyRowProps) {
           }}
         >
           {keySummary.purpose}
+        </span>
+      )}
+      {usedBy.length > 0 && (
+        <span
+          style={{
+            fontSize: "var(--font-micro)",
+            lineHeight: "var(--line-label)",
+            color: "var(--text-muted)",
+          }}
+        >
+          {`Used by ${usedBy.join(", ")}`}
         </span>
       )}
       {purposeError !== null && (
