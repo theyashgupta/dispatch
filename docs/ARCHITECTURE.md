@@ -1992,7 +1992,12 @@ ever upserts, and `store.applyIssues` enforces that rule with the pull's partial
 loop fetches the assigned-unstarted issue set from Linear's GraphQL API. It never
 computes column-sensitive decisions from a snapshot (a queued-but-unapplied user move could
 otherwise be reverted), never sorts (To Do ordering is owned by `store.snapshot()` in `store/board.store.ts`), and
-never touches cards past To Do (that rule lives in `reconcile()`). The set is filtered by
+never changes a card's column (that rule lives in `reconcile()`). After a complete pull it also
+runs the tracked query: `LinearSource.fetchByIds` asks Linear by id, 250 ids per request, for the
+cards past To Do and Inbox that the pull did not return (`store.trackedIssueIds`: cards not in Done
+first, gone-flagged cards last in each group, 1000 ids at most), so a card whose issue moved to a
+state outside the filter keeps its display fields current; a failed tracked query requests nothing,
+so no card past To Do is flagged gone that cycle. The set is filtered by
 workflow-state TYPE `"unstarted"`, NOT by name — state names are workspace-customizable. The loop
 self-reschedules with a `setTimeout` (never `setInterval`, which could overlap) that is `unref()`'d
 so it never pins the process, runs one poll immediately on startup, and is fire-and-forget.
@@ -2015,10 +2020,12 @@ issue with NO existing card upserts a fresh Inbox card — new tickets land in I
 in To Do, so To Do stays 100% user-curated; a returned issue whose card is in `todo` OR `inbox`
 upserts an in-place refresh of title/url/description/priority/updatedAt/project and CLEARS
 `goneFromLinear` (ONE widened rule, not a separate branch — promoting a card to To Do simply moves
-it into the other half of the same refresh scope); a returned issue whose card is PAST that point is
-NOT upserted — the poller never touches cards past To Do/Inbox. Exception: a card past that point
-currently flagged `goneFromLinear` whose issue REAPPEARS emits a flag-only correction via
-`reappearedIds` (nothing else on the card is touched), because `goneFromLinear` is poller-owned
+it into the other half of the same refresh scope); a returned issue (from the pull or the tracked
+query) whose card is PAST that point gets a display-only upsert: `linearState`, `team`, `cycle` and
+`assignee` are refreshed and `goneFromLinear` cleared, emitted only when one of them changed, while
+the column, title, description, priority, project, identifier, url and `updatedAt` are never touched.
+A card past that point flagged `goneFromLinear` whose issue REAPPEARS with unchanged display fields
+emits a flag-only correction via `reappearedIds`, because `goneFromLinear` is poller-owned
 derived state, not user board state. `reconcile` does NOT sort; it carries
 `priority`/`updatedAt`/`project` faithfully so the store orders the To Do column on read.
 
@@ -2026,7 +2033,8 @@ derived state, not user board state. `reconcile` does NOT sort; it carries
 handled by column: in `todo` OR `inbox` → `removeIds` (an issue that vanished is removed
 IMMEDIATELY while in To Do or Inbox — Inbox does NOT inherit vanish-handling the way cards past To
 Do do; it is treated exactly like a vanished To Do ticket, never `goneFromLinear`-flagged and kept
-forever); past that point → `goneIds` (the card is KEPT and flagged `goneFromLinear`). CR-01
+forever); past that point → `goneIds` (the card is KEPT and flagged `goneFromLinear`), and only
+when the tracked query requested the issue by id and did not get it back. CR-01
 carve-out: a To Do card with a start saga IN FLIGHT (or already carrying provisioning/session state
 from one) is treated like a card past To Do — never removed, only flagged — because removing it
 mid-saga would orphan a live `claude` session and its worktrees with no card to reach them; an

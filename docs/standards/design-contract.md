@@ -138,6 +138,10 @@ One color per source, ratified 2026-09-23 for the multi-source dispatcher (`docs
 | `--src-calendar` | #efb14a | amber                                                          | 6.53:1             | 6.53:1                        | 9.06:1                         |
 | `--src-agent`    | #4fd1c5 | teal                                                           | 6.64:1             | 6.63:1                        | 9.22:1                         |
 
+## Linear state colors
+
+The Linear workflow state chip (`src/web/primitives/StateChip.tsx`, rendered through `LinearStateChip` in `src/web/features/badges/`) shows the state in Linear's own color. That color is API data, not a design token: `stateChipColor` in `src/web/lib/linear-state.ts` accepts it only as a 6-digit hex and passes it to a style value, so it sits outside the `NEW-24` token maps. When Linear sends no color, or a value that is not a 6-digit hex, the chip falls back by state type to existing tokens: unstarted, triage and backlog `--col-todo` (gray), started `--prio-medium` (yellow), completed `--col-in-review` (purple), canceled `--col-done` (slate), any other type `--text-muted`. The chip is the `Chip` primitive with a 6px dot in the color, text in the color, no border, and a background of the color mixed 12 percent into transparent. Test fixtures under `src/web` must not use a `tokens.css` palette hex as a Linear color, because `NEW-24` flags those literals.
+
 ## State palette
 
 Hover, pressed and focus-visible values for every interactive board element, transcribed from the
