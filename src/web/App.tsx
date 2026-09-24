@@ -89,7 +89,13 @@ import {
 } from "./lib/cleanup-feedback.js";
 import { refreshPushSubscription } from "./lib/push.js";
 import type { StartRequest } from "./lib/start-request.js";
-import type { PrerequisiteStatus, TunnelState } from "../shared/types.js";
+import { formatSize } from "./lib/format-size.js";
+import type { WorkspacesSummary } from "./features/workspaces/index.js";
+import type {
+  PrerequisiteStatus,
+  TunnelState,
+  WorktreeRow,
+} from "../shared/types.js";
 import type { CardSearchResult } from "../shared/search.js";
 import { DONE_PAGE_SIZE } from "../shared/done-limit.js";
 
@@ -124,6 +130,11 @@ const ArchivePage = lazy(() =>
     default: m.ArchivePage,
   })),
 );
+const WorkspacesPage = lazy(() =>
+  import("./features/workspaces/index.js").then((m) => ({
+    default: m.WorkspacesPage,
+  })),
+);
 
 const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
   "settings",
@@ -132,6 +143,12 @@ const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
   "vault",
   "archive",
 ]);
+
+const headerNoteStyle: CSSProperties = {
+  fontSize: "var(--font-label)",
+  color: "var(--text-muted)",
+  whiteSpace: "nowrap",
+};
 
 const activitySelectStyle: CSSProperties = {
   height: "28px",
@@ -251,6 +268,9 @@ export function App() {
   const [archiveCount, setArchiveCount] = useState<number | undefined>();
   const [playbookCount, setPlaybookCount] = useState<number | undefined>();
   const [vaultCount, setVaultCount] = useState<number | undefined>();
+  const [workspacesSummary, setWorkspacesSummary] = useState<
+    WorkspacesSummary | undefined
+  >();
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>({
     cardId: null,
     types: [],
@@ -430,6 +450,28 @@ export function App() {
     }
     setPinned({ card: stubToCard(result), kind: "stub", members: [] });
     hydratePinned(result.id);
+  }
+
+  function isInBoardWindow(id: string): boolean {
+    return board?.cards.some((card) => card.id === id) === true;
+  }
+
+  function requestWorktreeCleanup(row: WorktreeRow): void {
+    if (isInBoardWindow(row.cardId)) setCleanupCardId(row.cardId);
+    else openWorktreeCard(row);
+  }
+
+  function openWorktreeCard(row: WorktreeRow): void {
+    if (isInBoardWindow(row.cardId)) {
+      selectCard(row.cardId);
+      return;
+    }
+    selectSearchResult({
+      id: row.cardId,
+      identifier: row.identifier,
+      title: row.title,
+      column: row.column,
+    });
   }
 
   useTransitionNotifications(board, connection, selectCard, soundEnabled);
@@ -646,6 +688,7 @@ export function App() {
     playbooks: { title: "Playbooks", count: playbookCount },
     vault: { title: "Vault", count: vaultCount },
     archive: { title: "Archive", count: archiveCount },
+    workspaces: { title: "Workspaces", count: workspacesSummary?.count },
   };
   const pageTitle = pageMeta[route.page].title;
 
@@ -729,6 +772,13 @@ export function App() {
               }
             />
           </>
+        ) : route.page === "workspaces" && workspacesSummary ? (
+          <span style={headerNoteStyle}>
+            {`${formatSize(workspacesSummary.totalKb)} on disk`}
+            {workspacesSummary.unknownSizes > 0
+              ? ` (${workspacesSummary.unknownSizes} unknown)`
+              : ""}
+          </span>
         ) : undefined
       }
     />
@@ -803,6 +853,13 @@ export function App() {
               />
             ) : route.page === "vault" ? (
               <VaultPage onCountChange={setVaultCount} />
+            ) : route.page === "workspaces" ? (
+              <WorkspacesPage
+                board={board}
+                onSummaryChange={setWorkspacesSummary}
+                onOpenCard={openWorktreeCard}
+                onCleanupRequest={requestWorktreeCleanup}
+              />
             ) : (
               <Board
                 board={board}

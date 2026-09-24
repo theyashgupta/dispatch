@@ -2,6 +2,7 @@ import {
   Activity,
   Archive,
   ClipboardList,
+  HardDrive,
   Inbox,
   Kanban,
   KeyRound,
@@ -41,6 +42,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   { page: "vault", label: "Vault", icon: KeyRound, group: "System" },
   { page: "archive", label: "Archive", icon: Archive, group: "System" },
+  {
+    page: "workspaces",
+    label: "Workspaces",
+    icon: HardDrive,
+    group: "System",
+  },
 ];
 
 /**

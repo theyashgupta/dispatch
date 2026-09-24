@@ -8,6 +8,7 @@ export const PAGES = [
   "playbooks",
   "vault",
   "archive",
+  "workspaces",
 ] as const;
 
 export type Page = (typeof PAGES)[number];
