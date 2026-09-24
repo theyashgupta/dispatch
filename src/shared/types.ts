@@ -47,7 +47,8 @@ export type EventType =
   | "group_unwound"
   | "group_restored"
   | "archive_deleted"
-  | "session_reset";
+  | "session_reset"
+  | "item_promoted";
 
 /** One immutable board-activity log row; append-only; carries no secrets. */
 export interface ActivityEvent {
@@ -157,6 +158,25 @@ export interface ProbeUnknown {
    * optional is deliberate, not an oversight.
    */
   checkedAt?: string;
+}
+
+export const ITEM_STATES = ["unread", "read", "snoozed", "done"] as const;
+export type ItemState = (typeof ITEM_STATES)[number];
+export type SettableItemState = Exclude<ItemState, "snoozed">;
+
+export interface Item {
+  id: string;
+  source: string;
+  type: string;
+  title: string;
+  snippet: string;
+  url?: string;
+  createdAt: string;
+  priority: number;
+  state: ItemState;
+  snoozedUntil?: string;
+  meta: Record<string, string>;
+  cardId?: string;
 }
 
 export interface Card {
@@ -760,6 +780,7 @@ export interface BoardSnapshot {
    * @see docs/ARCHITECTURE.md#sse-transport
    */
   doneCounts?: { awaiting: number; cleaned: number; total: number };
+  items?: Item[];
 }
 
 /**
