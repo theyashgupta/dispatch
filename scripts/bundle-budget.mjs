@@ -44,7 +44,7 @@ const BUDGETS = [
   {
     label: "assets/inbox-*.js",
     match: (f) => f.startsWith(`assets${sep}inbox-`) && f.endsWith(".js"),
-    budgetGzipBytes: 2211, // seed: 2010
+    budgetGzipBytes: 2803, // seed: 2549 (re-seeded 2026-09-24 after InboxRow moved onto ListRow and Chip)
   },
   {
     label: "assets/orca-*.js",
@@ -55,6 +55,21 @@ const BUDGETS = [
     label: "assets/settings-*.js",
     match: (f) => f.startsWith(`assets${sep}settings-`) && f.endsWith(".js"),
     budgetGzipBytes: 21245, // seed: 19313
+  },
+  {
+    label: "assets/playbooks-*.js",
+    match: (f) => f.startsWith(`assets${sep}playbooks-`) && f.endsWith(".js"),
+    budgetGzipBytes: 3963, // seed: 3603 (the playbooks page plus its editor modal, lazy)
+  },
+  {
+    label: "assets/vault-*.js",
+    match: (f) => f.startsWith(`assets${sep}vault-`) && f.endsWith(".js"),
+    budgetGzipBytes: 5310, // seed: 4828 (the vault page, lazy)
+  },
+  {
+    label: "assets/archive-*.js",
+    match: (f) => f.startsWith(`assets${sep}archive-`) && f.endsWith(".js"),
+    budgetGzipBytes: 2132, // seed: 1939 (the archive page, lazy; the accounts page rides main because the accounts barrel is eager)
   },
   {
     label: "assets/index-*.css",

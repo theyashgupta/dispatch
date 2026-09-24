@@ -16,16 +16,29 @@ import { ARCHIVE_RETENTION_MAX_DAYS } from "../../../shared/types.js";
 import { parseArchiveRetention } from "./archive-retention.js";
 
 interface ArchiveSectionProps {
-  inputStyle: CSSProperties;
+  onCountChange: (count: number | undefined) => void;
 }
+
+const inputStyle: CSSProperties = {
+  height: "32px",
+  padding: "0 var(--space-sm)",
+  background: "var(--surface-card)",
+  border: "1px solid var(--border)",
+  borderRadius: "var(--radius)",
+  color: "var(--text)",
+  fontFamily: "var(--font-ui)",
+  fontSize: "var(--font-body)",
+  lineHeight: "var(--line-body)",
+  outline: "none",
+};
 
 interface RowState {
   busy: boolean;
   error: string | null;
 }
 
-export function ArchiveSection({ inputStyle }: ArchiveSectionProps) {
-  const [rows, setRows] = useState<ArchivedGroupSummary[]>([]);
+export function ArchiveSection({ onCountChange }: ArchiveSectionProps) {
+  const [rows, setRows] = useState<ArchivedGroupSummary[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [rowState, setRowState] = useState<Record<string, RowState>>({});
   const [draftDays, setDraftDays] = useState("");
@@ -33,6 +46,10 @@ export function ArchiveSection({ inputStyle }: ArchiveSectionProps) {
   const [retentionError, setRetentionError] = useState<string | null>(null);
   const [retentionSaved, setRetentionSaved] = useState(false);
   const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    onCountChange(rows?.length);
+  }, [rows?.length, onCountChange]);
 
   async function reload(): Promise<void> {
     try {
@@ -194,15 +211,15 @@ export function ArchiveSection({ inputStyle }: ArchiveSectionProps) {
       {loadError && (
         <Notice
           tone="destructive"
-          label="Couldn't load the archive. Reopen settings to retry."
+          label="Couldn't load the archive. Reopen the page to retry."
         />
       )}
-      {!loadError && rows.length === 0 && (
+      {!loadError && rows !== null && rows.length === 0 && (
         <span style={mutedStyle}>
           No archived groups. Unwind a group to see it here.
         </span>
       )}
-      {rows.map((row) => {
+      {(rows ?? []).map((row) => {
         const state = rowState[row.id] ?? { busy: false, error: null };
         const blocked = row.deleteBlocked != null;
         const reason = state.error ?? row.deleteBlocked ?? null;
