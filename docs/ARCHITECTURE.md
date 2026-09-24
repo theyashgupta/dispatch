@@ -2090,6 +2090,24 @@ Sync-to-Linear requires a one-time interactive Linear MCP OAuth authorization on
 `claude`, type `/mcp`, choose `linear`, and authenticate in the browser. The workspace selected during
 that OAuth flow is the write target for every subsequent headless sync (done for Yash-Test 2026-07-20).
 
+**Connection routes (LOCAL-32).** `routes/connection.route.ts` owns the Linear connection after
+first-run setup. `GET /api/sources/:source/connection` answers `{ configured, connected, account?,
+error? }`: no stored key means no network call; a stored key runs the live viewer check
+(`linear.source.ts#fetchLinearAccount`, `viewer { id name email }`), and a rejection or an outage comes
+back as `error: "rejected"` or `"unreachable"` with `configured: true`. `PUT
+/api/sources/:source/key` is test-before-persist like `POST /api/setup`: a rejected key answers
+400 and an unreachable Linear answers 502, both with `config.json` byte-identical; a valid key is
+written by `updateLinearApiKey`, the registry is rebuilt and the enabled pollers restart, and the
+body carries only the account label. `DELETE /api/sources/:source/key` removes the key through
+`config-holder.ts#clearLinearApiKey` (the filters and every other key survive; the held config
+keeps `""`), rebuilds the registry so Linear is disabled, restarts the enabled pollers so the
+Linear loop retires, and answers 204, also when nothing was stored. Cards are untouched. Only
+`linear` stores a key, so every other source id answers 404 on all three. A key with a character
+outside printable ASCII answers 400 before any network call, a config write failure answers 500
+`save-failed`, and a replace whose key check was still in flight when a disconnect landed answers
+409 `superseded` and writes nothing. The key never appears in a response, a log line or an error
+body.
+
 ### SSE Transport
 
 The board receives state over a single hand-rolled Server-Sent-Events stream — no SSE library —
@@ -3046,6 +3064,20 @@ retired literal inside the sync strip until the strip retired with it (see
 [App Shell Zones](#app-shell-zones)); a third, directory-scoped check (`checkBoardReadingRhythm`, `NEW-19`, above) covers
 the fifth; and a fourth, file-scoped check (`checkTerminalFence`, `NEW-20`, above) covers the
 sixth — proving only the fenced subject set, never the fenced contents, as stated above.
+
+**Connection card (LOCAL-32).** Every source connection renders through two presentational
+primitives: `primitives/ConnectionCard.tsx` (source icon, name, status chip, credential line, and a
+body with the numbered setup guide, the scopes as monospace chips, the token page link, the form
+slot, the privacy footer and an optional details section below it, where Settings puts the Linear
+filters) and `primitives/CredentialForm.tsx` (password input, Connect or
+Replace, Test, and a two-step Disconnect that re-arms after 5 s). The body reveals with the
+Collapsible grid-rows pair and never measures; once open it stops clipping so dropdowns inside it
+can overflow. The status is the shared `SourceCardStatus` union (checking, disconnected, connected with
+an optional account, error with its copy, soon); a soon card renders the header only. The Linear
+composition lives in `features/connections/LinearConnectionCard.tsx` behind the feature barrel so
+the setup wizard can reuse it; Settings is its consumer today. `hooks/useLinearConnection.ts` reads
+the status on mount and on Test only, shows Checking until the first read settles, and keeps
+Connect disabled until then.
 
 ### App Shell Zones
 
