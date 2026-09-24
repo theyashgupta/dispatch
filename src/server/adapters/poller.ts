@@ -185,7 +185,11 @@ export function startEnabledPollers(): void {
   startPollers(sources);
 }
 
-/** Stop every loop; the test teardown path. */
+/**
+ * Stop every loop; the test teardown path.
+ *
+ * @public The poller and board route specs are the callers.
+ */
 export function stopPollers(): void {
   for (const loop of loops.values()) retireLoop(loop);
 }
@@ -204,7 +208,11 @@ export function pollNow(sourceId: string): boolean {
   return true;
 }
 
-/** Per-source loop state for diagnostics and tests. */
+/**
+ * Per-source loop state for diagnostics and tests.
+ *
+ * @public The poller specs are the callers.
+ */
 export function pollerDiagnostics(): {
   id: string;
   backoffMs: number;
