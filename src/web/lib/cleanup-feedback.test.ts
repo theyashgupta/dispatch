@@ -58,11 +58,21 @@ test("a quiet finish is silent, a warning and a block each get a toast, the bloc
   );
   const multi = card({
     sessionSummaries: [
-      { id: "s1", ordinal: 1, lost: false },
+      {
+        id: "s1",
+        ordinal: 1,
+        lost: false,
+        active: true,
+        createdAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      },
       {
         id: "s2",
         ordinal: 2,
         lost: false,
+        active: false,
+        createdAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-01T00:00:00.000Z",
         cleanupBlocked: [{ repo: "web", count: 1 }],
       },
     ],

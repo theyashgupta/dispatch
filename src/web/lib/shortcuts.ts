@@ -32,6 +32,12 @@ export const INBOX_SHORTCUTS: readonly { key: string; label: string }[] = [
   { key: "u", label: "Toggle read" },
 ];
 
+export const SESSIONS_SHORTCUTS: readonly { key: string; label: string }[] = [
+  { key: "j", label: "Next session" },
+  { key: "k", label: "Previous session" },
+  { key: "Enter", label: "Open" },
+];
+
 const EDITABLE_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 const ACTIVATABLE_TAGS = new Set(["BUTTON", "A", "SUMMARY"]);
 const ACTIVATABLE_ROLES = new Set([

@@ -153,8 +153,8 @@ export function redactArchivedGroup(row: ArchivedGroup): ArchivedGroupSummary {
  * (1) remove the card's own secret field; (2) remove `sessions` outright — the full array is
  * server-side only and carries every session's own secret field (the active session's own
  * `ttydPort`/`activeSessionId` already ride the wire unconditionally via the card's own flat
- * mirror fields, so no separate active-session projection is needed here, Phase 102); (3) at two
- * or more sessions, FIELD-PICK the `SessionSummary` keys per session onto
+ * mirror fields, so no separate active-session projection is needed here, Phase 102); (3) for
+ * every card with at least one session, FIELD-PICK the `SessionSummary` keys per session onto
  * `wireCard.sessionSummaries`, sorted by `createdAt` ascending, never spreading the session
  * object — this is the only place a non-active session's own
  * `prs`/`previews`/`prsUnknown`/`previewsUnknown` become observable on the wire (`ARTIFACT-01`),
@@ -180,9 +180,12 @@ export function redactCard(card: Card): Card {
   wireCard.sessionCount = hasMultipleSessions
     ? card.sessions!.length
     : undefined;
-  const sortedSessions = hasMultipleSessions
-    ? [...card.sessions!].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-    : undefined;
+  const sortedSessions =
+    (card.sessions?.length ?? 0) >= 1
+      ? [...card.sessions!].sort((a, b) =>
+          a.createdAt.localeCompare(b.createdAt),
+        )
+      : undefined;
   const displayOrdinalById = new Map<string, number>();
   sortedSessions?.forEach((s, i) => displayOrdinalById.set(s.id, i + 1));
   wireCard.sessionSummaries = sortedSessions?.map((s, i) => {
@@ -192,6 +195,13 @@ export function redactCard(card: Card): Card {
       id: s.id,
       ordinal: i + 1,
       lost: s.tmuxSession == null,
+      active: s.id === card.activeSessionId,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      branch: s.branch,
+      workspaceFolder:
+        s.workspace == null ? undefined : path.basename(s.workspace.folder),
+      lastMarker: s.lastMarker,
       claudeAccountId: s.claudeAccountId,
       cleanupBlocked: s.cleanupBlocked,
       prs: s.prs,
@@ -3314,8 +3324,8 @@ class BoardStore extends EventEmitter {
    * {@link setActiveSession}, so the six-field mirror keeps its single owner. `finishCleanup` is the
    * only caller — a warned teardown (`recordCleanupWarning`) did not fully complete, so its record
    * stays present per `markSessionLost`'s clear-in-place precedent; only a SUCCESSFUL teardown
-   * removes the record, which is what keeps `sessionCount`/`sessionSummaries` absent-at-N<=1 correct
-   * for a fully-cleaned card.
+   * removes the record, which is what keeps `sessionCount` and `sessionSummaries` absent for a
+   * fully-cleaned card.
    * @remarks No-op (no mutation) when no record resolves for `sessionId ?? card.activeSessionId` —
    * a card holding only flat legacy fields has no record to remove and keeps behaving as it does
    * today.
