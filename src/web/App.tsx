@@ -73,12 +73,16 @@ import {
   promoteItem,
   resetCard as resetCardApi,
   restoreArchived,
+  resumeCard,
   setItemState,
   snoozeItem,
+  switchSession,
   unwindGroup as unwindGroupApi,
 } from "./lib/api.js";
 import type { ActionServices } from "./lib/actions.js";
 import { useItems } from "./hooks/useItems.js";
+import { nowMs } from "./lib/format-age.js";
+import { flattenSessions } from "./lib/sessions.js";
 import type { UnwindDestination } from "../shared/types.js";
 import { UpdateBanner } from "./features/update/index.js";
 import { cleanupCard as cleanupCardApi, getCard, getSetup } from "./lib/api.js";
@@ -117,6 +121,11 @@ const PlaybooksPage = lazy(() =>
 const VaultPage = lazy(() =>
   import("./features/vault/index.js").then((m) => ({
     default: m.VaultPage,
+  })),
+);
+const SessionsPage = lazy(() =>
+  import("./features/sessions/index.js").then((m) => ({
+    default: m.SessionsPage,
   })),
 );
 const ArchivePage = lazy(() =>
@@ -455,7 +464,15 @@ export function App() {
   const { show: showUndo, notice: showNotice } = undoToast;
   const actionServices = useMemo<ActionServices>(
     () => ({
-      api: { promoteItem, setItemState, snoozeItem, moveCard },
+      api: {
+        promoteItem,
+        setItemState,
+        snoozeItem,
+        moveCard,
+        cleanupCard: cleanupCardApi,
+        switchSession,
+        resumeCard,
+      },
       showUndo,
       notice: showNotice,
       openUrl: (url) => {
@@ -633,9 +650,12 @@ export function App() {
   ) : null;
 
   const inboxCount = inboxWaitingCount(board.cards, items);
+  const sessionRows = flattenSessions(board.cards, nowMs());
+  const liveSessionCount = sessionRows.filter((row) => row.running).length;
   const pageMeta: Record<Page, { title: string; count?: number }> = {
     board: { title: "Board", count: board.cards.length },
     inbox: { title: "Inbox", count: inboxCount },
+    sessions: { title: "Sessions", count: sessionRows.length },
     workspace: { title: "Workspace" },
     settings: { title: "Settings" },
     activity: { title: "Activity", count: feed.events.length },
@@ -659,6 +679,7 @@ export function App() {
       collapsed={navMode === "collapsed"}
       onToggleCollapsed={nav.toggle}
       inboxCount={inboxCount}
+      liveSessionCount={liveSessionCount}
       syncedAt={board.syncedAt ?? null}
       connection={connection}
       pollIntervalMs={board.pollIntervalMs ?? null}
@@ -794,6 +815,13 @@ export function App() {
               />
             ) : route.page === "accounts" ? (
               <AccountsPage claudeAccounts={claudeAccounts} />
+            ) : route.page === "sessions" ? (
+              <SessionsPage
+                board={board}
+                selectedCardId={selectedCard ? selectedCardId : null}
+                onSelectCard={selectCard}
+                services={actionServices}
+              />
             ) : route.page === "archive" ? (
               <ArchivePage onCountChange={setArchiveCount} />
             ) : route.page === "playbooks" ? (
