@@ -1,7 +1,8 @@
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 import type { FilterOption } from "../../../shared/types.js";
 import { Button } from "../../primitives/Button.js";
 import { focusRing } from "../../primitives/focus-ring.js";
+import { Select } from "../../primitives/Select.js";
 import { MultiSelect } from "../modals/index.js";
 import type { InboxGroupBy, InboxRange } from "./inbox-rows.js";
 
@@ -35,54 +36,6 @@ const GROUP_LABEL: Record<InboxGroupBy, string> = {
   source: "Group by source",
   type: "Group by type",
 };
-
-const selectStyle: CSSProperties = {
-  flex: "0 0 auto",
-  height: "32px",
-  padding: "0 var(--space-sm)",
-  background: "var(--surface-card)",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius)",
-  color: "var(--text)",
-  fontFamily: "var(--font-ui)",
-  fontSize: "var(--font-label)",
-  lineHeight: "var(--line-label)",
-  outline: "none",
-};
-
-interface SelectProps<T extends string> {
-  label: string;
-  value: T;
-  labels: Record<T, string>;
-  onChange: (value: T) => void;
-}
-
-function Select<T extends string>({
-  label,
-  value,
-  labels,
-  onChange,
-}: SelectProps<T>) {
-  const [focused, setFocused] = useState(false);
-  return (
-    <select
-      aria-label={label}
-      value={value}
-      onChange={(e) => onChange(e.target.value as T)}
-      onFocus={(event) =>
-        setFocused(event.currentTarget.matches(":focus-visible"))
-      }
-      onBlur={() => setFocused(false)}
-      style={{ ...selectStyle, ...focusRing(focused) }}
-    >
-      {(Object.keys(labels) as T[]).map((key) => (
-        <option key={key} value={key}>
-          {labels[key]}
-        </option>
-      ))}
-    </select>
-  );
-}
 
 export function InboxToolbar({
   search,
@@ -171,15 +124,6 @@ export function InboxToolbar({
         variant="secondary"
         aria-pressed={unreadOnly}
         onClick={() => onUnreadOnlyChange(!unreadOnly)}
-        style={
-          unreadOnly
-            ? {
-                background:
-                  "color-mix(in srgb, var(--accent) 16%, var(--surface-column))",
-                color: "var(--accent)",
-              }
-            : undefined
-        }
       >
         Unread only
       </Button>

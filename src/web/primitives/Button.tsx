@@ -98,15 +98,19 @@ export function Button({
         ? dangerStyle
         : secondaryStyle;
   const isDanger = variant === "danger";
+  const toggledOn = rest["aria-pressed"] === true;
   const composed: CSSProperties = {
     ...base,
+    ...(toggledOn ? { color: "var(--accent)" } : null),
     background:
       variant === "secondary"
         ? pressed
           ? "var(--pressed-card-hover)"
           : hovered
             ? "var(--surface-card-hover)"
-            : "transparent"
+            : toggledOn
+              ? "color-mix(in srgb, var(--accent) 16%, var(--surface-column))"
+              : "transparent"
         : pressed
           ? isDanger
             ? "var(--pressed-button-danger)"

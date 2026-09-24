@@ -1,6 +1,5 @@
-import { X } from "lucide-react";
 import { Button } from "../../primitives/Button.js";
-import { IconButton } from "../../primitives/IconButton.js";
+import { FloatBar } from "../../primitives/FloatBar.js";
 
 interface SelectionBarProps {
   count: number;
@@ -14,41 +13,11 @@ export function SelectionBar({
   onClear,
 }: SelectionBarProps) {
   if (count < 2) return null;
-
   return (
-    <div
-      style={{
-        position: "fixed",
-        bottom: "var(--space-xl)",
-        left: "50%",
-        transform: "translateX(-50%)",
-        zIndex: 5,
-        background: "var(--surface-card)",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius)",
-        boxShadow: "var(--shadow-float)",
-        padding: "var(--space-sm) var(--space-lg)",
-        display: "flex",
-        alignItems: "center",
-        gap: "var(--space-lg)",
-      }}
-    >
-      <span
-        style={{
-          fontSize: "var(--font-label)",
-          fontWeight: "var(--weight-semibold)",
-          lineHeight: "var(--line-label)",
-          color: "var(--text-muted)",
-        }}
-      >
-        {count} selected
-      </span>
+    <FloatBar count={count} onClear={onClear}>
       <Button variant="primary" onClick={onStartGroup}>
         {`Start ${count} as group`}
       </Button>
-      <IconButton aria-label="Clear selection" onClick={onClear}>
-        <X size={16} strokeWidth={2} aria-hidden="true" />
-      </IconButton>
-    </div>
+    </FloatBar>
   );
 }
