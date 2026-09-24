@@ -14,6 +14,7 @@ import { archiveRouter } from "./archive.route.js";
 import { pushRouter } from "./push.route.js";
 import { viewerRouter } from "./viewer.route.js";
 import { accountsRouter } from "./accounts.route.js";
+import { itemsRouter } from "./items.route.js";
 
 /**
  * Plain composition of the sub-routers — no nested gate here. The single enforcement point for
@@ -38,3 +39,4 @@ apiRouter.use(archiveRouter);
 apiRouter.use(pushRouter);
 apiRouter.use(viewerRouter);
 apiRouter.use(accountsRouter);
+apiRouter.use(itemsRouter);
