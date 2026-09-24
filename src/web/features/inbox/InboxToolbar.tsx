@@ -34,6 +34,7 @@ const GROUP_LABEL: Record<InboxGroupBy, string> = {
   none: "No grouping",
   source: "Group by source",
   type: "Group by type",
+  state: "Group by state",
 };
 
 const selectStyle: CSSProperties = {
