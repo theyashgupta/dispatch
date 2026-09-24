@@ -7,6 +7,7 @@ import {
   redactCard,
   store,
 } from "../store/board.store.js";
+import { ITEM_DESCRIPTION_MAX, ITEM_TITLE_MAX } from "../store/items.js";
 import {
   blocksAgentDoneManualEntry,
   blocksTodoToInProgressManualMove,
@@ -47,8 +48,6 @@ import { attachmentsDir } from "../services/infra/paths.js";
 export const cardsRouter = Router();
 
 const MAX_DIRECTION_LEN = 10000;
-const MAX_TITLE_LEN = 300;
-const MAX_DESCRIPTION_LEN = 20000;
 const MAX_GROUP_TITLE_MEMBERS = 50;
 
 /**
@@ -609,7 +608,7 @@ function memberIneligibleReason(card: Card | undefined): string | null {
 }
 
 /**
- * Atomic group create+start (Phase 63, GROUP-01/03/04): validates `title` (MAX_TITLE_LEN +
+ * Atomic group create+start (Phase 63, GROUP-01/03/04): validates `title` (ITEM_TITLE_MAX +
  * marker screening, the `POST /cards` precedent) and `memberIds` (>=2, distinct, each
  * re-validated live via {@link memberIneligibleReason} as a fast pre-check AND re-checked a
  * second time INSIDE the store's mutation queue by `createGroupCard`, which refuses the whole
@@ -639,7 +638,7 @@ async function createGroupHandler(req: Request, res: Response): Promise<void> {
     | undefined;
 
   const title = typeof body?.title === "string" ? body.title.trim() : "";
-  if (title === "" || title.length > MAX_TITLE_LEN) {
+  if (title === "" || title.length > ITEM_TITLE_MAX) {
     res.status(400).json({ error: "invalid-title" });
     return;
   }
@@ -979,14 +978,14 @@ cardsRouter.post("/cards", async (req, res) => {
     { title?: unknown; description?: unknown; images?: unknown } | undefined;
 
   const title = typeof body?.title === "string" ? body.title.trim() : "";
-  if (title === "" || title.length > MAX_TITLE_LEN) {
+  if (title === "" || title.length > ITEM_TITLE_MAX) {
     res.status(400).json({ error: "invalid-title" });
     return;
   }
 
   const description =
     typeof body?.description === "string" ? body.description.trim() : "";
-  if (description === "" || description.length > MAX_DESCRIPTION_LEN) {
+  if (description === "" || description.length > ITEM_DESCRIPTION_MAX) {
     res.status(400).json({ error: "invalid-description" });
     return;
   }
@@ -1006,7 +1005,7 @@ cardsRouter.post("/cards", async (req, res) => {
 
   const fullDescription =
     description + screenshotsSection(images.map((i) => i.name));
-  if (fullDescription.length > MAX_DESCRIPTION_LEN) {
+  if (fullDescription.length > ITEM_DESCRIPTION_MAX) {
     res.status(400).json({ error: "invalid-description" });
     return;
   }

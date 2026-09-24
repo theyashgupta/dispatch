@@ -3,6 +3,13 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import { DISPATCH_DATA_DIR } from "./data-dir.js";
+import {
+  applyItemUpserts,
+  buildPromotedCard,
+  redactItem,
+  wakeItem,
+  withState,
+} from "./items.js";
 import type {
   ActivityEvent,
   BoardSnapshot,
@@ -16,6 +23,8 @@ import type {
   SessionFields,
   SourceIssue,
   SourceKind,
+  Item,
+  SettableItemState,
   StartError,
   TerminalError,
   ArchivedGroup,
@@ -500,6 +509,8 @@ class BoardStore extends EventEmitter {
   /** Folder used on the last successful start, preselected in the modal; null when none yet. */
   private lastUsedFolder: string | null = null;
   private identifierCounters: Record<string, number> = {};
+  private readonly items = new Map<string, Item>();
+  private pendingItemUpserts: Item[] = [];
   /**
    * The persisted `meta.schemaVersion` counter (SESS-04), read back in {@link load} and re-emitted
    * by {@link buildMeta} so a migration that already ran stays recorded across every later
@@ -862,6 +873,8 @@ class BoardStore extends EventEmitter {
     this.queue = this.queue
       .then(async () => {
         const events = mutator();
+        const itemUpserts = this.pendingItemUpserts;
+        this.pendingItemUpserts = [];
         await this.db.backupTick();
         let broadcast: ActivityEvent[] = [];
         try {
@@ -869,11 +882,16 @@ class BoardStore extends EventEmitter {
             [...this.cards.values()],
             this.buildMeta(),
             events,
+            itemUpserts.length > 0 ? { upserts: itemUpserts } : undefined,
           );
           if (ids.length === events.length) {
             broadcast = events.map((e, i) => ({ ...e, id: ids[i] }));
           }
         } catch (err) {
+          const requeued = new Map(
+            [...itemUpserts, ...this.pendingItemUpserts].map((i) => [i.id, i]),
+          );
+          this.pendingItemUpserts = [...requeued.values()];
           console.error(
             "[store] persist failed (in-memory state still broadcast):",
             err,
@@ -1015,6 +1033,8 @@ class BoardStore extends EventEmitter {
       lastUsed: meta.lastUsed,
     });
     this.identifierCounters = seedIdentifierCounters(meta);
+    this.items.clear();
+    for (const item of this.db.readAllItems()) this.items.set(item.id, item);
     console.log(`[store] loaded ${this.cards.size} card(s) from board.db.`);
     if (migrationDue) {
       console.log(
@@ -1181,7 +1201,20 @@ class BoardStore extends EventEmitter {
           : redactCard(c),
       ),
       doneCounts,
+      items: this.wireItems().filter((i) => i.state !== "done"),
     };
+  }
+
+  /** Every item as the wire sees it: expired snoozes woken, redacted, priority then newest first. */
+  wireItems(): Item[] {
+    const now = new Date().toISOString();
+    return [...this.items.values()]
+      .map((item) => wakeItem(item, now))
+      .sort(
+        (a, b) =>
+          b.priority - a.priority || b.createdAt.localeCompare(a.createdAt),
+      )
+      .map(redactItem);
   }
 
   /**
@@ -3840,6 +3873,145 @@ class BoardStore extends EventEmitter {
       }
       return [];
     });
+  }
+
+  /**
+   * Apply one source poll's items under the single-writer queue.
+   *
+   * @remarks The pure rule lives in {@link applyItemUpserts}; this method only stages the changed
+   * rows for the same transaction as the cards and returns the counts.
+   */
+  upsertItems(
+    source: string,
+    incoming: readonly Item[],
+    opts: { kind: SourceKind; partial?: boolean },
+  ): Promise<{ inserted: number; updated: number; resolved: number }> {
+    const foreign = incoming.find(
+      (i) => i.source !== source || !i.id.startsWith(`${source}:`),
+    );
+    if (foreign) {
+      return Promise.reject(
+        new Error(
+          `item ${foreign.id} belongs to source ${foreign.source}, not ${source}`,
+        ),
+      );
+    }
+    let counts = { inserted: 0, updated: 0, resolved: 0 };
+    return this.enqueue(() => {
+      const result = applyItemUpserts(this.items, incoming, {
+        source,
+        kind: opts.kind,
+        partial: opts.partial ?? false,
+        now: new Date().toISOString(),
+      });
+      for (const item of result.upserts) this.stageItem(item);
+      counts = result.counts;
+      return [];
+    }).then(() => counts);
+  }
+
+  private stageItem(next: Item): void {
+    this.items.set(next.id, next);
+    this.pendingItemUpserts.push(next);
+  }
+
+  getItem(id: string): Item | undefined {
+    return this.items.get(id);
+  }
+
+  /**
+   * Set an item to unread, read or done; snoozed goes through {@link snoozeItem}.
+   *
+   * @remarks A promoted item stays done: reopening it would show an actionable row that already
+   * has a card.
+   */
+  setItemState(
+    id: string,
+    state: SettableItemState,
+  ): Promise<"ok" | "unknown" | "promoted"> {
+    let outcome: "ok" | "unknown" | "promoted" = "unknown";
+    return this.enqueue(() => {
+      const current = this.items.get(id);
+      if (!current) return [];
+      if (current.cardId !== undefined && state !== "done") {
+        outcome = "promoted";
+        return [];
+      }
+      outcome = "ok";
+      this.stageItem(
+        withState(wakeItem(current, new Date().toISOString()), state),
+      );
+      return [];
+    }).then(() => outcome);
+  }
+
+  /**
+   * Snooze an item until an ISO time the route has already validated as being in the future.
+   *
+   * @remarks A promoted item is refused for the same reason {@link setItemState} refuses to reopen
+   * it: the snooze would wake it back into the list beside its own card.
+   */
+  snoozeItem(
+    id: string,
+    untilIso: string,
+  ): Promise<"ok" | "unknown" | "promoted"> {
+    let outcome: "ok" | "unknown" | "promoted" = "unknown";
+    return this.enqueue(() => {
+      const current = this.items.get(id);
+      if (!current) return [];
+      if (current.cardId !== undefined) {
+        outcome = "promoted";
+        return [];
+      }
+      outcome = "ok";
+      this.stageItem({ ...current, state: "snoozed", snoozedUntil: untilIso });
+      return [];
+    }).then(() => outcome);
+  }
+
+  /**
+   * Turn an item into a local Inbox card, once.
+   *
+   * @remarks The card mint, the item's done state and its cardId land in one mutation. A second
+   * promote returns the existing card through item.cardId and creates nothing; when that card no
+   * longer exists (for example removed by a later sync) the item is promoted again into a new card.
+   */
+  promoteItem(
+    id: string,
+  ): Promise<{ card: Card; created: boolean } | undefined> {
+    let result: { card: Card; created: boolean } | undefined;
+    return this.enqueue(() => {
+      const current = this.items.get(id);
+      if (!current) return [];
+      if (current.cardId !== undefined) {
+        const existing = this.cards.get(current.cardId);
+        if (existing) {
+          result = { card: existing, created: false };
+          return [];
+        }
+      }
+      const now = new Date().toISOString();
+      const card = buildPromotedCard(
+        current,
+        this.nextIdentifier("LOCAL"),
+        now,
+      );
+      this.cards.set(card.id, card);
+      this.stageItem({ ...withState(current, "done"), cardId: card.id });
+      result = { card, created: true };
+      return [
+        this.event("item_promoted", {
+          cardId: card.id,
+          toCol: "inbox",
+          source: current.source,
+          reason: `promoted from ${current.source}: ${current.title}`,
+        }),
+      ];
+    }).then(() => result);
+  }
+
+  listItems(): Item[] {
+    return [...this.items.values()];
   }
 
   /**
