@@ -36,10 +36,10 @@ import {
 import { unregisterHookToken } from "../services/domain/hook-tokens.js";
 import { reapActivityThrottle } from "../services/domain/hook-events.js";
 import { seedPlaybooks } from "../services/domain/playbooks.js";
-import { startPoller } from "../adapters/poller.js";
+import { startEnabledPollers } from "../adapters/poller.js";
 import { sendPushForCard } from "../services/domain/push-send.js";
 import { startArtifactDetectionLoop } from "../adapters/artifact-detect.js";
-import { buildRegistry, getLinearSource } from "../sources/registry.js";
+import { buildRegistry } from "../sources/registry.js";
 import { startMarkerWatcher } from "../adapters/markers/watcher.js";
 import { reconcileSessions } from "./reconcile.js";
 import { resolveEditors } from "../adapters/editors.js";
@@ -53,12 +53,12 @@ import type { ActivityEvent } from "../../shared/types.js";
 import {
   DEFAULT_CLEANUP_DELAY_DAYS,
   DEFAULT_ARCHIVE_RETENTION_DAYS,
+  DEFAULT_POLL_INTERVAL_MS,
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
 } from "../../shared/types.js";
 
 const DEFAULT_PORT = 4700;
-const DEFAULT_POLL_INTERVAL_MS = 60_000;
 const ATTACHMENT_BODY_LIMIT = Math.ceil(
   MAX_ATTACHMENTS * MAX_ATTACHMENT_BYTES * 1.4,
 );
@@ -393,9 +393,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 
   setHooksRuntime({ capable, port, statusChannel });
-  if (config.linearApiKey) {
-    startPoller(config, getLinearSource());
-  }
+  startEnabledPollers();
   startMarkerWatcher(statusChannel);
   store.on("activity", (event: ActivityEvent) => {
     if (event.type !== "status_needs_input" || event.cardId == null) return;
