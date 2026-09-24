@@ -4,6 +4,10 @@ export const PAGES = [
   "workspace",
   "settings",
   "activity",
+  "accounts",
+  "playbooks",
+  "vault",
+  "archive",
 ] as const;
 
 export type Page = (typeof PAGES)[number];
