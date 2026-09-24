@@ -15,6 +15,7 @@ import type {
   Session,
   SessionFields,
   SourceIssue,
+  SourceKind,
   StartError,
   TerminalError,
   ArchivedGroup,
@@ -420,6 +421,37 @@ export interface ReservedSession {
   parentBranch?: string;
 }
 
+/**
+ * Fold the legacy per-prefix meta fields into the counter map on load.
+ *
+ * @remarks Takes the larger of the map entry and the legacy field per prefix, so a database
+ * written by either an older or a newer build resumes from its highest minted number.
+ */
+function seedIdentifierCounters(
+  meta: Partial<BoardMeta>,
+): Record<string, number> {
+  const counters: Record<string, number> = {};
+  for (const [prefix, n] of Object.entries(meta.identifierCounters ?? {})) {
+    if (typeof n === "number" && Number.isInteger(n) && n >= 0)
+      counters[prefix] = n;
+  }
+  const legacyLocal = meta.localTicketCounter;
+  if (
+    typeof legacyLocal === "number" &&
+    Number.isInteger(legacyLocal) &&
+    legacyLocal > (counters.LOCAL ?? 0)
+  )
+    counters.LOCAL = legacyLocal;
+  const legacyGroup = meta.groupTicketCounter;
+  if (
+    typeof legacyGroup === "number" &&
+    Number.isInteger(legacyGroup) &&
+    legacyGroup > (counters.GROUP ?? 0)
+  )
+    counters.GROUP = legacyGroup;
+  return counters;
+}
+
 class BoardStore extends EventEmitter {
   /** The sole mutable truth. */
   private readonly cards = new Map<string, Card>();
@@ -467,20 +499,7 @@ class BoardStore extends EventEmitter {
   private workspaceFolders: string[] = [];
   /** Folder used on the last successful start, preselected in the modal; null when none yet. */
   private lastUsedFolder: string | null = null;
-  /**
-   * Minted-at-accept counter for `LOCAL-<n>` ticket identifiers (Phase 61), persisted in the meta
-   * row alongside every other mutation. Incremented ONLY inside {@link createLocalCard}'s enqueue
-   * mutator — the store's existing single-writer queue is the concurrency guard, no separate
-   * mutex needed (mirrors every other counter/id-minting decision in this codebase).
-   */
-  private localTicketCounter = 0;
-  /**
-   * Minted-at-create counter for `GROUP-<n>` identifiers (Phase 63), persisted in the meta row
-   * alongside every other mutation. Incremented ONLY inside {@link createGroupCard}'s enqueue
-   * mutator (localTicketCounter precedent) — a SEPARATE counter from localTicketCounter's, per
-   * 63-CONTEXT.md Claude's Discretion.
-   */
-  private groupTicketCounter = 0;
+  private identifierCounters: Record<string, number> = {};
   /**
    * The persisted `meta.schemaVersion` counter (SESS-04), read back in {@link load} and re-emitted
    * by {@link buildMeta} so a migration that already ran stays recorded across every later
@@ -889,6 +908,18 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Mint the next `<prefix>-<n>` identifier for a card.
+   *
+   * @remarks Must run inside an enqueue mutator; the queue serializes the increment and the same
+   * mutation persists the counter, so a crash can never hand out one number twice.
+   */
+  private nextIdentifier(prefix: string): string {
+    const next = (this.identifierCounters[prefix] ?? 0) + 1;
+    this.identifierCounters[prefix] = next;
+    return `${prefix}-${next}`;
+  }
+
+  /**
    * Assemble the non-card meta row persisted alongside the cards — the same fields
    * persistSnapshot carried in board.json's envelope (syncWarning/pollIntervalMs/editors
    * stay in-memory-only, as they were absent from the persisted shape before).
@@ -898,8 +929,9 @@ class BoardStore extends EventEmitter {
       syncedAt: this.syncedAt,
       workspaceFolders: this.workspaceFolders,
       lastUsed: this.lastUsedFolder,
-      localTicketCounter: this.localTicketCounter,
-      groupTicketCounter: this.groupTicketCounter,
+      identifierCounters: { ...this.identifierCounters },
+      localTicketCounter: this.identifierCounters.LOCAL ?? 0,
+      groupTicketCounter: this.identifierCounters.GROUP ?? 0,
       schemaVersion: this.schemaVersion,
     };
   }
@@ -982,10 +1014,7 @@ class BoardStore extends EventEmitter {
       workspaceFolders: meta.workspaceFolders,
       lastUsed: meta.lastUsed,
     });
-    this.localTicketCounter =
-      typeof meta.localTicketCounter === "number" ? meta.localTicketCounter : 0;
-    this.groupTicketCounter =
-      typeof meta.groupTicketCounter === "number" ? meta.groupTicketCounter : 0;
+    this.identifierCounters = seedIdentifierCounters(meta);
     console.log(`[store] loaded ${this.cards.size} card(s) from board.db.`);
     if (migrationDue) {
       console.log(
@@ -3621,8 +3650,7 @@ class BoardStore extends EventEmitter {
   createLocalCard(title: string, description: string): Promise<Card> {
     let created!: Card;
     return this.enqueue(() => {
-      this.localTicketCounter += 1;
-      const identifier = `LOCAL-${this.localTicketCounter}`;
+      const identifier = this.nextIdentifier("LOCAL");
       const now = new Date().toISOString();
       created = {
         id: identifier,
@@ -3686,8 +3714,7 @@ class BoardStore extends EventEmitter {
         result = { ok: false, ineligibleIds };
         return [];
       }
-      this.groupTicketCounter += 1;
-      const identifier = `GROUP-${this.groupTicketCounter}`;
+      const identifier = this.nextIdentifier("GROUP");
       const now = new Date().toISOString();
       const created: Card = {
         id: identifier,
@@ -3825,8 +3852,10 @@ class BoardStore extends EventEmitter {
    * and are NOT sorted here — ordering is this store's read-path job (snapshot()).
    *
    * `partial` marks a truncated pull (pagination cap hit): the issue list is incomplete,
-   * so absence proves nothing — upserts still apply, but removals and gone-flags are
-   * SKIPPED for the cycle and a warning is recorded on the sync status instead.
+   * so absence proves nothing, upserts still apply, but removals and gone-flags are
+   * SKIPPED for the cycle and a warning is recorded on the sync status instead. An
+   * `append` source's fetch is a point-in-time slice, so its absences prove nothing
+   * either: removals and gone-flags apply only to a complete pull of a `snapshot` source.
    *
    * The cards Map stays keyed by raw upstream id, so the per-source reconcile filter
    * alone cannot stop a cross-source id collision: an upsert whose id already belongs
@@ -3836,7 +3865,7 @@ class BoardStore extends EventEmitter {
   applyIssues(
     issues: SourceIssue[],
     syncedAt: string,
-    opts: { partial?: boolean; source?: string } = {},
+    opts: { partial?: boolean; source?: string; kind?: SourceKind } = {},
   ): Promise<void> {
     return this.enqueue(() => {
       const src = opts.source ?? "linear";
@@ -3867,13 +3896,14 @@ class BoardStore extends EventEmitter {
         if (card) card.goneFromLinear = false;
       }
       if (opts.partial) {
-        this.syncWarning =
-          "Linear pull was truncated (pagination cap), removals skipped this cycle.";
+        this.syncWarning = `${src} pull was truncated (pagination cap), removals skipped this cycle.`;
       } else {
-        for (const id of r.removeIds) this.cards.delete(id);
-        for (const id of r.goneIds) {
-          const card = this.cards.get(id);
-          if (card) card.goneFromLinear = true;
+        if ((opts.kind ?? "snapshot") === "snapshot") {
+          for (const id of r.removeIds) this.cards.delete(id);
+          for (const id of r.goneIds) {
+            const card = this.cards.get(id);
+            if (card) card.goneFromLinear = true;
+          }
         }
         this.syncWarning = null;
       }

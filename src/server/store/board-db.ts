@@ -73,6 +73,7 @@ export interface BoardMeta {
    * Optional — defaults to 0 at hydrate time, matching `localTicketCounter`'s precedent.
    */
   groupTicketCounter?: number;
+  identifierCounters?: Record<string, number>;
   /**
    * Version counter for the store's boot-time schema migrations, written once by the
    * session-entity migration pass (Phase 90). Optional — defaults to `0` on a legacy row that
