@@ -20,6 +20,7 @@ import type {
   ClaudeUsageSnapshot,
   ClaudeLoginView,
   SettableItemState,
+  WorkspacesInventory,
 } from "../../shared/types.js";
 import type { CardSearchResult } from "../../shared/search.js";
 
@@ -1532,4 +1533,20 @@ export async function snoozeItem(id: string, until: string): Promise<void> {
 export async function promoteItem(id: string): Promise<{ card: Card }> {
   const res = await postItem(id, "promote");
   return (await res.json()) as { card: Card };
+}
+
+const WORKSPACES_TIMEOUT_MS = 60_000;
+
+/** Read the Workspaces inventory; `fresh` drops the server's inventory caches first. */
+export async function getWorkspaces(
+  fresh: boolean,
+): Promise<WorkspacesInventory> {
+  const res = await fetch(
+    fresh ? "/api/workspaces?fresh=1" : "/api/workspaces",
+    { signal: AbortSignal.timeout(WORKSPACES_TIMEOUT_MS) },
+  );
+  if (!res.ok) {
+    throw new Error(`getWorkspaces failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as WorkspacesInventory;
 }
