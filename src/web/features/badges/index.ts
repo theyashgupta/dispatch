@@ -5,5 +5,6 @@ export { PrOverflowChip, PR_CHIP_CAP } from "./PrOverflowChip.js";
 export { PreviewBadge } from "./PreviewBadge.js";
 export { previewBadgeTitle, previewEvidenceLine } from "./preview-evidence.js";
 export { SourceBadge } from "./SourceBadge.js";
+export { SourceIcon } from "./SourceIcon.js";
 export { UnknownProbeBadge } from "./UnknownProbeBadge.js";
 export { unknownProbeCopy } from "./unknown-probe-copy.js";

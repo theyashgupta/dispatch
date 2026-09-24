@@ -973,6 +973,23 @@ export interface SourceConfig {
   pollIntervalMs?: number;
 }
 
+export type SourceKeyError =
+  "rejected" | "unreachable" | "superseded" | "failed";
+
+export interface SourceConnection {
+  configured: boolean;
+  connected: boolean;
+  account?: string;
+  error?: Exclude<SourceKeyError, "superseded" | "failed">;
+}
+
+export type SourceCardStatus =
+  | { kind: "checking" }
+  | { kind: "disconnected" }
+  | { kind: "connected"; account?: string }
+  | { kind: "error"; message: string }
+  | { kind: "soon" };
+
 /** Contents of ~/.dispatch/config.json. */
 export interface Config {
   linearApiKey: string;
