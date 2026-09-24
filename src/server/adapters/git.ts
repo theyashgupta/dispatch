@@ -231,3 +231,24 @@ export async function branchDelete(
 ): Promise<void> {
   await run("git", ["branch", "-D", branch], { cwd: repoPath });
 }
+
+/**
+ * Read HEAD's committer time in `worktreePath` as epoch ms, or null when it is not a readable repo.
+ *
+ * @remarks Never throws: a probe failure reads as null.
+ */
+export async function lastCommitAt(
+  worktreePath: string,
+): Promise<number | null> {
+  try {
+    const { stdout } = await run("git", ["log", "-1", "--format=%ct"], {
+      cwd: worktreePath,
+      timeout: 10_000,
+      killEscalationMs: 2_000,
+    });
+    const seconds = Number.parseInt(stdout.trim(), 10);
+    return Number.isFinite(seconds) ? seconds * 1000 : null;
+  } catch {
+    return null;
+  }
+}
