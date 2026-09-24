@@ -19,6 +19,7 @@ import type {
   ClaudeAccountSummary,
   ClaudeUsageSnapshot,
   ClaudeLoginView,
+  SettableItemState,
 } from "../../shared/types.js";
 import type { CardSearchResult } from "../../shared/search.js";
 
@@ -1495,4 +1496,40 @@ export async function saveArchiveRetention(
   throw new Error(
     `saveArchiveRetention failed: ${res.status} ${res.statusText}`,
   );
+}
+
+async function postItem(
+  id: string,
+  path: string,
+  body?: object,
+): Promise<Response> {
+  const res = await fetch(`/api/items/${encodeURIComponent(id)}/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error ?? `${path} failed: ${res.status}`);
+  }
+  return res;
+}
+
+/** Set an item's state; a refused change (unknown or promoted) rejects with the server's reason. */
+export async function setItemState(
+  id: string,
+  state: SettableItemState,
+): Promise<void> {
+  await postItem(id, "state", { state });
+}
+
+/** Snooze an item until an ISO time; a refused snooze rejects with the server's reason. */
+export async function snoozeItem(id: string, until: string): Promise<void> {
+  await postItem(id, "snooze", { until });
+}
+
+/** Promote an item to a local Inbox card; repeats return the same card. */
+export async function promoteItem(id: string): Promise<{ card: Card }> {
+  const res = await postItem(id, "promote");
+  return (await res.json()) as { card: Card };
 }

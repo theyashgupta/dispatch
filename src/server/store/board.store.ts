@@ -500,6 +500,7 @@ class BoardStore extends EventEmitter {
     code: false,
     cursor: false,
   };
+  private enabledSourceIds: string[] = [];
   /**
    * Registered workspace-folder paths, persisted in board.json and broadcast on every snapshot so
    * the start modal reads them live. Runtime state (unlike the boot-only pollIntervalMs/editors), so
@@ -1202,6 +1203,7 @@ class BoardStore extends EventEmitter {
       ),
       doneCounts,
       items: this.wireItems().filter((i) => i.state !== "done"),
+      enabledSources: this.enabledSourceIds,
     };
   }
 
@@ -1254,6 +1256,11 @@ class BoardStore extends EventEmitter {
    */
   setEditors(e: { code: boolean; cursor: boolean }): void {
     this.editors = e;
+  }
+
+  /** Record which sources the registry enabled so the Inbox can tell an empty feed from no feed. */
+  setEnabledSources(ids: string[]): void {
+    this.enabledSourceIds = [...ids];
   }
 
   /**

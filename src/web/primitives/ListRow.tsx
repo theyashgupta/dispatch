@@ -57,9 +57,11 @@ const snippetStyle: CSSProperties = {
   fontSize: "var(--font-label)",
   lineHeight: "var(--line-label)",
   color: "var(--text-muted)",
-  whiteSpace: "nowrap",
+  display: "-webkit-box",
+  WebkitBoxOrient: "vertical",
+  WebkitLineClamp: 2,
   overflow: "hidden",
-  textOverflow: "ellipsis",
+  wordBreak: "break-word",
 };
 
 const dotStyle: CSSProperties = {

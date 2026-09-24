@@ -44,7 +44,7 @@ const BUDGETS = [
   {
     label: "assets/inbox-*.js",
     match: (f) => f.startsWith(`assets${sep}inbox-`) && f.endsWith(".js"),
-    budgetGzipBytes: 2803, // seed: 2549 (re-seeded 2026-09-24 after InboxRow moved onto ListRow and Chip)
+    budgetGzipBytes: 6961, // seed: 6329 (re-seeded 2026-09-24 with the merged items list, toolbar, row menu and keyboard rows)
   },
   {
     label: "assets/orca-*.js",
