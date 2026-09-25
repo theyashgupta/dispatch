@@ -39,7 +39,8 @@ import { seedPlaybooks } from "../services/domain/playbooks.js";
 import { startEnabledPollers } from "../adapters/poller.js";
 import { sendPushForCard } from "../services/domain/push-send.js";
 import { startArtifactDetectionLoop } from "../adapters/artifact-detect.js";
-import { buildRegistry } from "../sources/registry.js";
+import { buildRegistry, setCredentialResolver } from "../sources/registry.js";
+import { resolveGithubToken } from "../services/domain/github-token.js";
 import { startMarkerWatcher } from "../adapters/markers/watcher.js";
 import { reconcileSessions } from "./reconcile.js";
 import { resolveEditors } from "../adapters/editors.js";
@@ -294,6 +295,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   }
   const config = loadConfig();
   setOrchestrationConfig(config);
+  setCredentialResolver("github", resolveGithubToken);
   buildRegistry(config);
   loadOrCreateVapidKeys();
   console.log(`[push] VAPID keypair loaded from ${VAPID_KEYS_PATH}`);

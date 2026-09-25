@@ -974,13 +974,21 @@ export interface SourceConfig {
 }
 
 export type SourceKeyError =
-  "rejected" | "unreachable" | "superseded" | "failed";
+  | "rejected"
+  | "unreachable"
+  | "superseded"
+  | "failed"
+  | "sso-required"
+  | "no-credential";
 
 export interface SourceConnection {
   configured: boolean;
   connected: boolean;
   account?: string;
-  error?: Exclude<SourceKeyError, "superseded" | "failed">;
+  via?: "vault" | "gh";
+  enabled?: boolean;
+  error?: Exclude<SourceKeyError, "superseded" | "failed" | "no-credential">;
+  ssoUrl?: string;
 }
 
 export type SourceCardStatus =
@@ -989,6 +997,53 @@ export type SourceCardStatus =
   | { kind: "connected"; account?: string }
   | { kind: "error"; message: string }
   | { kind: "soon" };
+
+export type ItemSourceConfig = Pick<SourceConfig, "enabled" | "pollIntervalMs">;
+
+export type ItemSourceId = "github";
+
+export interface SourceCredential {
+  token: string;
+  via: "vault" | "gh";
+}
+
+export type PrCheckState = "pass" | "pending" | "fail";
+
+export interface PrCheck {
+  name: string;
+  state: PrCheckState;
+  url?: string;
+}
+
+export interface PrFile {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  patch?: string;
+  patchTruncated: boolean;
+}
+
+export interface PrDetail {
+  title: string;
+  url: string;
+  author: string;
+  state: "open" | "closed" | "merged";
+  draft: boolean;
+  body: string;
+  base: string;
+  head: string;
+  headSha: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  files: PrFile[];
+  filesTruncated: boolean;
+  checksTruncated: boolean;
+  checks: PrCheck[];
+}
+
+export type PrReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
 
 /** Contents of ~/.dispatch/config.json. */
 export interface Config {
@@ -1000,7 +1055,7 @@ export interface Config {
   workspaceRoot?: string;
   /** Status-source selection (`hooks | pane | auto`); absent resolves to `auto` at load. */
   statusChannel?: StatusChannel;
-  sources?: { linear?: SourceConfig };
+  sources?: { linear?: SourceConfig; github?: ItemSourceConfig };
   /** On-boot update check; absent or any non-`false` value resolves to on. */
   updateCheck?: boolean;
   /** The playbook name remembered from the last successful kickoff; absent when never set. */
