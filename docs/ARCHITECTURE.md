@@ -2056,14 +2056,29 @@ degrades to the plain `Synced` label rather than computing a relative age or a s
 JSDoc (the comment standard's tsx carve-out — [comments.md](standards/comments.md) rule 2 — forbids
 JSDoc in `src/web/**/*.tsx`, enforced by the `allowJsdoc: false` lint scoping in `eslint.config.ts`).
 
+**Linear comments.** The poll selects the last five comments on every issue node, main and tracked
+queries alike, so a card in any column receives new comments on the next poll. The mapping sorts
+them oldest first, caps each body at 600 characters and names a user-less comment "Linear". Comments
+live on the server card only: `redactCard` swaps them for `commentCount` and `lastCommentId` (so a
+new comment on a card already at five still changes the wire), because every mutation broadcasts the
+whole snapshot and five bodies per card would bloat each frame. The panel reads them through `GET
+/cards/:id/comments`, which serves the store and never calls Linear. `POST /cards/:id/comment`
+validates the body (`comment-body.ts`: empty, over 20000 characters, or carrying the agent status
+marker answer 400), then `linear-outbound.ts#postComment` calls the source's `addComment` through
+`source-gateway.ts`. A success clears `Card.linearError` and polls Linear at once; a failure stores
+fixed copy from `outbound-error.ts` in `Card.linearError` and answers 502, so raw provider text
+never reaches the card or the response.
+
 **Sync out — promoting a local card to Linear (`PUSH-01/02/03`).** The inbound half above mirrors
 Linear INTO the board; this half pushes a `source:"local"` card OUT to a real Linear issue on
 explicit user action (`POST /cards/:id/sync-linear`, `services/orchestration/linear-sync.ts`).
-MCP-only writes: the stored Linear API key is READ-ONLY toward Linear everywhere in this app — the
-sync path never uses it to create or update anything, instead spawning a headless `claude -p` that
+Key writes through source mutations only: the stored Linear API key writes to Linear solely
+through `LinearSource` mutation methods called from a service in `services/orchestration/`, never
+from a route (today `commentCreate`, called by `linear-outbound.ts#postComment`). This sync path
+does not use the key to create anything; it spawns a headless `claude -p` that
 reuses the CLI's own user-scope Linear MCP OAuth session, restricted via `--allowedTools` to five
 read/write tools (`list_issues`, `save_issue`, `list_teams`, `list_users`, `list_issue_statuses`).
-The sole sanctioned exceptions to "API key never writes" are (1) GraphQL `issueDelete` for
+Two further sanctioned key uses sit beside those mutations: (1) GraphQL `issueDelete` for
 TEST-cleanup only (user decision 2026-07-20), and (2) a single READ-ONLY `issue(id:...) { id }`
 lookup the sync service makes with the stored key AFTER the MCP create/find succeeds — 62-03 live
 smoke found that no Linear MCP tool in this allowlist (nor `get_issue`, checked live) ever exposes
