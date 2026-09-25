@@ -23,3 +23,19 @@ export const LINEAR_CONNECTION: ConnectionMeta = {
   footer:
     "Your key is checked against Linear and stored only in ~/.dispatch/config.json on this machine.",
 };
+
+export const GITHUB_CONNECTION: ConnectionMeta = {
+  source: "github",
+  name: "GitHub",
+  credentialLabel: "Personal access token",
+  steps: [
+    "Create a fine-grained or classic token on GitHub.",
+    "Give it the repo scope so Dispatch can read pull requests, post reviews and merge.",
+    "Paste it here and press Connect, or press Use gh login to reuse the GitHub CLI login.",
+    "Dispatch checks it with GitHub before saving it.",
+  ],
+  scopes: ["repo", "read:org"],
+  tokenPageUrl: "https://github.com/settings/tokens",
+  footer:
+    "Your token is checked against GitHub and stored only in the Dispatch Vault on this machine. With gh login, Dispatch asks gh for the token on each sync and never stores it.",
+};

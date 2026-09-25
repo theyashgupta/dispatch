@@ -1,4 +1,7 @@
-import { LinearConnectionCard } from "../connections/index.js";
+import {
+  GitHubConnectionCard,
+  LinearConnectionCard,
+} from "../connections/index.js";
 import {
   useCallback,
   useEffect,
@@ -1971,6 +1974,7 @@ const contentBodyStyle: CSSProperties = {
 const connectionsScrollStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
+  gap: "var(--space-lg)",
   flex: "1 1 auto",
   minHeight: 0,
   overflowY: "auto",
@@ -2112,6 +2116,7 @@ export function SettingsScreen({
               <LinearConnectionCard>
                 <SettingsScreen.FiltersTab filters={filters} />
               </LinearConnectionCard>
+              <GitHubConnectionCard />
             </div>
           )}
           {tab === "models" && (
