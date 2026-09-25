@@ -9,6 +9,7 @@ export const PAGES = [
   "vault",
   "archive",
   "workspaces",
+  "ask",
 ] as const;
 
 export type Page = (typeof PAGES)[number];
@@ -41,6 +42,16 @@ export function parseRoute(hash: string): Route {
   } catch {
     return { page, id };
   }
+}
+
+/**
+ * Serializes the route worth remembering for a later load: the parsed hash, minus an Ask id.
+ *
+ * @remarks An Ask id is a one-shot prefilled question, so a later load must never re-fill it.
+ */
+export function rememberedHash(hash: string): string {
+  const route = parseRoute(hash);
+  return routeHash(route.page === "ask" ? { page: route.page } : route);
 }
 
 /** Serializes a route to the hash `parseRoute` reads back, always with the leading `#/`. */

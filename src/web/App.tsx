@@ -79,6 +79,8 @@ import {
 } from "./lib/api.js";
 import type { ActionServices } from "./lib/actions.js";
 import { useItems } from "./hooks/useItems.js";
+import { useAsk } from "./hooks/useAsk.js";
+import { askAboutQuestion } from "./lib/ask.js";
 import type { UnwindDestination } from "../shared/types.js";
 import { UpdateBanner } from "./features/update/index.js";
 import { cleanupCard as cleanupCardApi, getCard, getSetup } from "./lib/api.js";
@@ -135,6 +137,9 @@ const WorkspacesPage = lazy(() =>
     default: m.WorkspacesPage,
   })),
 );
+const AskPage = lazy(() =>
+  import("./features/ask/index.js").then((m) => ({ default: m.AskPage })),
+);
 
 const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
   "settings",
@@ -142,6 +147,7 @@ const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
   "playbooks",
   "vault",
   "archive",
+  "ask",
 ]);
 
 const headerNoteStyle: CSSProperties = {
@@ -261,6 +267,7 @@ function BootScreen({ connection }: { connection: ConnectionStatus }) {
 export function App() {
   const feed = useActivityFeed();
   const claudeAccounts = useClaudeAccounts();
+  const ask = useAsk();
   const { route, navigate } = useRoute();
   const nav = useNavState();
   const carousel = useMediaQuery(CAROUSEL_QUERY);
@@ -495,6 +502,14 @@ export function App() {
   const undoToast = useUndoToast();
   const items = useItems(board);
   const { show: showUndo, notice: showNotice } = undoToast;
+  const askAbout = useCallback(
+    (question: string) => navigate("ask", question),
+    [navigate],
+  );
+  const consumeAskPrefill = useCallback(
+    () => navigate("ask", undefined, { replace: true }),
+    [navigate],
+  );
   const actionServices = useMemo<ActionServices>(
     () => ({
       api: { promoteItem, setItemState, snoozeItem, moveCard },
@@ -507,8 +522,9 @@ export function App() {
         navigator.clipboard
           ? navigator.clipboard.writeText(text)
           : Promise.reject(new Error("Clipboard unavailable over http")),
+      askAbout,
     }),
-    [showUndo, showNotice],
+    [showUndo, showNotice, askAbout],
   );
   const requestUnwind = useCallback(
     (id: string, to: UnwindDestination) => {
@@ -689,6 +705,7 @@ export function App() {
     vault: { title: "Vault", count: vaultCount },
     archive: { title: "Archive", count: archiveCount },
     workspaces: { title: "Workspaces", count: workspacesSummary?.count },
+    ask: { title: "Ask", count: ask.turns.length },
   };
   const pageTitle = pageMeta[route.page].title;
 
@@ -779,6 +796,13 @@ export function App() {
               ? ` (${workspacesSummary.unknownSizes} unknown)`
               : ""}
           </span>
+        ) : route.page === "ask" ? (
+          <Button
+            disabled={ask.turns.length === 0 && ask.pending === null}
+            onClick={ask.clear}
+          >
+            Clear
+          </Button>
         ) : undefined
       }
     />
@@ -860,6 +884,11 @@ export function App() {
                 onOpenCard={openWorktreeCard}
                 onCleanupRequest={requestWorktreeCleanup}
               />
+            ) : route.page === "ask" ? (
+              <AskPage
+                prefill={route.id}
+                onPrefillConsumed={consumeAskPrefill}
+              />
             ) : (
               <Board
                 board={board}
@@ -901,6 +930,15 @@ export function App() {
           onCleanupRequest={setCleanupCardId}
           onUnwindRequest={requestUnwind}
           onResetRequest={setResetCardId}
+          onAskRequest={(card) =>
+            askAbout(
+              askAboutQuestion({
+                kind: "card",
+                identifier: card.identifier,
+                title: card.title,
+              }),
+            )
+          }
           docked={route.page === "workspace"}
         />
       }

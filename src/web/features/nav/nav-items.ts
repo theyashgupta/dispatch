@@ -6,6 +6,7 @@ import {
   Inbox,
   Kanban,
   KeyRound,
+  MessageCircleQuestion,
   PanelLeft,
   Users,
   type LucideIcon,
@@ -25,6 +26,7 @@ export const NAV_GROUPS: readonly NavGroup[] = ["Home", "Work", "System"];
 
 export const NAV_ITEMS: readonly NavItem[] = [
   { page: "inbox", label: "Inbox", icon: Inbox, group: "Home" },
+  { page: "ask", label: "Ask", icon: MessageCircleQuestion, group: "Home" },
   { page: "board", label: "Board", icon: Kanban, group: "Work" },
   { page: "workspace", label: "Workspace", icon: PanelLeft, group: "Work" },
   { page: "activity", label: "Activity", icon: Activity, group: "Work" },

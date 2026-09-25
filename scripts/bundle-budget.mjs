@@ -72,6 +72,11 @@ const BUDGETS = [
     budgetGzipBytes: 2132, // seed: 1939 (the archive page, lazy; the accounts page rides main because the accounts barrel is eager)
   },
   {
+    label: "assets/ask-*.js",
+    match: (f) => f.startsWith(`assets${sep}ask-`) && f.endsWith(".js"),
+    budgetGzipBytes: 1955, // seed: 1777 (the ask page, lazy)
+  },
+  {
     label: "assets/index-*.css",
     match: (f) => f.startsWith(`assets${sep}index-`) && f.endsWith(".css"),
     budgetGzipBytes: 898, // seed: 816
