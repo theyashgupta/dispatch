@@ -34,12 +34,13 @@ function issueFields(issue: SourceIssue) {
 /** The Linear-owned display fields a poll may refresh on a card in any column. */
 function displayFields(
   issue: SourceIssue,
-): Pick<Card, "linearState" | "team" | "cycle" | "assignee"> {
+): Pick<Card, "linearState" | "team" | "cycle" | "assignee" | "comments"> {
   return {
     linearState: issue.state,
     team: issue.team,
     cycle: issue.cycle,
     assignee: issue.assignee,
+    comments: issue.comments,
   };
 }
 
@@ -50,9 +51,9 @@ function displayFields(
  * mapping, so key order matches, and a legacy row without a state id or color reads as changed.
  */
 function displayFieldsChanged(card: Card, issue: SourceIssue): boolean {
-  const { linearState, team, cycle, assignee } = card;
+  const { linearState, team, cycle, assignee, comments } = card;
   return (
-    JSON.stringify({ linearState, team, cycle, assignee }) !==
+    JSON.stringify({ linearState, team, cycle, assignee, comments }) !==
     JSON.stringify(displayFields(issue))
   );
 }

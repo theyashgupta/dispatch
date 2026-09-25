@@ -203,6 +203,9 @@ export interface Card {
   team?: LinearTeam;
   cycle?: number;
   assignee?: LinearAssignee;
+  comments?: LinearComment[];
+  commentCount?: number;
+  lastCommentId?: string;
   /** Linear priority integer: 0 none, 1 urgent, 2 high, 3 normal, 4 low. */
   priority: number;
   column: Column;
@@ -452,6 +455,7 @@ export interface Card {
    * stdout (SECURITY — mirrors `startError.stderr`'s no-pane-dump discipline).
    */
   syncError?: string | null;
+  linearError?: string | null;
 
   /**
    * Originating ticket source (a registered TicketSource.id — "linear" is the only value today).
@@ -1154,6 +1158,7 @@ export interface SourceIssue {
   team?: LinearTeam;
   cycle?: number;
   assignee?: LinearAssignee;
+  comments?: LinearComment[];
 }
 
 export interface TrackedRefresh {
@@ -1166,6 +1171,13 @@ export interface LinearState {
   name: string;
   type: string;
   color?: string;
+}
+
+export interface LinearComment {
+  id: string;
+  body: string;
+  createdAt: string;
+  author: string;
 }
 
 export interface LinearTeam {

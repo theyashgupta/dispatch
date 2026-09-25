@@ -43,6 +43,7 @@ export interface TicketSource {
     truncated: boolean;
   }>;
   fetchByIds?(ids: string[]): Promise<SourceIssue[]>;
+  addComment?(issueId: string, body: string): Promise<void>;
   readonly capabilities: FilterCapabilities;
   listOptions(
     dimension: Exclude<FilterDimension, "cycle">,

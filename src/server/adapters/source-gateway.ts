@@ -73,6 +73,14 @@ export function testLinearConnection(apiKey: string): Promise<boolean> {
   return testImpl(apiKey);
 }
 
+/** The source's comment mutation, or undefined when the source is off or cannot comment. */
+export function sourceCommenter(
+  sourceId: string,
+): ((issueId: string, body: string) => Promise<void>) | undefined {
+  const source = isSourceEnabled(sourceId) ? getSource(sourceId) : undefined;
+  return source?.addComment?.bind(source);
+}
+
 /** Whether a source id is registered and enabled, for routes that must answer 404 or 409. */
 export function sourceState(
   sourceId: string,
