@@ -28,7 +28,9 @@ const perfCalls: { cmd: string; shape: string; ms: number }[] = [];
  * `opts.timeout` deadline), mirroring the perf-harness kill pattern (`scripts/perf-boot.mjs`).
  * Without this, a child that ignores SIGTERM keeps the promisified `execFile` promise pending
  * forever — a caller's single-flight guard then wedges until backend restart. Returns a disarm
- * callback the caller MUST run on settle so a normally-exiting child's PID is never re-signalled.
+ * callback that run() calls when the child exits or fails to spawn, never on settle or on the
+ * abort's own error event: an abort rejects before the child is gone, and disarming then would
+ * cancel the SIGKILL it still needs.
  */
 function armKillEscalation(
   child: ChildProcess,
@@ -39,7 +41,8 @@ function armKillEscalation(
   const onAbort = (): void => {
     timers.push(setTimeout(() => child.kill("SIGKILL"), graceMs));
   };
-  opts.signal?.addEventListener("abort", onAbort, { once: true });
+  if (opts.signal?.aborted) onAbort();
+  else opts.signal?.addEventListener("abort", onAbort, { once: true });
   if (opts.timeout !== undefined) {
     timers.push(
       setTimeout(() => child.kill("SIGKILL"), opts.timeout + graceMs),
@@ -59,6 +62,8 @@ function armKillEscalation(
  * distinction is load-bearing for probes whose success path can still exit non-zero: `lsof` exits 1
  * with perfectly valid stdout when its `-p` list names a pid that has since died, so a caller must
  * be able to tell "exited 1, parse the stdout anyway" from "binary missing, give up".
+ * `.killed` is true only when the `timeout` deadline killed the child; an abort rejects with code
+ * `ABORT_ERR` and a maxBuffer overflow with `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`.
  * `killEscalationMs` (opt-in, inert when unset) arms {@link armKillEscalation} for callers whose
  * child may ignore the abort/timeout SIGTERM (headless `claude -p` drafts). `env` adds variables on
  * top of the inherited process environment (a per-account `CLAUDE_CONFIG_DIR`), never replaces it.
@@ -100,6 +105,13 @@ export async function run(
     killEscalationMs === undefined
       ? null
       : armKillEscalation(pending.child, execOpts, killEscalationMs);
+  if (disarm) {
+    const { child } = pending;
+    child.once("exit", disarm);
+    child.once("error", () => {
+      if (child.pid === undefined) disarm();
+    });
+  }
   try {
     const { stdout, stderr } = await pending;
     if (perfExec) perfCalls.push({ cmd, shape, ms: performance.now() - t0 });
@@ -110,14 +122,14 @@ export async function run(
       stderr?: string;
       stdout?: string;
       code?: number | string;
+      killed?: boolean;
     };
     throw Object.assign(new Error(e.message), {
       stderr: e.stderr ?? "",
       stdout: e.stdout ?? "",
       code: e.code,
+      killed: e.killed === true,
     });
-  } finally {
-    disarm?.();
   }
 }
 
