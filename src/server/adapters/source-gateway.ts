@@ -9,13 +9,31 @@ import {
   fetchLinearAccount,
   testLinearConnection as testImpl,
 } from "../sources/linear/linear.source.js";
+import { fetchGithubLogin } from "../sources/github/github.source.js";
+import {
+  fetchPrDetail,
+  postPrReview,
+  squashMergePr,
+} from "../sources/github/github-pr.js";
+
+export {
+  GitHubAuthError,
+  GitHubRequestError,
+  GitHubSsoError,
+} from "../sources/github/github.source.js";
+export { RateLimited as SourceRateLimited } from "../sources/ticket.source.js";
 import type {
   FilterCapabilities,
   FilterDimension,
   FilterOption,
   TicketSource,
 } from "../sources/ticket.source.js";
-import type { Config, SourceFilters } from "../../shared/types.js";
+import type {
+  Config,
+  PrDetail,
+  PrReviewEvent,
+  SourceFilters,
+} from "../../shared/types.js";
 
 /**
  * Thrown when a route asks for a source id the registry does not serve. It lives in the adapters
@@ -86,6 +104,49 @@ export function checkSourceKey(
 ): Promise<{ account?: string } | null> {
   resolveSource(sourceId);
   return fetchLinearAccount(apiKey);
+}
+
+/**
+ * Check a GitHub token live and return its login, or null when GitHub rejects it.
+ *
+ * @remarks Re-throws every other failure, including the SSO error, so callers can tell them apart.
+ */
+export function checkGithubToken(
+  token: string,
+): Promise<{ account?: string } | null> {
+  return fetchGithubLogin(token);
+}
+
+/** Read one pull request's detail with a GitHub token. */
+export function fetchGithubPr(
+  token: string,
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<PrDetail> {
+  return fetchPrDetail(token, owner, repo, number);
+}
+
+/** Post a review on one pull request with a GitHub token. */
+export function reviewGithubPr(
+  token: string,
+  owner: string,
+  repo: string,
+  number: number,
+  review: { event: PrReviewEvent; body?: string },
+): Promise<void> {
+  return postPrReview(token, owner, repo, number, review);
+}
+
+/** Squash merge one pull request at a given head commit with a GitHub token. */
+export function mergeGithubPr(
+  token: string,
+  owner: string,
+  repo: string,
+  number: number,
+  sha: string,
+): Promise<void> {
+  return squashMergePr(token, owner, repo, number, sha);
 }
 
 /** Whether a source id is registered and enabled, for routes that must answer 404 or 409. */
