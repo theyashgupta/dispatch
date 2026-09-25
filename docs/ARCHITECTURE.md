@@ -2042,6 +2042,10 @@ Inbox card is structurally never mid-saga (no session can start from Inbox), so 
 harmless no-op there. The muted "Gone from Linear" badge (`web/features/badges/GoneBadge.tsx`, shown
 only on cards past To Do/Inbox) is INFORMATIONAL, not destructive: the issue disappearing from
 Linear on a card past that point is EXPECTED, so it uses muted text/border, never red.
+A card adopted from a local card on Sync to Linear (`mapping.ts#isAdopted`: its id differs from its
+issue id) is the exception in To Do: its issue can sit outside the board filter, so absence never
+removes it. Like a card past To Do it joins the tracked query, is refreshed by id and is flagged
+gone only when that query requested it and did not get it back.
 
 **Sync-status precedence (`SYNC-04`).** The sidebar footer status (`web/features/nav/SyncStatus.tsx`) reports sync
 freshness + connection health as TEXT only (no spinner — the board must feel instant), and its
@@ -2074,8 +2078,13 @@ Linear INTO the board; this half pushes a `source:"local"` card OUT to a real Li
 explicit user action (`POST /cards/:id/sync-linear`, `services/orchestration/linear-sync.ts`).
 Key writes through source mutations only: the stored Linear API key writes to Linear solely
 through `LinearSource` mutation methods called from a service in `services/orchestration/`, never
-from a route (today `commentCreate`, called by `linear-outbound.ts#postComment`). This sync path
-does not use the key to create anything; it spawns a headless `claude -p` that
+from a route (`commentCreate` and `issueUpdate` from `linear-outbound.ts`, `issueCreate` from
+`linear-sync.ts#syncCardDirect`). By default Sync to Linear takes the direct path: the route needs a
+`teamId` (400 otherwise), `FindSync` searches for the card's `dispatch-sync:<cardId>` token and a
+hit is adopted with no create, and a miss sends `issueCreate` with the token as the last
+description line (`create-input.ts#buildCreateInput`). With `linearSyncViaClaude: true` in config
+the old path runs for one release instead: it does not use the key to create anything; it spawns a
+headless `claude -p` that
 reuses the CLI's own user-scope Linear MCP OAuth session, restricted via `--allowedTools` to five
 read/write tools (`list_issues`, `save_issue`, `list_teams`, `list_users`, `list_issue_statuses`).
 Two further sanctioned key uses sit beside those mutations: (1) GraphQL `issueDelete` for
