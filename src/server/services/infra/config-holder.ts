@@ -6,6 +6,7 @@ import {
   type SourceFilters,
   type StatusChannel,
   type TerminalAppearance,
+  type UserProfile,
 } from "../../../shared/types.js";
 import { CONFIG_PATH } from "./paths.js";
 
@@ -325,6 +326,18 @@ export function updateClaudeArgs(args: string): void {
  */
 export function updateTerminalAppearance(appearance: TerminalAppearance): void {
   patchConfig({ terminal: appearance });
+}
+
+/**
+ * Persist the About you profile (Settings ▸ About you) and make it live.
+ *
+ * @remarks Called only from the validated `PUT /config/profile` route. An empty profile is stored
+ * as an absent key, because JSON serialization drops the undefined value.
+ */
+export function updateProfile(profile: UserProfile): void {
+  patchConfig({
+    profile: Object.keys(profile).length > 0 ? profile : undefined,
+  });
 }
 
 /**

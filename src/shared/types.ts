@@ -1020,6 +1020,15 @@ export interface Config {
   activeClaudeAccountId?: string;
   /** Terminal appearance chosen in Settings; absent or invalid resolves to the shipped default. */
   terminal?: TerminalAppearance;
+  profile?: UserProfile;
+}
+
+export interface UserProfile {
+  name?: string;
+  email?: string;
+  handles?: string[];
+  role?: string;
+  brief?: string;
 }
 
 export interface TerminalAppearance {
