@@ -35,6 +35,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Orchestration Saga](#orchestration-saga)
   - [Exec Chokepoint](#exec-chokepoint)
   - [Linear Sync](#linear-sync)
+  - [GitHub Source](#github-source)
   - [SSE Transport](#sse-transport)
   - [Startup Preflight](#startup-preflight)
   - [Cleanup Lifecycle](#cleanup-lifecycle)
@@ -2112,6 +2113,53 @@ outside printable ASCII answers 400 before any network call, a config write fail
 `save-failed`, and a replace whose key check was still in flight when a disconnect landed answers
 409 `superseded` and writes nothing. The key never appears in a response, a log line or an error
 body.
+
+**Token sources (LOCAL-45).** The same three routes also serve `github`, dispatched through
+`services/domain/token-connection.ts`. A GitHub token lives in the Dispatch Vault under
+`GITHUB_TOKEN`; when that value is empty, `services/domain/github-token.ts#resolveGithubToken` asks
+`adapters/gh.ts#readGhToken` (`gh auth token` through the exec chokepoint) on every call and never
+caches or logs the result. A token that is not printable ASCII resolves to no credential. The
+registry receives that resolver from bootstrap (`setCredentialResolver`), because sources may not
+import the Vault or the exec chokepoint. `GET` reports `configured` when a credential resolves, `via`
+(`vault` or `gh`), and `connected` only while `sources.github.enabled` is true and `GET /user`
+answers; an SSO block answers `error: "sso-required"` with the authorization URL. `PUT` checks a
+pasted token with `GET /user`, stores it with the Vault service (creating the key with its purpose
+when absent), and writes `sources.github.enabled: true` through
+`config-holder.ts#setSourceEnabled`. `POST /api/sources/:source/connect` (token sources only) turns
+polling on with the credential already present (a filled Vault value or the gh login) and answers
+400 `no-credential` when there is none; like `PUT`, it answers 409 `superseded` when a `DELETE`
+landed while it was checking. `DELETE` clears the Vault value and its previous value with
+`vault.ts#clearValue`, keeping the key name and purpose, and writes `enabled: false`. A filled Vault
+value or a logged-in `gh` is a credential, not consent: GitHub polls, and the pull request routes
+answer, only after one of these routes enabled it.
+
+### GitHub Source
+
+`sources/github/github.source.ts` is a snapshot item source (LOCAL-45). Each poll resolves the token
+through the registry's credential resolver (the Vault `GITHUB_TOKEN`, else `gh auth token`) and runs
+three searches in order, each one page of 100: `is:open is:pr review-requested:@me`,
+`is:open is:pr mentions:@me`, `is:open is:pr assignee:@me`. `mergeSearchResults` keeps the first
+category a PR appears in (types `pr_review` at priority 75, `pr_mention` and `pr_assigned` at 50)
+and marks the pull partial when a category has more than 100 results, reports incomplete results,
+or carries the `X-GitHub-SSO: partial-results` header; a partial pull never auto-resolves an item.
+Item ids are `github:<owner>/<name>#<number>` and `createdAt` is the PR's last update. A 401 fails
+the poll with last-known-good kept, an exhausted rate limit raises `RateLimited`, and a 403 with
+`X-GitHub-SSO: required` raises `GitHubSsoError` with the authorization URL.
+`DISPATCH_GITHUB_API_URL` replaces the API base for sandbox runs against `scripts/fake-github.mjs`,
+started as `node scripts/fake-github.mjs <port> <state.json>` from a copy of
+`scripts/fixtures/fake-github-state.json`, with `scripts/fixtures/gh-shim-g5.sh` copied to `gh` on the
+sandbox server's PATH.
+
+`routes/github.route.ts` serves the Pull Requests page through `services/domain/github.ts` and the
+source gateway. `GET /api/github/pr/:owner/:repo/:number` answers the PR with at most 50 files, each
+patch cut at 6000 characters (both cuts flagged), and one check list merged from check runs and
+legacy statuses, sorted fail, pending, pass (`github-pr.ts#classifyCheckRun` passes only success,
+skipped and neutral). `POST .../review` posts `APPROVE`, `REQUEST_CHANGES` or `COMMENT` (a body is
+required for the last two, at most 20000 characters). `POST .../merge` squash merges with the head
+SHA the client saw, so a head that moved answers 409 `not-mergeable`. Owner, repo, number and SHA are
+validated before any GitHub call; errors answer an error kind (`rejected`, `not-found`,
+`sso-required`, `rate-limited`, `unreachable`, `no-credential`) and only GitHub's own message text
+for its refusals, never the token or a raw body. A successful write calls `pollNow("github")`.
 
 ### SSE Transport
 
