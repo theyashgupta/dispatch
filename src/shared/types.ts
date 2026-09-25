@@ -860,6 +860,18 @@ export interface WorkspacesInventory {
   unknownSizes: number;
 }
 
+export const ASK_LIMITS = { question: 2000, turns: 20, turnText: 8000 };
+
+export interface AskTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+export interface AskRequest {
+  question: string;
+  history: AskTurn[];
+}
+
 /**
  * A directory entry surfaced by the folder-browser API: absolute path, display
  * name, whether it carries a `.git` marker, and whether its name is a dotfolder.
