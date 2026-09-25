@@ -22,6 +22,7 @@ import type {
   SettableItemState,
   SourceConnection,
   SourceKeyError,
+  UserProfile,
 } from "../../shared/types.js";
 import type { CardSearchResult } from "../../shared/search.js";
 
@@ -1589,4 +1590,37 @@ export async function deleteSourceKey(source: string): Promise<void> {
   if (!res.ok) {
     throw new Error(`deleteSourceKey failed: ${res.status}`);
   }
+}
+
+/** Read the About you profile: GET /api/config/profile. Throws on non-2xx. */
+export async function getProfile(): Promise<UserProfile> {
+  const res = await fetch("/api/config/profile");
+  if (!res.ok) {
+    throw new Error(`getProfile failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as UserProfile;
+}
+
+/**
+ * Save the About you profile: PUT /api/config/profile.
+ *
+ * @remarks A 400 carries the server's field-named message for the tab to show verbatim; any other
+ * non-2xx throws. The 200 body is the normalized profile as stored.
+ */
+export async function saveProfile(
+  profile: UserProfile,
+): Promise<{ ok: true; profile: UserProfile } | { ok: false; error: string }> {
+  const res = await fetch("/api/config/profile", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profile),
+  });
+  if (res.ok) {
+    return { ok: true, profile: (await res.json()) as UserProfile };
+  }
+  if (res.status === 400) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: body.error ?? "Invalid profile" };
+  }
+  throw new Error(`saveProfile failed: ${res.status} ${res.statusText}`);
 }

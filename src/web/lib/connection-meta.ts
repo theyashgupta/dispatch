@@ -23,3 +23,11 @@ export const LINEAR_CONNECTION: ConnectionMeta = {
   footer:
     "Your key is checked against Linear and stored only in ~/.dispatch/config.json on this machine.",
 };
+
+export const SOON_CONNECTIONS: { source: string; name: string }[] = [
+  { source: "github", name: "GitHub" },
+  { source: "slack", name: "Slack" },
+  { source: "sentry", name: "Sentry" },
+  { source: "meeting", name: "Meetings" },
+  { source: "calendar", name: "Calendar" },
+];
