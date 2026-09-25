@@ -9,6 +9,7 @@ export const PAGES = [
   "playbooks",
   "vault",
   "archive",
+  "pull-requests",
 ] as const;
 
 export type Page = (typeof PAGES)[number];

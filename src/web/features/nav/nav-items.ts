@@ -1,6 +1,7 @@
 import {
   Activity,
   Archive,
+  GitPullRequest,
   ClipboardList,
   Inbox,
   Kanban,
@@ -12,7 +13,7 @@ import {
 } from "lucide-react";
 import type { Page } from "../../lib/route.js";
 
-export type NavGroup = "Home" | "Work" | "System";
+export type NavGroup = "Home" | "Work" | "Sources" | "System";
 
 export interface NavItem {
   page: Page;
@@ -21,7 +22,12 @@ export interface NavItem {
   group: NavGroup;
 }
 
-export const NAV_GROUPS: readonly NavGroup[] = ["Home", "Work", "System"];
+export const NAV_GROUPS: readonly NavGroup[] = [
+  "Home",
+  "Work",
+  "Sources",
+  "System",
+];
 
 export const NAV_ITEMS: readonly NavItem[] = [
   { page: "inbox", label: "Inbox", icon: Inbox, group: "Home" },
@@ -43,6 +49,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   { page: "vault", label: "Vault", icon: KeyRound, group: "System" },
   { page: "archive", label: "Archive", icon: Archive, group: "System" },
+  {
+    page: "pull-requests",
+    label: "Pull Requests",
+    icon: GitPullRequest,
+    group: "Sources",
+  },
 ];
 
 /**
