@@ -186,6 +186,30 @@ done; a promoted item stays done and answers 409), `POST /api/items/:id/snooze` 
 validates a future ISO time before any queue work; a promoted item answers 409 here too), `POST /api/items/:id/promote` (201 on the
 first call, 200 after).
 
+### Meeting notes
+
+The paste flow turns meeting notes into Inbox items, never cards. `POST /api/cards/draft-many`
+(`routes/meetings.route.ts`) validates the meeting name (1 to 200 characters), the notes (at most
+100000 characters) and an optional "your name in these notes" hint, then runs one headless
+`claude -p` through `meeting-draft.ts#generateMeetingDrafts` with the same fixed flags as
+`ticket-generate.ts` (no tools, strict MCP config, no session persistence, 150 s timeout, SIGKILL
+escalation). The prompt goes on stdin, so the notes never appear in the process list. The route
+has its own single-flight flag (409 while a run is open) and aborts on `res.on("close")`, which
+kills the child when the client cancels. Notes and model output are never logged.
+
+The model answers with repeated `## Action item` sections (`key:`, `title:`, then a quoted
+description) or the literal `NO_ACTION_ITEMS`. The pure parser in `meeting-actions.ts` drops any
+section with an invalid key or title, an empty body, or the `DISPATCH_STATUS:` marker, keeps the
+first of a duplicate key and at most 15. `POST /api/meetings/items` creates the drafts the user
+kept: it answers 400 on the marker in the meeting name, a title or a description, validates every
+draft before writing, and upserts `append` items through `store.upsertItems("meeting", ...)`, answering the created and
+updated counts. An
+item id is `meeting:<feed>:<meeting date>-<meeting slug>:<key>`, where the slug is a readable
+prefix plus a short hash of the full name so two meetings never share one, so the same meeting pasted twice
+on one day updates its rows and keeps their state, while a weekly meeting gets new rows each week.
+Each item carries `meta.meeting`, `meta.meetingDate`, `meta.meetingId`, `meta.key` and
+`meta.siblings` (the other titles from the same meeting as JSON).
+
 ### Session Projection Chokepoint
 
 A card's six flat session fields — `tmuxSession`, `ttydPort`, `hookToken`, `claudeSessionId`,
@@ -1956,7 +1980,9 @@ builders pass ticket titles to `claude` as the `-p` argv element today:
 `group-title-generate.ts#buildPrompt` (every group member's title). What makes those safe is that
 each prompt is ONE element of an argv array handed to `execFile` — no shell parses it, so no
 metacharacter in it can mean anything. A helper that shell-quoted a value, or an `sh -c`
-carve-out, would break the guarantee no matter how well the value was screened.
+carve-out, would break the guarantee no matter how well the value was screened. The meeting
+notes prompt (`meeting-draft.ts#generateMeetingDrafts`) goes further and keeps its request text
+out of argv entirely: it travels on stdin through `run()`'s `input` option.
 
 The distinct claims worth keeping separate: a ticket **identifier** is the only per-ticket value
 that reaches a SESSION-layer argv (tmux session name, branch, worktree path), and it is
