@@ -15,6 +15,7 @@ import type {
 import type { Config, SourceFilters } from "../../shared/types.js";
 
 export { LINEAR_GRAPHQL_URL } from "../sources/linear/linear.source.js";
+export type { TicketSource };
 
 /**
  * Thrown when a route asks for a source id the registry does not serve. It lives in the adapters
@@ -73,12 +74,9 @@ export function testLinearConnection(apiKey: string): Promise<boolean> {
   return testImpl(apiKey);
 }
 
-/** The source's comment mutation, or undefined when the source is off or cannot comment. */
-export function sourceCommenter(
-  sourceId: string,
-): ((issueId: string, body: string) => Promise<void>) | undefined {
-  const source = isSourceEnabled(sourceId) ? getSource(sourceId) : undefined;
-  return source?.addComment?.bind(source);
+/** The source when it is registered and enabled, for services that write to it. */
+export function enabledSource(sourceId: string): TicketSource | undefined {
+  return isSourceEnabled(sourceId) ? getSource(sourceId) : undefined;
 }
 
 /** Whether a source id is registered and enabled, for routes that must answer 404 or 409. */

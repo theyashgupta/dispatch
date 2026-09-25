@@ -988,6 +988,7 @@ export interface Config {
   sources?: { linear?: SourceConfig };
   /** On-boot update check; absent or any non-`false` value resolves to on. */
   updateCheck?: boolean;
+  linearSyncViaClaude?: boolean;
   /** The playbook name remembered from the last successful kickoff; absent when never set. */
   lastUsedPlaybook?: string;
   /**
@@ -1171,6 +1172,40 @@ export interface LinearState {
   name: string;
   type: string;
   color?: string;
+}
+
+export interface WorkflowState extends LinearState {
+  id: string;
+  position: number;
+}
+
+export interface WorkflowTeam extends LinearTeam {
+  states: WorkflowState[];
+}
+
+export interface LinearWorkflow {
+  viewerId: string;
+  teams: WorkflowTeam[];
+}
+
+export interface NewLinearIssue {
+  teamId: string;
+  title: string;
+  description: string | null;
+  token: string;
+  stateId?: string;
+  priority?: number;
+}
+
+export interface CreatedLinearIssue {
+  created: boolean;
+  issue: {
+    id: string;
+    identifier: string;
+    url: string;
+    title: string;
+    description: string;
+  };
 }
 
 export interface LinearComment {

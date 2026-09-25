@@ -34,8 +34,14 @@ import {
   generateGroupTitlePhrase,
   type GroupTitleMember,
 } from "../services/orchestration/group-title-generate.js";
-import { syncCardToLinear } from "../services/orchestration/linear-sync.js";
-import { postComment } from "../services/orchestration/linear-outbound.js";
+import {
+  syncCard,
+  syncViaClaude,
+} from "../services/orchestration/linear-sync.js";
+import {
+  assignToMe,
+  postComment,
+} from "../services/orchestration/linear-outbound.js";
 import { validateCommentBody } from "../../shared/comment-body.js";
 import {
   ATTACHMENT_NAME_RE,
@@ -46,6 +52,7 @@ import {
   commitAttachments,
 } from "../services/domain/attachments.js";
 import { attachmentsDir } from "../services/infra/paths.js";
+import { enabledSource } from "../adapters/source-gateway.js";
 
 export const cardsRouter = Router();
 
@@ -162,6 +169,15 @@ cardsRouter.post("/cards/:id/comment", async (req, res) => {
     return;
   }
   res.status(201).json({ ok: true });
+});
+
+cardsRouter.post("/cards/:id/assign-me", async (req, res) => {
+  const outcome = await assignToMe(req.params.id);
+  if (!outcome.ok) {
+    res.status(outcome.status).json({ error: outcome.error });
+    return;
+  }
+  res.status(204).end();
 });
 
 cardsRouter.post("/cards/:id/move", async (req, res) => {
@@ -1135,12 +1151,14 @@ function screenAdoptedFields(
  * guard follows the `isStarting` discipline EXACTLY: `store.isSyncing` is checked and
  * `store.beginSync` is called SYNCHRONOUSLY with no `await` between them, so a concurrent request
  * for the SAME card can never race past the guard; a DIFFERENT card's sync is unaffected (the guard
- * is keyed by card id, never a global flag). The subprocess call carries NO abort-on-disconnect
+ * is keyed by card id, never a global flag). The sync call (direct or Claude path) carries NO abort-on-disconnect
  * wiring — the service's own no-signal decision — so the server owns the full timeout bound and a
  * client disconnect can never orphan a created-but-unadopted Linear issue mid-flight. The 200 body
  * passes the card through `redactCard()` — the same redaction applied by `snapshot()`, reached
  * directly rather than by building a whole board to find one card — never the live Map entry, so a
  * started local card's `hookToken` can never ride the response (SECURITY).
+ * The direct path (the default) needs a `teamId` in the body (400 otherwise) and a connected
+ * Linear source (409 "Linear is not connected").
  */
 async function syncLinearHandler(
   req: Request<{ id: string }>,
@@ -1173,15 +1191,40 @@ async function syncLinearHandler(
     return;
   }
 
+  const { teamId, stateId } = (req.body ?? {}) as {
+    teamId?: unknown;
+    stateId?: unknown;
+  };
+  const target =
+    typeof teamId === "string" && teamId !== ""
+      ? {
+          teamId,
+          ...(typeof stateId === "string" && stateId !== "" ? { stateId } : {}),
+        }
+      : undefined;
+  const viaClaude = syncViaClaude();
+  if (!target && !viaClaude) {
+    res.status(400).json({ error: "teamId is required" });
+    return;
+  }
+  if (!viaClaude && !enabledSource("linear")?.createIssue) {
+    res.status(409).json({ error: "Linear is not connected" });
+    return;
+  }
+
   store.beginSync(id);
   void store.setSyncing(id, true);
 
   try {
-    const result = await syncCardToLinear({
-      id: card.id,
-      title: card.title,
-      description: card.description,
-    });
+    const result = await syncCard(
+      {
+        id: card.id,
+        title: card.title,
+        description: card.description,
+        priority: card.priority,
+      },
+      target,
+    );
 
     const adopted = screenAdoptedFields(result, card);
     await store.adoptLinearIdentity(id, adopted);

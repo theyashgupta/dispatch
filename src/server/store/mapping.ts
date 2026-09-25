@@ -63,6 +63,15 @@ export function isPastTodo(card: Card): boolean {
   return card.column !== "todo" && card.column !== "inbox";
 }
 
+/**
+ * Whether a card began as a local card and adopted a Linear issue on Sync to Linear.
+ *
+ * @remarks Its issue may sit outside the board filter, so absence from the pull never removes it.
+ */
+export function isAdopted(card: Card): boolean {
+  return card.id !== card.issueId;
+}
+
 /** CR-01 predicate: a start saga is in flight for the card, or it already carries provisioning/session state from one. Exported so `adoptLinearIdentity`'s poll-race dedup applies the SAME removal guard reconcile does. */
 export function isStartingCard(
   card: Card,
@@ -150,7 +159,7 @@ export function reconcile(
   const goneIds: string[] = [];
   for (const card of current.values()) {
     if (seen.has(card.issueId)) continue;
-    if (!isPastTodo(card)) {
+    if (!isPastTodo(card) && !isAdopted(card)) {
       if (card.groupId == null && !isStartingCard(card, inFlightStartIds)) {
         removeIds.push(card.id);
       } else {
