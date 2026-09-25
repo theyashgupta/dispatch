@@ -102,6 +102,7 @@ import {
 } from "./lib/cleanup-feedback.js";
 import { refreshPushSubscription } from "./lib/push.js";
 import type { StartRequest } from "./lib/start-request.js";
+import { meetingNotice } from "./lib/meetings.js";
 import type { PrerequisiteStatus, TunnelState } from "../shared/types.js";
 import type { CardSearchResult } from "../shared/search.js";
 import { DONE_PAGE_SIZE } from "../shared/done-limit.js";
@@ -140,6 +141,11 @@ const SessionsPage = lazy(() =>
 const CommandPalette = lazy(() =>
   import("./features/palette/index.js").then((m) => ({
     default: m.CommandPalette,
+  })),
+);
+const MeetingNotesModal = lazy(() =>
+  import("./features/meetings/index.js").then((m) => ({
+    default: m.MeetingNotesModal,
   })),
 );
 const CheatSheet = lazy(() =>
@@ -611,6 +617,7 @@ export function App() {
   };
 
   const [createTicketOpen, setCreateTicketOpen] = useState(false);
+  const [meetingNotesOpen, setMeetingNotesOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const overlayReturnRef = useRef<HTMLElement | null>(null);
@@ -975,7 +982,21 @@ export function App() {
         />
       )}
       {createTicketOpen && (
-        <CreateTicketModal onClose={closeOverlay(setCreateTicketOpen)} />
+        <CreateTicketModal
+          onClose={closeOverlay(setCreateTicketOpen)}
+          onFromMeetingNotes={() => {
+            setCreateTicketOpen(false);
+            setMeetingNotesOpen(true);
+          }}
+        />
+      )}
+      {meetingNotesOpen && (
+        <Suspense fallback={null}>
+          <MeetingNotesModal
+            onClose={closeOverlay(setMeetingNotesOpen)}
+            onCreated={(result) => showNotice(meetingNotice(result))}
+          />
+        </Suspense>
       )}
       {shortcutsOpen && (
         <Suspense fallback={null}>
@@ -1000,6 +1021,7 @@ export function App() {
                 openCard: selectCard,
                 navigate,
                 newTicket: openOverlay(setCreateTicketOpen),
+                meetingNotes: openOverlay(setMeetingNotesOpen),
                 syncNow: () =>
                   void syncSources(
                     actionServices.api,

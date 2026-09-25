@@ -14,6 +14,7 @@ export interface Command {
 export interface CommandContext extends CardActionContext {
   navigate: (page: Page) => void;
   newTicket: () => void;
+  meetingNotes: () => void;
   syncNow: () => void;
 }
 
@@ -41,6 +42,11 @@ export function buildCommands(
       }),
     ),
     { id: "new-ticket", label: "New ticket", key: "n", run: ctx.newTicket },
+    {
+      id: "meeting-notes",
+      label: "New tickets from meeting notes",
+      run: ctx.meetingNotes,
+    },
     { id: "sync-now", label: "Sync now", run: ctx.syncNow },
   ];
   if (card == null || card.groupId != null) return general;
