@@ -2090,8 +2090,8 @@ Sync-to-Linear requires a one-time interactive Linear MCP OAuth authorization on
 `claude`, type `/mcp`, choose `linear`, and authenticate in the browser. The workspace selected during
 that OAuth flow is the write target for every subsequent headless sync (done for Yash-Test 2026-07-20).
 
-**Connection routes (LOCAL-32).** `routes/connection.route.ts` owns the Linear connection after
-first-run setup. `GET /api/sources/:source/connection` answers `{ configured, connected, account?,
+**Connection routes (LOCAL-32).** `routes/connection.route.ts` owns the Linear connection for
+Settings and the setup wizard. `GET /api/sources/:source/connection` answers `{ configured, connected, account?,
 error? }`: no stored key means no network call; a stored key runs the live viewer check
 (`linear.source.ts#fetchLinearAccount`, `viewer { id name email }`), and a rejection or an outage comes
 back as `error: "rejected"` or `"unreachable"` with `configured: true`. `PUT
@@ -2242,18 +2242,30 @@ freshness guarantee for the point where a start actually gets requested.
 Preflight is INFORMATIVE, never a gate (`BOARD-05`, `PRE-01`/`PRE-02`/`PRE-03`). `services/infra/preflight.ts` is
 the single source of truth for prerequisite / Node-version / storage-health status and per-platform
 install commands, and it is consumed identically by three surfaces: `dispatch doctor` and ordinary
-boot (`bootstrap/cli.ts`, `bootstrap/index.ts`) and the web first-run setup screen
-(`routes/setup.route.ts` → `web/lib/api.ts` → `features/setup/FirstRunSetup.tsx`). `probePreflight()`
+boot (`bootstrap/cli.ts`, `bootstrap/index.ts`) and the Welcome step of the web setup wizard
+(`routes/setup.route.ts` → `web/lib/api.ts` → `features/setup/PrerequisiteChecklist.tsx`). `probePreflight()`
 probes EVERY required binary — `tmux`, `ttyd`, `claude`, `git` — with no short-circuit, and returns
 each one's presence plus its exact platform-appropriate install command, alongside the running Node
 version compared against the `engines.node` floor and a read-only storage-health line.
 
 The backend BOOTS REGARDLESS: a missing binary, a below-floor Node, or unhealthy storage renders a
-line and the server still listens, so the browser always reaches a live setup screen with current
-status. (Sessions that actually need a missing binary still fail at use-time, on the card.) `dispatch
+line and the server still listens, so the browser always reaches the app, and the setup wizard
+shows current status. (Sessions that actually need a missing binary still fail at use-time, on the card.) `dispatch
 doctor` is likewise a diagnostic, not a gate — it ALWAYS exits 0. The only fail-fast path left is a
 missing/incomplete config, which throws `StartupError` (the class still homed in
 `bootstrap/binary-check.ts`, now its sole remaining export, raised from `bootstrap/config.ts`).
+
+The setup wizard (`features/setup/SetupWizard.tsx`) opens over the running app, never in place of
+it. `App.tsx` opens it on its own only when `lib/setup-wizard.ts` sees `needsKey` and not
+`onboardingDone` in `GET /api/setup`; every way of closing it calls `POST /api/setup/onboarding-done`,
+which writes the flat `onboardingDone` config flag (204, idempotent), so it never opens on its own
+again. A failed status read renders the app with no wizard. Settings, Connections, Run setup guide
+reopens it at Welcome after a fresh `GET /api/setup`, so the checklist is current, and the Linear
+card in Settings remounts when it closes so it reads the new connection. An app that already has a
+Linear key and no flag marks onboarding done on load, so a later disconnect never reopens the
+wizard on its own. The same helper holds
+Next on the Connect Linear step until the Linear card reports a connection; Skip this connection
+moves on without one.
 
 A missing binary is one guided command away on either surface: in an interactive terminal preflight
 offers `[Y/n]` and runs the install on confirm; under a pipe/CI it prints the command and never
@@ -3086,7 +3098,7 @@ Collapsible grid-rows pair and never measures; once open it stops clipping so dr
 can overflow. The status is the shared `SourceCardStatus` union (checking, disconnected, connected with
 an optional account, error with its copy, soon); a soon card renders the header only. The Linear
 composition lives in `features/connections/LinearConnectionCard.tsx` behind the feature barrel so
-the setup wizard can reuse it; Settings is its consumer today. `hooks/useLinearConnection.ts` reads
+the setup wizard reuses it; Settings and the wizard are its consumers. `hooks/useLinearConnection.ts` reads
 the status on mount and on Test only, shows Checking until the first read settles, and keeps
 Connect disabled until then.
 
