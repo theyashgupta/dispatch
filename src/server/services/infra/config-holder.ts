@@ -329,6 +329,15 @@ export function updateTerminalAppearance(appearance: TerminalAppearance): void {
 }
 
 /**
+ * Record that the setup wizard was closed so it never opens on its own again.
+ *
+ * @remarks Idempotent: every close path in the wizard calls it, and a repeat writes the same flag.
+ */
+export function markOnboardingDone(): void {
+  patchConfig({ onboardingDone: true });
+}
+
+/**
  * Persist the About you profile (Settings ▸ About you) and make it live.
  *
  * @remarks Called only from the validated `PUT /config/profile` route. An empty profile is stored

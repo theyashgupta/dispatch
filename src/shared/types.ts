@@ -901,7 +901,7 @@ export interface PlaybookPickerResponse {
 export type StatusChannel = "hooks" | "pane" | "auto";
 
 /**
- * Per-binary presence result surfaced by the boot probe and the first-run setup screen. Shared here
+ * Per-binary presence result surfaced by the boot probe and the setup wizard. Shared here
  * so the `/api/setup` route and the web client agree on the shape without either reaching across the
  * server boundary; `hint` is populated only when the binary is absent.
  * @remarks `installable` is true only for the package-manager targets (tmux/ttyd/git) that get the
@@ -919,9 +919,20 @@ export interface PrerequisiteStatus {
 
 /**
  * The single-source-of-truth preflight snapshot shared by `dispatch doctor`, ordinary boot, and the
- * web first-run setup screen. Every field is INFORMATIVE — a below-floor Node, missing binary, or
+ * web setup wizard. Every field is INFORMATIVE: a below-floor Node, missing binary, or
  * unhealthy storage renders a status line but never blocks boot (PRE-01/02/03).
  */
+export interface SetupChecks {
+  prerequisites: PrerequisiteStatus[];
+  node: PreflightReport["node"];
+  storage: PreflightReport["storage"];
+}
+
+export interface SetupStatus extends SetupChecks {
+  needsKey: boolean;
+  onboardingDone: boolean;
+}
+
 export interface PreflightReport {
   binaries: PrerequisiteStatus[];
   node: { version: string; floor: string; ok: boolean };
@@ -1021,6 +1032,7 @@ export interface Config {
   /** Terminal appearance chosen in Settings; absent or invalid resolves to the shipped default. */
   terminal?: TerminalAppearance;
   profile?: UserProfile;
+  onboardingDone?: boolean;
 }
 
 export interface UserProfile {
