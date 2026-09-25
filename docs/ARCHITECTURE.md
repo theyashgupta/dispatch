@@ -2108,6 +2108,17 @@ outside printable ASCII answers 400 before any network call, a config write fail
 409 `superseded` and writes nothing. The key never appears in a response, a log line or an error
 body.
 
+**Profile route (LOCAL-43).** `routes/profile.route.ts` owns the About you profile. `GET
+/api/config/profile` answers the stored profile or `{}`; `PUT /api/config/profile` runs the body
+through the shared `profile.ts#parseProfile` (strings trimmed and blanks stored as absent; name,
+email and role at most 200 characters, brief at most 4000, at most 20 handles of at most 100
+characters, trimmed and de-duplicated; unknown keys dropped) and answers 400 with the field named
+and `config.json` byte-identical, or writes it through `config-holder.ts#updateProfile` and answers
+the normalized profile. An empty profile is stored as an absent key. `loadConfig` reads the profile
+with the same function and treats a malformed one as absent. The profile is never copied onto the
+board snapshot or any SSE frame (`sse-profile.test.ts`). The routes sit behind the shared remote
+gate, so an authenticated remote session can read and write the profile like a local one.
+
 ### SSE Transport
 
 The board receives state over a single hand-rolled Server-Sent-Events stream — no SSE library —
@@ -3078,6 +3089,21 @@ composition lives in `features/connections/LinearConnectionCard.tsx` behind the 
 the setup wizard can reuse it; Settings is its consumer today. `hooks/useLinearConnection.ts` reads
 the status on mount and on Test only, shows Checking until the first read settles, and keeps
 Connect disabled until then.
+
+**Settings tabs (LOCAL-43).** Settings is a rail of nine tab ids: connections, board, appearance,
+notifications, remote, workspaces, about-you, updates and about. `web/lib/settings-tab.ts` holds
+the list and `settingsTabFrom`, which maps the legacy ids (filters, models, cleanup, terminal and
+the retired ids) to their current tab without rewriting the hash. Each tab lives in its own file
+under `web/features/settings/` and exports its section; every tab except Notifications and About
+also exports its use hook (the Board tab exports three, the About tab reuses `useUpdatesTab`).
+`web/features/settings/SettingsScreen.tsx` is the rail plus a switch and invokes each hook once, so
+unsaved drafts and the update run result survive a tab switch. Style constants shared across tab
+files live in `web/features/settings/settings-styles.ts`. Connections shows the Linear card, then a Coming soon card per
+`web/lib/connection-meta.ts#SOON_CONNECTIONS` entry. `web/features/settings/AboutYouTab.tsx`
+reads and saves the profile route above, with the comma-separated handles field parsed by
+`web/lib/profile-handles.ts`. `web/features/settings/UpdatesTab.tsx#useUpdatesTab` reads `GET /api/update` once when Settings
+mounts and feeds both the Updates and About tabs; the repository
+link and license come from `web/lib/about-meta.ts`, which a test pins to `package.json`.
 
 ### App Shell Zones
 
