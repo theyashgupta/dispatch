@@ -1,9 +1,10 @@
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 import type { FilterOption } from "../../../shared/types.js";
 import { Button } from "../../primitives/Button.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { MultiSelect } from "../modals/index.js";
 import type { InboxGroupBy, InboxRange } from "./inbox-rows.js";
+import { Select } from "../../primitives/Select.js";
 
 interface InboxToolbarProps {
   search: string;
@@ -37,51 +38,32 @@ const GROUP_LABEL: Record<InboxGroupBy, string> = {
   state: "Group by state",
 };
 
-const selectStyle: CSSProperties = {
-  flex: "0 0 auto",
-  height: "32px",
-  padding: "0 var(--space-sm)",
-  background: "var(--surface-card)",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius)",
-  color: "var(--text)",
-  fontFamily: "var(--font-ui)",
-  fontSize: "var(--font-label)",
-  lineHeight: "var(--line-label)",
-  outline: "none",
-};
-
-interface SelectProps<T extends string> {
+interface EnumSelectProps<T extends string> {
   label: string;
   value: T;
   labels: Record<T, string>;
   onChange: (value: T) => void;
 }
 
-function Select<T extends string>({
+function EnumSelect<T extends string>({
   label,
   value,
   labels,
   onChange,
-}: SelectProps<T>) {
-  const [focused, setFocused] = useState(false);
+}: EnumSelectProps<T>) {
   return (
-    <select
-      aria-label={label}
+    <Select
+      label={label}
       value={value}
-      onChange={(e) => onChange(e.target.value as T)}
-      onFocus={(event) =>
-        setFocused(event.currentTarget.matches(":focus-visible"))
-      }
-      onBlur={() => setFocused(false)}
-      style={{ ...selectStyle, ...focusRing(focused) }}
+      onChange={(next) => onChange(next as T)}
+      style={{ flex: "0 0 auto" }}
     >
       {(Object.keys(labels) as T[]).map((key) => (
         <option key={key} value={key}>
           {labels[key]}
         </option>
       ))}
-    </select>
+    </Select>
   );
 }
 
@@ -162,7 +144,7 @@ export function InboxToolbar({
           onChange={onSourcesChange}
         />
       </div>
-      <Select
+      <EnumSelect
         label="Time range"
         value={range}
         labels={RANGE_LABEL}
@@ -184,7 +166,7 @@ export function InboxToolbar({
       >
         Unread only
       </Button>
-      <Select
+      <EnumSelect
         label="Group by"
         value={groupBy}
         labels={GROUP_LABEL}
