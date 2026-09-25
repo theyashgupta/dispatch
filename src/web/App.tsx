@@ -59,7 +59,7 @@ import {
   MultiSelect,
 } from "./features/modals/index.js";
 import { settingsTabFrom } from "./lib/settings-tab.js";
-import { FirstRunSetup } from "./features/setup/index.js";
+import { SetupWizard } from "./features/setup/index.js";
 import { Toast } from "./primitives/Toast.js";
 import { Spinner } from "./primitives/Spinner.js";
 import { Button } from "./primitives/Button.js";
@@ -81,7 +81,16 @@ import type { ActionServices } from "./lib/actions.js";
 import { useItems } from "./hooks/useItems.js";
 import type { UnwindDestination } from "../shared/types.js";
 import { UpdateBanner } from "./features/update/index.js";
-import { cleanupCard as cleanupCardApi, getCard, getSetup } from "./lib/api.js";
+import {
+  cleanupCard as cleanupCardApi,
+  getCard,
+  getSetup,
+  markOnboardingDone,
+} from "./lib/api.js";
+import {
+  shouldMarkOnboardingDone,
+  shouldOpenSetupWizard,
+} from "./lib/setup-wizard.js";
 import {
   cleanupAttemptEnded,
   cleanupOutcomeCopy,
@@ -89,7 +98,7 @@ import {
 } from "./lib/cleanup-feedback.js";
 import { refreshPushSubscription } from "./lib/push.js";
 import type { StartRequest } from "./lib/start-request.js";
-import type { PrerequisiteStatus, TunnelState } from "../shared/types.js";
+import type { SetupChecks, TunnelState } from "../shared/types.js";
 import type { CardSearchResult } from "../shared/search.js";
 import { DONE_PAGE_SIZE } from "../shared/done-limit.js";
 
@@ -563,58 +572,66 @@ export function App() {
 
   const [createTicketOpen, setCreateTicketOpen] = useState(false);
 
+  const [setupWizardOpen, setSetupWizardOpen] = useState(false);
+
   const overlayAboveContent =
     selectedCard != null ||
     activityOpen ||
     sheetOpen ||
     createTicketOpen ||
+    setupWizardOpen ||
     cleanupCard != null ||
     resetCard != null ||
     (startCard != null && startRequest != null);
 
-  const [setupState, setSetupState] = useState<
-    "loading" | "needsKey" | "ready"
-  >("loading");
-  const [prerequisites, setPrerequisites] = useState<PrerequisiteStatus[]>([]);
-  const [node, setNode] = useState<{
-    version: string;
-    floor: string;
-    ok: boolean;
-  } | null>(null);
-  const [storage, setStorage] = useState<{ ok: boolean; path: string } | null>(
-    null,
-  );
+  const [setupLoaded, setSetupLoaded] = useState(false);
+  const [setupChecks, setSetupChecks] = useState<SetupChecks | null>(null);
+  const [setupRuns, setSetupRuns] = useState(0);
   useEffect(() => {
     let active = true;
     void getSetup()
       .then((s) => {
         if (!active) return;
-        setPrerequisites(s.prerequisites);
-        setNode(s.node);
-        setStorage(s.storage);
-        setSetupState(s.needsKey ? "needsKey" : "ready");
+        setSetupChecks(s);
+        setSetupWizardOpen(shouldOpenSetupWizard(s));
+        if (shouldMarkOnboardingDone(s)) {
+          void markOnboardingDone().catch((err: unknown) => {
+            console.error("markOnboardingDone failed", err);
+          });
+        }
       })
-      .catch(() => {
-        if (active) setSetupState("ready");
+      .catch((err: unknown) => {
+        console.error("getSetup failed", err);
+      })
+      .finally(() => {
+        if (active) setSetupLoaded(true);
       });
     return () => {
       active = false;
     };
   }, []);
 
-  if (setupState === "loading") {
-    return <BootScreen connection={connection} />;
-  }
+  const openSetupWizard = async (): Promise<boolean> => {
+    try {
+      setSetupChecks(await getSetup());
+      setSetupWizardOpen(true);
+      return true;
+    } catch (err) {
+      console.error("getSetup failed", err);
+      return false;
+    }
+  };
 
-  if (setupState === "needsKey" && node && storage) {
-    return (
-      <FirstRunSetup
-        prerequisites={prerequisites}
-        node={node}
-        storage={storage}
-        onConnected={() => setSetupState("ready")}
-      />
-    );
+  const closeSetupWizard = (linearChanged: boolean) => {
+    setSetupWizardOpen(false);
+    if (linearChanged) setSetupRuns((n) => n + 1);
+    void markOnboardingDone().catch((err: unknown) => {
+      console.error("markOnboardingDone failed", err);
+    });
+  };
+
+  if (!setupLoaded) {
+    return <BootScreen connection={connection} />;
   }
 
   if (board === null) {
@@ -664,6 +681,7 @@ export function App() {
       pollIntervalMs={board.pollIntervalMs ?? null}
       syncWarning={board.syncWarning ?? null}
       syncUnreachable={board.syncUnreachable ?? false}
+      noSource={(board.enabledSources ?? []).length === 0}
       accountSlot={accountSlot}
       onOpenCreateTicket={() => {
         setCreateTicketOpen(true);
@@ -784,6 +802,8 @@ export function App() {
                 tunnelState={tunnelState}
                 soundEnabled={soundEnabled}
                 onToggleSound={setSoundEnabled}
+                onRunSetup={openSetupWizard}
+                connectionKey={setupRuns}
               />
             ) : route.page === "activity" ? (
               <ActivityPage
@@ -896,6 +916,9 @@ export function App() {
       )}
       {createTicketOpen && (
         <CreateTicketModal onClose={() => setCreateTicketOpen(false)} />
+      )}
+      {setupWizardOpen && setupChecks && (
+        <SetupWizard {...setupChecks} onClose={closeSetupWizard} />
       )}
       {isToastVisible(undoToast.state) && (
         <Toast

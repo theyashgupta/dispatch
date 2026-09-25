@@ -19,14 +19,14 @@ import {
   previewLinearFilters,
   saveLinearFilters,
 } from "../../lib/api.js";
-import { SOON_CONNECTIONS } from "../../lib/connection-meta.js";
 import { Button } from "../../primitives/Button.js";
-import { ConnectionCard } from "../../primitives/ConnectionCard.js";
 import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { Notice } from "../../primitives/Notice.js";
-import { SourceIcon } from "../badges/index.js";
-import { LinearConnectionCard } from "../connections/index.js";
+import {
+  LinearConnectionCard,
+  SoonConnectionCards,
+} from "../connections/index.js";
 import { MultiSelect } from "../modals/index.js";
 
 type MultiDim = "assignees" | "projects" | "teams";
@@ -123,6 +123,7 @@ export function useFiltersTab(onSaved: () => void): FiltersTab {
   }, []);
 
   useEffect(() => {
+    if (!linearConfigured) return;
     let active = true;
     void (async () => {
       try {
@@ -155,7 +156,7 @@ export function useFiltersTab(onSaved: () => void): FiltersTab {
     return () => {
       active = false;
     };
-  }, [loadRound]);
+  }, [loadRound, linearConfigured]);
 
   useEffect(() => {
     if (!draft) return;
@@ -468,6 +469,11 @@ const connectionsScrollStyle: CSSProperties = {
   padding: "var(--space-xs)",
 };
 
+const runSetupRowStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+};
+
 const syncFiltersHeadingStyle: CSSProperties = {
   margin: 0,
   fontFamily: "var(--font-ui)",
@@ -479,24 +485,53 @@ const syncFiltersHeadingStyle: CSSProperties = {
 
 interface ConnectionsTabSectionProps {
   filters: FiltersTab;
+  onRunSetup?: () => Promise<boolean>;
+  connectionKey?: number;
 }
 
-export function ConnectionsTabSection({ filters }: ConnectionsTabSectionProps) {
+export function ConnectionsTabSection({
+  filters,
+  onRunSetup,
+  connectionKey,
+}: ConnectionsTabSectionProps) {
+  const [runSetup, setRunSetup] = useState<"idle" | "opening" | "failed">(
+    "idle",
+  );
+
+  async function handleRunSetup(open: () => Promise<boolean>) {
+    setRunSetup("opening");
+    setRunSetup((await open()) ? "idle" : "failed");
+  }
+
   return (
     <div className="scroll-stable-y" style={connectionsScrollStyle}>
-      <LinearConnectionCard onConnection={filters.onLinearConnection}>
+      {onRunSetup && (
+        <div style={runSetupRowStyle}>
+          <Button
+            disabled={runSetup === "opening"}
+            aria-busy={runSetup === "opening"}
+            onClick={() => void handleRunSetup(onRunSetup)}
+          >
+            Run setup guide
+          </Button>
+        </div>
+      )}
+      {runSetup === "failed" && (
+        <div role="alert">
+          <Notice
+            tone="destructive"
+            label="Couldn't load the setup checks. Try again."
+          />
+        </div>
+      )}
+      <LinearConnectionCard
+        key={connectionKey}
+        onConnection={filters.onLinearConnection}
+      >
         <h2 style={syncFiltersHeadingStyle}>Sync filters</h2>
         <FiltersTabSection filters={filters} />
       </LinearConnectionCard>
-      {SOON_CONNECTIONS.map((connection) => (
-        <ConnectionCard
-          key={connection.source}
-          badge={<SourceIcon source={connection.source} />}
-          name={connection.name}
-          status={{ kind: "soon" }}
-          credentialLabel="Arrives in a later release."
-        />
-      ))}
+      <SoonConnectionCards />
     </div>
   );
 }
