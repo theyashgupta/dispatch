@@ -35,6 +35,8 @@ import {
   type GroupTitleMember,
 } from "../services/orchestration/group-title-generate.js";
 import { syncCardToLinear } from "../services/orchestration/linear-sync.js";
+import { postComment } from "../services/orchestration/linear-outbound.js";
+import { validateCommentBody } from "../../shared/comment-body.js";
 import {
   ATTACHMENT_NAME_RE,
   CARD_ID_RE,
@@ -137,6 +139,30 @@ function getCardById(req: Request<{ id: string }>, res: Response): void {
 }
 
 cardsRouter.get("/cards/:id", getCardById);
+
+cardsRouter.get("/cards/:id/comments", (req, res) => {
+  const card = store.getCard(req.params.id);
+  if (!card) {
+    res.status(404).json({ error: `unknown card id: ${req.params.id}` });
+    return;
+  }
+  res.status(200).json({ comments: card.comments ?? [] });
+});
+
+cardsRouter.post("/cards/:id/comment", async (req, res) => {
+  const body: unknown = (req.body as { body?: unknown } | undefined)?.body;
+  const invalid = validateCommentBody(body);
+  if (invalid != null) {
+    res.status(400).json({ error: invalid });
+    return;
+  }
+  const outcome = await postComment(req.params.id, body as string);
+  if (!outcome.ok) {
+    res.status(outcome.status).json({ error: outcome.error });
+    return;
+  }
+  res.status(201).json({ ok: true });
+});
 
 cardsRouter.post("/cards/:id/move", async (req, res) => {
   const { id } = req.params;

@@ -258,8 +258,8 @@ async function resolveIssueId(
 /**
  * Sync a `source:"local"` card out to Linear via a headless `claude -p` subprocess restricted to
  * the five Linear MCP tools, reusing the USER-SCOPE MCP config already registered for the CLI —
- * the stored, read-only Linear API key never creates or updates anything (PUSH-01); it is only
- * used afterward, by {@link resolveIssueId}, for a read lookup of the created issue's internal id.
+ * the stored Linear API key never creates the issue (PUSH-01); this path uses it only afterward,
+ * by {@link resolveIssueId}, for a read lookup of the created issue's internal id.
  * Deliberately deviates from
  * `ticket-generate.ts`'s invocation in two ways, both load-bearing: NO `--tools ""` and NO
  * `--strict-mcp-config` — both would sever the user-scope Linear MCP this feature exists to use.
