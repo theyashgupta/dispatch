@@ -30,6 +30,7 @@ export const INBOX_SHORTCUTS: readonly { key: string; label: string }[] = [
   { key: "s", label: "Snooze" },
   { key: "o", label: "Open link" },
   { key: "u", label: "Toggle read" },
+  { key: "a", label: "Ask about this" },
 ];
 
 const EDITABLE_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);

@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   Maximize2,
+  MessageCircleQuestion,
   Minimize2,
   Play,
   RotateCcw,
@@ -65,6 +66,7 @@ interface PanelHeaderProps {
   onCleanupRequest?: (id: string) => void;
   onUnwindRequest?: (id: string, to: UnwindDestination) => void;
   onResetRequest?: (id: string) => void;
+  onAskRequest?: (card: CardModel) => void;
 }
 
 export function PanelHeader({
@@ -82,6 +84,7 @@ export function PanelHeader({
   onCleanupRequest,
   onUnwindRequest,
   onResetRequest,
+  onAskRequest,
 }: PanelHeaderProps) {
   const c = card;
   const [syncPending, setSyncPending] = useState(false);
@@ -177,6 +180,19 @@ export function PanelHeader({
             onClick={() => openEditor(c.id, "cursor").catch(console.error)}
           >
             <CursorMark />
+          </IconButton>
+        )}
+        {c && onAskRequest && (
+          <IconButton
+            aria-label="Ask about this"
+            title="Ask about this"
+            onClick={() => onAskRequest(c)}
+          >
+            <MessageCircleQuestion
+              size={16}
+              strokeWidth={2}
+              aria-hidden="true"
+            />
           </IconButton>
         )}
 
