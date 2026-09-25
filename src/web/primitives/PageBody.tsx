@@ -10,7 +10,7 @@ const scrollStyle: CSSProperties = {
   overflowY: "auto",
 };
 
-const columnStyle: CSSProperties = {
+export const pageColumnStyle: CSSProperties = {
   maxWidth: "720px",
   margin: "0 auto",
   padding: "var(--space-lg)",
@@ -22,7 +22,7 @@ const columnStyle: CSSProperties = {
 export function PageBody({ children }: PageBodyProps) {
   return (
     <div className="scroll-stable-y" style={scrollStyle}>
-      <div style={columnStyle}>{children}</div>
+      <div style={pageColumnStyle}>{children}</div>
     </div>
   );
 }
