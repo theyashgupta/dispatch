@@ -55,6 +55,7 @@ interface DetailPanelProps {
   onCleanupRequest?: (id: string) => void;
   onUnwindRequest?: (id: string, to: UnwindDestination) => void;
   onResetRequest?: (id: string) => void;
+  onSyncRequest?: (id: string) => void;
   docked?: boolean;
   accounts?: ClaudeAccountSummary[];
 }
@@ -74,6 +75,7 @@ export function DetailPanel({
   onCleanupRequest,
   onUnwindRequest,
   onResetRequest,
+  onSyncRequest,
   docked = false,
   accounts,
 }: DetailPanelProps) {
@@ -295,7 +297,7 @@ export function DetailPanel({
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       if (cleanupDragRef.current != null) {
         cleanupDragRef.current();
         return;
@@ -548,6 +550,7 @@ export function DetailPanel({
               onCleanupRequest={onCleanupRequest}
               onUnwindRequest={onUnwindRequest}
               onResetRequest={onResetRequest}
+              onSyncRequest={onSyncRequest}
             />
 
             {sessionAccountEmail != null && (

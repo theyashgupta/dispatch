@@ -1,9 +1,11 @@
 import { useState, type CSSProperties } from "react";
-import { Send } from "lucide-react";
+import { Send, UserPlus } from "lucide-react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { useCardComments } from "../../hooks/useCardComments.js";
-import { postCardComment } from "../../lib/api.js";
+import { useLinearWorkflow } from "../../hooks/useLinearWorkflow.js";
+import { assignCardToMe, postCardComment } from "../../lib/api.js";
 import { formatAge, nowMs } from "../../lib/format-age.js";
+import { Button } from "../../primitives/Button.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Collapsible } from "../../primitives/Collapsible.js";
 import { focusRing } from "../../primitives/focus-ring.js";
@@ -20,6 +22,24 @@ const sectionStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: "var(--space-sm)",
+  minWidth: 0,
+};
+
+const actionPanelStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "var(--space-sm)",
+  padding: "var(--space-sm)",
+  background: "var(--surface-column)",
+  border: "1px solid var(--border)",
+  borderRadius: "var(--radius)",
+  minWidth: 0,
+};
+
+const actionRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "var(--space-xs)",
   minWidth: 0,
 };
 
@@ -78,9 +98,28 @@ export function LinearSection({ card }: LinearSectionProps) {
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
+  const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+  const workflow = useLinearWorkflow();
+  const viewerId =
+    workflow.status === "ready" ? workflow.workflow.viewerId : undefined;
+  const assignedToMe = viewerId !== undefined && card.assignee?.id === viewerId;
   const [focused, setFocused] = useState(false);
   const count = comments.length;
   const rows = Math.min(6, Math.max(2, draft.split("\n").length));
+
+  const handleAssign = async () => {
+    setAssigning(true);
+    setAssignError(null);
+    const result = await assignCardToMe(card.id);
+    setAssigning(false);
+    if (result.ok || result.status === 502) return;
+    setAssignError(
+      result.status === 409
+        ? "Linear is not connected."
+        : (result.error ?? "Could not reach Dispatch. Try again."),
+    );
+  };
 
   const handleSend = async () => {
     setPosting(true);
@@ -103,28 +142,49 @@ export function LinearSection({ card }: LinearSectionProps) {
           label={card.linearError}
         />
       )}
-      <div style={composerStyle}>
-        <textarea
-          value={draft}
-          rows={rows}
-          onChange={(e) => setDraft(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          aria-label="Add a comment"
-          placeholder="Add a comment (markdown)..."
-          style={{ ...textareaStyle, ...focusRing(focused) }}
-        />
-        <IconButton
-          aria-label="Send comment"
-          disabled={posting || draft.trim() === ""}
-          onClick={() => void handleSend()}
-        >
-          <Send size={14} strokeWidth={2} aria-hidden="true" />
-        </IconButton>
+      <div style={actionPanelStyle}>
+        {!assignedToMe && (
+          <div style={actionRowStyle}>
+            <Button
+              variant="secondary"
+              disabled={assigning}
+              onClick={() => void handleAssign()}
+            >
+              <UserPlus size={12} strokeWidth={2} aria-hidden="true" />
+              Assign to me
+            </Button>
+            {assignError != null && (
+              <Notice
+                tone="destructive"
+                icon={<WarningIcon />}
+                label={assignError}
+              />
+            )}
+          </div>
+        )}
+        <div style={composerStyle}>
+          <textarea
+            value={draft}
+            rows={rows}
+            onChange={(e) => setDraft(e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            aria-label="Add a comment"
+            placeholder="Add a comment (markdown)..."
+            style={{ ...textareaStyle, ...focusRing(focused) }}
+          />
+          <IconButton
+            aria-label="Send comment"
+            disabled={posting || draft.trim() === ""}
+            onClick={() => void handleSend()}
+          >
+            <Send size={14} strokeWidth={2} aria-hidden="true" />
+          </IconButton>
+        </div>
+        {postError != null && (
+          <Notice tone="destructive" icon={<WarningIcon />} label={postError} />
+        )}
       </div>
-      {postError != null && (
-        <Notice tone="destructive" icon={<WarningIcon />} label={postError} />
-      )}
       {count > 0 && (
         <Collapsible
           title="Comments"
