@@ -9,6 +9,7 @@ import type {
   DiscoveredRepo,
   FilterCapabilities,
   FilterOption,
+  LinearComment,
   Playbook,
   PlaybookPickerResponse,
   PrerequisiteStatus,
@@ -1203,6 +1204,39 @@ export async function getCard(
     throw new Error(`getCard failed: ${res.status} ${res.statusText}`);
   }
   return (await res.json()) as { card: Card; members: Card[] };
+}
+
+/** The stored Linear comments of a card, oldest first: GET /api/cards/:id/comments. Throws on non-2xx. */
+export async function getCardComments(id: string): Promise<LinearComment[]> {
+  const res = await fetch(`/api/cards/${encodeURIComponent(id)}/comments`);
+  if (!res.ok) {
+    throw new Error(`getCardComments failed: ${res.status} ${res.statusText}`);
+  }
+  return ((await res.json()) as { comments: LinearComment[] }).comments;
+}
+
+/**
+ * Post a Linear comment: POST /api/cards/:id/comment.
+ *
+ * @remarks A 502 also sets the card's `linearError`, which arrives over SSE; `error` carries the
+ * server's fixed copy, or null when the request never got an answer.
+ */
+export async function postCardComment(
+  id: string,
+  body: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string | null }> {
+  try {
+    const res = await fetch(`/api/cards/${encodeURIComponent(id)}/comment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+    });
+    if (res.ok) return { ok: true };
+    const parsed = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, status: res.status, error: parsed.error ?? null };
+  } catch {
+    return { ok: false, status: 0, error: null };
+  }
 }
 
 /**
