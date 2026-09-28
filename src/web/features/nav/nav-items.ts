@@ -1,5 +1,6 @@
 import {
   Activity,
+  AlertTriangle,
   Archive,
   GitPullRequest,
   ClipboardList,
@@ -9,6 +10,8 @@ import {
   MessageSquare,
   PanelLeft,
   SquareTerminal,
+  Sun,
+  Ticket,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -33,11 +36,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
 ];
 
 export const NAV_ITEMS: readonly NavItem[] = [
+  { page: "today", label: "Today", icon: Sun, group: "Home" },
   { page: "inbox", label: "Inbox", icon: Inbox, group: "Home" },
   { page: "board", label: "Board", icon: Kanban, group: "Work" },
   { page: "sessions", label: "Sessions", icon: SquareTerminal, group: "Work" },
   { page: "workspace", label: "Workspace", icon: PanelLeft, group: "Work" },
   { page: "activity", label: "Activity", icon: Activity, group: "Work" },
+  { page: "tickets", label: "Tickets", icon: Ticket, group: "Sources" },
   {
     page: "accounts",
     label: "Accounts and Usage",
@@ -58,6 +63,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: GitPullRequest,
     group: "Sources",
   },
+  { page: "errors", label: "Errors", icon: AlertTriangle, group: "Sources" },
   {
     page: "slack",
     label: "Slack",

@@ -283,3 +283,56 @@ test("a row with an unparseable time survives the all range and sorts last among
     ["fake:plus", "fake:z"],
   );
 });
+
+test("group by state runs in workflow order and puts stateless rows last", () => {
+  const rows = mergeInboxRows(
+    [item("i1")],
+    [
+      card("c-done", {
+        linearState: { name: "Done", type: "completed" },
+        priority: 1,
+      }),
+      card("c-todo", {
+        linearState: { name: "Todo", type: "unstarted" },
+        priority: 2,
+      }),
+      card("c-prog", {
+        linearState: { name: "In Progress", type: "started" },
+        priority: 3,
+      }),
+      card("c-review", {
+        linearState: { name: "In Review", type: "started" },
+        priority: 3,
+      }),
+      card("c-none", { priority: 4 }),
+    ],
+    {},
+  );
+  const groups = groupInboxRows(rows, "state");
+  assert.deepEqual(
+    groups.map((g) => [g.label, g.rows.map((r) => r.id)]),
+    [
+      ["Todo", ["c-todo"]],
+      ["In Progress", ["c-prog"]],
+      ["In Review", ["c-review"]],
+      ["Done", ["c-done"]],
+      ["No state", ["fake:i1", "c-none"]],
+    ],
+  );
+});
+
+test("two states with the same name group together at the lower workflow rank", () => {
+  const rows = mergeInboxRows(
+    [],
+    [
+      card("c-a", { linearState: { name: "Review", type: "started" } }),
+      card("c-b", { linearState: { name: "Review", type: "unstarted" } }),
+      card("c-c", { linearState: { name: "Todo", type: "unstarted" } }),
+    ],
+    {},
+  );
+  assert.deepEqual(
+    groupInboxRows(rows, "state").map((g) => g.label),
+    ["Review", "Todo"],
+  );
+});

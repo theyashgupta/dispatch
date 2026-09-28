@@ -113,21 +113,29 @@ export const ITEM_DESCRIPTION_MAX = 20000;
  * Build the local Inbox card a promoted item becomes.
  *
  * @remarks The description is the snippet, the source link and one list line per meta pair, so the
- * card keeps everything the connector knew; both caps match the create-ticket route's limits.
+ * card keeps everything the connector knew; both caps match the create-ticket route's limits. A
+ * context goes last under a Context heading and the rest is cut first, so the context stays whole.
+ * Every status marker is disarmed because the kickoff inlines this provider text into a pane the
+ * marker parser reads.
  */
 export function buildPromotedCard(
   item: Item,
   identifier: string,
   now: string,
+  context?: string,
 ): Card {
   const parts = [item.snippet.trim()];
   if (item.url !== undefined) parts.push(`Source: ${item.url}`);
   const metaLines = Object.entries(item.meta).map(([k, v]) => `- ${k}: ${v}`);
   if (metaLines.length > 0) parts.push(metaLines.join("\n"));
-  const description = parts
+  const tail = context?.trim() ? `\n\n## Context\n\n${context.trim()}` : "";
+  const head = parts
     .filter((p) => p !== "")
     .join("\n\n")
-    .slice(0, ITEM_DESCRIPTION_MAX);
+    .slice(0, ITEM_DESCRIPTION_MAX - tail.length);
+  const description = (
+    tail && head === "" ? tail.trimStart() : head + tail
+  ).replace(/DISPATCH_STATUS:/gi, "DISPATCH-STATUS:");
   return {
     id: identifier,
     issueId: item.id,

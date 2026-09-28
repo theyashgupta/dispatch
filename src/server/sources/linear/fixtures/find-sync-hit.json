@@ -1,0 +1,15 @@
+{
+  "data": {
+    "issues": {
+      "nodes": [
+        {
+          "id": "issue-9",
+          "identifier": "ENG-9",
+          "url": "https://linear.app/acme/issue/ENG-9",
+          "title": "Already synced",
+          "description": "Body\n\ndispatch-sync:LOCAL-1"
+        }
+      ]
+    }
+  }
+}

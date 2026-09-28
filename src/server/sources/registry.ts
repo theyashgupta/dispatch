@@ -6,6 +6,7 @@ import {
 import type { TicketSource } from "./ticket.source.js";
 import { GitHubSource } from "./github/github.source.js";
 import { LinearSource } from "./linear/linear.source.js";
+import { SentrySource } from "./sentry/sentry.source.js";
 import { SlackSource } from "./slack/slack.source.js";
 
 /** The boot-built ticket sources, keyed by id. Empty until buildRegistry() runs at boot. */
@@ -66,6 +67,15 @@ export function buildRegistry(config: Config): void {
   );
   sources.set(github.id, github);
   if (githubConfig?.enabled === true) enabled.add(github.id);
+  const sentryConfig = config.sources?.sentry;
+  const sentry = new SentrySource(
+    () => (resolvers.get("sentry") ?? noCredential)(),
+    sentryConfig?.pollIntervalMs ??
+      config.pollIntervalMs ??
+      DEFAULT_POLL_INTERVAL_MS,
+  );
+  sources.set(sentry.id, sentry);
+  if (sentryConfig?.enabled === true) enabled.add(sentry.id);
   const slackPollMs = config.sources?.slack?.pollIntervalMs ?? SLACK_POLL_MS;
   const slack = new SlackSource(
     () => (resolvers.get("slack") ?? noCredential)(),

@@ -4,3 +4,4 @@ export { ResetModal } from "./ResetModal.js";
 export { MultiSelect } from "./MultiSelect.js";
 export { CreateTicketModal } from "./CreateTicketModal.js";
 export { GroupStartModal } from "./GroupStartModal.js";
+export { SyncToLinearModal } from "./SyncToLinearModal.js";
