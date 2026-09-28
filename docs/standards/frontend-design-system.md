@@ -36,7 +36,7 @@ What this means in this codebase: focus is expressed as `outline: 2px solid var(
 
 Where an `overflow: hidden` ancestor clips the outline, drop the offset to 0 at that site. Never revert to an accent box-shadow ring to work around clipping.
 
-The accent's job, quoted verbatim from `design-contract.md`'s `## Color roles` accent row: "interactive/selected-state signal only: active view toggle, active inbox badge, drag-target highlight, needs-attention card border, resize-handle hover, active search result row." `docs/standards/design-contract.md` is the source of that job list and wins on any conflict with this file.
+The accent's job list lives in the accent row of `design-contract.md`'s `## Color roles` table (the checked source toggle is its newest job). That row is the source and wins on any conflict with this file; it is not copied here, so it cannot drift.
 
 Inter is named first in `--font-ui` but is not loaded as a webfont — there is no `@font-face`, no webfont link, and no bundled font file, so the app renders in the OS system font on every real machine. This is a deliberate decline for the current milestone, not an oversight: loading Inter would add bundle weight and FOUT/FOIT risk on the mobile tunnel path for no hierarchy gain, and hierarchy is what this milestone buys. Revisit only if a future milestone wants a genuinely different typographic voice.
 

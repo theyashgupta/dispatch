@@ -200,7 +200,7 @@ kills the child when the client cancels. Notes and model output are never logged
 The model answers with repeated `## Action item` sections (`key:`, `title:`, then a quoted
 description) or the literal `NO_ACTION_ITEMS`. The pure parser in `meeting-actions.ts` drops any
 section with an invalid key or title, an empty body, or the `DISPATCH_STATUS:` marker, keeps the
-first of a duplicate key and at most 15. `POST /api/meetings/items` creates the drafts the user
+first of a duplicate key within one meeting and date, and at most 15. `POST /api/meetings/items` creates the drafts the user
 kept: it answers 400 on the marker in the meeting name, a title or a description, validates every
 draft before writing, and upserts `append` items through `store.upsertItems("meeting", ...)`, answering the created and
 updated counts. An
@@ -209,6 +209,30 @@ prefix plus a short hash of the full name so two meetings never share one, so th
 on one day updates its rows and keeps their state, while a weekly meeting gets new rows each week.
 Each item carries `meta.meeting`, `meta.meetingDate`, `meta.meetingId`, `meta.key` and
 `meta.siblings` (the other titles from the same meeting as JSON).
+
+### Granola round
+
+The Granola round pulls the user's action items from Granola through their own `claude` login. It
+is not a ticket source and never rides the poller: the poller polls every source on boot and on
+every registry rebuild and does not kill an in-flight fetch, and each of those would spend Claude
+usage. `services/orchestration/granola-round.ts` owns one timer, a single-flight flag, an abort
+controller per round and an in-memory status. Each round first runs `claude mcp list` and stops
+with no model call unless a Granola server is connected; its name becomes the only allowed tool
+(`--restricted` so the user's settings files, their allow rules and default mode, never apply,
+`--tools ""`, `--allowedTools mcp__<server>`, `--model sonnet`, no `--strict-mcp-config` so the
+connector loads, 300 s limit, SIGKILL 5 s after SIGTERM). The prompt goes on stdin. Sections carry
+`meeting:`, `date:` and `link:` lines; the shared parser drops a section without a meeting, the
+drafts are grouped per meeting and date, and a link becomes the item url only when it is a plain
+https URL (no credentials before the host).
+Items land through the same append upsert with ids `meeting:granola:<date>-<slug>:<key>`, so a
+rerun updates rows and a done item stays done. The cursor lives in `BoardMeta.sourceCursors` under
+`meeting:granola` and advances only on success; a round reads from 30 minutes before the last
+success, or the whole review window. The round runs at boot only when the last success is over an
+hour old, then an hour after each attempt. `sources.meeting` in config holds `enabled` and
+`windowHours` (24, 48, 72, 168 or 336) and is written through `patchSourceConfig`. Disabling clears
+the timer and kills a running round; a window change clears the cursor and runs a full pass. The
+routes (`GET`/`PUT /api/meetings/granola`, `POST .../check`, `POST .../run` answering 202 or 409)
+never return model output or stderr.
 
 ### Session Projection Chokepoint
 
@@ -1972,6 +1996,9 @@ synchronous spawns — because command injection is the top threat for this phas
 inherited for interactive installs), and `spawnPiped()` (every stream piped, for the one adapter
 that must write to a child's stdin: the Claude login's pasted code, `adapters/claude-login.ts`).
 All three are argv arrays with no shell; a new caller picks one of them, never adds a fourth.
+With `killEscalationMs` set, an aborted `run()` settles only after the child has exited, and the
+SIGKILL timer stays armed until then, so a caller's single flight never releases while a child that
+ignores SIGTERM still runs.
 
 The guarantee is **argv-array-only invocation**, and that is the whole of it. It is NOT that
 untrusted values stay out of argv, and no code should be written on that assumption. Two prompt
@@ -3104,7 +3131,9 @@ filters) and `primitives/CredentialForm.tsx` (password input, Connect or
 Replace, Test, and a two-step Disconnect that re-arms after 5 s). The body reveals with the
 Collapsible grid-rows pair and never measures; once open it stops clipping so dropdowns inside it
 can overflow. The status is the shared `SourceCardStatus` union (checking, disconnected, connected with
-an optional account, error with its copy, soon); a soon card renders the header only. The Linear
+an optional account, error with its copy, soon, off); a soon card renders the header only. An
+optional `toggle` prop puts a native "Enabled" checkbox beside the expand button, a separate tab
+stop, for sources that ride on the claude CLI and need no key (the Granola card). The Linear
 composition lives in `features/connections/LinearConnectionCard.tsx` behind the feature barrel so
 the setup wizard can reuse it; Settings is its consumer today. `hooks/useLinearConnection.ts` reads
 the status on mount and on Test only, shows Checking until the first read settles, and keeps
