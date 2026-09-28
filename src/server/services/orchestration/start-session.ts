@@ -1,10 +1,19 @@
 import path from "node:path";
-import type { Config, StartError } from "../../../shared/types.js";
+import type {
+  Config,
+  SessionFields,
+  StartError,
+} from "../../../shared/types.js";
 import { store, type ReservedSession } from "../../store/board.store.js";
 import { hasSession } from "../../adapters/tmux.js";
 import { registerHookToken } from "../domain/hook-tokens.js";
 import { loadPlaybooks } from "../domain/playbooks.js";
 import { updateLastUsedPlaybook } from "../infra/config-holder.js";
+import {
+  columnChangesSince,
+  pushColumnChanges,
+  snapshotColumns,
+} from "./linear-outbound.js";
 import {
   steps,
   StartStepError,
@@ -42,6 +51,23 @@ function toStartError(
     variant: "generic",
     ...base,
   };
+}
+
+/**
+ * Finish a start saga and queue the Linear state push when it moved the card out of To Do.
+ *
+ * @remarks The push runs off the saga's path; a start from any other column never pushes (R-30).
+ */
+export async function completeStartAndPush(
+  cardId: string,
+  sessionId: string | undefined,
+  fields: SessionFields,
+): Promise<void> {
+  const before = snapshotColumns(cardId);
+  await store.completeStart(cardId, sessionId, fields);
+  void pushColumnChanges(
+    columnChangesSince(before).filter((c) => c.fromCol === "todo"),
+  );
 }
 
 /**
@@ -198,7 +224,7 @@ export async function startSession(
         done.push(step);
       }
       currentStep = undefined;
-      await store.completeStart(cardId, reserved?.sessionId, {
+      await completeStartAndPush(cardId, reserved?.sessionId, {
         workspacePath: ctx.workspacePath,
         branch: sessionName,
         tmuxSession: session,

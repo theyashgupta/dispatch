@@ -4,6 +4,7 @@ import path from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import type {
   Config,
+  LinearStateMap,
   SourceFilters,
   StatusChannel,
   TerminalAppearance,
@@ -20,6 +21,7 @@ import {
   DEFAULT_TERMINAL_APPEARANCE,
   validateTerminalAppearance,
 } from "../../shared/terminal-appearance.js";
+import { parseStateMap } from "../../shared/linear-state-map.js";
 import { StartupError } from "./binary-check.js";
 import { CONFIG_PATH, DISPATCH_DIR } from "../services/infra/paths.js";
 
@@ -210,6 +212,22 @@ function readNestedFilters(parsed: Record<string, unknown>): SourceFilters {
 }
 
 /**
+ * Read `sources.linear.stateMap` through parseStateMap.
+ *
+ * @remarks An invalid stored map is ignored with a warning, so the push falls back to the defaults.
+ */
+function readNestedStateMap(
+  parsed: Record<string, unknown>,
+): LinearStateMap | undefined {
+  const raw = nestedLinear(parsed)?.stateMap;
+  if (raw === undefined) return undefined;
+  const result = parseStateMap(raw);
+  if (result.ok) return result.map;
+  console.warn(`[config] ignoring sources.linear.stateMap: ${result.error}`);
+  return undefined;
+}
+
+/**
  * Read the optional `enabled` and `pollIntervalMs` fields of `sources.linear`.
  *
  * @remarks A non-boolean `enabled` and a non-positive or non-finite interval are dropped, so the
@@ -370,6 +388,7 @@ export function loadConfig(): Config {
       : DEFAULT_WORKSPACE_ROOT;
 
   const activeClaudeAccountId = readActiveClaudeAccountId(parsed);
+  const stateMap = readNestedStateMap(parsed);
   const config: Config = {
     linearApiKey: rawKey,
     port: typeof parsed.port === "number" ? parsed.port : DEFAULT_PORT,
@@ -388,6 +407,7 @@ export function loadConfig(): Config {
         apiKey: rawKey,
         filters: readNestedFilters(parsed),
         ...readNestedSourceSettings(parsed),
+        ...(stateMap ? { stateMap } : {}),
       },
     },
     lastUsedPlaybook: readLastUsedPlaybook(parsed),

@@ -44,18 +44,52 @@ function displayFields(
   };
 }
 
-/**
- * Whether any Linear-owned display field differs between a card and a fresh issue.
- *
- * @remarks Compares JSON, which drops undefined keys; every stored value was built by the same
- * mapping, so key order matches, and a legacy row without a state id or color reads as changed.
- */
-function displayFieldsChanged(card: Card, issue: SourceIssue): boolean {
-  const { linearState, team, cycle, assignee, comments } = card;
+const PENDING_TTL_MS = 300_000;
+
+type HeldDisplay = ReturnType<typeof displayFields> &
+  Pick<Card, "pendingState">;
+
+/** Whether a card holds a pushed Linear state younger than five minutes. */
+export function hasFreshPending(card: Card, now: number): boolean {
   return (
-    JSON.stringify({ linearState, team, cycle, assignee, comments }) !==
-    JSON.stringify(displayFields(issue))
+    card.pendingState != null &&
+    now - Date.parse(card.pendingState.at) < PENDING_TTL_MS
   );
+}
+
+/**
+ * The display fields a poll writes, holding a fresh pushed state until Linear reports it.
+ *
+ * @remarks A fresh pending state keeps the chip against a different incoming state; the matching
+ * state or an expired hold clears it and the incoming state applies.
+ */
+function heldDisplay(card: Card, issue: SourceIssue, now: number): HeldDisplay {
+  const fields = displayFields(issue);
+  const pending = card.pendingState;
+  if (pending == null) return fields;
+  if (hasFreshPending(card, now) && issue.state?.id !== pending.id) {
+    return { ...fields, linearState: card.linearState };
+  }
+  return { ...fields, pendingState: undefined };
+}
+
+/**
+ * Whether applying `next` would change any Linear-owned display field or the pending hold.
+ *
+ * @remarks Compares JSON, which drops undefined keys, over one fixed key order, so a legacy row
+ * without a state id or color reads as changed.
+ */
+function displayFieldsChanged(card: Card, next: HeldDisplay): boolean {
+  const pick = (c: Card) =>
+    JSON.stringify({
+      linearState: c.linearState,
+      team: c.team,
+      cycle: c.cycle,
+      assignee: c.assignee,
+      comments: c.comments,
+      pendingState: c.pendingState ?? undefined,
+    });
+  return pick(card) !== pick({ ...card, ...next });
 }
 
 /** Whether a card sits past To Do and Inbox, where a poll refreshes only its display fields. */
@@ -87,9 +121,9 @@ export function isStartingCard(
 
 /**
  * Reconcile a source poll against the current board and return upserts/removes/gone/reappeared.
- * PURE — no I/O, no clock read, no sorting; upserts are pushed in provider-return order and the
- * store orders To Do on read. `current` is keyed by upstream issue id (Card.issueId), which today
- * equals card.id.
+ * PURE: no I/O, no sorting, and no clock read when `now` is passed; upserts are pushed in
+ * provider-return order and the store orders To Do on read. `current` is keyed by upstream issue
+ * id (Card.issueId), which today equals card.id.
  * @remarks Rules, all keyed by upstream issue id:
  *  - Returned issue with no existing card -> upsert a NEW Inbox card stamped with `sourceId`
  *    (SYNC-01) — new tickets land in Inbox, never directly in To Do.
@@ -119,6 +153,8 @@ export function reconcile(
   inFlightStartIds: ReadonlySet<string> = new Set(),
   sourceId: string = "linear",
   tracked?: TrackedRefresh,
+  now: number = Date.now(),
+  pushingIds: ReadonlySet<string> = new Set(),
 ): ReconcileResult {
   const seen = new Set(issues.map((i) => i.id));
   const trackedById = new Map(
@@ -127,12 +163,9 @@ export function reconcile(
   const upserts: Card[] = [];
   const reappearedIds: string[] = [];
   const refreshPastTodo = (existing: Card, issue: SourceIssue): void => {
-    if (displayFieldsChanged(existing, issue)) {
-      upserts.push({
-        ...existing,
-        ...displayFields(issue),
-        goneFromLinear: false,
-      });
+    const next = heldDisplay(existing, issue, now);
+    if (displayFieldsChanged(existing, next)) {
+      upserts.push({ ...existing, ...next, goneFromLinear: false });
     } else if (existing.goneFromLinear) {
       reappearedIds.push(existing.id);
     }
@@ -148,6 +181,7 @@ export function reconcile(
       upserts.push({
         ...existing,
         ...issueFields(issue),
+        ...heldDisplay(existing, issue, now),
         goneFromLinear: false,
       });
     } else {
@@ -159,7 +193,12 @@ export function reconcile(
   const goneIds: string[] = [];
   for (const card of current.values()) {
     if (seen.has(card.issueId)) continue;
-    if (!isPastTodo(card) && !isAdopted(card)) {
+    if (
+      !isPastTodo(card) &&
+      !isAdopted(card) &&
+      !hasFreshPending(card, now) &&
+      !pushingIds.has(card.id)
+    ) {
       if (card.groupId == null && !isStartingCard(card, inFlightStartIds)) {
         removeIds.push(card.id);
       } else {

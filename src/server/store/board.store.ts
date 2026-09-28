@@ -15,6 +15,7 @@ import type {
   BoardSnapshot,
   Card,
   Column,
+  ColumnChange,
   EventType,
   PreviewInfo,
   PrInfo,
@@ -31,6 +32,7 @@ import type {
   ArchivedGroup,
   ArchivedGroupSummary,
   UnwindDestination,
+  WorkflowState,
 } from "../../shared/types.js";
 import { DEFAULT_CLEANUP_DELAY_DAYS } from "../../shared/types.js";
 import type { CardSearchResult } from "../../shared/search.js";
@@ -51,7 +53,14 @@ import {
 import { NEEDS_INPUT_MARKER_PREFIX } from "../../shared/marker-key.js";
 import { isDemoteEligible } from "../../shared/demote-eligibility.js";
 import { DEFAULT_ARCHIVE_RETENTION_DAYS } from "../../shared/types.js";
-import { isAdopted, isPastTodo, isStartingCard, reconcile } from "./mapping.js";
+import { LINEAR_PUSH_FAILED_PREFIX } from "../../shared/linear-state-map.js";
+import {
+  hasFreshPending,
+  isAdopted,
+  isPastTodo,
+  isStartingCard,
+  reconcile,
+} from "./mapping.js";
 import { latestClaudeSession, touchClaudeSession } from "./claude-sessions.js";
 
 export const BOARD_PATH = path.join(DISPATCH_DATA_DIR, "board.json");
@@ -541,6 +550,7 @@ class BoardStore extends EventEmitter {
    * To Do card whose Linear issue vanished mid-saga (which would orphan a live session).
    */
   private readonly inFlightStarts = new Set<string>();
+  private readonly pushesInFlight = new Set<string>();
   /**
    * Card ids with a Sync-to-Linear request currently in flight (PUSH-01/03). Mirrors
    * `inFlightStarts` EXACTLY: transient, in-memory, NOT persisted — no sync survives a restart, so
@@ -1302,13 +1312,14 @@ class BoardStore extends EventEmitter {
     returnedIds: ReadonlySet<string>,
     limit = 1000,
   ): string[] {
+    const now = Date.now();
     const tier = (c: Card): number =>
       (c.column === "done" ? 2 : 0) + (c.goneFromLinear ? 1 : 0);
     return [...this.cards.values()]
       .filter(
         (c) =>
           (c.source ?? "linear") === sourceId &&
-          (isPastTodo(c) || isAdopted(c)) &&
+          (isPastTodo(c) || isAdopted(c) || hasFreshPending(c, now)) &&
           !returnedIds.has(c.issueId),
       )
       .sort(
@@ -1414,6 +1425,12 @@ class BoardStore extends EventEmitter {
    */
   listPushSubscriptions(): PushSubscriptionRow[] {
     return this.db.listPushSubscriptions();
+  }
+
+  /** Mark or clear a queued Linear state push for a card, so a poll keeps the card meanwhile. */
+  setPushing(id: string, pushing: boolean): void {
+    if (pushing) this.pushesInFlight.add(id);
+    else this.pushesInFlight.delete(id);
   }
 
   /**
@@ -2909,14 +2926,25 @@ class BoardStore extends EventEmitter {
    * (`LIFE-03`) is the one other writer of the field, but it never mints a fresh delay — it only
    * re-instates a schedule the scheduler's own abandon path cleared moments earlier.
    */
-  moveCardManual(id: string, column: Column): Promise<void> {
+  moveCardManual(id: string, column: Column): Promise<ColumnChange[]> {
+    let changes: ColumnChange[] = [];
     return this.enqueue(() => {
       const c = this.cards.get(id);
       if (!c) return [];
       const from = c.column;
       if (!isManualMoveAllowed(from, column)) return [];
+      const moved = [c, ...(c.memberIds ?? []).map((m) => this.cards.get(m))]
+        .filter((card): card is Card => card != null)
+        .map((card) => ({ card, fromCol: card.column }));
       c.column = column;
       this.mirrorMemberColumn(c, column);
+      changes = moved
+        .filter(({ card, fromCol }) => card.column !== fromCol)
+        .map(({ card, fromCol }) => ({
+          id: card.id,
+          fromCol,
+          toCol: card.column,
+        }));
       if (from !== "done" && column === "done") {
         const sessions = c.sessions ?? [];
         const dueAt = Date.now() + this.cleanupDelayMs;
@@ -2954,7 +2982,7 @@ class BoardStore extends EventEmitter {
           source: "user",
         }),
       ];
-    });
+    }).then(() => changes);
   }
 
   /**
@@ -3912,6 +3940,43 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Record one Linear state push: the pushed state and its hold on success, the notice on failure.
+   *
+   * @remarks One enqueue writes the card fields and the `linear_state_pushed` event together; a
+   * failure leaves the column, `linearState` and `pendingState` untouched.
+   */
+  recordLinearPush(
+    id: string,
+    push: { fromCol: Column; toCol: Column } & (
+      { ok: true; state: WorkflowState } | { ok: false; copy: string }
+    ),
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      if (push.ok) {
+        const { id: stateId, name, type, color } = push.state;
+        card.linearState = { id: stateId, name, type, color };
+        card.pendingState = { id: stateId, at: new Date().toISOString() };
+        card.linearError = null;
+      } else {
+        card.linearError = push.copy;
+      }
+      return [
+        this.event("linear_state_pushed", {
+          cardId: id,
+          source: "user",
+          fromCol: push.fromCol,
+          toCol: push.toCol,
+          reason: push.ok
+            ? push.state.name
+            : `${LINEAR_PUSH_FAILED_PREFIX}${push.copy}`,
+        }),
+      ];
+    });
+  }
+
+  /**
    * Record a retry-safe Sync-to-Linear failure (PUSH-03) in ONE atomic mutation (`setStartError`
    * precedent): set the fixed/service-derived `syncError` copy AND clear the in-flight `syncing`
    * flag together, so the SSE broadcast never carries a torn frame with the error set but the button
@@ -4114,6 +4179,8 @@ class BoardStore extends EventEmitter {
         this.inFlightStarts,
         src,
         opts.tracked,
+        Date.now(),
+        this.pushesInFlight,
       );
       const applied: string[] = [];
       const syncedIn: string[] = [];
