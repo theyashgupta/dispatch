@@ -61,6 +61,7 @@ src/web/
 | `StartModal.tsx`, `CleanupModal.tsx`, `MultiSelect.tsx`                                                                  | `features/modals/`               |
 | `SettingsScreen.tsx`, `PlaybookEditorModal.tsx`                                                                          | `features/settings/`             |
 | `GoneBadge.tsx`, `PlanReadyBadge.tsx`, `SourceBadge.tsx`                                                                 | `features/badges/` (shared leaf) |
+| `SessionsPage.tsx`, `SessionRow.tsx`                                                                                     | `features/sessions/`             |
 | `useBoardStream.ts`, `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts` | `hooks/`                         |
 | `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`                                    | `lib/`                           |
 | `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Glyph` / `Markdown`                                            | `primitives/`                    |

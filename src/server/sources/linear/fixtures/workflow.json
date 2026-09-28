@@ -1,0 +1,62 @@
+{
+  "data": {
+    "viewer": { "id": "user-me" },
+    "teams": {
+      "nodes": [
+        {
+          "id": "team-x",
+          "key": "X",
+          "name": "Zeta",
+          "states": {
+            "nodes": [
+              {
+                "id": "x-done",
+                "name": "Done",
+                "type": "completed",
+                "color": "#4cb782",
+                "position": 3
+              },
+              {
+                "id": "x-todo",
+                "name": "Todo",
+                "type": "unstarted",
+                "color": null,
+                "position": 1
+              }
+            ]
+          }
+        },
+        {
+          "id": "team-eng",
+          "key": "ENG",
+          "name": "Engineering",
+          "states": {
+            "nodes": [
+              {
+                "id": "st-progress",
+                "name": "In Progress",
+                "type": "started",
+                "color": "#f2c94c",
+                "position": 2
+              },
+              {
+                "id": "st-backlog",
+                "name": "Backlog",
+                "type": "backlog",
+                "color": "#bec2c8",
+                "position": 0
+              },
+              {
+                "id": "st-todo",
+                "name": "Todo",
+                "type": "unstarted",
+                "color": "#e2e2e2",
+                "position": 1
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

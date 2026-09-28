@@ -1,4 +1,4 @@
-import type { Card, Item } from "../../shared/types.js";
+import type { Card, Column, Item } from "../../shared/types.js";
 import type * as Api from "./api.js";
 import { SNOOZE_LABELS, snoozeUntil, type SnoozePreset } from "./snooze.js";
 
@@ -23,7 +23,14 @@ export type InboxActionId =
 
 export type ActionApi = Pick<
   typeof Api,
-  "promoteItem" | "setItemState" | "snoozeItem" | "moveCard"
+  | "promoteItem"
+  | "setItemState"
+  | "snoozeItem"
+  | "moveCard"
+  | "cleanupCard"
+  | "switchSession"
+  | "resumeCard"
+  | "pollSource"
 >;
 
 export interface ActionContext {
@@ -165,4 +172,118 @@ export function snoozeRow(
     .catch((err: unknown) => {
       ctx.notice(err instanceof Error ? err.message : "Snooze failed");
     });
+}
+
+export interface BulkTarget {
+  cardId: string;
+  identifier: string;
+  sessionId: string;
+  active?: boolean;
+  restoreSessionId?: string;
+}
+
+export interface BulkOutcome {
+  done: string[];
+  failed: { identifier: string; error: string }[];
+}
+
+function distinctCards(rows: readonly BulkTarget[]): BulkTarget[] {
+  const seen = new Set<string>();
+  return rows.filter((r) => !seen.has(r.cardId) && seen.add(r.cardId));
+}
+
+async function runPerCard(
+  rows: readonly BulkTarget[],
+  step: (row: BulkTarget) => Promise<void>,
+): Promise<BulkOutcome> {
+  const outcome: BulkOutcome = { done: [], failed: [] };
+  for (const row of distinctCards(rows)) {
+    try {
+      await step(row);
+      outcome.done.push(row.identifier);
+    } catch (err: unknown) {
+      outcome.failed.push({
+        identifier: row.identifier,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return outcome;
+}
+
+/** Clean up each selected card once, in order; a failure is recorded and the rest still run. */
+export function runBulkCleanup(
+  api: Pick<ActionApi, "cleanupCard">,
+  rows: readonly BulkTarget[],
+): Promise<BulkOutcome> {
+  return runPerCard(rows, (row) => api.cleanupCard(row.cardId, false));
+}
+
+/**
+ * Switch each selected card to its row's session when needed, then resume it.
+ *
+ * @remarks A refused resume switches the card back to the session that was active before, so a
+ * failed resume never leaves the card pointed at a dead session; failures are recorded per card.
+ */
+export function runBulkResume(
+  api: Pick<ActionApi, "switchSession" | "resumeCard">,
+  rows: readonly BulkTarget[],
+): Promise<BulkOutcome> {
+  return runPerCard(rows, async (row) => {
+    const switched = row.active !== true;
+    if (switched) await api.switchSession(row.cardId, row.sessionId);
+    const result = await api.resumeCard(row.cardId);
+    if (result.ok) return;
+    const restore = row.restoreSessionId;
+    if (switched && restore != null && restore !== row.sessionId) {
+      await api.switchSession(row.cardId, restore).catch(() => undefined);
+    }
+    throw new Error(`resume refused (${result.status ?? "network"})`);
+  });
+}
+
+/** One line of toast copy for a bulk outcome. */
+export function bulkOutcomeCopy(verb: string, outcome: BulkOutcome): string {
+  const total = outcome.done.length + outcome.failed.length;
+  const head = `${verb} ${outcome.done.length} of ${total}`;
+  if (outcome.failed.length === 0) return head;
+  return `${head}. Failed: ${outcome.failed.map((f) => `${f.identifier} (${f.error})`).join(", ")}`;
+}
+
+export interface CardActionContext {
+  api: Pick<ActionApi, "moveCard">;
+  requestStart: (cardId: string) => void;
+  requestCleanup: (cardId: string) => void;
+  openCard: (cardId: string) => void;
+}
+
+export const CARD_ACTIONS = {
+  start: (ctx: CardActionContext, card: Card) => ctx.requestStart(card.id),
+  openTerminal: (ctx: CardActionContext, card: Card) => ctx.openCard(card.id),
+  moveTo: (ctx: CardActionContext, card: Card, column: Column) =>
+    ctx.api.moveCard(card.id, column),
+  cleanup: (ctx: CardActionContext, card: Card) => ctx.requestCleanup(card.id),
+};
+
+/**
+ * Poll every enabled source now and say which ones were asked.
+ *
+ * @remarks With no enabled source nothing is posted; a refused source is named in the notice
+ * instead of failing the rest.
+ */
+export async function syncSources(
+  api: Pick<ActionApi, "pollSource">,
+  enabled: readonly string[],
+  notice: (text: string) => void,
+): Promise<void> {
+  if (enabled.length === 0) {
+    notice("No source is enabled");
+    return;
+  }
+  notice(`Syncing ${enabled.join(", ")}`);
+  const results = await Promise.allSettled(
+    enabled.map((id) => api.pollSource(id)),
+  );
+  const refused = enabled.filter((_, i) => results[i]?.status === "rejected");
+  if (refused.length > 0) notice(`Sync refused: ${refused.join(", ")}`);
 }

@@ -14,6 +14,7 @@ import {
   testLinearConnection,
 } from "../adapters/source-gateway.js";
 import { startEnabledPollers } from "../adapters/poller.js";
+import { invalidateWorkflow } from "../services/orchestration/linear-outbound.js";
 
 /**
  * First-run onboarding surface behind the shared `/api` loopback guard.
@@ -92,6 +93,7 @@ setupRouter.post("/setup", async (req, res) => {
   }
   updateLinearApiKey(apiKey.trim());
   rebuildSources(getOrchestrationConfig()!);
+  invalidateWorkflow();
   startEnabledPollers();
   res.status(200).json({ ok: true });
 });
