@@ -1,6 +1,7 @@
 import {
   GitHubConnectionCard,
   LinearConnectionCard,
+  SlackConnectionCard,
 } from "../connections/index.js";
 import {
   useCallback,
@@ -2117,6 +2118,7 @@ export function SettingsScreen({
                 <SettingsScreen.FiltersTab filters={filters} />
               </LinearConnectionCard>
               <GitHubConnectionCard />
+              <SlackConnectionCard />
             </div>
           )}
           {tab === "models" && (

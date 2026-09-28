@@ -3,6 +3,7 @@ import type {
   SourceConnection,
   SourceKeyError,
 } from "../../shared/types.js";
+import { isProviderCode } from "../../shared/credential.js";
 
 export const CONNECTION_ERROR_COPY: Record<SourceKeyError, string> = {
   rejected: "Linear rejected that key. Double-check it and try again.",
@@ -28,6 +29,27 @@ export const GITHUB_ERROR_COPY: Record<SourceKeyError, string> = {
   "no-credential":
     "No token found. Paste one, or log in with the GitHub CLI and try again.",
 };
+
+export const SLACK_ERROR_COPY: Record<SourceKeyError, string> = {
+  rejected:
+    "Slack rejected that token. Paste a user token (xoxp-) or a bot token (xoxb-).",
+  unreachable: "Couldn't reach Slack. Check your connection and try again.",
+  superseded:
+    "Slack was disconnected while this token was being checked. Paste it again to reconnect.",
+  failed:
+    "Dispatch couldn't save the token. Check the Dispatch Vault and try again.",
+  "sso-required":
+    "Slack refused the token for your organization's single sign-on. Check it and try again.",
+  "no-credential": "No token found. Paste one and press Connect.",
+};
+
+export const SLACK_BOT_NOTE =
+  "Bot token: Dispatch sees only mentions of the bot and channels it was invited to. A user token sees your own DMs and mentions.";
+
+/** The line that quotes Slack's own error code, or none when Slack sent no plain code. */
+export function slackSaidLine(code: string | null | undefined): string | null {
+  return isProviderCode(code) ? `Slack said: ${code}.` : null;
+}
 
 /**
  * Map the server's connection report to the status a connection card shows.
