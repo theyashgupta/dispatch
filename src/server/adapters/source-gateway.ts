@@ -14,6 +14,8 @@ import type {
 } from "../sources/ticket.source.js";
 import type { Config, SourceFilters } from "../../shared/types.js";
 
+export { LINEAR_GRAPHQL_URL } from "../sources/linear/linear.source.js";
+
 /**
  * Thrown when a route asks for a source id the registry does not serve. It lives in the adapters
  * layer so routes can map it to a 404 without importing `sources` directly — the eslint boundary

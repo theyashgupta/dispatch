@@ -21,12 +21,13 @@ import { formatCleanupCountdown } from "../../lib/format-cleanup-countdown.js";
 import { useResumeFeedback } from "../../hooks/useResumeFeedback.js";
 import {
   GoneBadge,
-  LinearStateBadge,
+  LinearStateChip,
   PrBadge,
   PrOverflowChip,
   PR_CHIP_CAP,
   PreviewBadge,
   SourceBadge,
+  TeamCycleText,
   UnknownProbeBadge,
 } from "../badges/index.js";
 import { Button } from "../../primitives/Button.js";
@@ -270,7 +271,9 @@ export function CardView({
                 }}
               />
             )}
-            <Field mono>{card.identifier}</Field>
+            <Field mono style={{ whiteSpace: "nowrap" }}>
+              {card.identifier}
+            </Field>
           </div>
           <div
             style={{
@@ -279,10 +282,11 @@ export function CardView({
               gap: "var(--space-xs)",
               flexWrap: "wrap",
               justifyContent: "flex-end",
+              minWidth: 0,
             }}
           >
             <SourceBadge source={card.source ?? "linear"} />
-            <LinearStateBadge card={card} />
+            <LinearStateChip card={card} />
             {!isGroup &&
               prs
                 .slice(0, PR_CHIP_CAP)
@@ -378,6 +382,7 @@ export function CardView({
           >
             {formatAge(card.updatedAt, nowMs())}
           </span>
+          <TeamCycleText card={card} />
           {isCarousel && onMoveTo && (
             <Button
               variant="secondary"

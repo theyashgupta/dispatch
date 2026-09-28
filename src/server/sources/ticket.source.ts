@@ -42,6 +42,7 @@ export interface TicketSource {
     items?: Item[];
     truncated: boolean;
   }>;
+  fetchByIds?(ids: string[]): Promise<SourceIssue[]>;
   readonly capabilities: FilterCapabilities;
   listOptions(
     dimension: Exclude<FilterDimension, "cycle">,

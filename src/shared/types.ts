@@ -196,10 +196,13 @@ export interface Card {
    */
   project?: { id: string; name: string } | null;
   /**
-   * Linear workflow state { name, type }; optional/nullable so pre-this-plan cards backfill on the
-   * next poll like `project`. WIRE field — rides `snapshot()` unredacted.
+   * Linear workflow state { id, name, type, color }; optional/nullable so older cards backfill on
+   * the next poll like `project`. WIRE field, rides `snapshot()` unredacted.
    */
-  linearState?: { name: string; type: string } | null;
+  linearState?: LinearState | null;
+  team?: LinearTeam;
+  cycle?: number;
+  assignee?: LinearAssignee;
   /** Linear priority integer: 0 none, 1 urgent, 2 high, 3 normal, 4 low. */
   priority: number;
   column: Column;
@@ -1151,8 +1154,34 @@ export interface SourceIssue {
   updatedAt: string;
   /** Linear project { id, name }; null when the issue has no project. */
   project: { id: string; name: string } | null;
-  /** Linear workflow state name+type; null when the issue has no state. */
-  state: { name: string; type: string } | null;
+  /** Linear workflow state with its id and Linear's own color; null when the issue has no state. */
+  state: LinearState | null;
+  team?: LinearTeam;
+  cycle?: number;
+  assignee?: LinearAssignee;
+}
+
+export interface TrackedRefresh {
+  issues: SourceIssue[];
+  requested: ReadonlySet<string>;
+}
+
+export interface LinearState {
+  id?: string;
+  name: string;
+  type: string;
+  color?: string;
+}
+
+export interface LinearTeam {
+  id: string;
+  key: string;
+  name: string;
+}
+
+export interface LinearAssignee {
+  id: string;
+  name: string;
 }
 
 /** Result of reconciling a Linear poll against the current board. */
