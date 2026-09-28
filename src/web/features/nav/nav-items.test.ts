@@ -16,16 +16,25 @@ test("every nav row's page parses back to itself", () => {
   }
 });
 
-test("groups with no rows are omitted and order is Home, Work, System", () => {
+test("groups with no rows are omitted and order is Home, Work, Sources, System", () => {
   assert.deepEqual(
     navGroups(NAV_ITEMS).map((entry) => entry.group),
-    ["Home", "Work", "System"],
+    ["Home", "Work", "Sources", "System"],
   );
   assert.deepEqual(
     navGroups(NAV_ITEMS.filter((item) => item.group !== "System")).map(
       (entry) => entry.group,
     ),
-    ["Home", "Work"],
+    ["Home", "Work", "Sources"],
+  );
+});
+
+test("the Sources group lists Meetings then Calendar", () => {
+  assert.deepEqual(
+    NAV_ITEMS.filter((item) => item.group === "Sources").map(
+      (item) => item.page,
+    ),
+    ["meetings", "calendar"],
   );
 });
 

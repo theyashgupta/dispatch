@@ -209,3 +209,96 @@ test("a filters block keeps only string ids and boolean flags", () => {
     includeActive: true,
   });
 });
+
+test("a sources.meeting block loads enabled and the window", () => {
+  writeConfig({
+    sources: {
+      linear: { apiKey: "k" },
+      meeting: { enabled: true, windowHours: 168 },
+    },
+  });
+  assert.deepEqual(loadConfig().sources?.meeting, {
+    enabled: true,
+    windowHours: 168,
+  });
+});
+
+test("a bad enabled and an unlisted window are ignored, the window defaults to 48", () => {
+  for (const meeting of [
+    { enabled: "yes", windowHours: 50 },
+    { windowHours: "168" },
+    null,
+  ]) {
+    writeConfig({ sources: { linear: { apiKey: "k" }, meeting } });
+    assert.deepEqual(loadConfig().sources?.meeting, { windowHours: 48 });
+  }
+  writeConfig({});
+  assert.deepEqual(loadConfig().sources?.meeting, { windowHours: 48 });
+});
+
+test("the flat key migration keeps sources.meeting on disk", () => {
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({
+      linearApiKey: "flat",
+      sources: { meeting: { enabled: true, windowHours: 72 } },
+    }),
+  );
+  const config = loadConfig();
+  assert.deepEqual(config.sources?.meeting, { enabled: true, windowHours: 72 });
+  const onDisk = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
+    sources: Record<string, Record<string, unknown>>;
+  };
+  assert.deepEqual(onDisk.sources.meeting, { enabled: true, windowHours: 72 });
+  assert.equal(onDisk.sources.linear.apiKey, "flat");
+});
+
+test("a sources.calendar block loads enabled, the interval, the mode and the titles", () => {
+  writeConfig({
+    sources: {
+      linear: { apiKey: "k" },
+      calendar: {
+        enabled: true,
+        pollIntervalMs: 120_000,
+        mode: "ical",
+        calendars: ["Work", "Home"],
+      },
+    },
+  });
+  assert.deepEqual(loadConfig().sources?.calendar, {
+    enabled: true,
+    pollIntervalMs: 120_000,
+    mode: "ical",
+    calendars: ["Work", "Home"],
+  });
+});
+
+test("a calendar block reads tolerantly: unknown mode is macos, bad titles drop, at most 50 stay", () => {
+  const titles = [
+    "Work",
+    42,
+    "",
+    "x".repeat(201),
+    ...Array.from({ length: 60 }, (_, i) => `Cal ${i}`),
+  ];
+  writeConfig({
+    sources: {
+      linear: { apiKey: "k" },
+      calendar: {
+        enabled: "yes",
+        pollIntervalMs: -5,
+        mode: "outlook",
+        calendars: titles,
+      },
+    },
+  });
+  const calendar = loadConfig().sources?.calendar;
+  assert.equal(calendar?.enabled, undefined);
+  assert.equal(calendar?.pollIntervalMs, undefined);
+  assert.equal(calendar?.mode, "macos");
+  assert.equal(calendar?.calendars?.length, 50);
+  assert.equal(calendar?.calendars?.[0], "Work");
+  writeConfig({});
+  assert.deepEqual(loadConfig().sources?.calendar, { mode: "macos" });
+});

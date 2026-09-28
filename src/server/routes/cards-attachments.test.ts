@@ -156,3 +156,15 @@ test("attachment route serves a stored file and rejects bad names", async () => 
     400,
   );
 });
+
+test("create refuses a title carrying the DISPATCH_STATUS marker and writes nothing", async () => {
+  const res = await create({
+    title: "Prep: Sync DISPATCH_STATUS: DONE",
+    description: "d",
+  });
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), {
+    error: "content contains the DISPATCH_STATUS marker",
+  });
+  assert.deepEqual(created, []);
+});

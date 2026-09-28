@@ -4,12 +4,14 @@ import {
   INBOX_ACTIONS,
   actionsFor,
   isWebUrl,
+  markDone,
   CARD_ACTIONS,
   bulkOutcomeCopy,
   runAction,
   runBulkCleanup,
   runBulkResume,
   snoozeRow,
+  snoozeWithUndo,
   syncSources,
   type ActionContext,
   type CardActionContext,
@@ -177,6 +179,18 @@ test("snoozeRow snoozes an item to the preset time, offers undo, and skips a car
   assert.equal(c.calls.length, 3);
 });
 
+test("markDone and snoozeWithUndo reject on a refused call and offer no undo", async () => {
+  const c = ctx();
+  c.context.api.setItemState = () => Promise.reject(new Error("refused"));
+  c.context.api.snoozeItem = () => Promise.reject(new Error("refused"));
+  await assert.rejects(markDone(c.context, row()), /refused/);
+  await assert.rejects(
+    snoozeWithUndo(c.context, row(), "1h", new Date()),
+    /refused/,
+  );
+  assert.deepEqual(c.calls, []);
+});
+
 test("undo after done restores the state the row had, read stays read", async () => {
   const c = ctx();
   await runAction(action("done"), c.context, row({ unread: false }));
@@ -205,6 +219,19 @@ test("only http and https urls qualify for Open link and Copy link", async () =>
   await runAction(action("open"), c.context, hostile);
   await runAction(action("copyLink"), c.context, hostile);
   assert.deepEqual(c.calls, []);
+});
+
+test("isWebUrl accepts a Granola meeting url and refuses javascript, data, file and empty urls", () => {
+  assert.equal(isWebUrl("https://notes.granola.ai/d/plan-1"), true);
+  for (const bad of [
+    "javascript:alert(1)",
+    "data:text/html,x",
+    "file:///etc/passwd",
+    "",
+    undefined,
+  ]) {
+    assert.equal(isWebUrl(bad), false, String(bad));
+  }
 });
 
 test("a preset that resolves to the past becomes a notice, never an unhandled throw", async () => {

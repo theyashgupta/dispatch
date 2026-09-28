@@ -36,10 +36,14 @@ test("items upsert through the queue, survive a reload and keep their state", as
   });
   assert.equal(
     third.updated,
-    1,
-    "only the row whose title changed back is rewritten",
+    2,
+    "the renamed row and the auto-resolved row that came back are rewritten",
   );
-  assert.equal(store.getItem("fake:b")?.state, "done", "a done row stays done");
+  assert.equal(
+    store.getItem("fake:b")?.state,
+    "unread",
+    "a row the pull auto-resolved returns when it is listed again",
+  );
   const fourth = await store.upsertItems("fake", [item("a"), item("b")], {
     kind: "snapshot",
   });
@@ -354,4 +358,19 @@ test("the snapshot reports the enabled sources, empty until set", () => {
   store.setEnabledSources(["fake", "linear"]);
   assert.deepEqual(store.snapshot().enabledSources, ["fake", "linear"]);
   store.setEnabledSources([]);
+});
+
+test("a snooze on an auto-resolved row survives the next snapshot pull that lists it", async () => {
+  await store.upsertItems("snz", [item("a", { source: "snz" })], {
+    kind: "snapshot",
+  });
+  await store.upsertItems("snz", [], { kind: "snapshot" });
+  assert.equal(store.getItem("snz:a")?.state, "done");
+  const until = new Date(Date.now() + 3_600_000).toISOString();
+  assert.equal(await store.snoozeItem("snz:a", until), "ok");
+  await store.upsertItems("snz", [item("a", { source: "snz" })], {
+    kind: "snapshot",
+  });
+  assert.equal(store.getItem("snz:a")?.state, "snoozed");
+  assert.equal(store.getItem("snz:a")?.snoozedUntil, until);
 });
