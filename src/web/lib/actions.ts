@@ -44,6 +44,8 @@ export interface ActionContext {
 
 export type ActionServices = Omit<ActionContext, "openSnooze">;
 
+type RowRef = Pick<InboxRowModel, "id" | "title" | "unread">;
+
 export interface InboxAction {
   id: InboxActionId;
   label: string;
@@ -53,7 +55,7 @@ export interface InboxAction {
 }
 
 const isItem = (row: InboxRowModel) => row.kind === "item";
-const priorState = (row: InboxRowModel) => (row.unread ? "unread" : "read");
+const priorState = (row: RowRef) => (row.unread ? "unread" : "read");
 
 /**
  * True for an http or https url; anything else never reaches window.open or the clipboard.
@@ -98,12 +100,7 @@ export const INBOX_ACTIONS: readonly InboxAction[] = [
     label: "Done",
     key: "e",
     appliesTo: isItem,
-    run: async (ctx, row) => {
-      await ctx.api.setItemState(row.id, "done");
-      ctx.showUndo(`${row.title} marked done`, () =>
-        ctx.api.setItemState(row.id, priorState(row)),
-      );
-    },
+    run: markDone,
   },
   {
     id: "toggleRead",
@@ -152,6 +149,30 @@ export function runAction(
   });
 }
 
+/** Mark an item done and offer Undo back to its prior read state. */
+export async function markDone(
+  ctx: ActionServices,
+  row: RowRef,
+): Promise<void> {
+  await ctx.api.setItemState(row.id, "done");
+  ctx.showUndo(`${row.title} marked done`, () =>
+    ctx.api.setItemState(row.id, priorState(row)),
+  );
+}
+
+/** Snooze an item to a preset and offer Undo back to its prior read state. */
+export async function snoozeWithUndo(
+  ctx: ActionServices,
+  row: RowRef,
+  preset: SnoozePreset,
+  now: Date,
+): Promise<void> {
+  await ctx.api.snoozeItem(row.id, snoozeUntil(preset, now).toISOString());
+  ctx.showUndo(`${row.title} snoozed for ${SNOOZE_LABELS[preset]}`, () =>
+    ctx.api.setItemState(row.id, priorState(row)),
+  );
+}
+
 /** Snooze an item row to a preset and offer Undo; a refusal becomes a notice. */
 export function snoozeRow(
   ctx: ActionContext,
@@ -161,14 +182,7 @@ export function snoozeRow(
 ): Promise<void> {
   if (row.kind !== "item") return Promise.resolve();
   return Promise.resolve()
-    .then(() =>
-      ctx.api.snoozeItem(row.id, snoozeUntil(preset, now).toISOString()),
-    )
-    .then(() =>
-      ctx.showUndo(`${row.title} snoozed for ${SNOOZE_LABELS[preset]}`, () =>
-        ctx.api.setItemState(row.id, priorState(row)),
-      ),
-    )
+    .then(() => snoozeWithUndo(ctx, row, preset, now))
     .catch((err: unknown) => {
       ctx.notice(err instanceof Error ? err.message : "Snooze failed");
     });
