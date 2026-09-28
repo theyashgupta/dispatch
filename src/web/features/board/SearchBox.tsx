@@ -11,7 +11,6 @@ import { CAROUSEL_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
 import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { IconButton } from "../../primitives/IconButton.js";
-import { Kbd } from "../../primitives/Kbd.js";
 import { COLUMN_ACCENT, COLUMN_LABELS } from "./column-meta.js";
 
 const SEARCH_MIN_WIDTH = 280;
@@ -19,19 +18,14 @@ const SEARCH_MAX_WIDTH = 360;
 const ROW_HEIGHT = 44;
 const DEBOUNCE_MS = 200;
 const GAP = 4;
-const MOD_KEY = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 
 type SearchStatus = "idle" | "loading" | "ready" | "error";
 
 interface SearchBoxProps {
   onSelectResult: (result: CardSearchResult) => void;
-  overlayAboveContent?: boolean;
 }
 
-export function SearchBox({
-  onSelectResult,
-  overlayAboveContent,
-}: SearchBoxProps) {
+export function SearchBox({ onSelectResult }: SearchBoxProps) {
   const isCarousel = useMediaQuery(CAROUSEL_QUERY);
   const [query, setQuery] = useState("");
   const [dismissed, setDismissed] = useState(false);
@@ -109,22 +103,6 @@ export function SearchBox({
     inputRef.current?.focus();
   }, [overlayOpen]);
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (overlayAboveContent) return;
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        if (isCarousel) {
-          setOverlayOpen(true);
-        } else {
-          inputRef.current?.focus();
-        }
-      }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [overlayAboveContent, isCarousel]);
-
   function closePanel() {
     setDismissed(true);
     setActiveIndex(null);
@@ -183,7 +161,7 @@ export function SearchBox({
   const inputStyle = {
     width: "100%",
     height: "32px",
-    padding: "0 calc(var(--space-sm) * 2 + 36px) 0 26px",
+    padding: "0 var(--space-sm) 0 26px",
     background: "var(--surface-card)",
     border: "1px solid var(--border)",
     borderRadius: "var(--radius)",
@@ -214,7 +192,6 @@ export function SearchBox({
         type="text"
         role="combobox"
         aria-label="Search tickets"
-        aria-keyshortcuts="Meta+K Control+K"
         aria-expanded={open}
         aria-controls="search-results-listbox"
         aria-autocomplete="list"
@@ -235,19 +212,6 @@ export function SearchBox({
         onBlur={() => setInputFocused(false)}
         style={inputStyle}
       />
-      <span
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          right: "var(--space-sm)",
-          display: "inline-flex",
-          gap: "2px",
-          pointerEvents: "none",
-        }}
-      >
-        <Kbd>{MOD_KEY}</Kbd>
-        <Kbd>K</Kbd>
-      </span>
     </div>
   );
 
@@ -378,7 +342,6 @@ export function SearchBox({
         <span ref={triggerRef} style={{ display: "inline-flex" }}>
           <IconButton
             aria-label="Search tickets"
-            aria-keyshortcuts="Meta+K Control+K"
             title="Search tickets"
             onClick={() => setOverlayOpen(true)}
           >

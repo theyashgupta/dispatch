@@ -22,7 +22,12 @@ import {
 } from "./hooks/useUnseenActivity.js";
 import { useTransitionNotifications } from "./hooks/useTransitionNotifications.js";
 import { AppShell } from "./AppShell.js";
-import { NavSheet, SidebarNav, TopBar } from "./features/nav/index.js";
+import {
+  NAV_ITEMS,
+  NavSheet,
+  SidebarNav,
+  TopBar,
+} from "./features/nav/index.js";
 import { effectiveNavState } from "./lib/nav-state.js";
 import {
   CAROUSEL_QUERY,
@@ -30,7 +35,7 @@ import {
   useMediaQuery,
 } from "./hooks/useMediaQuery.js";
 import { PageHeader } from "./primitives/PageHeader.js";
-import { useRoute } from "./hooks/useRoute.js";
+import { pendingRestore, useRoute } from "./hooks/useRoute.js";
 import type { Page } from "./lib/route.js";
 import { useNavState } from "./hooks/useNavState.js";
 import { UsageChip } from "./features/accounts/index.js";
@@ -71,15 +76,23 @@ import {
 } from "./hooks/useUndoToast.js";
 import {
   moveCard,
+  pollSource,
   promoteItem,
   resetCard as resetCardApi,
   restoreArchived,
+  resumeCard,
   setItemState,
   snoozeItem,
+  switchSession,
   unwindGroup as unwindGroupApi,
 } from "./lib/api.js";
-import type { ActionServices } from "./lib/actions.js";
+import { syncSources, type ActionServices } from "./lib/actions.js";
+import { buildCommands } from "./lib/commands.js";
+import { GLOBAL_SHORTCUTS, bindShortcuts } from "./lib/shortcuts.js";
+import { useShortcuts } from "./hooks/useShortcuts.js";
 import { useItems } from "./hooks/useItems.js";
+import { nowMs } from "./lib/format-age.js";
+import { flattenSessions } from "./lib/sessions.js";
 import type { UnwindDestination } from "../shared/types.js";
 import { UpdateBanner } from "./features/update/index.js";
 import { cleanupCard as cleanupCardApi, getCard, getSetup } from "./lib/api.js";
@@ -118,6 +131,21 @@ const PlaybooksPage = lazy(() =>
 const VaultPage = lazy(() =>
   import("./features/vault/index.js").then((m) => ({
     default: m.VaultPage,
+  })),
+);
+const SessionsPage = lazy(() =>
+  import("./features/sessions/index.js").then((m) => ({
+    default: m.SessionsPage,
+  })),
+);
+const CommandPalette = lazy(() =>
+  import("./features/palette/index.js").then((m) => ({
+    default: m.CommandPalette,
+  })),
+);
+const CheatSheet = lazy(() =>
+  import("./features/palette/index.js").then((m) => ({
+    default: m.CheatSheet,
   })),
 );
 const ArchivePage = lazy(() =>
@@ -269,6 +297,18 @@ export function App() {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [pinned, setPinned] = useState<PinnedCard | null>(null);
   const [pinnedHydrating, setPinnedHydrating] = useState(false);
+  const [panelRoute, setPanelRoute] = useState(() => ({
+    page: route.page,
+    restoring: pendingRestore(),
+  }));
+  if (panelRoute.page !== route.page) {
+    setPanelRoute({ page: route.page, restoring: false });
+    if (!panelRoute.restoring && route.page !== "workspace") {
+      setSelectedCardId(null);
+      setPinned(null);
+      setPinnedHydrating(false);
+    }
+  }
   const [pinFetchError, setPinFetchError] = useState<{
     id: string;
     kind: "not-found" | "network";
@@ -456,7 +496,16 @@ export function App() {
   const { show: showUndo, notice: showNotice } = undoToast;
   const actionServices = useMemo<ActionServices>(
     () => ({
-      api: { promoteItem, setItemState, snoozeItem, moveCard },
+      api: {
+        promoteItem,
+        setItemState,
+        snoozeItem,
+        moveCard,
+        cleanupCard: cleanupCardApi,
+        switchSession,
+        resumeCard,
+        pollSource,
+      },
       showUndo,
       notice: showNotice,
       openUrl: (url) => {
@@ -565,15 +614,24 @@ export function App() {
   };
 
   const [createTicketOpen, setCreateTicketOpen] = useState(false);
-
-  const overlayAboveContent =
-    selectedCard != null ||
-    activityOpen ||
-    sheetOpen ||
-    createTicketOpen ||
-    cleanupCard != null ||
-    resetCard != null ||
-    (startCard != null && startRequest != null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const overlayReturnRef = useRef<HTMLElement | null>(null);
+  const openOverlay = (open: (value: boolean) => void) => () => {
+    overlayReturnRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    open(true);
+  };
+  const closeOverlay =
+    (open: (value: boolean) => void) =>
+    (ran = false) => {
+      open(false);
+      const target = overlayReturnRef.current;
+      overlayReturnRef.current = null;
+      if (ran !== true && target?.isConnected === true) target.focus();
+    };
 
   const [setupState, setSetupState] = useState<
     "loading" | "needsKey" | "ready"
@@ -586,6 +644,18 @@ export function App() {
   } | null>(null);
   const [storage, setStorage] = useState<{ ok: boolean; path: string } | null>(
     null,
+  );
+  useShortcuts(
+    bindShortcuts(GLOBAL_SHORTCUTS, {
+      "meta+k": openOverlay(setPaletteOpen),
+      n: openOverlay(setCreateTicketOpen),
+      "?": openOverlay(setShortcutsOpen),
+    }),
+    {
+      menuOpen:
+        activityOpen || sheetOpen || board === null || setupState !== "ready",
+      scopeId: "root",
+    },
   );
   useEffect(() => {
     let active = true;
@@ -636,9 +706,12 @@ export function App() {
   ) : null;
 
   const inboxCount = inboxWaitingCount(board.cards, items);
+  const sessionRows = flattenSessions(board.cards, nowMs());
+  const liveSessionCount = sessionRows.filter((row) => row.running).length;
   const pageMeta: Record<Page, { title: string; count?: number }> = {
     board: { title: "Board", count: board.cards.length },
     inbox: { title: "Inbox", count: inboxCount },
+    sessions: { title: "Sessions", count: sessionRows.length },
     workspace: { title: "Workspace" },
     settings: { title: "Settings" },
     activity: { title: "Activity", count: feed.events.length },
@@ -662,6 +735,7 @@ export function App() {
       collapsed={navMode === "collapsed"}
       onToggleCollapsed={nav.toggle}
       inboxCount={inboxCount}
+      liveSessionCount={liveSessionCount}
       syncedAt={board.syncedAt ?? null}
       connection={connection}
       pollIntervalMs={board.pollIntervalMs ?? null}
@@ -669,7 +743,7 @@ export function App() {
       syncUnreachable={board.syncUnreachable ?? false}
       accountSlot={accountSlot}
       onOpenCreateTicket={() => {
-        setCreateTicketOpen(true);
+        openOverlay(setCreateTicketOpen)();
         if (navMode === "topbar") setSheetOpen(false);
       }}
       onOpenActivity={() => {
@@ -797,6 +871,13 @@ export function App() {
               />
             ) : route.page === "accounts" ? (
               <AccountsPage claudeAccounts={claudeAccounts} />
+            ) : route.page === "sessions" ? (
+              <SessionsPage
+                board={board}
+                selectedCardId={selectedCard ? selectedCardId : null}
+                onSelectCard={selectCard}
+                services={actionServices}
+              />
             ) : route.page === "archive" ? (
               <ArchivePage onCountChange={setArchiveCount} />
             ) : route.page === "playbooks" ? (
@@ -818,7 +899,6 @@ export function App() {
                 doneLimit={doneLimit}
                 onLoadMoreDone={() => setDoneLimit((n) => n + DONE_PAGE_SIZE)}
                 onSelectSearchResult={selectSearchResult}
-                overlayAboveContent={overlayAboveContent}
               />
             )}
           </Suspense>
@@ -907,7 +987,45 @@ export function App() {
         />
       )}
       {createTicketOpen && (
-        <CreateTicketModal onClose={() => setCreateTicketOpen(false)} />
+        <CreateTicketModal onClose={closeOverlay(setCreateTicketOpen)} />
+      )}
+      {shortcutsOpen && (
+        <Suspense fallback={null}>
+          <CheatSheet onClose={closeOverlay(setShortcutsOpen)} />
+        </Suspense>
+      )}
+      {paletteOpen && (
+        <Suspense fallback={null}>
+          <CommandPalette
+            commands={buildCommands(
+              {
+                api: {
+                  moveCard: (id, column) =>
+                    moveCard(id, column).catch(() =>
+                      showNotice(
+                        `Couldn't move ${board.cards.find((c) => c.id === id)?.identifier ?? id}.`,
+                      ),
+                    ),
+                },
+                requestStart,
+                requestCleanup: setCleanupCardId,
+                openCard: selectCard,
+                navigate,
+                newTicket: openOverlay(setCreateTicketOpen),
+                syncNow: () =>
+                  void syncSources(
+                    actionServices.api,
+                    board.enabledSources ?? [],
+                    showNotice,
+                  ),
+              },
+              NAV_ITEMS,
+              selectedCard,
+            )}
+            onClose={closeOverlay(setPaletteOpen)}
+            onOpenCard={selectSearchResult}
+          />
+        </Suspense>
       )}
       {isToastVisible(undoToast.state) && (
         <Toast
