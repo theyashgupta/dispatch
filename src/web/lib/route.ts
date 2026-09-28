@@ -2,6 +2,7 @@ export const PAGES = [
   "board",
   "inbox",
   "sessions",
+  "tickets",
   "workspace",
   "settings",
   "activity",
@@ -10,6 +11,8 @@ export const PAGES = [
   "vault",
   "archive",
   "pull-requests",
+  "errors",
+  "today",
 ] as const;
 
 export type Page = (typeof PAGES)[number];

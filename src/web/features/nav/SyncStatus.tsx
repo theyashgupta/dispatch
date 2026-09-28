@@ -7,6 +7,7 @@ interface SyncStatusProps {
   pollIntervalMs: number | null;
   syncWarning: string | null;
   syncUnreachable?: boolean;
+  noSource?: boolean;
   collapsed: boolean;
 }
 
@@ -62,6 +63,7 @@ export function SyncStatus({
   pollIntervalMs,
   syncWarning,
   syncUnreachable,
+  noSource,
   collapsed,
 }: SyncStatusProps) {
   const [now, setNow] = useState(() => Date.now());
@@ -71,6 +73,9 @@ export function SyncStatus({
   }, []);
 
   const disconnected = connection === "disconnected";
+  if (noSource && !disconnected) {
+    return <div role="status" aria-live="polite" />;
+  }
   const syncedTs = syncedAt !== null ? new Date(syncedAt).getTime() : NaN;
   const syncedTsValid = Number.isFinite(syncedTs);
   const stale =

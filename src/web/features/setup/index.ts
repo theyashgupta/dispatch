@@ -1,1 +1,1 @@
-export { FirstRunSetup } from "./FirstRunSetup.js";
+export { SetupWizard } from "./SetupWizard.js";
