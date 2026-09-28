@@ -681,9 +681,13 @@ column transition on a session that is still running. For a Linear-sourced group
 is in fact the ONLY attacker-influenced text in the kickoff, since such a member contributes no
 inlined description, only the batched MCP-read instruction.
 
-A group member's `description` is deliberately NOT fenced: inlined description content is
-multi-line by design (it is content, not a single-line field), and only local-source members carry
-one.
+Descriptions stay multi-line, but every inline description (a single card's or a local group
+member's) goes through `kickoff.ts#guardDescription` (LOCAL-29): the status-marker token is defused
+like a title's, and a card promoted from a provider item is fenced with
+`shared/untrusted.ts#fenceUntrusted`. A promoted card is one whose `issueId` is the item id
+(`<source>:...`, required by the store) rather than its own `LOCAL-<n>` identifier. That text came
+from a Slack message or a pull request body, so the fence keeps it from opening a fence of its own
+or reading as the operator's direction.
 
 ### Watcher Discriminator
 
@@ -2227,6 +2231,29 @@ history row whose `ts`, `text`, `user`, `thread_ts` or `reply_count` has the wro
 refuses (`channel_not_found`, `not_in_channel`, `missing_scope`) is skipped for that poll with one
 warning; a 429 drops the whole poll through the rate-limit back-off and moves no cursor. Mentions
 inside thread replies are not read (R-17).
+
+`GET /api/slack/thread/:itemId` (the item id URL-encoded) loads the thread behind a Slack item
+through `services/domain/slack.ts#slackThread` and `sources/slack/slack-thread.ts#fetchSlackThread`
+(`conversations.replies`, limit 40, one page). It answers 404 `not-found` for a missing, non-Slack
+or thread-less item (no `meta.threadTs`) before any Slack call, 409 `disabled` while the switch is
+off and 409 `no-credential` without a token. The body is `{ messages: [{ author, time, text }],
+truncated }`: the parent first, then replies oldest first, text rendered like titles, bot messages
+kept and named by their username or bot id, at most 20 `users.info` lookups per call, `truncated`
+from Slack's `has_more`. Slack token codes answer 401 `rejected` with `providerError`,
+`thread_not_found` and `channel_not_found` answer 404, a 429 answers 429 `rate-limited` and
+anything else 502 `unreachable`. Loaded threads are cached in memory for 10 minutes keyed
+`<token hash>:<channel>:<threadTs>` (`SlackThreadCache`, at most 200 entries, the oldest evicted;
+the name cache is also per token hash, so nothing crosses Slack accounts); errors are
+never cached.
+
+In the Inbox, an expanded Slack item with `meta.threadTs` shows `features/slack/SlackThread`: a
+collapsed "Thread" section whose "Load thread" button fetches the route through
+`hooks/useSlackThread` (never on mount or a timer) and lists the messages as plain text. Every
+expanded Slack item also offers "Draft reply" (`lib/actions.ts`, no key): it loads the thread when
+there is one, builds the kickoff with `lib/slack-prompt.ts#draftReplyPrompt` (the message and the
+thread fenced by `fenceUntrusted`, the channel named, posting forbidden) and calls App's
+`startAgent`, which promotes the item, moves the card to To Do and opens StartModal prefilled. The
+reply is printed in the session; Dispatch still calls no Slack write method.
 
 ### SSE Transport
 
