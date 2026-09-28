@@ -4,6 +4,7 @@ import path from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import type {
   Config,
+  CalendarSourceConfig,
   MeetingSourceConfig,
   SourceFilters,
   StatusChannel,
@@ -14,6 +15,8 @@ import {
   DEFAULT_CLEANUP_DELAY_DAYS,
   DEFAULT_ARCHIVE_RETENTION_DAYS,
   ARCHIVE_RETENTION_MAX_DAYS,
+  CALENDAR_TITLE_MAX,
+  CALENDARS_MAX,
   DEFAULT_FILTERS,
   DEFAULT_GRANOLA_WINDOW_HOURS,
   DEFAULT_POLL_INTERVAL_MS,
@@ -160,21 +163,22 @@ function readLastUsedPlaybook(
 }
 
 /**
- * Read the well-formed `sources.linear` object from a parsed config.
+ * Read the well-formed `sources.<id>` object from a parsed config.
  *
- * @remarks Returns undefined when `sources` or `sources.linear` is absent, null, an array or not
+ * @remarks Returns undefined when `sources` or `sources.<id>` is absent, null, an array or not
  * an object, so each caller applies its own fallback.
  */
-function nestedLinear(
+function sourceBlock(
   parsed: Record<string, unknown>,
+  id: string,
 ): Record<string, unknown> | undefined {
   const sources = parsed.sources;
   if (typeof sources !== "object" || sources === null || Array.isArray(sources))
     return undefined;
-  const linear = (sources as Record<string, unknown>).linear;
-  if (typeof linear !== "object" || linear === null || Array.isArray(linear))
+  const block = (sources as Record<string, unknown>)[id];
+  if (typeof block !== "object" || block === null || Array.isArray(block))
     return undefined;
-  return linear as Record<string, unknown>;
+  return block as Record<string, unknown>;
 }
 
 /**
@@ -184,7 +188,7 @@ function nestedLinear(
  * which keeps the boot migration idempotent.
  */
 function readNestedKey(parsed: Record<string, unknown>): string {
-  const apiKey = nestedLinear(parsed)?.apiKey;
+  const apiKey = sourceBlock(parsed, "linear")?.apiKey;
   return typeof apiKey === "string" ? apiKey.trim() : "";
 }
 
@@ -195,7 +199,7 @@ function readNestedKey(parsed: Record<string, unknown>): string {
  * `apiKey` but no `filters` still yields the assigned-to-me pull.
  */
 function readNestedFilters(parsed: Record<string, unknown>): SourceFilters {
-  const filters = nestedLinear(parsed)?.filters;
+  const filters = sourceBlock(parsed, "linear")?.filters;
   if (typeof filters !== "object" || filters === null || Array.isArray(filters))
     return DEFAULT_FILTERS;
   const f = filters as Record<string, unknown>;
@@ -220,7 +224,7 @@ function readNestedSourceSettings(parsed: Record<string, unknown>): {
   enabled?: boolean;
   pollIntervalMs?: number;
 } {
-  const linear = nestedLinear(parsed);
+  const linear = sourceBlock(parsed, "linear");
   if (!linear) return {};
   const out: { enabled?: boolean; pollIntervalMs?: number } = {};
   if (typeof linear.enabled === "boolean") out.enabled = linear.enabled;
@@ -239,15 +243,7 @@ function readNestedSourceSettings(parsed: Record<string, unknown>): {
 function readMeetingSource(
   parsed: Record<string, unknown>,
 ): MeetingSourceConfig {
-  const sources = parsed.sources;
-  const block =
-    typeof sources === "object" && sources !== null && !Array.isArray(sources)
-      ? (sources as Record<string, unknown>).meeting
-      : undefined;
-  const meeting =
-    typeof block === "object" && block !== null && !Array.isArray(block)
-      ? (block as Record<string, unknown>)
-      : {};
+  const meeting = sourceBlock(parsed, "meeting") ?? {};
   const windowHours = GRANOLA_WINDOW_HOURS.find(
     (hours) => hours === meeting.windowHours,
   );
@@ -256,6 +252,41 @@ function readMeetingSource(
       ? { enabled: meeting.enabled }
       : {}),
     windowHours: windowHours ?? DEFAULT_GRANOLA_WINDOW_HOURS,
+  };
+}
+
+/**
+ * Read `sources.calendar`, keeping at most 50 calendar titles of at most 200 characters.
+ *
+ * @remarks An unknown mode reads as macos, so a hand-edited typo never switches the source to the
+ * iCal path, which needs a Vault key the user may not have.
+ */
+function readCalendarSource(
+  parsed: Record<string, unknown>,
+): CalendarSourceConfig {
+  const calendar = sourceBlock(parsed, "calendar") ?? {};
+  const interval = calendar.pollIntervalMs;
+  const titles = Array.isArray(calendar.calendars)
+    ? calendar.calendars
+        .filter(
+          (title): title is string =>
+            typeof title === "string" &&
+            title.trim() !== "" &&
+            title.length <= CALENDAR_TITLE_MAX,
+        )
+        .slice(0, CALENDARS_MAX)
+    : undefined;
+  return {
+    ...(typeof calendar.enabled === "boolean"
+      ? { enabled: calendar.enabled }
+      : {}),
+    ...(typeof interval === "number" &&
+    Number.isFinite(interval) &&
+    interval > 0
+      ? { pollIntervalMs: interval }
+      : {}),
+    mode: calendar.mode === "ical" ? "ical" : "macos",
+    ...(titles !== undefined ? { calendars: titles } : {}),
   };
 }
 
@@ -416,6 +447,7 @@ export function loadConfig(): Config {
         ...readNestedSourceSettings(parsed),
       },
       meeting: readMeetingSource(parsed),
+      calendar: readCalendarSource(parsed),
     },
     lastUsedPlaybook: readLastUsedPlaybook(parsed),
     cleanupDelayDays: readWholeDays(

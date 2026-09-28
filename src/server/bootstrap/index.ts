@@ -43,7 +43,13 @@ import {
 } from "../services/orchestration/granola-round.js";
 import { sendPushForCard } from "../services/domain/push-send.js";
 import { startArtifactDetectionLoop } from "../adapters/artifact-detect.js";
-import { buildRegistry } from "../sources/registry.js";
+import {
+  buildRegistry,
+  setCredentialResolver,
+  setMacCalendarReader,
+} from "../sources/registry.js";
+import { readMacEvents } from "../adapters/calendar-mac.js";
+import { resolveIcalUrl } from "../services/orchestration/calendar.js";
 import { startMarkerWatcher } from "../adapters/markers/watcher.js";
 import { reconcileSessions } from "./reconcile.js";
 import { resolveEditors } from "../adapters/editors.js";
@@ -302,6 +308,8 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   }
   const config = loadConfig();
   setOrchestrationConfig(config);
+  setMacCalendarReader(readMacEvents);
+  setCredentialResolver("calendar", resolveIcalUrl);
   buildRegistry(config);
   loadOrCreateVapidKeys();
   console.log(`[push] VAPID keypair loaded from ${VAPID_KEYS_PATH}`);

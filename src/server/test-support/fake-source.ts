@@ -12,6 +12,7 @@ export interface FakeSourceOptions {
   kind?: SourceKind;
   pollIntervalMs?: number;
   vaultKeys?: readonly string[];
+  itemsOnly?: boolean;
   fetch?: () => Promise<{
     issues: SourceIssue[];
     items?: Item[];
@@ -31,6 +32,7 @@ export function makeFakeSource(opts: FakeSourceOptions): TicketSource {
     kind: opts.kind ?? "snapshot",
     pollIntervalMs: opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
     vaultKeys: opts.vaultKeys ?? [],
+    ...(opts.itemsOnly ? { itemsOnly: true } : {}),
     capabilities: { dimensions: [] },
     fetch:
       opts.fetch ?? (() => Promise.resolve({ issues: [], truncated: false })),

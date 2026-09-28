@@ -1,5 +1,6 @@
 import {
   buildRegistry,
+  calendarSourceFor,
   getLinearSource,
   getSource,
   isSourceEnabled,
@@ -15,7 +16,22 @@ import type {
   FilterOption,
   TicketSource,
 } from "../sources/ticket.source.js";
-import type { Config, SourceFilters } from "../../shared/types.js";
+import {
+  CalendarSource,
+  type CalendarSourceStatus,
+} from "../sources/calendar/calendar.source.js";
+import { calendarErrorCode } from "../sources/calendar/calendar-events.js";
+import type {
+  CalendarErrorCode,
+  CalendarSourceConfig,
+  Config,
+  SourceFilters,
+} from "../../shared/types.js";
+
+export {
+  setCredentialResolver,
+  setMacCalendarReader,
+} from "../sources/registry.js";
 
 /**
  * Thrown when a route asks for a source id the registry does not serve. It lives in the adapters
@@ -102,4 +118,27 @@ export function vaultKeyUsers(
   sources: readonly TicketSource[] = listSources(),
 ): string[] {
   return sources.filter((s) => s.vaultKeys.includes(name)).map((s) => s.id);
+}
+
+/**
+ * Run one calendar read with candidate settings; the error code on failure, null on success.
+ *
+ * @remarks The read uses a throwaway source, so nothing reaches the store before the user's
+ * settings are saved (U4-09).
+ */
+export async function testCalendarRead(
+  settings: CalendarSourceConfig,
+): Promise<CalendarErrorCode | null> {
+  try {
+    await calendarSourceFor(() => settings).fetch();
+    return null;
+  } catch (err) {
+    return calendarErrorCode(err);
+  }
+}
+
+/** The registered calendar source's last read outcome, empty before its first read. */
+export function calendarReadStatus(): CalendarSourceStatus {
+  const source = getSource("calendar");
+  return source instanceof CalendarSource ? source.status : {};
 }

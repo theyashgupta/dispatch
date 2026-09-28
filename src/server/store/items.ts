@@ -29,19 +29,24 @@ export function wakeItem(item: Item, now: string): Item {
   return withState(item, "unread");
 }
 
-/** A copy of the item in a non-snoozed state, with any snooze time dropped. */
+/**
+ * A copy of the item in a non-snoozed state, with any snooze time dropped.
+ *
+ * @remarks It also drops `autoResolved`, so a state someone sets is never revived by a later pull.
+ */
 export function withState(item: Item, state: SettableItemState): Item {
   const next: Item = { ...item, state };
   delete next.snoozedUntil;
+  delete next.autoResolved;
   return next;
 }
 
 /**
  * Compute the rows one source poll changes.
  *
- * @remarks An existing row keeps state, snoozedUntil and cardId and merges meta with the connector's
- * keys winning; a complete snapshot pull marks the source's missing rows done; an append or partial
- * pull never does.
+ * @remarks An existing row keeps state, snoozedUntil and cardId. A snapshot pull is the source's
+ * whole truth, so it replaces meta and revives a row it had auto-resolved; an append pull merges meta.
+ * A complete snapshot pull marks the source's missing rows done; an append or partial pull never does.
  */
 export function applyItemUpserts(
   existing: ReadonlyMap<string, Item>,
@@ -60,7 +65,9 @@ export function applyItemUpserts(
       counts.inserted += 1;
       continue;
     }
-    const kept = wakeItem(prior, opts.now);
+    const woken = wakeItem(prior, opts.now);
+    const kept =
+      woken.autoResolved === true ? withState(woken, "unread") : woken;
     const merged: Item = {
       ...kept,
       type: next.type,
@@ -69,7 +76,10 @@ export function applyItemUpserts(
       url: next.url,
       priority: next.priority,
       createdAt: next.createdAt,
-      meta: { ...kept.meta, ...next.meta },
+      meta:
+        opts.kind === "snapshot"
+          ? { ...next.meta }
+          : { ...kept.meta, ...next.meta },
     };
     if (JSON.stringify(merged) === JSON.stringify(prior)) continue;
     upserts.push(merged);
@@ -79,7 +89,7 @@ export function applyItemUpserts(
     for (const item of existing.values()) {
       if (item.source !== opts.source || latest.has(item.id)) continue;
       if (item.state === "done") continue;
-      upserts.push(withState(item, "done"));
+      upserts.push({ ...withState(item, "done"), autoResolved: true });
       counts.resolved += 1;
     }
   }

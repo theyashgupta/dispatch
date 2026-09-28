@@ -177,6 +177,7 @@ export interface Item {
   snoozedUntil?: string;
   meta: Record<string, string>;
   cardId?: string;
+  autoResolved?: boolean;
 }
 
 export interface Card {
@@ -981,6 +982,48 @@ export interface MeetingSourceConfig {
   windowHours?: number;
 }
 
+export type CalendarMode = "macos" | "ical";
+
+export const CALENDARS_MAX = 50;
+export const CALENDAR_TITLE_MAX = 200;
+
+export interface CalendarSourceConfig {
+  enabled?: boolean;
+  pollIntervalMs?: number;
+  mode: CalendarMode;
+  calendars?: string[];
+}
+
+export type CalendarErrorCode =
+  | "calendar-denied"
+  | "ical-url-missing"
+  | "ical-url-invalid"
+  | "ical-unreachable"
+  | "ical-invalid"
+  | "ical-too-large"
+  | "timeout"
+  | "failed";
+
+export interface CalendarStatus {
+  enabled: boolean;
+  mode: CalendarMode;
+  calendars: string[];
+  icalFilled: boolean;
+  lastPolledAt?: string;
+  lastError?: CalendarErrorCode;
+  eventCount?: number;
+}
+
+export interface CalendarChoice {
+  title: string;
+  source: string;
+  ignoredByDefault: boolean;
+}
+
+export type CalendarSettingsPatch = Partial<
+  Pick<CalendarSourceConfig, "enabled" | "mode" | "calendars">
+>;
+
 export type GranolaCheckState =
   "connected" | "needs-auth" | "failed" | "not-found" | "claude-missing";
 
@@ -1030,7 +1073,11 @@ export interface Config {
   workspaceRoot?: string;
   /** Status-source selection (`hooks | pane | auto`); absent resolves to `auto` at load. */
   statusChannel?: StatusChannel;
-  sources?: { linear?: SourceConfig; meeting?: MeetingSourceConfig };
+  sources?: {
+    linear?: SourceConfig;
+    meeting?: MeetingSourceConfig;
+    calendar?: CalendarSourceConfig;
+  };
   /** On-boot update check; absent or any non-`false` value resolves to on. */
   updateCheck?: boolean;
   /** The playbook name remembered from the last successful kickoff; absent when never set. */
