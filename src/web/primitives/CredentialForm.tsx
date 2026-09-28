@@ -14,6 +14,8 @@ interface CredentialFormProps {
   onConnect: (value: string) => Promise<boolean>;
   onTest: () => void;
   onDisconnect: () => void;
+  useExistingLabel?: string;
+  onUseExisting?: () => void;
 }
 
 const CONFIRM_MS = 5000;
@@ -55,8 +57,11 @@ export function CredentialForm({
   onConnect,
   onTest,
   onDisconnect,
+  useExistingLabel,
+  onUseExisting,
 }: CredentialFormProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const submitting = useRef(false);
   const [hasText, setHasText] = useState(false);
   const [focused, setFocused] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -73,10 +78,15 @@ export function CredentialForm({
 
   async function handleSubmit() {
     const input = inputRef.current;
-    if (!canSubmit || !input) return;
-    if (await onConnect(input.value.trim())) {
-      input.value = "";
-      setHasText(false);
+    if (!canSubmit || !input || submitting.current) return;
+    submitting.current = true;
+    try {
+      if (await onConnect(input.value.trim())) {
+        input.value = "";
+        setHasText(false);
+      }
+    } finally {
+      submitting.current = false;
     }
   }
 
@@ -123,6 +133,11 @@ export function CredentialForm({
         >
           {configured ? "Replace" : "Connect"}
         </Button>
+        {!configured && useExistingLabel && onUseExisting && (
+          <Button variant="secondary" disabled={!idle} onClick={onUseExisting}>
+            {useExistingLabel}
+          </Button>
+        )}
       </div>
       {configured && (
         <div style={rowStyle}>

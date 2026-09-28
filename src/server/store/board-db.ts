@@ -10,6 +10,7 @@ import type {
   EventType,
   ArchivedGroup,
   Item,
+  SourceCursor,
 } from "../../shared/types.js";
 
 export const BOARD_DB_PATH = path.join(DISPATCH_DATA_DIR, "board.db");
@@ -84,11 +85,6 @@ export interface BoardMeta {
    */
   schemaVersion?: number;
   sourceCursors?: Record<string, SourceCursor>;
-}
-
-export interface SourceCursor {
-  cursor: string;
-  polledAt: string;
 }
 
 export interface ItemWrites {

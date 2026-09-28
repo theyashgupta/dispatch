@@ -21,7 +21,7 @@ import {
 } from "../infra/config-holder.js";
 import { readCurrent } from "../domain/vault.js";
 
-const CALENDAR_ICAL_KEY = "CALENDAR_ICAL_URL";
+export const CALENDAR_ICAL_KEY = "CALENDAR_ICAL_URL";
 
 type CalendarResult<T> =
   ({ ok: true } & T) | { ok: false; error: CalendarErrorCode };

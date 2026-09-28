@@ -58,6 +58,14 @@ export const INBOX_SHORTCUTS: readonly ShortcutEntry[] = [
   { key: "u", label: "Toggle read" },
 ];
 
+export const TICKETS_BINDINGS: readonly { key: string; label: string }[] = [
+  { key: "j", label: "Next row" },
+  { key: "k", label: "Previous row" },
+  { key: "Enter", label: "Open" },
+  { key: "e", label: "Done" },
+  { key: "o", label: "Open link" },
+];
+
 export const SESSIONS_SHORTCUTS: readonly ShortcutEntry[] = [
   { key: "j", label: "Next session" },
   { key: "k", label: "Previous session" },

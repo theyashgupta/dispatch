@@ -71,14 +71,26 @@ test("a read row is never reset to unread by an upsert, and an unchanged row is 
   assert.deepEqual(same.counts, { inserted: 0, updated: 0, resolved: 0 });
 });
 
-test("meta merges with connector keys winning and app keys surviving", () => {
+test("an append pull merges meta with connector keys winning and earlier keys surviving", () => {
   const prior = item("a", { meta: { repo: "old", pinned: "1" } });
   const r = applyItemUpserts(
     existing(prior),
     [item("a", { meta: { repo: "new", ci: "red" } })],
-    snapshot,
+    append,
   );
   assert.deepEqual(r.upserts[0]?.meta, { repo: "new", pinned: "1", ci: "red" });
+});
+
+test("a snapshot pull replaces meta, so a key the source dropped is gone", () => {
+  const prior = item("a", {
+    meta: { joinUrl: "https://meet.example/old", start: "s" },
+  });
+  const r = applyItemUpserts(
+    existing(prior),
+    [item("a", { meta: { start: "s" } })],
+    snapshot,
+  );
+  assert.deepEqual(r.upserts[0]?.meta, { start: "s" });
 });
 
 test("a complete snapshot pull resolves missing rows to done, drops their snooze, keeps cardId, and leaves done rows done", () => {
@@ -99,6 +111,29 @@ test("a complete snapshot pull resolves missing rows to done, drops their snooze
   assert.equal(byId.get("fake:s")?.state, "done");
   assert.equal(byId.get("fake:s")?.snoozedUntil, undefined);
   assert.deepEqual(r.counts, { inserted: 0, updated: 0, resolved: 2 });
+});
+
+test("a row the pull auto-resolved returns to unread when it reappears, and a later user state clears the mark", () => {
+  const first = applyItemUpserts(
+    existing(item("a"), item("b")),
+    [item("a")],
+    snapshot,
+  );
+  const resolved = first.upserts.find((u) => u.id === "fake:b");
+  assert.ok(resolved);
+  assert.equal(resolved.state, "done");
+  assert.equal(resolved?.autoResolved, true);
+  assert.equal(redactItem(resolved).autoResolved, undefined);
+  const back = applyItemUpserts(
+    existing(item("a"), resolved),
+    [item("a"), item("b")],
+    snapshot,
+  );
+  const revived = back.upserts.find((u) => u.id === "fake:b");
+  assert.equal(revived?.state, "unread");
+  assert.equal(revived?.autoResolved, undefined);
+  const userDone = withState({ ...resolved }, "done");
+  assert.equal(userDone.autoResolved, undefined);
 });
 
 test("a done row that reappears in a pull stays done", () => {

@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { focusRing } from "./focus-ring.js";
 
 const selectStyle: CSSProperties = {
@@ -15,22 +15,33 @@ const selectStyle: CSSProperties = {
   outline: "none",
 };
 
-interface SelectProps<T extends string> {
+const shrinkableSelectStyle: CSSProperties = {
+  ...selectStyle,
+  flex: undefined,
+  minWidth: 0,
+};
+
+type SelectProps<T extends string> = {
   label: string;
   value: T | "";
-  labels: Record<T, string>;
   onChange: (value: T) => void;
+  style?: CSSProperties;
   placeholder?: string;
   disabled?: boolean;
-}
+} & (
+  | { labels: Record<T, string>; children?: never }
+  | { labels?: never; children: ReactNode }
+);
 
 export function Select<T extends string>({
   label,
   value,
-  labels,
   onChange,
+  style,
   placeholder,
   disabled,
+  labels,
+  children,
 }: SelectProps<T>) {
   const [focused, setFocused] = useState(false);
   return (
@@ -44,7 +55,8 @@ export function Select<T extends string>({
       }
       onBlur={() => setFocused(false)}
       style={{
-        ...selectStyle,
+        ...(labels ? selectStyle : shrinkableSelectStyle),
+        ...style,
         ...focusRing(focused && !disabled),
         ...(disabled ? { cursor: "default", opacity: 0.5 } : null),
       }}
@@ -54,11 +66,13 @@ export function Select<T extends string>({
           {placeholder}
         </option>
       ) : null}
-      {(Object.keys(labels) as T[]).map((key) => (
-        <option key={key} value={key}>
-          {labels[key]}
-        </option>
-      ))}
+      {labels
+        ? (Object.keys(labels) as T[]).map((key) => (
+            <option key={key} value={key}>
+              {labels[key]}
+            </option>
+          ))
+        : children}
     </select>
   );
 }

@@ -1,5 +1,6 @@
-import type { Card, Column, Item } from "../../shared/types.js";
+import type { Card, Column, Item, SlackThread } from "../../shared/types.js";
 import type * as Api from "./api.js";
+import { draftReplyPrompt } from "./slack-prompt.js";
 import { SNOOZE_LABELS, snoozeUntil, type SnoozePreset } from "./snooze.js";
 
 export interface InboxRowModel {
@@ -19,7 +20,13 @@ export interface InboxRowModel {
 }
 
 export type InboxActionId =
-  "promote" | "snooze" | "done" | "toggleRead" | "open" | "copyLink";
+  | "promote"
+  | "snooze"
+  | "done"
+  | "toggleRead"
+  | "open"
+  | "copyLink"
+  | "draftReply";
 
 export type ActionApi = Pick<
   typeof Api,
@@ -31,6 +38,7 @@ export type ActionApi = Pick<
   | "switchSession"
   | "resumeCard"
   | "pollSource"
+  | "getSlackThread"
 >;
 
 export interface ActionContext {
@@ -40,6 +48,10 @@ export interface ActionContext {
   openSnooze: (row: InboxRowModel) => void;
   openUrl: (url: string) => void;
   copyText: (text: string) => Promise<void>;
+  startAgent: (
+    target: { itemId: string },
+    extraDirection: string,
+  ) => Promise<void>;
 }
 
 export type ActionServices = Omit<ActionContext, "openSnooze">;
@@ -74,6 +86,9 @@ export function isWebUrl(url: string | undefined): url is string {
 }
 
 const hasUrl = (row: InboxRowModel) => isWebUrl(row.url);
+
+const isSlackItem = (row: InboxRowModel) =>
+  row.kind === "item" && row.item?.source === "slack";
 
 export const INBOX_ACTIONS: readonly InboxAction[] = [
   {
@@ -130,6 +145,21 @@ export const INBOX_ACTIONS: readonly InboxAction[] = [
       ctx.notice("Link copied");
     },
   },
+  {
+    id: "draftReply",
+    label: "Draft reply",
+    appliesTo: isSlackItem,
+    run: async (ctx, row) => {
+      const item = row.item;
+      if (!item) return;
+      let thread: SlackThread | null | undefined;
+      if (item.meta.threadTs) {
+        const loaded = await ctx.api.getSlackThread(item.id);
+        thread = loaded.ok ? loaded.thread : null;
+      }
+      await ctx.startAgent({ itemId: item.id }, draftReplyPrompt(item, thread));
+    },
+  },
 ];
 
 /** The actions a row's menu lists, in table order. */
@@ -137,16 +167,24 @@ export function actionsFor(row: InboxRowModel): InboxAction[] {
   return INBOX_ACTIONS.filter((a) => a.appliesTo(row));
 }
 
-/** Run one action; a refusal or failure becomes a notice instead of an unhandled rejection. */
+/**
+ * Run one action and resolve whether it ran and succeeded.
+ *
+ * @remarks A refusal or failure becomes a notice instead of an unhandled rejection.
+ */
 export function runAction(
   action: InboxAction,
   ctx: ActionContext,
   row: InboxRowModel,
-): Promise<void> {
-  if (!action.appliesTo(row)) return Promise.resolve();
-  return action.run(ctx, row).catch((err: unknown) => {
-    ctx.notice(err instanceof Error ? err.message : `${action.label} failed`);
-  });
+): Promise<boolean> {
+  if (!action.appliesTo(row)) return Promise.resolve(false);
+  return action.run(ctx, row).then(
+    () => true,
+    (err: unknown) => {
+      ctx.notice(err instanceof Error ? err.message : `${action.label} failed`);
+      return false;
+    },
+  );
 }
 
 /** Mark an item done and offer Undo back to its prior read state. */
@@ -173,18 +211,20 @@ export async function snoozeWithUndo(
   );
 }
 
-/** Snooze an item row to a preset and offer Undo; a refusal becomes a notice. */
+/** Snooze an item row to a preset, offer Undo, and resolve whether it snoozed; a refusal becomes a notice. */
 export function snoozeRow(
   ctx: ActionContext,
   row: InboxRowModel,
   preset: SnoozePreset,
   now: Date,
-): Promise<void> {
-  if (row.kind !== "item") return Promise.resolve();
+): Promise<boolean> {
+  if (row.kind !== "item") return Promise.resolve(false);
   return Promise.resolve()
     .then(() => snoozeWithUndo(ctx, row, preset, now))
+    .then(() => true)
     .catch((err: unknown) => {
       ctx.notice(err instanceof Error ? err.message : "Snooze failed");
+      return false;
     });
 }
 

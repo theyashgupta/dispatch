@@ -1,4 +1,8 @@
-import { DEFAULT_POLL_INTERVAL_MS } from "../../shared/types.js";
+import {
+  DEFAULT_POLL_INTERVAL_MS,
+  type SourceIssue,
+  type TrackedRefresh,
+} from "../../shared/types.js";
 import { store } from "../store/board.store.js";
 import { enabledSources } from "../sources/registry.js";
 import { RateLimited, type TicketSource } from "../sources/ticket.source.js";
@@ -26,6 +30,33 @@ function baseInterval(source: TicketSource): number {
 }
 
 /**
+ * Refresh by id the source's cards past To Do that the main pull did not return.
+ *
+ * @remarks Undefined keeps the plain gone rule (no by-id support, or a truncated pull whose
+ * absences prove nothing anyway). A failure requests nothing, so no card past To Do is flagged gone.
+ */
+async function fetchTracked(
+  source: TicketSource,
+  issues: SourceIssue[],
+  truncated: boolean,
+): Promise<TrackedRefresh | undefined> {
+  if (truncated || !source.fetchByIds) return undefined;
+  const ids = store.trackedIssueIds(
+    source.id,
+    new Set(issues.map((i) => i.id)),
+  );
+  if (ids.length === 0) return { issues: [], requested: new Set() };
+  try {
+    return { issues: await source.fetchByIds(ids), requested: new Set(ids) };
+  } catch (err) {
+    console.warn(
+      `[poller] ${source.id} tracked refresh failed, no card past To Do is flagged gone this cycle: ${(err as Error).message}`,
+    );
+    return { issues: [], requested: new Set() };
+  }
+}
+
+/**
  * Run one poll of a source, then reschedule that source's next tick.
  *
  * @remarks The captured `gen` is the race guard: `pollNow` bumps the loop's generation and starts
@@ -44,7 +75,9 @@ async function pollOnce(loop: Loop): Promise<void> {
   const gen = loop.generation;
   const source = loop.source;
   try {
-    const { issues, items, truncated } = await source.fetch();
+    const { issues, items, truncated, cursors } = await source.fetch({
+      cursors: store.getSourceCursors(source.id),
+    });
     if (gen !== loop.generation) return;
     if (truncated) {
       console.warn(
@@ -54,10 +87,13 @@ async function pollOnce(loop: Loop): Promise<void> {
       );
     }
     if (source.itemsOnly !== true) {
+      const tracked = await fetchTracked(source, issues, truncated);
+      if (gen !== loop.generation) return;
       await store.applyIssues(issues, new Date().toISOString(), {
         partial: truncated,
         source: source.id,
         kind: source.kind,
+        tracked,
       });
     }
     if (items !== undefined) {
@@ -66,6 +102,7 @@ async function pollOnce(loop: Loop): Promise<void> {
         partial: truncated,
       });
     }
+    if (cursors !== undefined) await store.setSourceCursors(source.id, cursors);
     if (gen !== loop.generation) return;
     loop.backoffMs = baseInterval(source);
     scheduleNext(loop, loop.backoffMs);
@@ -190,7 +227,11 @@ export function startEnabledPollers(): void {
   startPollers(sources);
 }
 
-/** Stop every loop; the test teardown path. */
+/**
+ * Stop every loop; the test teardown path.
+ *
+ * @public The poller and board route specs are the callers.
+ */
 export function stopPollers(): void {
   for (const loop of loops.values()) retireLoop(loop);
 }
@@ -209,7 +250,11 @@ export function pollNow(sourceId: string): boolean {
   return true;
 }
 
-/** Per-source loop state for diagnostics and tests. */
+/**
+ * Per-source loop state for diagnostics and tests.
+ *
+ * @public The poller specs are the callers.
+ */
 export function pollerDiagnostics(): {
   id: string;
   backoffMs: number;

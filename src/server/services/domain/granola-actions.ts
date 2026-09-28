@@ -1,4 +1,4 @@
-import type { SourceCursor } from "../../store/board-db.js";
+import type { SourceCursor } from "../../../shared/types.js";
 import type { ActionDraft } from "./meeting-actions.js";
 
 export type GranolaCheck =

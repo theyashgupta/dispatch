@@ -27,7 +27,7 @@ import { DISPATCH_DIR } from "../infra/paths.js";
 
 export type GranolaRunResult = "started" | "running" | "disabled";
 
-const CURSOR_KEY = "meeting:granola";
+const CURSOR_KEY = "granola";
 const LIST_TIMEOUT_MS = 60_000;
 const ROUND_TIMEOUT_MS = 300_000;
 const KILL_GRACE_MS = 5_000;

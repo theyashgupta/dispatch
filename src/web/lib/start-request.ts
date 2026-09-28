@@ -11,4 +11,5 @@ export interface StartRequest {
    * to start another from).
    */
   newSession?: boolean;
+  extraDirection?: string;
 }
