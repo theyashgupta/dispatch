@@ -25,6 +25,12 @@ import { Markdown } from "../../primitives/Markdown.js";
 import { Notice } from "../../primitives/Notice.js";
 import { Spinner } from "../../primitives/Spinner.js";
 import { focusRing } from "../../primitives/focus-ring.js";
+import {
+  DetailActions,
+  DetailHeader,
+  DetailPlaceholder,
+  DetailScroll,
+} from "../../primitives/DetailPaneBody.js";
 import { MergeConfirmModal } from "./MergeConfirmModal.js";
 
 interface PrDetailProps {
@@ -71,45 +77,9 @@ const CHECK_LABEL: Record<PrCheckState, string> = {
   pass: "Passing",
 };
 
-const paneStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "var(--space-lg)",
-  flex: "1 1 auto",
-  minWidth: 0,
-  minHeight: 0,
-  overflowY: "auto",
-  padding: "var(--space-lg)",
-};
-
-const titleStyle: CSSProperties = {
-  margin: 0,
-  fontSize: "var(--font-heading)",
-  lineHeight: "var(--line-heading)",
-  fontWeight: "var(--weight-semibold)",
-  color: "var(--text)",
-  overflowWrap: "anywhere",
-};
-
-const metaRowStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  alignItems: "center",
-  gap: "var(--space-sm)",
-  fontSize: "var(--font-label)",
-  lineHeight: "var(--line-label)",
-  color: "var(--text-muted)",
-};
-
 const linkStyle: CSSProperties = {
   color: "var(--text)",
   textDecoration: "underline",
-};
-
-const actionsStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "var(--space-sm)",
 };
 
 const composerStyle: CSSProperties = {
@@ -151,14 +121,6 @@ const patchStyle: CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: "var(--font-micro)",
   lineHeight: "var(--line-label)",
-};
-
-const emptyStyle: CSSProperties = {
-  padding: "var(--space-3xl) var(--space-lg)",
-  textAlign: "center",
-  fontSize: "var(--font-label)",
-  lineHeight: "var(--line-label)",
-  color: "var(--text-muted)",
 };
 
 function lineColor(line: string): string {
@@ -280,9 +242,11 @@ export function PrDetail({
 
   if (!row) {
     return (
-      <div style={paneStyle}>
-        <div style={emptyStyle}>Select a pull request to see its detail.</div>
-      </div>
+      <DetailScroll>
+        <DetailPlaceholder>
+          Select a pull request to see its detail.
+        </DetailPlaceholder>
+      </DetailScroll>
     );
   }
 
@@ -291,61 +255,45 @@ export function PrDetail({
   const open = detail?.state === "open";
 
   return (
-    <div style={paneStyle} data-testid="pr-detail">
-      {onBack && (
-        <div>
-          <Button variant="secondary" onClick={onBack}>
-            Back
-          </Button>
-        </div>
-      )}
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-xs)",
-        }}
-      >
-        <h2 style={titleStyle}>{row.title}</h2>
-        <div style={metaRowStyle}>
-          <ExternalTextLink href={row.url}>{label}</ExternalTextLink>
-          {detail && (
-            <>
-              <span>{detail.author}</span>
-              <span>
-                {detail.head} into {detail.base}
-              </span>
-              <span>
-                +{detail.additions} -{detail.deletions}
-              </span>
-              <Chip
-                tone={
-                  detail.state === "merged"
-                    ? "success"
-                    : detail.state === "closed"
-                      ? "danger"
-                      : "neutral"
-                }
-              >
-                {detail.state === "merged"
-                  ? "Merged"
+    <DetailScroll testId="pr-detail">
+      <DetailHeader onBack={onBack} title={row.title}>
+        <ExternalTextLink href={row.url}>{label}</ExternalTextLink>
+        {detail && (
+          <>
+            <span>{detail.author}</span>
+            <span>
+              {detail.head} into {detail.base}
+            </span>
+            <span>
+              +{detail.additions} -{detail.deletions}
+            </span>
+            <Chip
+              tone={
+                detail.state === "merged"
+                  ? "success"
                   : detail.state === "closed"
-                    ? "Closed"
-                    : detail.draft
-                      ? "Draft"
-                      : "Open"}
-              </Chip>
-            </>
-          )}
-        </div>
-      </div>
+                    ? "danger"
+                    : "neutral"
+              }
+            >
+              {detail.state === "merged"
+                ? "Merged"
+                : detail.state === "closed"
+                  ? "Closed"
+                  : detail.draft
+                    ? "Draft"
+                    : "Open"}
+            </Chip>
+          </>
+        )}
+      </DetailHeader>
       {load.kind === "loading" && <Spinner />}
       {load.kind === "error" && (
         <Notice tone="destructive" label={load.message} />
       )}
       {detail && (
         <>
-          <div style={actionsStyle}>
+          <DetailActions>
             <Button
               variant="secondary"
               disabled={!open || busy !== null}
@@ -400,7 +348,7 @@ export function PrDetail({
             >
               Open on GitHub
             </Button>
-          </div>
+          </DetailActions>
           {composer && (
             <div style={composerStyle}>
               <textarea
@@ -418,7 +366,7 @@ export function PrDetail({
                 onBlur={() => setComposerFocus(false)}
                 style={{ ...textareaStyle, ...focusRing(composerFocus) }}
               />
-              <div style={actionsStyle}>
+              <DetailActions>
                 <Button
                   variant="primary"
                   disabled={draft.trim() === "" || busy !== null}
@@ -436,7 +384,7 @@ export function PrDetail({
                 >
                   Cancel
                 </Button>
-              </div>
+              </DetailActions>
             </div>
           )}
           {error && <Notice tone="destructive" label={error} />}
@@ -531,6 +479,6 @@ export function PrDetail({
           )}
         </>
       )}
-    </div>
+    </DetailScroll>
   );
 }
