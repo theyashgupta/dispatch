@@ -91,6 +91,7 @@ import { GLOBAL_SHORTCUTS, bindShortcuts } from "./lib/shortcuts.js";
 import { useShortcuts } from "./hooks/useShortcuts.js";
 import { useItems } from "./hooks/useItems.js";
 import { buildPrRows } from "./lib/pr-rows.js";
+import { feedItems, isListedError } from "./lib/feed-items.js";
 import { nowMs } from "./lib/format-age.js";
 import { flattenSessions } from "./lib/sessions.js";
 import type { UnwindDestination } from "../shared/types.js";
@@ -136,6 +137,11 @@ const VaultPage = lazy(() =>
 const PullRequestsPage = lazy(() =>
   import("./features/pull-requests/index.js").then((m) => ({
     default: m.PullRequestsPage,
+  })),
+);
+const ErrorsPage = lazy(() =>
+  import("./features/errors/index.js").then((m) => ({
+    default: m.ErrorsPage,
   })),
 );
 const SessionsPage = lazy(() =>
@@ -349,6 +355,20 @@ export function App() {
       localStorage.setItem("dsp.sound", soundEnabled ? "on" : "off");
     } catch {}
   }, [soundEnabled]);
+
+  const [errorsInFeeds, setErrorsInFeeds] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("dsp.errorsInFeeds") === "on";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("dsp.errorsInFeeds", errorsInFeeds ? "on" : "off");
+    } catch {}
+  }, [errorsInFeeds]);
 
   useEffect(() => {
     void refreshPushSubscription();
@@ -572,6 +592,7 @@ export function App() {
   const startAgent = async (
     target: { itemId?: string; cardId?: string },
     extraDirection: string,
+    context?: string,
   ) => {
     try {
       if (target.cardId) {
@@ -583,7 +604,7 @@ export function App() {
         return;
       }
       if (!target.itemId) return;
-      const { card } = await promoteItem(target.itemId);
+      const { card } = await promoteItem(target.itemId, context);
       if (card.column === "inbox") await moveCard(card.id, "todo");
       setStartRequest({ cardId: card.id, extraDirection });
     } catch {
@@ -730,7 +751,8 @@ export function App() {
     />
   ) : null;
 
-  const inboxCount = inboxWaitingCount(board.cards, items);
+  const inboxItems = feedItems(items, errorsInFeeds);
+  const inboxCount = inboxWaitingCount(board.cards, inboxItems);
   const sessionRows = flattenSessions(board.cards, nowMs());
   const liveSessionCount = sessionRows.filter((row) => row.running).length;
   const githubEnabled = board.enabledSources?.includes("github") === true;
@@ -738,6 +760,8 @@ export function App() {
     ? items.filter((item) => item.source === "github" && item.state !== "done")
         .length
     : 0;
+  const sentryEnabled = board.enabledSources?.includes("sentry") === true;
+  const errorCount = sentryEnabled ? items.filter(isListedError).length : 0;
   const pageMeta: Record<Page, { title: string; count?: number }> = {
     board: { title: "Board", count: board.cards.length },
     inbox: { title: "Inbox", count: inboxCount },
@@ -756,6 +780,7 @@ export function App() {
       title: "Pull Requests",
       count: githubEnabled ? buildPrRows(items, board.cards).length : 0,
     },
+    errors: { title: "Errors", count: errorCount },
   };
   const pageTitle = pageMeta[route.page].title;
 
@@ -771,6 +796,7 @@ export function App() {
       inboxCount={inboxCount}
       liveSessionCount={liveSessionCount}
       prCount={prCount}
+      errorCount={errorCount}
       syncedAt={board.syncedAt ?? null}
       connection={connection}
       pollIntervalMs={board.pollIntervalMs ?? null}
@@ -894,10 +920,28 @@ export function App() {
                   )
                 }
               />
+            ) : route.page === "errors" ? (
+              <ErrorsPage
+                board={board}
+                items={items}
+                selectedKey={route.id ?? null}
+                onSelect={(key) =>
+                  navigate("errors", key ?? undefined, { replace: true })
+                }
+                onMarkRead={(id) => void setItemState(id, "read")}
+                onNotice={showNotice}
+                onStartAgent={(row, prompt, context) =>
+                  void startAgent(
+                    { itemId: row.itemId, cardId: row.cardId },
+                    prompt,
+                    context,
+                  )
+                }
+              />
             ) : route.page === "inbox" ? (
               <InboxView
                 board={board}
-                items={items}
+                items={inboxItems}
                 selectedCardId={selectedCard ? selectedCardId : null}
                 onSelectCard={selectCard}
                 services={actionServices}
@@ -913,6 +957,8 @@ export function App() {
                 tunnelState={tunnelState}
                 soundEnabled={soundEnabled}
                 onToggleSound={setSoundEnabled}
+                errorsInFeeds={errorsInFeeds}
+                onToggleErrorsInFeeds={setErrorsInFeeds}
               />
             ) : route.page === "activity" ? (
               <ActivityPage

@@ -32,6 +32,7 @@ interface SidebarNavProps {
   inboxCount: number;
   liveSessionCount: number;
   prCount: number;
+  errorCount: number;
   syncedAt: string | null;
   connection: ConnectionStatus;
   pollIntervalMs: number | null;
@@ -168,6 +169,7 @@ export function SidebarNav({
   inboxCount,
   liveSessionCount,
   prCount,
+  errorCount,
   syncedAt,
   connection,
   pollIntervalMs,
@@ -259,6 +261,8 @@ export function SidebarNav({
                     <Chip tone="accent">{liveSessionCount}</Chip>
                   ) : item.page === "pull-requests" && prCount > 0 ? (
                     <Chip tone="accent">{prCount}</Chip>
+                  ) : item.page === "errors" && errorCount > 0 ? (
+                    <Chip tone="accent">{errorCount}</Chip>
                   ) : undefined
                 }
                 onSelect={() => onNavigate(item.page)}

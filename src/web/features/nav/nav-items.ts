@@ -1,5 +1,6 @@
 import {
   Activity,
+  AlertTriangle,
   Archive,
   GitPullRequest,
   ClipboardList,
@@ -55,6 +56,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: GitPullRequest,
     group: "Sources",
   },
+  { page: "errors", label: "Errors", icon: AlertTriangle, group: "Sources" },
 ];
 
 /**

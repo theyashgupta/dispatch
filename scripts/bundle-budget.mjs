@@ -34,7 +34,7 @@ const BUDGETS = [
   {
     label: "index.html",
     match: (f) => f === "index.html",
-    budgetGzipBytes: 576, // seed: 524 (re-seeded 2026-09-25 with the sessions page preload)
+    budgetGzipBytes: 635, // seed: 577 (re-seeded 2026-09-28 with the Errors page route, LOCAL-46)
   },
   {
     label: "assets/main-*.js",
@@ -76,6 +76,11 @@ const BUDGETS = [
     match: (f) =>
       f.startsWith(`assets${sep}pull-requests-`) && f.endsWith(".js"),
     budgetGzipBytes: 4861, // seed: 4419 (re-seeded with the Pull Requests detail pane, LOCAL-45)
+  },
+  {
+    label: "assets/errors-*.js",
+    match: (f) => f.startsWith(`assets${sep}errors-`) && f.endsWith(".js"),
+    budgetGzipBytes: 4266, // seed: 3878 (re-seeded 2026-09-28 with the Errors detail pane and its actions, lazy, LOCAL-46)
   },
   {
     label: "assets/palette-*.js",
