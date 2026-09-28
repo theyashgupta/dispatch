@@ -121,11 +121,7 @@ import type { StartRequest } from "./lib/start-request.js";
 import { meetingNotice } from "./lib/meetings.js";
 import { formatSize } from "./lib/format-size.js";
 import type { WorkspacesSummary } from "./features/workspaces/index.js";
-import type {
-  SetupChecks,
-  TunnelState,
-  WorktreeRow,
-} from "../shared/types.js";
+import type { SetupChecks, TunnelState, WorktreeRow } from "../shared/types.js";
 import type { CardSearchResult } from "../shared/search.js";
 import { DONE_PAGE_SIZE } from "../shared/done-limit.js";
 
