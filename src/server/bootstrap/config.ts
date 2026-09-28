@@ -48,6 +48,8 @@ const CONFIG_TEMPLATE = {
   "// updateCheck":
     "Set to false to disable the on-boot update check. Default true.",
   updateCheck: true,
+  "// linearSyncViaClaude":
+    "Set to true to keep the old Claude MCP path for Sync to Linear for one release. Default false (direct GraphQL).",
   "// cleanupDelayDays":
     "Days a finished card keeps its workspace before automatic cleanup. 0 = clean up immediately on Done. Default 7, max 90.",
   cleanupDelayDays: DEFAULT_CLEANUP_DELAY_DAYS,
@@ -380,6 +382,7 @@ export function loadConfig(): Config {
     workspaceRoot,
     statusChannel: readStatusChannel(parsed),
     updateCheck: readUpdateCheck(parsed),
+    linearSyncViaClaude: parsed.linearSyncViaClaude === true,
     sources: {
       linear: {
         apiKey: rawKey,

@@ -10,6 +10,7 @@ import type {
   FilterCapabilities,
   FilterOption,
   LinearComment,
+  LinearWorkflow,
   Playbook,
   PlaybookPickerResponse,
   PrerequisiteStatus,
@@ -185,37 +186,30 @@ export async function startGroup(input: {
 }
 
 /**
- * Promote a `source:"local"` card to a real Linear issue: POST /api/cards/:id/sync-linear. Mirrors
- * createLocalTicket's discrimination exactly: 200 → `{ ok: true, card }` (the swapped Card, already
- * reflecting the new identifier); 409 → `{ ok: false, error }` (the parsed body's renderable copy —
- * non-local card or a sync already in flight); 404/502/network → `{ ok: false, error: null }`
- * (generic, no server-side detail to surface). The response is held open for the duration of the
- * sync (up to ~150s) — the server owns that bound, there is no client-side timeout/abort. The
- * authoritative identity swap always arrives over SSE regardless of this response, since the panel
- * stays open on the same `Card.id` throughout.
+ * Promote a local card to a Linear issue: POST /api/cards/:id/sync-linear.
+ *
+ * @remarks 200 carries the adopted card; 400 and 409 carry renderable copy; any other failure
+ * answers `error: null`, and the card's `syncError` arrives over SSE.
  */
 export async function syncCardToLinear(
   id: string,
+  target: { teamId: string; stateId?: string },
 ): Promise<{ ok: true; card: Card } | { ok: false; error: string | null }> {
   try {
     const res = await fetch(
       `/api/cards/${encodeURIComponent(id)}/sync-linear`,
       {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(target),
       },
     );
-    if (res.status === 409) {
-      const body = (await res.json().catch((err) => {
-        console.error("syncCardToLinear: failed to parse 409 body", err);
-        return {};
-      })) as { error?: string };
+    if (res.ok) return { ok: true, card: (await res.json()) as Card };
+    if (res.status === 400 || res.status === 409) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
       return { ok: false, error: body.error ?? null };
     }
-    if (!res.ok) {
-      return { ok: false, error: null };
-    }
-    const card = (await res.json()) as Card;
-    return { ok: true, card };
+    return { ok: false, error: null };
   } catch {
     return { ok: false, error: null };
   }
@@ -1249,6 +1243,38 @@ export async function postCardComment(
     if (res.ok) return { ok: true };
     const parsed = (await res.json().catch(() => ({}))) as { error?: string };
     return { ok: false, status: res.status, error: parsed.error ?? null };
+  } catch {
+    return { ok: false, status: 0, error: null };
+  }
+}
+
+/** The viewer and the Linear teams with their states: GET /api/sources/linear/workflow. */
+export async function getLinearWorkflow(): Promise<
+  { ok: true; workflow: LinearWorkflow } | { ok: false; error: string }
+> {
+  try {
+    const res = await fetch("/api/sources/linear/workflow");
+    if (res.ok) {
+      return { ok: true, workflow: (await res.json()) as LinearWorkflow };
+    }
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: body.error ?? "Could not load Linear teams." };
+  } catch {
+    return { ok: false, error: "Could not reach Dispatch. Try again." };
+  }
+}
+
+/** Assign a Linear card to the viewer: POST /api/cards/:id/assign-me. */
+export async function assignCardToMe(
+  id: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string | null }> {
+  try {
+    const res = await fetch(`/api/cards/${encodeURIComponent(id)}/assign-me`, {
+      method: "POST",
+    });
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, status: res.status, error: body.error ?? null };
   } catch {
     return { ok: false, status: 0, error: null };
   }

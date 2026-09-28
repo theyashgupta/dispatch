@@ -21,7 +21,7 @@ import type {
 } from "../../../shared/types.js";
 import { UnwindPicker } from "./UnwindPicker.js";
 import { LinearStateChip, TeamCycleText } from "../badges/index.js";
-import { moveCard, openEditor, syncCardToLinear } from "../../lib/api.js";
+import { moveCard, openEditor } from "../../lib/api.js";
 import { isDemoteEligible } from "../../../shared/demote-eligibility.js";
 import { isResetEligible } from "../../../shared/reset-eligibility.js";
 import { Button } from "../../primitives/Button.js";
@@ -66,6 +66,7 @@ interface PanelHeaderProps {
   onCleanupRequest?: (id: string) => void;
   onUnwindRequest?: (id: string, to: UnwindDestination) => void;
   onResetRequest?: (id: string) => void;
+  onSyncRequest?: (id: string) => void;
 }
 
 export function PanelHeader({
@@ -83,9 +84,9 @@ export function PanelHeader({
   onCleanupRequest,
   onUnwindRequest,
   onResetRequest,
+  onSyncRequest,
 }: PanelHeaderProps) {
   const c = card;
-  const [syncPending, setSyncPending] = useState(false);
   const [unwindRect, setUnwindRect] = useState<DOMRect | null>(null);
   const unwindIdentifier = c?.source === "group" ? c.identifier : c?.groupId;
   const unwindable = unwindIdentifier != null;
@@ -93,6 +94,7 @@ export function PanelHeader({
   const narrowPanel = (docked || takeover) && narrowViewport;
   const awaitingCleanup =
     c?.column === "done" && (c.tmuxSession != null || c.workspacePath != null);
+  const syncLabel = c?.syncing === true ? "Syncing…" : "Sync Linear";
   return (
     <div
       style={{
@@ -221,36 +223,13 @@ export function PanelHeader({
         {c?.source === "local" && (
           <Button
             variant="secondary"
-            disabled={syncPending || c.syncing === true}
-            onClick={() => {
-              setSyncPending(true);
-              syncCardToLinear(c.id)
-                .then((result) => {
-                  if (!result.ok && result.error === null) {
-                    console.error("syncCardToLinear: network failure");
-                  }
-                })
-                .catch(console.error)
-                .finally(() => setSyncPending(false));
-            }}
-            aria-label={
-              narrowPanel
-                ? syncPending || c.syncing === true
-                  ? "Syncing…"
-                  : "Sync Linear"
-                : undefined
-            }
-            title={
-              narrowPanel
-                ? syncPending || c.syncing === true
-                  ? "Syncing…"
-                  : "Sync Linear"
-                : undefined
-            }
+            disabled={c.syncing === true}
+            onClick={() => onSyncRequest?.(c.id)}
+            aria-label={narrowPanel ? syncLabel : undefined}
+            title={narrowPanel ? syncLabel : undefined}
           >
             <Upload size={12} strokeWidth={2} aria-hidden="true" />
-            {!narrowPanel &&
-              (syncPending || c.syncing === true ? "Syncing…" : "Sync Linear")}
+            {!narrowPanel && syncLabel}
           </Button>
         )}
         {unwindable && c && onUnwindRequest && (

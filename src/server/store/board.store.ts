@@ -51,7 +51,7 @@ import {
 import { NEEDS_INPUT_MARKER_PREFIX } from "../../shared/marker-key.js";
 import { isDemoteEligible } from "../../shared/demote-eligibility.js";
 import { DEFAULT_ARCHIVE_RETENTION_DAYS } from "../../shared/types.js";
-import { isPastTodo, isStartingCard, reconcile } from "./mapping.js";
+import { isAdopted, isPastTodo, isStartingCard, reconcile } from "./mapping.js";
 import { latestClaudeSession, touchClaudeSession } from "./claude-sessions.js";
 
 export const BOARD_PATH = path.join(DISPATCH_DATA_DIR, "board.json");
@@ -238,7 +238,7 @@ function syncedFieldsChanged(prev: Card, next: Card): boolean {
     prev.description !== next.description ||
     prev.priority !== next.priority ||
     prev.updatedAt !== next.updatedAt ||
-    prev.goneFromLinear !== next.goneFromLinear ||
+    (prev.goneFromLinear ?? false) !== (next.goneFromLinear ?? false) ||
     prev.project?.id !== next.project?.id
   );
 }
@@ -1318,7 +1318,7 @@ class BoardStore extends EventEmitter {
       .filter(
         (c) =>
           (c.source ?? "linear") === sourceId &&
-          isPastTodo(c) &&
+          (isPastTodo(c) || isAdopted(c)) &&
           !returnedIds.has(c.issueId),
       )
       .sort(
@@ -3851,7 +3851,8 @@ class BoardStore extends EventEmitter {
    * here (its hook token released through the clearHookToken chokepoint) so the sync-triggered card
    * (stable `Card.id`) stays the sole owner of the issueId, meeting PUSH-02's zero-duplicate
    * guarantee even when this race window is hit. The delete carries `reconcile()`'s removal guards:
-   * a duplicate that is past To Do/Inbox, is linked into a group (`groupId != null` — deleting it
+   * a duplicate that is itself an adopted card (another synced card, not a race leftover), past
+   * To Do/Inbox, is linked into a group (`groupId != null`: deleting it
    * would leave the group's `memberIds` referencing a nonexistent card, the two-sided-invariant
    * hazard), or is starting/carries session state (isStartingCard) is NEVER deleted — deleting an
    * active one would orphan a live tmux/ttyd session (the `inFlightStarts` hazard). In that case
@@ -3876,6 +3877,7 @@ class BoardStore extends EventEmitter {
       );
       const unsafe = duplicates.find(
         (dup) =>
+          isAdopted(dup) ||
           (dup.column !== "todo" && dup.column !== "inbox") ||
           dup.groupId != null ||
           isStartingCard(dup, this.inFlightStarts),

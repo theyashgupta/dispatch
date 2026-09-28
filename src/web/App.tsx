@@ -60,6 +60,7 @@ import {
   StartModal,
   CleanupModal,
   ResetModal,
+  SyncToLinearModal,
   CreateTicketModal,
   MultiSelect,
 } from "./features/modals/index.js";
@@ -592,6 +593,8 @@ export function App() {
   };
 
   const [resetCardId, setResetCardId] = useState<string | null>(null);
+  const [syncCardId, setSyncCardId] = useState<string | null>(null);
+  const cardToSync = board?.cards.find((card) => card.id === syncCardId);
   const resetCard =
     board?.cards.find((card) => card.id === resetCardId) ??
     actionablePinnedCard(resetCardId, pinned);
@@ -924,6 +927,7 @@ export function App() {
           onCleanupRequest={setCleanupCardId}
           onUnwindRequest={requestUnwind}
           onResetRequest={setResetCardId}
+          onSyncRequest={setSyncCardId}
           docked={route.page === "workspace"}
         />
       }
@@ -972,6 +976,14 @@ export function App() {
           card={resetCard}
           onConfirm={requestReset}
           onClose={() => setResetCardId(null)}
+        />
+      )}
+      {cardToSync && (
+        <SyncToLinearModal
+          key={syncCardId}
+          card={cardToSync}
+          cards={board?.cards ?? []}
+          onClose={() => setSyncCardId(null)}
         />
       )}
       {createTicketOpen && (

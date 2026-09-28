@@ -1,4 +1,4 @@
-import type { LinearState, LinearTeam } from "../../shared/types.js";
+import type { Card, LinearState, LinearTeam } from "../../shared/types.js";
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
@@ -49,4 +49,23 @@ export function teamCycleLabel(
 export function stateTypeRank(type: string): number {
   const i = STATE_TYPE_ORDER.indexOf(type);
   return i === -1 ? STATE_TYPE_ORDER.length : i;
+}
+
+/**
+ * The team to preselect for Sync to Linear.
+ *
+ * @remarks The team of the most recently updated card with a known team wins, else the first team.
+ */
+export function defaultTeamId(
+  cards: readonly Pick<Card, "team" | "updatedAt">[],
+  teams: readonly { id: string }[],
+): string | undefined {
+  const known = new Set(teams.map((t) => t.id));
+  let best: { id: string; at: string } | undefined;
+  for (const card of cards) {
+    const id = card.team?.id;
+    if (!id || !known.has(id)) continue;
+    if (!best || card.updatedAt > best.at) best = { id, at: card.updatedAt };
+  }
+  return best?.id ?? teams[0]?.id;
 }

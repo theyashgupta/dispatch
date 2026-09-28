@@ -1,5 +1,8 @@
 import type {
+  CreatedLinearIssue,
   LinearComment,
+  LinearWorkflow,
+  NewLinearIssue,
   LinearTeam,
   SourceFilters,
   SourceIssue,
@@ -11,6 +14,8 @@ import {
   type TicketSource,
 } from "../ticket.source.js";
 import { buildLinearQuery, type LinearIssueFilter } from "./filter.js";
+import { buildCreateInput } from "./create-input.js";
+import { carriesSyncToken } from "../../../shared/sync-token.js";
 
 export const LINEAR_GRAPHQL_URL =
   process.env.DISPATCH_LINEAR_API_URL ?? "https://api.linear.app/graphql";
@@ -123,6 +128,36 @@ interface GraphQLData {
   teams?: Connection<{ id: string; name?: string }>;
   projects?: Connection<{ id: string; name?: string }>;
   commentCreate?: { success?: boolean };
+  issueUpdate?: { success?: boolean };
+  issueCreate?: { success?: boolean; issue?: CreatedIssueNode | null };
+}
+
+interface CreatedIssueNode {
+  id: string;
+  identifier: string;
+  url: string;
+  title: string;
+  description: string | null;
+}
+
+interface WorkflowData {
+  viewer?: { id?: string };
+  teams?: {
+    nodes?: {
+      id: string;
+      key: string;
+      name: string;
+      states?: {
+        nodes?: {
+          id: string;
+          name: string;
+          type: string;
+          color?: string | null;
+          position: number;
+        }[];
+      };
+    }[];
+  };
 }
 
 /**
@@ -337,6 +372,10 @@ async function fetchIssuesByIds(
 }
 
 const VIEWER_QUERY = `query Viewer { viewer { id } }`;
+const WORKFLOW_QUERY = `query Workflow { viewer { id } teams(first: 50) { nodes { id key name states { nodes { id name type color position } } } } }`;
+const ASSIGN_MUTATION = `mutation Assign($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`;
+const FIND_SYNC_QUERY = `query FindSync($filter: IssueFilter) { issues(first: 50, filter: $filter) { nodes { id identifier url title description } } }`;
+const CREATE_MUTATION = `mutation Create($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url title description } } }`;
 const COMMENT_MUTATION = `mutation Comment($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id } } }`;
 
 /**
@@ -365,6 +404,17 @@ const ACTIVE_USERS: Record<string, unknown> = { active: { eq: true } };
 const TEAMS_QUERY = `query Teams { teams(first: ${PAGE_SIZE}) { nodes { id name } pageInfo { hasNextPage } } }`;
 const PROJECTS_QUERY = `query Projects { projects(first: ${PAGE_SIZE}) { nodes { id name } pageInfo { hasNextPage } } }`;
 
+/** Normalize a created or found issue node for adoption onto the card. */
+function createdIssue(n: CreatedIssueNode): CreatedLinearIssue["issue"] {
+  return {
+    id: n.id,
+    identifier: n.identifier,
+    url: n.url,
+    title: n.title,
+    description: n.description ?? "",
+  };
+}
+
 /**
  * The Linear TicketSource: owns the GraphQL query, cursor paging, prefix-less auth, and RATELIMITED
  * detection. Constructed at boot with the resolved API key plus a live-filters accessor — `fetch()`
@@ -383,6 +433,7 @@ export class LinearSource implements TicketSource {
   };
 
   readonly capabilities: FilterCapabilities = LinearSource.capabilities;
+  private cachedViewerId: string | undefined;
 
   constructor(
     private apiKey: string,
@@ -398,6 +449,93 @@ export class LinearSource implements TicketSource {
   /** Fetch issues by id for the poller's tracked refresh of cards past To Do. */
   fetchByIds(ids: string[]): Promise<SourceIssue[]> {
     return fetchIssuesByIds(this.apiKey, ids);
+  }
+
+  /**
+   * Read the viewer and every team with its states in one request.
+   *
+   * @remarks Teams sort by name and states by position; the viewer id is cached for the process.
+   */
+  async workflow(): Promise<LinearWorkflow> {
+    const data = (await postGraphQL(
+      this.apiKey,
+      WORKFLOW_QUERY,
+      {},
+    )) as WorkflowData;
+    const viewerId = data.viewer?.id;
+    if (!viewerId) throw new Error("Linear response missing viewer");
+    this.cachedViewerId = viewerId;
+    const teams = (data.teams?.nodes ?? [])
+      .map((t) => ({
+        id: t.id,
+        key: t.key,
+        name: t.name,
+        states: (t.states?.nodes ?? [])
+          .map((st) => ({
+            id: st.id,
+            name: st.name,
+            type: st.type,
+            color: st.color ?? undefined,
+            position: st.position,
+          }))
+          .sort((a, b) => a.position - b.position),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return { viewerId, teams };
+  }
+
+  /** The viewer's user id, cached after the first success; a failure is never cached. */
+  async viewerId(): Promise<string> {
+    if (this.cachedViewerId) return this.cachedViewerId;
+    const data = await postGraphQL(this.apiKey, VIEWER_QUERY, {});
+    const id = (data as WorkflowData).viewer?.id;
+    if (!id) throw new Error("Linear response missing viewer");
+    this.cachedViewerId = id;
+    return id;
+  }
+
+  /** Assign an issue to a user through issueUpdate. */
+  async assignIssue(issueId: string, assigneeId: string): Promise<void> {
+    const data = await postGraphQL(this.apiKey, ASSIGN_MUTATION, {
+      id: issueId,
+      input: { assigneeId },
+    });
+    if (data.issueUpdate?.success !== true) {
+      throw new Error("Linear did not update the issue");
+    }
+  }
+
+  /**
+   * Create the issue for a synced card, or return the issue that already carries its token.
+   *
+   * @remarks The token search runs first so a retry after an ambiguous failure never duplicates;
+   * it reads only issues the viewer created, because card ids repeat across installs, and only an
+   * exact token line counts, since `contains` also matches a longer card id.
+   * ponytail: the search reads 50 hits, so more than 49 longer ids sharing the prefix could hide
+   * the real one; page through the hits if that ever happens.
+   */
+  async createIssue(input: NewLinearIssue): Promise<CreatedLinearIssue> {
+    const found = await postGraphQL(this.apiKey, FIND_SYNC_QUERY, {
+      filter: {
+        description: { contains: input.token },
+        creator: { isMe: { eq: true } },
+      },
+    });
+    if (!Array.isArray(found.issues?.nodes)) {
+      throw new Error("Linear response missing issues connection");
+    }
+    const hit = (found.issues?.nodes as CreatedIssueNode[] | undefined)?.find(
+      (n) => carriesSyncToken(n.description, input.token),
+    );
+    if (hit) return { created: false, issue: createdIssue(hit) };
+    const data = await postGraphQL(this.apiKey, CREATE_MUTATION, {
+      input: buildCreateInput(input),
+    });
+    const issue = data.issueCreate?.issue;
+    if (data.issueCreate?.success !== true || !issue) {
+      throw new Error("Linear did not create the issue");
+    }
+    return { created: true, issue: createdIssue(issue) };
   }
 
   /** Post a comment on an issue; the body travels only as a GraphQL variable. */
