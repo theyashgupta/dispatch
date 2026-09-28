@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, GripVertical, RotateCw } from "lucide-react";
+import { GripVertical, RotateCw } from "lucide-react";
 import { DEFAULT_CLAUDE_ACCOUNT_ID } from "../../../shared/types.js";
 import type {
   ClaudeAccountSummary,
@@ -24,6 +24,7 @@ import { PanelHeader } from "./PanelHeader.js";
 import { PreviewRow } from "./PreviewRow.js";
 import { UnknownProbeRow } from "./UnknownProbeRow.js";
 import { ReferenceBlocks } from "./ReferenceBlocks.js";
+import { LinearSection } from "./LinearSection.js";
 import { SessionLostSection } from "./SessionLostSection.js";
 import { SessionSwitcher } from "./SessionSwitcher.js";
 import { SessionFlowRow } from "./SessionFlowRow.js";
@@ -31,6 +32,7 @@ import { hasSessionFlow } from "../../lib/session-flow.js";
 import { Field } from "../../primitives/Field.js";
 import { StartAnotherSessionButton } from "./StartAnotherSessionButton.js";
 import { TerminalRegion } from "./TerminalRegion.js";
+import { WarningIcon } from "../../primitives/WarningIcon.js";
 
 const PANEL_MIN_WIDTH_PX = 360;
 const PANEL_MAX_WIDTH_RATIO = 0.9;
@@ -55,6 +57,7 @@ interface DetailPanelProps {
   onCleanupRequest?: (id: string) => void;
   onUnwindRequest?: (id: string, to: UnwindDestination) => void;
   onResetRequest?: (id: string) => void;
+  onSyncRequest?: (id: string) => void;
   onAskRequest?: (card: CardModel) => void;
   docked?: boolean;
   accounts?: ClaudeAccountSummary[];
@@ -75,6 +78,7 @@ export function DetailPanel({
   onCleanupRequest,
   onUnwindRequest,
   onResetRequest,
+  onSyncRequest,
   onAskRequest,
   docked = false,
   accounts,
@@ -297,7 +301,7 @@ export function DetailPanel({
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       if (cleanupDragRef.current != null) {
         cleanupDragRef.current();
         return;
@@ -372,6 +376,25 @@ export function DetailPanel({
     ? "transform var(--motion-panel-open) var(--easing-enter)"
     : "transform var(--motion-panel-close) var(--easing-exit)";
 
+  const referenceColumn = (
+    <>
+      <ReferenceBlocks
+        card={c}
+        members={members}
+        membersActionable={membersActionable}
+      />
+      {c != null && (c.source ?? "linear") === "linear" && (
+        <LinearSection key={c.id} card={c} />
+      )}
+      {c && (
+        <CardTimeline
+          cardId={c.id}
+          events={activityEvents ?? []}
+          identifiers={cardIdentifiers}
+        />
+      )}
+    </>
+  );
   return (
     <>
       {!docked && (
@@ -393,6 +416,7 @@ export function DetailPanel({
       <aside
         aria-label="Ticket detail"
         ref={asideRef}
+        inert={!docked && !open}
         style={{
           position: "fixed",
           top: docked ? "var(--chrome-top, var(--page-header-height))" : 0,
@@ -531,6 +555,7 @@ export function DetailPanel({
               onCleanupRequest={onCleanupRequest}
               onUnwindRequest={onUnwindRequest}
               onResetRequest={onResetRequest}
+              onSyncRequest={onSyncRequest}
               onAskRequest={onAskRequest}
             />
 
@@ -559,7 +584,7 @@ export function DetailPanel({
                 </span>
               </div>
             )}
-            {(c?.sessionSummaries != null || showStartAnother) && (
+            {((c?.sessionSummaries?.length ?? 0) >= 2 || showStartAnother) && (
               <div
                 style={{
                   display: "flex",
@@ -571,7 +596,9 @@ export function DetailPanel({
                   borderBottom: "1px solid var(--border)",
                 }}
               >
-                {c?.sessionSummaries != null && <SessionSwitcher card={c} />}
+                {c != null && (c.sessionSummaries?.length ?? 0) >= 2 && (
+                  <SessionSwitcher card={c} />
+                )}
                 {showStartAnother && c != null && (
                   <StartAnotherSessionButton
                     card={c}
@@ -613,14 +640,7 @@ export function DetailPanel({
                 >
                   <Notice
                     tone="destructive"
-                    icon={
-                      <AlertTriangle
-                        size={12}
-                        strokeWidth={2}
-                        aria-hidden="true"
-                        style={{ flex: "0 0 auto" }}
-                      />
-                    }
+                    icon={<WarningIcon />}
                     label={
                       pinFetchError === "not-found"
                         ? "This ticket could not be found"
@@ -664,18 +684,7 @@ export function DetailPanel({
                           gap: "var(--panel-section-gap)",
                         }}
                       >
-                        <ReferenceBlocks
-                          card={c}
-                          members={members}
-                          membersActionable={membersActionable}
-                        />
-                        {c && (
-                          <CardTimeline
-                            cardId={c.id}
-                            events={activityEvents ?? []}
-                            identifiers={cardIdentifiers}
-                          />
-                        )}
+                        {referenceColumn}
                       </div>
                     )
                   ) : (
@@ -689,18 +698,7 @@ export function DetailPanel({
                         gap: "var(--panel-section-gap)",
                       }}
                     >
-                      <ReferenceBlocks
-                        card={c}
-                        members={members}
-                        membersActionable={membersActionable}
-                      />
-                      {c && (
-                        <CardTimeline
-                          cardId={c.id}
-                          events={activityEvents ?? []}
-                          identifiers={cardIdentifiers}
-                        />
-                      )}
+                      {referenceColumn}
                     </div>
                   )}
 

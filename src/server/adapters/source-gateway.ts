@@ -1,18 +1,80 @@
 import {
   buildRegistry,
+  calendarSourceFor,
   getLinearSource,
   getSource,
   isSourceEnabled,
   listSources,
 } from "../sources/registry.js";
-import { testLinearConnection as testImpl } from "../sources/linear/linear.source.js";
+import {
+  fetchLinearAccount,
+  testLinearConnection as testImpl,
+} from "../sources/linear/linear.source.js";
+import { fetchGithubLogin } from "../sources/github/github.source.js";
+import { fetchSentryAccount } from "../sources/sentry/sentry.source.js";
+import {
+  fetchSentryIssue as fetchIssueImpl,
+  resolveSentryIssue as resolveIssueImpl,
+} from "../sources/sentry/sentry-issue.js";
+import { slackAuthTest } from "../sources/slack/slack-api.js";
+
+export {
+  isSlackChannel,
+  normalizeSlackChannels,
+  parseChannelRef as parseSlackChannelRef,
+  SLACK_CHANNEL_MAX,
+} from "../sources/slack/channel-ref.js";
+export {
+  listSlackChannels,
+  slackChannelInfo,
+} from "../sources/slack/slack-channels.js";
+export {
+  fetchSlackThread,
+  SlackThreadCache,
+} from "../sources/slack/slack-thread.js";
+import {
+  fetchPrDetail,
+  postPrReview,
+  squashMergePr,
+} from "../sources/github/github-pr.js";
+
+export {
+  GitHubAuthError,
+  GitHubRequestError,
+  GitHubSsoError,
+} from "../sources/github/github.source.js";
+export {
+  SentryAuthError,
+  SentryRequestError,
+} from "../sources/sentry/sentry.source.js";
+export { RateLimited as SourceRateLimited } from "../sources/ticket.source.js";
 import type {
   FilterCapabilities,
   FilterDimension,
   FilterOption,
   TicketSource,
 } from "../sources/ticket.source.js";
-import type { Config, SourceFilters } from "../../shared/types.js";
+import {
+  CalendarSource,
+  type CalendarSourceStatus,
+} from "../sources/calendar/calendar.source.js";
+import { calendarErrorCode } from "../sources/calendar/calendar-events.js";
+import type {
+  CalendarErrorCode,
+  CalendarSourceConfig,
+  Config,
+  PrDetail,
+  PrReviewEvent,
+  SentryIssueDetail,
+  SourceFilters,
+} from "../../shared/types.js";
+
+export { LINEAR_GRAPHQL_URL } from "../sources/linear/linear.source.js";
+export type { TicketSource };
+export {
+  setCredentialResolver,
+  setMacCalendarReader,
+} from "../sources/registry.js";
 
 /**
  * Thrown when a route asks for a source id the registry does not serve. It lives in the adapters
@@ -71,6 +133,95 @@ export function testLinearConnection(apiKey: string): Promise<boolean> {
   return testImpl(apiKey);
 }
 
+/**
+ * Check a key live and return its account, or null when the source rejects it.
+ *
+ * @remarks Re-throws every failure that is not a credential rejection so the route can answer
+ * unreachable.
+ */
+export function checkSourceKey(
+  sourceId: string,
+  apiKey: string,
+): Promise<{ account?: string } | null> {
+  resolveSource(sourceId);
+  return fetchLinearAccount(apiKey);
+}
+
+/**
+ * Check a GitHub token live and return its login, or null when GitHub rejects it.
+ *
+ * @remarks Re-throws every other failure, including the SSO error, so callers can tell them apart.
+ */
+export function checkGithubToken(
+  token: string,
+): Promise<{ account?: string } | null> {
+  return fetchGithubLogin(token);
+}
+
+/** Check a Sentry token live and return its organizations label, or null when Sentry rejects it. */
+export function checkSentryToken(
+  token: string,
+): Promise<{ account?: string } | null> {
+  return fetchSentryAccount(token);
+}
+
+/** Read one Sentry issue with its latest event, on the organization's allowed region. */
+export function fetchSentryIssue(
+  token: string,
+  org: string,
+  regionUrl: string | undefined,
+  issueId: string,
+): Promise<SentryIssueDetail> {
+  return fetchIssueImpl(token, org, regionUrl, issueId);
+}
+
+/** Resolve one Sentry issue, on the organization's allowed region. */
+export function resolveSentryIssue(
+  token: string,
+  org: string,
+  regionUrl: string | undefined,
+  issueId: string,
+): Promise<void> {
+  return resolveIssueImpl(token, org, regionUrl, issueId);
+}
+
+/** Read one pull request's detail with a GitHub token. */
+export function fetchGithubPr(
+  token: string,
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<PrDetail> {
+  return fetchPrDetail(token, owner, repo, number);
+}
+
+/** Post a review on one pull request with a GitHub token. */
+export function reviewGithubPr(
+  token: string,
+  owner: string,
+  repo: string,
+  number: number,
+  review: { event: PrReviewEvent; body?: string },
+): Promise<void> {
+  return postPrReview(token, owner, repo, number, review);
+}
+
+/** Squash merge one pull request at a given head commit with a GitHub token. */
+export function mergeGithubPr(
+  token: string,
+  owner: string,
+  repo: string,
+  number: number,
+  sha: string,
+): Promise<void> {
+  return squashMergePr(token, owner, repo, number, sha);
+}
+
+/** The source when it is registered and enabled, for services that write to it. */
+export function enabledSource(sourceId: string): TicketSource | undefined {
+  return isSourceEnabled(sourceId) ? getSource(sourceId) : undefined;
+}
+
 /** Whether a source id is registered and enabled, for routes that must answer 404 or 409. */
 export function sourceState(
   sourceId: string,
@@ -85,4 +236,39 @@ export function vaultKeyUsers(
   sources: readonly TicketSource[] = listSources(),
 ): string[] {
   return sources.filter((s) => s.vaultKeys.includes(name)).map((s) => s.id);
+}
+
+/**
+ * Check a Slack token live: the account for an accepted token, or Slack's rejection code.
+ *
+ * @remarks Re-throws every transport failure so the caller reads it as unreachable.
+ */
+export async function checkSlackToken(
+  token: string,
+): Promise<{ account?: string } | { rejected: string }> {
+  const auth = await slackAuthTest(token);
+  return "rejected" in auth ? auth : { account: auth.account };
+}
+
+/**
+ * Run one calendar read with candidate settings; the error code on failure, null on success.
+ *
+ * @remarks The read uses a throwaway source, so nothing reaches the store before the user's
+ * settings are saved (U4-09).
+ */
+export async function testCalendarRead(
+  settings: CalendarSourceConfig,
+): Promise<CalendarErrorCode | null> {
+  try {
+    await calendarSourceFor(() => settings).fetch();
+    return null;
+  } catch (err) {
+    return calendarErrorCode(err);
+  }
+}
+
+/** The registered calendar source's last read outcome, empty before its first read. */
+export function calendarReadStatus(): CalendarSourceStatus {
+  const source = getSource("calendar");
+  return source instanceof CalendarSource ? source.status : {};
 }

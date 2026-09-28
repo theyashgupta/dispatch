@@ -21,18 +21,29 @@ test("empty, bare and unknown hashes map to the board with no id", () => {
   }
 });
 
-test("the route table holds exactly the nine shell pages", () => {
+test("the route table holds exactly the shell and source pages", () => {
   assert.deepEqual([...PAGES].sort(), [
     "accounts",
     "activity",
     "archive",
+    "ask",
     "board",
+    "calendar",
+    "errors",
     "inbox",
+    "meetings",
     "playbooks",
+    "pull-requests",
+    "sessions",
     "settings",
+    "slack",
+    "tickets",
+    "today",
     "vault",
     "workspace",
+    "workspaces",
   ]);
+  assert.equal(parseRoute("#/workspaces").page, "workspaces");
   assert.deepEqual(parseRoute("#/accounts/whatever"), {
     page: "accounts",
     id: "whatever",
@@ -55,9 +66,20 @@ test("routeHash round-trips every valid hash", () => {
     "#/playbooks",
     "#/vault",
     "#/archive",
+    "#/meetings",
   ]) {
     assert.equal(routeHash(parseRoute(hash)), hash);
   }
+});
+
+test("a meetings id with colons round-trips through routeHash and parseRoute", () => {
+  const route = parseRoute(
+    routeHash({ page: "meetings", id: "meeting:paste:2026-01-01-sync:key" }),
+  );
+  assert.deepEqual(route, {
+    page: "meetings",
+    id: "meeting:paste:2026-01-01-sync:key",
+  });
 });
 
 test("a malformed percent sequence in the id never throws", () => {

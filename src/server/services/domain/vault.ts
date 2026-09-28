@@ -444,6 +444,37 @@ export async function editPurpose(
 }
 
 /**
+ * Remove a key's value and keep the key, so its name and purpose stay listed as not filled.
+ *
+ * @remarks A source disconnect calls this: the Vault page must keep showing the key for the user
+ * to fill again. The previous value goes too, so a disconnect forgets every copy of the token.
+ */
+export async function clearValue(name: string): Promise<VaultWriteResult> {
+  return serialized(async () => {
+    const keys = await readMetadata();
+    const index = keys.findIndex((k) => k.name === name);
+    if (index === -1) {
+      return { ok: false, error: "not-found" };
+    }
+
+    const mine = isLineFor(name);
+    const lines = (await readValueLines()).filter((line) => !mine(line));
+    const previous = (await readPreviousLines()).filter((line) => !mine(line));
+    const key: VaultKeySummary = {
+      ...keys[index],
+      filled: false,
+      hasPrevious: false,
+      updatedAt: new Date().toISOString(),
+    };
+    const nextKeys = [...keys];
+    nextKeys[index] = key;
+
+    await writeStore(nextKeys, lines, previous);
+    return { ok: true, key };
+  });
+}
+
+/**
  * Delete a key and its value line. Matches the value line by a `NAME=` prefix, so a longer
  * sibling name such as `FOOBAR` is untouched by deleting `FOO`.
  */
@@ -501,8 +532,9 @@ export const readPrevious = (name: string) =>
 
 /**
  * Read a key's current value, from `values.env`.
- * @remarks Exists for exactly one caller, the rotate flow, which must show the outgoing value so
- * the user can revoke it upstream or roll back before the new one lands.
+ *
+ * @remarks Two callers: the rotate flow, which must show the outgoing value so the user can revoke it
+ * upstream, and the calendar iCal URL resolver, which hands the value only to the feed fetch.
  */
 export const readCurrent = (name: string) =>
   readStoredValue(VAULT_VALUES_PATH, name);
