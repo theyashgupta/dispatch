@@ -7,12 +7,13 @@ import {
   KeyRound,
   PanelLeft,
   SquareTerminal,
+  Ticket,
   Users,
   type LucideIcon,
 } from "lucide-react";
 import type { Page } from "../../lib/route.js";
 
-export type NavGroup = "Home" | "Work" | "System";
+export type NavGroup = "Home" | "Work" | "Sources" | "System";
 
 export interface NavItem {
   page: Page;
@@ -21,7 +22,12 @@ export interface NavItem {
   group: NavGroup;
 }
 
-export const NAV_GROUPS: readonly NavGroup[] = ["Home", "Work", "System"];
+export const NAV_GROUPS: readonly NavGroup[] = [
+  "Home",
+  "Work",
+  "Sources",
+  "System",
+];
 
 export const NAV_ITEMS: readonly NavItem[] = [
   { page: "inbox", label: "Inbox", icon: Inbox, group: "Home" },
@@ -29,6 +35,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { page: "sessions", label: "Sessions", icon: SquareTerminal, group: "Work" },
   { page: "workspace", label: "Workspace", icon: PanelLeft, group: "Work" },
   { page: "activity", label: "Activity", icon: Activity, group: "Work" },
+  { page: "tickets", label: "Tickets", icon: Ticket, group: "Sources" },
   {
     page: "accounts",
     label: "Accounts and Usage",

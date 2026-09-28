@@ -40,6 +40,7 @@ import {
 } from "../services/orchestration/linear-sync.js";
 import {
   assignToMe,
+  moveLinearState,
   postComment,
   pushColumnChanges,
 } from "../services/orchestration/linear-outbound.js";
@@ -174,6 +175,22 @@ cardsRouter.post("/cards/:id/comment", async (req, res) => {
 
 cardsRouter.post("/cards/:id/assign-me", async (req, res) => {
   const outcome = await assignToMe(req.params.id);
+  if (!outcome.ok) {
+    res.status(outcome.status).json({ error: outcome.error });
+    return;
+  }
+  res.status(204).end();
+});
+
+cardsRouter.post("/cards/:id/linear-state", async (req, res) => {
+  const stateId = (req.body as { stateId?: unknown } | undefined)?.stateId;
+  if (typeof stateId !== "string" || stateId === "" || stateId.length > 200) {
+    res.status(400).json({
+      error: "stateId must be a string of 1 to 200 characters",
+    });
+    return;
+  }
+  const outcome = await moveLinearState(req.params.id, stateId);
   if (!outcome.ok) {
     res.status(outcome.status).json({ error: outcome.error });
     return;

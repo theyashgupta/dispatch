@@ -26,6 +26,7 @@ type SelectProps<T extends string> = {
   value: T;
   onChange: (value: T) => void;
   style?: CSSProperties;
+  disabled?: boolean;
 } & (
   | { labels: Record<T, string>; children?: never }
   | { labels?: never; children: ReactNode }
@@ -36,6 +37,7 @@ export function Select<T extends string>({
   value,
   onChange,
   style,
+  disabled,
   labels,
   children,
 }: SelectProps<T>) {
@@ -44,6 +46,7 @@ export function Select<T extends string>({
     <select
       aria-label={label}
       value={value}
+      disabled={disabled}
       onChange={(e) => onChange(e.target.value as T)}
       onFocus={(event) =>
         setFocused(event.currentTarget.matches(":focus-visible"))
@@ -53,6 +56,7 @@ export function Select<T extends string>({
         ...(labels ? selectStyle : shrinkableSelectStyle),
         ...style,
         ...focusRing(focused),
+        ...(disabled ? { cursor: "default", opacity: 0.5 } : null),
       }}
     >
       {labels
