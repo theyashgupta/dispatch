@@ -4107,6 +4107,7 @@ class BoardStore extends EventEmitter {
    */
   promoteItem(
     id: string,
+    context?: string,
   ): Promise<{ card: Card; created: boolean } | undefined> {
     let result: { card: Card; created: boolean } | undefined;
     return this.enqueue(() => {
@@ -4124,6 +4125,7 @@ class BoardStore extends EventEmitter {
         current,
         this.nextIdentifier("LOCAL"),
         now,
+        context,
       );
       this.cards.set(card.id, card);
       this.stageItem({ ...withState(current, "done"), cardId: card.id });

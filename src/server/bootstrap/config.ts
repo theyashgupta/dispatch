@@ -422,6 +422,7 @@ export function loadConfig(): Config {
         ...(stateMap ? { stateMap } : {}),
       },
       github: readNestedSourceSettings(parsed, "github"),
+      sentry: readNestedSourceSettings(parsed, "sentry"),
     },
     lastUsedPlaybook: readLastUsedPlaybook(parsed),
     cleanupDelayDays: readWholeDays(

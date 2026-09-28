@@ -10,6 +10,11 @@ import {
   testLinearConnection as testImpl,
 } from "../sources/linear/linear.source.js";
 import { fetchGithubLogin } from "../sources/github/github.source.js";
+import { fetchSentryAccount } from "../sources/sentry/sentry.source.js";
+import {
+  fetchSentryIssue as fetchIssueImpl,
+  resolveSentryIssue as resolveIssueImpl,
+} from "../sources/sentry/sentry-issue.js";
 import {
   fetchPrDetail,
   postPrReview,
@@ -21,6 +26,10 @@ export {
   GitHubRequestError,
   GitHubSsoError,
 } from "../sources/github/github.source.js";
+export {
+  SentryAuthError,
+  SentryRequestError,
+} from "../sources/sentry/sentry.source.js";
 export { RateLimited as SourceRateLimited } from "../sources/ticket.source.js";
 import type {
   FilterCapabilities,
@@ -32,6 +41,7 @@ import type {
   Config,
   PrDetail,
   PrReviewEvent,
+  SentryIssueDetail,
   SourceFilters,
 } from "../../shared/types.js";
 
@@ -118,6 +128,33 @@ export function checkGithubToken(
   token: string,
 ): Promise<{ account?: string } | null> {
   return fetchGithubLogin(token);
+}
+
+/** Check a Sentry token live and return its organizations label, or null when Sentry rejects it. */
+export function checkSentryToken(
+  token: string,
+): Promise<{ account?: string } | null> {
+  return fetchSentryAccount(token);
+}
+
+/** Read one Sentry issue with its latest event, on the organization's allowed region. */
+export function fetchSentryIssue(
+  token: string,
+  org: string,
+  regionUrl: string | undefined,
+  issueId: string,
+): Promise<SentryIssueDetail> {
+  return fetchIssueImpl(token, org, regionUrl, issueId);
+}
+
+/** Resolve one Sentry issue, on the organization's allowed region. */
+export function resolveSentryIssue(
+  token: string,
+  org: string,
+  regionUrl: string | undefined,
+  issueId: string,
+): Promise<void> {
+  return resolveIssueImpl(token, org, regionUrl, issueId);
 }
 
 /** Read one pull request's detail with a GitHub token. */

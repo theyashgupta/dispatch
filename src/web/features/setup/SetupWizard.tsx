@@ -246,8 +246,8 @@ export function SetupWizard({
           {step === "sources" && (
             <>
               <p style={bodyTextStyle}>
-                Connect GitHub any time in Settings, Connections. Slack, Sentry,
-                Meetings and Calendar arrive in later releases.
+                Connect GitHub and Sentry any time in Settings, Connections.
+                Slack, Meetings and Calendar arrive in later releases.
               </p>
               <SoonConnectionCards />
             </>

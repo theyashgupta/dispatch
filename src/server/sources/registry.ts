@@ -6,6 +6,7 @@ import {
 import type { TicketSource } from "./ticket.source.js";
 import { GitHubSource } from "./github/github.source.js";
 import { LinearSource } from "./linear/linear.source.js";
+import { SentrySource } from "./sentry/sentry.source.js";
 
 /** The boot-built ticket sources, keyed by id. Empty until buildRegistry() runs at boot. */
 const sources = new Map<string, TicketSource>();
@@ -63,6 +64,15 @@ export function buildRegistry(config: Config): void {
   );
   sources.set(github.id, github);
   if (githubConfig?.enabled === true) enabled.add(github.id);
+  const sentryConfig = config.sources?.sentry;
+  const sentry = new SentrySource(
+    () => (resolvers.get("sentry") ?? noCredential)(),
+    sentryConfig?.pollIntervalMs ??
+      config.pollIntervalMs ??
+      DEFAULT_POLL_INTERVAL_MS,
+  );
+  sources.set(sentry.id, sentry);
+  if (sentryConfig?.enabled === true) enabled.add(sentry.id);
 }
 
 export function getSource(id: string): TicketSource | undefined {

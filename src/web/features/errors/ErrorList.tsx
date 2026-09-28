@@ -4,15 +4,15 @@ import { Chip } from "../../primitives/Chip.js";
 import { ListGroup, RowTime } from "../../primitives/ListGroup.js";
 import { ListRow } from "../../primitives/ListRow.js";
 import { SourceBadge } from "../badges/index.js";
-import { CATEGORY_LABEL, type PrGroup, type PrRow } from "../../lib/pr-rows.js";
+import { levelTone, type ErrorGroup, type ErrorRow } from "./error-rows.js";
 
-interface PrListProps {
-  groups: PrGroup[];
+interface ErrorListProps {
+  groups: ErrorGroup[];
   selectedKey: string | null;
-  onSelect: (row: PrRow) => void;
+  onSelect: (row: ErrorRow) => void;
 }
 
-export function PrList({ groups, selectedKey, onSelect }: PrListProps) {
+export function ErrorList({ groups, selectedKey, onSelect }: ErrorListProps) {
   const narrow = useMediaQuery(CAROUSEL_QUERY);
   return (
     <>
@@ -21,25 +21,28 @@ export function PrList({ groups, selectedKey, onSelect }: PrListProps) {
           key={group.key}
           title={group.label}
           count={group.rows.length}
-          testId="pr-group"
+          testId="error-group"
         >
           {group.rows.map((row) => (
             <ListRow
               key={row.key}
-              id={`pr-row-${row.key}`}
+              id={`error-row-${row.key}`}
               selected={row.key === selectedKey}
               unread={row.unread}
               onSelect={() => onSelect(row)}
-              snippet={row.author ? `${row.repo} by ${row.author}` : row.repo}
-              leading={<SourceBadge source="github" />}
-              title={`#${row.number} ${row.title}`}
+              snippet={
+                narrow
+                  ? row.culprit
+                  : `${row.count} ${row.count === 1 ? "event" : "events"} · ${row.culprit}`
+              }
+              leading={<SourceBadge source="sentry" />}
+              title={row.shortId ? `${row.shortId} ${row.title}` : row.title}
               meta={
                 <>
-                  {!narrow && row.category !== "yours" && (
-                    <Chip>{CATEGORY_LABEL[row.category]}</Chip>
-                  )}
-                  {row.yours && <Chip tone="accent">Yours</Chip>}
-                  {row.draft && <Chip>Draft</Chip>}
+                  <Chip tone={levelTone(row.level)}>
+                    {row.level || "unknown"}
+                  </Chip>
+                  {row.assigned && <Chip tone="accent">Assigned</Chip>}
                   <RowTime>{formatAge(row.time, nowMs())}</RowTime>
                 </>
               }

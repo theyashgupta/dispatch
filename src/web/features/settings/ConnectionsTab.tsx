@@ -26,6 +26,7 @@ import { Notice } from "../../primitives/Notice.js";
 import {
   GitHubConnectionCard,
   LinearConnectionCard,
+  SentryConnectionCard,
   SoonConnectionCards,
 } from "../connections/index.js";
 import { MultiSelect } from "../modals/index.js";
@@ -491,12 +492,16 @@ interface ConnectionsTabSectionProps {
   filters: FiltersTab;
   onRunSetup?: () => Promise<boolean>;
   connectionKey?: number;
+  errorsInFeeds: boolean;
+  onToggleErrorsInFeeds: (on: boolean) => void;
 }
 
 export function ConnectionsTabSection({
   filters,
   onRunSetup,
   connectionKey,
+  errorsInFeeds,
+  onToggleErrorsInFeeds,
 }: ConnectionsTabSectionProps) {
   const [runSetup, setRunSetup] = useState<"idle" | "opening" | "failed">(
     "idle",
@@ -536,6 +541,10 @@ export function ConnectionsTabSection({
         <FiltersTabSection filters={filters} />
       </LinearConnectionCard>
       <GitHubConnectionCard />
+      <SentryConnectionCard
+        errorsInFeeds={errorsInFeeds}
+        onToggleErrorsInFeeds={onToggleErrorsInFeeds}
+      />
       <SoonConnectionCards />
     </div>
   );

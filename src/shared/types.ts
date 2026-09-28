@@ -1033,7 +1033,7 @@ export type SourceCardStatus =
 
 export type ItemSourceConfig = Pick<SourceConfig, "enabled" | "pollIntervalMs">;
 
-export type ItemSourceId = "github";
+export type ItemSourceId = "github" | "sentry";
 
 export interface SourceCredential {
   token: string;
@@ -1088,7 +1088,11 @@ export interface Config {
   workspaceRoot?: string;
   /** Status-source selection (`hooks | pane | auto`); absent resolves to `auto` at load. */
   statusChannel?: StatusChannel;
-  sources?: { linear?: SourceConfig; github?: ItemSourceConfig };
+  sources?: {
+    linear?: SourceConfig;
+    github?: ItemSourceConfig;
+    sentry?: ItemSourceConfig;
+  };
   /** On-boot update check; absent or any non-`false` value resolves to on. */
   updateCheck?: boolean;
   linearSyncViaClaude?: boolean;
@@ -1379,4 +1383,43 @@ export interface ArchivedGroupSummary {
   destination: UnwindDestination;
   members: { id: string; identifier: string }[];
   deleteBlocked?: string;
+}
+
+export interface SentryFrame {
+  function: string | null;
+  file: string | null;
+  line: number | null;
+  column: number | null;
+  inApp: boolean;
+  module: string | null;
+  context: { line: number; code: string }[];
+}
+
+export interface SentryBreadcrumb {
+  timestamp: string | null;
+  type: string | null;
+  category: string | null;
+  level: string | null;
+  message: string | null;
+}
+
+export interface SentryIssueDetail {
+  id: string;
+  shortId: string;
+  title: string;
+  culprit: string;
+  permalink: string | null;
+  level: string;
+  project: string;
+  status: string;
+  count: number;
+  userCount: number;
+  firstSeen: string | null;
+  lastSeen: string | null;
+  exception: { type: string | null; value: string | null } | null;
+  frames: SentryFrame[];
+  breadcrumbs: SentryBreadcrumb[];
+  tags: { key: string; value: string }[];
+  logger: string | null;
+  platform: string | null;
 }

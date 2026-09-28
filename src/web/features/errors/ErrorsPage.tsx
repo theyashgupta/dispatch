@@ -10,32 +10,31 @@ import {
   ListPane,
   SplitView,
 } from "../../primitives/SplitView.js";
-import { PrDetail } from "./PrDetail.js";
-import { PrList } from "./PrList.js";
+import { ErrorDetail } from "./ErrorDetail.js";
+import { ErrorList } from "./ErrorList.js";
 import {
-  buildPrRows,
-  groupPrRows,
-  type PrGroupBy,
-  type PrRow,
-} from "../../lib/pr-rows.js";
+  buildErrorRows,
+  groupErrorRows,
+  type ErrorGroupBy,
+  type ErrorRow,
+} from "./error-rows.js";
 
-interface PullRequestsPageProps {
+interface ErrorsPageProps {
   board: BoardSnapshot;
   items: Item[];
   selectedKey: string | null;
   onSelect: (key: string | null) => void;
   onMarkRead: (itemId: string) => void;
-  onStartAgent: (row: PrRow, prompt: string) => void;
+  onStartAgent: (row: ErrorRow, prompt: string, context: string) => void;
   onNotice: (text: string) => void;
 }
 
-const GROUP_LABEL: Record<PrGroupBy, string> = {
-  repo: "Repo",
-  author: "Author",
-  type: "Type",
+const GROUP_LABEL: Record<ErrorGroupBy, string> = {
+  project: "Project",
+  level: "Level",
 };
 
-export function PullRequestsPage({
+export function ErrorsPage({
   board,
   items,
   selectedKey,
@@ -43,20 +42,17 @@ export function PullRequestsPage({
   onMarkRead,
   onStartAgent,
   onNotice,
-}: PullRequestsPageProps) {
+}: ErrorsPageProps) {
   const narrow = useMediaQuery(CAROUSEL_QUERY);
-  const [groupBy, setGroupBy] = useState<PrGroupBy>("repo");
-  const rows = useMemo(
-    () => buildPrRows(items, board.cards),
-    [items, board.cards],
-  );
-  const groups = useMemo(() => groupPrRows(rows, groupBy), [rows, groupBy]);
-  const connected = board.enabledSources?.includes("github") === true;
-  const partial = board.syncWarning?.startsWith("github ") === true;
+  const [groupBy, setGroupBy] = useState<ErrorGroupBy>("project");
+  const rows = useMemo(() => buildErrorRows(items), [items]);
+  const groups = useMemo(() => groupErrorRows(rows, groupBy), [rows, groupBy]);
+  const connected = board.enabledSources?.includes("sentry") === true;
+  const partial = board.syncWarning?.startsWith("sentry ") === true;
 
-  function handleSelect(row: PrRow) {
+  function handleSelect(row: ErrorRow) {
     onSelect(row.key);
-    if (row.unread && row.itemId) onMarkRead(row.itemId);
+    if (row.unread) onMarkRead(row.itemId);
   }
 
   const list = (
@@ -74,20 +70,20 @@ export function PullRequestsPage({
         partial ? (
           <Notice
             tone="muted"
-            label="Some pull requests may be missing: GitHub returned more than 100 results in a search, or an organization needs SAML single sign-on."
+            label="Some errors may be missing: Sentry returned 100 or more issues in a query, more than 10 organizations, or an organization refused access."
           />
         ) : undefined
       }
     >
       {!connected ? (
-        <ConnectPrompt testId="pr-connect">
-          GitHub is not connected. Connect it in Settings and the pull requests
-          that wait on you land here.
+        <ConnectPrompt testId="errors-connect">
+          Sentry is not connected. Connect it in Settings and the errors that
+          need you land here.
         </ConnectPrompt>
       ) : rows.length === 0 ? (
-        <PaneEmpty>No pull requests wait on you.</PaneEmpty>
+        <PaneEmpty>No errors need you.</PaneEmpty>
       ) : (
-        <PrList
+        <ErrorList
           groups={groups}
           selectedKey={selectedKey}
           onSelect={handleSelect}
@@ -101,9 +97,14 @@ export function PullRequestsPage({
     : null;
   const detail = (
     <DetailPane>
-      <PrDetail
+      <ErrorDetail
         key={selectedRow?.key ?? "none"}
         row={selectedRow}
+        placeholder={
+          connected && rows.length > 0
+            ? "Select an error to see its details."
+            : null
+        }
         onBack={narrow ? () => onSelect(null) : undefined}
         onStartAgent={onStartAgent}
         onNotice={onNotice}
@@ -114,7 +115,7 @@ export function PullRequestsPage({
   return (
     <SplitView
       narrow={narrow}
-      showDetail={selectedRow != null}
+      showDetail={selectedRow !== null}
       list={list}
       detail={detail}
     />

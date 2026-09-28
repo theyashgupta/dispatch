@@ -217,6 +217,8 @@ interface SettingsScreenProps {
   onToggleSound: (enabled: boolean) => void;
   onRunSetup?: () => Promise<boolean>;
   connectionKey?: number;
+  errorsInFeeds: boolean;
+  onToggleErrorsInFeeds: (on: boolean) => void;
 }
 
 export function SettingsScreen({
@@ -229,6 +231,8 @@ export function SettingsScreen({
   onToggleSound,
   onRunSetup,
   connectionKey,
+  errorsInFeeds,
+  onToggleErrorsInFeeds,
 }: SettingsScreenProps) {
   const filters = useFiltersTab(onSaved);
   const modelsTab = useModelsTab(onSaved);
@@ -306,6 +310,8 @@ export function SettingsScreen({
               filters={filters}
               onRunSetup={onRunSetup}
               connectionKey={connectionKey}
+              errorsInFeeds={errorsInFeeds}
+              onToggleErrorsInFeeds={onToggleErrorsInFeeds}
             />
           )}
           {tab === "board" && (
