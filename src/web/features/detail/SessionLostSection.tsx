@@ -1,9 +1,10 @@
-import { AlertTriangle, Play, RotateCw } from "lucide-react";
+import { Play, RotateCw } from "lucide-react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { startCard } from "../../lib/api.js";
 import { useResumeFeedback } from "../../hooks/useResumeFeedback.js";
 import { Button } from "../../primitives/Button.js";
 import { Notice } from "../../primitives/Notice.js";
+import { WarningIcon } from "../../primitives/WarningIcon.js";
 
 interface SessionLostSectionProps {
   card: CardModel;
@@ -46,18 +47,7 @@ export function SessionLostSection({
         gap: "var(--space-lg)",
       }}
     >
-      <Notice
-        tone="destructive"
-        icon={
-          <AlertTriangle
-            size={12}
-            strokeWidth={2}
-            aria-hidden="true"
-            style={{ flex: "0 0 auto" }}
-          />
-        }
-        label="Session lost"
-      />
+      <Notice tone="destructive" icon={<WarningIcon />} label="Session lost" />
 
       <div
         style={{

@@ -1,4 +1,5 @@
 import type {
+  LinearComment,
   LinearTeam,
   SourceFilters,
   SourceIssue,
@@ -23,6 +24,7 @@ const PAGE_SIZE = 250;
 const LINEAR_TIMEOUT_MS = 30_000;
 const TRACKED_CHUNK = 250;
 const MAX_TRACKED = 1000;
+const COMMENT_BODY_CAP = 600;
 
 /**
  * Thrown by `postGraphQL` only when Linear rejects the credentials themselves — an HTTP 401/403 or a
@@ -54,7 +56,7 @@ function isAuthCode(code: string | undefined): boolean {
 }
 
 const ISSUE_NODE_FIELDS =
-  "id identifier title url description priority updatedAt state { id name type color } team { id key name } cycle { number } project { id name } assignee { id displayName }";
+  "id identifier title url description priority updatedAt state { id name type color } team { id key name } cycle { number } project { id name } assignee { id displayName } comments(last: 5) { nodes { id body createdAt user { displayName } } }";
 
 /**
  * Build the paged board query for the active shape. `viewer.assignedIssues` keeps the implicit
@@ -99,6 +101,14 @@ interface IssueNode {
   team?: LinearTeam | null;
   cycle?: { number: number } | null;
   assignee?: { id: string; displayName: string } | null;
+  comments?: { nodes?: CommentNode[] } | null;
+}
+
+interface CommentNode {
+  id: string;
+  body: string;
+  createdAt: string;
+  user: { displayName: string } | null;
 }
 
 interface Connection<N> {
@@ -112,6 +122,7 @@ interface GraphQLData {
   users?: Connection<{ id: string; name?: string; displayName?: string }>;
   teams?: Connection<{ id: string; name?: string }>;
   projects?: Connection<{ id: string; name?: string }>;
+  commentCreate?: { success?: boolean };
 }
 
 /**
@@ -271,7 +282,28 @@ function mapIssueNode(n: IssueNode): SourceIssue {
     assignee: n.assignee
       ? { id: n.assignee.id, name: n.assignee.displayName }
       : undefined,
+    comments: mapComments(n.comments?.nodes ?? []),
   };
+}
+
+/**
+ * Sort comments oldest first, cap each body, and name a user-less comment "Linear".
+ *
+ * @remarks A null user is an integration or bot comment. The cap keeps a stored card small, and
+ * drops a trailing half of a surrogate pair so an emoji is never split.
+ */
+function mapComments(nodes: CommentNode[]): LinearComment[] {
+  return nodes
+    .map((c) => ({
+      id: c.id,
+      body:
+        c.body.length > COMMENT_BODY_CAP
+          ? `${c.body.slice(0, COMMENT_BODY_CAP - 1).replace(/[\uD800-\uDBFF]$/, "")}…`
+          : c.body,
+      createdAt: c.createdAt,
+      author: c.user?.displayName ?? "Linear",
+    }))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 const TRACKED_QUERY = `query Tracked($ids: [ID!]) { issues(first: ${TRACKED_CHUNK}, filter: { id: { in: $ids } }) { nodes { ${ISSUE_NODE_FIELDS} } } }`;
@@ -305,6 +337,7 @@ async function fetchIssuesByIds(
 }
 
 const VIEWER_QUERY = `query Viewer { viewer { id } }`;
+const COMMENT_MUTATION = `mutation Comment($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id } } }`;
 
 /**
  * Live key check for the first-run setup route: run a minimal viewer query with the entered key.
@@ -365,6 +398,16 @@ export class LinearSource implements TicketSource {
   /** Fetch issues by id for the poller's tracked refresh of cards past To Do. */
   fetchByIds(ids: string[]): Promise<SourceIssue[]> {
     return fetchIssuesByIds(this.apiKey, ids);
+  }
+
+  /** Post a comment on an issue; the body travels only as a GraphQL variable. */
+  async addComment(issueId: string, body: string): Promise<void> {
+    const data = await postGraphQL(this.apiKey, COMMENT_MUTATION, {
+      input: { issueId, body },
+    });
+    if (data.commentCreate?.success !== true) {
+      throw new Error("Linear did not create the comment");
+    }
   }
 
   /**

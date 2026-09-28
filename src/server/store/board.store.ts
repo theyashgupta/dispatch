@@ -150,7 +150,7 @@ export function redactArchivedGroup(row: ArchivedGroup): ArchivedGroupSummary {
 /**
  * Strip a card's secrets before it leaves the process — the SINGLE sanctioned place a card loses
  * them. Every new read path (windowed `snapshot()`, and any future one) must call this rather than
- * duplicate the strip, so the redaction boundary can never drift. Three responsibilities:
+ * duplicate the strip, so the redaction boundary can never drift. Four responsibilities:
  * (1) remove the card's own secret field; (2) remove `sessions` outright — the full array is
  * server-side only and carries every session's own secret field (the active session's own
  * `ttydPort`/`activeSessionId` already ride the wire unconditionally via the card's own flat
@@ -166,6 +166,9 @@ export function redactArchivedGroup(row: ArchivedGroup): ArchivedGroupSummary {
  * ABSENCE by explicit branch, never `undefined` leaking through a bare lookup. Resolves exactly one
  * hop — `builtFrom` is never traversed transitively (decision `D-C`). Operates on the shallow
  * copy only; never mutates the source card's `sessions` array or any session object.
+ * (4) replace Linear `comments` with `commentCount` and `lastCommentId`, so comment bodies never
+ * ride the broadcast snapshot.
+ * @see docs/ARCHITECTURE.md#linear-sync
  * @see docs/ARCHITECTURE.md#session-projection-chokepoint
  * @see docs/ARCHITECTURE.md#session-inheritance
  */
@@ -173,6 +176,11 @@ export function redactCard(card: Card): Card {
   const wireCard = { ...card };
   delete wireCard.hookToken;
   delete wireCard.sessions;
+  if (card.comments !== undefined) {
+    wireCard.commentCount = card.comments.length;
+    wireCard.lastCommentId = card.comments.at(-1)?.id;
+  }
+  delete wireCard.comments;
   const activeAccount = card.sessions?.find(
     (s) => s.id === card.activeSessionId,
   )?.claudeAccountId;
@@ -3899,6 +3907,15 @@ class BoardStore extends EventEmitter {
           reason: `synced to Linear as ${adopted.identifier}`,
         }),
       ];
+    });
+  }
+
+  /** Set or clear the card's Linear write failure copy; a no-op for an unknown id. */
+  setLinearError(id: string, copy: string | null): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) card.linearError = copy;
+      return [];
     });
   }
 
