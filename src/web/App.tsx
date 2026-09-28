@@ -94,8 +94,15 @@ import type { PrerequisiteStatus, TunnelState } from "../shared/types.js";
 import type { CardSearchResult } from "../shared/search.js";
 import { DONE_PAGE_SIZE } from "../shared/done-limit.js";
 
+import { isTicketCard } from "./lib/linear-state.js";
+
 const InboxView = lazy(() =>
   import("./features/inbox/index.js").then((m) => ({ default: m.InboxView })),
+);
+const TicketsPage = lazy(() =>
+  import("./features/tickets/index.js").then((m) => ({
+    default: m.TicketsPage,
+  })),
 );
 const OrcaView = lazy(() =>
   import("./features/orca/index.js").then((m) => ({ default: m.OrcaView })),
@@ -636,9 +643,11 @@ export function App() {
   ) : null;
 
   const inboxCount = inboxWaitingCount(board.cards, items);
+  const ticketsCount = board.cards.filter(isTicketCard).length;
   const pageMeta: Record<Page, { title: string; count?: number }> = {
     board: { title: "Board", count: board.cards.length },
     inbox: { title: "Inbox", count: inboxCount },
+    tickets: { title: "Tickets", count: ticketsCount },
     workspace: { title: "Workspace" },
     settings: { title: "Settings" },
     activity: { title: "Activity", count: feed.events.length },
@@ -662,6 +671,7 @@ export function App() {
       collapsed={navMode === "collapsed"}
       onToggleCollapsed={nav.toggle}
       inboxCount={inboxCount}
+      ticketsCount={ticketsCount}
       syncedAt={board.syncedAt ?? null}
       connection={connection}
       pollIntervalMs={board.pollIntervalMs ?? null}
@@ -775,6 +785,15 @@ export function App() {
                 selectedCardId={selectedCard ? selectedCardId : null}
                 onSelectCard={selectCard}
                 services={actionServices}
+              />
+            ) : route.page === "tickets" ? (
+              <TicketsPage
+                board={board}
+                selectedCardId={selectedCard ? selectedCardId : null}
+                onSelectCard={selectCard}
+                onStartRequest={requestStart}
+                onMoveCard={moveCard}
+                onNotice={showNotice}
               />
             ) : route.page === "settings" ? (
               <SettingsScreen

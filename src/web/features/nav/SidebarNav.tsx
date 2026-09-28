@@ -29,6 +29,7 @@ interface SidebarNavProps {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   inboxCount: number;
+  ticketsCount: number;
   syncedAt: string | null;
   connection: ConnectionStatus;
   pollIntervalMs: number | null;
@@ -161,6 +162,7 @@ export function SidebarNav({
   collapsed,
   onToggleCollapsed,
   inboxCount,
+  ticketsCount,
   syncedAt,
   connection,
   pollIntervalMs,
@@ -243,6 +245,8 @@ export function SidebarNav({
                 badge={
                   item.page === "inbox" && inboxCount > 0 ? (
                     <Chip tone="accent">{inboxCount}</Chip>
+                  ) : item.page === "tickets" && ticketsCount > 0 ? (
+                    <Chip>{ticketsCount}</Chip>
                   ) : undefined
                 }
                 onSelect={() => onNavigate(item.page)}
