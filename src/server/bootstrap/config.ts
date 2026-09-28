@@ -4,6 +4,7 @@ import path from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import type {
   Config,
+  MeetingSourceConfig,
   SourceFilters,
   StatusChannel,
   TerminalAppearance,
@@ -14,7 +15,9 @@ import {
   DEFAULT_ARCHIVE_RETENTION_DAYS,
   ARCHIVE_RETENTION_MAX_DAYS,
   DEFAULT_FILTERS,
+  DEFAULT_GRANOLA_WINDOW_HOURS,
   DEFAULT_POLL_INTERVAL_MS,
+  GRANOLA_WINDOW_HOURS,
 } from "../../shared/types.js";
 import {
   DEFAULT_TERMINAL_APPEARANCE,
@@ -231,6 +234,32 @@ function readNestedSourceSettings(parsed: Record<string, unknown>): {
 }
 
 /**
+ * Read `sources.meeting`, dropping a non-boolean `enabled` and an unlisted `windowHours`.
+ */
+function readMeetingSource(
+  parsed: Record<string, unknown>,
+): MeetingSourceConfig {
+  const sources = parsed.sources;
+  const block =
+    typeof sources === "object" && sources !== null && !Array.isArray(sources)
+      ? (sources as Record<string, unknown>).meeting
+      : undefined;
+  const meeting =
+    typeof block === "object" && block !== null && !Array.isArray(block)
+      ? (block as Record<string, unknown>)
+      : {};
+  const windowHours = GRANOLA_WINDOW_HOURS.find(
+    (hours) => hours === meeting.windowHours,
+  );
+  return {
+    ...(typeof meeting.enabled === "boolean"
+      ? { enabled: meeting.enabled }
+      : {}),
+    windowHours: windowHours ?? DEFAULT_GRANOLA_WINDOW_HOURS,
+  };
+}
+
+/**
  * Build the nested-shape object for the flat→nested boot migration. config.json is a user-edited
  * file, so unknown top-level keys are expected and carried forward verbatim, and any pre-existing
  * `sources` entries are preserved — including keys already inside `sources.linear` (a `filters`
@@ -386,6 +415,7 @@ export function loadConfig(): Config {
         filters: readNestedFilters(parsed),
         ...readNestedSourceSettings(parsed),
       },
+      meeting: readMeetingSource(parsed),
     },
     lastUsedPlaybook: readLastUsedPlaybook(parsed),
     cleanupDelayDays: readWholeDays(

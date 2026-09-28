@@ -973,6 +973,35 @@ export interface SourceConfig {
   pollIntervalMs?: number;
 }
 
+export const GRANOLA_WINDOW_HOURS = [24, 48, 72, 168, 336] as const;
+export const DEFAULT_GRANOLA_WINDOW_HOURS = 48;
+
+export interface MeetingSourceConfig {
+  enabled?: boolean;
+  windowHours?: number;
+}
+
+export type GranolaCheckState =
+  "connected" | "needs-auth" | "failed" | "not-found" | "claude-missing";
+
+export type GranolaCheckResult =
+  | { state: "connected"; server: string }
+  | { state: Exclude<GranolaCheckState, "connected">; server?: string };
+
+export type GranolaError =
+  Exclude<GranolaCheckState, "connected"> | "timeout" | "unreadable";
+
+export interface GranolaStatus {
+  enabled: boolean;
+  windowHours: number;
+  running: boolean;
+  lastRunAt?: string;
+  lastError?: GranolaError;
+  lastCount?: number;
+  polledAt?: string;
+  server?: string;
+}
+
 export type SourceKeyError =
   "rejected" | "unreachable" | "superseded" | "failed";
 
@@ -988,7 +1017,8 @@ export type SourceCardStatus =
   | { kind: "disconnected" }
   | { kind: "connected"; account?: string }
   | { kind: "error"; message: string }
-  | { kind: "soon" };
+  | { kind: "soon" }
+  | { kind: "off" };
 
 /** Contents of ~/.dispatch/config.json. */
 export interface Config {
@@ -1000,7 +1030,7 @@ export interface Config {
   workspaceRoot?: string;
   /** Status-source selection (`hooks | pane | auto`); absent resolves to `auto` at load. */
   statusChannel?: StatusChannel;
-  sources?: { linear?: SourceConfig };
+  sources?: { linear?: SourceConfig; meeting?: MeetingSourceConfig };
   /** On-boot update check; absent or any non-`false` value resolves to on. */
   updateCheck?: boolean;
   /** The playbook name remembered from the last successful kickoff; absent when never set. */
