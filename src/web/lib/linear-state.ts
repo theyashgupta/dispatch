@@ -69,3 +69,15 @@ export function defaultTeamId(
   }
   return best?.id ?? teams[0]?.id;
 }
+
+/**
+ * Whether a card is a Linear ticket the Tickets page lists.
+ *
+ * @remarks Local cards and group cards are never Linear tickets; the check lives here, outside the
+ * lazy tickets chunk, so the sidebar count can use it without loading the page.
+ */
+export function isTicketCard(
+  card: Pick<Card, "source" | "memberIds">,
+): boolean {
+  return (card.source ?? "linear") === "linear" && !card.memberIds?.length;
+}
