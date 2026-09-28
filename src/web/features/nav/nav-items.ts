@@ -9,6 +9,7 @@ import {
   KeyRound,
   PanelLeft,
   SquareTerminal,
+  Ticket,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -36,6 +37,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { page: "sessions", label: "Sessions", icon: SquareTerminal, group: "Work" },
   { page: "workspace", label: "Workspace", icon: PanelLeft, group: "Work" },
   { page: "activity", label: "Activity", icon: Activity, group: "Work" },
+  { page: "tickets", label: "Tickets", icon: Ticket, group: "Sources" },
   {
     page: "accounts",
     label: "Accounts and Usage",

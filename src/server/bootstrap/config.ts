@@ -5,9 +5,11 @@ import writeFileAtomic from "write-file-atomic";
 import type {
   Config,
   ItemSourceConfig,
+  LinearStateMap,
   SourceFilters,
   StatusChannel,
   TerminalAppearance,
+  UserProfile,
 } from "../../shared/types.js";
 import {
   DEFAULT_CLAUDE_ARGS,
@@ -21,6 +23,8 @@ import {
   DEFAULT_TERMINAL_APPEARANCE,
   validateTerminalAppearance,
 } from "../../shared/terminal-appearance.js";
+import { parseProfile } from "../../shared/profile.js";
+import { parseStateMap } from "../../shared/linear-state-map.js";
 import { StartupError } from "./binary-check.js";
 import { CONFIG_PATH, DISPATCH_DIR } from "../services/infra/paths.js";
 
@@ -49,6 +53,8 @@ const CONFIG_TEMPLATE = {
   "// updateCheck":
     "Set to false to disable the on-boot update check. Default true.",
   updateCheck: true,
+  "// linearSyncViaClaude":
+    "Set to true to keep the old Claude MCP path for Sync to Linear for one release. Default false (direct GraphQL).",
   "// cleanupDelayDays":
     "Days a finished card keeps its workspace before automatic cleanup. 0 = clean up immediately on Done. Default 7, max 90.",
   cleanupDelayDays: DEFAULT_CLEANUP_DELAY_DAYS,
@@ -105,6 +111,14 @@ function readWholeDays(
     value <= max
     ? value
     : fallback;
+}
+
+/** Read the About you profile tolerantly: a malformed or empty profile loads as absent. */
+function readProfile(parsed: Record<string, unknown>): UserProfile | undefined {
+  const result = parseProfile(parsed.profile);
+  return result.ok && Object.keys(result.value).length > 0
+    ? result.value
+    : undefined;
 }
 
 /**
@@ -207,6 +221,22 @@ function readNestedFilters(parsed: Record<string, unknown>): SourceFilters {
     currentCycle: f.currentCycle === true,
     includeActive: f.includeActive === true,
   };
+}
+
+/**
+ * Read `sources.linear.stateMap` through parseStateMap.
+ *
+ * @remarks An invalid stored map is ignored with a warning, so the push falls back to the defaults.
+ */
+function readNestedStateMap(
+  parsed: Record<string, unknown>,
+): LinearStateMap | undefined {
+  const raw = nestedSource(parsed, "linear")?.stateMap;
+  if (raw === undefined) return undefined;
+  const result = parseStateMap(raw);
+  if (result.ok) return result.map;
+  console.warn(`[config] ignoring sources.linear.stateMap: ${result.error}`);
+  return undefined;
 }
 
 /**
@@ -370,6 +400,7 @@ export function loadConfig(): Config {
       : DEFAULT_WORKSPACE_ROOT;
 
   const activeClaudeAccountId = readActiveClaudeAccountId(parsed);
+  const stateMap = readNestedStateMap(parsed);
   const config: Config = {
     linearApiKey: rawKey,
     port: typeof parsed.port === "number" ? parsed.port : DEFAULT_PORT,
@@ -382,11 +413,13 @@ export function loadConfig(): Config {
     workspaceRoot,
     statusChannel: readStatusChannel(parsed),
     updateCheck: readUpdateCheck(parsed),
+    linearSyncViaClaude: parsed.linearSyncViaClaude === true,
     sources: {
       linear: {
         apiKey: rawKey,
         filters: readNestedFilters(parsed),
         ...readNestedSourceSettings(parsed, "linear"),
+        ...(stateMap ? { stateMap } : {}),
       },
       github: readNestedSourceSettings(parsed, "github"),
       sentry: readNestedSourceSettings(parsed, "sentry"),
@@ -408,6 +441,9 @@ export function loadConfig(): Config {
     ...(activeClaudeAccountId !== undefined ? { activeClaudeAccountId } : {}),
     terminal: readTerminal(parsed),
   };
+  const profile = readProfile(parsed);
+  if (profile) config.profile = profile;
+  if (parsed.onboardingDone === true) config.onboardingDone = true;
 
   const hasKey = config.linearApiKey.length > 0;
   console.log(`[config] loaded ${CONFIG_PATH} (api key present: ${hasKey})`);

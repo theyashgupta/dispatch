@@ -1,22 +1,38 @@
 export const SETTINGS_TABS = [
-  "filters",
-  "models",
-  "terminal",
-  "workspaces",
-  "remote",
+  "connections",
+  "board",
+  "appearance",
   "notifications",
-  "cleanup",
+  "remote",
+  "workspaces",
+  "about-you",
+  "updates",
+  "about",
 ] as const;
 
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
 
+const LEGACY_TAB_ALIASES: Readonly<Record<string, SettingsTab>> = {
+  filters: "connections",
+  playbooks: "connections",
+  vault: "connections",
+  accounts: "connections",
+  models: "board",
+  cleanup: "board",
+  terminal: "appearance",
+};
+
 /**
  * Resolves a route detail to a settings tab, falling back to the first tab for unknown ids.
- * @remarks The retired playbooks, vault and accounts ids fall back too, so a saved legacy hash
- * lands on Sync filters instead of an empty pane.
+ * @remarks Legacy ids map to the tab that now holds their controls, so a saved hash such as
+ * `#/settings/filters` renders Connections without rewriting the URL.
  */
 export function settingsTabFrom(id: string | undefined): SettingsTab {
-  return (SETTINGS_TABS as readonly string[]).includes(id ?? "")
-    ? (id as SettingsTab)
-    : SETTINGS_TABS[0];
+  if ((SETTINGS_TABS as readonly string[]).includes(id ?? "")) {
+    return id as SettingsTab;
+  }
+  if (id !== undefined && Object.hasOwn(LEGACY_TAB_ALIASES, id)) {
+    return LEGACY_TAB_ALIASES[id];
+  }
+  return SETTINGS_TABS[0];
 }
