@@ -448,3 +448,135 @@ void test("parked is never a source for a manual move into agent_done", async ()
   await store.moveCardManual(cardId, "agent_done");
   assert.equal(store.getCard(cardId)?.column, "parked");
 });
+
+void test("redactCard emits one widened summary for a single-session card, active and without secrets", () => {
+  const wire = redactCard(
+    card(
+      [
+        {
+          id: "s1",
+          createdAt: "2026-09-01T00:00:00.000Z",
+          updatedAt: "2026-09-03T00:00:00.000Z",
+          tmuxSession: "dsp-LOCAL-1",
+          branch: "dispatch/LOCAL-1",
+          workspace: { folder: "/Users/me/code/acme-app", repos: [] },
+          lastMarker: "NEEDS_INPUT",
+          hookToken: "hook-secret",
+          workspacePath: "/Users/me/code/acme-app/.dispatch/LOCAL-1",
+          claudeSessions: [
+            {
+              id: "conv-a",
+              createdAt: "2026-09-01T00:00:00.000Z",
+              lastActiveAt: "2026-09-01T00:00:00.000Z",
+            },
+          ],
+        },
+      ],
+      "s1",
+    ),
+  );
+  assert.equal(wire.sessionCount, undefined);
+  assert.deepEqual(wire.sessionSummaries, [
+    {
+      id: "s1",
+      ordinal: 1,
+      lost: false,
+      active: true,
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-03T00:00:00.000Z",
+      branch: "dispatch/LOCAL-1",
+      workspaceFolder: "acme-app",
+      lastMarker: "NEEDS_INPUT",
+      claudeAccountId: undefined,
+      cleanupBlocked: undefined,
+      prs: undefined,
+      prsUnknown: undefined,
+      previews: undefined,
+      previewsUnknown: undefined,
+    },
+  ]);
+  const json = JSON.stringify(wire);
+  for (const secret of [
+    "hook-secret",
+    "workspacePath",
+    "claudeSessions",
+    "/Users/me/code",
+  ]) {
+    assert.equal(json.includes(secret), false, secret);
+  }
+});
+
+void test("redactCard marks exactly one summary active for a two-session card and keeps ordinals and sessionCount", () => {
+  const wire = redactCard(
+    card(
+      [
+        {
+          id: "s2",
+          createdAt: "2026-09-02T00:00:00.000Z",
+          updatedAt: "2026-09-02T00:00:00.000Z",
+          tmuxSession: "dsp-LOCAL-1-2",
+        },
+        {
+          id: "s1",
+          createdAt: "2026-09-01T00:00:00.000Z",
+          updatedAt: "2026-09-01T00:00:00.000Z",
+        },
+      ],
+      "s2",
+    ),
+  );
+  assert.equal(wire.sessionCount, 2);
+  assert.deepEqual(
+    wire.sessionSummaries?.map((s) => [s.id, s.ordinal, s.active, s.lost]),
+    [
+      ["s1", 1, false, true],
+      ["s2", 2, true, false],
+    ],
+  );
+  assert.equal(wire.sessionSummaries?.filter((s) => s.active).length, 1);
+});
+
+void test("redactCard emits no summaries for a card without sessions", () => {
+  assert.equal(redactCard(card(undefined)).sessionSummaries, undefined);
+  assert.equal(redactCard(card([])).sessionSummaries, undefined);
+});
+
+void test("redactCard keeps every secret off a multi-session summary", () => {
+  const secretSession = (id: string, createdAt: string) => ({
+    id,
+    createdAt,
+    updatedAt: createdAt,
+    tmuxSession: `dsp-${id}`,
+    ttydPort: 7681,
+    hookToken: `hook-${id}`,
+    claudeSessionId: `conv-${id}`,
+    claudeSessions: [{ id: `conv-${id}`, createdAt, lastActiveAt: createdAt }],
+    workspacePath: `/Users/me/code/app/.dispatch/${id}`,
+    workspace: { folder: "/Users/me/code/app", repos: [] },
+  });
+  const wire = redactCard(
+    card(
+      [
+        secretSession("s1", "2026-09-01T00:00:00.000Z"),
+        secretSession("s2", "2026-09-02T00:00:00.000Z"),
+        secretSession("s3", "2026-09-03T00:00:00.000Z"),
+      ],
+      "s2",
+    ),
+  );
+  const summaries = JSON.stringify(wire.sessionSummaries);
+  for (const secret of [
+    "hook-",
+    "conv-",
+    "ttydPort",
+    "/Users/me",
+    "workspacePath",
+    "claudeSessions",
+  ]) {
+    assert.equal(summaries.includes(secret), false, secret);
+  }
+  assert.deepEqual(
+    wire.sessionSummaries?.map((s) => s.workspaceFolder),
+    ["app", "app", "app"],
+  );
+});

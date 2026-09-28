@@ -16,6 +16,7 @@ import {
 import type { ConnectionStatus } from "../../hooks/useBoardStream.js";
 import type { Page, Route } from "../../lib/route.js";
 import { Chip } from "../../primitives/Chip.js";
+import { Spinner } from "../../primitives/Spinner.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { Glyph, wordmarkStyle } from "../../primitives/Glyph.js";
 import { IconButton } from "../../primitives/IconButton.js";
@@ -29,6 +30,7 @@ interface SidebarNavProps {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   inboxCount: number;
+  liveSessionCount: number;
   ticketsCount: number;
   syncedAt: string | null;
   connection: ConnectionStatus;
@@ -45,6 +47,8 @@ interface SidebarNavProps {
 }
 
 const navStyle: CSSProperties = {
+  position: "relative",
+  zIndex: 11,
   flex: "0 0 auto",
   display: "flex",
   flexDirection: "column",
@@ -162,6 +166,7 @@ export function SidebarNav({
   collapsed,
   onToggleCollapsed,
   inboxCount,
+  liveSessionCount,
   ticketsCount,
   syncedAt,
   connection,
@@ -242,9 +247,16 @@ export function SidebarNav({
                 label={item.label}
                 active={route.page === item.page}
                 collapsed={collapsed}
+                iconSlot={
+                  item.page === "sessions" && liveSessionCount > 0 ? (
+                    <Spinner />
+                  ) : undefined
+                }
                 badge={
                   item.page === "inbox" && inboxCount > 0 ? (
                     <Chip tone="accent">{inboxCount}</Chip>
+                  ) : item.page === "sessions" && liveSessionCount > 0 ? (
+                    <Chip tone="accent">{liveSessionCount}</Chip>
                   ) : item.page === "tickets" && ticketsCount > 0 ? (
                     <Chip>{ticketsCount}</Chip>
                   ) : undefined
