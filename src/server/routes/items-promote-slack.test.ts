@@ -51,6 +51,9 @@ test("promoting a Slack mention creates a card whose description holds the messa
   const description = stored?.description ?? "";
   assert.ok(description.includes(mention.snippet), description);
   assert.ok(description.includes("channelName: eng-platform"), description);
-  assert.ok(description.includes(permalink), description);
+  assert.ok(
+    description.split("\n").some((line) => line === `Source: ${permalink}`),
+    description,
+  );
   assert.equal(stored?.issueId, mention.id);
 });

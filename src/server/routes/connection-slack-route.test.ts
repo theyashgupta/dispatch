@@ -136,7 +136,7 @@ beforeEach(async () => {
     "fetch",
     (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input instanceof Request ? input.url : input);
-      if (url.startsWith("https://slack.com/api")) {
+      if (new URL(url).hostname === "slack.com") {
         slackCalls += 1;
         const token = (
           new Headers(init?.headers).get("authorization") ?? ""
