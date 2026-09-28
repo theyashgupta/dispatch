@@ -29,6 +29,7 @@ import type {
   TerminalError,
   ArchivedGroup,
   ArchivedGroupSummary,
+  SourceCursor,
   UnwindDestination,
 } from "../../shared/types.js";
 import { DEFAULT_CLEANUP_DELAY_DAYS } from "../../shared/types.js";
@@ -520,6 +521,7 @@ class BoardStore extends EventEmitter {
   /** Folder used on the last successful start, preselected in the modal; null when none yet. */
   private lastUsedFolder: string | null = null;
   private identifierCounters: Record<string, number> = {};
+  private sourceCursors: Record<string, SourceCursor> = {};
   private readonly items = new Map<string, Item>();
   private pendingItemUpserts: Item[] = [];
   /**
@@ -962,6 +964,7 @@ class BoardStore extends EventEmitter {
       localTicketCounter: this.identifierCounters.LOCAL ?? 0,
       groupTicketCounter: this.identifierCounters.GROUP ?? 0,
       schemaVersion: this.schemaVersion,
+      sourceCursors: { ...this.sourceCursors },
     };
   }
 
@@ -1044,6 +1047,7 @@ class BoardStore extends EventEmitter {
       lastUsed: meta.lastUsed,
     });
     this.identifierCounters = seedIdentifierCounters(meta);
+    this.sourceCursors = { ...(meta.sourceCursors ?? {}) };
     this.items.clear();
     for (const item of this.db.readAllItems()) this.items.set(item.id, item);
     console.log(`[store] loaded ${this.cards.size} card(s) from board.db.`);
@@ -1268,9 +1272,54 @@ class BoardStore extends EventEmitter {
     this.editors = e;
   }
 
-  /** Record which sources the registry enabled so the Inbox can tell an empty feed from no feed. */
+  /** One source's stored poll cursors, keyed by target id without the source prefix. */
+  getSourceCursors(sourceId: string): Record<string, SourceCursor> {
+    const prefix = `${sourceId}:`;
+    return Object.fromEntries(
+      Object.entries(this.sourceCursors)
+        .filter(([key]) => key.startsWith(prefix))
+        .map(([key, entry]) => [key.slice(prefix.length), { ...entry }]),
+    );
+  }
+
+  /**
+   * Replace every stored cursor of one source, leaving other sources' cursors untouched.
+   *
+   * @remarks A target the source no longer polls loses its entry, so the meta row never grows
+   * without bound (U2-09).
+   */
+  setSourceCursors(
+    sourceId: string,
+    cursors: Record<string, SourceCursor>,
+  ): Promise<void> {
+    const prefix = `${sourceId}:`;
+    return this.enqueue(() => {
+      const next = Object.fromEntries(
+        Object.entries(this.sourceCursors).filter(
+          ([key]) => !key.startsWith(prefix),
+        ),
+      );
+      for (const [key, entry] of Object.entries(cursors)) {
+        next[prefix + key] = { ...entry };
+      }
+      this.sourceCursors = next;
+      return [];
+    });
+  }
+
+  /**
+   * Record which sources the registry enabled so the Inbox can tell an empty feed from no feed.
+   *
+   * @remarks A change is broadcast so open pages see a source switched on or off at once; the
+   * Inbox hides Slack items while Slack is off (U2-11).
+   */
   setEnabledSources(ids: string[]): void {
-    this.enabledSourceIds = [...ids];
+    const next = [...ids];
+    const same =
+      next.length === this.enabledSourceIds.length &&
+      next.every((id, i) => id === this.enabledSourceIds[i]);
+    this.enabledSourceIds = next;
+    if (!same) this.emit("change");
   }
 
   /**

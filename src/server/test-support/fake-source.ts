@@ -1,6 +1,7 @@
 import type {
   FilterOption,
   Item,
+  SourceCursor,
   SourceIssue,
   SourceKind,
 } from "../../shared/types.js";
@@ -12,10 +13,11 @@ export interface FakeSourceOptions {
   kind?: SourceKind;
   pollIntervalMs?: number;
   vaultKeys?: readonly string[];
-  fetch?: () => Promise<{
+  fetch?: (opts?: { cursors?: Record<string, SourceCursor> }) => Promise<{
     issues: SourceIssue[];
     items?: Item[];
     truncated: boolean;
+    cursors?: Record<string, SourceCursor>;
   }>;
 }
 

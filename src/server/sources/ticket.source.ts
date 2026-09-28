@@ -4,6 +4,7 @@ import type {
   FilterOption,
   SourceFilters,
   Item,
+  SourceCursor,
   SourceIssue,
   SourceKind,
 } from "../../shared/types.js";
@@ -37,10 +38,11 @@ export interface TicketSource {
   readonly kind: SourceKind;
   readonly pollIntervalMs: number;
   readonly vaultKeys: readonly string[];
-  fetch(): Promise<{
+  fetch(opts?: { cursors?: Record<string, SourceCursor> }): Promise<{
     issues: SourceIssue[];
     items?: Item[];
     truncated: boolean;
+    cursors?: Record<string, SourceCursor>;
   }>;
   readonly capabilities: FilterCapabilities;
   listOptions(

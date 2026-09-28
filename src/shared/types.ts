@@ -164,6 +164,11 @@ export const ITEM_STATES = ["unread", "read", "snoozed", "done"] as const;
 export type ItemState = (typeof ITEM_STATES)[number];
 export type SettableItemState = Exclude<ItemState, "snoozed">;
 
+export interface SourceCursor {
+  cursor?: string;
+  polledAt: string;
+}
+
 export interface Item {
   id: string;
   source: string;
