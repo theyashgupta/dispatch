@@ -7,6 +7,7 @@ import type {
 import {
   connectSource,
   deleteSourceKey,
+  disableSource,
   getSourceConnection,
   saveSourceKey,
 } from "../lib/api.js";
@@ -19,15 +20,17 @@ export interface SourceConnectionState {
   status: SourceCardStatus;
   busy: CredentialBusy;
   formError: SourceKeyError | null;
+  formProviderError: string | null;
   connect: (apiKey: string) => Promise<boolean>;
   connectExisting: () => Promise<void>;
   test: () => Promise<void>;
   disconnect: () => Promise<void>;
+  disable: () => Promise<void>;
 }
 
 /**
  * One source's connection behind a connection card: status, connect or replace, use the existing
- * credential, test, disconnect.
+ * credential, test, pause, disconnect.
  *
  * @remarks `startedConnected` freezes the first result so a card picks its initial open state once
  * and never collapses under the user after that.
@@ -42,6 +45,9 @@ export function useSourceConnection(
   );
   const [busy, setBusy] = useState<CredentialBusy>("load");
   const [formError, setFormError] = useState<SourceKeyError | null>(null);
+  const [formProviderError, setFormProviderError] = useState<string | null>(
+    null,
+  );
 
   const refresh = useCallback(async () => {
     try {
@@ -53,6 +59,8 @@ export function useSourceConnection(
       setConnection((prev) => ({
         configured: prev?.configured ?? false,
         connected: false,
+        ...(prev?.enabled !== undefined ? { enabled: prev.enabled } : {}),
+        ...(prev?.account ? { account: prev.account } : {}),
         error: "unreachable",
       }));
     }
@@ -66,11 +74,15 @@ export function useSourceConnection(
     async (apiKey: string) => {
       setBusy("connect");
       setFormError(null);
+      setFormProviderError(null);
       try {
         const result = await saveSourceKey(source, apiKey);
         if (!result.ok) {
           setFormError(result.reason);
-          if (result.reason === "superseded") await refresh();
+          setFormProviderError(result.providerError ?? null);
+          if (result.reason === "superseded" || result.reason === "failed") {
+            await refresh();
+          }
           return false;
         }
         setConnection({
@@ -79,6 +91,7 @@ export function useSourceConnection(
           enabled: true,
           ...(result.account ? { account: result.account } : {}),
         });
+        await refresh();
         return true;
       } catch {
         setFormError("unreachable");
@@ -93,6 +106,7 @@ export function useSourceConnection(
   const test = useCallback(async () => {
     setBusy("test");
     setFormError(null);
+    setFormProviderError(null);
     await refresh();
     setBusy(null);
   }, [refresh]);
@@ -100,10 +114,12 @@ export function useSourceConnection(
   const connectExisting = useCallback(async () => {
     setBusy("connect");
     setFormError(null);
+    setFormProviderError(null);
     try {
       const result = await connectSource(source);
       if (!result.ok) {
         setFormError(result.reason);
+        setFormProviderError(result.providerError ?? null);
         return;
       }
       await refresh();
@@ -117,14 +133,29 @@ export function useSourceConnection(
   const disconnect = useCallback(async () => {
     setBusy("disconnect");
     setFormError(null);
+    setFormProviderError(null);
     try {
       await deleteSourceKey(source);
     } catch {
       setFormError("failed");
+      await refresh();
       setBusy(null);
       return;
     }
     setConnection({ configured: false, connected: false });
+    await refresh();
+    setBusy(null);
+  }, [source, refresh]);
+
+  const disable = useCallback(async () => {
+    setBusy("connect");
+    setFormError(null);
+    setFormProviderError(null);
+    try {
+      await disableSource(source);
+    } catch {
+      setFormError("failed");
+    }
     await refresh();
     setBusy(null);
   }, [source, refresh]);
@@ -135,9 +166,11 @@ export function useSourceConnection(
     status: cardStatusFrom(connection, copy),
     busy,
     formError,
+    formProviderError,
     connect,
     connectExisting,
     test,
     disconnect,
+    disable,
   };
 }

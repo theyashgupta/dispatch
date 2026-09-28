@@ -40,6 +40,60 @@ export const GITHUB_CONNECTION: ConnectionMeta = {
     "Your token is checked against GitHub and stored only in the Dispatch Vault on this machine. With gh login, Dispatch asks gh for the token on each sync and never stores it.",
 };
 
+export const SLACK_CONNECTION: ConnectionMeta = {
+  source: "slack",
+  name: "Slack",
+  credentialLabel: "User OAuth token",
+  steps: [
+    "Create an app from scratch at api.slack.com/apps, in your own workspace.",
+    "Under OAuth and Permissions, add the User Token Scopes listed below.",
+    "Install the app to your workspace. An admin may need to approve it.",
+    "Copy the User OAuth Token (it starts with xoxp-) and paste it here. A bot token (xoxb-) also works but sees only what the bot is in.",
+    "Keep the app internal to your workspace. Slack limits distributed apps to one history request a minute.",
+  ],
+  scopes: [
+    "channels:history",
+    "channels:read",
+    "groups:history",
+    "groups:read",
+    "im:history",
+    "im:read",
+    "mpim:history",
+    "mpim:read",
+    "users:read",
+  ],
+  tokenPageUrl: "https://api.slack.com/apps",
+  footer:
+    "Your token is checked against Slack and stored only in the Dispatch Vault on this machine. Dispatch only reads from Slack.",
+};
+
+export const SLACK_CONSENT = [
+  {
+    heading: "Dispatch will read",
+    lines: [
+      "The channels you pick below.",
+      "Your direct messages and group DMs.",
+      "The names of the people who wrote them.",
+    ],
+  },
+  {
+    heading: "Dispatch will store",
+    lines: [
+      "Messages that mention you or were sent to you, in board.db on this machine.",
+      "Your token, in the Dispatch Vault on this machine.",
+    ],
+  },
+  {
+    heading: "Dispatch will never",
+    lines: [
+      "Post, reply, react or change anything in Slack.",
+      "Read a channel you did not pick.",
+    ],
+  },
+] as const;
+
+export const SLACK_THREAD_LIMIT_NOTE =
+  "Mentions inside thread replies are not picked up yet.";
 export const SENTRY_CONNECTION: ConnectionMeta = {
   source: "sentry",
   name: "Sentry",
@@ -56,7 +110,6 @@ export const SENTRY_CONNECTION: ConnectionMeta = {
 };
 
 export const SOON_CONNECTIONS: { source: string; name: string }[] = [
-  { source: "slack", name: "Slack" },
   { source: "meeting", name: "Meetings" },
   { source: "calendar", name: "Calendar" },
 ];
@@ -65,5 +118,6 @@ export const ALL_CONNECTIONS: { source: string; name: string }[] = [
   { source: LINEAR_CONNECTION.source, name: LINEAR_CONNECTION.name },
   { source: GITHUB_CONNECTION.source, name: GITHUB_CONNECTION.name },
   { source: SENTRY_CONNECTION.source, name: SENTRY_CONNECTION.name },
+  { source: SLACK_CONNECTION.source, name: SLACK_CONNECTION.name },
   ...SOON_CONNECTIONS,
 ];

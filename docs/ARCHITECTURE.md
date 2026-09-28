@@ -2254,6 +2254,42 @@ description, provider text and context alike, is disarmed to `DISPATCH-STATUS:`,
 inlines the description into a pane the marker parser reads. A second promote returns the existing
 card and ignores the context.
 
+### Slack Source
+
+The Slack source is read-only by construction (LOCAL-27). `sources/slack/slack-api.ts#slackGet` is
+the only Slack caller in the app: it sends GET with the token in the Authorization header and
+accepts only the six methods in its frozen `SLACK_READ_METHODS` allowlist (`auth.test`,
+`users.conversations`, `conversations.history`, `conversations.replies`, `conversations.info`,
+`users.info`). A read-only guard test beside the client fails when the allowlist changes or when any
+file under `src/` names a Slack write method. `DISPATCH_SLACK_API_URL` replaces the API base for
+sandbox runs against `scripts/fake-slack.mjs`.
+
+The token lives in the Dispatch Vault under `SLACK_USER_TOKEN` (xoxp, preferred) or
+`SLACK_BOT_TOKEN` (xoxb). `services/domain/slack-token.ts#resolveSlackToken` reads the user key,
+then the bot key, on every call and skips a value that is not printable ASCII. Slack is a row in
+the token-source table (`services/domain/token-connection.ts`), so the connection routes above
+serve it: `PUT` stores a pasted token under the key its prefix names (`slackKeyFor`), then clears the other Slack key, and refuses any
+other prefix before calling Slack; the check is `auth.test`, whose account label is
+`<user> @ <team>`; a rejection answers Slack's error code as `providerError` when it is a plain
+lowercase code; `GET` adds `tokenKind` (`user` or `bot`); `DELETE` clears every key of the source. `POST
+/api/sources/:source/disable` (token sources only) writes `enabled: false` and keeps the token, so
+the Slack card's "Poll Slack" switch pauses the source; it bumps the same disconnect guard, so a
+connect still checking cannot re-enable it.
+
+`routes/slack.route.ts` serves Slack setup through `services/domain/slack.ts`.
+`GET /api/slack/channels` lists public and private channels (`users.conversations`, archived
+excluded, at most 5 pages of 200, `truncated` when more remain) and
+`POST /api/slack/channels/resolve` turns a channel link or id into `{ id, name }` through
+`conversations.info` (`sources/slack/channel-ref.ts#parseChannelRef`; when Slack answers
+`missing_scope`, `channel_not_found` or `not_in_channel` the id stands in as the name and Slack's
+code rides along). Both answer 409 `disabled` while `sources.slack.enabled` is not
+true and 409 `no-credential` without a token, before any Slack call. `GET /api/sources/slack/channels`
+answers the saved list and `PUT /api/sources/slack/channels`
+validates and saves `sources.slack.channels` (`{ id, name }[]`, at most 200, the first entry per id
+kept) through
+`config-holder.ts#setSlackChannels`. Errors answer `rejected` (Slack auth codes), `missing-scope`,
+`unreachable` or `not-a-channel`, never the token or a raw body.
+
 ### SSE Transport
 
 The board receives state over a single hand-rolled Server-Sent-Events stream — no SSE library —

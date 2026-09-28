@@ -21,6 +21,8 @@ import type {
   SentryIssueDetail,
   SettableItemState,
   SetupStatus,
+  SlackChannel,
+  SlackChannelOption,
   SourceConnection,
   SourceFilters,
   SourceKeyError,
@@ -31,6 +33,7 @@ import type {
   UserProfile,
   VaultKeySummary,
 } from "../../shared/types.js";
+import { isProviderCode } from "../../shared/credential.js";
 import type { CardSearchResult } from "../../shared/search.js";
 
 /**
@@ -1671,20 +1674,31 @@ const SOURCE_KEY_ERRORS = new Set<string>([
 ]);
 
 /**
- * Read the error kind a failed key save or connect answered.
+ * Read the error kind a failed key save or connect answered, plus the provider's own error code.
  *
  * @remarks The server names the kind in the body; the status fallback covers a body that is not
- * JSON, such as a proxy error page.
+ * JSON, such as a proxy error page. Only a plain lowercase provider code is kept.
  */
-async function sourceKeyReason(res: Response): Promise<SourceKeyError> {
-  const body = (await res.json().catch(() => ({}))) as { error?: unknown };
-  if (typeof body.error === "string" && SOURCE_KEY_ERRORS.has(body.error)) {
-    return body.error as SourceKeyError;
-  }
-  if (res.status === 400) return "rejected";
-  if (res.status === 502) return "unreachable";
-  if (res.status === 409) return "superseded";
-  return "failed";
+async function sourceKeyFailure(
+  res: Response,
+): Promise<{ ok: false; reason: SourceKeyError; providerError?: string }> {
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: unknown;
+    providerError?: unknown;
+  };
+  const reason: SourceKeyError =
+    typeof body.error === "string" && SOURCE_KEY_ERRORS.has(body.error)
+      ? (body.error as SourceKeyError)
+      : res.status === 400
+        ? "rejected"
+        : res.status === 502
+          ? "unreachable"
+          : res.status === 409
+            ? "superseded"
+            : "failed";
+  return isProviderCode(body.providerError)
+    ? { ok: false, reason, providerError: body.providerError }
+    : { ok: false, reason };
 }
 
 /**
@@ -1698,7 +1712,8 @@ export async function saveSourceKey(
   source: string,
   apiKey: string,
 ): Promise<
-  { ok: true; account?: string } | { ok: false; reason: SourceKeyError }
+  | { ok: true; account?: string }
+  | { ok: false; reason: SourceKeyError; providerError?: string }
 > {
   const res = await fetch(`/api/sources/${encodeURIComponent(source)}/key`, {
     method: "PUT",
@@ -1708,7 +1723,7 @@ export async function saveSourceKey(
   if (res.ok) {
     return { ok: true, ...((await res.json()) as { account?: string }) };
   }
-  return { ok: false, reason: await sourceKeyReason(res) };
+  return sourceKeyFailure(res);
 }
 
 /**
@@ -1720,7 +1735,8 @@ export async function saveSourceKey(
 export async function connectSource(
   source: string,
 ): Promise<
-  { ok: true; account?: string } | { ok: false; reason: SourceKeyError }
+  | { ok: true; account?: string }
+  | { ok: false; reason: SourceKeyError; providerError?: string }
 > {
   const res = await fetch(
     `/api/sources/${encodeURIComponent(source)}/connect`,
@@ -1729,7 +1745,116 @@ export async function connectSource(
   if (res.ok) {
     return { ok: true, ...((await res.json()) as { account?: string }) };
   }
-  return { ok: false, reason: await sourceKeyReason(res) };
+  return sourceKeyFailure(res);
+}
+
+/** Pause a token source and keep its token: POST /api/sources/:source/disable. Throws on non-2xx. */
+export async function disableSource(source: string): Promise<void> {
+  const res = await fetch(
+    `/api/sources/${encodeURIComponent(source)}/disable`,
+    { method: "POST" },
+  );
+  if (!res.ok) {
+    throw new Error(`disableSource failed: ${res.status}`);
+  }
+}
+
+/** Read the saved Slack channels: GET /api/sources/slack/channels. Throws on non-2xx. */
+export async function getSavedSlackChannels(): Promise<SlackChannel[]> {
+  const res = await fetch("/api/sources/slack/channels");
+  if (!res.ok) throw new Error(`getSavedSlackChannels failed: ${res.status}`);
+  return ((await res.json()) as { channels: SlackChannel[] }).channels;
+}
+
+export type SlackSetupFailure =
+  "not-a-channel" | "disabled" | "rejected" | "restricted" | "unreachable";
+
+/**
+ * Map a Slack setup route's error kind to the line the picker shows.
+ *
+ * @remarks A missing token reads as rejected and any unknown or unreadable answer as unreachable, so
+ * the picker always has a line to show.
+ */
+function slackSetupFailure(error: unknown): SlackSetupFailure {
+  if (
+    error === "not-a-channel" ||
+    error === "disabled" ||
+    error === "rejected"
+  ) {
+    return error;
+  }
+  if (error === "no-credential") return "rejected";
+  if (error === "missing-scope") return "restricted";
+  return "unreachable";
+}
+
+/** List the Slack channels to pick: GET /api/slack/channels; any refusal answers its reason. */
+export async function listSlackChannels(): Promise<
+  | { ok: true; channels: SlackChannelOption[]; truncated: boolean }
+  | { ok: false; reason: SlackSetupFailure }
+> {
+  try {
+    const res = await fetch("/api/slack/channels");
+    const body = (await res.json().catch(() => ({}))) as {
+      channels?: SlackChannelOption[];
+      truncated?: boolean;
+      error?: unknown;
+    };
+    if (!res.ok || !body.channels) {
+      return { ok: false, reason: slackSetupFailure(body.error) };
+    }
+    return {
+      ok: true,
+      channels: body.channels,
+      truncated: body.truncated === true,
+    };
+  } catch {
+    return { ok: false, reason: "unreachable" };
+  }
+}
+
+/** Resolve a pasted channel link or id: POST /api/slack/channels/resolve; any refusal answers its reason. */
+export async function resolveSlackChannel(
+  input: string,
+): Promise<
+  | { ok: true; id: string; name: string }
+  | { ok: false; reason: SlackSetupFailure }
+> {
+  try {
+    const res = await fetch("/api/slack/channels/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input }),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      id?: string;
+      name?: string;
+      error?: unknown;
+    };
+    if (res.ok && body.id && body.name) {
+      return { ok: true, id: body.id, name: body.name };
+    }
+    return { ok: false, reason: slackSetupFailure(body.error) };
+  } catch {
+    return { ok: false, reason: "unreachable" };
+  }
+}
+
+/** Save the picked Slack channels: PUT /api/sources/slack/channels; null when the save failed. */
+export async function saveSlackChannels(
+  channels: SlackChannel[],
+): Promise<SlackChannel[] | null> {
+  try {
+    const res = await fetch("/api/sources/slack/channels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channels }),
+    });
+    if (!res.ok) return null;
+    return ((await res.json()) as { channels: SlackChannel[] }).channels;
+  } catch {
+    return null;
+  }
 }
 
 /** Remove a source's stored key: DELETE /api/sources/:source/key. Throws on non-2xx. */

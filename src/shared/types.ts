@@ -1022,6 +1022,8 @@ export interface SourceConnection {
   enabled?: boolean;
   error?: Exclude<SourceKeyError, "superseded" | "failed" | "no-credential">;
   ssoUrl?: string;
+  providerError?: string;
+  tokenKind?: "user" | "bot";
 }
 
 export type SourceCardStatus =
@@ -1033,12 +1035,27 @@ export type SourceCardStatus =
 
 export type ItemSourceConfig = Pick<SourceConfig, "enabled" | "pollIntervalMs">;
 
-export type ItemSourceId = "github" | "sentry";
+export type ItemSourceId = "github" | "sentry" | "slack";
 
 export interface SourceCredential {
   token: string;
   via: "vault" | "gh";
+  key?: string;
+  kind?: "user" | "bot";
 }
+
+export interface SlackChannel {
+  id: string;
+  name: string;
+}
+
+export interface SlackChannelOption extends SlackChannel {
+  private: boolean;
+}
+
+export type SlackSourceConfig = ItemSourceConfig & {
+  channels?: SlackChannel[];
+};
 
 export type PrCheckState = "pass" | "pending" | "fail";
 
@@ -1092,6 +1109,7 @@ export interface Config {
     linear?: SourceConfig;
     github?: ItemSourceConfig;
     sentry?: ItemSourceConfig;
+    slack?: SlackSourceConfig;
   };
   /** On-boot update check; absent or any non-`false` value resolves to on. */
   updateCheck?: boolean;

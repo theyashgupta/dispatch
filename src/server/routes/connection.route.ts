@@ -7,8 +7,10 @@ import {
 import { checkSourceKey, rebuildSources } from "../adapters/source-gateway.js";
 import { startEnabledPollers } from "../adapters/poller.js";
 import type { ItemSourceId, SourceConnection } from "../../shared/types.js";
+import { TOKEN_SHAPE } from "../../shared/credential.js";
 import {
   connectTokenSource,
+  disableTokenSource,
   disconnectTokenSource,
   saveTokenSourceKey,
   tokenConnection,
@@ -18,7 +20,7 @@ import {
 } from "../services/domain/token-connection.js";
 
 /**
- * Source connection surface: status with the account behind the stored key, replace key, disconnect.
+ * Source connection surface: status with the account behind the stored key, replace key, disable, disconnect.
  *
  * @remarks Replace is test-before-persist, so a rejected or unreachable key never reaches disk, and
  * a disconnect that lands while a replace is still checking its key wins. Linear keeps its key in
@@ -26,8 +28,6 @@ import {
  * is never echoed, logged or placed in an error body.
  */
 export const connectionRouter = Router();
-
-const KEY_SHAPE = /^[\x21-\x7e]+$/;
 
 const keyGenerations = new Map<string, number>();
 
@@ -102,7 +102,7 @@ connectionRouter.put("/sources/:source/key", async (req, res) => {
     return;
   }
   const key = apiKey.trim();
-  if (!KEY_SHAPE.test(key)) {
+  if (!TOKEN_SHAPE.test(key)) {
     res.status(400).json({ error: "rejected" });
     return;
   }
@@ -199,4 +199,20 @@ connectionRouter.post("/sources/:source/connect", async (req, res) => {
         ? { account: connected.account, via: connected.via }
         : { via: connected.via },
     );
+});
+
+connectionRouter.post("/sources/:source/disable", (req, res) => {
+  const { source } = req.params;
+  const def = tokenSource(source);
+  if (!def) {
+    res.status(404).json({ error: "unknown source" });
+    return;
+  }
+  if (!disableTokenSource(def)) {
+    res.status(500).json({ error: "save-failed" });
+    return;
+  }
+  keyGenerations.set(source, generationOf(source) + 1);
+  reloadSources();
+  res.status(204).end();
 });

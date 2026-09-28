@@ -6,6 +6,7 @@ import {
   type ItemSourceId,
   type LinearStateMap,
   type SourceConfig,
+  type SlackChannel,
   type SourceFilters,
   type StatusChannel,
   type TerminalAppearance,
@@ -352,11 +353,32 @@ export function updateActiveClaudeAccountId(id: string): void {
  * Persist whether an item source may poll, and make it live for the next registry rebuild.
  *
  * @remarks Only `sources.<id>.enabled` changes; every other key, including the rest of that source's
- * block, is carried verbatim. The connection routes are the only callers, after a credential check.
+ * block, is carried verbatim. The connection routes are the only callers.
  */
 export function setSourceEnabled(
   sourceId: ItemSourceId,
   enabled: boolean,
+): void {
+  patchSourceBlock(sourceId, { enabled });
+}
+
+/**
+ * Persist the Slack channels to poll.
+ *
+ * @remarks Only `sources.slack.channels` changes; the caller has already validated the list.
+ */
+export function setSlackChannels(channels: SlackChannel[]): void {
+  patchSourceBlock("slack", { channels });
+}
+
+/**
+ * Merge fields into one item source's config block on disk and in the held config.
+ *
+ * @remarks Atomic write at mode 0600; every other key in the file and in the block is carried verbatim.
+ */
+function patchSourceBlock(
+  sourceId: ItemSourceId,
+  patch: { enabled?: boolean; channels?: SlackChannel[] },
 ): void {
   const raw = fs.readFileSync(CONFIG_PATH, "utf8");
   let parsed: Record<string, unknown>;
@@ -389,7 +411,7 @@ export function setSourceEnabled(
 
   const next = {
     ...parsed,
-    sources: { ...sources, [sourceId]: { ...prior, enabled } },
+    sources: { ...sources, [sourceId]: { ...prior, ...patch } },
   };
   writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
     mode: 0o600,
@@ -399,7 +421,7 @@ export function setSourceEnabled(
   if (orchestrationConfig) {
     orchestrationConfig.sources = {
       ...orchestrationConfig.sources,
-      [sourceId]: { ...orchestrationConfig.sources?.[sourceId], enabled },
+      [sourceId]: { ...orchestrationConfig.sources?.[sourceId], ...patch },
     };
   }
 }

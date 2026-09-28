@@ -15,6 +15,18 @@ import {
   fetchSentryIssue as fetchIssueImpl,
   resolveSentryIssue as resolveIssueImpl,
 } from "../sources/sentry/sentry-issue.js";
+import { slackAuthTest } from "../sources/slack/slack-api.js";
+
+export {
+  isSlackChannel,
+  normalizeSlackChannels,
+  parseChannelRef as parseSlackChannelRef,
+  SLACK_CHANNEL_MAX,
+} from "../sources/slack/channel-ref.js";
+export {
+  listSlackChannels,
+  slackChannelInfo,
+} from "../sources/slack/slack-channels.js";
 import {
   fetchPrDetail,
   postPrReview,
@@ -208,4 +220,16 @@ export function vaultKeyUsers(
   sources: readonly TicketSource[] = listSources(),
 ): string[] {
   return sources.filter((s) => s.vaultKeys.includes(name)).map((s) => s.id);
+}
+
+/**
+ * Check a Slack token live: the account for an accepted token, or Slack's rejection code.
+ *
+ * @remarks Re-throws every transport failure so the caller reads it as unreachable.
+ */
+export async function checkSlackToken(
+  token: string,
+): Promise<{ account?: string } | { rejected: string }> {
+  const auth = await slackAuthTest(token);
+  return "rejected" in auth ? auth : { account: auth.account };
 }

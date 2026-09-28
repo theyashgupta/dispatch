@@ -27,6 +27,7 @@ import {
   GitHubConnectionCard,
   LinearConnectionCard,
   SentryConnectionCard,
+  SlackConnectionCard,
   SoonConnectionCards,
 } from "../connections/index.js";
 import { MultiSelect } from "../modals/index.js";
@@ -545,6 +546,7 @@ export function ConnectionsTabSection({
         errorsInFeeds={errorsInFeeds}
         onToggleErrorsInFeeds={onToggleErrorsInFeeds}
       />
+      <SlackConnectionCard />
       <SoonConnectionCards />
     </div>
   );

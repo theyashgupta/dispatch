@@ -42,6 +42,7 @@ import { startArtifactDetectionLoop } from "../adapters/artifact-detect.js";
 import { buildRegistry, setCredentialResolver } from "../sources/registry.js";
 import { resolveGithubToken } from "../services/domain/github-token.js";
 import { resolveSentryToken } from "../services/domain/sentry-token.js";
+import { resolveSlackToken } from "../services/domain/slack-token.js";
 import { startMarkerWatcher } from "../adapters/markers/watcher.js";
 import { reconcileSessions } from "./reconcile.js";
 import { resolveEditors } from "../adapters/editors.js";
@@ -298,6 +299,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   setOrchestrationConfig(config);
   setCredentialResolver("github", resolveGithubToken);
   setCredentialResolver("sentry", resolveSentryToken);
+  setCredentialResolver("slack", resolveSlackToken);
   buildRegistry(config);
   loadOrCreateVapidKeys();
   console.log(`[push] VAPID keypair loaded from ${VAPID_KEYS_PATH}`);
