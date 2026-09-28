@@ -29,6 +29,7 @@ import {
   TopBar,
 } from "./features/nav/index.js";
 import { effectiveNavState } from "./lib/nav-state.js";
+import { hideDisabledSlack } from "./lib/hide-disabled-slack.js";
 import {
   CAROUSEL_QUERY,
   NARROW_QUERY,
@@ -498,6 +499,10 @@ export function App() {
 
   const undoToast = useUndoToast();
   const items = useItems(board);
+  const inboxItems = useMemo(
+    () => hideDisabledSlack(items, board?.enabledSources ?? []),
+    [items, board?.enabledSources],
+  );
   const { show: showUndo, notice: showNotice } = undoToast;
   const actionServices = useMemo<ActionServices>(
     () => ({
@@ -730,7 +735,7 @@ export function App() {
     />
   ) : null;
 
-  const inboxCount = inboxWaitingCount(board.cards, items);
+  const inboxCount = inboxWaitingCount(board.cards, inboxItems);
   const sessionRows = flattenSessions(board.cards, nowMs());
   const liveSessionCount = sessionRows.filter((row) => row.running).length;
   const githubEnabled = board.enabledSources?.includes("github") === true;
@@ -897,7 +902,7 @@ export function App() {
             ) : route.page === "inbox" ? (
               <InboxView
                 board={board}
-                items={items}
+                items={inboxItems}
                 selectedCardId={selectedCard ? selectedCardId : null}
                 onSelectCard={selectCard}
                 services={actionServices}
