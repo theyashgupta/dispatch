@@ -27,6 +27,7 @@ test("the route table holds exactly the shell pages and Pull Requests", () => {
     "activity",
     "archive",
     "board",
+    "errors",
     "inbox",
     "playbooks",
     "pull-requests",
