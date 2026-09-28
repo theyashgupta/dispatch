@@ -12,7 +12,7 @@ src/server/
 ├── routes/        # HTTP transport: route handlers (thin), SSE broadcaster, loopback/DNS-rebinding guard
 ├── services/      # orchestration: the start/cleanup saga, kickoff, config validation, rollback
 ├── adapters/      # subprocess + external I/O: tmux, ttyd, git, the exec chokepoint, claude-trust, marker parse/watcher, Linear poller, editors
-├── sources/       # ticket and item sources: provider seams (linear.source.ts, github/github.source.ts), source registry, per-source filters
+├── sources/       # ticket and item sources: provider seams (linear.source.ts, github/github.source.ts, slack/slack-api.ts), source registry, per-source filters
 └── store/         # single-writer state: board.store (never split) + Linear→Card mapping
 ```
 
