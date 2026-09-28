@@ -15,6 +15,7 @@ import type {
   PrDetail,
   PrerequisiteStatus,
   PrReviewEvent,
+  SentryIssueDetail,
   SettableItemState,
   SourceConnection,
   SourceFilters,
@@ -1547,9 +1548,16 @@ export async function snoozeItem(id: string, until: string): Promise<void> {
   await postItem(id, "snooze", { until });
 }
 
-/** Promote an item to a local Inbox card; repeats return the same card. */
-export async function promoteItem(id: string): Promise<{ card: Card }> {
-  const res = await postItem(id, "promote");
+/** Promote an item to a local Inbox card, optionally with a context block; repeats return the same card. */
+export async function promoteItem(
+  id: string,
+  context?: string,
+): Promise<{ card: Card }> {
+  const res = await postItem(
+    id,
+    "promote",
+    context !== undefined ? { context } : undefined,
+  );
   return (await res.json()) as { card: Card };
 }
 
@@ -1721,5 +1729,25 @@ export async function mergePullRequest(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sha }),
   });
+  return res?.ok ? { ok: true } : prFailure(res);
+}
+
+/** Read one Sentry issue with its latest event: GET /api/sentry/issue/:id. */
+export async function getSentryIssue(
+  issueId: string,
+): Promise<PrRequestResult<{ detail: SentryIssueDetail }>> {
+  const res = await prFetch(`/api/sentry/issue/${encodeURIComponent(issueId)}`);
+  if (!res?.ok) return prFailure(res);
+  return { ok: true, detail: (await res.json()) as SentryIssueDetail };
+}
+
+/** Resolve one Sentry issue; the server marks its item done only after Sentry agrees. */
+export async function resolveSentryIssue(
+  issueId: string,
+): Promise<PrRequestResult<object>> {
+  const res = await prFetch(
+    `/api/sentry/issue/${encodeURIComponent(issueId)}/resolve`,
+    { method: "POST" },
+  );
   return res?.ok ? { ok: true } : prFailure(res);
 }

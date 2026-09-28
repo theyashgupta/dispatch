@@ -17,6 +17,7 @@ import { accountsRouter } from "./accounts.route.js";
 import { itemsRouter } from "./items.route.js";
 import { connectionRouter } from "./connection.route.js";
 import { githubRouter } from "./github.route.js";
+import { sentryRouter } from "./sentry.route.js";
 
 /**
  * Plain composition of the sub-routers — no nested gate here. The single enforcement point for
@@ -44,3 +45,4 @@ apiRouter.use(accountsRouter);
 apiRouter.use(itemsRouter);
 apiRouter.use(connectionRouter);
 apiRouter.use(githubRouter);
+apiRouter.use(sentryRouter);
