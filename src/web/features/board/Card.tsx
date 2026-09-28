@@ -8,6 +8,7 @@ import { CardView } from "./CardView.js";
 import { playCardMoveFlip, recordCardMoveRect } from "./card-move-flip.js";
 import { useLastOpened } from "../../hooks/useUnseenActivity.js";
 import { deriveShowDot, deriveShowGone } from "../../lib/card-badges.js";
+import { CARD_DOM_PREFIX } from "./board-keys.js";
 
 interface CardProps {
   card: CardModel;
@@ -89,6 +90,13 @@ export function Card({
       domProps={{
         ...listeners,
         ...attributes,
+        id: `${CARD_DOM_PREFIX}${card.id}`,
+        onKeyDown: (event) => {
+          listeners?.onKeyDown?.(event);
+          if (event.key === "Enter" && event.target === event.currentTarget) {
+            onSelect?.(card.id);
+          }
+        },
         onMouseEnter: () => setHover(true),
         onMouseLeave: () => setHover(false),
         onPointerDown: (event) => {
