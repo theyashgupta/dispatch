@@ -10,9 +10,13 @@
  *   { team: { name, url }, tokens: { "<token>": { user, userId, botId? } | { error } },
  *     channels: [{ id, name, is_private? }], generatedChannels?: number,
  *     info?: { "<id>": { name } | { error } },
+ *     dms?: [{ id, is_im?, is_mpim?, name?, is_user_deleted? }],
+ *     history?: { "<id>": [{ ts, user?, text?, subtype?, bot_id?, thread_ts?, reply_count? }] },
+ *     historyErrors?: { "<id>": "<code>" }, users?: { "<id>": { name, display_name? } },
  *     listRestricted?: boolean, rateLimited?: boolean, down?: boolean }
- * Serves auth.test, users.conversations and conversations.info; anything else answers
- * unknown_method. A state file that does not parse answers 500 until it is fixed. It binds
+ * Serves auth.test, users.conversations (channels, im and mpim), conversations.info,
+ * conversations.history (oldest exclusive, newest first, limit and has_more) and users.info;
+ * anything else answers unknown_method. A state file that does not parse answers 500 until it is fixed. It binds
  * 127.0.0.1 only and refuses ports 4700 and 4710.
  */
 import { appendFileSync, readFileSync } from "node:fs";
@@ -74,6 +78,9 @@ function answer(method, params, caller, state) {
   if (method === "users.conversations") {
     if (state.listRestricted) return { ok: false, error: "missing_scope" };
     const types = (params.get("types") ?? "public_channel").split(",");
+    const dms = (state.dms ?? []).filter((d) =>
+      d.is_mpim ? types.includes("mpim") : types.includes("im"),
+    );
     const channels = allChannels(state)
       .filter((c) =>
         c.is_private
@@ -87,7 +94,7 @@ function answer(method, params, caller, state) {
         is_group: Boolean(c.is_private),
         is_private: Boolean(c.is_private),
       }));
-    const { slice, next } = page(channels, params);
+    const { slice, next } = page([...channels, ...dms], params);
     return {
       ok: true,
       channels: slice,
@@ -100,6 +107,37 @@ function answer(method, params, caller, state) {
     if (!entry) return { ok: false, error: "channel_not_found" };
     if (entry.error) return { ok: false, error: entry.error };
     return { ok: true, channel: { id, name: entry.name } };
+  }
+  if (method === "conversations.history") {
+    const id = params.get("channel") ?? "";
+    const refused = state.historyErrors?.[id];
+    if (refused) return { ok: false, error: refused };
+    const oldest = Number(params.get("oldest") ?? 0);
+    const limit = Math.max(
+      1,
+      Math.min(Number(params.get("limit") ?? 100), 1000),
+    );
+    const newer = (state.history?.[id] ?? [])
+      .filter((m) => Number(m.ts) > oldest)
+      .sort((a, b) => Number(b.ts) - Number(a.ts));
+    return {
+      ok: true,
+      messages: newer.slice(0, limit),
+      has_more: newer.length > limit,
+    };
+  }
+  if (method === "users.info") {
+    const id = params.get("user") ?? "";
+    const user = state.users?.[id];
+    if (!user) return { ok: false, error: "user_not_found" };
+    return {
+      ok: true,
+      user: {
+        id,
+        name: user.name,
+        profile: { display_name: user.display_name ?? "", real_name: "" },
+      },
+    };
   }
   return { ok: false, error: "unknown_method" };
 }
