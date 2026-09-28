@@ -41,6 +41,7 @@ import {
 import {
   assignToMe,
   postComment,
+  pushColumnChanges,
 } from "../services/orchestration/linear-outbound.js";
 import { validateCommentBody } from "../../shared/comment-body.js";
 import {
@@ -216,7 +217,7 @@ cardsRouter.post("/cards/:id/move", async (req, res) => {
     return;
   }
 
-  await store.moveCardManual(id, column as Column);
+  void pushColumnChanges(await store.moveCardManual(id, column as Column));
   res.status(204).end();
 });
 

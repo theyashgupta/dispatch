@@ -374,6 +374,7 @@ async function fetchIssuesByIds(
 const VIEWER_QUERY = `query Viewer { viewer { id } }`;
 const WORKFLOW_QUERY = `query Workflow { viewer { id } teams(first: 50) { nodes { id key name states { nodes { id name type color position } } } } }`;
 const ASSIGN_MUTATION = `mutation Assign($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`;
+const STATE_MUTATION = `mutation SetState($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`;
 const FIND_SYNC_QUERY = `query FindSync($filter: IssueFilter) { issues(first: 50, filter: $filter) { nodes { id identifier url title description } } }`;
 const CREATE_MUTATION = `mutation Create($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url title description } } }`;
 const COMMENT_MUTATION = `mutation Comment($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id } } }`;
@@ -496,9 +497,23 @@ export class LinearSource implements TicketSource {
 
   /** Assign an issue to a user through issueUpdate. */
   async assignIssue(issueId: string, assigneeId: string): Promise<void> {
-    const data = await postGraphQL(this.apiKey, ASSIGN_MUTATION, {
+    await this.updateIssue(ASSIGN_MUTATION, issueId, { assigneeId });
+  }
+
+  /** Move an issue to a workflow state through issueUpdate. */
+  async updateState(issueId: string, stateId: string): Promise<void> {
+    await this.updateIssue(STATE_MUTATION, issueId, { stateId });
+  }
+
+  /** Send one issueUpdate; Linear answering success false throws. */
+  private async updateIssue(
+    mutation: string,
+    issueId: string,
+    input: Record<string, string>,
+  ): Promise<void> {
+    const data = await postGraphQL(this.apiKey, mutation, {
       id: issueId,
-      input: { assigneeId },
+      input,
     });
     if (data.issueUpdate?.success !== true) {
       throw new Error("Linear did not update the issue");

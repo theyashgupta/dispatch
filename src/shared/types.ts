@@ -48,7 +48,8 @@ export type EventType =
   | "group_restored"
   | "archive_deleted"
   | "session_reset"
-  | "item_promoted";
+  | "item_promoted"
+  | "linear_state_pushed";
 
 /** One immutable board-activity log row; append-only; carries no secrets. */
 export interface ActivityEvent {
@@ -200,6 +201,7 @@ export interface Card {
    * the next poll like `project`. WIRE field, rides `snapshot()` unredacted.
    */
   linearState?: LinearState | null;
+  pendingState?: { id: string; at: string } | null;
   team?: LinearTeam;
   cycle?: number;
   assignee?: LinearAssignee;
@@ -973,11 +975,24 @@ export type SourceKind = "snapshot" | "append";
 
 export const DEFAULT_POLL_INTERVAL_MS = 60_000;
 
+export type MappedColumn = Exclude<Column, "agent_done" | "inbox">;
+
+export interface ColumnChange {
+  id: string;
+  fromCol: Column;
+  toCol: Column;
+}
+
+export type TeamStateMap = Partial<Record<MappedColumn, string | null>>;
+
+export type LinearStateMap = Record<string, TeamStateMap>;
+
 export interface SourceConfig {
   apiKey: string;
   filters?: SourceFilters;
   enabled?: boolean;
   pollIntervalMs?: number;
+  stateMap?: LinearStateMap;
 }
 
 /** Contents of ~/.dispatch/config.json. */

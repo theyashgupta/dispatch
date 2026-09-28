@@ -576,6 +576,10 @@ legal source column(s), target, and owning code path:
 | Restore (LOCAL-17)                                           | archived group, members in the unwind destination                                | group's archived column (members mirror)         | `board.store.ts#restoreGroup`, all-or-nothing via `#restoreBlocker`                       |
 | Reset (LOCAL-20)                                             | any column, card holds a session, workspace or branch                            | `inbox`, every session detached                  | `services/orchestration/reset.ts#resetCard` -> `board.store.ts#resetCard`                 |
 
+Two rows also push a Linear state (LOCAL-23): the manual move and the start-saga success schedule
+the mapped workflow state after the column changes; no agent-driven row does (see the status push
+paragraph under [Linear Sync](#linear-sync)).
+
 Every conflict this spec was written to name is now closed and reflected in the table above:
 `flipBack`'s guard is `FLIP_BACK_SOURCES` rather than `needs_input` alone; the Inbox marker-guard
 hole is closed store-side via `APPLY_MARKER_EXCLUDED_SOURCES`; `moveCardManual`'s blind set into
@@ -2126,6 +2130,8 @@ Sync-to-Linear requires a one-time interactive Linear MCP OAuth authorization on
 `claude` — `claude mcp add --transport http linear -s user https://mcp.linear.app/mcp`, then run
 `claude`, type `/mcp`, choose `linear`, and authenticate in the browser. The workspace selected during
 that OAuth flow is the write target for every subsequent headless sync (done for Yash-Test 2026-07-20).
+
+**Status push (LOCAL-23).** A manual move (`POST /cards/:id/move`, including mirrored group members) and the start saga's To Do to In Progress push the matching Linear workflow state. The map lives in `sources.linear.stateMap` (team id to column to state id or `null` for "do not sync"), validated by `shared/linear-state-map.ts#parseStateMap` and served by `GET`/`PUT /api/config/linear-state-map`; `resolveTargetState` fills unmapped columns with type defaults (To Do the lowest unstarted state, In Progress and Needs Input the lowest started, Done the lowest completed, In Review and Parked do not sync). Settings edits it in the Sync filters tab (`features/settings/LinearStateMapSection.tsx`). `store.moveCardManual` returns the column changes it made, read inside its own mutation so two overlapping moves each record their own columns, and the route hands them to `services/orchestration/linear-outbound.ts#pushColumnChanges`, which queues the pushes off the request path, chained per card so two quick moves reach Linear in order; `start-session.ts#completeStartAndPush` snapshots the columns around `completeStart` (`snapshotColumns`, `columnChangesSince`). Agent-driven moves (`applyMarker`, `flipBack`) never push. A push is skipped when the target equals the card's `linearState` or `pendingState`. Success runs `issueUpdate` with the state (`LinearSource.updateState`), then `store.recordLinearPush` sets `linearState` and `pendingState { id, at }` and clears `linearError` in one mutation and a poll follows; `reconcile()` holds the pushed state against a different incoming one for 300000 ms or until Linear reports it, keeps a To Do card with a fresh hold or a queued push (`store.setPushing`), and `trackedIssueIds` tracks a held card. Failure leaves the column, `linearState` and `pendingState` as they were and sets `linearError` to "Linear state not updated. " plus the fixed outbound copy. Every attempt writes one `linear_state_pushed` activity event (reason: the state name or `failed: <copy>`).
 
 ### SSE Transport
 

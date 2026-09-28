@@ -1,10 +1,19 @@
-import type { LinearWorkflow } from "../../../shared/types.js";
+import {
+  columnPushes,
+  resolveTargetState,
+} from "../../../shared/linear-state-map.js";
+import type {
+  Column,
+  ColumnChange,
+  LinearWorkflow,
+} from "../../../shared/types.js";
 import { pollNow } from "../../adapters/poller.js";
 import {
   enabledSource,
   type TicketSource,
 } from "../../adapters/source-gateway.js";
 import { store } from "../../store/board.store.js";
+import { getOrchestrationConfig } from "../infra/config-holder.js";
 import { outboundErrorCopy } from "./outbound-error.js";
 
 export type OutboundOutcome =
@@ -115,4 +124,138 @@ export async function getWorkflow(
 /** Drop the cached workflow so the next read fetches it again. */
 export function invalidateWorkflow(): void {
   workflowCache = undefined;
+}
+
+export interface ColumnSnapshot {
+  id: string;
+  column: Column;
+}
+
+const pushChains = new Map<string, Promise<void>>();
+
+/** The columns of a card and its mirrored members, read before a move. */
+export function snapshotColumns(cardId: string): ColumnSnapshot[] {
+  const ids = [cardId, ...(store.getCard(cardId)?.memberIds ?? [])];
+  return ids.flatMap((id) => {
+    const card = store.getCard(id);
+    return card ? [{ id, column: card.column }] : [];
+  });
+}
+
+/** The column changes since a snapshot, read from the live cards. */
+export function columnChangesSince(
+  before: readonly ColumnSnapshot[],
+): ColumnChange[] {
+  return before.flatMap(({ id, column: fromCol }) => {
+    const toCol = store.getCard(id)?.column;
+    return toCol && toCol !== fromCol ? [{ id, fromCol, toCol }] : [];
+  });
+}
+
+/**
+ * Queue a state push for every changed Linear card with a team.
+ *
+ * @remarks Callers do not await it: the move answers at once and each card's pushes run in order.
+ */
+export function pushColumnChanges(
+  changes: readonly ColumnChange[],
+  deps: OutboundDeps = LIVE,
+): Promise<void> {
+  const runs = changes.flatMap(({ id, fromCol, toCol }) => {
+    const card = store.getCard(id);
+    if (!card?.team || (card.source ?? "linear") !== "linear") return [];
+    return [
+      chainPush(id, () => pushState(id, fromCol, toCol, undefined, deps)),
+    ];
+  });
+  return Promise.all(runs).then(() => undefined);
+}
+
+/**
+ * Push a chosen state for a card without a map lookup, in order with its other pushes.
+ *
+ * @public The panel "Move to" route in the Tickets unit becomes the consumer; until then only its spec calls it.
+ */
+export function setLinearState(
+  cardId: string,
+  stateId: string,
+  deps: OutboundDeps = LIVE,
+): Promise<void> {
+  const column = store.getCard(cardId)?.column;
+  if (!column) return Promise.resolve();
+  return chainPush(cardId, () =>
+    pushState(cardId, column, column, stateId, deps),
+  );
+}
+
+/** Run `push` after every earlier push for the same card has settled. */
+function chainPush(cardId: string, push: () => Promise<void>): Promise<void> {
+  const next = (pushChains.get(cardId) ?? Promise.resolve())
+    .then(push)
+    .catch((err: unknown) => {
+      console.warn(
+        `[linear-push] push for card ${cardId} failed:`,
+        (err as Error).message,
+      );
+    });
+  pushChains.set(cardId, next);
+  store.setPushing(cardId, true);
+  void next.finally(() => {
+    if (pushChains.get(cardId) !== next) return;
+    pushChains.delete(cardId);
+    store.setPushing(cardId, false);
+  });
+  return next;
+}
+
+/**
+ * Resolve the target state for one card and send it, recording the outcome on the card.
+ *
+ * @remarks A missing target, or one equal to the card's current or pending state, sends nothing
+ * and records nothing; any Linear failure becomes the card notice and never throws.
+ */
+async function pushState(
+  cardId: string,
+  fromCol: Column,
+  toCol: Column,
+  chosenStateId: string | undefined,
+  deps: OutboundDeps,
+): Promise<void> {
+  const card = store.getCard(cardId);
+  const source = deps.source("linear");
+  const teamId = card?.team?.id;
+  if (!card || !teamId || !source?.updateState) return;
+  const teamMap = getOrchestrationConfig()?.sources?.linear?.stateMap?.[teamId];
+  if (!chosenStateId && !columnPushes(teamMap, toCol)) return;
+  const fail = (copy: string) =>
+    store.recordLinearPush(cardId, {
+      ok: false,
+      copy: `Linear state not updated. ${copy}`,
+      fromCol,
+      toCol,
+    });
+  const workflow = await getWorkflow(deps);
+  if (!workflow.ok) {
+    await fail(workflow.error);
+    return;
+  }
+  const states =
+    workflow.workflow.teams.find((t) => t.id === teamId)?.states ?? [];
+  const targetId = chosenStateId ?? resolveTargetState(teamMap, states, toCol);
+  const state = states.find((s) => s.id === targetId);
+  if (
+    !state ||
+    state.id === card.linearState?.id ||
+    state.id === card.pendingState?.id
+  ) {
+    return;
+  }
+  try {
+    await source.updateState(card.issueId, state.id);
+  } catch (err) {
+    await fail(outboundErrorCopy(err));
+    return;
+  }
+  await store.recordLinearPush(cardId, { ok: true, state, fromCol, toCol });
+  deps.poll("linear");
 }
