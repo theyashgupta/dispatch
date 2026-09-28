@@ -57,3 +57,10 @@ test("the Sources group holds Pull Requests and Errors", () => {
     ["pull-requests", "errors"],
   );
 });
+
+test("the Home group lists Today first, then Inbox", () => {
+  assert.deepEqual(
+    NAV_ITEMS.filter((item) => item.group === "Home").map((item) => item.page),
+    ["today", "inbox"],
+  );
+});
