@@ -84,7 +84,7 @@ const BUDGETS = [
   {
     label: "assets/meetings-*.js",
     match: (f) => f.startsWith(`assets${sep}meetings-`) && f.endsWith(".js"),
-    budgetGzipBytes: 2735, // seed: 2486 (the meeting notes modal, lazy)
+    budgetGzipBytes: 4769, // seed: 4335 (re-seeded 2026-09-28 with the meeting detail pane and its four actions)
   },
   {
     label: "assets/index-*.css",
