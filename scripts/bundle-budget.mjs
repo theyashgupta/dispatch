@@ -83,6 +83,11 @@ const BUDGETS = [
     budgetGzipBytes: 4266, // seed: 3878 (re-seeded 2026-09-28 with the Errors detail pane and its actions, lazy, LOCAL-46)
   },
   {
+    label: "assets/today-*.js",
+    match: (f) => f.startsWith(`assets${sep}today-`) && f.endsWith(".js"),
+    budgetGzipBytes: 4023, // seed: 3657 (the Today page with chips, list and agenda, lazy, LOCAL-48)
+  },
+  {
     label: "assets/palette-*.js",
     match: (f) => f.startsWith(`assets${sep}palette-`) && f.endsWith(".js"),
     budgetGzipBytes: 2595, // seed: 2359 (the command palette and the cheat sheet, lazy)

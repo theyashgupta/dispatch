@@ -1,5 +1,6 @@
 import type { Card, FilterOption, Item } from "../../../shared/types.js";
 import type { InboxRowModel } from "../../lib/actions.js";
+import { cardPriorityScore } from "../../lib/card-priority.js";
 import { stateTypeRank } from "../../lib/linear-state.js";
 
 export type InboxRange = "all" | "today" | "3d" | "week";
@@ -19,7 +20,6 @@ interface InboxGroup {
   rows: InboxRowModel[];
 }
 
-const CARD_PRIORITY: Record<number, number> = { 1: 100, 2: 75, 3: 50, 4: 25 };
 const ACRONYMS: Record<string, string> = { pr: "PR", ci: "CI" };
 const DAY_MS = 86_400_000;
 
@@ -57,7 +57,7 @@ function cardRow(card: Card, opened: boolean): InboxRowModel {
     source: card.source ?? "linear",
     title: card.title,
     snippet: card.description ?? "",
-    priority: CARD_PRIORITY[card.priority] ?? 0,
+    priority: cardPriorityScore(card.priority),
     time: card.updatedAt,
     unread: !opened,
     url: card.url,

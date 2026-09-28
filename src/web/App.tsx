@@ -161,6 +161,11 @@ const ErrorsPage = lazy(() =>
     default: m.ErrorsPage,
   })),
 );
+const TodayPage = lazy(() =>
+  import("./features/today/index.js").then((m) => ({
+    default: m.TodayPage,
+  })),
+);
 const SessionsPage = lazy(() =>
   import("./features/sessions/index.js").then((m) => ({
     default: m.SessionsPage,
@@ -813,6 +818,7 @@ export function App() {
       count: githubEnabled ? buildPrRows(items, board.cards).length : 0,
     },
     errors: { title: "Errors", count: errorCount },
+    today: { title: "Today" },
   };
   const pageTitle = pageMeta[route.page].title;
 
@@ -971,6 +977,13 @@ export function App() {
                     context,
                   )
                 }
+              />
+            ) : route.page === "today" ? (
+              <TodayPage
+                board={board}
+                items={inboxItems}
+                onSelectCard={selectCard}
+                onNavigate={navigate}
               />
             ) : route.page === "inbox" ? (
               <InboxView
