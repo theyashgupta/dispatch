@@ -1,6 +1,8 @@
 export const PAGES = [
   "board",
   "inbox",
+  "sessions",
+  "tickets",
   "workspace",
   "settings",
   "activity",

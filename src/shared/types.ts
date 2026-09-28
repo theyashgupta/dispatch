@@ -48,7 +48,8 @@ export type EventType =
   | "group_restored"
   | "archive_deleted"
   | "session_reset"
-  | "item_promoted";
+  | "item_promoted"
+  | "linear_state_pushed";
 
 /** One immutable board-activity log row; append-only; carries no secrets. */
 export interface ActivityEvent {
@@ -196,10 +197,17 @@ export interface Card {
    */
   project?: { id: string; name: string } | null;
   /**
-   * Linear workflow state { name, type }; optional/nullable so pre-this-plan cards backfill on the
-   * next poll like `project`. WIRE field — rides `snapshot()` unredacted.
+   * Linear workflow state { id, name, type, color }; optional/nullable so older cards backfill on
+   * the next poll like `project`. WIRE field, rides `snapshot()` unredacted.
    */
-  linearState?: { name: string; type: string } | null;
+  linearState?: LinearState | null;
+  pendingState?: { id: string; at: string } | null;
+  team?: LinearTeam;
+  cycle?: number;
+  assignee?: LinearAssignee;
+  comments?: LinearComment[];
+  commentCount?: number;
+  lastCommentId?: string;
   /** Linear priority integer: 0 none, 1 urgent, 2 high, 3 normal, 4 low. */
   priority: number;
   column: Column;
@@ -342,13 +350,11 @@ export interface Card {
    */
   sessionCount?: number;
   /**
-   * Per-session digest for the detail panel's session switcher. NON-SECRET, same policy class as
-   * `sessionCount` — rides `snapshot()`/`redactCard` UNREDACTED, carries no credential and no
-   * pane content. ABSENT (never an empty or single-element array) when the card owns zero or one
-   * session record, matching the `prs?`/`previews?` absent-means-nothing-to-report idiom; an
-   * array of length 2 or more otherwise, one entry per session ordered by `ordinal`. Carries no
-   * per-entry `active` flag by design — see {@link SessionSummary}. Populated exclusively inside
-   * `redactCard`, immediately after `sessionCount`, following the identical field-pick discipline.
+   * Per-session digest for the detail panel's switcher and the Sessions page.
+   *
+   * @remarks NON-SECRET like `sessionCount`: built only by `redactCard` through a field pick, so
+   * no credential or pane content rides along. Absent when the card owns no session record,
+   * otherwise one entry per session ordered by `ordinal` (LOCAL-39 widened it from two or more).
    * @see docs/ARCHITECTURE.md#session-projection-chokepoint
    */
   sessionSummaries?: SessionSummary[];
@@ -449,6 +455,7 @@ export interface Card {
    * stdout (SECURITY — mirrors `startError.stderr`'s no-pane-dump discipline).
    */
   syncError?: string | null;
+  linearError?: string | null;
 
   /**
    * Originating ticket source (a registered TicketSource.id — "linear" is the only value today).
@@ -645,12 +652,11 @@ export interface ClaudeSession {
 }
 
 /**
- * Wire-only per-session digest for the detail panel's session switcher, built by the store's
- * `redactCard` chokepoint via a field pick (never a spread) so a future `Session` field cannot
- * silently widen this array to carry a secret. Deliberately carries no `active` flag:
- * `Card.activeSessionId` is already the one field naming the active session, and a second field
- * claiming the same fact could disagree under a race; the client compares
- * `entry.id === card.activeSessionId` instead.
+ * Wire-only per-session digest, built by the store's `redactCard` chokepoint via a field pick.
+ *
+ * @remarks Never a spread, so a future `Session` field cannot widen it to carry a secret. `active`
+ * is computed in the same pick from `Card.activeSessionId`, so the two cannot disagree within one
+ * snapshot.
  * @see docs/ARCHITECTURE.md#session-projection-chokepoint
  */
 export interface SessionSummary {
@@ -660,12 +666,20 @@ export interface SessionSummary {
   ordinal: number;
   /** True when `Session.tmuxSession` is absent — this sibling's own terminal is dead. */
   lost: boolean;
+  /** True for the card's active session; computed from `Card.activeSessionId` in the same pick. */
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  branch?: string;
+  /** The basename of `Session.workspace.folder`; the full path stays off the wire. */
+  workspaceFolder?: string;
+  lastMarker?: string;
   /** Mirrors `Session.claudeAccountId`; absent for sessions that predate account tagging. */
   claudeAccountId?: string;
   /**
    * Mirrors {@link Session.cleanupBlocked} for THIS session. Absent when this session is not
-   * blocked — same absent-means-nothing-to-report idiom as `sessionSummaries` itself, which is
-   * absent at N<=1, so a single-session ticket's wire shape carries this field nowhere at all.
+   * blocked, the same absent-means-nothing-to-report idiom as `sessionCount`, which stays absent
+   * at N<=1 while `sessionSummaries` is present for every card with a session (LOCAL-39).
    */
   cleanupBlocked?: { repo: string; count: number }[];
   /**
@@ -961,11 +975,24 @@ export type SourceKind = "snapshot" | "append";
 
 export const DEFAULT_POLL_INTERVAL_MS = 60_000;
 
+export type MappedColumn = Exclude<Column, "agent_done" | "inbox">;
+
+export interface ColumnChange {
+  id: string;
+  fromCol: Column;
+  toCol: Column;
+}
+
+export type TeamStateMap = Partial<Record<MappedColumn, string | null>>;
+
+export type LinearStateMap = Record<string, TeamStateMap>;
+
 export interface SourceConfig {
   apiKey: string;
   filters?: SourceFilters;
   enabled?: boolean;
   pollIntervalMs?: number;
+  stateMap?: LinearStateMap;
 }
 
 export type SourceKeyError =
@@ -998,6 +1025,7 @@ export interface Config {
   sources?: { linear?: SourceConfig };
   /** On-boot update check; absent or any non-`false` value resolves to on. */
   updateCheck?: boolean;
+  linearSyncViaClaude?: boolean;
   /** The playbook name remembered from the last successful kickoff; absent when never set. */
   lastUsedPlaybook?: string;
   /**
@@ -1172,8 +1200,76 @@ export interface SourceIssue {
   updatedAt: string;
   /** Linear project { id, name }; null when the issue has no project. */
   project: { id: string; name: string } | null;
-  /** Linear workflow state name+type; null when the issue has no state. */
-  state: { name: string; type: string } | null;
+  /** Linear workflow state with its id and Linear's own color; null when the issue has no state. */
+  state: LinearState | null;
+  team?: LinearTeam;
+  cycle?: number;
+  assignee?: LinearAssignee;
+  comments?: LinearComment[];
+}
+
+export interface TrackedRefresh {
+  issues: SourceIssue[];
+  requested: ReadonlySet<string>;
+}
+
+export interface LinearState {
+  id?: string;
+  name: string;
+  type: string;
+  color?: string;
+}
+
+export interface WorkflowState extends LinearState {
+  id: string;
+  position: number;
+}
+
+export interface WorkflowTeam extends LinearTeam {
+  states: WorkflowState[];
+}
+
+export interface LinearWorkflow {
+  viewerId: string;
+  teams: WorkflowTeam[];
+}
+
+export interface NewLinearIssue {
+  teamId: string;
+  title: string;
+  description: string | null;
+  token: string;
+  stateId?: string;
+  priority?: number;
+}
+
+export interface CreatedLinearIssue {
+  created: boolean;
+  issue: {
+    id: string;
+    identifier: string;
+    url: string;
+    title: string;
+    description: string;
+  };
+}
+
+export interface LinearComment {
+  id: string;
+  body: string;
+  createdAt: string;
+  author: string;
+}
+
+export interface LinearTeam {
+  id: string;
+  key: string;
+  name: string;
+}
+
+export interface LinearAssignee {
+  id: string;
+  name: string;
 }
 
 /** Result of reconciling a Linear poll against the current board. */

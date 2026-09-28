@@ -1,8 +1,9 @@
-import { AlertTriangle, Play, RotateCw } from "lucide-react";
+import { Play, RotateCw } from "lucide-react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { ensureTerminal, runClaude } from "../../lib/api.js";
 import { Button } from "../../primitives/Button.js";
 import { Notice } from "../../primitives/Notice.js";
+import { WarningIcon } from "../../primitives/WarningIcon.js";
 
 interface TerminalRegionProps {
   card: CardModel;
@@ -49,14 +50,7 @@ export function TerminalRegion({ card }: TerminalRegionProps) {
           >
             <Notice
               tone="destructive"
-              icon={
-                <AlertTriangle
-                  size={12}
-                  strokeWidth={2}
-                  aria-hidden="true"
-                  style={{ flex: "0 0 auto" }}
-                />
-              }
+              icon={<WarningIcon />}
               label={
                 c.terminalError.variant === "spawn"
                   ? "Terminal unavailable: couldn't start"
