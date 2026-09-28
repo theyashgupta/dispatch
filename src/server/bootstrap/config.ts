@@ -389,6 +389,7 @@ export function loadConfig(): Config {
         ...readNestedSourceSettings(parsed, "linear"),
       },
       github: readNestedSourceSettings(parsed, "github"),
+      sentry: readNestedSourceSettings(parsed, "sentry"),
     },
     lastUsedPlaybook: readLastUsedPlaybook(parsed),
     cleanupDelayDays: readWholeDays(
