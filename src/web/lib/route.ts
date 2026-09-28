@@ -10,6 +10,7 @@ export const PAGES = [
   "archive",
   "workspaces",
   "ask",
+  "flow",
 ] as const;
 
 export type Page = (typeof PAGES)[number];

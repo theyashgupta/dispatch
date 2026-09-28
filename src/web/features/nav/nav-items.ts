@@ -9,6 +9,7 @@ import {
   MessageCircleQuestion,
   PanelLeft,
   Users,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 import type { Page } from "../../lib/route.js";
@@ -50,6 +51,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: HardDrive,
     group: "System",
   },
+  { page: "flow", label: "Flow", icon: Workflow, group: "System" },
 ];
 
 /**
