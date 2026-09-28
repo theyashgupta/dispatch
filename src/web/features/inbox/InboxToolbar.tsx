@@ -2,9 +2,9 @@ import { useState } from "react";
 import type { FilterOption } from "../../../shared/types.js";
 import { Button } from "../../primitives/Button.js";
 import { focusRing } from "../../primitives/focus-ring.js";
+import { Select } from "../../primitives/Select.js";
 import { MultiSelect } from "../modals/index.js";
 import type { InboxGroupBy, InboxRange } from "./inbox-rows.js";
-import { Select } from "../../primitives/Select.js";
 
 interface InboxToolbarProps {
   search: string;
@@ -37,35 +37,6 @@ const GROUP_LABEL: Record<InboxGroupBy, string> = {
   type: "Group by type",
   state: "Group by state",
 };
-
-interface EnumSelectProps<T extends string> {
-  label: string;
-  value: T;
-  labels: Record<T, string>;
-  onChange: (value: T) => void;
-}
-
-function EnumSelect<T extends string>({
-  label,
-  value,
-  labels,
-  onChange,
-}: EnumSelectProps<T>) {
-  return (
-    <Select
-      label={label}
-      value={value}
-      onChange={(next) => onChange(next as T)}
-      style={{ flex: "0 0 auto" }}
-    >
-      {(Object.keys(labels) as T[]).map((key) => (
-        <option key={key} value={key}>
-          {labels[key]}
-        </option>
-      ))}
-    </Select>
-  );
-}
 
 export function InboxToolbar({
   search,
@@ -144,7 +115,7 @@ export function InboxToolbar({
           onChange={onSourcesChange}
         />
       </div>
-      <EnumSelect
+      <Select
         label="Time range"
         value={range}
         labels={RANGE_LABEL}
@@ -154,19 +125,10 @@ export function InboxToolbar({
         variant="secondary"
         aria-pressed={unreadOnly}
         onClick={() => onUnreadOnlyChange(!unreadOnly)}
-        style={
-          unreadOnly
-            ? {
-                background:
-                  "color-mix(in srgb, var(--accent) 16%, var(--surface-column))",
-                color: "var(--accent)",
-              }
-            : undefined
-        }
       >
         Unread only
       </Button>
-      <EnumSelect
+      <Select
         label="Group by"
         value={groupBy}
         labels={GROUP_LABEL}

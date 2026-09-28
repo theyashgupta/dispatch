@@ -314,14 +314,18 @@ full removal) is recorded in `docs/BASELINES.md`. This does not change store-sid
 fields and the underlying session RECORD, which persists regardless of how many wire projections the
 client reads.
 
-**`Card.sessionSummaries` (Phase 92, `UI-03`) follows `sessionCount`'s absent-at-0-or-1 idiom, never
-spread.** Built in `redactCard` immediately after `sessionCount`: absent when a card has 0 or 1
-sessions, a 2+-element array of `{ id, ordinal, lost }` otherwise — one explicit three-key
-object-literal pick per session (`{ id: s.id, ordinal: i + 1, lost: s.tmuxSession == null }`), never
-`{ ...s }`, so a future `Session` field (`hookToken`, `claudeSessionId`, `workspacePath`) cannot ride
-along even if the entity grows. It deliberately carries no per-entry `active` flag — the client
-compares `entry.id === card.activeSessionId` against the wire's own single source of truth, rather
-than trusting a second, independently-computed boolean that could disagree with it.
+**`Card.sessionSummaries` (Phase 92, `UI-03`; widened for LOCAL-39) is present for every card with
+at least one session and is never spread.** Built in `redactCard` immediately after `sessionCount`
+(which keeps its absent-at-0-or-1 idiom): absent when a card has no session, otherwise one entry per
+session, sorted by `createdAt`, carrying `id`, `ordinal`, `lost`, `active`, `createdAt`,
+`updatedAt`, `branch`, `workspaceFolder` (the basename of `workspace.folder`, never the path),
+`lastMarker`, `claudeAccountId`, `cleanupBlocked`, `prs`, `previews` and `parentOrdinal`. It is one
+explicit object-literal pick per session, never `{ ...s }`, so `hookToken`, `claudeSessionId`,
+`claudeSessions` and `workspacePath` cannot ride along even if the entity grows. `active` is
+computed in the same pick from `card.activeSessionId`, the wire's single source of truth, so it
+cannot disagree with it; the Sessions page needs it because it lists rows without the card. The
+detail panel's switcher and the cleanup modal's plural copy render only when the array holds two or
+more entries.
 
 ### Session Inheritance
 
@@ -1599,8 +1603,9 @@ protect the board's scanning density; session creation spends that same budget r
 a second one on the card face.
 
 **The session row's render gate is an OR, not the switcher's own `sessionSummaries != null`.**
-`sessionSummaries` is absent at N=1 (`91-UI-SPEC.md`'s absent-means-nothing-to-report idiom) —
-exactly the moment a person needs to create session 2. The row now renders when EITHER the
+The switcher renders only when `sessionSummaries` holds two or more entries. At N=1 the array is
+present (LOCAL-39, for the Sessions page) but the switcher stays hidden, and N=1 is exactly the
+moment a person needs to create session 2. The row now renders when EITHER the
 switcher has something to show OR the button has a reason to exist, so the affordance is reachable
 at N=1 without the switcher's own gate widening.
 
@@ -2996,7 +3001,7 @@ to prevent.
 not a consumer cap: `RETIRED_PATTERNS`'s literal scan over `src/**/*.{ts,tsx}` catches the retired
 `0 6px 16px rgba(0,0,0,0.45)` value reappearing anywhere outside `tokens.css`, which is what makes
 "one definition" mechanical. Measured today it is consumed at seven call sites — the card drag
-overlay (`CardView.tsx:171`), the selection bar (`SelectionBar.tsx:29`), the search results
+overlay (`CardView.tsx:171`), the floating selection bar (`FloatBar.tsx`), the search results
 listbox (`SearchBox.tsx:321`), the carousel search overlay (`SearchBox.tsx:400`), the move-to
 picker (`MoveToPicker.tsx:97`), the multi-select dropdown (`MultiSelect.tsx:248`), and the modal
 (`Modal.tsx:110`). Cards and columns carry no shadow at rest; a second, independently-defined
@@ -3155,6 +3160,25 @@ read `--page-header-height` (52px, stepped to 44px below 768px for the same card
 strip once recorded). The strip's zone grid, its width-dependent template, the narrow-width
 wordmark removal and the view-switch rendering (Candidate C and its retune) are history, recorded
 in `docs/standards/design-contract.md`'s Deferred decisions rows 2 and 5.
+
+**Keyboard.** Every key binding goes through one hook, `useShortcuts(bindings, { menuOpen,
+scopeId })` in `src/web/hooks/useShortcuts.ts`, over the pure `resolveShortcut` and the binding
+tables in `src/web/lib/shortcuts.ts`: `GLOBAL_SHORTCUTS` (Cmd or Ctrl+K opens the command
+palette, n opens New ticket, ? opens the cheat sheet), mounted once in App; `BOARD_SHORTCUTS`
+(j, k, h, l move the focused card, 1 to 7 move it to a column through the board's own move path;
+Enter stays with the focused card, a role button that opens itself, as the resolver leaves Enter
+to activatable targets);
+`INBOX_SHORTCUTS`; and `SESSIONS_SHORTCUTS`. The inert rule: a plain key never fires while the user types in an input, textarea, select or
+contentEditable, with a modifier held, outside the owning view, or while a Modal or a row menu is
+open; a meta binding fires only with Cmd or Ctrl and never with Shift. The global keys are also
+inert while the Activity drawer or the nav sheet is open and before setup finishes, and the board
+keys are inert while the undocked detail panel is open. Closing the palette, the cheat sheet or
+New ticket returns focus to the element that had it, unless a palette command ran.
+The palette (`features/palette/CommandPalette.tsx`) is a Modal, so its Escape and focus trap sit in
+the modal stack; its commands come from `buildCommands` in `src/web/lib/commands.ts` over the
+card actions in `src/web/lib/actions.ts`. The cheat sheet renders the four tables, so a binding
+cannot ship without its row. The sidebar sits above the detail panel scrim, and a change to any
+page other than Workspace closes the undocked panel, so one sidebar click navigates.
 
 ### Modal Focus Containment
 

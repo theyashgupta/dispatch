@@ -1,15 +1,8 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { focusRing } from "./focus-ring.js";
 
-interface SelectProps {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  children: ReactNode;
-  style?: CSSProperties;
-}
-
 const selectStyle: CSSProperties = {
+  flex: "0 0 auto",
   height: "32px",
   padding: "0 var(--space-sm)",
   background: "var(--surface-card)",
@@ -20,29 +13,55 @@ const selectStyle: CSSProperties = {
   fontSize: "var(--font-label)",
   lineHeight: "var(--line-label)",
   outline: "none",
+};
+
+const shrinkableSelectStyle: CSSProperties = {
+  ...selectStyle,
+  flex: undefined,
   minWidth: 0,
 };
 
-export function Select({
+type SelectProps<T extends string> = {
+  label: string;
+  value: T;
+  onChange: (value: T) => void;
+  style?: CSSProperties;
+} & (
+  | { labels: Record<T, string>; children?: never }
+  | { labels?: never; children: ReactNode }
+);
+
+export function Select<T extends string>({
   label,
   value,
   onChange,
-  children,
   style,
-}: SelectProps) {
+  labels,
+  children,
+}: SelectProps<T>) {
   const [focused, setFocused] = useState(false);
   return (
     <select
       aria-label={label}
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={(e) => onChange(e.target.value as T)}
       onFocus={(event) =>
         setFocused(event.currentTarget.matches(":focus-visible"))
       }
       onBlur={() => setFocused(false)}
-      style={{ ...selectStyle, ...style, ...focusRing(focused) }}
+      style={{
+        ...(labels ? selectStyle : shrinkableSelectStyle),
+        ...style,
+        ...focusRing(focused),
+      }}
     >
-      {children}
+      {labels
+        ? (Object.keys(labels) as T[]).map((key) => (
+            <option key={key} value={key}>
+              {labels[key]}
+            </option>
+          ))
+        : children}
     </select>
   );
 }
