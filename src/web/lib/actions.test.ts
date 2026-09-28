@@ -104,6 +104,7 @@ function ctx() {
     notice: (text) => calls.push(`notice ${text}`),
     openSnooze: (r) => calls.push(`snooze-picker ${r.id}`),
     openUrl: (url) => calls.push(`open ${url}`),
+    askAbout: (question) => calls.push(`ask ${question}`),
     copyText: async (text) => {
       calls.push(`copy ${text}`);
       await Promise.resolve();
@@ -129,15 +130,15 @@ test("appliesTo: promote applies to both kinds; snooze, done and toggleRead refu
   const bare = row({ url: undefined });
   assert.deepEqual(
     actionsFor(item).map((a) => a.id),
-    ["promote", "snooze", "done", "toggleRead", "open", "copyLink"],
+    ["promote", "snooze", "done", "toggleRead", "open", "copyLink", "ask"],
   );
   assert.deepEqual(
     actionsFor(card).map((a) => a.id),
-    ["promote", "open", "copyLink"],
+    ["promote", "open", "copyLink", "ask"],
   );
   assert.deepEqual(
     actionsFor(bare).map((a) => a.id),
-    ["promote", "snooze", "done", "toggleRead"],
+    ["promote", "snooze", "done", "toggleRead", "ask"],
   );
 });
 
@@ -264,7 +265,7 @@ test("only http and https urls qualify for Open link and Copy link", async () =>
   const hostile = row({ url: "javascript:alert(1)" });
   assert.deepEqual(
     actionsFor(hostile).map((a) => a.id),
-    ["promote", "snooze", "done", "toggleRead"],
+    ["promote", "snooze", "done", "toggleRead", "ask"],
   );
   await runAction(action("open"), c.context, hostile);
   await runAction(action("copyLink"), c.context, hostile);
