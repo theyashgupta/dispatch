@@ -24,6 +24,7 @@ import { slackRouter } from "./slack.route.js";
 import { meetingsRouter } from "./meetings.route.js";
 import { calendarRouter } from "./calendar.route.js";
 import { workspacesRouter } from "./workspaces.route.js";
+import { askRouter } from "./ask.route.js";
 
 /**
  * Plain composition of the sub-routers — no nested gate here. The single enforcement point for
@@ -58,3 +59,4 @@ apiRouter.use(slackRouter);
 apiRouter.use(meetingsRouter);
 apiRouter.use(calendarRouter);
 apiRouter.use(workspacesRouter);
+apiRouter.use(askRouter);

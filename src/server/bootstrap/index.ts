@@ -13,6 +13,7 @@ import {
 } from "../routes/remote-auth-gate.js";
 import { sweepStrayTunnels } from "../adapters/cloudflared.js";
 import { disableTunnel } from "../services/orchestration/tunnel.js";
+import { stopAskRuns } from "../services/orchestration/ask.js";
 import { terminalProxyRouter } from "../routes/terminal-proxy.route.js";
 import { viewerPageRouter } from "../routes/viewer-page.route.js";
 import {
@@ -239,6 +240,7 @@ const SHUTDOWN_WAIT_MS = 6_000;
 function shutdown(signal: NodeJS.Signals): void {
   console.log(`[shutdown] ${signal} received, tearing down remote access`);
   disableTunnel();
+  stopAskRuns();
   setTimeout(() => process.exit(0), SHUTDOWN_WAIT_MS).unref();
   void stopGranolaRound().finally(() => process.exit(0));
 }

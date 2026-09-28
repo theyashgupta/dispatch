@@ -35,6 +35,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Orchestration Saga](#orchestration-saga)
   - [Exec Chokepoint](#exec-chokepoint)
   - [Workspaces Inventory](#workspaces-inventory)
+  - [Ask](#ask)
   - [Linear Sync](#linear-sync)
   - [GitHub Source](#github-source)
   - [Sentry Source](#sentry-source)
@@ -2150,7 +2151,9 @@ each prompt is ONE element of an argv array handed to `execFile` — no shell pa
 metacharacter in it can mean anything. A helper that shell-quoted a value, or an `sh -c`
 carve-out, would break the guarantee no matter how well the value was screened. The meeting
 notes prompt (`meeting-draft.ts#generateMeetingDrafts`) goes further and keeps its request text
-out of argv entirely: it travels on stdin through `run()`'s `input` option.
+out of argv entirely: it travels on stdin through `run()`'s `input` option. The Ask prompt
+(`ask-prompt.ts#buildAskPrompt`) sends titles and snippets on stdin the same way, so no argv
+element carries them (see [Ask](#ask)).
 
 The distinct claims worth keeping separate: a ticket **identifier** is the only per-ticket value
 that reaches a SESSION-layer argv (tmux session name, branch, worktree path), and it is
@@ -2186,6 +2189,27 @@ per workspace path (sizes 5 minutes, commit times and folder discovery 60 s, all
 `?fresh=1`), at most 4 subprocesses run at once per inventory build, and a failed or timed-out probe yields `null`
 instead of failing the response. `scripts/perf-workspaces.mjs` measures board frame latency during
 a cold scan; the result is recorded in `docs/BASELINES.md`.
+
+### Ask
+
+`POST /api/ask` (`routes/ask.route.ts`) answers a question about the board with headless
+`claude -p` (`services/orchestration/ask.ts` `askClaude`), modelled on `ticket-generate.ts`: fixed
+flags `--output-format text`, `--tools ""`, `--strict-mcp-config`, `--no-session-persistence` and
+`--settings '{"disableAllHooks":true}'` (the user's own hooks and plugins would otherwise receive the
+whole board prompt), `cwd` the Dispatch data dir, a 180 s timeout with a 5 s kill escalation, and
+the prompt on stdin. Server shutdown aborts a running child through `stopAskRuns`.
+The data that leaves the machine is decided by two pure builders. `ask-context.ts`
+`buildAskContext` reads the full card set (`store.listCards()`) and every item
+(`store.wireItems()`) and emits one JSON line per record, built key by key from a fixed allow-list:
+no hook token, workspace path, Claude session id, ttyd port, tmux session or URL ever enters it.
+Every card and item that is not done comes first, then done ones newest first, capped at 250
+lines; the 20 newest session records and one sync line follow. `ask-prompt.ts` `buildAskPrompt`
+fences that data between `<dispatch-data>` tags, tells Claude the records are data and not
+instructions, then appends the earlier turns and the question. The route validates the body (400),
+single-flights with its own `askInFlight` flag (409), aborts the child on `res.on("close")` when the
+response is not yet written, and answers 504 on a timeout and 502 on any other failure. It logs
+only the failure kind (`timeout`, `empty` or `exit`), never question, history, context or answer
+text.
 
 ### Linear Sync
 

@@ -199,6 +199,7 @@ export function InboxView({
     s: onCursor((row) => handleAction(row, "snooze")),
     o: onCursor((row) => handleAction(row, "open")),
     u: onCursor((row) => handleAction(row, "toggleRead")),
+    a: onCursor((row) => handleAction(row, "ask")),
   };
   useShortcuts(
     INBOX_SHORTCUTS.map((entry) => ({

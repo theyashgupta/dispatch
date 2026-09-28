@@ -11,6 +11,7 @@ import {
   KeyRound,
   MessageSquare,
   Mic,
+  MessageCircleQuestion,
   PanelLeft,
   SquareTerminal,
   Sun,
@@ -41,6 +42,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
 export const NAV_ITEMS: readonly NavItem[] = [
   { page: "today", label: "Today", icon: Sun, group: "Home" },
   { page: "inbox", label: "Inbox", icon: Inbox, group: "Home" },
+  { page: "ask", label: "Ask", icon: MessageCircleQuestion, group: "Home" },
   { page: "board", label: "Board", icon: Kanban, group: "Work" },
   { page: "sessions", label: "Sessions", icon: SquareTerminal, group: "Work" },
   { page: "workspace", label: "Workspace", icon: PanelLeft, group: "Work" },

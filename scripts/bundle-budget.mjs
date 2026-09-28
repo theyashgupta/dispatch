@@ -118,6 +118,11 @@ const BUDGETS = [
     budgetGzipBytes: 2655, // seed: 2413 (the Calendar page agenda, lazy)
   },
   {
+    label: "assets/ask-*.js",
+    match: (f) => f.startsWith(`assets${sep}ask-`) && f.endsWith(".js"),
+    budgetGzipBytes: 1955, // seed: 1777 (the ask page, lazy)
+  },
+  {
     label: "assets/index-*.css",
     match: (f) => f.startsWith(`assets${sep}index-`) && f.endsWith(".css"),
     budgetGzipBytes: 898, // seed: 816

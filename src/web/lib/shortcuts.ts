@@ -56,6 +56,7 @@ export const INBOX_SHORTCUTS: readonly ShortcutEntry[] = [
   { key: "s", label: "Snooze" },
   { key: "o", label: "Open link" },
   { key: "u", label: "Toggle read" },
+  { key: "a", label: "Ask about this" },
 ];
 
 export const TICKETS_BINDINGS: readonly { key: string; label: string }[] = [

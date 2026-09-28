@@ -2,6 +2,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 import {
   initialHash,
   parseRoute,
+  rememberedHash,
   routeHash,
   type Page,
   type Route,
@@ -61,7 +62,7 @@ export function useRoute(): {
   useEffect(() => {
     if (hash === "" || hash === "#" || hash === "#/") return;
     try {
-      localStorage.setItem(ROUTE_KEY, routeHash(parseRoute(hash)));
+      localStorage.setItem(ROUTE_KEY, rememberedHash(hash));
     } catch {}
   }, [hash]);
 

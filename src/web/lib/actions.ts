@@ -1,6 +1,7 @@
 import type { Card, Column, Item, SlackThread } from "../../shared/types.js";
 import type * as Api from "./api.js";
 import { draftReplyPrompt } from "./slack-prompt.js";
+import { askAboutQuestion, type AskAboutTarget } from "./ask.js";
 import { SNOOZE_LABELS, snoozeUntil, type SnoozePreset } from "./snooze.js";
 
 export interface InboxRowModel {
@@ -26,7 +27,8 @@ export type InboxActionId =
   | "toggleRead"
   | "open"
   | "copyLink"
-  | "draftReply";
+  | "draftReply"
+  | "ask";
 
 export type ActionApi = Pick<
   typeof Api,
@@ -52,6 +54,7 @@ export interface ActionContext {
     target: { itemId: string },
     extraDirection: string,
   ) => Promise<void>;
+  askAbout: (question: string) => void;
 }
 
 export type ActionServices = Omit<ActionContext, "openSnooze">;
@@ -89,6 +92,16 @@ const hasUrl = (row: InboxRowModel) => isWebUrl(row.url);
 
 const isSlackItem = (row: InboxRowModel) =>
   row.kind === "item" && row.item?.source === "slack";
+function askTarget(row: InboxRowModel): AskAboutTarget {
+  return row.kind === "card" && row.card
+    ? { kind: "card", identifier: row.card.identifier, title: row.title }
+    : {
+        kind: "item",
+        source: row.source,
+        typeLabel: row.typeLabel ?? "item",
+        title: row.title,
+      };
+}
 
 export const INBOX_ACTIONS: readonly InboxAction[] = [
   {
@@ -158,6 +171,16 @@ export const INBOX_ACTIONS: readonly InboxAction[] = [
         thread = loaded.ok ? loaded.thread : null;
       }
       await ctx.startAgent({ itemId: item.id }, draftReplyPrompt(item, thread));
+    },
+  },
+  {
+    id: "ask",
+    label: "Ask about this",
+    key: "a",
+    appliesTo: () => true,
+    run: (ctx, row) => {
+      ctx.askAbout(askAboutQuestion(askTarget(row)));
+      return Promise.resolve();
     },
   },
 ];

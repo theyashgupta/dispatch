@@ -6,6 +6,7 @@ import type {
   GranolaCheckResult,
   GranolaStatus,
   MeetingSourceConfig,
+  AskTurn,
   ActivityEvent,
   ArchivedGroupSummary,
   Card,
@@ -2242,4 +2243,34 @@ export async function getWorkspaces(
     throw new Error(`getWorkspaces failed: ${res.status} ${res.statusText}`);
   }
   return (await res.json()) as WorkspacesInventory;
+}
+
+export type AskResult =
+  | { ok: true; answer: string }
+  | { ok: false; error: "busy" | "timeout" | "failed" | "invalid" };
+
+/**
+ * Ask Claude a question about the board; an abort rejects with the fetch AbortError.
+ */
+export async function askQuestion(
+  question: string,
+  history: AskTurn[],
+  signal: AbortSignal,
+): Promise<AskResult> {
+  const res = await fetch("/api/ask", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, history }),
+    signal,
+  });
+  if (res.ok) {
+    return {
+      ok: true,
+      answer: ((await res.json()) as { answer: string }).answer,
+    };
+  }
+  if (res.status === 409) return { ok: false, error: "busy" };
+  if (res.status === 504) return { ok: false, error: "timeout" };
+  if (res.status === 400) return { ok: false, error: "invalid" };
+  return { ok: false, error: "failed" };
 }

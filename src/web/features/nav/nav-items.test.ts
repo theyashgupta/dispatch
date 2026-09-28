@@ -58,9 +58,9 @@ test("the Sources group holds Tickets, Pull Requests, Errors, Meetings, Calendar
   );
 });
 
-test("the Home group lists Today first, then Inbox", () => {
+test("the Home group lists Today first, then Inbox, then Ask", () => {
   assert.deepEqual(
     NAV_ITEMS.filter((item) => item.group === "Home").map((item) => item.page),
-    ["today", "inbox"],
+    ["today", "inbox", "ask"],
   );
 });

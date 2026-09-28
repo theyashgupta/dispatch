@@ -56,6 +56,7 @@ interface DetailPanelProps {
   onUnwindRequest?: (id: string, to: UnwindDestination) => void;
   onResetRequest?: (id: string) => void;
   onSyncRequest?: (id: string) => void;
+  onAskRequest?: (card: CardModel) => void;
   docked?: boolean;
   accounts?: ClaudeAccountSummary[];
 }
@@ -76,6 +77,7 @@ export function DetailPanel({
   onUnwindRequest,
   onResetRequest,
   onSyncRequest,
+  onAskRequest,
   docked = false,
   accounts,
 }: DetailPanelProps) {
@@ -552,6 +554,7 @@ export function DetailPanel({
               onUnwindRequest={onUnwindRequest}
               onResetRequest={onResetRequest}
               onSyncRequest={onSyncRequest}
+              onAskRequest={onAskRequest}
             />
 
             {sessionAccountEmail != null && (
