@@ -146,14 +146,18 @@ export function FlowPage({ board, onOpenList }: FlowPageProps) {
     }
     syncInFlight.current = true;
     setSyncRun((n) => n + 1);
-    const results = await Promise.all(
-      ids.map(async (id) => ({ id, result: await pollSource(id) })),
-    ).finally(() => {
-      syncInFlight.current = false;
-    });
-    const started = results.filter((r) => r.result.ok).map((r) => r.id);
-    const errors = results.flatMap((r) =>
-      r.result.ok ? [] : [`${r.id}: ${r.result.error}`],
+    const results = await Promise.allSettled(ids.map(pollSource)).finally(
+      () => {
+        syncInFlight.current = false;
+      },
+    );
+    const started = ids.filter((_, i) => results[i]?.status === "fulfilled");
+    const errors = results.flatMap((r, i) =>
+      r.status === "rejected"
+        ? [
+            `${ids[i]}: ${r.reason instanceof Error ? r.reason.message : "server unreachable"}`,
+          ]
+        : [],
     );
     if (started.length === 0) setSyncRun(0);
     setNotice(
