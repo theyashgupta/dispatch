@@ -11,6 +11,7 @@ import { MAX_ATTACHMENTS } from "../../../shared/types.js";
 
 interface CreateTicketModalProps {
   onClose: () => void;
+  onFromMeetingNotes: () => void;
 }
 
 type Phase = "prompt" | "generating" | "review";
@@ -65,7 +66,10 @@ function acceptErrorCopy(error: string | null): string {
   }
 }
 
-export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
+export function CreateTicketModal({
+  onClose,
+  onFromMeetingNotes,
+}: CreateTicketModalProps) {
   const modalRef = useRef<ModalControl>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -368,6 +372,15 @@ export function CreateTicketModal({ onClose }: CreateTicketModalProps) {
             gap: "var(--space-sm)",
           }}
         >
+          {phase === "prompt" && (
+            <Button
+              variant="secondary"
+              style={{ marginRight: "auto" }}
+              onClick={onFromMeetingNotes}
+            >
+              From meeting notes
+            </Button>
+          )}
           {phase === "prompt" && (
             <Button
               variant="primary"

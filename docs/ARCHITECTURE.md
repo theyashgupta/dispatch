@@ -36,6 +36,8 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Exec Chokepoint](#exec-chokepoint)
   - [Workspaces Inventory](#workspaces-inventory)
   - [Linear Sync](#linear-sync)
+  - [GitHub Source](#github-source)
+  - [Sentry Source](#sentry-source)
   - [SSE Transport](#sse-transport)
   - [Startup Preflight](#startup-preflight)
   - [Cleanup Lifecycle](#cleanup-lifecycle)
@@ -171,7 +173,11 @@ upsert: an existing row keeps `state`, `snoozedUntil` and `cardId`; `meta` merge
 connector's keys winning and app keys surviving; a complete pull of a `snapshot` source marks that
 source's missing rows `done`; an `append` source or a partial pull never does. A source hands
 items to the poller as an optional `items` field on its `fetch()` result and the poller calls
-`store.upsertItems(source.id, items, { kind, partial })` right after `applyIssues`. `promoteItem`
+`store.upsertItems(source.id, items, { kind, partial })` right after `applyIssues`. A source that
+reads incrementally receives its stored cursors as `fetch({ cursors })` and may return `cursors`;
+the poller writes them with `store.setSourceCursors` only after `upsertItems` resolves, so a failed
+upsert or a thrown fetch never moves a cursor (the map lives in the board meta as `sourceCursors`,
+keyed `<source>:<target>`). `promoteItem`
 mints a local Inbox card (`LOCAL-n`, `issueId` = the item id, description from the snippet, the
 source link and the meta pairs) and marks the item `done` with `cardId` in one mutation; a second
 promote returns the existing card. It is the only item mutation that emits an activity event
@@ -186,6 +192,180 @@ filters. The routes live in `routes/items.route.ts`: `POST /api/items/:id/state`
 done; a promoted item stays done and answers 409), `POST /api/items/:id/snooze` (the route
 validates a future ISO time before any queue work; a promoted item answers 409 here too), `POST /api/items/:id/promote` (201 on the
 first call, 200 after).
+
+### Meeting notes
+
+The paste flow turns meeting notes into Inbox items, never cards. `POST /api/cards/draft-many`
+(`routes/meetings.route.ts`) validates the meeting name (1 to 200 characters), the notes (at most
+100000 characters) and an optional "your name in these notes" hint, then runs one headless
+`claude -p` through `meeting-draft.ts#generateMeetingDrafts` with the same fixed flags as
+`ticket-generate.ts` (no tools, strict MCP config, no session persistence, 150 s timeout, SIGKILL
+escalation). The prompt goes on stdin, so the notes never appear in the process list. The route
+has its own single-flight flag (409 while a run is open) and aborts on `res.on("close")`, which
+kills the child when the client cancels. Notes and model output are never logged.
+
+The model answers with repeated `## Action item` sections (`key:`, `title:`, then a quoted
+description) or the literal `NO_ACTION_ITEMS`. The pure parser in `meeting-actions.ts` drops any
+section with an invalid key or title, an empty body, or the `DISPATCH_STATUS:` marker, keeps the
+first of a duplicate key within one meeting and date, and at most 15. `POST /api/meetings/items` creates the drafts the user
+kept: it answers 400 on the marker in the meeting name, a title or a description, validates every
+draft before writing, and upserts `append` items through `store.upsertItems("meeting", ...)`, answering the created and
+updated counts. An
+item id is `meeting:<feed>:<meeting date>-<meeting slug>:<key>`, where the slug is a readable
+prefix plus a short hash of the full name so two meetings never share one, so the same meeting pasted twice
+on one day updates its rows and keeps their state, while a weekly meeting gets new rows each week.
+Each item carries `meta.meeting`, `meta.meetingDate`, `meta.meetingId`, `meta.key` and
+`meta.siblings` (the other titles from the same meeting as JSON).
+
+`POST /api/meetings/items` also stores the pasted notes it was sent, at most 100000 characters,
+under `DISPATCH_DIR/meetings/<sha256 hex of the meeting id>.txt` through `write-file-atomic` at
+mode 0600, after the item upsert succeeds, and stamps `meta.transcript = "paste"` on every item of
+that create. A repeat create for the same meeting on the same day overwrites the file; a write
+failure answers 500 `transcript-write-failed` with the same created, updated and ids fields, and
+leaves the items in place; the modal then reports the created items and that the notes were not
+saved. The file store is `services/orchestration/meeting-transcripts.ts`. `GET
+/api/meetings/transcript?meetingId=<id>` validates the id shape, then answers 200 `{ text }`, 400
+on a bad id, 404 when no transcript is stored, or 500 `transcript-read-failed`. The notes never
+appear in a log, the SSE frame or an error body.
+
+The Meetings page (`features/meetings/MeetingsPage.tsx`) lives under a "Sources" nav group with one
+"Meetings" row. `src/web/lib/meetings.ts` groups the meeting items by `meta.meetingId`, newest
+`meetingDate` first, and parses `meta.siblings`. The detail pane (`MeetingDetail.tsx`) shows the
+selected item, the sibling action items from the same meeting with the current one highlighted, an
+"Open in Granola" link when the item has a web url, a "Load transcript" button when the item has a
+stored transcript, and four actions: promote to ticket, run agent (which promotes the item, moves
+the card to To Do, then opens the existing start flow), and mark done and snooze, which run the
+same `lib/actions.ts` helpers as the Inbox and offer the same Undo.
+
+### Granola round
+
+The Granola round pulls the user's action items from Granola through their own `claude` login. It
+is not a ticket source and never rides the poller: the poller polls every source on boot and on
+every registry rebuild and does not kill an in-flight fetch, and each of those would spend Claude
+usage. `services/orchestration/granola-round.ts` owns one timer, a single-flight flag, an abort
+controller per round and an in-memory status. Each round first runs `claude mcp list` and stops
+with no model call unless a Granola server is connected; its name becomes the only allowed tool
+(`--restricted` so the user's settings files, their allow rules and default mode, never apply,
+`--tools ""`, `--allowedTools mcp__<server>`, `--model sonnet`, no `--strict-mcp-config` so the
+connector loads, 300 s limit, SIGKILL 5 s after SIGTERM). The prompt goes on stdin. Sections carry
+`meeting:`, `date:` and `link:` lines; the shared parser drops a section without a meeting, the
+drafts are grouped per meeting and date, and a link becomes the item url only when it is a plain
+https URL (no credentials before the host).
+Items land through the same append upsert with ids `meeting:granola:<date>-<slug>:<key>`, so a
+rerun updates rows and a done item stays done. The cursor lives in `BoardMeta.sourceCursors` under
+`meeting:granola` and advances only on success; a round reads from 30 minutes before the last
+success, or the whole review window. The round runs at boot only when the last success is over an
+hour old, then an hour after each attempt. `sources.meeting` in config holds `enabled` and
+`windowHours` (24, 48, 72, 168 or 336) and is written through `patchSourceConfig`. Disabling clears
+the timer and kills a running round; a window change clears the cursor and runs a full pass. The
+routes (`GET`/`PUT /api/meetings/granola`, `POST .../check`, `POST .../run` answering 202 or 409)
+never return model output or stderr.
+
+### Calendar source
+
+The Calendar source turns the user's events from one hour ago to 48 hours ahead into items. It is a
+`snapshot` ticket source (`sources/calendar/calendar.source.ts`, id `calendar`, no filter
+dimensions) that polls every 300 s and is enabled only when `sources.calendar.enabled` is exactly
+`true`. `sources.calendar.mode` picks one of two readers. In `macos` mode (the default) it reads
+this Mac's calendars through `adapters/calendar-mac.ts`: one JXA script run as `osascript -l
+JavaScript -` through the exec chokepoint, the script on stdin and its arguments as one JSON argv
+element so no calendar title is ever spliced into script source, 30 s limit, SIGKILL 5 s after
+SIGTERM. The script uses the ObjC bridge to EventKit, `eventsMatchingPredicate` over the window and
+the selected calendars (by title; none selected reads every calendar whose title does not match
+`/birthday|holiday|siri suggestions/i`), and keeps the first 4000 characters of the notes. When no
+saved title matches a calendar the script answers an error (`failed`), so a renamed calendar keeps
+the last good items instead of reading as an empty day; when only some match, it reads the rest and
+the pull is partial, so no row of the missing calendar auto-resolves. The osascript output buffer is 16 MB. It uses
+EventKit and not the Calendar app's scripting dictionary because that dictionary returns a recurring
+event only as its first occurrence, so a weekly meeting never shows inside the window, and its
+`whose` filter scans every event; EventKit expands recurrences and filters by date natively. In
+`ical` mode it fetches the secret address stored under the Dispatch Vault key `CALENDAR_ICAL_URL`,
+read through `services/orchestration/calendar.ts#resolveIcalUrl`, and parses it with
+`sources/calendar/ics.ts#parseIcs`. Sources may import only sources and shared, so boot calls
+`setMacCalendarReader` and `setCredentialResolver("calendar", ...)` from `sources/registry.ts`
+before the registry is built. A failed read is rethrown as its
+error code, so the poller keeps the last good items, and the code with the last poll time and event
+count stays in memory for the status route.
+
+Consent: macOS asks once for calendar access, on the first read or calendar list, and the script
+waits up to 25 s for the answer. An authorization of denied or restricted, and an osascript error `-1743`, both map to the
+`calendar-denied` code, which the client shows as "Dispatch needs access to your calendars. Open
+System Settings, Privacy and Security, Calendars, and allow the app that runs Dispatch." A
+`selftest` argument makes the script answer before it touches EventKit, so a check can prove the
+script runs under the real osascript without raising the privacy prompt.
+
+The pure `sources/calendar/calendar-events.ts#calendarPriority` ranks a timed event 92 while it
+runs or when it starts within 15 minutes, 84 when it starts within 60 minutes, 64 when it starts
+later on today's local date, and 52 when it has ended or starts on a later day. An all-day event
+ranks 64 while it runs and 52 otherwise. `eventToItem` builds the item that the Calendar page and
+the Today agenda both read: id `calendar:<uid>:<start ISO>` (recurring instances share a UID),
+source `calendar`, type `event`, the title or "(No title)" cut to 300 characters, a snippet of the
+location and the first 280 characters of the notes (the rest of the notes is never stored),
+`createdAt` = start, and `url` = the join link. `meta` holds `start` and `end` (ISO, UTC),
+`allDay` (`"true"` or `"false"`) and `calendar`, plus `joinUrl`, `location` and `refs` only when
+non-empty. The join link is the first https URL, without credentials, from the conference field,
+the event URL, the location, then the notes, stored in its normalized form (`URL.href`), so a line
+break in the raw value never reaches the item. `refs` lists the ticket ids, GitHub pull request URLs
+and `<owner>/<repo>#<n>` references found in the notes, de-duplicated in order, at most 20, comma
+separated. For a snapshot source a pull replaces the row's `meta` instead of merging it, so an event
+that lost its conference link loses `joinUrl`; a row the store auto-resolved (an internal
+`autoResolved` flag, never on the wire) returns to `unread` when a later pull lists it again, and a
+user-set state clears the flag, so the user's Done still sticks. Append sources keep the merge.
+
+The iCal URL must parse and be https, or http to `127.0.0.1`, `::1` or `localhost`, with no
+credentials; anything else is `ical-url-invalid` with no request. Redirects are followed by hand,
+at most 5 hops, and every hop must be https, or http to loopback only when the configured URL is
+itself loopback, so a remote feed cannot aim Dispatch at a local service (a refused hop is
+`ical-url-invalid`, a sixth redirect is `ical-unreachable`). The fetch has a 30 s deadline, the body is read as a stream and
+refused past 5 MB (`ical-too-large`), and a body without `BEGIN:VCALENDAR` is `ical-invalid`.
+`parseIcs` reads UTC, floating, all-day and `TZID` times and expands only DAILY and WEEKLY rules
+(INTERVAL, BYDAY, UNTIL, COUNT, EXDATE, RECURRENCE-ID overrides, STATUS:CANCELLED) in the event's
+wall-clock time, so a 10:00 meeting stays at 10:00 across a DST change, capped at 1000 iterations.
+A cancelled series also drops its moved instances.
+Any other rule skips its series (with its RECURRENCE-ID overrides), and the cap, a skipped series
+or an RDATE marks the pull partial, so the poller never auto-resolves items it could not read. A
+skipped series marks it only when it can reach the window (DTSTART before the window end, no UNTIL
+or an UNTIL on or after the window start, and no COUNT or a COUNT bound on or after the window
+start, where the bound is DTSTART plus 4 x COUNT x a gap, the gap being the larger of INTERVAL x
+1, 7, 31 or 366 days for DAILY, WEEKLY, MONTHLY or YEARLY and a floor its BY parts imply (366 days
+for BYMONTH, BYYEARDAY or BYWEEKNO, 31 for BYMONTHDAY, BYSETPOS or an ordinal BYDAY, 7 for a plain
+BYDAY), and any other FREQ counts as reaching), an override of a skipped series only when
+it overlaps the window, and an RDATE (a PERIOD by its start) only when one of its dates overlaps
+the window, because a feed carries its whole history and one ended series must not stop
+auto-resolve for good. A VEVENT without a UID is skipped, since its item id would collide.
+Overrides and masters are indexed by UID once, so a large feed parses in linear time. Both readers use the window now minus 1 hour
+to now plus 48 hours. The URL is a secret: `CalendarReadError` carries only the code, and the URL
+never appears in a log, a status, a response or an error body.
+
+The Inbox excludes calendar events: `App.tsx` feeds the Inbox and its count with items whose
+source is not `calendar`, and passes the calendar items to the Calendar page. The page
+(`src/web/features/calendar/CalendarPage.tsx`) is the "Calendar" row of the "Sources" nav group.
+`src/web/lib/calendar.ts#agendaDays` keeps the `calendar` `event` items that overlap the window,
+sorts them by start then title, and groups them by local day labelled "Today", "Tomorrow" or the
+weekday and date; `soonLabel` gives "Now" while a timed event runs and "In <n> min" when it starts
+within 15 minutes. Each row shows the time range or "All day", the title, the location and
+calendar, the soon chip, a Join button when `meta.joinUrl` is a web URL, and "Prepare with agent".
+That button creates a To Do card through `POST /api/cards` titled "Prepare: <event title>", with a
+description from `preparePrompt` (the meeting line, the join link, the refs split into tickets
+named by their board card title and pull requests, and the brief to write; only the refs reach the
+prompt, never the invite notes, the title, calendar name, join link and card titles are flattened
+to one line, and every `DISPATCH_STATUS:` is rewritten; the card title is flattened the same way),
+then opens the existing start flow on that card. The page re-reads the status every 30 s, shows
+"Calendar is off. Connect it in Settings." when the source is off, shows the last error's copy in a
+notice above the list, and shows "Couldn't load the Calendar status. Reload the page." as a
+destructive notice in every state while the status read fails.
+
+The routes live in `routes/calendar.route.ts`: `GET /api/calendar/status` answers 200 with the
+enabled flag, mode, selected calendars, whether the Vault key is filled (read in every mode, so
+the card's iCal choice is truthful while a macOS calendar is connected) and the last read (500 `status-failed` on a fault);
+`POST /api/calendar/calendars` (no body) answers 200 `{ calendars }` (title, account and
+`ignoredByDefault`) or 409 `{ error }` with the reader's code. It is a POST because the list runs
+EventKit, which can raise the macOS Calendars prompt, and a cross-site GET carries no Origin for
+the loopback gate to refuse; `PUT
+/api/calendar/settings` validates `{ mode?, calendars?, enabled? }` (400 on a wrong shape), runs one
+test read first when the result is enabled and answers 409 `{ error }` without writing when it
+fails, else writes the config, rebuilds the sources, restarts the pollers and answers 200 with the
+status. None of them returns the iCal URL.
 
 ### Session Projection Chokepoint
 
@@ -315,14 +495,18 @@ full removal) is recorded in `docs/BASELINES.md`. This does not change store-sid
 fields and the underlying session RECORD, which persists regardless of how many wire projections the
 client reads.
 
-**`Card.sessionSummaries` (Phase 92, `UI-03`) follows `sessionCount`'s absent-at-0-or-1 idiom, never
-spread.** Built in `redactCard` immediately after `sessionCount`: absent when a card has 0 or 1
-sessions, a 2+-element array of `{ id, ordinal, lost }` otherwise — one explicit three-key
-object-literal pick per session (`{ id: s.id, ordinal: i + 1, lost: s.tmuxSession == null }`), never
-`{ ...s }`, so a future `Session` field (`hookToken`, `claudeSessionId`, `workspacePath`) cannot ride
-along even if the entity grows. It deliberately carries no per-entry `active` flag — the client
-compares `entry.id === card.activeSessionId` against the wire's own single source of truth, rather
-than trusting a second, independently-computed boolean that could disagree with it.
+**`Card.sessionSummaries` (Phase 92, `UI-03`; widened for LOCAL-39) is present for every card with
+at least one session and is never spread.** Built in `redactCard` immediately after `sessionCount`
+(which keeps its absent-at-0-or-1 idiom): absent when a card has no session, otherwise one entry per
+session, sorted by `createdAt`, carrying `id`, `ordinal`, `lost`, `active`, `createdAt`,
+`updatedAt`, `branch`, `workspaceFolder` (the basename of `workspace.folder`, never the path),
+`lastMarker`, `claudeAccountId`, `cleanupBlocked`, `prs`, `previews` and `parentOrdinal`. It is one
+explicit object-literal pick per session, never `{ ...s }`, so `hookToken`, `claudeSessionId`,
+`claudeSessions` and `workspacePath` cannot ride along even if the entity grows. `active` is
+computed in the same pick from `card.activeSessionId`, the wire's single source of truth, so it
+cannot disagree with it; the Sessions page needs it because it lists rows without the card. The
+detail panel's switcher and the cleanup modal's plural copy render only when the array holds two or
+more entries.
 
 ### Session Inheritance
 
@@ -573,6 +757,10 @@ legal source column(s), target, and owning code path:
 | Restore (LOCAL-17)                                           | archived group, members in the unwind destination                                | group's archived column (members mirror)         | `board.store.ts#restoreGroup`, all-or-nothing via `#restoreBlocker`                       |
 | Reset (LOCAL-20)                                             | any column, card holds a session, workspace or branch                            | `inbox`, every session detached                  | `services/orchestration/reset.ts#resetCard` -> `board.store.ts#resetCard`                 |
 
+Two rows also push a Linear state (LOCAL-23): the manual move and the start-saga success schedule
+the mapped workflow state after the column changes; no agent-driven row does (see the status push
+paragraph under [Linear Sync](#linear-sync)).
+
 Every conflict this spec was written to name is now closed and reflected in the table above:
 `flipBack`'s guard is `FLIP_BACK_SOURCES` rather than `needs_input` alone; the Inbox marker-guard
 hole is closed store-side via `APPLY_MARKER_EXCLUDED_SOURCES`; `moveCardManual`'s blind set into
@@ -673,9 +861,13 @@ column transition on a session that is still running. For a Linear-sourced group
 is in fact the ONLY attacker-influenced text in the kickoff, since such a member contributes no
 inlined description, only the batched MCP-read instruction.
 
-A group member's `description` is deliberately NOT fenced: inlined description content is
-multi-line by design (it is content, not a single-line field), and only local-source members carry
-one.
+Descriptions stay multi-line, but every inline description (a single card's or a local group
+member's) goes through `kickoff.ts#guardDescription` (LOCAL-29): the status-marker token is defused
+like a title's, and a card promoted from a provider item is fenced with
+`shared/untrusted.ts#fenceUntrusted`. A promoted card is one whose `issueId` is the item id
+(`<source>:...`, required by the store) rather than its own `LOCAL-<n>` identifier. That text came
+from a Slack message or a pull request body, so the fence keeps it from opening a fence of its own
+or reading as the operator's direction.
 
 ### Watcher Discriminator
 
@@ -1596,8 +1788,9 @@ protect the board's scanning density; session creation spends that same budget r
 a second one on the card face.
 
 **The session row's render gate is an OR, not the switcher's own `sessionSummaries != null`.**
-`sessionSummaries` is absent at N=1 (`91-UI-SPEC.md`'s absent-means-nothing-to-report idiom) —
-exactly the moment a person needs to create session 2. The row now renders when EITHER the
+The switcher renders only when `sessionSummaries` holds two or more entries. At N=1 the array is
+present (LOCAL-39, for the Sessions page) but the switcher stays hidden, and N=1 is exactly the
+moment a person needs to create session 2. The row now renders when EITHER the
 switcher has something to show OR the button has a reason to exist, so the affordance is reachable
 at N=1 without the switcher's own gate widening.
 
@@ -1944,6 +2137,9 @@ synchronous spawns — because command injection is the top threat for this phas
 inherited for interactive installs), and `spawnPiped()` (every stream piped, for the one adapter
 that must write to a child's stdin: the Claude login's pasted code, `adapters/claude-login.ts`).
 All three are argv arrays with no shell; a new caller picks one of them, never adds a fourth.
+With `killEscalationMs` set, an aborted `run()` settles only after the child has exited, and the
+SIGKILL timer stays armed until then, so a caller's single flight never releases while a child that
+ignores SIGTERM still runs.
 
 The guarantee is **argv-array-only invocation**, and that is the whole of it. It is NOT that
 untrusted values stay out of argv, and no code should be written on that assumption. Two prompt
@@ -1952,7 +2148,9 @@ builders pass ticket titles to `claude` as the `-p` argv element today:
 `group-title-generate.ts#buildPrompt` (every group member's title). What makes those safe is that
 each prompt is ONE element of an argv array handed to `execFile` — no shell parses it, so no
 metacharacter in it can mean anything. A helper that shell-quoted a value, or an `sh -c`
-carve-out, would break the guarantee no matter how well the value was screened.
+carve-out, would break the guarantee no matter how well the value was screened. The meeting
+notes prompt (`meeting-draft.ts#generateMeetingDrafts`) goes further and keeps its request text
+out of argv entirely: it travels on stdin through `run()`'s `input` option.
 
 The distinct claims worth keeping separate: a ticket **identifier** is the only per-ticket value
 that reaches a SESSION-layer argv (tmux session name, branch, worktree path), and it is
@@ -2002,13 +2200,20 @@ self-rescheduling loop per enabled source, each on its own `pollIntervalMs`, and
 to the store; it is the ONLY I/O half of the sync. A per-source in-flight guard means a source
 never overlaps itself (a sync-now or restart that lands mid-fetch runs once more after settlement), and a
 per-source generation means `pollNow(sourceId)` discards only that source's stale fetch.
-`POST /api/sources/:id/poll` exposes `pollNow` for a manual sync. Every source declares a `kind`:
+`POST /api/sources/:id/poll` exposes `pollNow` for a manual sync. Each poll reads the source's
+stored cursors before `fetch` and replaces them after the item upsert when the source returns any.
+Every source declares a `kind`:
 a `snapshot` source's complete pull may remove or flag vanished cards, an `append` source only
 ever upserts, and `store.applyIssues` enforces that rule with the pull's partial flag. The Linear
 loop fetches the assigned-unstarted issue set from Linear's GraphQL API. It never
 computes column-sensitive decisions from a snapshot (a queued-but-unapplied user move could
 otherwise be reverted), never sorts (To Do ordering is owned by `store.snapshot()` in `store/board.store.ts`), and
-never touches cards past To Do (that rule lives in `reconcile()`). The set is filtered by
+never changes a card's column (that rule lives in `reconcile()`). After a complete pull it also
+runs the tracked query: `LinearSource.fetchByIds` asks Linear by id, 250 ids per request, for the
+cards past To Do and Inbox that the pull did not return (`store.trackedIssueIds`: cards not in Done
+first, gone-flagged cards last in each group, 1000 ids at most), so a card whose issue moved to a
+state outside the filter keeps its display fields current; a failed tracked query requests nothing,
+so no card past To Do is flagged gone that cycle. The set is filtered by
 workflow-state TYPE `"unstarted"`, NOT by name — state names are workspace-customizable. The loop
 self-reschedules with a `setTimeout` (never `setInterval`, which could overlap) that is `unref()`'d
 so it never pins the process, runs one poll immediately on startup, and is fire-and-forget.
@@ -2031,10 +2236,12 @@ issue with NO existing card upserts a fresh Inbox card — new tickets land in I
 in To Do, so To Do stays 100% user-curated; a returned issue whose card is in `todo` OR `inbox`
 upserts an in-place refresh of title/url/description/priority/updatedAt/project and CLEARS
 `goneFromLinear` (ONE widened rule, not a separate branch — promoting a card to To Do simply moves
-it into the other half of the same refresh scope); a returned issue whose card is PAST that point is
-NOT upserted — the poller never touches cards past To Do/Inbox. Exception: a card past that point
-currently flagged `goneFromLinear` whose issue REAPPEARS emits a flag-only correction via
-`reappearedIds` (nothing else on the card is touched), because `goneFromLinear` is poller-owned
+it into the other half of the same refresh scope); a returned issue (from the pull or the tracked
+query) whose card is PAST that point gets a display-only upsert: `linearState`, `team`, `cycle` and
+`assignee` are refreshed and `goneFromLinear` cleared, emitted only when one of them changed, while
+the column, title, description, priority, project, identifier, url and `updatedAt` are never touched.
+A card past that point flagged `goneFromLinear` whose issue REAPPEARS with unchanged display fields
+emits a flag-only correction via `reappearedIds`, because `goneFromLinear` is poller-owned
 derived state, not user board state. `reconcile` does NOT sort; it carries
 `priority`/`updatedAt`/`project` faithfully so the store orders the To Do column on read.
 
@@ -2042,7 +2249,8 @@ derived state, not user board state. `reconcile` does NOT sort; it carries
 handled by column: in `todo` OR `inbox` → `removeIds` (an issue that vanished is removed
 IMMEDIATELY while in To Do or Inbox — Inbox does NOT inherit vanish-handling the way cards past To
 Do do; it is treated exactly like a vanished To Do ticket, never `goneFromLinear`-flagged and kept
-forever); past that point → `goneIds` (the card is KEPT and flagged `goneFromLinear`). CR-01
+forever); past that point → `goneIds` (the card is KEPT and flagged `goneFromLinear`), and only
+when the tracked query requested the issue by id and did not get it back. CR-01
 carve-out: a To Do card with a start saga IN FLIGHT (or already carrying provisioning/session state
 from one) is treated like a card past To Do — never removed, only flagged — because removing it
 mid-saga would orphan a live `claude` session and its worktrees with no card to reach them; an
@@ -2050,6 +2258,10 @@ Inbox card is structurally never mid-saga (no session can start from Inbox), so 
 harmless no-op there. The muted "Gone from Linear" badge (`web/features/badges/GoneBadge.tsx`, shown
 only on cards past To Do/Inbox) is INFORMATIONAL, not destructive: the issue disappearing from
 Linear on a card past that point is EXPECTED, so it uses muted text/border, never red.
+A card adopted from a local card on Sync to Linear (`mapping.ts#isAdopted`: its id differs from its
+issue id) is the exception in To Do: its issue can sit outside the board filter, so absence never
+removes it. Like a card past To Do it joins the tracked query, is refreshed by id and is flagged
+gone only when that query requested it and did not get it back.
 
 **Sync-status precedence (`SYNC-04`).** The sidebar footer status (`web/features/nav/SyncStatus.tsx`) reports sync
 freshness + connection health as TEXT only (no spinner — the board must feel instant), and its
@@ -2064,14 +2276,34 @@ degrades to the plain `Synced` label rather than computing a relative age or a s
 JSDoc (the comment standard's tsx carve-out — [comments.md](standards/comments.md) rule 2 — forbids
 JSDoc in `src/web/**/*.tsx`, enforced by the `allowJsdoc: false` lint scoping in `eslint.config.ts`).
 
+**Linear comments.** The poll selects the last five comments on every issue node, main and tracked
+queries alike, so a card in any column receives new comments on the next poll. The mapping sorts
+them oldest first, caps each body at 600 characters and names a user-less comment "Linear". Comments
+live on the server card only: `redactCard` swaps them for `commentCount` and `lastCommentId` (so a
+new comment on a card already at five still changes the wire), because every mutation broadcasts the
+whole snapshot and five bodies per card would bloat each frame. The panel reads them through `GET
+/cards/:id/comments`, which serves the store and never calls Linear. `POST /cards/:id/comment`
+validates the body (`comment-body.ts`: empty, over 20000 characters, or carrying the agent status
+marker answer 400), then `linear-outbound.ts#postComment` calls the source's `addComment` through
+`source-gateway.ts`. A success clears `Card.linearError` and polls Linear at once; a failure stores
+fixed copy from `outbound-error.ts` in `Card.linearError` and answers 502, so raw provider text
+never reaches the card or the response.
+
 **Sync out — promoting a local card to Linear (`PUSH-01/02/03`).** The inbound half above mirrors
 Linear INTO the board; this half pushes a `source:"local"` card OUT to a real Linear issue on
 explicit user action (`POST /cards/:id/sync-linear`, `services/orchestration/linear-sync.ts`).
-MCP-only writes: the stored Linear API key is READ-ONLY toward Linear everywhere in this app — the
-sync path never uses it to create or update anything, instead spawning a headless `claude -p` that
+Key writes through source mutations only: the stored Linear API key writes to Linear solely
+through `LinearSource` mutation methods called from a service in `services/orchestration/`, never
+from a route (`commentCreate` and `issueUpdate` from `linear-outbound.ts`, `issueCreate` from
+`linear-sync.ts#syncCardDirect`). By default Sync to Linear takes the direct path: the route needs a
+`teamId` (400 otherwise), `FindSync` searches for the card's `dispatch-sync:<cardId>` token and a
+hit is adopted with no create, and a miss sends `issueCreate` with the token as the last
+description line (`create-input.ts#buildCreateInput`). With `linearSyncViaClaude: true` in config
+the old path runs for one release instead: it does not use the key to create anything; it spawns a
+headless `claude -p` that
 reuses the CLI's own user-scope Linear MCP OAuth session, restricted via `--allowedTools` to five
 read/write tools (`list_issues`, `save_issue`, `list_teams`, `list_users`, `list_issue_statuses`).
-The sole sanctioned exceptions to "API key never writes" are (1) GraphQL `issueDelete` for
+Two further sanctioned key uses sit beside those mutations: (1) GraphQL `issueDelete` for
 TEST-cleanup only (user decision 2026-07-20), and (2) a single READ-ONLY `issue(id:...) { id }`
 lookup the sync service makes with the stored key AFTER the MCP create/find succeeds — 62-03 live
 smoke found that no Linear MCP tool in this allowlist (nor `get_issue`, checked live) ever exposes
@@ -2105,6 +2337,225 @@ Sync-to-Linear requires a one-time interactive Linear MCP OAuth authorization on
 `claude` — `claude mcp add --transport http linear -s user https://mcp.linear.app/mcp`, then run
 `claude`, type `/mcp`, choose `linear`, and authenticate in the browser. The workspace selected during
 that OAuth flow is the write target for every subsequent headless sync (done for Yash-Test 2026-07-20).
+
+**Connection routes (LOCAL-32).** `routes/connection.route.ts` owns the Linear connection for
+Settings and the setup wizard. `GET /api/sources/:source/connection` answers `{ configured, connected, account?,
+error? }`: no stored key means no network call; a stored key runs the live viewer check
+(`linear.source.ts#fetchLinearAccount`, `viewer { id name email }`), and a rejection or an outage comes
+back as `error: "rejected"` or `"unreachable"` with `configured: true`. `PUT
+/api/sources/:source/key` is test-before-persist like `POST /api/setup`: a rejected key answers
+400 and an unreachable Linear answers 502, both with `config.json` byte-identical; a valid key is
+written by `updateLinearApiKey`, the registry is rebuilt and the enabled pollers restart, and the
+body carries only the account label. `DELETE /api/sources/:source/key` removes the key through
+`config-holder.ts#clearLinearApiKey` (the filters and every other key survive; the held config
+keeps `""`), rebuilds the registry so Linear is disabled, restarts the enabled pollers so the
+Linear loop retires, and answers 204, also when nothing was stored. Cards are untouched. Only
+`linear` stores a key, so every other source id answers 404 on all three. A key with a character
+outside printable ASCII answers 400 before any network call, a config write failure answers 500
+`save-failed`, and a replace whose key check was still in flight when a disconnect landed answers
+409 `superseded` and writes nothing. The key never appears in a response, a log line or an error
+body.
+
+**Token sources (LOCAL-45, LOCAL-46).** The same three routes also serve `github` and `sentry`,
+dispatched through `services/domain/token-connection.ts` (`TOKEN_SOURCES`). A Sentry token lives only
+in the Vault under `SENTRY_TOKEN` (`services/domain/sentry-token.ts`, no CLI fallback); its check lists
+the organizations the token sees and the account names up to three of them plus a count of the rest. A GitHub token lives in the Dispatch Vault under
+`GITHUB_TOKEN`; when that value is empty, `services/domain/github-token.ts#resolveGithubToken` asks
+`adapters/gh.ts#readGhToken` (`gh auth token` through the exec chokepoint) on every call and never
+caches or logs the result. A token that is not printable ASCII resolves to no credential. The
+registry receives that resolver from bootstrap (`setCredentialResolver`), because sources may not
+import the Vault or the exec chokepoint. `GET` reports `configured` when a credential resolves, `via`
+(`vault` or `gh`), and `connected` only while `sources.github.enabled` is true and `GET /user`
+answers; an SSO block answers `error: "sso-required"` with the authorization URL. `PUT` checks a
+pasted token with `GET /user`, stores it with the Vault service (creating the key with its purpose
+when absent), and writes `sources.github.enabled: true` through
+`config-holder.ts#setSourceEnabled`. `POST /api/sources/:source/connect` (token sources only) turns
+polling on with the credential already present (a filled Vault value or the gh login) and answers
+400 `no-credential` when there is none; like `PUT`, it answers 409 `superseded` when a `DELETE`
+landed while it was checking. `DELETE` clears the Vault value and its previous value with
+`vault.ts#clearValue`, keeping the key name and purpose, and writes `enabled: false`. A filled Vault
+value or a logged-in `gh` is a credential, not consent: GitHub polls, and the pull request routes
+answer, only after one of these routes enabled it.
+
+**Profile route (LOCAL-43).** `routes/profile.route.ts` owns the About you profile. `GET
+/api/config/profile` answers the stored profile or `{}`; `PUT /api/config/profile` runs the body
+through the shared `profile.ts#parseProfile` (strings trimmed and blanks stored as absent; name,
+email and role at most 200 characters, brief at most 4000, at most 20 handles of at most 100
+characters, trimmed and de-duplicated; unknown keys dropped) and answers 400 with the field named
+and `config.json` byte-identical, or writes it through `config-holder.ts#updateProfile` and answers
+the normalized profile. An empty profile is stored as an absent key. `loadConfig` reads the profile
+with the same function and treats a malformed one as absent. The profile is never copied onto the
+board snapshot or any SSE frame (`sse-profile.test.ts`). The routes sit behind the shared remote
+gate, so an authenticated remote session can read and write the profile like a local one.
+
+**Status push (LOCAL-23).** A manual move (`POST /cards/:id/move`, including mirrored group members) and the start saga's To Do to In Progress push the matching Linear workflow state. The map lives in `sources.linear.stateMap` (team id to column to state id or `null` for "do not sync"), validated by `shared/linear-state-map.ts#parseStateMap` and served by `GET`/`PUT /api/config/linear-state-map`; `resolveTargetState` fills unmapped columns with type defaults (To Do the lowest unstarted state, In Progress and Needs Input the lowest started, Done the lowest completed, In Review and Parked do not sync). Settings edits it in the Sync filters tab (`features/settings/LinearStateMapSection.tsx`). `store.moveCardManual` returns the column changes it made, read inside its own mutation so two overlapping moves each record their own columns, and the route hands them to `services/orchestration/linear-outbound.ts#pushColumnChanges`, which queues the pushes off the request path, chained per card so two quick moves reach Linear in order; `start-session.ts#completeStartAndPush` snapshots the columns around `completeStart` (`snapshotColumns`, `columnChangesSince`). Agent-driven moves (`applyMarker`, `flipBack`) never push. A push is skipped when the target equals the card's `linearState` or `pendingState`. Success runs `issueUpdate` with the state (`LinearSource.updateState`), then `store.recordLinearPush` sets `linearState` and `pendingState { id, at }` and clears `linearError` in one mutation and a poll follows; `reconcile()` holds the pushed state against a different incoming one for 300000 ms or until Linear reports it, keeps a To Do card with a fresh hold or a queued push (`store.setPushing`), and `trackedIssueIds` tracks a held card. Failure leaves the column, `linearState` and `pendingState` as they were and sets `linearError` to "Linear state not updated. " plus the fixed outbound copy. Every attempt writes one `linear_state_pushed` activity event (reason: the state name or `failed: <copy>`).
+
+**Tickets page and Move to (LOCAL-42).** `#/tickets` (`features/tickets/TicketsPage.tsx`, a lazy chunk with its own bundle budget line) lists every Linear card on the wire (`lib/linear-state.ts#isTicketCard`: source linear and no group) ordered by priority then recency, grouped by status, priority, project, cycle, team or none (`features/tickets/ticket-rows.ts`, the choice kept in `localStorage` `dsp.tickets.groupBy`). Row actions and the j, k, Enter, e, o keys follow `ticket-actions.ts#ticketActionsFor`, which mirrors the move route guards (no Done for Inbox, grouped or starting cards). The detail panel's Move to select calls `POST /cards/:id/linear-state { stateId }`: `linear-outbound.ts#moveLinearState` refuses an unknown card (404), a non-Linear or teamless card (409) and a state outside the card's team (400) before any write, then `setLinearState` runs the same per-card push chain as a board move with the card's current column as both `fromCol` and `toCol`, so the column never changes; a failure answers 502 with the recorded card notice.
+
+### GitHub Source
+
+`sources/github/github.source.ts` is a snapshot item source (LOCAL-45). Each poll resolves the token
+through the registry's credential resolver (the Vault `GITHUB_TOKEN`, else `gh auth token`) and runs
+three searches in order, each one page of 100: `is:open is:pr review-requested:@me`,
+`is:open is:pr mentions:@me`, `is:open is:pr assignee:@me`. `mergeSearchResults` keeps the first
+category a PR appears in (types `pr_review` at priority 75, `pr_mention` and `pr_assigned` at 50)
+and marks the pull partial when a category has more than 100 results, reports incomplete results,
+or carries the `X-GitHub-SSO: partial-results` header; a partial pull never auto-resolves an item.
+Item ids are `github:<owner>/<name>#<number>` and `createdAt` is the PR's last update. A 401 fails
+the poll with last-known-good kept, an exhausted rate limit raises `RateLimited`, and a 403 with
+`X-GitHub-SSO: required` raises `GitHubSsoError` with the authorization URL.
+`DISPATCH_GITHUB_API_URL` replaces the API base for sandbox runs against `scripts/fake-github.mjs`,
+started as `node scripts/fake-github.mjs <port> <state.json>` from a copy of
+`scripts/fixtures/fake-github-state.json`, with `scripts/fixtures/gh-shim-g5.sh` copied to `gh` on the
+sandbox server's PATH.
+
+`routes/github.route.ts` serves the Pull Requests page through `services/domain/github.ts` and the
+source gateway. `GET /api/github/pr/:owner/:repo/:number` answers the PR with at most 50 files, each
+patch cut at 6000 characters (both cuts flagged), and one check list merged from check runs and
+legacy statuses, sorted fail, pending, pass (`github-pr.ts#classifyCheckRun` passes only success,
+skipped and neutral). `POST .../review` posts `APPROVE`, `REQUEST_CHANGES` or `COMMENT` (a body is
+required for the last two, at most 20000 characters). `POST .../merge` squash merges with the head
+SHA the client saw, so a head that moved answers 409 `not-mergeable`. Owner, repo, number and SHA are
+validated before any GitHub call; errors answer an error kind (`rejected`, `not-found`,
+`sso-required`, `rate-limited`, `unreachable`, `no-credential`) and only GitHub's own message text
+for its refusals, never the token or a raw body. A successful write calls `pollNow("github")`.
+
+### Sentry Source
+
+`sources/sentry/sentry.source.ts` is a snapshot item source (LOCAL-46). Each poll resolves the token
+from the Vault `SENTRY_TOKEN` only (`services/domain/sentry-token.ts`), lists the organizations on the
+base URL, and for at most 10 organizations runs two issue queries in order, each with a 14-day period
+and one page of 100: `is:unresolved assigned:me`, then `is:unresolved`. The first query an issue
+appears in wins (types `error_assigned` at priority 100 or 75, `error` at 50 or 25, the higher value
+for fatal and error levels), so every assigned issue ranks above every organization-wide one. The
+pull is partial when a query fills its page or announces a next page, when the organization cap cuts
+organizations, or when an organization answers 403 (that organization is skipped); a partial pull
+never auto-resolves an item. Organization-scoped calls go to the organization's region URL only when
+`sentry.source.ts#allowedRegion` accepts it (an https origin on sentry.io or a subdomain, or the base
+itself), else to the base URL, so the token never follows an arbitrary host. Item ids are
+`sentry:<issue id>` and `createdAt` is the issue's last seen time. A 401 fails the poll with
+last-known-good kept and a 429 or an exhausted rate limit raises `RateLimited`.
+`DISPATCH_SENTRY_API_URL` replaces the base URL for sandbox runs against `scripts/fake-sentry.mjs`,
+started as `node scripts/fake-sentry.mjs <port> <state.json>` from a copy of
+`scripts/fixtures/fake-sentry-state.json`; its organizations report the fake's own origin as their
+region URL, which the allowlist accepts as the configured base.
+
+`routes/sentry.route.ts` serves the Errors page through `services/domain/sentry.ts` and the source
+gateway. `GET /api/sentry/issue/:id` answers the issue with its latest event (`sentry-issue.ts#mapSentryDetail`):
+the impact fields with the count as a number, the outermost exception's type and value, its newest 25
+frames newest first with their context lines, the last 12 breadcrumbs oldest first, the tags, the
+logger and the platform. `POST /api/sentry/issue/:id/resolve` sets the issue to resolved in Sentry and
+only then marks the item done (204). A latest event Sentry refuses or lacks leaves the detail without
+one instead of failing it. The id must be digits only (else 400) and must name a stored item
+(else 404), both before any Sentry call, because the item's meta names the organization and region;
+the stored region is re-checked through `allowedRegion` on every call. A disconnected source answers
+`no-credential`; other errors answer an error kind (`rejected`, `forbidden`, `not-found`,
+`rate-limited`, `unreachable`), never the token or a raw body.
+
+`POST /api/items/:id/promote` accepts an optional `context` string of at most 8000 characters and
+appends it under a `## Context` heading at the end of the new card's description, trimming the rest so
+the whole description stays within 20000 characters. Every `DISPATCH_STATUS:` token in the promoted
+description, provider text and context alike, is disarmed to `DISPATCH-STATUS:`, because the kickoff
+inlines the description into a pane the marker parser reads. A second promote returns the existing
+card and ignores the context.
+
+### Slack Source
+
+The Slack source is read-only by construction (LOCAL-27). `sources/slack/slack-api.ts#slackGet` is
+the only Slack caller in the app: it sends GET with the token in the Authorization header and
+accepts only the six methods in its frozen `SLACK_READ_METHODS` allowlist (`auth.test`,
+`users.conversations`, `conversations.history`, `conversations.replies`, `conversations.info`,
+`users.info`). A read-only guard test beside the client fails when the allowlist changes or when any
+file under `src/` names a Slack write method. `DISPATCH_SLACK_API_URL` replaces the API base for
+sandbox runs against `scripts/fake-slack.mjs`.
+
+The token lives in the Dispatch Vault under `SLACK_USER_TOKEN` (xoxp, preferred) or
+`SLACK_BOT_TOKEN` (xoxb). `services/domain/slack-token.ts#resolveSlackToken` reads the user key,
+then the bot key, on every call and skips a value that is not printable ASCII. Slack is a row in
+the token-source table (`services/domain/token-connection.ts`), so the connection routes above
+serve it: `PUT` stores a pasted token under the key its prefix names (`slackKeyFor`), then clears the other Slack key, and refuses any
+other prefix before calling Slack; the check is `auth.test`, whose account label is
+`<user> @ <team>`; a rejection answers Slack's error code as `providerError` when it is a plain
+lowercase code; `GET` adds `tokenKind` (`user` or `bot`); `DELETE` clears every key of the source. `POST
+/api/sources/:source/disable` (token sources only) writes `enabled: false` and keeps the token, so
+the Slack card's "Poll Slack" switch pauses the source; it bumps the same disconnect guard, so a
+connect still checking cannot re-enable it.
+
+`routes/slack.route.ts` serves Slack setup through `services/domain/slack.ts`.
+`GET /api/slack/channels` lists public and private channels (`users.conversations`, archived
+excluded, at most 5 pages of 200, `truncated` when more remain) and
+`POST /api/slack/channels/resolve` turns a channel link or id into `{ id, name }` through
+`conversations.info` (`sources/slack/channel-ref.ts#parseChannelRef`; when Slack answers
+`missing_scope`, `channel_not_found` or `not_in_channel` the id stands in as the name and Slack's
+code rides along). Both answer 409 `disabled` while `sources.slack.enabled` is not
+true and 409 `no-credential` without a token, before any Slack call. `GET /api/sources/slack/channels`
+answers the saved list and `PUT /api/sources/slack/channels`
+validates and saves `sources.slack.channels` (`{ id, name }[]`, at most 200, the first entry per id
+kept) through
+`config-holder.ts#setSlackChannels`. Errors answer `rejected` (Slack auth codes), `missing-scope`,
+`unreachable` or `not-a-channel`, never the token or a raw body. A save polls Slack at once
+(`pollNow("slack")`) when the source is running.
+
+`sources/slack/slack.source.ts#SlackSource` is an `append` item source (id `slack`, 120 s default
+interval, enabled only while `sources.slack.enabled` is true). Each poll checks the token with
+`auth.test` (the user id is "me", the workspace URL feeds permalinks), lists the user's DMs and
+group DMs (`users.conversations` `im,mpim`, at most 5 pages of 200 with a warning past that,
+deleted users dropped; a `missing_scope` refusal logs one warning, reads the picked channels only
+and keeps every stored cursor), then reads `conversations.history` one conversation at a time for
+at most 40 targets (`slack-targets.ts#orderTargets`): up to 10 slots stay with DMs, picked channels
+fill the rest and DMs take any channel slot left over, each group least recently read first with
+never-read first, so every target is read in turn and dormant DMs never delay a picked channel.
+A group DM that is also a picked channel is read once, as the channel. A history
+answer with `has_more` logs that older messages in the window were skipped. History starts at the
+target's cursor minus 600 s, or 24 h back on first sight, and the new cursor is the newest ts seen,
+never older than the last one; cursors live in the board meta through the cursor hand-off above.
+`slack-message.ts#classifyMessage` keeps a DM from anyone else and a channel message that mentions
+the user, and drops the user's own, bot, user-less and subtype messages except `thread_broadcast`
+and `file_share`. An item's id is `slack:<channel>:<ts>`, its title
+`<author> in #<channel>: <first 80 characters>` (`in DM` or `in group DM` for DMs) and its url the
+message permalink; authors come from `users.info`, at most 50 lookups per poll, and an author Slack
+will never name (`user_not_found`, `user_not_visible`, `missing_scope`) is cached as their id. A
+history row whose `ts`, `text`, `user`, `thread_ts` or `reply_count` has the wrong type is dropped. A conversation Slack
+refuses (`channel_not_found`, `not_in_channel`, `missing_scope`) is skipped for that poll with one
+warning; a 429 drops the whole poll through the rate-limit back-off and moves no cursor. Mentions
+inside thread replies are not read (R-17).
+
+`GET /api/slack/thread/:itemId` (the item id URL-encoded) loads the thread behind a Slack item
+through `services/domain/slack.ts#slackThread` and `sources/slack/slack-thread.ts#fetchSlackThread`
+(`conversations.replies`, limit 40, one page). It answers 404 `not-found` for a missing, non-Slack
+or thread-less item (no `meta.threadTs`) before any Slack call, 409 `disabled` while the switch is
+off and 409 `no-credential` without a token. The body is `{ messages: [{ author, time, text }],
+truncated }`: the parent first, then replies oldest first, text rendered like titles, bot messages
+kept and named by their username or bot id, at most 20 `users.info` lookups per call, `truncated`
+from Slack's `has_more`. Slack token codes answer 401 `rejected` with `providerError`,
+`thread_not_found` and `channel_not_found` answer 404, a 429 answers 429 `rate-limited` and
+anything else 502 `unreachable`. Loaded threads are cached in memory for 10 minutes keyed
+`<token hash>:<channel>:<threadTs>` (`SlackThreadCache`, at most 200 entries, the oldest evicted;
+the name cache is also per token hash, so nothing crosses Slack accounts); errors are
+never cached.
+
+In the Inbox, an expanded Slack item with `meta.threadTs` shows `features/slack/SlackThread`: a
+collapsed "Thread" section whose "Load thread" button fetches the route through
+`hooks/useSlackThread` (never on mount or a timer) and lists the messages as plain text. Every
+expanded Slack item, and the Slack page detail below, also offers "Draft reply" (`lib/actions.ts`, no key): it loads the thread when
+there is one, builds the kickoff with `lib/slack-prompt.ts#draftReplyPrompt` (the message and the
+thread fenced by `fenceUntrusted`, the channel named, posting forbidden) and calls App's
+`startAgent`, which promotes the item, moves the card to To Do and opens StartModal prefilled. The
+reply is printed in the session; Dispatch still calls no Slack write method.
+
+The Slack page (`#/slack` and `#/slack/<id>`, LOCAL-47) lists the same Slack items.
+`lib/slack-rows.ts` builds its rows (`slackRows`: Slack items not done, newest first, as Inbox row
+models), pills (`slackPills`: From, DM or Mention, Thread) and conversation groups
+(`groupSlackRows`); it sits in `lib/` so App counts the rows for the nav chip and the page title
+without loading the page chunk. App lazy-loads the page through the slack barrel's
+`loadSlackPage()`, because the Inbox imports `SlackThread` from the same barrel eagerly. At 1024 px
+and wider the list and the detail sit side by side; below that the detail replaces the list and
+offers Back. Selecting a row marks it read. The detail runs `INBOX_ACTIONS` by id (Draft reply,
+Promote to ticket, Snooze, Done, Copy link), wraps promote to show "Created <identifier>", and
+clears the selection after a successful Promote, Done or snooze preset when that row is still
+selected (`runAction` and `snoozeRow` resolve whether the action succeeded). With Slack off the page shows only a
+notice that links to Settings; with no Slack items it shows only an empty message; an id that is
+not a listed row shows the list (and, when wide, the detail's "Pick a message" state).
 
 ### SSE Transport
 
@@ -2229,18 +2680,30 @@ freshness guarantee for the point where a start actually gets requested.
 Preflight is INFORMATIVE, never a gate (`BOARD-05`, `PRE-01`/`PRE-02`/`PRE-03`). `services/infra/preflight.ts` is
 the single source of truth for prerequisite / Node-version / storage-health status and per-platform
 install commands, and it is consumed identically by three surfaces: `dispatch doctor` and ordinary
-boot (`bootstrap/cli.ts`, `bootstrap/index.ts`) and the web first-run setup screen
-(`routes/setup.route.ts` → `web/lib/api.ts` → `features/setup/FirstRunSetup.tsx`). `probePreflight()`
+boot (`bootstrap/cli.ts`, `bootstrap/index.ts`) and the Welcome step of the web setup wizard
+(`routes/setup.route.ts` → `web/lib/api.ts` → `features/setup/PrerequisiteChecklist.tsx`). `probePreflight()`
 probes EVERY required binary — `tmux`, `ttyd`, `claude`, `git` — with no short-circuit, and returns
 each one's presence plus its exact platform-appropriate install command, alongside the running Node
 version compared against the `engines.node` floor and a read-only storage-health line.
 
 The backend BOOTS REGARDLESS: a missing binary, a below-floor Node, or unhealthy storage renders a
-line and the server still listens, so the browser always reaches a live setup screen with current
-status. (Sessions that actually need a missing binary still fail at use-time, on the card.) `dispatch
+line and the server still listens, so the browser always reaches the app, and the setup wizard
+shows current status. (Sessions that actually need a missing binary still fail at use-time, on the card.) `dispatch
 doctor` is likewise a diagnostic, not a gate — it ALWAYS exits 0. The only fail-fast path left is a
 missing/incomplete config, which throws `StartupError` (the class still homed in
 `bootstrap/binary-check.ts`, now its sole remaining export, raised from `bootstrap/config.ts`).
+
+The setup wizard (`features/setup/SetupWizard.tsx`) opens over the running app, never in place of
+it. `App.tsx` opens it on its own only when `lib/setup-wizard.ts` sees `needsKey` and not
+`onboardingDone` in `GET /api/setup`; every way of closing it calls `POST /api/setup/onboarding-done`,
+which writes the flat `onboardingDone` config flag (204, idempotent), so it never opens on its own
+again. A failed status read renders the app with no wizard. Settings, Connections, Run setup guide
+reopens it at Welcome after a fresh `GET /api/setup`, so the checklist is current, and the Linear
+card in Settings remounts when it closes so it reads the new connection. An app that already has a
+Linear key and no flag marks onboarding done on load, so a later disconnect never reopens the
+wizard on its own. The same helper holds
+Next on the Connect Linear step until the Linear card reports a connection; Skip this connection
+moves on without one.
 
 A missing binary is one guided command away on either surface: in an interactive terminal preflight
 offers `[Y/n]` and runs the install on confirm; under a pipe/CI it prints the command and never
@@ -2974,7 +3437,7 @@ to prevent.
 not a consumer cap: `RETIRED_PATTERNS`'s literal scan over `src/**/*.{ts,tsx}` catches the retired
 `0 6px 16px rgba(0,0,0,0.45)` value reappearing anywhere outside `tokens.css`, which is what makes
 "one definition" mechanical. Measured today it is consumed at seven call sites — the card drag
-overlay (`CardView.tsx:171`), the selection bar (`SelectionBar.tsx:29`), the search results
+overlay (`CardView.tsx:171`), the floating selection bar (`FloatBar.tsx`), the search results
 listbox (`SearchBox.tsx:321`), the carousel search overlay (`SearchBox.tsx:400`), the move-to
 picker (`MoveToPicker.tsx:97`), the multi-select dropdown (`MultiSelect.tsx:248`), and the modal
 (`Modal.tsx:110`). Cards and columns carry no shadow at rest; a second, independently-defined
@@ -3063,6 +3526,37 @@ retired literal inside the sync strip until the strip retired with it (see
 the fifth; and a fourth, file-scoped check (`checkTerminalFence`, `NEW-20`, above) covers the
 sixth — proving only the fenced subject set, never the fenced contents, as stated above.
 
+**Connection card (LOCAL-32).** Every source connection renders through two presentational
+primitives: `primitives/ConnectionCard.tsx` (source icon, name, status chip, credential line, and a
+body with the numbered setup guide, the scopes as monospace chips, the token page link, the form
+slot, the privacy footer and an optional details section below it, where Settings puts the Linear
+filters) and `primitives/CredentialForm.tsx` (password input, Connect or
+Replace, Test, and a two-step Disconnect that re-arms after 5 s). The body reveals with the
+Collapsible grid-rows pair and never measures; once open it stops clipping so dropdowns inside it
+can overflow. The status is the shared `SourceCardStatus` union (checking, disconnected, connected with
+an optional account, error with its copy, soon, off); a soon card renders the header only. An
+optional `toggle` prop puts a native "Enabled" checkbox beside the expand button, a separate tab
+stop, for sources that ride on the claude CLI and need no key (the Granola card). The Linear
+composition lives in `features/connections/LinearConnectionCard.tsx` behind the feature barrel so
+the setup wizard reuses it; Settings and the wizard are its consumers. `hooks/useLinearConnection.ts` reads
+the status on mount and on Test only, shows Checking until the first read settles, and keeps
+Connect disabled until then.
+
+**Settings tabs (LOCAL-43).** Settings is a rail of nine tab ids: connections, board, appearance,
+notifications, remote, workspaces, about-you, updates and about. `web/lib/settings-tab.ts` holds
+the list and `settingsTabFrom`, which maps the legacy ids (filters, models, cleanup, terminal and
+the retired ids) to their current tab without rewriting the hash. Each tab lives in its own file
+under `web/features/settings/` and exports its section; every tab except Notifications and About
+also exports its use hook (the Board tab exports three, the About tab reuses `useUpdatesTab`).
+`web/features/settings/SettingsScreen.tsx` is the rail plus a switch and invokes each hook once, so
+unsaved drafts and the update run result survive a tab switch. Style constants shared across tab
+files live in `web/features/settings/settings-styles.ts`. Connections shows the Linear card, then a Coming soon card per
+`web/lib/connection-meta.ts#SOON_CONNECTIONS` entry. `web/features/settings/AboutYouTab.tsx`
+reads and saves the profile route above, with the comma-separated handles field parsed by
+`web/lib/profile-handles.ts`. `web/features/settings/UpdatesTab.tsx#useUpdatesTab` reads `GET /api/update` once when Settings
+mounts and feeds both the Updates and About tabs; the repository
+link and license come from `web/lib/about-meta.ts`, which a test pins to `package.json`.
+
 ### App Shell Zones
 
 **The two-column shell (reversed decision, 2026-09-23).** This section once recorded a written
@@ -3097,11 +3591,18 @@ shifts the docked panel by style values alone and never remounts the terminal if
 absolutely positioned element inside the rows container carries the tint
 (`color-mix(in srgb, var(--accent) 16%, var(--surface-column))`, the formula the inbox count badge
 and the session switcher already use) and is translated by the active row's `offsetTop`, read from
-a per-row ref map in a layout effect when the route or the collapsed state changes. Switching pages
+a per-row ref map in a layout effect when the route, the collapsed state or the visible rows change. Switching pages
 moves one transform and re-renders no row; the active row only changes its text color to
 `var(--accent)`, the "active sidebar row" accent job. Rows are 32px tall, take keyboard focus
-through `focusRing()` only, and expose `aria-current="page"`. Groups with no rows are omitted, so
-Sources and System stay hidden until a page exists for them.
+through `focusRing()` only, and expose `aria-current="page"`. Groups with no rows are omitted.
+Sources holds one row, Meetings, and stays present because the paste flow needs no connection.
+
+**A nav row tied to a source shows only while that source is enabled.** `NavItem` has an optional
+`source`; `visibleNavItems(NAV_ITEMS, board.enabledSources)` in `nav-items.ts` drops a row whose
+source is not enabled and keeps every row without one. `SidebarNav` derives its groups from that
+list, and `App.tsx` passes the same list to `buildCommands`, so the palette's "Go to" command
+follows the same rule. Only the Slack row (last in Sources, with the unread non-done Slack count)
+carries a source today; every other row is always present.
 
 **The footer status truncation chain moved with the status.** The sync status is the sidebar's only
 elastic text and the one piece that can be arbitrarily long (the server-supplied `syncWarning` has
@@ -3123,7 +3624,9 @@ remembered `dsp.nav` value. Below 768px the sidebar leaves the layout: the main 
 top bar (glyph, page title, menu button) and the same `SidebarNav` renders inside a left sheet
 with a scrim, closed by Escape or a row click, with focus returned to the menu button, following
 the `ActivityDrawer` pattern. `--nav-current` is `0px` in that mode so the docked panel spans the
-viewport. The pure decision is `effectiveNavState(stored, carousel, narrow)`.
+viewport. The pure decision is `effectiveNavState(stored, carousel, narrow)`. At the same breakpoint the Settings section nav changes from a vertical rail to a horizontal
+scrolling strip above the content (`SettingsScreen.tsx`, the "Settings section nav" row of
+`docs/standards/design-contract.md#chrome-dimensions`).
 
 **Retired with the strip.** The strip cascade invariant (its two token cascades, formerly the
 eighteenth NEW-series ID) and its file-scoped check were deleted together with the strip component, and `FROZEN_COUNT` in `scripts/check-invariants.mjs`
@@ -3133,6 +3636,25 @@ read `--page-header-height` (52px, stepped to 44px below 768px for the same card
 strip once recorded). The strip's zone grid, its width-dependent template, the narrow-width
 wordmark removal and the view-switch rendering (Candidate C and its retune) are history, recorded
 in `docs/standards/design-contract.md`'s Deferred decisions rows 2 and 5.
+
+**Keyboard.** Every key binding goes through one hook, `useShortcuts(bindings, { menuOpen,
+scopeId })` in `src/web/hooks/useShortcuts.ts`, over the pure `resolveShortcut` and the binding
+tables in `src/web/lib/shortcuts.ts`: `GLOBAL_SHORTCUTS` (Cmd or Ctrl+K opens the command
+palette, n opens New ticket, ? opens the cheat sheet), mounted once in App; `BOARD_SHORTCUTS`
+(j, k, h, l move the focused card, 1 to 7 move it to a column through the board's own move path;
+Enter stays with the focused card, a role button that opens itself, as the resolver leaves Enter
+to activatable targets);
+`INBOX_SHORTCUTS`; and `SESSIONS_SHORTCUTS`. The inert rule: a plain key never fires while the user types in an input, textarea, select or
+contentEditable, with a modifier held, outside the owning view, or while a Modal or a row menu is
+open; a meta binding fires only with Cmd or Ctrl and never with Shift. The global keys are also
+inert while the Activity drawer or the nav sheet is open and before setup finishes, and the board
+keys are inert while the undocked detail panel is open. Closing the palette, the cheat sheet or
+New ticket returns focus to the element that had it, unless a palette command ran.
+The palette (`features/palette/CommandPalette.tsx`) is a Modal, so its Escape and focus trap sit in
+the modal stack; its commands come from `buildCommands` in `src/web/lib/commands.ts` over the
+card actions in `src/web/lib/actions.ts`. The cheat sheet renders the four tables, so a binding
+cannot ship without its row. The sidebar sits above the detail panel scrim, and a change to any
+page other than Workspace closes the undocked panel, so one sidebar click navigates.
 
 ### Modal Focus Containment
 
@@ -3211,7 +3733,9 @@ real membership directly, independent of windowing` below for the full envelope 
    by `GET /api/cards/:id/attachments/:name` (`services/domain/attachments.ts`). For a local card
    whose description carries such links, `services/domain/kickoff.ts` rewrites them to absolute paths
    and adds an `## Attached images` section that tells the session to Read each file first; Linear
-   and group cards never get that section (`T-116-04`).
+   and group cards never get that section (`T-116-04`). Pasted meeting notes live under
+   `~/.dispatch/meetings/<sha256 hex of the meeting id>.txt` (folder `0700`, files `0600`), written
+   and read by `services/orchestration/meeting-transcripts.ts`.
 5. **tmux invocations (argv-exact).** Session name `dsp-<identifier>`;
    `new-session -d -s <name> -c <cwd> -x 200 -y 50 [-e KEY=VALUE ...]` with NO command argv (tmux runs
    its `default-shell` as a login shell, `SHELL-01`); the claude launch is `send-keys -l -t =<name>:

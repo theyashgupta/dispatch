@@ -1,4 +1,12 @@
-import type { SourceFilters, SourceIssue } from "../../../shared/types.js";
+import type {
+  CreatedLinearIssue,
+  LinearComment,
+  LinearWorkflow,
+  NewLinearIssue,
+  LinearTeam,
+  SourceFilters,
+  SourceIssue,
+} from "../../../shared/types.js";
 import {
   RateLimited,
   type FilterCapabilities,
@@ -6,11 +14,22 @@ import {
   type TicketSource,
 } from "../ticket.source.js";
 import { buildLinearQuery, type LinearIssueFilter } from "./filter.js";
+import { buildCreateInput } from "./create-input.js";
+import { carriesSyncToken } from "../../../shared/sync-token.js";
 
-const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
+export const LINEAR_GRAPHQL_URL =
+  process.env.DISPATCH_LINEAR_API_URL ?? "https://api.linear.app/graphql";
+if (process.env.DISPATCH_LINEAR_API_URL) {
+  console.warn(
+    `[linear] DISPATCH_LINEAR_API_URL is set; Linear requests go to ${new URL(LINEAR_GRAPHQL_URL).host}`,
+  );
+}
 const MAX_PAGES = 20;
 const PAGE_SIZE = 250;
 const LINEAR_TIMEOUT_MS = 30_000;
+const TRACKED_CHUNK = 250;
+const MAX_TRACKED = 1000;
+const COMMENT_BODY_CAP = 600;
 
 /**
  * Thrown by `postGraphQL` only when Linear rejects the credentials themselves — an HTTP 401/403 or a
@@ -42,7 +61,7 @@ function isAuthCode(code: string | undefined): boolean {
 }
 
 const ISSUE_NODE_FIELDS =
-  "id identifier title url description priority updatedAt state { id name type } project { id name }";
+  "id identifier title url description priority updatedAt state { id name type color } team { id key name } cycle { number } project { id name } assignee { id displayName } comments(last: 5) { nodes { id body createdAt user { displayName } } }";
 
 /**
  * Build the paged board query for the active shape. `viewer.assignedIssues` keeps the implicit
@@ -78,7 +97,23 @@ interface IssueNode {
   priority: number;
   updatedAt: string;
   project: { id: string; name: string } | null;
-  state: { id: string; name: string; type: string } | null;
+  state: {
+    id: string;
+    name: string;
+    type: string;
+    color?: string | null;
+  } | null;
+  team?: LinearTeam | null;
+  cycle?: { number: number } | null;
+  assignee?: { id: string; displayName: string } | null;
+  comments?: { nodes?: CommentNode[] } | null;
+}
+
+interface CommentNode {
+  id: string;
+  body: string;
+  createdAt: string;
+  user: { displayName: string } | null;
 }
 
 interface Connection<N> {
@@ -92,6 +127,37 @@ interface GraphQLData {
   users?: Connection<{ id: string; name?: string; displayName?: string }>;
   teams?: Connection<{ id: string; name?: string }>;
   projects?: Connection<{ id: string; name?: string }>;
+  commentCreate?: { success?: boolean };
+  issueUpdate?: { success?: boolean };
+  issueCreate?: { success?: boolean; issue?: CreatedIssueNode | null };
+}
+
+interface CreatedIssueNode {
+  id: string;
+  identifier: string;
+  url: string;
+  title: string;
+  description: string | null;
+}
+
+interface WorkflowData {
+  viewer?: { id?: string };
+  teams?: {
+    nodes?: {
+      id: string;
+      key: string;
+      name: string;
+      states?: {
+        nodes?: {
+          id: string;
+          name: string;
+          type: string;
+          color?: string | null;
+          position: number;
+        }[];
+      };
+    }[];
+  };
 }
 
 /**
@@ -224,7 +290,12 @@ async function fetchAllIssues(
     if (!hasNextPage || endCursor === null) break;
     after = endCursor;
   }
-  const issues = nodes.map((n) => ({
+  return { issues: nodes.map(mapIssueNode), truncated: lastHasNextPage };
+}
+
+/** Map one GraphQL issue node to a SourceIssue. */
+function mapIssueNode(n: IssueNode): SourceIssue {
+  return {
     id: n.id,
     identifier: n.identifier,
     title: n.title,
@@ -233,38 +304,145 @@ async function fetchAllIssues(
     priority: n.priority,
     updatedAt: n.updatedAt,
     project: n.project ?? null,
-    state: n.state ? { name: n.state.name, type: n.state.type } : null,
-  }));
-  return { issues, truncated: lastHasNextPage };
+    state: n.state
+      ? {
+          id: n.state.id,
+          name: n.state.name,
+          type: n.state.type,
+          color: n.state.color ?? undefined,
+        }
+      : null,
+    team: n.team ?? undefined,
+    cycle: n.cycle?.number,
+    assignee: n.assignee
+      ? { id: n.assignee.id, name: n.assignee.displayName }
+      : undefined,
+    comments: mapComments(n.comments?.nodes ?? []),
+  };
 }
 
-const VIEWER_QUERY = `query Viewer { viewer { id } }`;
+/**
+ * Sort comments oldest first, cap each body, and name a user-less comment "Linear".
+ *
+ * @remarks A null user is an integration or bot comment. The cap keeps a stored card small, and
+ * drops a trailing half of a surrogate pair so an emoji is never split.
+ */
+function mapComments(nodes: CommentNode[]): LinearComment[] {
+  return nodes
+    .map((c) => ({
+      id: c.id,
+      body:
+        c.body.length > COMMENT_BODY_CAP
+          ? `${c.body.slice(0, COMMENT_BODY_CAP - 1).replace(/[\uD800-\uDBFF]$/, "")}…`
+          : c.body,
+      createdAt: c.createdAt,
+      author: c.user?.displayName ?? "Linear",
+    }))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+const TRACKED_QUERY = `query Tracked($ids: [ID!]) { issues(first: ${TRACKED_CHUNK}, filter: { id: { in: $ids } }) { nodes { ${ISSUE_NODE_FIELDS} } } }`;
 
 /**
- * Live key check for the first-run setup route: run a minimal viewer query with the entered key.
+ * Fetch issues by id in chunks, for the cards past To Do that the board query no longer returns.
  *
- * @remarks Resolves `true` when Linear returns a viewer, and `false` ONLY on a genuine credential
- * rejection — an HTTP 401/403 or a GraphQL authentication error, which `postGraphQL` surfaces as a
- * `LinearAuthError` — so the route answers 400 "rejected" only for a truly bad key. Every other
- * failure re-throws so the route answers 502 "unreachable": a `fetch` `TypeError` (offline), a
- * `RateLimited` (HTTP 429 on a valid key), a non-JSON body (an outage page), and any 5xx/other
- * transport error. A valid-but-rate-limited key or a transient outage is therefore reported as
- * unreachable, not as a rejected key. The key is passed straight to `postGraphQL` and is never logged.
+ * @remarks Ids travel only as the `$ids` variable. The store caps the list at {@link MAX_TRACKED};
+ * a longer list is refused before any request as a guard against a caller that skips the cap.
  */
-export async function testLinearConnection(apiKey: string): Promise<boolean> {
+async function fetchIssuesByIds(
+  apiKey: string,
+  ids: string[],
+): Promise<SourceIssue[]> {
+  if (ids.length > MAX_TRACKED) {
+    throw new Error(
+      `tracked refresh needs ${ids.length} ids, above the ${MAX_TRACKED} cap`,
+    );
+  }
+  const out: SourceIssue[] = [];
+  for (let i = 0; i < ids.length; i += TRACKED_CHUNK) {
+    const data = await postGraphQL(apiKey, TRACKED_QUERY, {
+      ids: ids.slice(i, i + TRACKED_CHUNK),
+    });
+    if (!Array.isArray(data.issues?.nodes)) {
+      throw new Error("Linear response missing issues connection");
+    }
+    out.push(...(data.issues.nodes as IssueNode[]).map(mapIssueNode));
+  }
+  return out;
+}
+
+const VIEWER_QUERY = `query Viewer { viewer { id name email } }`;
+const WORKFLOW_QUERY = `query Workflow { viewer { id } teams(first: 50) { nodes { id key name states { nodes { id name type color position } } } } }`;
+const ASSIGN_MUTATION = `mutation Assign($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`;
+const STATE_MUTATION = `mutation SetState($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`;
+const FIND_SYNC_QUERY = `query FindSync($filter: IssueFilter) { issues(first: 50, filter: $filter) { nodes { id identifier url title description } } }`;
+const CREATE_MUTATION = `mutation Create($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url title description } } }`;
+const COMMENT_MUTATION = `mutation Comment($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id } } }`;
+
+/**
+ * Format a Linear viewer as the account label a connection card shows.
+ *
+ * @remarks "name (email)" when both are present, whichever one exists otherwise, and no label when
+ * neither is.
+ */
+function accountLabel(viewer: {
+  name?: string | null;
+  email?: string | null;
+}): string | undefined {
+  const name = viewer.name?.trim();
+  const email = viewer.email?.trim();
+  if (name && email) return `${name} (${email})`;
+  return name || email || undefined;
+}
+
+/**
+ * Live key check that also reads the account behind the key.
+ *
+ * @remarks Resolves null only for a genuine credential rejection (an HTTP 401 or 403, or a GraphQL
+ * authentication code surfaced as `LinearAuthError`). Every other failure re-throws, so a rate limit,
+ * an outage page or an offline machine is reported as unreachable, never as a rejected key. The key
+ * is never logged.
+ */
+export async function fetchLinearAccount(
+  apiKey: string,
+): Promise<{ account?: string } | null> {
+  let data: GraphQLData;
   try {
-    const data = await postGraphQL(apiKey, VIEWER_QUERY, {});
-    return Boolean((data as { viewer?: { id?: string } }).viewer?.id);
+    data = await postGraphQL(apiKey, VIEWER_QUERY, {});
   } catch (err) {
-    if (err instanceof LinearAuthError) return false;
+    if (err instanceof LinearAuthError) return null;
     throw err;
   }
+  const viewer = (
+    data as {
+      viewer?: { id?: string; name?: string | null; email?: string | null };
+    }
+  ).viewer;
+  if (!viewer?.id) return null;
+  const account = accountLabel(viewer);
+  return account ? { account } : {};
+}
+
+/** First-run key check: true for a valid key, false for a rejected one; outages re-throw. */
+export async function testLinearConnection(apiKey: string): Promise<boolean> {
+  return (await fetchLinearAccount(apiKey)) !== null;
 }
 
 const USERS_QUERY = `query Users($onlyActive: UserFilter) { users(filter: $onlyActive, first: ${PAGE_SIZE}) { nodes { id name displayName } pageInfo { hasNextPage } } }`;
 const ACTIVE_USERS: Record<string, unknown> = { active: { eq: true } };
 const TEAMS_QUERY = `query Teams { teams(first: ${PAGE_SIZE}) { nodes { id name } pageInfo { hasNextPage } } }`;
 const PROJECTS_QUERY = `query Projects { projects(first: ${PAGE_SIZE}) { nodes { id name } pageInfo { hasNextPage } } }`;
+
+/** Normalize a created or found issue node for adoption onto the card. */
+function createdIssue(n: CreatedIssueNode): CreatedLinearIssue["issue"] {
+  return {
+    id: n.id,
+    identifier: n.identifier,
+    url: n.url,
+    title: n.title,
+    description: n.description ?? "",
+  };
+}
 
 /**
  * The Linear TicketSource: owns the GraphQL query, cursor paging, prefix-less auth, and RATELIMITED
@@ -284,6 +462,7 @@ export class LinearSource implements TicketSource {
   };
 
   readonly capabilities: FilterCapabilities = LinearSource.capabilities;
+  private cachedViewerId: string | undefined;
 
   constructor(
     private apiKey: string,
@@ -294,6 +473,122 @@ export class LinearSource implements TicketSource {
   fetch(): Promise<{ issues: SourceIssue[]; truncated: boolean }> {
     const { useViewerScope, filter } = buildLinearQuery(this.getFilters());
     return fetchAllIssues(this.apiKey, useViewerScope, filter);
+  }
+
+  /** Fetch issues by id for the poller's tracked refresh of cards past To Do. */
+  fetchByIds(ids: string[]): Promise<SourceIssue[]> {
+    return fetchIssuesByIds(this.apiKey, ids);
+  }
+
+  /**
+   * Read the viewer and every team with its states in one request.
+   *
+   * @remarks Teams sort by name and states by position; the viewer id is cached for the process.
+   */
+  async workflow(): Promise<LinearWorkflow> {
+    const data = (await postGraphQL(
+      this.apiKey,
+      WORKFLOW_QUERY,
+      {},
+    )) as WorkflowData;
+    const viewerId = data.viewer?.id;
+    if (!viewerId) throw new Error("Linear response missing viewer");
+    this.cachedViewerId = viewerId;
+    const teams = (data.teams?.nodes ?? [])
+      .map((t) => ({
+        id: t.id,
+        key: t.key,
+        name: t.name,
+        states: (t.states?.nodes ?? [])
+          .map((st) => ({
+            id: st.id,
+            name: st.name,
+            type: st.type,
+            color: st.color ?? undefined,
+            position: st.position,
+          }))
+          .sort((a, b) => a.position - b.position),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return { viewerId, teams };
+  }
+
+  /** The viewer's user id, cached after the first success; a failure is never cached. */
+  async viewerId(): Promise<string> {
+    if (this.cachedViewerId) return this.cachedViewerId;
+    const data = await postGraphQL(this.apiKey, VIEWER_QUERY, {});
+    const id = (data as WorkflowData).viewer?.id;
+    if (!id) throw new Error("Linear response missing viewer");
+    this.cachedViewerId = id;
+    return id;
+  }
+
+  /** Assign an issue to a user through issueUpdate. */
+  async assignIssue(issueId: string, assigneeId: string): Promise<void> {
+    await this.updateIssue(ASSIGN_MUTATION, issueId, { assigneeId });
+  }
+
+  /** Move an issue to a workflow state through issueUpdate. */
+  async updateState(issueId: string, stateId: string): Promise<void> {
+    await this.updateIssue(STATE_MUTATION, issueId, { stateId });
+  }
+
+  /** Send one issueUpdate; Linear answering success false throws. */
+  private async updateIssue(
+    mutation: string,
+    issueId: string,
+    input: Record<string, string>,
+  ): Promise<void> {
+    const data = await postGraphQL(this.apiKey, mutation, {
+      id: issueId,
+      input,
+    });
+    if (data.issueUpdate?.success !== true) {
+      throw new Error("Linear did not update the issue");
+    }
+  }
+
+  /**
+   * Create the issue for a synced card, or return the issue that already carries its token.
+   *
+   * @remarks The token search runs first so a retry after an ambiguous failure never duplicates;
+   * it reads only issues the viewer created, because card ids repeat across installs, and only an
+   * exact token line counts, since `contains` also matches a longer card id.
+   * ponytail: the search reads 50 hits, so more than 49 longer ids sharing the prefix could hide
+   * the real one; page through the hits if that ever happens.
+   */
+  async createIssue(input: NewLinearIssue): Promise<CreatedLinearIssue> {
+    const found = await postGraphQL(this.apiKey, FIND_SYNC_QUERY, {
+      filter: {
+        description: { contains: input.token },
+        creator: { isMe: { eq: true } },
+      },
+    });
+    if (!Array.isArray(found.issues?.nodes)) {
+      throw new Error("Linear response missing issues connection");
+    }
+    const hit = (found.issues?.nodes as CreatedIssueNode[] | undefined)?.find(
+      (n) => carriesSyncToken(n.description, input.token),
+    );
+    if (hit) return { created: false, issue: createdIssue(hit) };
+    const data = await postGraphQL(this.apiKey, CREATE_MUTATION, {
+      input: buildCreateInput(input),
+    });
+    const issue = data.issueCreate?.issue;
+    if (data.issueCreate?.success !== true || !issue) {
+      throw new Error("Linear did not create the issue");
+    }
+    return { created: true, issue: createdIssue(issue) };
+  }
+
+  /** Post a comment on an issue; the body travels only as a GraphQL variable. */
+  async addComment(issueId: string, body: string): Promise<void> {
+    const data = await postGraphQL(this.apiKey, COMMENT_MUTATION, {
+      input: { issueId, body },
+    });
+    if (data.commentCreate?.success !== true) {
+      throw new Error("Linear did not create the comment");
+    }
   }
 
   /**

@@ -1,27 +1,48 @@
 import type {
-  TerminalAppearance,
+  CalendarChoice,
+  CalendarErrorCode,
+  CalendarSettingsPatch,
+  CalendarStatus,
+  GranolaCheckResult,
+  GranolaStatus,
+  MeetingSourceConfig,
   ActivityEvent,
   ArchivedGroupSummary,
-  UnwindDestination,
   Card,
+  ClaudeAccountSummary,
+  ClaudeLoginView,
+  ClaudeUsageSnapshot,
   Column,
   DirListing,
   DiscoveredRepo,
   FilterCapabilities,
   FilterOption,
+  LinearComment,
+  LinearStateMap,
+  LinearWorkflow,
   Playbook,
   PlaybookPickerResponse,
+  PrDetail,
   PrerequisiteStatus,
+  PrReviewEvent,
+  SentryIssueDetail,
+  SettableItemState,
+  SetupStatus,
+  SlackChannel,
+  SlackChannelOption,
+  SlackThread,
+  SourceConnection,
   SourceFilters,
+  SourceKeyError,
+  TerminalAppearance,
+  UnwindDestination,
   UpdateRunResult,
   UpdateStatus,
+  UserProfile,
   VaultKeySummary,
-  ClaudeAccountSummary,
-  ClaudeUsageSnapshot,
-  ClaudeLoginView,
-  SettableItemState,
   WorkspacesInventory,
 } from "../../shared/types.js";
+import { isProviderCode } from "../../shared/credential.js";
 import type { CardSearchResult } from "../../shared/search.js";
 
 /**
@@ -185,37 +206,30 @@ export async function startGroup(input: {
 }
 
 /**
- * Promote a `source:"local"` card to a real Linear issue: POST /api/cards/:id/sync-linear. Mirrors
- * createLocalTicket's discrimination exactly: 200 → `{ ok: true, card }` (the swapped Card, already
- * reflecting the new identifier); 409 → `{ ok: false, error }` (the parsed body's renderable copy —
- * non-local card or a sync already in flight); 404/502/network → `{ ok: false, error: null }`
- * (generic, no server-side detail to surface). The response is held open for the duration of the
- * sync (up to ~150s) — the server owns that bound, there is no client-side timeout/abort. The
- * authoritative identity swap always arrives over SSE regardless of this response, since the panel
- * stays open on the same `Card.id` throughout.
+ * Promote a local card to a Linear issue: POST /api/cards/:id/sync-linear.
+ *
+ * @remarks 200 carries the adopted card; 400 and 409 carry renderable copy; any other failure
+ * answers `error: null`, and the card's `syncError` arrives over SSE.
  */
 export async function syncCardToLinear(
   id: string,
+  target: { teamId: string; stateId?: string },
 ): Promise<{ ok: true; card: Card } | { ok: false; error: string | null }> {
   try {
     const res = await fetch(
       `/api/cards/${encodeURIComponent(id)}/sync-linear`,
       {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(target),
       },
     );
-    if (res.status === 409) {
-      const body = (await res.json().catch((err) => {
-        console.error("syncCardToLinear: failed to parse 409 body", err);
-        return {};
-      })) as { error?: string };
+    if (res.ok) return { ok: true, card: (await res.json()) as Card };
+    if (res.status === 400 || res.status === 409) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
       return { ok: false, error: body.error ?? null };
     }
-    if (!res.ok) {
-      return { ok: false, error: null };
-    }
-    const card = (await res.json()) as Card;
-    return { ok: true, card };
+    return { ok: false, error: null };
   } catch {
     return { ok: false, error: null };
   }
@@ -701,6 +715,21 @@ export async function removeWorkspaceFolder(path: string): Promise<void> {
 }
 
 /**
+ * Ask the server to poll one source now: POST /api/sources/:id/poll.
+ *
+ * @remarks Throws on any non-2xx so Sync now can report a refused source; the poll result arrives
+ * over SSE like any scheduled poll.
+ */
+export async function pollSource(id: string): Promise<void> {
+  const res = await fetch(`/api/sources/${encodeURIComponent(id)}/poll`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    throw new Error(`pollSource failed: ${res.status} ${res.statusText}`);
+  }
+}
+
+/**
  * Ensure a ttyd terminal for a card's live session: POST /api/cards/:id/terminal.
  * Fire-and-forget — the backend spawns-or-reuses ttyd single-flight (202 Accepted)
  * and the SSE snapshot carries the outcome (`ttydPort` on success, `terminalError`
@@ -1033,33 +1062,35 @@ export async function saveClaudeArgs(
 }
 
 /**
- * Read first-run status: GET /api/setup. Fired once on app mount to gate the setup screen vs the
- * board. Returns `needsKey` plus the live prerequisite checklist; the Linear key never crosses this
- * boundary. Throws on any non-2xx so the caller can fail-open to the board rather than trapping a
- * fresh install behind a fetch error.
+ * Read setup status: GET /api/setup. Read on app mount to decide whether the setup wizard opens, and
+ * again when Run setup guide reopens it, so the prerequisite rows are current. The Linear key never
+ * crosses this boundary. Throws on any non-2xx so the caller can render the app with no wizard.
  */
-export async function getSetup(): Promise<{
-  needsKey: boolean;
-  prerequisites: PrerequisiteStatus[];
-  node: { version: string; floor: string; ok: boolean };
-  storage: { ok: boolean; path: string };
-}> {
+export async function getSetup(): Promise<SetupStatus> {
   const res = await fetch("/api/setup");
   if (!res.ok) {
     throw new Error(`getSetup failed: ${res.status} ${res.statusText}`);
   }
-  return (await res.json()) as {
-    needsKey: boolean;
-    prerequisites: PrerequisiteStatus[];
-    node: { version: string; floor: string; ok: boolean };
-    storage: { ok: boolean; path: string };
-  };
+  return (await res.json()) as SetupStatus;
 }
 
 /**
- * Run the guided install for one prerequisite on first run: POST /api/setup/install { target }.
+ * Mark the setup wizard done: POST /api/setup/onboarding-done. Throws on any non-2xx so the caller
+ * can log it; the wizard closes either way.
+ */
+export async function markOnboardingDone(): Promise<void> {
+  const res = await fetch("/api/setup/onboarding-done", { method: "POST" });
+  if (!res.ok) {
+    throw new Error(
+      `markOnboardingDone failed: ${res.status} ${res.statusText}`,
+    );
+  }
+}
+
+/**
+ * Run the guided install for one prerequisite from the setup wizard: POST /api/setup/install { target }.
  * Drives the shared preflight `runInstall` over the loopback route (whitelist-validated to
- * tmux/ttyd/git server-side) and resolves the re-probed status so the setup screen can flip the row.
+ * tmux/ttyd/git server-side) and resolves the re-probed status so the wizard checklist can flip the row.
  * The Linear key never crosses this boundary and there is no streaming — a single request/response.
  * Resolves `{ ok, command, status }` on 2xx; throws on any non-2xx so the component renders the
  * failure state (mirrors moveCard's reject-on-non-2xx).
@@ -1084,37 +1115,6 @@ export async function runPrerequisiteInstall(target: string): Promise<{
     command: string;
     status: PrerequisiteStatus;
   };
-}
-
-/**
- * Submit the Linear key on first run: POST /api/setup. The server tests the key against Linear
- * before persisting, so the discriminated result maps each failure mode distinctly: 200 → { ok:true }
- * (board hydrates over the live SSE, no reload); 502 → { ok:false, reason:"unreachable" } (couldn't
- * reach Linear); 409 → { ok:false, reason:"already-configured" } (a key already exists — a benign
- * two-tab race, NOT a bad key, so the caller can transition straight to the board); any other non-2xx
- * (400) → { ok:false, reason:"rejected" }. The key is sent once and never echoed back.
- */
-export async function saveLinearKey(
-  apiKey: string,
-): Promise<
-  | { ok: true }
-  | { ok: false; reason: "rejected" | "unreachable" | "already-configured" }
-> {
-  const res = await fetch("/api/setup", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ apiKey }),
-  });
-  if (res.ok) {
-    return { ok: true };
-  }
-  if (res.status === 502) {
-    return { ok: false, reason: "unreachable" };
-  }
-  if (res.status === 409) {
-    return { ok: false, reason: "already-configured" };
-  }
-  return { ok: false, reason: "rejected" };
 }
 
 /**
@@ -1204,6 +1204,125 @@ export async function getCard(
     throw new Error(`getCard failed: ${res.status} ${res.statusText}`);
   }
   return (await res.json()) as { card: Card; members: Card[] };
+}
+
+/** The stored Linear comments of a card, oldest first: GET /api/cards/:id/comments. Throws on non-2xx. */
+export async function getCardComments(id: string): Promise<LinearComment[]> {
+  const res = await fetch(`/api/cards/${encodeURIComponent(id)}/comments`);
+  if (!res.ok) {
+    throw new Error(`getCardComments failed: ${res.status} ${res.statusText}`);
+  }
+  return ((await res.json()) as { comments: LinearComment[] }).comments;
+}
+
+/**
+ * Post a Linear comment: POST /api/cards/:id/comment.
+ *
+ * @remarks A 502 also sets the card's `linearError`, which arrives over SSE; `error` carries the
+ * server's fixed copy, or null when the request never got an answer.
+ */
+export async function postCardComment(
+  id: string,
+  body: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string | null }> {
+  try {
+    const res = await fetch(`/api/cards/${encodeURIComponent(id)}/comment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+    });
+    if (res.ok) return { ok: true };
+    const parsed = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, status: res.status, error: parsed.error ?? null };
+  } catch {
+    return { ok: false, status: 0, error: null };
+  }
+}
+
+/** The viewer and the Linear teams with their states: GET /api/sources/linear/workflow. */
+export async function getLinearWorkflow(): Promise<
+  { ok: true; workflow: LinearWorkflow } | { ok: false; error: string }
+> {
+  try {
+    const res = await fetch("/api/sources/linear/workflow");
+    if (res.ok) {
+      return { ok: true, workflow: (await res.json()) as LinearWorkflow };
+    }
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: body.error ?? "Could not load Linear teams." };
+  } catch {
+    return { ok: false, error: "Could not reach Dispatch. Try again." };
+  }
+}
+
+/** Read the saved column-to-state map: GET /api/config/linear-state-map. Throws on non-2xx. */
+export async function getLinearStateMap(): Promise<LinearStateMap> {
+  const res = await fetch("/api/config/linear-state-map");
+  if (!res.ok) {
+    throw new Error(
+      `getLinearStateMap failed: ${res.status} ${res.statusText}`,
+    );
+  }
+  return ((await res.json()) as { stateMap: LinearStateMap }).stateMap;
+}
+
+/** Save the whole column-to-state map: PUT /api/config/linear-state-map. */
+export async function saveLinearStateMap(
+  stateMap: LinearStateMap,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch("/api/config/linear-state-map", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stateMap }),
+    });
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return {
+      ok: false,
+      error: body.error ?? "Couldn't save the state map. Try again.",
+    };
+  } catch {
+    return { ok: false, error: "Could not reach Dispatch. Try again." };
+  }
+}
+
+/** Assign a Linear card to the viewer: POST /api/cards/:id/assign-me. */
+export async function assignCardToMe(
+  id: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string | null }> {
+  try {
+    const res = await fetch(`/api/cards/${encodeURIComponent(id)}/assign-me`, {
+      method: "POST",
+    });
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, status: res.status, error: body.error ?? null };
+  } catch {
+    return { ok: false, status: 0, error: null };
+  }
+}
+
+/** Move a Linear card to one of its team's states: POST /api/cards/:id/linear-state. */
+export async function setCardLinearState(
+  id: string,
+  stateId: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string | null }> {
+  try {
+    const res = await fetch(
+      `/api/cards/${encodeURIComponent(id)}/linear-state`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stateId }),
+      },
+    );
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, status: res.status, error: body.error ?? null };
+  } catch {
+    return { ok: false, status: 0, error: null };
+  }
 }
 
 /**
@@ -1529,10 +1648,584 @@ export async function snoozeItem(id: string, until: string): Promise<void> {
   await postItem(id, "snooze", { until });
 }
 
-/** Promote an item to a local Inbox card; repeats return the same card. */
-export async function promoteItem(id: string): Promise<{ card: Card }> {
-  const res = await postItem(id, "promote");
+/** Promote an item to a local Inbox card, optionally with a context block; repeats return the same card. */
+export async function promoteItem(
+  id: string,
+  context?: string,
+): Promise<{ card: Card }> {
+  const res = await postItem(
+    id,
+    "promote",
+    context !== undefined ? { context } : undefined,
+  );
   return (await res.json()) as { card: Card };
+}
+
+/** Read a source's connection status: GET /api/sources/:source/connection. Throws on non-2xx. */
+export async function getSourceConnection(
+  source: string,
+): Promise<SourceConnection> {
+  const res = await fetch(
+    `/api/sources/${encodeURIComponent(source)}/connection`,
+  );
+  if (!res.ok) {
+    throw new Error(`getSourceConnection failed: ${res.status}`);
+  }
+  return (await res.json()) as SourceConnection;
+}
+
+const SOURCE_KEY_ERRORS = new Set<string>([
+  "rejected",
+  "unreachable",
+  "sso-required",
+  "superseded",
+  "no-credential",
+]);
+
+/**
+ * Read the error kind a failed key save or connect answered, plus the provider's own error code.
+ *
+ * @remarks The server names the kind in the body; the status fallback covers a body that is not
+ * JSON, such as a proxy error page. Only a plain lowercase provider code is kept.
+ */
+async function sourceKeyFailure(
+  res: Response,
+): Promise<{ ok: false; reason: SourceKeyError; providerError?: string }> {
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: unknown;
+    providerError?: unknown;
+  };
+  const reason: SourceKeyError =
+    typeof body.error === "string" && SOURCE_KEY_ERRORS.has(body.error)
+      ? (body.error as SourceKeyError)
+      : res.status === 400
+        ? "rejected"
+        : res.status === 502
+          ? "unreachable"
+          : res.status === 409
+            ? "superseded"
+            : "failed";
+  return isProviderCode(body.providerError)
+    ? { ok: false, reason, providerError: body.providerError }
+    : { ok: false, reason };
+}
+
+/**
+ * Store a new key for a source: PUT /api/sources/:source/key.
+ *
+ * @remarks The server checks the key with the provider before saving it, so a 400 (rejected) and a
+ * 502 (unreachable) both mean nothing was written; a 409 means a disconnect won the race. The key
+ * is sent once and never echoed back.
+ */
+export async function saveSourceKey(
+  source: string,
+  apiKey: string,
+): Promise<
+  | { ok: true; account?: string }
+  | { ok: false; reason: SourceKeyError; providerError?: string }
+> {
+  const res = await fetch(`/api/sources/${encodeURIComponent(source)}/key`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey }),
+  });
+  if (res.ok) {
+    return { ok: true, ...((await res.json()) as { account?: string }) };
+  }
+  return sourceKeyFailure(res);
+}
+
+/**
+ * Turn a token source on with the credential it already has: POST /api/sources/:source/connect.
+ *
+ * @remarks Used when the Vault already holds the token or the gh CLI is logged in, so nothing is
+ * pasted and no secret crosses the wire.
+ */
+export async function connectSource(
+  source: string,
+): Promise<
+  | { ok: true; account?: string }
+  | { ok: false; reason: SourceKeyError; providerError?: string }
+> {
+  const res = await fetch(
+    `/api/sources/${encodeURIComponent(source)}/connect`,
+    { method: "POST" },
+  );
+  if (res.ok) {
+    return { ok: true, ...((await res.json()) as { account?: string }) };
+  }
+  return sourceKeyFailure(res);
+}
+
+/** Pause a token source and keep its token: POST /api/sources/:source/disable. Throws on non-2xx. */
+export async function disableSource(source: string): Promise<void> {
+  const res = await fetch(
+    `/api/sources/${encodeURIComponent(source)}/disable`,
+    { method: "POST" },
+  );
+  if (!res.ok) {
+    throw new Error(`disableSource failed: ${res.status}`);
+  }
+}
+
+/** Read the saved Slack channels: GET /api/sources/slack/channels. Throws on non-2xx. */
+export async function getSavedSlackChannels(): Promise<SlackChannel[]> {
+  const res = await fetch("/api/sources/slack/channels");
+  if (!res.ok) throw new Error(`getSavedSlackChannels failed: ${res.status}`);
+  return ((await res.json()) as { channels: SlackChannel[] }).channels;
+}
+
+export type SlackSetupFailure =
+  "not-a-channel" | "disabled" | "rejected" | "restricted" | "unreachable";
+
+/**
+ * Map a Slack setup route's error kind to the line the picker shows.
+ *
+ * @remarks A missing token reads as rejected and any unknown or unreadable answer as unreachable, so
+ * the picker always has a line to show.
+ */
+function slackSetupFailure(error: unknown): SlackSetupFailure {
+  if (
+    error === "not-a-channel" ||
+    error === "disabled" ||
+    error === "rejected"
+  ) {
+    return error;
+  }
+  if (error === "no-credential") return "rejected";
+  if (error === "missing-scope") return "restricted";
+  return "unreachable";
+}
+
+/** List the Slack channels to pick: GET /api/slack/channels; any refusal answers its reason. */
+export async function listSlackChannels(): Promise<
+  | { ok: true; channels: SlackChannelOption[]; truncated: boolean }
+  | { ok: false; reason: SlackSetupFailure }
+> {
+  try {
+    const res = await fetch("/api/slack/channels");
+    const body = (await res.json().catch(() => ({}))) as {
+      channels?: SlackChannelOption[];
+      truncated?: boolean;
+      error?: unknown;
+    };
+    if (!res.ok || !body.channels) {
+      return { ok: false, reason: slackSetupFailure(body.error) };
+    }
+    return {
+      ok: true,
+      channels: body.channels,
+      truncated: body.truncated === true,
+    };
+  } catch {
+    return { ok: false, reason: "unreachable" };
+  }
+}
+
+/** Resolve a pasted channel link or id: POST /api/slack/channels/resolve; any refusal answers its reason. */
+export async function resolveSlackChannel(
+  input: string,
+): Promise<
+  | { ok: true; id: string; name: string }
+  | { ok: false; reason: SlackSetupFailure }
+> {
+  try {
+    const res = await fetch("/api/slack/channels/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input }),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      id?: string;
+      name?: string;
+      error?: unknown;
+    };
+    if (res.ok && body.id && body.name) {
+      return { ok: true, id: body.id, name: body.name };
+    }
+    return { ok: false, reason: slackSetupFailure(body.error) };
+  } catch {
+    return { ok: false, reason: "unreachable" };
+  }
+}
+
+/** Save the picked Slack channels: PUT /api/sources/slack/channels; null when the save failed. */
+export async function saveSlackChannels(
+  channels: SlackChannel[],
+): Promise<SlackChannel[] | null> {
+  try {
+    const res = await fetch("/api/sources/slack/channels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channels }),
+    });
+    if (!res.ok) return null;
+    return ((await res.json()) as { channels: SlackChannel[] }).channels;
+  } catch {
+    return null;
+  }
+}
+
+/** Remove a source's stored key: DELETE /api/sources/:source/key. Throws on non-2xx. */
+export async function deleteSourceKey(source: string): Promise<void> {
+  const res = await fetch(`/api/sources/${encodeURIComponent(source)}/key`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    throw new Error(`deleteSourceKey failed: ${res.status}`);
+  }
+}
+
+export type PrRequestResult<T> =
+  | ({ ok: true } & T)
+  | { ok: false; error: string; message?: string; ssoUrl?: string };
+
+/** Fetch a pull request route, turning a network failure into a response-shaped failure. */
+async function prFetch(
+  url: string,
+  init?: RequestInit,
+): Promise<Response | null> {
+  try {
+    return await fetch(url, init);
+  } catch {
+    return null;
+  }
+}
+
+async function prFailure(
+  res: Response | null,
+): Promise<{ ok: false; error: string; message?: string; ssoUrl?: string }> {
+  if (!res) return { ok: false, error: "unreachable" };
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: unknown;
+    message?: unknown;
+    ssoUrl?: unknown;
+  };
+  return {
+    ok: false,
+    error: typeof body.error === "string" ? body.error : "unreachable",
+    ...(typeof body.message === "string" ? { message: body.message } : {}),
+    ...(typeof body.ssoUrl === "string" ? { ssoUrl: body.ssoUrl } : {}),
+  };
+}
+
+function prPath(owner: string, repo: string, number: number): string {
+  return `/api/github/pr/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`;
+}
+
+/** Read one pull request's detail: GET /api/github/pr/:owner/:repo/:number. */
+export async function getPullRequest(
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<PrRequestResult<{ detail: PrDetail }>> {
+  const res = await prFetch(prPath(owner, repo, number));
+  if (!res?.ok) return prFailure(res);
+  return { ok: true, detail: (await res.json()) as PrDetail };
+}
+
+/** Post a review on a pull request: POST /api/github/pr/:owner/:repo/:number/review. */
+export async function reviewPullRequest(
+  owner: string,
+  repo: string,
+  number: number,
+  event: PrReviewEvent,
+  body?: string,
+): Promise<PrRequestResult<object>> {
+  const res = await prFetch(`${prPath(owner, repo, number)}/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ? { event, body } : { event }),
+  });
+  return res?.ok ? { ok: true } : prFailure(res);
+}
+
+/** Squash merge a pull request at the head the user saw: POST .../merge. */
+export async function mergePullRequest(
+  owner: string,
+  repo: string,
+  number: number,
+  sha: string,
+): Promise<PrRequestResult<object>> {
+  const res = await prFetch(`${prPath(owner, repo, number)}/merge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sha }),
+  });
+  return res?.ok ? { ok: true } : prFailure(res);
+}
+
+/**
+ * Load a Slack item's thread: GET /api/slack/thread/:itemId.
+ *
+ * @remarks A rejected token carries Slack's code for the "Slack refused" line; every other failure,
+ * including a network error or no answer within 45 s, reads as unreachable.
+ */
+export async function getSlackThread(
+  itemId: string,
+): Promise<
+  | { ok: true; thread: SlackThread }
+  | { ok: false; reason: "rejected" | "unreachable"; providerError?: string }
+> {
+  try {
+    const res = await fetch(`/api/slack/thread/${encodeURIComponent(itemId)}`, {
+      signal: AbortSignal.timeout(45_000),
+    });
+    const body = (await res
+      .json()
+      .catch(() => ({}))) as Partial<SlackThread> & {
+      error?: unknown;
+      providerError?: unknown;
+    };
+    if (res.ok && Array.isArray(body.messages)) {
+      return {
+        ok: true,
+        thread: { messages: body.messages, truncated: body.truncated === true },
+      };
+    }
+    if (body.error === "rejected") {
+      return {
+        ok: false,
+        reason: "rejected",
+        ...(isProviderCode(body.providerError)
+          ? { providerError: body.providerError }
+          : {}),
+      };
+    }
+    return { ok: false, reason: "unreachable" };
+  } catch {
+    return { ok: false, reason: "unreachable" };
+  }
+}
+
+/** Read the About you profile: GET /api/config/profile. Throws on non-2xx. */
+export async function getProfile(): Promise<UserProfile> {
+  const res = await fetch("/api/config/profile");
+  if (!res.ok) {
+    throw new Error(`getProfile failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as UserProfile;
+}
+
+/**
+ * Save the About you profile: PUT /api/config/profile.
+ *
+ * @remarks A 400 carries the server's field-named message for the tab to show verbatim; any other
+ * non-2xx throws. The 200 body is the normalized profile as stored.
+ */
+export async function saveProfile(
+  profile: UserProfile,
+): Promise<{ ok: true; profile: UserProfile } | { ok: false; error: string }> {
+  const res = await fetch("/api/config/profile", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profile),
+  });
+  if (res.ok) {
+    return { ok: true, profile: (await res.json()) as UserProfile };
+  }
+  if (res.status === 400) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: body.error ?? "Invalid profile" };
+  }
+  throw new Error(`saveProfile failed: ${res.status} ${res.statusText}`);
+}
+
+/** Read one Sentry issue with its latest event: GET /api/sentry/issue/:id. */
+export async function getSentryIssue(
+  issueId: string,
+): Promise<PrRequestResult<{ detail: SentryIssueDetail }>> {
+  const res = await prFetch(`/api/sentry/issue/${encodeURIComponent(issueId)}`);
+  if (!res?.ok) return prFailure(res);
+  return { ok: true, detail: (await res.json()) as SentryIssueDetail };
+}
+
+/** Resolve one Sentry issue; the server marks its item done only after Sentry agrees. */
+export async function resolveSentryIssue(
+  issueId: string,
+): Promise<PrRequestResult<object>> {
+  const res = await prFetch(
+    `/api/sentry/issue/${encodeURIComponent(issueId)}/resolve`,
+    { method: "POST" },
+  );
+  return res?.ok ? { ok: true } : prFailure(res);
+}
+
+export interface MeetingDraft {
+  key: string;
+  title: string;
+  description: string;
+}
+
+/**
+ * Draft the user's action items from meeting notes: POST /api/cards/draft-many.
+ *
+ * @remarks Non-OK statuses resolve `{ ok: false, error }` with the server's error code; an abort
+ * or a network failure rejects, left for the caller's catch, like `generateTicketDraft`.
+ */
+export async function draftMeetingItems(
+  meeting: string,
+  notes: string,
+  me: string,
+  signal: AbortSignal,
+): Promise<
+  { ok: true; drafts: MeetingDraft[] } | { ok: false; error: string | null }
+> {
+  const res = await fetch("/api/cards/draft-many", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ meeting, notes, me }),
+    signal,
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: body.error ?? null };
+  }
+  const body = (await res.json()) as { drafts: MeetingDraft[] };
+  return { ok: true, drafts: body.drafts };
+}
+
+/**
+ * Create the checked meeting drafts and store the notes: POST /api/meetings/items. Never throws.
+ *
+ * @remarks A 500 transcript-write-failed still created the items, so it resolves ok with
+ * notesSaved false.
+ */
+export async function createMeetingItems(
+  meeting: string,
+  drafts: readonly MeetingDraft[],
+  notes?: string,
+): Promise<
+  | { ok: true; created: number; updated: number; notesSaved: boolean }
+  | { ok: false; error: string | null }
+> {
+  try {
+    const res = await fetch("/api/meetings/items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ meeting, drafts, notes }),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      created?: number;
+      updated?: number;
+    };
+    const { created, updated } = body;
+    if (typeof created !== "number" || typeof updated !== "number") {
+      return { ok: false, error: body.error ?? null };
+    }
+    if (res.ok || body.error === "transcript-write-failed") {
+      return { ok: true, created, updated, notesSaved: res.ok };
+    }
+    return { ok: false, error: body.error ?? null };
+  } catch {
+    return { ok: false, error: null };
+  }
+}
+
+/** Read a meeting's stored transcript: GET /api/meetings/transcript. Throws on non-2xx. */
+export async function getMeetingTranscript(meetingId: string): Promise<string> {
+  const res = await fetch(
+    `/api/meetings/transcript?meetingId=${encodeURIComponent(meetingId)}`,
+  );
+  if (!res.ok) {
+    throw new Error(`getMeetingTranscript failed: ${res.status}`);
+  }
+  const body = (await res.json()) as { text: string };
+  return body.text;
+}
+
+/** Read the Granola round status: GET /api/meetings/granola. */
+export async function getGranola(): Promise<GranolaStatus> {
+  const res = await fetch("/api/meetings/granola");
+  if (!res.ok) throw new Error(`getGranola failed: ${res.status}`);
+  return (await res.json()) as GranolaStatus;
+}
+
+/** Save Granola settings: PUT /api/meetings/granola; answers the status after the change. */
+export async function putGranola(
+  patch: MeetingSourceConfig,
+): Promise<GranolaStatus> {
+  const res = await fetch("/api/meetings/granola", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`putGranola failed: ${res.status}`);
+  return (await res.json()) as GranolaStatus;
+}
+
+/** Check connection: POST /api/meetings/granola/check runs a fresh claude mcp list. */
+export async function checkGranola(): Promise<GranolaCheckResult> {
+  const res = await fetch("/api/meetings/granola/check", { method: "POST" });
+  if (!res.ok) throw new Error(`checkGranola failed: ${res.status}`);
+  return (await res.json()) as GranolaCheckResult;
+}
+
+/**
+ * Analyze now: POST /api/meetings/granola/run.
+ *
+ * @remarks A 409 (running or off) needs no message of its own: the status read that follows shows
+ * the round running or the card Off.
+ */
+export async function runGranola(): Promise<void> {
+  await fetch("/api/meetings/granola/run", { method: "POST" });
+}
+
+/** Read the Calendar source status: GET /api/calendar/status. */
+export async function getCalendarStatus(): Promise<CalendarStatus> {
+  const res = await fetch("/api/calendar/status");
+  if (!res.ok) throw new Error(`getCalendarStatus failed: ${res.status}`);
+  return (await res.json()) as CalendarStatus;
+}
+
+type CalendarResult<T> =
+  { ok: true; value: T } | { ok: false; error: CalendarErrorCode };
+
+async function calendarResult<T>(
+  res: Response,
+  read: (body: unknown) => T,
+): Promise<CalendarResult<T>> {
+  if (res.status === 409) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: (body.error ?? "failed") as CalendarErrorCode };
+  }
+  if (!res.ok) throw new Error(`calendar request failed: ${res.status}`);
+  return { ok: true, value: read(await res.json()) };
+}
+
+/**
+ * List this Mac's calendars: POST /api/calendar/calendars with no body.
+ *
+ * @remarks A POST, so a cross-site page cannot trigger the macOS Calendars prompt. A 409 carries
+ * the read's error code, which the card shows; other failures throw.
+ */
+export async function listCalendars(): Promise<
+  CalendarResult<CalendarChoice[]>
+> {
+  return calendarResult(
+    await fetch("/api/calendar/calendars", { method: "POST" }),
+    (body) => (body as { calendars: CalendarChoice[] }).calendars,
+  );
+}
+
+/**
+ * Save Calendar settings: PUT /api/calendar/settings.
+ *
+ * @remarks Enabling runs one test read on the server; a 409 carries its error code and nothing was
+ * saved.
+ */
+export async function putCalendarSettings(
+  patch: CalendarSettingsPatch,
+): Promise<CalendarResult<CalendarStatus>> {
+  return calendarResult(
+    await fetch("/api/calendar/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }),
+    (body) => body as CalendarStatus,
+  );
 }
 
 const WORKSPACES_TIMEOUT_MS = 60_000;

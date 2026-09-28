@@ -34,7 +34,7 @@ const BUDGETS = [
   {
     label: "index.html",
     match: (f) => f === "index.html",
-    budgetGzipBytes: 517, // seed: 470 (re-seeded 2026-09-24 with the sidebar shell)
+    budgetGzipBytes: 635, // seed: 577 (re-seeded 2026-09-28 with the Errors page route, LOCAL-46)
   },
   {
     label: "assets/main-*.js",
@@ -67,9 +67,55 @@ const BUDGETS = [
     budgetGzipBytes: 5310, // seed: 4828 (the vault page, lazy)
   },
   {
+    label: "assets/sessions-*.js",
+    match: (f) => f.startsWith(`assets${sep}sessions-`) && f.endsWith(".js"),
+    budgetGzipBytes: 3943, // seed: 3584 (re-seeded 2026-09-25 with the sessions toolbar, bulk bar, confirm dialog and keyboard rows)
+  },
+  {
+    label: "assets/pull-requests-*.js",
+    match: (f) =>
+      f.startsWith(`assets${sep}pull-requests-`) && f.endsWith(".js"),
+    budgetGzipBytes: 4861, // seed: 4419 (re-seeded with the Pull Requests detail pane, LOCAL-45)
+  },
+  {
+    label: "assets/errors-*.js",
+    match: (f) => f.startsWith(`assets${sep}errors-`) && f.endsWith(".js"),
+    budgetGzipBytes: 4266, // seed: 3878 (re-seeded 2026-09-28 with the Errors detail pane and its actions, lazy, LOCAL-46)
+  },
+  {
+    label: "assets/today-*.js",
+    match: (f) => f.startsWith(`assets${sep}today-`) && f.endsWith(".js"),
+    budgetGzipBytes: 4023, // seed: 3657 (the Today page with chips, list and agenda, lazy, LOCAL-48)
+  },
+  {
+    label: "assets/SlackPage-*.js",
+    match: (f) => f.startsWith(`assets${sep}SlackPage-`) && f.endsWith(".js"),
+    budgetGzipBytes: 2613, // seed: 2375 (the Slack page list and detail, lazy through the slack barrel's loadSlackPage, LOCAL-47)
+  },
+  {
+    label: "assets/palette-*.js",
+    match: (f) => f.startsWith(`assets${sep}palette-`) && f.endsWith(".js"),
+    budgetGzipBytes: 2595, // seed: 2359 (the command palette and the cheat sheet, lazy)
+  },
+  {
     label: "assets/archive-*.js",
     match: (f) => f.startsWith(`assets${sep}archive-`) && f.endsWith(".js"),
     budgetGzipBytes: 2132, // seed: 1939 (the archive page, lazy; the accounts page rides main because the accounts barrel is eager)
+  },
+  {
+    label: "assets/tickets-*.js",
+    match: (f) => f.startsWith(`assets${sep}tickets-`) && f.endsWith(".js"),
+    budgetGzipBytes: 3744, // seed: 3403 (the tickets page with its row model, lazy)
+  },
+  {
+    label: "assets/meetings-*.js",
+    match: (f) => f.startsWith(`assets${sep}meetings-`) && f.endsWith(".js"),
+    budgetGzipBytes: 4769, // seed: 4335 (re-seeded 2026-09-28 with the meeting detail pane and its four actions)
+  },
+  {
+    label: "assets/calendar-*.js",
+    match: (f) => f.startsWith(`assets${sep}calendar-`) && f.endsWith(".js"),
+    budgetGzipBytes: 2655, // seed: 2413 (the Calendar page agenda, lazy)
   },
   {
     label: "assets/index-*.css",

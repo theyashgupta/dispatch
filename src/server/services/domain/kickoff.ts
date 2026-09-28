@@ -1,4 +1,5 @@
 import type { Card } from "../../../shared/types.js";
+import { fenceUntrusted } from "../../../shared/untrusted.js";
 import { attachmentLinks, withAbsoluteAttachments } from "./attachments.js";
 import { attachmentsDir } from "../infra/paths.js";
 import { VAULT_RUN_PATH, VAULT_SCHEMA_PATH } from "../infra/paths.js";
@@ -142,6 +143,20 @@ function fenceTitle(title: string): string {
 }
 
 /**
+ * Make a card's inline description safe to paste into a kickoff.
+ *
+ * @remarks The status-marker token is defused like a title's. A card promoted from a provider item
+ * (its issueId is the item id, not its own) is also fenced, because that text came from someone
+ * else and could otherwise open a fence of its own or read as the operator's instructions.
+ * @see docs/ARCHITECTURE.md#group-card-titles
+ */
+function guardDescription(card: Card, text: string): string {
+  const defused = text.replace(MARKER_TOKEN_RE, "DISPATCH_STATUS ");
+  const promoted = card.source === "local" && card.issueId !== card.id;
+  return promoted ? fenceUntrusted(defused, Infinity) : defused;
+}
+
+/**
  * The group-arm's ticket slot (Phase 63, KICK-06): Linear members get a `## Tickets` heading with
  * one identifier/title/url bullet each plus ONE batched MCP-read instruction; local members follow
  * with an inlined `## <identifier>: <title>` section and their trimmed description (falling back
@@ -154,9 +169,8 @@ function fenceTitle(title: string): string {
  * title carrying a newline emits its tail as a STANDALONE line inside `## Tickets`, which is both a
  * prompt injection into the operator's own prompt (the highest-trust register the agent has) and a
  * marker spoof: `adapters/markers/parse.ts`'s `MARKER_RE` is line-anchored and scans the whole
- * pane, and the kickoff echo demonstrably reaches that parser. A member's `description` is
- * deliberately NOT fenced — inlined description content is multi-line by design and is content, not
- * a single-line field.
+ * pane, and the kickoff echo demonstrably reaches that parser. A member's description stays
+ * multi-line and goes through {@link guardDescription}, like a single card's.
  */
 function groupTicketSection(members: Card[]): string[] {
   const linear = members.filter((m) => (m.source ?? "linear") === "linear");
@@ -178,9 +192,12 @@ function groupTicketSection(members: Card[]): string[] {
     lines.push(
       ``,
       `## ${m.identifier}: ${fenceTitle(m.title)}`,
-      withAbsoluteAttachments(
-        m.description?.trim() || "(no description provided)",
-        attachmentsDir(m.id),
+      guardDescription(
+        m,
+        withAbsoluteAttachments(
+          m.description?.trim() || "(no description provided)",
+          attachmentsDir(m.id),
+        ),
       ),
     );
   }
@@ -222,6 +239,8 @@ function groupTicketSection(members: Card[]): string[] {
  * parent's commits are in this history; its uncommitted worktree changes are not) because that
  * boundary is the honest limit of what inheritance actually carries.
  * @see docs/ARCHITECTURE.md#session-inheritance
+ * @remarks Every inline description, a single card's or a group member's, goes through
+ * {@link guardDescription}.
  */
 export function buildKickoff(
   card: Card,
@@ -240,10 +259,12 @@ export function buildKickoff(
     card.description?.trim() || "(no description provided)";
   const imageNames = slim || isGroup ? [] : attachmentLinks(rawDescription);
   const imageDir = attachmentsDir(card.id);
-  const description =
+  const description = guardDescription(
+    card,
     imageNames.length > 0
       ? withAbsoluteAttachments(rawDescription, imageDir)
-      : rawDescription;
+      : rawDescription,
+  );
   const extra = extraDirection.trim();
   const url = card.url?.trim();
   const substituted =

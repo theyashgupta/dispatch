@@ -1,6 +1,8 @@
 export const PAGES = [
   "board",
   "inbox",
+  "sessions",
+  "tickets",
   "workspace",
   "settings",
   "activity",
@@ -8,6 +10,12 @@ export const PAGES = [
   "playbooks",
   "vault",
   "archive",
+  "pull-requests",
+  "errors",
+  "today",
+  "slack",
+  "meetings",
+  "calendar",
   "workspaces",
 ] as const;
 
