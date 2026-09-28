@@ -17,6 +17,8 @@ import { accountsRouter } from "./accounts.route.js";
 import { itemsRouter } from "./items.route.js";
 import { connectionRouter } from "./connection.route.js";
 import { githubRouter } from "./github.route.js";
+import { profileRouter } from "./profile.route.js";
+import { linearRouter } from "./linear.route.js";
 import { sentryRouter } from "./sentry.route.js";
 
 /**
@@ -45,4 +47,6 @@ apiRouter.use(accountsRouter);
 apiRouter.use(itemsRouter);
 apiRouter.use(connectionRouter);
 apiRouter.use(githubRouter);
+apiRouter.use(profileRouter);
+apiRouter.use(linearRouter);
 apiRouter.use(sentryRouter);

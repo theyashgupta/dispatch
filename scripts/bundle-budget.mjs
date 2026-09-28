@@ -98,6 +98,11 @@ const BUDGETS = [
     budgetGzipBytes: 2132, // seed: 1939 (the archive page, lazy; the accounts page rides main because the accounts barrel is eager)
   },
   {
+    label: "assets/tickets-*.js",
+    match: (f) => f.startsWith(`assets${sep}tickets-`) && f.endsWith(".js"),
+    budgetGzipBytes: 3744, // seed: 3403 (the tickets page with its row model, lazy)
+  },
+  {
     label: "assets/index-*.css",
     match: (f) => f.startsWith(`assets${sep}index-`) && f.endsWith(".css"),
     budgetGzipBytes: 898, // seed: 816

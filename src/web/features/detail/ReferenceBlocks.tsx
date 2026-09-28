@@ -1,4 +1,4 @@
-import { AlertTriangle, RotateCw } from "lucide-react";
+import { RotateCw } from "lucide-react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { cleanupCard } from "../../lib/api.js";
 import { MemberRow } from "../board/index.js";
@@ -7,6 +7,7 @@ import { Field } from "../../primitives/Field.js";
 import { Markdown } from "../../primitives/Markdown.js";
 import { Notice } from "../../primitives/Notice.js";
 import { PrList } from "./PrList.js";
+import { WarningIcon } from "../../primitives/WarningIcon.js";
 
 interface ReferenceBlocksProps {
   card: CardModel | null;
@@ -116,14 +117,7 @@ export function ReferenceBlocks({
         >
           <Notice
             tone="destructive"
-            icon={
-              <AlertTriangle
-                size={12}
-                strokeWidth={2}
-                aria-hidden="true"
-                style={{ flex: "0 0 auto" }}
-              />
-            }
+            icon={<WarningIcon />}
             label={`Provisioning error: ${c.startError.step}`}
           />
           <Notice tone="destructive" mono>
