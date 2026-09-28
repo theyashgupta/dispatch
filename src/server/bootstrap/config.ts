@@ -8,6 +8,7 @@ import type {
   SourceFilters,
   StatusChannel,
   TerminalAppearance,
+  UserProfile,
 } from "../../shared/types.js";
 import {
   DEFAULT_CLAUDE_ARGS,
@@ -21,6 +22,7 @@ import {
   DEFAULT_TERMINAL_APPEARANCE,
   validateTerminalAppearance,
 } from "../../shared/terminal-appearance.js";
+import { parseProfile } from "../../shared/profile.js";
 import { parseStateMap } from "../../shared/linear-state-map.js";
 import { StartupError } from "./binary-check.js";
 import { CONFIG_PATH, DISPATCH_DIR } from "../services/infra/paths.js";
@@ -108,6 +110,14 @@ function readWholeDays(
     value <= max
     ? value
     : fallback;
+}
+
+/** Read the About you profile tolerantly: a malformed or empty profile loads as absent. */
+function readProfile(parsed: Record<string, unknown>): UserProfile | undefined {
+  const result = parseProfile(parsed.profile);
+  return result.ok && Object.keys(result.value).length > 0
+    ? result.value
+    : undefined;
 }
 
 /**
@@ -427,6 +437,8 @@ export function loadConfig(): Config {
     ...(activeClaudeAccountId !== undefined ? { activeClaudeAccountId } : {}),
     terminal: readTerminal(parsed),
   };
+  const profile = readProfile(parsed);
+  if (profile) config.profile = profile;
 
   const hasKey = config.linearApiKey.length > 0;
   console.log(`[config] loaded ${CONFIG_PATH} (api key present: ${hasKey})`);
