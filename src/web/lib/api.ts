@@ -10,6 +10,7 @@ import type {
   FilterCapabilities,
   FilterOption,
   LinearComment,
+  LinearStateMap,
   LinearWorkflow,
   Playbook,
   PlaybookPickerResponse,
@@ -1244,6 +1245,38 @@ export async function getLinearWorkflow(): Promise<
     }
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     return { ok: false, error: body.error ?? "Could not load Linear teams." };
+  } catch {
+    return { ok: false, error: "Could not reach Dispatch. Try again." };
+  }
+}
+
+/** Read the saved column-to-state map: GET /api/config/linear-state-map. Throws on non-2xx. */
+export async function getLinearStateMap(): Promise<LinearStateMap> {
+  const res = await fetch("/api/config/linear-state-map");
+  if (!res.ok) {
+    throw new Error(
+      `getLinearStateMap failed: ${res.status} ${res.statusText}`,
+    );
+  }
+  return ((await res.json()) as { stateMap: LinearStateMap }).stateMap;
+}
+
+/** Save the whole column-to-state map: PUT /api/config/linear-state-map. */
+export async function saveLinearStateMap(
+  stateMap: LinearStateMap,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch("/api/config/linear-state-map", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stateMap }),
+    });
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return {
+      ok: false,
+      error: body.error ?? "Couldn't save the state map. Try again.",
+    };
   } catch {
     return { ok: false, error: "Could not reach Dispatch. Try again." };
   }
