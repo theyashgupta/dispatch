@@ -1,10 +1,9 @@
+import { TOKEN_SHAPE } from "../../../shared/credential.js";
 import type { SourceCredential } from "../../../shared/types.js";
 import { readGhToken } from "../../adapters/gh.js";
 import { readCurrent } from "./vault.js";
 
 export const GITHUB_TOKEN_KEY = "GITHUB_TOKEN";
-
-const TOKEN_SHAPE = /^[\x21-\x7e]+$/;
 
 /**
  * Resolve the GitHub token: the Vault value when it is non-empty, else the gh CLI login.

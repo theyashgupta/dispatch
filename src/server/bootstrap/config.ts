@@ -5,6 +5,7 @@ import writeFileAtomic from "write-file-atomic";
 import type {
   Config,
   ItemSourceConfig,
+  SlackSourceConfig,
   SourceFilters,
   StatusChannel,
   TerminalAppearance,
@@ -22,6 +23,11 @@ import {
   validateTerminalAppearance,
 } from "../../shared/terminal-appearance.js";
 import { StartupError } from "./binary-check.js";
+import {
+  isSlackChannel,
+  normalizeSlackChannels,
+  SLACK_CHANNEL_MAX,
+} from "../sources/slack/channel-ref.js";
 import { CONFIG_PATH, DISPATCH_DIR } from "../services/infra/paths.js";
 
 const DEFAULT_PORT = 4700;
@@ -233,6 +239,23 @@ function readNestedSourceSettings(
 }
 
 /**
+ * Read `sources.slack`: the item-source settings plus the picked channels.
+ *
+ * @remarks config.json is user-edited, so a malformed channel entry is dropped and the list is cut at
+ * the save route's cap instead of failing boot.
+ */
+function readSlackSettings(parsed: Record<string, unknown>): SlackSourceConfig {
+  const settings: SlackSourceConfig = readNestedSourceSettings(parsed, "slack");
+  const channels = nestedSource(parsed, "slack")?.channels;
+  if (Array.isArray(channels)) {
+    settings.channels = normalizeSlackChannels(
+      channels.filter(isSlackChannel),
+    ).slice(0, SLACK_CHANNEL_MAX);
+  }
+  return settings;
+}
+
+/**
  * Build the nested-shape object for the flat→nested boot migration. config.json is a user-edited
  * file, so unknown top-level keys are expected and carried forward verbatim, and any pre-existing
  * `sources` entries are preserved — including keys already inside `sources.linear` (a `filters`
@@ -389,6 +412,7 @@ export function loadConfig(): Config {
         ...readNestedSourceSettings(parsed, "linear"),
       },
       github: readNestedSourceSettings(parsed, "github"),
+      slack: readSlackSettings(parsed),
     },
     lastUsedPlaybook: readLastUsedPlaybook(parsed),
     cleanupDelayDays: readWholeDays(
