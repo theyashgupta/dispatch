@@ -11,8 +11,8 @@ src/server/
 ├── bootstrap/     # composition root + preflight: startup wiring, config holder, binary preflight, boot reconcile
 ├── routes/        # HTTP transport: route handlers (thin), SSE broadcaster, loopback/DNS-rebinding guard
 ├── services/      # orchestration: the start/cleanup saga, kickoff, config validation, rollback
-├── adapters/      # subprocess + external I/O: tmux, ttyd, git, the exec chokepoint, claude-trust, marker parse/watcher, Linear poller, editors
-├── sources/       # ticket sources: provider seam (linear.source.ts), source registry, per-source filters
+├── adapters/      # subprocess + external I/O: tmux, ttyd, git, the exec chokepoint, claude-trust, marker parse/watcher, Linear poller, editors, the macOS calendar reader (calendar-mac.ts)
+├── sources/       # ticket sources: provider seam (linear.source.ts), source registry, per-source filters, the calendar snapshot source (calendar/)
 └── store/         # single-writer state: board.store (never split) + Linear→Card mapping
 ```
 
@@ -28,6 +28,8 @@ src/server/
 | `linear/poller.ts`                                                                    | `adapters/` (external adapter) |
 | `editors.ts` (root file today — it is a subprocess adapter)                           | `adapters/`                    |
 | `store/{board.store,mapping}.ts`                                                      | `store/`                       |
+
+The calendar source lives in `sources/calendar/` (`calendar.source.ts`, `calendar-events.ts`, `ics.ts`); its macOS reader is the subprocess adapter `adapters/calendar-mac.ts`, injected at boot (the registry setters `setMacCalendarReader` and `setCredentialResolver`) because a source may import only sources and shared. Its status, calendar list and settings service is `services/orchestration/calendar.ts`, since it runs osascript, writes config and restarts pollers.
 
 `board.store.ts` stays one cohesive single-writer class — it is never split.
 
@@ -46,7 +48,7 @@ src/web/
 │   ├── settings/   # SettingsScreen (full-screen, sidebar-nav), PlaybookEditorModal
 │   └── badges/     # GoneBadge, PlanReadyBadge, SourceBadge — shared leaf feature (see import direction)
 ├── hooks/          # data/effect hooks: useBoardStream, useUnseenActivity, useTransitionNotifications, useResumeFeedback, useMediaQuery
-├── lib/            # non-UI helpers: api.ts, card-badges.ts, format-age.ts, resume-feedback.ts, start-request.ts, meetings.ts
+├── lib/            # non-UI helpers: api.ts, card-badges.ts, format-age.ts, resume-feedback.ts, start-request.ts, meetings.ts, calendar.ts
 └── styles/         # tokens.css — the design-token source of truth, survives unchanged
 ```
 
@@ -63,8 +65,9 @@ src/web/
 | `GoneBadge.tsx`, `PlanReadyBadge.tsx`, `SourceBadge.tsx`                                                                 | `features/badges/` (shared leaf) |
 | `SessionsPage.tsx`, `SessionRow.tsx`                                                                                     | `features/sessions/`             |
 | `MeetingNotesModal.tsx`, `MeetingsPage.tsx`, `MeetingList.tsx`, `MeetingDetail.tsx`                                      | `features/meetings/`             |
+| `CalendarPage.tsx`                                                                                                       | `features/calendar/`             |
 | `useBoardStream.ts`, `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts` | `hooks/`                         |
-| `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`, `meetings.ts`                     | `lib/`                           |
+| `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`, `meetings.ts`, `calendar.ts`      | `lib/`                           |
 | `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Glyph` / `Markdown`                                            | `primitives/`                    |
 | `tokens.css`                                                                                                             | `styles/`                        |
 

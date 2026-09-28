@@ -254,6 +254,112 @@ the timer and kills a running round; a window change clears the cursor and runs 
 routes (`GET`/`PUT /api/meetings/granola`, `POST .../check`, `POST .../run` answering 202 or 409)
 never return model output or stderr.
 
+### Calendar source
+
+The Calendar source turns the user's events from one hour ago to 48 hours ahead into items. It is a
+`snapshot` ticket source (`sources/calendar/calendar.source.ts`, id `calendar`, no filter
+dimensions) that polls every 300 s and is enabled only when `sources.calendar.enabled` is exactly
+`true`. `sources.calendar.mode` picks one of two readers. In `macos` mode (the default) it reads
+this Mac's calendars through `adapters/calendar-mac.ts`: one JXA script run as `osascript -l
+JavaScript -` through the exec chokepoint, the script on stdin and its arguments as one JSON argv
+element so no calendar title is ever spliced into script source, 30 s limit, SIGKILL 5 s after
+SIGTERM. The script uses the ObjC bridge to EventKit, `eventsMatchingPredicate` over the window and
+the selected calendars (by title; none selected reads every calendar whose title does not match
+`/birthday|holiday|siri suggestions/i`), and keeps the first 4000 characters of the notes. When no
+saved title matches a calendar the script answers an error (`failed`), so a renamed calendar keeps
+the last good items instead of reading as an empty day; when only some match, it reads the rest and
+the pull is partial, so no row of the missing calendar auto-resolves. The osascript output buffer is 16 MB. It uses
+EventKit and not the Calendar app's scripting dictionary because that dictionary returns a recurring
+event only as its first occurrence, so a weekly meeting never shows inside the window, and its
+`whose` filter scans every event; EventKit expands recurrences and filters by date natively. In
+`ical` mode it fetches the secret address stored under the Dispatch Vault key `CALENDAR_ICAL_URL`,
+read through `services/orchestration/calendar.ts#resolveIcalUrl`, and parses it with
+`sources/calendar/ics.ts#parseIcs`. Sources may import only sources and shared, so boot calls
+`setMacCalendarReader` and `setCredentialResolver("calendar", ...)` from `sources/registry.ts`
+before the registry is built. A failed read is rethrown as its
+error code, so the poller keeps the last good items, and the code with the last poll time and event
+count stays in memory for the status route.
+
+Consent: macOS asks once for calendar access, on the first read or calendar list, and the script
+waits up to 25 s for the answer. An authorization of denied or restricted, and an osascript error `-1743`, both map to the
+`calendar-denied` code, which the client shows as "Dispatch needs access to your calendars. Open
+System Settings, Privacy and Security, Calendars, and allow the app that runs Dispatch." A
+`selftest` argument makes the script answer before it touches EventKit, so a check can prove the
+script runs under the real osascript without raising the privacy prompt.
+
+The pure `sources/calendar/calendar-events.ts#calendarPriority` ranks a timed event 92 while it
+runs or when it starts within 15 minutes, 84 when it starts within 60 minutes, 64 when it starts
+later on today's local date, and 52 when it has ended or starts on a later day. An all-day event
+ranks 64 while it runs and 52 otherwise. `eventToItem` builds the item that the Calendar page and
+the Today agenda both read: id `calendar:<uid>:<start ISO>` (recurring instances share a UID),
+source `calendar`, type `event`, the title or "(No title)" cut to 300 characters, a snippet of the
+location and the first 280 characters of the notes (the rest of the notes is never stored),
+`createdAt` = start, and `url` = the join link. `meta` holds `start` and `end` (ISO, UTC),
+`allDay` (`"true"` or `"false"`) and `calendar`, plus `joinUrl`, `location` and `refs` only when
+non-empty. The join link is the first https URL, without credentials, from the conference field,
+the event URL, the location, then the notes, stored in its normalized form (`URL.href`), so a line
+break in the raw value never reaches the item. `refs` lists the ticket ids, GitHub pull request URLs
+and `<owner>/<repo>#<n>` references found in the notes, de-duplicated in order, at most 20, comma
+separated. For a snapshot source a pull replaces the row's `meta` instead of merging it, so an event
+that lost its conference link loses `joinUrl`; a row the store auto-resolved (an internal
+`autoResolved` flag, never on the wire) returns to `unread` when a later pull lists it again, and a
+user-set state clears the flag, so the user's Done still sticks. Append sources keep the merge.
+
+The iCal URL must parse and be https, or http to `127.0.0.1`, `::1` or `localhost`, with no
+credentials; anything else is `ical-url-invalid` with no request. Redirects are followed by hand,
+at most 5 hops, and every hop must be https, or http to loopback only when the configured URL is
+itself loopback, so a remote feed cannot aim Dispatch at a local service (a refused hop is
+`ical-url-invalid`, a sixth redirect is `ical-unreachable`). The fetch has a 30 s deadline, the body is read as a stream and
+refused past 5 MB (`ical-too-large`), and a body without `BEGIN:VCALENDAR` is `ical-invalid`.
+`parseIcs` reads UTC, floating, all-day and `TZID` times and expands only DAILY and WEEKLY rules
+(INTERVAL, BYDAY, UNTIL, COUNT, EXDATE, RECURRENCE-ID overrides, STATUS:CANCELLED) in the event's
+wall-clock time, so a 10:00 meeting stays at 10:00 across a DST change, capped at 1000 iterations.
+A cancelled series also drops its moved instances.
+Any other rule skips its series (with its RECURRENCE-ID overrides), and the cap, a skipped series
+or an RDATE marks the pull partial, so the poller never auto-resolves items it could not read. A
+skipped series marks it only when it can reach the window (DTSTART before the window end, no UNTIL
+or an UNTIL on or after the window start, and no COUNT or a COUNT bound on or after the window
+start, where the bound is DTSTART plus 4 x COUNT x a gap, the gap being the larger of INTERVAL x
+1, 7, 31 or 366 days for DAILY, WEEKLY, MONTHLY or YEARLY and a floor its BY parts imply (366 days
+for BYMONTH, BYYEARDAY or BYWEEKNO, 31 for BYMONTHDAY, BYSETPOS or an ordinal BYDAY, 7 for a plain
+BYDAY), and any other FREQ counts as reaching), an override of a skipped series only when
+it overlaps the window, and an RDATE (a PERIOD by its start) only when one of its dates overlaps
+the window, because a feed carries its whole history and one ended series must not stop
+auto-resolve for good. A VEVENT without a UID is skipped, since its item id would collide.
+Overrides and masters are indexed by UID once, so a large feed parses in linear time. Both readers use the window now minus 1 hour
+to now plus 48 hours. The URL is a secret: `CalendarReadError` carries only the code, and the URL
+never appears in a log, a status, a response or an error body.
+
+The Inbox excludes calendar events: `App.tsx` feeds the Inbox and its count with items whose
+source is not `calendar`, and passes the calendar items to the Calendar page. The page
+(`src/web/features/calendar/CalendarPage.tsx`) is the "Calendar" row of the "Sources" nav group.
+`src/web/lib/calendar.ts#agendaDays` keeps the `calendar` `event` items that overlap the window,
+sorts them by start then title, and groups them by local day labelled "Today", "Tomorrow" or the
+weekday and date; `soonLabel` gives "Now" while a timed event runs and "In <n> min" when it starts
+within 15 minutes. Each row shows the time range or "All day", the title, the location and
+calendar, the soon chip, a Join button when `meta.joinUrl` is a web URL, and "Prepare with agent".
+That button creates a To Do card through `POST /api/cards` titled "Prepare: <event title>", with a
+description from `preparePrompt` (the meeting line, the join link, the refs split into tickets
+named by their board card title and pull requests, and the brief to write; only the refs reach the
+prompt, never the invite notes, the title, calendar name, join link and card titles are flattened
+to one line, and every `DISPATCH_STATUS:` is rewritten; the card title is flattened the same way),
+then opens the existing start flow on that card. The page re-reads the status every 30 s, shows
+"Calendar is off. Connect it in Settings." when the source is off, shows the last error's copy in a
+notice above the list, and shows "Couldn't load the Calendar status. Reload the page." as a
+destructive notice in every state while the status read fails.
+
+The routes live in `routes/calendar.route.ts`: `GET /api/calendar/status` answers 200 with the
+enabled flag, mode, selected calendars, whether the Vault key is filled (read in every mode, so
+the card's iCal choice is truthful while a macOS calendar is connected) and the last read (500 `status-failed` on a fault);
+`POST /api/calendar/calendars` (no body) answers 200 `{ calendars }` (title, account and
+`ignoredByDefault`) or 409 `{ error }` with the reader's code. It is a POST because the list runs
+EventKit, which can raise the macOS Calendars prompt, and a cross-site GET carries no Origin for
+the loopback gate to refuse; `PUT
+/api/calendar/settings` validates `{ mode?, calendars?, enabled? }` (400 on a wrong shape), runs one
+test read first when the result is enabled and answers 409 `{ error }` without writing when it
+fails, else writes the config, rebuilds the sources, restarts the pollers and answers 200 with the
+status. None of them returns the iCal URL.
+
 ### Session Projection Chokepoint
 
 A card's six flat session fields — `tmuxSession`, `ttydPort`, `hookToken`, `claudeSessionId`,
@@ -3219,7 +3325,9 @@ remembered `dsp.nav` value. Below 768px the sidebar leaves the layout: the main 
 top bar (glyph, page title, menu button) and the same `SidebarNav` renders inside a left sheet
 with a scrim, closed by Escape or a row click, with focus returned to the menu button, following
 the `ActivityDrawer` pattern. `--nav-current` is `0px` in that mode so the docked panel spans the
-viewport. The pure decision is `effectiveNavState(stored, carousel, narrow)`.
+viewport. The pure decision is `effectiveNavState(stored, carousel, narrow)`. At the same breakpoint the Settings section nav changes from a vertical rail to a horizontal
+scrolling strip above the content (`SettingsScreen.tsx`, the "Settings section nav" row of
+`docs/standards/design-contract.md#chrome-dimensions`).
 
 **Retired with the strip.** The strip cascade invariant (its two token cascades, formerly the
 eighteenth NEW-series ID) and its file-scoped check were deleted together with the strip component, and `FROZEN_COUNT` in `scripts/check-invariants.mjs`
