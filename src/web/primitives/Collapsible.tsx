@@ -27,6 +27,12 @@ const headerStyle: CSSProperties = {
   textAlign: "left",
 };
 
+const titleStyle: CSSProperties = {
+  flex: "1 1 auto",
+  minWidth: 0,
+  overflowWrap: "anywhere",
+};
+
 const chevronStyle: CSSProperties = {
   flex: "0 0 auto",
   transition: "transform var(--motion-panel-open) var(--easing-enter)",
@@ -73,7 +79,7 @@ export function Collapsible({
             transform: open ? "rotate(90deg)" : "none",
           }}
         />
-        <span style={{ flex: "1 1 auto" }}>{title}</span>
+        <span style={titleStyle}>{title}</span>
         {badge}
       </button>
       <div

@@ -6,7 +6,7 @@
 
 :root {
   /* Color — 60/30/10 dark theme, one accent + one semantic (destructive). */
-  --bg: #0b0c0e; /* Dominant (60%): app background, error/first-run screens */
+  --bg: #0b0c0e; /* Dominant (60%): app background, error screens */
   --surface-column: #131417; /* Secondary (30%): column surface, slide-over */
   --surface-card: #1a1b1f; /* Secondary (30%): elevated card surface */
   --surface-card-hover: #202126; /* Card hover lift (no accent) */
@@ -23,7 +23,7 @@
   --space-sm: 8px; /* inter-card gap, column inner gap, card padding */
   --space-lg: 16px; /* column inner padding, board gutter */
   --space-xl: 24px; /* slide-over/error screen block spacing */
-  --space-2xl: 32px; /* error/first-run outer padding */
+  --space-2xl: 32px; /* error screen outer padding */
   --space-3xl: 48px; /* empty-state vertical centering offset */
   --panel-section-gap: 16px; /* LUI-05: the detail panel's single reading-surface section rhythm, docs/standards/design-contract.md ## Spacing rhythm; replaces ReferenceBlocks/PrList/CardTimeline's own ad hoc per-block margins */
 
@@ -39,7 +39,7 @@
   --font-micro: 11px; /* card timestamps, column count chips, mono one-step-down */
   --font-heading: 17px; /* panel title, modal heading */
   --font-md-h1: 14px; /* description-heading cap — held at 14px; the panel title moved to 17px so the old "one step below 15px" relationship no longer holds, but no replacement value was rendered and checked, so this is deliberately not retuned */
-  --font-display: 22px; /* wordmark, first-run / startup-error title */
+  --font-display: 22px; /* wordmark, startup-error title */
 
   --weight-regular: 400;
   --weight-medium: 500; /* column headers, panel section labels, sidebar sync status text */

@@ -28,9 +28,7 @@ const perfCalls: { cmd: string; shape: string; ms: number }[] = [];
  * `opts.timeout` deadline), mirroring the perf-harness kill pattern (`scripts/perf-boot.mjs`).
  * Without this, a child that ignores SIGTERM keeps the promisified `execFile` promise pending
  * forever — a caller's single-flight guard then wedges until backend restart. Returns a disarm
- * callback that run() calls when the child exits or fails to spawn, never on settle or on the
- * abort's own error event: an abort rejects before the child is gone, and disarming then would
- * cancel the SIGKILL it still needs.
+ * callback the caller MUST run on settle so a normally-exiting child's PID is never re-signalled.
  */
 function armKillEscalation(
   child: ChildProcess,
@@ -41,7 +39,7 @@ function armKillEscalation(
   const onAbort = (): void => {
     timers.push(setTimeout(() => child.kill("SIGKILL"), graceMs));
   };
-  if (opts.signal?.aborted) onAbort();
+  if (opts.signal?.aborted === true) onAbort();
   else opts.signal?.addEventListener("abort", onAbort, { once: true });
   if (opts.timeout !== undefined) {
     timers.push(
@@ -62,11 +60,11 @@ function armKillEscalation(
  * distinction is load-bearing for probes whose success path can still exit non-zero: `lsof` exits 1
  * with perfectly valid stdout when its `-p` list names a pid that has since died, so a caller must
  * be able to tell "exited 1, parse the stdout anyway" from "binary missing, give up".
- * `.killed` is true only when the `timeout` deadline killed the child; an abort rejects with code
- * `ABORT_ERR` and a maxBuffer overflow with `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`.
  * `killEscalationMs` (opt-in, inert when unset) arms {@link armKillEscalation} for callers whose
  * child may ignore the abort/timeout SIGTERM (headless `claude -p` drafts). `env` adds variables on
  * top of the inherited process environment (a per-account `CLAUDE_CONFIG_DIR`), never replaces it.
+ * With escalation armed, an aborted run settles only once the child has exited, so a caller's
+ * single flight never releases while the old child still runs.
  * @param input written to the child's stdin, which is then closed; for stream-json requests. The
  * stdin error event is swallowed because a child that exits before draining a large input raises
  * EPIPE outside the awaited promise, which would otherwise take the whole server down.
@@ -105,13 +103,6 @@ export async function run(
     killEscalationMs === undefined
       ? null
       : armKillEscalation(pending.child, execOpts, killEscalationMs);
-  if (disarm) {
-    const { child } = pending;
-    child.once("exit", disarm);
-    child.once("error", () => {
-      if (child.pid === undefined) disarm();
-    });
-  }
   try {
     const { stdout, stderr } = await pending;
     if (perfExec) perfCalls.push({ cmd, shape, ms: performance.now() - t0 });
@@ -124,13 +115,35 @@ export async function run(
       code?: number | string;
       killed?: boolean;
     };
+    if (disarm !== null && opts.signal?.aborted === true) {
+      await childExit(pending.child);
+    }
     throw Object.assign(new Error(e.message), {
       stderr: e.stderr ?? "",
       stdout: e.stdout ?? "",
       code: e.code,
       killed: e.killed === true,
     });
+  } finally {
+    if (disarm !== null) void childExit(pending.child).then(disarm);
   }
+}
+
+/**
+ * Resolves once the child has exited; at once for one that already exited or never spawned.
+ *
+ * @remarks An abort rejects the exec promise before the child is gone, so escalation timers are
+ * released on exit instead, which is what lets the SIGKILL reach a child that ignores SIGTERM.
+ */
+function childExit(child: ChildProcess): Promise<void> {
+  if (
+    child.pid === undefined ||
+    child.exitCode !== null ||
+    child.signalCode !== null
+  ) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => child.once("exit", () => resolve()));
 }
 
 /**

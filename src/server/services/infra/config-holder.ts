@@ -3,9 +3,14 @@ import writeFileAtomic from "write-file-atomic";
 import {
   DEFAULT_CLAUDE_ACCOUNT_ID,
   type Config,
+  type ItemSourceId,
+  type LinearStateMap,
+  type SourceConfig,
+  type SlackChannel,
   type SourceFilters,
   type StatusChannel,
   type TerminalAppearance,
+  type UserProfile,
 } from "../../../shared/types.js";
 import { CONFIG_PATH } from "./paths.js";
 
@@ -48,17 +53,58 @@ export function getHooksRuntime(): HooksRuntime | null {
 }
 
 /**
- * Persist a source's filter selection to `~/.dispatch/config.json` and make it live immediately.
+ * Rewrite one `sources.linear` field in config.json and mirror it onto the held config.
  *
- * @remarks The single writer for the secret-adjacent config file. It re-reads the raw file, mutates
- * ONLY `sources.linear.filters`, and carries every other top-level key plus `sources.linear.apiKey`
- * forward verbatim, so the write never drops the Linear key or a user-added field. The write is
- * atomic at mode 0600 because the file holds the API key at rest; the key is never read, logged, or
- * returned — it is copied as an opaque value. The held in-memory Config is mutated IN PLACE so the
- * registry's live-filters accessor closure sees the new scope on the very next poll with no restart.
- * A JSON parse failure reports the byte position only, never the parser message, which embeds a
- * snippet of the file around the failure — and a mis-quoted key sits exactly there.
+ * @remarks The write is atomic at mode 0600 because the file holds the Linear key at rest. A parse
+ * failure reports the byte position only: the parser message quotes the file, key included.
  */
+function writeLinearField<K extends keyof SourceConfig>(
+  field: K,
+  value: SourceConfig[K],
+): void {
+  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
+  let parsed: Record<string, unknown>;
+  try {
+    const p = JSON.parse(raw) as unknown;
+    if (typeof p !== "object" || p === null || Array.isArray(p)) {
+      throw new Error("not an object");
+    }
+    parsed = p as Record<string, unknown>;
+  } catch (err) {
+    const pos = /position (\d+)/.exec((err as Error).message)?.[1];
+    throw new Error(
+      `config at ${CONFIG_PATH} is not valid JSON${pos ? ` (near position ${pos})` : ""}`,
+    );
+  }
+
+  const priorSources =
+    typeof parsed.sources === "object" &&
+    parsed.sources !== null &&
+    !Array.isArray(parsed.sources)
+      ? (parsed.sources as Record<string, unknown>)
+      : {};
+  const priorLinear =
+    typeof priorSources.linear === "object" &&
+    priorSources.linear !== null &&
+    !Array.isArray(priorSources.linear)
+      ? (priorSources.linear as Record<string, unknown>)
+      : {};
+
+  const next = {
+    ...parsed,
+    sources: { ...priorSources, linear: { ...priorLinear, [field]: value } },
+  };
+
+  writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
+    mode: 0o600,
+  });
+  fs.chmodSync(CONFIG_PATH, 0o600);
+
+  const held = orchestrationConfig?.sources?.linear;
+  if (held) held[field] = value;
+}
+
+/** Persist a source's filter selection so the next poll uses it. */
 export function updateSourceFilters(
   sourceId: string,
   filters: SourceFilters,
@@ -66,121 +112,34 @@ export function updateSourceFilters(
   if (sourceId !== "linear") {
     throw new Error(`unknown source: ${sourceId}`);
   }
+  writeLinearField("filters", filters);
+}
 
-  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
-  let parsed: Record<string, unknown>;
-  try {
-    const p = JSON.parse(raw) as unknown;
-    if (typeof p !== "object" || p === null || Array.isArray(p)) {
-      throw new Error("not an object");
-    }
-    parsed = p as Record<string, unknown>;
-  } catch (err) {
-    const pos = /position (\d+)/.exec((err as Error).message)?.[1];
-    throw new Error(
-      `config at ${CONFIG_PATH} is not valid JSON${pos ? ` (near position ${pos})` : ""}`,
-    );
-  }
-
-  const priorSources =
-    typeof parsed.sources === "object" &&
-    parsed.sources !== null &&
-    !Array.isArray(parsed.sources)
-      ? (parsed.sources as Record<string, unknown>)
-      : {};
-  const priorLinear =
-    typeof priorSources.linear === "object" &&
-    priorSources.linear !== null &&
-    !Array.isArray(priorSources.linear)
-      ? (priorSources.linear as Record<string, unknown>)
-      : {};
-
-  const next = {
-    ...parsed,
-    sources: {
-      ...priorSources,
-      linear: { ...priorLinear, filters },
-    },
-  };
-
-  writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
-    mode: 0o600,
-  });
-  fs.chmodSync(CONFIG_PATH, 0o600);
-
-  if (orchestrationConfig?.sources?.linear) {
-    orchestrationConfig.sources.linear.filters = filters;
-  }
+/** Persist the Linear column-to-state map so the next push uses it. */
+export function updateLinearStateMap(stateMap: LinearStateMap): void {
+  writeLinearField("stateMap", stateMap);
 }
 
 /**
- * Persist the Linear API key to `~/.dispatch/config.json` and make it live immediately, mirroring
- * `updateSourceFilters` exactly.
+ * Persist the Linear API key so the next poll uses it.
  *
- * @remarks The first-run setup route calls this only after a live Linear check has passed, so a
- * rejected key never reaches disk. It re-reads the raw file, mutates ONLY `sources.linear.apiKey`,
- * and carries every other top-level key plus `sources.linear.filters` forward verbatim. The write is
- * atomic at mode 0600 because the file holds the key at rest; the key is copied as an opaque value —
- * never read back, logged, or returned. Both the resolved `linearApiKey` read and the nested
- * `sources.linear.apiKey` on the held Config are mutated IN PLACE so the registry's key-carrying
- * source and the keyless-boot signal both flip on the next poll with no restart.
+ * @remarks The setup route calls this only after a live Linear check passed, so a rejected key
+ * never reaches disk.
  */
 export function updateLinearApiKey(apiKey: string): void {
-  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
-  let parsed: Record<string, unknown>;
-  try {
-    const p = JSON.parse(raw) as unknown;
-    if (typeof p !== "object" || p === null || Array.isArray(p)) {
-      throw new Error("not an object");
-    }
-    parsed = p as Record<string, unknown>;
-  } catch (err) {
-    const pos = /position (\d+)/.exec((err as Error).message)?.[1];
-    throw new Error(
-      `config at ${CONFIG_PATH} is not valid JSON${pos ? ` (near position ${pos})` : ""}`,
-    );
-  }
-
-  const priorSources =
-    typeof parsed.sources === "object" &&
-    parsed.sources !== null &&
-    !Array.isArray(parsed.sources)
-      ? (parsed.sources as Record<string, unknown>)
-      : {};
-  const priorLinear =
-    typeof priorSources.linear === "object" &&
-    priorSources.linear !== null &&
-    !Array.isArray(priorSources.linear)
-      ? (priorSources.linear as Record<string, unknown>)
-      : {};
-
-  const next = {
-    ...parsed,
-    sources: {
-      ...priorSources,
-      linear: { ...priorLinear, apiKey },
-    },
-  };
-
-  writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
-    mode: 0o600,
-  });
-  fs.chmodSync(CONFIG_PATH, 0o600);
-
-  if (orchestrationConfig) {
-    orchestrationConfig.linearApiKey = apiKey;
-    if (orchestrationConfig.sources?.linear) {
-      orchestrationConfig.sources.linear.apiKey = apiKey;
-    }
-  }
+  writeLinearField("apiKey", apiKey);
+  if (orchestrationConfig) orchestrationConfig.linearApiKey = apiKey;
 }
 
 /**
- * Read `~/.dispatch/config.json`, merge the flat top-level keys in `patch`, and write it back
- * atomically at mode 0600, mutating the in-memory config the same way so the change is live.
- * @remarks Shared by every flat-key writer below; nested `sources` writers keep their own merge.
+ * Remove the stored Linear key from `~/.dispatch/config.json` and from the held config.
+ *
+ * @remarks Deletes only `sources.linear.apiKey` and a legacy flat `linearApiKey`, carrying every
+ * other key (the Linear filters included) forward verbatim at mode 0600. A file with no stored key
+ * is left byte-identical, so a repeated disconnect writes nothing. The held config keeps its typed
+ * empty state (`""`), which the registry reads as keyless on the next rebuild.
  */
-function patchConfig(patch: Partial<Config>): void {
+export function clearLinearApiKey(): void {
   const raw = fs.readFileSync(CONFIG_PATH, "utf8");
   let parsed: Record<string, unknown>;
   try {
@@ -197,7 +156,112 @@ function patchConfig(patch: Partial<Config>): void {
     );
   }
 
-  const next = { ...parsed, ...patch };
+  const sources =
+    typeof parsed.sources === "object" &&
+    parsed.sources !== null &&
+    !Array.isArray(parsed.sources)
+      ? (parsed.sources as Record<string, unknown>)
+      : {};
+  const linear =
+    typeof sources.linear === "object" &&
+    sources.linear !== null &&
+    !Array.isArray(sources.linear)
+      ? (sources.linear as Record<string, unknown>)
+      : null;
+
+  if ((linear && "apiKey" in linear) || "linearApiKey" in parsed) {
+    const next: Record<string, unknown> = { ...parsed };
+    delete next.linearApiKey;
+    if (linear) {
+      const nextLinear = { ...linear };
+      delete nextLinear.apiKey;
+      next.sources = { ...sources, linear: nextLinear };
+    }
+    writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
+      mode: 0o600,
+    });
+    fs.chmodSync(CONFIG_PATH, 0o600);
+  }
+
+  if (orchestrationConfig) {
+    orchestrationConfig.linearApiKey = "";
+    if (orchestrationConfig.sources?.linear) {
+      orchestrationConfig.sources.linear.apiKey = "";
+    }
+  }
+}
+
+type SourceBlocks = NonNullable<Config["sources"]>;
+
+/**
+ * Patch one `sources.<id>` block in `~/.dispatch/config.json` and in the held config.
+ *
+ * @remarks Every other top-level key and every other source block, including the Linear key, is
+ * carried forward verbatim; the write is atomic at mode 0600 like the other writers here.
+ */
+export function patchSourceConfig<K extends keyof SourceBlocks>(
+  id: K,
+  patch: Partial<NonNullable<SourceBlocks[K]>>,
+): void {
+  const parsed = readConfigObject();
+  const priorSources =
+    typeof parsed.sources === "object" &&
+    parsed.sources !== null &&
+    !Array.isArray(parsed.sources)
+      ? (parsed.sources as Record<string, unknown>)
+      : {};
+  const prior = priorSources[id];
+  const priorBlock =
+    typeof prior === "object" && prior !== null && !Array.isArray(prior)
+      ? (prior as Record<string, unknown>)
+      : {};
+  const next = {
+    ...parsed,
+    sources: { ...priorSources, [id]: { ...priorBlock, ...patch } },
+  };
+  writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
+    mode: 0o600,
+  });
+  fs.chmodSync(CONFIG_PATH, 0o600);
+  if (orchestrationConfig) {
+    const sources: SourceBlocks = orchestrationConfig.sources ?? {};
+    sources[id] = { ...sources[id], ...patch };
+    orchestrationConfig.sources = sources;
+  }
+}
+
+/**
+ * Read `~/.dispatch/config.json` as a JSON object.
+ *
+ * @remarks A parse failure reports the byte position only, never the parser message, which embeds
+ * a snippet of the file and so can carry the API key.
+ */
+function readConfigObject(): Record<string, unknown> {
+  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
+  let parsed: Record<string, unknown>;
+  try {
+    const p = JSON.parse(raw) as unknown;
+    if (typeof p !== "object" || p === null || Array.isArray(p)) {
+      throw new Error("not an object");
+    }
+    parsed = p as Record<string, unknown>;
+  } catch (err) {
+    const pos = /position (\d+)/.exec((err as Error).message)?.[1];
+    throw new Error(
+      `config at ${CONFIG_PATH} is not valid JSON${pos ? ` (near position ${pos})` : ""}`,
+      { cause: err },
+    );
+  }
+  return parsed;
+}
+
+/**
+ * Read `~/.dispatch/config.json`, merge the flat top-level keys in `patch`, and write it back
+ * atomically at mode 0600, mutating the in-memory config the same way so the change is live.
+ * @remarks Shared by every flat-key writer below; nested `sources` writers keep their own merge.
+ */
+function patchConfig(patch: Partial<Config>): void {
+  const next = { ...readConfigObject(), ...patch };
 
   writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
     mode: 0o600,
@@ -268,6 +332,27 @@ export function updateTerminalAppearance(appearance: TerminalAppearance): void {
 }
 
 /**
+ * Record that the setup wizard was closed so it never opens on its own again.
+ *
+ * @remarks Idempotent: every close path in the wizard calls it, and a repeat writes the same flag.
+ */
+export function markOnboardingDone(): void {
+  patchConfig({ onboardingDone: true });
+}
+
+/**
+ * Persist the About you profile (Settings ▸ About you) and make it live.
+ *
+ * @remarks Called only from the validated `PUT /config/profile` route. An empty profile is stored
+ * as an absent key, because JSON serialization drops the undefined value.
+ */
+export function updateProfile(profile: UserProfile): void {
+  patchConfig({
+    profile: Object.keys(profile).length > 0 ? profile : undefined,
+  });
+}
+
+/**
  * Persist the active Claude account id (Settings ▸ Accounts, header switcher) and make it live for
  * the next session start.
  *
@@ -309,5 +394,82 @@ export function updateActiveClaudeAccountId(id: string): void {
     } else {
       orchestrationConfig.activeClaudeAccountId = id;
     }
+  }
+}
+
+/**
+ * Persist whether an item source may poll, and make it live for the next registry rebuild.
+ *
+ * @remarks Only `sources.<id>.enabled` changes; every other key, including the rest of that source's
+ * block, is carried verbatim. The connection routes are the only callers.
+ */
+export function setSourceEnabled(
+  sourceId: ItemSourceId,
+  enabled: boolean,
+): void {
+  patchSourceBlock(sourceId, { enabled });
+}
+
+/**
+ * Persist the Slack channels to poll.
+ *
+ * @remarks Only `sources.slack.channels` changes; the caller has already validated the list.
+ */
+export function setSlackChannels(channels: SlackChannel[]): void {
+  patchSourceBlock("slack", { channels });
+}
+
+/**
+ * Merge fields into one item source's config block on disk and in the held config.
+ *
+ * @remarks Atomic write at mode 0600; every other key in the file and in the block is carried verbatim.
+ */
+function patchSourceBlock(
+  sourceId: ItemSourceId,
+  patch: { enabled?: boolean; channels?: SlackChannel[] },
+): void {
+  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
+  let parsed: Record<string, unknown>;
+  try {
+    const p = JSON.parse(raw) as unknown;
+    if (typeof p !== "object" || p === null || Array.isArray(p)) {
+      throw new Error("not an object");
+    }
+    parsed = p as Record<string, unknown>;
+  } catch (err) {
+    const pos = /position (\d+)/.exec((err as Error).message)?.[1];
+    throw new Error(
+      `config at ${CONFIG_PATH} is not valid JSON${pos ? ` (near position ${pos})` : ""}`,
+      { cause: err },
+    );
+  }
+
+  const sources =
+    typeof parsed.sources === "object" &&
+    parsed.sources !== null &&
+    !Array.isArray(parsed.sources)
+      ? (parsed.sources as Record<string, unknown>)
+      : {};
+  const prior =
+    typeof sources[sourceId] === "object" &&
+    sources[sourceId] !== null &&
+    !Array.isArray(sources[sourceId])
+      ? (sources[sourceId] as Record<string, unknown>)
+      : {};
+
+  const next = {
+    ...parsed,
+    sources: { ...sources, [sourceId]: { ...prior, ...patch } },
+  };
+  writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
+    mode: 0o600,
+  });
+  fs.chmodSync(CONFIG_PATH, 0o600);
+
+  if (orchestrationConfig) {
+    orchestrationConfig.sources = {
+      ...orchestrationConfig.sources,
+      [sourceId]: { ...orchestrationConfig.sources?.[sourceId], ...patch },
+    };
   }
 }

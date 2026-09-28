@@ -22,15 +22,22 @@ import {
 } from "./hooks/useUnseenActivity.js";
 import { useTransitionNotifications } from "./hooks/useTransitionNotifications.js";
 import { AppShell } from "./AppShell.js";
-import { NavSheet, SidebarNav, TopBar } from "./features/nav/index.js";
+import {
+  NAV_ITEMS,
+  NavSheet,
+  SidebarNav,
+  TopBar,
+  visibleNavItems,
+} from "./features/nav/index.js";
 import { effectiveNavState } from "./lib/nav-state.js";
+import { hideDisabledSlack } from "./lib/hide-disabled-slack.js";
 import {
   CAROUSEL_QUERY,
   NARROW_QUERY,
   useMediaQuery,
 } from "./hooks/useMediaQuery.js";
 import { PageHeader } from "./primitives/PageHeader.js";
-import { useRoute } from "./hooks/useRoute.js";
+import { pendingRestore, useRoute } from "./hooks/useRoute.js";
 import type { Page } from "./lib/route.js";
 import { useNavState } from "./hooks/useNavState.js";
 import { UsageChip } from "./features/accounts/index.js";
@@ -55,11 +62,12 @@ import {
   StartModal,
   CleanupModal,
   ResetModal,
+  SyncToLinearModal,
   CreateTicketModal,
   MultiSelect,
 } from "./features/modals/index.js";
 import { settingsTabFrom } from "./lib/settings-tab.js";
-import { FirstRunSetup } from "./features/setup/index.js";
+import { SetupWizard } from "./features/setup/index.js";
 import { Toast } from "./primitives/Toast.js";
 import { Spinner } from "./primitives/Spinner.js";
 import { Button } from "./primitives/Button.js";
@@ -70,20 +78,41 @@ import {
 } from "./hooks/useUndoToast.js";
 import {
   moveCard,
+  getSlackThread,
+  pollSource,
   promoteItem,
   resetCard as resetCardApi,
   restoreArchived,
+  resumeCard,
   setItemState,
   snoozeItem,
+  switchSession,
   unwindGroup as unwindGroupApi,
 } from "./lib/api.js";
-import type { ActionServices } from "./lib/actions.js";
+import { syncSources, type ActionServices } from "./lib/actions.js";
+import { buildCommands } from "./lib/commands.js";
+import { GLOBAL_SHORTCUTS, bindShortcuts } from "./lib/shortcuts.js";
+import { useShortcuts } from "./hooks/useShortcuts.js";
 import { useItems } from "./hooks/useItems.js";
+import { buildPrRows } from "./lib/pr-rows.js";
+import { feedItems, isListedError } from "./lib/feed-items.js";
+import { slackRows } from "./lib/slack-rows.js";
+import { nowMs } from "./lib/format-age.js";
+import { flattenSessions } from "./lib/sessions.js";
 import { useAsk } from "./hooks/useAsk.js";
 import { askAboutQuestion } from "./lib/ask.js";
 import type { UnwindDestination } from "../shared/types.js";
 import { UpdateBanner } from "./features/update/index.js";
-import { cleanupCard as cleanupCardApi, getCard, getSetup } from "./lib/api.js";
+import {
+  cleanupCard as cleanupCardApi,
+  getCard,
+  getSetup,
+  markOnboardingDone,
+} from "./lib/api.js";
+import {
+  shouldMarkOnboardingDone,
+  shouldOpenSetupWizard,
+} from "./lib/setup-wizard.js";
 import {
   cleanupAttemptEnded,
   cleanupOutcomeCopy,
@@ -91,18 +120,22 @@ import {
 } from "./lib/cleanup-feedback.js";
 import { refreshPushSubscription } from "./lib/push.js";
 import type { StartRequest } from "./lib/start-request.js";
+import { meetingNotice } from "./lib/meetings.js";
 import { formatSize } from "./lib/format-size.js";
 import type { WorkspacesSummary } from "./features/workspaces/index.js";
-import type {
-  PrerequisiteStatus,
-  TunnelState,
-  WorktreeRow,
-} from "../shared/types.js";
+import type { SetupChecks, TunnelState, WorktreeRow } from "../shared/types.js";
 import type { CardSearchResult } from "../shared/search.js";
 import { DONE_PAGE_SIZE } from "../shared/done-limit.js";
 
+import { isTicketCard } from "./lib/linear-state.js";
+
 const InboxView = lazy(() =>
   import("./features/inbox/index.js").then((m) => ({ default: m.InboxView })),
+);
+const TicketsPage = lazy(() =>
+  import("./features/tickets/index.js").then((m) => ({
+    default: m.TicketsPage,
+  })),
 );
 const OrcaView = lazy(() =>
   import("./features/orca/index.js").then((m) => ({ default: m.OrcaView })),
@@ -125,6 +158,54 @@ const PlaybooksPage = lazy(() =>
 const VaultPage = lazy(() =>
   import("./features/vault/index.js").then((m) => ({
     default: m.VaultPage,
+  })),
+);
+const PullRequestsPage = lazy(() =>
+  import("./features/pull-requests/index.js").then((m) => ({
+    default: m.PullRequestsPage,
+  })),
+);
+const ErrorsPage = lazy(() =>
+  import("./features/errors/index.js").then((m) => ({
+    default: m.ErrorsPage,
+  })),
+);
+const TodayPage = lazy(() =>
+  import("./features/today/index.js").then((m) => ({
+    default: m.TodayPage,
+  })),
+);
+const SlackPage = lazy(() =>
+  import("./features/slack/index.js").then((m) => m.loadSlackPage()),
+);
+const SessionsPage = lazy(() =>
+  import("./features/sessions/index.js").then((m) => ({
+    default: m.SessionsPage,
+  })),
+);
+const CommandPalette = lazy(() =>
+  import("./features/palette/index.js").then((m) => ({
+    default: m.CommandPalette,
+  })),
+);
+const MeetingNotesModal = lazy(() =>
+  import("./features/meetings/index.js").then((m) => ({
+    default: m.MeetingNotesModal,
+  })),
+);
+const MeetingsPage = lazy(() =>
+  import("./features/meetings/index.js").then((m) => ({
+    default: m.MeetingsPage,
+  })),
+);
+const CalendarPage = lazy(() =>
+  import("./features/calendar/index.js").then((m) => ({
+    default: m.CalendarPage,
+  })),
+);
+const CheatSheet = lazy(() =>
+  import("./features/palette/index.js").then((m) => ({
+    default: m.CheatSheet,
   })),
 );
 const ArchivePage = lazy(() =>
@@ -299,6 +380,18 @@ export function App() {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [pinned, setPinned] = useState<PinnedCard | null>(null);
   const [pinnedHydrating, setPinnedHydrating] = useState(false);
+  const [panelRoute, setPanelRoute] = useState(() => ({
+    page: route.page,
+    restoring: pendingRestore(),
+  }));
+  if (panelRoute.page !== route.page) {
+    setPanelRoute({ page: route.page, restoring: false });
+    if (!panelRoute.restoring && route.page !== "workspace") {
+      setSelectedCardId(null);
+      setPinned(null);
+      setPinnedHydrating(false);
+    }
+  }
   const [pinFetchError, setPinFetchError] = useState<{
     id: string;
     kind: "not-found" | "network";
@@ -334,6 +427,20 @@ export function App() {
       localStorage.setItem("dsp.sound", soundEnabled ? "on" : "off");
     } catch {}
   }, [soundEnabled]);
+
+  const [errorsInFeeds, setErrorsInFeeds] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("dsp.errorsInFeeds") === "on";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("dsp.errorsInFeeds", errorsInFeeds ? "on" : "off");
+    } catch {}
+  }, [errorsInFeeds]);
 
   useEffect(() => {
     void refreshPushSubscription();
@@ -505,7 +612,52 @@ export function App() {
 
   const undoToast = useUndoToast();
   const items = useItems(board);
+  const inboxItems = useMemo(
+    () =>
+      hideDisabledSlack(
+        feedItems(items, errorsInFeeds),
+        board?.enabledSources ?? [],
+      ),
+    [items, errorsInFeeds, board?.enabledSources],
+  );
+  const slack = useMemo(() => slackRows(inboxItems), [inboxItems]);
+  const navItems = useMemo(
+    () => visibleNavItems(NAV_ITEMS, board?.enabledSources ?? []),
+    [board?.enabledSources],
+  );
+  const meetingItems = items.filter((item) => item.source === "meeting");
+  const inboxRows = useMemo(
+    () => inboxItems.filter((item) => item.source !== "calendar"),
+    [inboxItems],
+  );
   const { show: showUndo, notice: showNotice } = undoToast;
+  const [startRequest, setStartRequest] = useState<StartRequest | null>(null);
+  const startAgent = useCallback(
+    async (
+      target: { itemId?: string; cardId?: string },
+      extraDirection: string,
+      context?: string,
+    ) => {
+      try {
+        if (target.cardId) {
+          setStartRequest({
+            cardId: target.cardId,
+            newSession: true,
+            extraDirection,
+          });
+          return;
+        }
+        if (!target.itemId) return;
+        const { card } = await promoteItem(target.itemId, context);
+        if (card.column === "inbox") await moveCard(card.id, "todo");
+        setStartRequest({ cardId: card.id, extraDirection });
+      } catch {
+        showNotice("Couldn't start the agent. Try again.");
+      }
+    },
+    [showNotice],
+  );
+
   const askAbout = useCallback(
     (question: string) => navigate("ask", question),
     [navigate],
@@ -516,19 +668,30 @@ export function App() {
   );
   const actionServices = useMemo<ActionServices>(
     () => ({
-      api: { promoteItem, setItemState, snoozeItem, moveCard },
+      api: {
+        promoteItem,
+        setItemState,
+        snoozeItem,
+        moveCard,
+        cleanupCard: cleanupCardApi,
+        switchSession,
+        resumeCard,
+        pollSource,
+        getSlackThread,
+      },
       showUndo,
       notice: showNotice,
       openUrl: (url) => {
-        window.open(url, "_blank", "noopener");
+        window.open(url, "_blank", "noopener,noreferrer");
       },
       copyText: (text) =>
         navigator.clipboard
           ? navigator.clipboard.writeText(text)
           : Promise.reject(new Error("Clipboard unavailable over http")),
+      startAgent,
       askAbout,
     }),
-    [showUndo, showNotice, askAbout],
+    [showUndo, showNotice, startAgent, askAbout],
   );
   const requestUnwind = useCallback(
     (id: string, to: UnwindDestination) => {
@@ -555,7 +718,6 @@ export function App() {
     [undoToast],
   );
 
-  const [startRequest, setStartRequest] = useState<StartRequest | null>(null);
   const startCard =
     board?.cards.find((card) => card.id === startRequest?.cardId) ??
     actionablePinnedCard(startRequest?.cardId, pinned);
@@ -605,6 +767,8 @@ export function App() {
   };
 
   const [resetCardId, setResetCardId] = useState<string | null>(null);
+  const [syncCardId, setSyncCardId] = useState<string | null>(null);
+  const cardToSync = board?.cards.find((card) => card.id === syncCardId);
   const resetCard =
     board?.cards.find((card) => card.id === resetCardId) ??
     actionablePinnedCard(resetCardId, pinned);
@@ -624,59 +788,92 @@ export function App() {
   };
 
   const [createTicketOpen, setCreateTicketOpen] = useState(false);
+  const [meetingNotesOpen, setMeetingNotesOpen] = useState(false);
 
-  const overlayAboveContent =
-    selectedCard != null ||
-    activityOpen ||
-    sheetOpen ||
-    createTicketOpen ||
-    cleanupCard != null ||
-    resetCard != null ||
-    (startCard != null && startRequest != null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const overlayReturnRef = useRef<HTMLElement | null>(null);
+  const openOverlay = (open: (value: boolean) => void) => () => {
+    overlayReturnRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    open(true);
+  };
+  const closeOverlay =
+    (open: (value: boolean) => void) =>
+    (ran = false) => {
+      open(false);
+      const target = overlayReturnRef.current;
+      overlayReturnRef.current = null;
+      if (ran !== true && target?.isConnected === true) target.focus();
+    };
 
-  const [setupState, setSetupState] = useState<
-    "loading" | "needsKey" | "ready"
-  >("loading");
-  const [prerequisites, setPrerequisites] = useState<PrerequisiteStatus[]>([]);
-  const [node, setNode] = useState<{
-    version: string;
-    floor: string;
-    ok: boolean;
-  } | null>(null);
-  const [storage, setStorage] = useState<{ ok: boolean; path: string } | null>(
-    null,
+  const [setupWizardOpen, setSetupWizardOpen] = useState(false);
+  const [setupLoaded, setSetupLoaded] = useState(false);
+  const [setupChecks, setSetupChecks] = useState<SetupChecks | null>(null);
+  const [setupRuns, setSetupRuns] = useState(0);
+  useShortcuts(
+    bindShortcuts(GLOBAL_SHORTCUTS, {
+      "meta+k": openOverlay(setPaletteOpen),
+      n: openOverlay(setCreateTicketOpen),
+      "?": openOverlay(setShortcutsOpen),
+    }),
+    {
+      menuOpen:
+        activityOpen ||
+        sheetOpen ||
+        board === null ||
+        !setupLoaded ||
+        setupWizardOpen,
+      scopeId: "root",
+    },
   );
   useEffect(() => {
     let active = true;
     void getSetup()
       .then((s) => {
         if (!active) return;
-        setPrerequisites(s.prerequisites);
-        setNode(s.node);
-        setStorage(s.storage);
-        setSetupState(s.needsKey ? "needsKey" : "ready");
+        setSetupChecks(s);
+        setSetupWizardOpen(shouldOpenSetupWizard(s));
+        if (shouldMarkOnboardingDone(s)) {
+          void markOnboardingDone().catch((err: unknown) => {
+            console.error("markOnboardingDone failed", err);
+          });
+        }
       })
-      .catch(() => {
-        if (active) setSetupState("ready");
+      .catch((err: unknown) => {
+        console.error("getSetup failed", err);
+      })
+      .finally(() => {
+        if (active) setSetupLoaded(true);
       });
     return () => {
       active = false;
     };
   }, []);
 
-  if (setupState === "loading") {
-    return <BootScreen connection={connection} />;
-  }
+  const openSetupWizard = async (): Promise<boolean> => {
+    try {
+      setSetupChecks(await getSetup());
+      setSetupWizardOpen(true);
+      return true;
+    } catch (err) {
+      console.error("getSetup failed", err);
+      return false;
+    }
+  };
 
-  if (setupState === "needsKey" && node && storage) {
-    return (
-      <FirstRunSetup
-        prerequisites={prerequisites}
-        node={node}
-        storage={storage}
-        onConnected={() => setSetupState("ready")}
-      />
-    );
+  const closeSetupWizard = (linearChanged: boolean) => {
+    setSetupWizardOpen(false);
+    if (linearChanged) setSetupRuns((n) => n + 1);
+    void markOnboardingDone().catch((err: unknown) => {
+      console.error("markOnboardingDone failed", err);
+    });
+  };
+
+  if (!setupLoaded) {
+    return <BootScreen connection={connection} />;
   }
 
   if (board === null) {
@@ -694,10 +891,23 @@ export function App() {
     />
   ) : null;
 
-  const inboxCount = inboxWaitingCount(board.cards, items);
+  const inboxCount = inboxWaitingCount(board.cards, inboxRows);
+  const sessionRows = flattenSessions(board.cards, nowMs());
+  const liveSessionCount = sessionRows.filter((row) => row.running).length;
+  const githubEnabled = board.enabledSources?.includes("github") === true;
+  const prCount = githubEnabled
+    ? items.filter((item) => item.source === "github" && item.state !== "done")
+        .length
+    : 0;
+  const ticketsCount = board.cards.filter(isTicketCard).length;
+  const sentryEnabled = board.enabledSources?.includes("sentry") === true;
+  const errorCount = sentryEnabled ? items.filter(isListedError).length : 0;
+  const slackCount = slack.filter((row) => row.unread).length;
   const pageMeta: Record<Page, { title: string; count?: number }> = {
     board: { title: "Board", count: board.cards.length },
     inbox: { title: "Inbox", count: inboxCount },
+    sessions: { title: "Sessions", count: sessionRows.length },
+    tickets: { title: "Tickets", count: ticketsCount },
     workspace: { title: "Workspace" },
     settings: { title: "Settings" },
     activity: { title: "Activity", count: feed.events.length },
@@ -708,6 +918,15 @@ export function App() {
     playbooks: { title: "Playbooks", count: playbookCount },
     vault: { title: "Vault", count: vaultCount },
     archive: { title: "Archive", count: archiveCount },
+    "pull-requests": {
+      title: "Pull Requests",
+      count: githubEnabled ? buildPrRows(items, board.cards).length : 0,
+    },
+    errors: { title: "Errors", count: errorCount },
+    today: { title: "Today" },
+    slack: { title: "Slack", count: slack.length },
+    meetings: { title: "Meetings", count: meetingItems.length },
+    calendar: { title: "Calendar" },
     workspaces: { title: "Workspaces", count: workspacesSummary?.count },
     ask: { title: "Ask", count: ask.turns.length },
     flow: { title: "Flow" },
@@ -724,14 +943,22 @@ export function App() {
       collapsed={navMode === "collapsed"}
       onToggleCollapsed={nav.toggle}
       inboxCount={inboxCount}
+      meetingCount={meetingItems.length}
+      liveSessionCount={liveSessionCount}
+      prCount={prCount}
+      ticketsCount={ticketsCount}
+      errorCount={errorCount}
+      slackCount={slackCount}
+      navItems={navItems}
       syncedAt={board.syncedAt ?? null}
       connection={connection}
       pollIntervalMs={board.pollIntervalMs ?? null}
       syncWarning={board.syncWarning ?? null}
       syncUnreachable={board.syncUnreachable ?? false}
+      noSource={(board.enabledSources ?? []).length === 0}
       accountSlot={accountSlot}
       onOpenCreateTicket={() => {
-        setCreateTicketOpen(true);
+        openOverlay(setCreateTicketOpen)();
         if (navMode === "topbar") setSheetOpen(false);
       }}
       onOpenActivity={() => {
@@ -757,6 +984,10 @@ export function App() {
             onClick={() => setPlaybookCreateRequest((n) => n + 1)}
           >
             New playbook
+          </Button>
+        ) : route.page === "meetings" ? (
+          <Button variant="primary" onClick={openOverlay(setMeetingNotesOpen)}>
+            From meeting notes
           </Button>
         ) : route.page === "activity" ? (
           <>
@@ -844,13 +1075,79 @@ export function App() {
                 selectedCardId={selectedCard ? selectedCardId : null}
                 onSelectCard={selectCard}
               />
+            ) : route.page === "pull-requests" ? (
+              <PullRequestsPage
+                board={board}
+                items={items}
+                selectedKey={route.id ?? null}
+                onSelect={(key) =>
+                  navigate("pull-requests", key ?? undefined, { replace: true })
+                }
+                onMarkRead={(id) => void setItemState(id, "read")}
+                onNotice={showNotice}
+                onStartAgent={(row, prompt) =>
+                  void startAgent(
+                    { itemId: row.itemId, cardId: row.cardId },
+                    prompt,
+                  )
+                }
+              />
+            ) : route.page === "errors" ? (
+              <ErrorsPage
+                board={board}
+                items={items}
+                selectedKey={route.id ?? null}
+                onSelect={(key) =>
+                  navigate("errors", key ?? undefined, { replace: true })
+                }
+                onMarkRead={(id) => void setItemState(id, "read")}
+                onNotice={showNotice}
+                onStartAgent={(row, prompt, context) =>
+                  void startAgent(
+                    { itemId: row.itemId, cardId: row.cardId },
+                    prompt,
+                    context,
+                  )
+                }
+              />
+            ) : route.page === "today" ? (
+              <TodayPage
+                board={board}
+                items={inboxItems}
+                onSelectCard={selectCard}
+                onNavigate={navigate}
+              />
+            ) : route.page === "slack" ? (
+              <SlackPage
+                board={board}
+                rows={slack}
+                selectedId={route.id ?? null}
+                onSelect={(id) =>
+                  navigate("slack", id ?? undefined, { replace: true })
+                }
+                onMarkRead={(id) =>
+                  void setItemState(id, "read").catch(() =>
+                    showNotice("Couldn't mark it read."),
+                  )
+                }
+                services={actionServices}
+              />
             ) : route.page === "inbox" ? (
               <InboxView
                 board={board}
-                items={items}
+                items={inboxRows}
                 selectedCardId={selectedCard ? selectedCardId : null}
                 onSelectCard={selectCard}
                 services={actionServices}
+              />
+            ) : route.page === "tickets" ? (
+              <TicketsPage
+                board={board}
+                selectedCardId={selectedCard ? selectedCardId : null}
+                onSelectCard={selectCard}
+                onStartRequest={requestStart}
+                onMoveCard={moveCard}
+                onNotice={showNotice}
               />
             ) : route.page === "settings" ? (
               <SettingsScreen
@@ -863,6 +1160,10 @@ export function App() {
                 tunnelState={tunnelState}
                 soundEnabled={soundEnabled}
                 onToggleSound={setSoundEnabled}
+                onRunSetup={openSetupWizard}
+                connectionKey={setupRuns}
+                errorsInFeeds={errorsInFeeds}
+                onToggleErrorsInFeeds={setErrorsInFeeds}
               />
             ) : route.page === "activity" ? (
               <ActivityPage
@@ -873,6 +1174,13 @@ export function App() {
               />
             ) : route.page === "accounts" ? (
               <AccountsPage claudeAccounts={claudeAccounts} />
+            ) : route.page === "sessions" ? (
+              <SessionsPage
+                board={board}
+                selectedCardId={selectedCard ? selectedCardId : null}
+                onSelectCard={selectCard}
+                services={actionServices}
+              />
             ) : route.page === "archive" ? (
               <ArchivePage onCountChange={setArchiveCount} />
             ) : route.page === "playbooks" ? (
@@ -882,6 +1190,23 @@ export function App() {
               />
             ) : route.page === "vault" ? (
               <VaultPage onCountChange={setVaultCount} />
+            ) : route.page === "calendar" ? (
+              <CalendarPage
+                items={items}
+                cards={board.cards}
+                services={actionServices}
+                onStartPromoted={(cardId) => setStartRequest({ cardId })}
+                onOpenSettings={() => navigate("settings")}
+              />
+            ) : route.page === "meetings" ? (
+              <MeetingsPage
+                items={meetingItems}
+                selectedId={route.id}
+                onSelect={(id) => navigate("meetings", id ?? undefined)}
+                onOpenMeetingNotes={openOverlay(setMeetingNotesOpen)}
+                services={actionServices}
+                onStartPromoted={(cardId) => setStartRequest({ cardId })}
+              />
             ) : route.page === "workspaces" ? (
               <WorkspacesPage
                 board={board}
@@ -908,7 +1233,6 @@ export function App() {
                 doneLimit={doneLimit}
                 onLoadMoreDone={() => setDoneLimit((n) => n + DONE_PAGE_SIZE)}
                 onSelectSearchResult={selectSearchResult}
-                overlayAboveContent={overlayAboveContent}
               />
             )}
           </Suspense>
@@ -937,6 +1261,7 @@ export function App() {
           onCleanupRequest={setCleanupCardId}
           onUnwindRequest={requestUnwind}
           onResetRequest={setResetCardId}
+          onSyncRequest={setSyncCardId}
           onAskRequest={(card) =>
             askAbout(
               askAboutQuestion({
@@ -973,6 +1298,7 @@ export function App() {
           key={`${startRequest.cardId}:${startRequest.newSession === true ? "new" : "start"}`}
           card={startCard}
           newSession={startRequest.newSession === true}
+          extraDirection={startRequest.extraDirection}
           onClose={() => setStartRequest(null)}
           onEditPlaybooks={() => {
             setStartRequest(null);
@@ -996,8 +1322,72 @@ export function App() {
           onClose={() => setResetCardId(null)}
         />
       )}
+      {cardToSync && (
+        <SyncToLinearModal
+          key={syncCardId}
+          card={cardToSync}
+          cards={board?.cards ?? []}
+          onClose={() => setSyncCardId(null)}
+        />
+      )}
       {createTicketOpen && (
-        <CreateTicketModal onClose={() => setCreateTicketOpen(false)} />
+        <CreateTicketModal
+          onClose={closeOverlay(setCreateTicketOpen)}
+          onFromMeetingNotes={() => {
+            setCreateTicketOpen(false);
+            setMeetingNotesOpen(true);
+          }}
+        />
+      )}
+      {meetingNotesOpen && (
+        <Suspense fallback={null}>
+          <MeetingNotesModal
+            onClose={closeOverlay(setMeetingNotesOpen)}
+            onCreated={(result) => showNotice(meetingNotice(result))}
+          />
+        </Suspense>
+      )}
+      {shortcutsOpen && (
+        <Suspense fallback={null}>
+          <CheatSheet onClose={closeOverlay(setShortcutsOpen)} />
+        </Suspense>
+      )}
+      {paletteOpen && (
+        <Suspense fallback={null}>
+          <CommandPalette
+            commands={buildCommands(
+              {
+                api: {
+                  moveCard: (id, column) =>
+                    moveCard(id, column).catch(() =>
+                      showNotice(
+                        `Couldn't move ${board.cards.find((c) => c.id === id)?.identifier ?? id}.`,
+                      ),
+                    ),
+                },
+                requestStart,
+                requestCleanup: setCleanupCardId,
+                openCard: selectCard,
+                navigate,
+                newTicket: openOverlay(setCreateTicketOpen),
+                meetingNotes: openOverlay(setMeetingNotesOpen),
+                syncNow: () =>
+                  void syncSources(
+                    actionServices.api,
+                    board.enabledSources ?? [],
+                    showNotice,
+                  ),
+              },
+              navItems,
+              selectedCard,
+            )}
+            onClose={closeOverlay(setPaletteOpen)}
+            onOpenCard={selectSearchResult}
+          />
+        </Suspense>
+      )}
+      {setupWizardOpen && setupChecks && (
+        <SetupWizard {...setupChecks} onClose={closeSetupWizard} />
       )}
       {isToastVisible(undoToast.state) && (
         <Toast

@@ -122,3 +122,183 @@ test("archiveRetentionDays reads a valid value and falls back to 30 on anything 
   writeConfig({});
   assert.equal(loadConfig().archiveRetentionDays, 30);
 });
+
+test("sources.linear.enabled and pollIntervalMs are read when well formed", () => {
+  writeConfig({
+    sources: { linear: { apiKey: "k", enabled: false, pollIntervalMs: 15000 } },
+  });
+  const linear = loadConfig().sources?.linear;
+  assert.equal(linear?.enabled, false);
+  assert.equal(linear?.pollIntervalMs, 15000);
+});
+
+test("a string enabled and a negative interval fall back", () => {
+  writeConfig({
+    sources: { linear: { apiKey: "k", enabled: "yes", pollIntervalMs: -5 } },
+  });
+  const linear = loadConfig().sources?.linear;
+  assert.equal(linear?.enabled, undefined);
+  assert.equal(linear?.pollIntervalMs, undefined);
+});
+
+test("a migrated flat key still resolves with no source settings", () => {
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, JSON.stringify({ linearApiKey: "flat" }));
+  const cfg = loadConfig();
+  assert.equal(cfg.linearApiKey, "flat");
+  assert.equal(cfg.sources?.linear?.enabled, undefined);
+  assert.equal(cfg.sources?.linear?.pollIntervalMs, undefined);
+});
+
+test("a zero source interval falls back to the global one", () => {
+  writeConfig({
+    pollIntervalMs: 20000,
+    sources: { linear: { apiKey: "k", pollIntervalMs: 0 } },
+  });
+  const cfg = loadConfig();
+  assert.equal(cfg.sources?.linear?.pollIntervalMs, undefined);
+  assert.equal(cfg.pollIntervalMs, 20000);
+});
+
+test("a non-positive global interval falls back to the default", () => {
+  writeConfig({ pollIntervalMs: -5 });
+  assert.equal(loadConfig().pollIntervalMs, 60000);
+});
+
+test("a malformed sources block falls back on every source field", () => {
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, JSON.stringify({ sources: "nope" }));
+  const cfg = loadConfig();
+  assert.equal(cfg.linearApiKey, "");
+  assert.equal(cfg.sources?.linear?.enabled, undefined);
+  assert.equal(cfg.sources?.linear?.pollIntervalMs, undefined);
+});
+
+test("a malformed filters block yields the default filters", () => {
+  writeConfig({ sources: { linear: { apiKey: "k", filters: ["x"] } } });
+  const filters = loadConfig().sources?.linear?.filters;
+  assert.deepEqual(filters, {
+    assignees: [],
+    projects: [],
+    teams: [],
+    currentCycle: false,
+    includeActive: false,
+  });
+});
+
+test("a filters block keeps only string ids and boolean flags", () => {
+  writeConfig({
+    sources: {
+      linear: {
+        apiKey: "k",
+        filters: {
+          assignees: ["a1", 7],
+          teams: "t",
+          currentCycle: "yes",
+          includeActive: true,
+        },
+      },
+    },
+  });
+  const filters = loadConfig().sources?.linear?.filters;
+  assert.deepEqual(filters, {
+    assignees: ["a1"],
+    projects: [],
+    teams: [],
+    currentCycle: false,
+    includeActive: true,
+  });
+});
+
+test("a sources.meeting block loads enabled and the window", () => {
+  writeConfig({
+    sources: {
+      linear: { apiKey: "k" },
+      meeting: { enabled: true, windowHours: 168 },
+    },
+  });
+  assert.deepEqual(loadConfig().sources?.meeting, {
+    enabled: true,
+    windowHours: 168,
+  });
+});
+
+test("a bad enabled and an unlisted window are ignored, the window defaults to 48", () => {
+  for (const meeting of [
+    { enabled: "yes", windowHours: 50 },
+    { windowHours: "168" },
+    null,
+  ]) {
+    writeConfig({ sources: { linear: { apiKey: "k" }, meeting } });
+    assert.deepEqual(loadConfig().sources?.meeting, { windowHours: 48 });
+  }
+  writeConfig({});
+  assert.deepEqual(loadConfig().sources?.meeting, { windowHours: 48 });
+});
+
+test("the flat key migration keeps sources.meeting on disk", () => {
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({
+      linearApiKey: "flat",
+      sources: { meeting: { enabled: true, windowHours: 72 } },
+    }),
+  );
+  const config = loadConfig();
+  assert.deepEqual(config.sources?.meeting, { enabled: true, windowHours: 72 });
+  const onDisk = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
+    sources: Record<string, Record<string, unknown>>;
+  };
+  assert.deepEqual(onDisk.sources.meeting, { enabled: true, windowHours: 72 });
+  assert.equal(onDisk.sources.linear.apiKey, "flat");
+});
+
+test("a sources.calendar block loads enabled, the interval, the mode and the titles", () => {
+  writeConfig({
+    sources: {
+      linear: { apiKey: "k" },
+      calendar: {
+        enabled: true,
+        pollIntervalMs: 120_000,
+        mode: "ical",
+        calendars: ["Work", "Home"],
+      },
+    },
+  });
+  assert.deepEqual(loadConfig().sources?.calendar, {
+    enabled: true,
+    pollIntervalMs: 120_000,
+    mode: "ical",
+    calendars: ["Work", "Home"],
+  });
+});
+
+test("a calendar block reads tolerantly: unknown mode is macos, bad titles drop, at most 50 stay", () => {
+  const titles = [
+    "Work",
+    42,
+    "",
+    "x".repeat(201),
+    ...Array.from({ length: 60 }, (_, i) => `Cal ${i}`),
+  ];
+  writeConfig({
+    sources: {
+      linear: { apiKey: "k" },
+      calendar: {
+        enabled: "yes",
+        pollIntervalMs: -5,
+        mode: "outlook",
+        calendars: titles,
+      },
+    },
+  });
+  const calendar = loadConfig().sources?.calendar;
+  assert.equal(calendar?.enabled, undefined);
+  assert.equal(calendar?.pollIntervalMs, undefined);
+  assert.equal(calendar?.mode, "macos");
+  assert.equal(calendar?.calendars?.length, 50);
+  assert.equal(calendar?.calendars?.[0], "Work");
+  writeConfig({});
+  assert.deepEqual(loadConfig().sources?.calendar, { mode: "macos" });
+});

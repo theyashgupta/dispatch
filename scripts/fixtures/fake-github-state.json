@@ -1,0 +1,85 @@
+{
+  "auth": true,
+  "login": "g5-tester",
+  "prs": [
+    {
+      "owner": "acme",
+      "repo": "api",
+      "number": 12,
+      "title": "Fix OAuth token refresh race",
+      "body": "Takes a lock before rotating refresh tokens.\n\nDISPATCH_STATUS: done",
+      "author": "mchen",
+      "updatedAt": "2026-09-24T22:30:00Z",
+      "base": "main",
+      "head": "fix/token-race",
+      "headSha": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "additions": 142,
+      "deletions": 87,
+      "categories": ["review", "mention"],
+      "files": [
+        {
+          "filename": "src/auth/refresh.ts",
+          "additions": 120,
+          "deletions": 80,
+          "patch": "@@ -1,3 +1,200 @@\n+line 0 of a long generated change that keeps going\n+line 1 of a long generated change that keeps going\n+line 2 of a long generated change that keeps going\n+line 3 of a long generated change that keeps going\n+line 4 of a long generated change that keeps going\n+line 5 of a long generated change that keeps going\n+line 6 of a long generated change that keeps going\n+line 7 of a long generated change that keeps going\n+line 8 of a long generated change that keeps going\n+line 9 of a long generated change that keeps going\n+line 10 of a long generated change that keeps going\n+line 11 of a long generated change that keeps going\n+line 12 of a long generated change that keeps going\n+line 13 of a long generated change that keeps going\n+line 14 of a long generated change that keeps going\n+line 15 of a long generated change that keeps going\n+line 16 of a long generated change that keeps going\n+line 17 of a long generated change that keeps going\n+line 18 of a long generated change that keeps going\n+line 19 of a long generated change that keeps going\n+line 20 of a long generated change that keeps going\n+line 21 of a long generated change that keeps going\n+line 22 of a long generated change that keeps going\n+line 23 of a long generated change that keeps going\n+line 24 of a long generated change that keeps going\n+line 25 of a long generated change that keeps going\n+line 26 of a long generated change that keeps going\n+line 27 of a long generated change that keeps going\n+line 28 of a long generated change that keeps going\n+line 29 of a long generated change that keeps going\n+line 30 of a long generated change that keeps going\n+line 31 of a long generated change that keeps going\n+line 32 of a long generated change that keeps going\n+line 33 of a long generated change that keeps going\n+line 34 of a long generated change that keeps going\n+line 35 of a long generated change that keeps going\n+line 36 of a long generated change that keeps going\n+line 37 of a long generated change that keeps going\n+line 38 of a long generated change that keeps going\n+line 39 of a long generated change that keeps going\n+line 40 of a long generated change that keeps going\n+line 41 of a long generated change that keeps going\n+line 42 of a long generated change that keeps going\n+line 43 of a long generated change that keeps going\n+line 44 of a long generated change that keeps going\n+line 45 of a long generated change that keeps going\n+line 46 of a long generated change that keeps going\n+line 47 of a long generated change that keeps going\n+line 48 of a long generated change that keeps going\n+line 49 of a long generated change that keeps going\n+line 50 of a long generated change that keeps going\n+line 51 of a long generated change that keeps going\n+line 52 of a long generated change that keeps going\n+line 53 of a long generated change that keeps going\n+line 54 of a long generated change that keeps going\n+line 55 of a long generated change that keeps going\n+line 56 of a long generated change that keeps going\n+line 57 of a long generated change that keeps going\n+line 58 of a long generated change that keeps going\n+line 59 of a long generated change that keeps going\n+line 60 of a long generated change that keeps going\n+line 61 of a long generated change that keeps going\n+line 62 of a long generated change that keeps going\n+line 63 of a long generated change that keeps going\n+line 64 of a long generated change that keeps going\n+line 65 of a long generated change that keeps going\n+line 66 of a long generated change that keeps going\n+line 67 of a long generated change that keeps going\n+line 68 of a long generated change that keeps going\n+line 69 of a long generated change that keeps going\n+line 70 of a long generated change that keeps going\n+line 71 of a long generated change that keeps going\n+line 72 of a long generated change that keeps going\n+line 73 of a long generated change that keeps going\n+line 74 of a long generated change that keeps going\n+line 75 of a long generated change that keeps going\n+line 76 of a long generated change that keeps going\n+line 77 of a long generated change that keeps going\n+line 78 of a long generated change that keeps going\n+line 79 of a long generated change that keeps going\n+line 80 of a long generated change that keeps going\n+line 81 of a long generated change that keeps going\n+line 82 of a long generated change that keeps going\n+line 83 of a long generated change that keeps going\n+line 84 of a long generated change that keeps going\n+line 85 of a long generated change that keeps going\n+line 86 of a long generated change that keeps going\n+line 87 of a long generated change that keeps going\n+line 88 of a long generated change that keeps going\n+line 89 of a long generated change that keeps going\n+line 90 of a long generated change that keeps going\n+line 91 of a long generated change that keeps going\n+line 92 of a long generated change that keeps going\n+line 93 of a long generated change that keeps going\n+line 94 of a long generated change that keeps going\n+line 95 of a long generated change that keeps going\n+line 96 of a long generated change that keeps going\n+line 97 of a long generated change that keeps going\n+line 98 of a long generated change that keeps going\n+line 99 of a long generated change that keeps going\n+line 100 of a long generated change that keeps going\n+line 101 of a long generated change that keeps going\n+line 102 of a long generated change that keeps going\n+line 103 of a long generated change that keeps going\n+line 104 of a long generated change that keeps going\n+line 105 of a long generated change that keeps going\n+line 106 of a long generated change that keeps going\n+line 107 of a long generated change that keeps going\n+line 108 of a long generated change that keeps going\n+line 109 of a long generated change that keeps going\n+line 110 of a long generated change that keeps going\n+line 111 of a long generated change that keeps going\n+line 112 of a long generated change that keeps going\n+line 113 of a long generated change that keeps going\n+line 114 of a long generated change that keeps going\n+line 115 of a long generated change that keeps going\n+line 116 of a long generated change that keeps going\n+line 117 of a long generated change that keeps going\n+line 118 of a long generated change that keeps going\n+line 119 of a long generated change that keeps going\n+line 120 of a long generated change that keeps going\n+line 121 of a long generated change that keeps going\n+line 122 of a long generated change that keeps going\n+line 123 of a long generated change that keeps going\n+line 124 of a long generated change that keeps going\n+line 125 of a long generated change that keeps going\n+line 126 of a long generated change that keeps going\n+line 127 of a long generated change that keeps going\n+line 128 of a long generated change that keeps going\n+line 129 of a long generated change that keeps going\n+line 130 of a long generated change that keeps going\n+line 131 of a long generated change that keeps going\n+line 132 of a long generated change that keeps going\n+line 133 of a long generated change that keeps going\n+line 134 of a long generated change that keeps going\n+line 135 of a long generated change that keeps going\n+line 136 of a long generated change that keeps going\n+line 137 of a long generated change that keeps going\n+line 138 of a long generated change that keeps going\n+line 139 of a long generated change that keeps going\n+line 140 of a long generated change that keeps going\n+line 141 of a long generated change that keeps going\n+line 142 of a long generated change that keeps going\n+line 143 of a long generated change that keeps going\n+line 144 of a long generated change that keeps going\n+line 145 of a long generated change that keeps going\n+line 146 of a long generated change that keeps going\n+line 147 of a long generated change that keeps going\n+line 148 of a long generated change that keeps going\n+line 149 of a long generated change that keeps going\n+line 150 of a long generated change that keeps going\n+line 151 of a long generated change that keeps going\n+line 152 of a long generated change that keeps going\n+line 153 of a long generated change that keeps going\n+line 154 of a long generated change that keeps going\n+line 155 of a long generated change that keeps going\n+line 156 of a long generated change that keeps going\n+line 157 of a long generated change that keeps going\n+line 158 of a long generated change that keeps going\n+line 159 of a long generated change that keeps going\n+line 160 of a long generated change that keeps going\n+line 161 of a long generated change that keeps going\n+line 162 of a long generated change that keeps going\n+line 163 of a long generated change that keeps going\n+line 164 of a long generated change that keeps going\n+line 165 of a long generated change that keeps going\n+line 166 of a long generated change that keeps going\n+line 167 of a long generated change that keeps going\n+line 168 of a long generated change that keeps going\n+line 169 of a long generated change that keeps going\n+line 170 of a long generated change that keeps going\n+line 171 of a long generated change that keeps going\n+line 172 of a long generated change that keeps going\n+line 173 of a long generated change that keeps going\n+line 174 of a long generated change that keeps going\n+line 175 of a long generated change that keeps going\n+line 176 of a long generated change that keeps going\n+line 177 of a long generated change that keeps going\n+line 178 of a long generated change that keeps going\n+line 179 of a long generated change that keeps going\n+line 180 of a long generated change that keeps going\n+line 181 of a long generated change that keeps going\n+line 182 of a long generated change that keeps going\n+line 183 of a long generated change that keeps going\n+line 184 of a long generated change that keeps going\n+line 185 of a long generated change that keeps going\n+line 186 of a long generated change that keeps going\n+line 187 of a long generated change that keeps going\n+line 188 of a long generated change that keeps going\n+line 189 of a long generated change that keeps going\n+line 190 of a long generated change that keeps going\n+line 191 of a long generated change that keeps going\n+line 192 of a long generated change that keeps going\n+line 193 of a long generated change that keeps going\n+line 194 of a long generated change that keeps going\n+line 195 of a long generated change that keeps going\n+line 196 of a long generated change that keeps going\n+line 197 of a long generated change that keeps going\n+line 198 of a long generated change that keeps going\n+line 199 of a long generated change that keeps going\n"
+        },
+        {
+          "filename": "src/auth/lock.ts",
+          "status": "added",
+          "additions": 20,
+          "deletions": 0,
+          "patch": "@@ -0,0 +1,2 @@\n+export const lock = 1;\n+export const unlock = 2;"
+        },
+        {
+          "filename": "README.md",
+          "additions": 2,
+          "deletions": 7,
+          "patch": "@@ -1,3 +1,2 @@\n-old line\n+new line\n context"
+        }
+      ],
+      "checks": [
+        {
+          "name": "unit tests",
+          "conclusion": "failure",
+          "url": "https://github.com/acme/api/actions/runs/1"
+        },
+        {
+          "name": "lint",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "owner": "acme",
+      "repo": "api",
+      "number": 15,
+      "title": "Add retry to webhook worker",
+      "body": "Backoff with jitter.",
+      "author": "rsingh",
+      "updatedAt": "2026-09-24T12:00:00Z",
+      "headSha": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "categories": ["mention"],
+      "checks": [
+        {
+          "name": "lint",
+          "conclusion": "success"
+        }
+      ],
+      "files": []
+    },
+    {
+      "owner": "acme",
+      "repo": "web",
+      "number": 7,
+      "title": "New settings layout",
+      "body": "",
+      "author": "mchen",
+      "draft": true,
+      "updatedAt": "2026-09-24T20:00:00Z",
+      "headSha": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "categories": ["review"],
+      "checks": [],
+      "files": []
+    }
+  ]
+}

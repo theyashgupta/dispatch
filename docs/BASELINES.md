@@ -193,7 +193,7 @@ median: PERF-RERENDER mode=prod total=20 toggle=6 inbox=4 select=4 sse=6
 ```
 
 **Spread note:** three pre-commit dry runs (same harness, uncommitted) showed occasional
-`toggle=7`/`total=21` instead of `toggle=6`/`total=20` — traced to `SyncStatus`'s own 1s
+`toggle=7`/`total=21` instead of `toggle=6`/`total=20` - traced to `SyncStatus`'s own 1s
 `setInterval` tick (unrelated to the interaction script) occasionally landing inside the
 350ms toggle settle-window and contributing one extra whole-tree commit, since
 `onCommitFiberRoot` fires once per commit for the single React root regardless of which
