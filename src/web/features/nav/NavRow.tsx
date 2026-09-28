@@ -4,6 +4,7 @@ import { focusRing } from "../../primitives/focus-ring.js";
 
 interface NavRowProps {
   icon: LucideIcon;
+  iconSlot?: ReactNode;
   label: string;
   active: boolean;
   collapsed: boolean;
@@ -43,6 +44,7 @@ const labelStyle: CSSProperties = {
 
 export function NavRow({
   icon: Icon,
+  iconSlot,
   label,
   active,
   collapsed,
@@ -75,7 +77,7 @@ export function NavRow({
         ...focusRing(focused),
       }}
     >
-      <Icon size={16} strokeWidth={2} aria-hidden="true" />
+      {iconSlot ?? <Icon size={16} strokeWidth={2} aria-hidden="true" />}
       {collapsed ? null : <span style={labelStyle}>{label}</span>}
       {collapsed ? null : badge}
     </button>

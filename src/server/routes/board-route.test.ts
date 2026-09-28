@@ -70,3 +70,56 @@ test("PUT with a valid body persists it and GET serves it live", async () => {
   assert.equal(written.port, 4799);
   assert.deepEqual(await (await fetch(url)).json(), custom);
 });
+
+const { rebuildSources } = await import("../adapters/source-gateway.js");
+const { startPollers, stopPollers } = await import("../adapters/poller.js");
+const { makeFakeSource } = await import("../test-support/fake-source.js");
+const pollUrl = (id: string) =>
+  `http://127.0.0.1:${port}/api/sources/${id}/poll`;
+
+test("POST /sources/:id/poll answers 404 for an unknown source", async () => {
+  rebuildSources({ linearApiKey: "k", sources: { linear: { apiKey: "k" } } });
+  const res = await fetch(pollUrl("nope"), { method: "POST" });
+  assert.equal(res.status, 404);
+  assert.deepEqual(await res.json(), { error: "unknown source" });
+});
+
+test("POST /sources/:id/poll answers 409 for a disabled source", async () => {
+  rebuildSources({
+    linearApiKey: "k",
+    sources: { linear: { apiKey: "k", enabled: false } },
+  });
+  const res = await fetch(pollUrl("linear"), { method: "POST" });
+  assert.equal(res.status, 409);
+  assert.deepEqual(await res.json(), { error: "source disabled" });
+});
+
+test("POST /sources/:id/poll answers 409 for an enabled source with no running loop", async () => {
+  rebuildSources({ linearApiKey: "k", sources: { linear: { apiKey: "k" } } });
+  stopPollers();
+  const res = await fetch(pollUrl("linear"), { method: "POST" });
+  assert.equal(res.status, 409);
+  assert.deepEqual(await res.json(), { error: "source not polling" });
+});
+
+test("POST /sources/:id/poll answers 202 and polls a running enabled source", async () => {
+  rebuildSources({ linearApiKey: "k", sources: { linear: { apiKey: "k" } } });
+  let fetches = 0;
+  startPollers([
+    makeFakeSource({
+      id: "linear",
+      pollIntervalMs: 60_000,
+      fetch: () => {
+        fetches += 1;
+        return Promise.resolve({ issues: [], truncated: false });
+      },
+    }),
+  ]);
+  const before = fetches;
+  const res = await fetch(pollUrl("linear"), { method: "POST" });
+  assert.equal(res.status, 202);
+  assert.deepEqual(await res.json(), { polling: "linear" });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(fetches, before + 1);
+  stopPollers();
+});

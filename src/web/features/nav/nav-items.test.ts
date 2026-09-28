@@ -16,16 +16,16 @@ test("every nav row's page parses back to itself", () => {
   }
 });
 
-test("groups with no rows are omitted and order is Home, Work, System", () => {
+test("groups with no rows are omitted and order is Home, Work, Sources, System", () => {
   assert.deepEqual(
     navGroups(NAV_ITEMS).map((entry) => entry.group),
-    ["Home", "Work", "System"],
+    ["Home", "Work", "Sources", "System"],
   );
   assert.deepEqual(
     navGroups(NAV_ITEMS.filter((item) => item.group !== "System")).map(
       (entry) => entry.group,
     ),
-    ["Home", "Work"],
+    ["Home", "Work", "Sources"],
   );
 });
 
@@ -33,11 +33,34 @@ test("an empty item list yields no groups", () => {
   assert.deepEqual(navGroups([]), []);
 });
 
-test("the System group lists the four moved pages in order", () => {
+test("the System group lists its pages in order, Workspaces after Archive", () => {
   assert.deepEqual(
     NAV_ITEMS.filter((item) => item.group === "System").map(
       (item) => item.page,
     ),
-    ["accounts", "playbooks", "vault", "archive"],
+    ["accounts", "playbooks", "vault", "archive", "workspaces"],
+  );
+});
+
+test("the Work group lists Board, Sessions, Workspace and Activity in order", () => {
+  assert.deepEqual(
+    NAV_ITEMS.filter((item) => item.group === "Work").map((item) => item.page),
+    ["board", "sessions", "workspace", "activity"],
+  );
+});
+
+test("the Sources group holds Tickets, Pull Requests, Errors, Meetings, Calendar and Slack", () => {
+  assert.deepEqual(
+    NAV_ITEMS.filter((item) => item.group === "Sources").map(
+      (item) => item.page,
+    ),
+    ["tickets", "pull-requests", "errors", "meetings", "calendar", "slack"],
+  );
+});
+
+test("the Home group lists Today first, then Inbox", () => {
+  assert.deepEqual(
+    NAV_ITEMS.filter((item) => item.group === "Home").map((item) => item.page),
+    ["today", "inbox"],
   );
 });

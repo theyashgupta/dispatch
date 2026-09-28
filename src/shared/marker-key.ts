@@ -22,3 +22,13 @@ export const NEEDS_INPUT_MARKER_KIND = "NEEDS_INPUT";
  * single space `markerKey` joins on.
  */
 export const NEEDS_INPUT_MARKER_PREFIX = `${NEEDS_INPUT_MARKER_KIND} `;
+
+/**
+ * The single write-time-AND-load-time footgun predicate: a playbook body must never be able to
+ * smuggle the status-protocol marker into a kickoff. Both `loadPlaybooks` (skip) and the write
+ * path (reject) call this one expression so the two checks can never drift apart. It lives in
+ * `shared` so the server guards, the Linear comment validator and the playbook editor all reuse it.
+ */
+export function hasDispatchMarker(body: string): boolean {
+  return body.includes("DISPATCH_STATUS:");
+}

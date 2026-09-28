@@ -1,8 +1,13 @@
 import type { Card, FilterOption, Item } from "../../../shared/types.js";
 import type { InboxRowModel } from "../../lib/actions.js";
+import { capitalize, humanizeType, itemRow } from "../../lib/inbox-row.js";
+import { cardPriorityScore } from "../../lib/card-priority.js";
+import { stateTypeRank } from "../../lib/linear-state.js";
+
+export { humanizeType };
 
 export type InboxRange = "all" | "today" | "3d" | "week";
-export type InboxGroupBy = "none" | "source" | "type";
+export type InboxGroupBy = "none" | "source" | "type" | "state";
 
 interface InboxFilter {
   query: string;
@@ -18,36 +23,7 @@ interface InboxGroup {
   rows: InboxRowModel[];
 }
 
-const CARD_PRIORITY: Record<number, number> = { 1: 100, 2: 75, 3: 50, 4: 25 };
-const ACRONYMS: Record<string, string> = { pr: "PR", ci: "CI" };
 const DAY_MS = 86_400_000;
-
-/** Turn a connector type key such as `pr_review` into the label `PR review`. */
-export function humanizeType(type: string): string {
-  return capitalize(
-    type
-      .split(/[_\s-]+/)
-      .filter(Boolean)
-      .map((w) => ACRONYMS[w] ?? w)
-      .join(" "),
-  );
-}
-
-function itemRow(item: Item): InboxRowModel {
-  return {
-    kind: "item",
-    id: item.id,
-    source: item.source,
-    title: item.title,
-    snippet: item.snippet,
-    priority: item.priority,
-    time: item.createdAt,
-    unread: item.state === "unread",
-    url: item.url,
-    typeLabel: humanizeType(item.type),
-    item,
-  };
-}
 
 function cardRow(card: Card, opened: boolean): InboxRowModel {
   return {
@@ -56,7 +32,7 @@ function cardRow(card: Card, opened: boolean): InboxRowModel {
     source: card.source ?? "linear",
     title: card.title,
     snippet: card.description ?? "",
-    priority: CARD_PRIORITY[card.priority] ?? 0,
+    priority: cardPriorityScore(card.priority),
     time: card.updatedAt,
     unread: !opened,
     url: card.url,
@@ -124,16 +100,20 @@ export function filterInboxRows(
   );
 }
 
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
+const NO_STATE = "No state";
 
-/** Bucket rows by source or type, keeping the incoming order inside each group. */
+/**
+ * Bucket rows by source, type or Linear state, keeping the incoming order inside each group.
+ *
+ * @remarks State groups run in workflow order (type, then name), and rows without a Linear state,
+ * items included, land in a "No state" group placed last.
+ */
 export function groupInboxRows(
   rows: readonly InboxRowModel[],
   by: InboxGroupBy,
 ): InboxGroup[] {
   if (by === "none") return [{ key: "all", label: "All", rows: [...rows] }];
+  if (by === "state") return groupByState(rows);
   const groups = new Map<string, InboxGroup>();
   for (const row of rows) {
     const label =
@@ -143,6 +123,27 @@ export function groupInboxRows(
     groups.set(label, group);
   }
   return [...groups.values()];
+}
+
+function groupByState(rows: readonly InboxRowModel[]): InboxGroup[] {
+  const groups = new Map<string, InboxGroup & { rank: number }>();
+  for (const row of rows) {
+    const state = row.card?.linearState;
+    const key = state ? `state:${state.name}` : "none";
+    const rank = state ? stateTypeRank(state.type) : Number.POSITIVE_INFINITY;
+    const group = groups.get(key) ?? {
+      key,
+      label: state?.name ?? NO_STATE,
+      rows: [],
+      rank,
+    };
+    group.rank = Math.min(group.rank, rank);
+    group.rows.push(row);
+    groups.set(key, group);
+  }
+  return [...groups.values()]
+    .sort((a, b) => a.rank - b.rank || a.label.localeCompare(b.label))
+    .map(({ key, label, rows: members }) => ({ key, label, rows: members }));
 }
 
 /** Ids of the item rows a Mark all read call should touch: visible and unread, never a card. */
