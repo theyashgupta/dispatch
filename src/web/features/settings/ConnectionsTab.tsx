@@ -28,6 +28,7 @@ import {
   SoonConnectionCards,
 } from "../connections/index.js";
 import { MultiSelect } from "../modals/index.js";
+import { LinearStateMapSection } from "./LinearStateMapSection.js";
 
 type MultiDim = "assignees" | "projects" | "teams";
 
@@ -453,6 +454,8 @@ function FiltersTabSection({ filters }: FiltersTabSectionProps) {
               label="Couldn't save filters. Try again."
             />
           )}
+
+          <LinearStateMapSection />
         </div>
       )}
     </>

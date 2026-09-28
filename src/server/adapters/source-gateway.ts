@@ -17,6 +17,9 @@ import type {
 } from "../sources/ticket.source.js";
 import type { Config, SourceFilters } from "../../shared/types.js";
 
+export { LINEAR_GRAPHQL_URL } from "../sources/linear/linear.source.js";
+export type { TicketSource };
+
 /**
  * Thrown when a route asks for a source id the registry does not serve. It lives in the adapters
  * layer so routes can map it to a 404 without importing `sources` directly — the eslint boundary
@@ -86,6 +89,11 @@ export function checkSourceKey(
 ): Promise<{ account?: string } | null> {
   resolveSource(sourceId);
   return fetchLinearAccount(apiKey);
+}
+
+/** The source when it is registered and enabled, for services that write to it. */
+export function enabledSource(sourceId: string): TicketSource | undefined {
+  return isSourceEnabled(sourceId) ? getSource(sourceId) : undefined;
 }
 
 /** Whether a source id is registered and enabled, for routes that must answer 404 or 409. */

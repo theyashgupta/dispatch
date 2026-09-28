@@ -9,6 +9,9 @@ import type {
   DiscoveredRepo,
   FilterCapabilities,
   FilterOption,
+  LinearComment,
+  LinearStateMap,
+  LinearWorkflow,
   Playbook,
   PlaybookPickerResponse,
   PrerequisiteStatus,
@@ -188,37 +191,30 @@ export async function startGroup(input: {
 }
 
 /**
- * Promote a `source:"local"` card to a real Linear issue: POST /api/cards/:id/sync-linear. Mirrors
- * createLocalTicket's discrimination exactly: 200 → `{ ok: true, card }` (the swapped Card, already
- * reflecting the new identifier); 409 → `{ ok: false, error }` (the parsed body's renderable copy —
- * non-local card or a sync already in flight); 404/502/network → `{ ok: false, error: null }`
- * (generic, no server-side detail to surface). The response is held open for the duration of the
- * sync (up to ~150s) — the server owns that bound, there is no client-side timeout/abort. The
- * authoritative identity swap always arrives over SSE regardless of this response, since the panel
- * stays open on the same `Card.id` throughout.
+ * Promote a local card to a Linear issue: POST /api/cards/:id/sync-linear.
+ *
+ * @remarks 200 carries the adopted card; 400 and 409 carry renderable copy; any other failure
+ * answers `error: null`, and the card's `syncError` arrives over SSE.
  */
 export async function syncCardToLinear(
   id: string,
+  target: { teamId: string; stateId?: string },
 ): Promise<{ ok: true; card: Card } | { ok: false; error: string | null }> {
   try {
     const res = await fetch(
       `/api/cards/${encodeURIComponent(id)}/sync-linear`,
       {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(target),
       },
     );
-    if (res.status === 409) {
-      const body = (await res.json().catch((err) => {
-        console.error("syncCardToLinear: failed to parse 409 body", err);
-        return {};
-      })) as { error?: string };
+    if (res.ok) return { ok: true, card: (await res.json()) as Card };
+    if (res.status === 400 || res.status === 409) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
       return { ok: false, error: body.error ?? null };
     }
-    if (!res.ok) {
-      return { ok: false, error: null };
-    }
-    const card = (await res.json()) as Card;
-    return { ok: true, card };
+    return { ok: false, error: null };
   } catch {
     return { ok: false, error: null };
   }
@@ -704,6 +700,21 @@ export async function removeWorkspaceFolder(path: string): Promise<void> {
 }
 
 /**
+ * Ask the server to poll one source now: POST /api/sources/:id/poll.
+ *
+ * @remarks Throws on any non-2xx so Sync now can report a refused source; the poll result arrives
+ * over SSE like any scheduled poll.
+ */
+export async function pollSource(id: string): Promise<void> {
+  const res = await fetch(`/api/sources/${encodeURIComponent(id)}/poll`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    throw new Error(`pollSource failed: ${res.status} ${res.statusText}`);
+  }
+}
+
+/**
  * Ensure a ttyd terminal for a card's live session: POST /api/cards/:id/terminal.
  * Fire-and-forget — the backend spawns-or-reuses ttyd single-flight (202 Accepted)
  * and the SSE snapshot carries the outcome (`ttydPort` on success, `terminalError`
@@ -1178,6 +1189,125 @@ export async function getCard(
     throw new Error(`getCard failed: ${res.status} ${res.statusText}`);
   }
   return (await res.json()) as { card: Card; members: Card[] };
+}
+
+/** The stored Linear comments of a card, oldest first: GET /api/cards/:id/comments. Throws on non-2xx. */
+export async function getCardComments(id: string): Promise<LinearComment[]> {
+  const res = await fetch(`/api/cards/${encodeURIComponent(id)}/comments`);
+  if (!res.ok) {
+    throw new Error(`getCardComments failed: ${res.status} ${res.statusText}`);
+  }
+  return ((await res.json()) as { comments: LinearComment[] }).comments;
+}
+
+/**
+ * Post a Linear comment: POST /api/cards/:id/comment.
+ *
+ * @remarks A 502 also sets the card's `linearError`, which arrives over SSE; `error` carries the
+ * server's fixed copy, or null when the request never got an answer.
+ */
+export async function postCardComment(
+  id: string,
+  body: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string | null }> {
+  try {
+    const res = await fetch(`/api/cards/${encodeURIComponent(id)}/comment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+    });
+    if (res.ok) return { ok: true };
+    const parsed = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, status: res.status, error: parsed.error ?? null };
+  } catch {
+    return { ok: false, status: 0, error: null };
+  }
+}
+
+/** The viewer and the Linear teams with their states: GET /api/sources/linear/workflow. */
+export async function getLinearWorkflow(): Promise<
+  { ok: true; workflow: LinearWorkflow } | { ok: false; error: string }
+> {
+  try {
+    const res = await fetch("/api/sources/linear/workflow");
+    if (res.ok) {
+      return { ok: true, workflow: (await res.json()) as LinearWorkflow };
+    }
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: body.error ?? "Could not load Linear teams." };
+  } catch {
+    return { ok: false, error: "Could not reach Dispatch. Try again." };
+  }
+}
+
+/** Read the saved column-to-state map: GET /api/config/linear-state-map. Throws on non-2xx. */
+export async function getLinearStateMap(): Promise<LinearStateMap> {
+  const res = await fetch("/api/config/linear-state-map");
+  if (!res.ok) {
+    throw new Error(
+      `getLinearStateMap failed: ${res.status} ${res.statusText}`,
+    );
+  }
+  return ((await res.json()) as { stateMap: LinearStateMap }).stateMap;
+}
+
+/** Save the whole column-to-state map: PUT /api/config/linear-state-map. */
+export async function saveLinearStateMap(
+  stateMap: LinearStateMap,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch("/api/config/linear-state-map", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stateMap }),
+    });
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return {
+      ok: false,
+      error: body.error ?? "Couldn't save the state map. Try again.",
+    };
+  } catch {
+    return { ok: false, error: "Could not reach Dispatch. Try again." };
+  }
+}
+
+/** Assign a Linear card to the viewer: POST /api/cards/:id/assign-me. */
+export async function assignCardToMe(
+  id: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string | null }> {
+  try {
+    const res = await fetch(`/api/cards/${encodeURIComponent(id)}/assign-me`, {
+      method: "POST",
+    });
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, status: res.status, error: body.error ?? null };
+  } catch {
+    return { ok: false, status: 0, error: null };
+  }
+}
+
+/** Move a Linear card to one of its team's states: POST /api/cards/:id/linear-state. */
+export async function setCardLinearState(
+  id: string,
+  stateId: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string | null }> {
+  try {
+    const res = await fetch(
+      `/api/cards/${encodeURIComponent(id)}/linear-state`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stateId }),
+      },
+    );
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, status: res.status, error: body.error ?? null };
+  } catch {
+    return { ok: false, status: 0, error: null };
+  }
 }
 
 /**

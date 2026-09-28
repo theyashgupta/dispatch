@@ -1,0 +1,116 @@
+{
+  "data": {
+    "viewer": {
+      "assignedIssues": {
+        "nodes": [
+          {
+            "id": "issue-1",
+            "identifier": "ENG-1",
+            "title": "Started issue with every field",
+            "url": "https://linear.app/acme/issue/ENG-1",
+            "description": "Body one",
+            "priority": 2,
+            "updatedAt": "2026-09-25T09:00:00.000Z",
+            "state": {
+              "id": "state-started",
+              "name": "In Progress",
+              "type": "started",
+              "color": "#f2c94c"
+            },
+            "team": {
+              "id": "team-eng",
+              "key": "ENG",
+              "name": "Engineering"
+            },
+            "cycle": {
+              "number": 14
+            },
+            "project": {
+              "id": "proj-core",
+              "name": "Core"
+            },
+            "assignee": {
+              "id": "user-me",
+              "displayName": "Me"
+            },
+            "comments": {
+              "nodes": [
+                {
+                  "id": "c-3",
+                  "body": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                  "createdAt": "2026-09-24T12:00:00.000Z",
+                  "user": {
+                    "displayName": "Ada"
+                  }
+                },
+                {
+                  "id": "c-1",
+                  "body": "First **comment**",
+                  "createdAt": "2026-09-22T12:00:00.000Z",
+                  "user": {
+                    "displayName": "Grace"
+                  }
+                },
+                {
+                  "id": "c-2",
+                  "body": "Bot note",
+                  "createdAt": "2026-09-23T12:00:00.000Z",
+                  "user": null
+                }
+              ]
+            }
+          },
+          {
+            "id": "issue-2",
+            "identifier": "ENG-2",
+            "title": "Issue with no team, cycle or assignee",
+            "url": "https://linear.app/acme/issue/ENG-2",
+            "description": null,
+            "priority": 0,
+            "updatedAt": "2026-09-25T08:00:00.000Z",
+            "state": {
+              "id": "state-todo",
+              "name": "Todo",
+              "type": "unstarted",
+              "color": "#e2e2e2"
+            },
+            "team": null,
+            "cycle": null,
+            "project": null,
+            "assignee": null,
+            "comments": {
+              "nodes": []
+            }
+          },
+          {
+            "id": "issue-3",
+            "identifier": "ENG-3",
+            "title": "Issue whose state has no color",
+            "url": "https://linear.app/acme/issue/ENG-3",
+            "description": null,
+            "priority": 3,
+            "updatedAt": "2026-09-25T07:00:00.000Z",
+            "state": {
+              "id": "state-review",
+              "name": "In Review",
+              "type": "started",
+              "color": null
+            },
+            "team": {
+              "id": "team-eng",
+              "key": "ENG",
+              "name": "Engineering"
+            },
+            "cycle": null,
+            "project": null,
+            "assignee": null
+          }
+        ],
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        }
+      }
+    }
+  }
+}
