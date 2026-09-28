@@ -10,6 +10,7 @@ export const PAGES = [
   "vault",
   "archive",
   "pull-requests",
+  "slack",
 ] as const;
 
 export type Page = (typeof PAGES)[number];

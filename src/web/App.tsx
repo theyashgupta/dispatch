@@ -27,6 +27,7 @@ import {
   NavSheet,
   SidebarNav,
   TopBar,
+  visibleNavItems,
 } from "./features/nav/index.js";
 import { effectiveNavState } from "./lib/nav-state.js";
 import { hideDisabledSlack } from "./lib/hide-disabled-slack.js";
@@ -93,6 +94,7 @@ import { GLOBAL_SHORTCUTS, bindShortcuts } from "./lib/shortcuts.js";
 import { useShortcuts } from "./hooks/useShortcuts.js";
 import { useItems } from "./hooks/useItems.js";
 import { buildPrRows } from "./lib/pr-rows.js";
+import { slackRows } from "./lib/slack-rows.js";
 import { nowMs } from "./lib/format-age.js";
 import { flattenSessions } from "./lib/sessions.js";
 import type { UnwindDestination } from "../shared/types.js";
@@ -139,6 +141,9 @@ const PullRequestsPage = lazy(() =>
   import("./features/pull-requests/index.js").then((m) => ({
     default: m.PullRequestsPage,
   })),
+);
+const SlackPage = lazy(() =>
+  import("./features/slack/index.js").then((m) => m.loadSlackPage()),
 );
 const SessionsPage = lazy(() =>
   import("./features/sessions/index.js").then((m) => ({
@@ -504,6 +509,11 @@ export function App() {
     () => hideDisabledSlack(items, board?.enabledSources ?? []),
     [items, board?.enabledSources],
   );
+  const slack = useMemo(() => slackRows(inboxItems), [inboxItems]);
+  const navItems = useMemo(
+    () => visibleNavItems(NAV_ITEMS, board?.enabledSources ?? []),
+    [board?.enabledSources],
+  );
   const { show: showUndo, notice: showNotice } = undoToast;
   const [startRequest, setStartRequest] = useState<StartRequest | null>(null);
   const startAgent = useCallback(
@@ -749,6 +759,7 @@ export function App() {
     ? items.filter((item) => item.source === "github" && item.state !== "done")
         .length
     : 0;
+  const slackCount = slack.filter((row) => row.unread).length;
   const pageMeta: Record<Page, { title: string; count?: number }> = {
     board: { title: "Board", count: board.cards.length },
     inbox: { title: "Inbox", count: inboxCount },
@@ -767,6 +778,7 @@ export function App() {
       title: "Pull Requests",
       count: githubEnabled ? buildPrRows(items, board.cards).length : 0,
     },
+    slack: { title: "Slack", count: slack.length },
   };
   const pageTitle = pageMeta[route.page].title;
 
@@ -782,6 +794,8 @@ export function App() {
       inboxCount={inboxCount}
       liveSessionCount={liveSessionCount}
       prCount={prCount}
+      slackCount={slackCount}
+      navItems={navItems}
       syncedAt={board.syncedAt ?? null}
       connection={connection}
       pollIntervalMs={board.pollIntervalMs ?? null}
@@ -904,6 +918,21 @@ export function App() {
                     prompt,
                   )
                 }
+              />
+            ) : route.page === "slack" ? (
+              <SlackPage
+                board={board}
+                rows={slack}
+                selectedId={route.id ?? null}
+                onSelect={(id) =>
+                  navigate("slack", id ?? undefined, { replace: true })
+                }
+                onMarkRead={(id) =>
+                  void setItemState(id, "read").catch(() =>
+                    showNotice("Couldn't mark it read."),
+                  )
+                }
+                services={actionServices}
               />
             ) : route.page === "inbox" ? (
               <InboxView
@@ -1074,7 +1103,7 @@ export function App() {
                     showNotice,
                   ),
               },
-              NAV_ITEMS,
+              navItems,
               selectedCard,
             )}
             onClose={closeOverlay(setPaletteOpen)}

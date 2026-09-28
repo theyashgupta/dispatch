@@ -34,7 +34,7 @@ const BUDGETS = [
   {
     label: "index.html",
     match: (f) => f === "index.html",
-    budgetGzipBytes: 576, // seed: 524 (re-seeded 2026-09-25 with the sessions page preload)
+    budgetGzipBytes: 634, // seed: 577 (re-seeded 2026-09-28 with the unit 4 build, which adds a createLucideIcon preload, LOCAL-47)
   },
   {
     label: "assets/main-*.js",
@@ -76,6 +76,11 @@ const BUDGETS = [
     match: (f) =>
       f.startsWith(`assets${sep}pull-requests-`) && f.endsWith(".js"),
     budgetGzipBytes: 4861, // seed: 4419 (re-seeded with the Pull Requests detail pane, LOCAL-45)
+  },
+  {
+    label: "assets/SlackPage-*.js",
+    match: (f) => f.startsWith(`assets${sep}SlackPage-`) && f.endsWith(".js"),
+    budgetGzipBytes: 2613, // seed: 2375 (the Slack page list and detail, lazy through the slack barrel's loadSlackPage, LOCAL-47)
   },
   {
     label: "assets/palette-*.js",
