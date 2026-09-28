@@ -26,6 +26,7 @@ const SIBLINGS_MAX = 14;
 const MEETING_PRIORITY = 76;
 const FIELD_RE = /^(key|title|meeting|date|link):\s*(.*)$/i;
 const FENCE_RE = /^`{3,}[\w-]*$/;
+const MEETING_ID_RE = /^(paste|granola):\d{4}-\d{2}-\d{2}-[a-z0-9-]{1,40}$/;
 
 /**
  * Build the paste-flow prompt that asks for the user's own action items as delimited sections.
@@ -176,6 +177,13 @@ export function meetingId(
 }
 
 /**
+ * True for an id `meetingId` can produce, the only shape a transcript lookup accepts.
+ */
+export function isMeetingId(value: unknown): value is string {
+  return typeof value === "string" && MEETING_ID_RE.test(value);
+}
+
+/**
  * Local calendar date of `date` as YYYY-MM-DD.
  */
 export function localDate(date: Date): string {
@@ -217,6 +225,7 @@ export function buildMeetingItems(input: {
   meetingDate: string;
   drafts: readonly ActionDraft[];
   now: string;
+  transcript?: "paste";
 }): Item[] {
   const id = meetingId(input.feed, input.meetingDate, input.meeting);
   return input.drafts.map((draft) => {
@@ -247,6 +256,9 @@ export function buildMeetingItems(input: {
         meetingId: id,
         key: draft.key,
         siblings: JSON.stringify(siblings),
+        ...(input.transcript !== undefined
+          ? { transcript: input.transcript }
+          : {}),
       },
     };
   });

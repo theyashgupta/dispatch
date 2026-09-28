@@ -4,6 +4,7 @@ import {
   MAX_ACTION_ITEMS,
   buildMeetingItems,
   isActionKey,
+  isMeetingId,
   localDate,
   type ActionDraft,
 } from "../services/domain/meeting-actions.js";
@@ -17,6 +18,10 @@ import {
 } from "../services/orchestration/granola-round.js";
 import { patchSourceConfig } from "../services/infra/config-holder.js";
 import {
+  readTranscript,
+  writeTranscript,
+} from "../services/orchestration/meeting-transcripts.js";
+import {
   GRANOLA_WINDOW_HOURS,
   type MeetingSourceConfig,
 } from "../../shared/types.js";
@@ -27,6 +32,15 @@ export const meetingsRouter = Router();
 
 const MEETING_MAX = 200;
 const NOTES_MAX = 100_000;
+
+/** True for pasted notes the routes accept: non-blank text of at most NOTES_MAX characters. */
+function isNotes(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim() !== "" &&
+    value.length <= NOTES_MAX
+  );
+}
 const ME_MAX = 100;
 const MARKER_ERROR = "content contains the DISPATCH_STATUS marker";
 
@@ -76,11 +90,7 @@ function draftManyHandler(req: Request, res: Response): void {
     return;
   }
   const notes = body.notes;
-  if (
-    typeof notes !== "string" ||
-    notes.trim() === "" ||
-    notes.length > NOTES_MAX
-  ) {
+  if (!isNotes(notes)) {
     res.status(400).json({ error: "invalid-notes" });
     return;
   }
@@ -125,13 +135,19 @@ function draftManyHandler(req: Request, res: Response): void {
  * Create the kept drafts as meeting items, validating every draft before any write.
  *
  * @remarks The item id is built from the meeting, the day and the key, so repeating a paste
- * updates its rows instead of adding new ones.
+ * updates its rows instead of adding new ones. The notes are stored only after the items are, and
+ * a failed store leaves the items in place because they are useful without it.
  */
 async function createItemsHandler(req: Request, res: Response): Promise<void> {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const meeting = boundedText(body.meeting, MEETING_MAX);
   if (meeting === null) {
     res.status(400).json({ error: "invalid-meeting" });
+    return;
+  }
+  const notes = body.notes;
+  if (notes !== undefined && !isNotes(notes)) {
+    res.status(400).json({ error: "invalid-notes" });
     return;
   }
   const rawDrafts = body.drafts;
@@ -170,13 +186,24 @@ async function createItemsHandler(req: Request, res: Response): Promise<void> {
     meetingDate: localDate(now),
     drafts: valid,
     now: now.toISOString(),
+    ...(notes !== undefined ? { transcript: "paste" as const } : {}),
   });
   const counts = await store.upsertItems("meeting", items, { kind: "append" });
-  res.status(201).json({
+  const result = {
     created: counts.inserted,
     updated: counts.updated,
     ids: items.map((i) => i.id),
-  });
+  };
+  if (notes !== undefined) {
+    try {
+      await writeTranscript(items[0].meta.meetingId, notes);
+    } catch (err) {
+      console.warn("[meetings/items] transcript write failed:", firstLine(err));
+      res.status(500).json({ error: "transcript-write-failed", ...result });
+      return;
+    }
+  }
+  res.status(201).json(result);
 }
 
 meetingsRouter.post("/cards/draft-many", draftManyHandler);
@@ -184,6 +211,30 @@ meetingsRouter.post("/meetings/items", (req, res) => {
   void createItemsHandler(req, res).catch((err: unknown) => {
     console.warn("[meetings/items] create failed:", firstLine(err));
     if (!res.headersSent) res.status(500).json({ error: "create-failed" });
+  });
+});
+
+/** Answer a meeting's stored notes after checking the id has the meetingId shape. */
+async function readTranscriptHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const id = req.query.meetingId;
+  if (!isMeetingId(id)) {
+    res.status(400).json({ error: "invalid-meeting-id" });
+    return;
+  }
+  const text = await readTranscript(id);
+  if (text === null) res.status(404).json({ error: "not-found" });
+  else res.json({ text });
+}
+
+meetingsRouter.get("/meetings/transcript", (req, res) => {
+  void readTranscriptHandler(req, res).catch((err: unknown) => {
+    console.warn("[meetings/transcript] read failed:", firstLine(err));
+    if (!res.headersSent) {
+      res.status(500).json({ error: "transcript-read-failed" });
+    }
   });
 });
 
