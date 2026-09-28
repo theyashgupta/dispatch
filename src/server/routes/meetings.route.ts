@@ -8,6 +8,18 @@ import {
   type ActionDraft,
 } from "../services/domain/meeting-actions.js";
 import { generateMeetingDrafts } from "../services/orchestration/meeting-draft.js";
+import {
+  applyGranolaSettings,
+  checkGranolaConnection,
+  granolaSettings,
+  granolaStatus,
+  runGranolaNow,
+} from "../services/orchestration/granola-round.js";
+import { patchSourceConfig } from "../services/infra/config-holder.js";
+import {
+  GRANOLA_WINDOW_HOURS,
+  type MeetingSourceConfig,
+} from "../../shared/types.js";
 import { store } from "../store/board.store.js";
 import { ITEM_DESCRIPTION_MAX, ITEM_TITLE_MAX } from "../store/items.js";
 
@@ -173,4 +185,56 @@ meetingsRouter.post("/meetings/items", (req, res) => {
     console.warn("[meetings/items] create failed:", firstLine(err));
     if (!res.headersSent) res.status(500).json({ error: "create-failed" });
   });
+});
+
+/**
+ * Save the Granola settings and apply them to the round.
+ *
+ * @remarks Validated before the write, so a bad body never reaches config.json.
+ */
+async function putGranolaHandler(req: Request, res: Response): Promise<void> {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const patch: MeetingSourceConfig = {};
+  if (body.enabled !== undefined) {
+    if (typeof body.enabled !== "boolean") {
+      res.status(400).json({ error: "invalid-enabled" });
+      return;
+    }
+    patch.enabled = body.enabled;
+  }
+  if (body.windowHours !== undefined) {
+    const hours = GRANOLA_WINDOW_HOURS.find((h) => h === body.windowHours);
+    if (hours === undefined) {
+      res.status(400).json({ error: "invalid-window" });
+      return;
+    }
+    patch.windowHours = hours;
+  }
+  const previous = granolaSettings();
+  patchSourceConfig("meeting", patch);
+  await applyGranolaSettings(previous);
+  res.json(granolaStatus());
+}
+
+meetingsRouter.get("/meetings/granola", (_req, res) => {
+  res.json(granolaStatus());
+});
+meetingsRouter.put("/meetings/granola", (req, res) => {
+  void putGranolaHandler(req, res).catch((err: unknown) => {
+    console.warn("[meetings/granola] settings failed:", firstLine(err));
+    if (!res.headersSent) res.status(500).json({ error: "settings-failed" });
+  });
+});
+meetingsRouter.post("/meetings/granola/check", (_req, res) => {
+  void checkGranolaConnection()
+    .then((check) => res.json(check))
+    .catch((err: unknown) => {
+      console.warn("[meetings/granola] check failed:", firstLine(err));
+      if (!res.headersSent) res.status(500).json({ error: "check-failed" });
+    });
+});
+meetingsRouter.post("/meetings/granola/run", (_req, res) => {
+  const result = runGranolaNow();
+  if (result === "started") res.status(202).json({ running: true });
+  else res.status(409).json({ error: result });
 });
