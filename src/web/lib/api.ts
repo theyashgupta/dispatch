@@ -23,6 +23,8 @@ import type {
   ClaudeUsageSnapshot,
   ClaudeLoginView,
   SettableItemState,
+  SourceConnection,
+  SourceKeyError,
 } from "../../shared/types.js";
 import type { CardSearchResult } from "../../shared/search.js";
 
@@ -1662,4 +1664,59 @@ export async function snoozeItem(id: string, until: string): Promise<void> {
 export async function promoteItem(id: string): Promise<{ card: Card }> {
   const res = await postItem(id, "promote");
   return (await res.json()) as { card: Card };
+}
+
+/** Read a source's connection status: GET /api/sources/:source/connection. Throws on non-2xx. */
+export async function getSourceConnection(
+  source: string,
+): Promise<SourceConnection> {
+  const res = await fetch(
+    `/api/sources/${encodeURIComponent(source)}/connection`,
+  );
+  if (!res.ok) {
+    throw new Error(`getSourceConnection failed: ${res.status}`);
+  }
+  return (await res.json()) as SourceConnection;
+}
+
+/**
+ * Store a new key for a source: PUT /api/sources/:source/key.
+ *
+ * @remarks The server checks the key with the provider before saving it, so a 400 (rejected) and a
+ * 502 (unreachable) both mean nothing was written; a 409 means a disconnect won the race. The key
+ * is sent once and never echoed back.
+ */
+export async function saveSourceKey(
+  source: string,
+  apiKey: string,
+): Promise<
+  { ok: true; account?: string } | { ok: false; reason: SourceKeyError }
+> {
+  const res = await fetch(`/api/sources/${encodeURIComponent(source)}/key`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey }),
+  });
+  if (res.ok) {
+    return { ok: true, ...((await res.json()) as { account?: string }) };
+  }
+  const reason: SourceKeyError =
+    res.status === 400
+      ? "rejected"
+      : res.status === 502
+        ? "unreachable"
+        : res.status === 409
+          ? "superseded"
+          : "failed";
+  return { ok: false, reason };
+}
+
+/** Remove a source's stored key: DELETE /api/sources/:source/key. Throws on non-2xx. */
+export async function deleteSourceKey(source: string): Promise<void> {
+  const res = await fetch(`/api/sources/${encodeURIComponent(source)}/key`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    throw new Error(`deleteSourceKey failed: ${res.status}`);
+  }
 }

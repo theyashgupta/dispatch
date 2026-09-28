@@ -371,7 +371,7 @@ async function fetchIssuesByIds(
   return out;
 }
 
-const VIEWER_QUERY = `query Viewer { viewer { id } }`;
+const VIEWER_QUERY = `query Viewer { viewer { id name email } }`;
 const WORKFLOW_QUERY = `query Workflow { viewer { id } teams(first: 50) { nodes { id key name states { nodes { id name type color position } } } } }`;
 const ASSIGN_MUTATION = `mutation Assign($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`;
 const STATE_MUTATION = `mutation SetState($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`;
@@ -380,24 +380,52 @@ const CREATE_MUTATION = `mutation Create($input: IssueCreateInput!) { issueCreat
 const COMMENT_MUTATION = `mutation Comment($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id } } }`;
 
 /**
- * Live key check for the first-run setup route: run a minimal viewer query with the entered key.
+ * Format a Linear viewer as the account label a connection card shows.
  *
- * @remarks Resolves `true` when Linear returns a viewer, and `false` ONLY on a genuine credential
- * rejection — an HTTP 401/403 or a GraphQL authentication error, which `postGraphQL` surfaces as a
- * `LinearAuthError` — so the route answers 400 "rejected" only for a truly bad key. Every other
- * failure re-throws so the route answers 502 "unreachable": a `fetch` `TypeError` (offline), a
- * `RateLimited` (HTTP 429 on a valid key), a non-JSON body (an outage page), and any 5xx/other
- * transport error. A valid-but-rate-limited key or a transient outage is therefore reported as
- * unreachable, not as a rejected key. The key is passed straight to `postGraphQL` and is never logged.
+ * @remarks "name (email)" when both are present, whichever one exists otherwise, and no label when
+ * neither is.
  */
-export async function testLinearConnection(apiKey: string): Promise<boolean> {
+function accountLabel(viewer: {
+  name?: string | null;
+  email?: string | null;
+}): string | undefined {
+  const name = viewer.name?.trim();
+  const email = viewer.email?.trim();
+  if (name && email) return `${name} (${email})`;
+  return name || email || undefined;
+}
+
+/**
+ * Live key check that also reads the account behind the key.
+ *
+ * @remarks Resolves null only for a genuine credential rejection (an HTTP 401 or 403, or a GraphQL
+ * authentication code surfaced as `LinearAuthError`). Every other failure re-throws, so a rate limit,
+ * an outage page or an offline machine is reported as unreachable, never as a rejected key. The key
+ * is never logged.
+ */
+export async function fetchLinearAccount(
+  apiKey: string,
+): Promise<{ account?: string } | null> {
+  let data: GraphQLData;
   try {
-    const data = await postGraphQL(apiKey, VIEWER_QUERY, {});
-    return Boolean((data as { viewer?: { id?: string } }).viewer?.id);
+    data = await postGraphQL(apiKey, VIEWER_QUERY, {});
   } catch (err) {
-    if (err instanceof LinearAuthError) return false;
+    if (err instanceof LinearAuthError) return null;
     throw err;
   }
+  const viewer = (
+    data as {
+      viewer?: { id?: string; name?: string | null; email?: string | null };
+    }
+  ).viewer;
+  if (!viewer?.id) return null;
+  const account = accountLabel(viewer);
+  return account ? { account } : {};
+}
+
+/** First-run key check: true for a valid key, false for a rejected one; outages re-throw. */
+export async function testLinearConnection(apiKey: string): Promise<boolean> {
+  return (await fetchLinearAccount(apiKey)) !== null;
 }
 
 const USERS_QUERY = `query Users($onlyActive: UserFilter) { users(filter: $onlyActive, first: ${PAGE_SIZE}) { nodes { id name displayName } pageInfo { hasNextPage } } }`;

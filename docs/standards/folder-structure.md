@@ -67,7 +67,7 @@ src/web/
 | `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Glyph` / `Markdown`                                            | `primitives/`                    |
 | `tokens.css`                                                                                                             | `styles/`                        |
 
-A component lives in the folder of the feature that consumes it; a component consumed by exactly one feature is co-located with that consumer (`PlaybookEditorModal` sits in `settings/` because `SettingsScreen` is its only consumer). `MultiSelect` stays in `modals/` even though both `settings/` and `inbox/` now consume it — cross-feature reuse goes through the owning feature's `index.ts` barrel rather than forcing a move.
+A component lives in the folder of the feature that consumes it; a component consumed by exactly one feature is co-located with that consumer (`PlaybookEditorModal` sits in `settings/` because `SettingsScreen` is its only consumer). `MultiSelect` stays in `modals/` even though both `settings/` and `inbox/` now consume it: cross-feature reuse goes through the owning feature's `index.ts` barrel rather than forcing a move. `features/connections/` follows the same rule: `LinearConnectionCard` composes the connection primitives with the Linear hook, and Settings imports it through the `connections` barrel so the setup wizard can reuse the same card instead of forking it.
 
 ## Import direction (unidirectional)
 

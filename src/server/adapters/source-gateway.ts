@@ -5,7 +5,10 @@ import {
   isSourceEnabled,
   listSources,
 } from "../sources/registry.js";
-import { testLinearConnection as testImpl } from "../sources/linear/linear.source.js";
+import {
+  fetchLinearAccount,
+  testLinearConnection as testImpl,
+} from "../sources/linear/linear.source.js";
 import type {
   FilterCapabilities,
   FilterDimension,
@@ -72,6 +75,20 @@ export function rebuildSources(config: Config): void {
 /** Live Linear key check for the setup route (viewer query); the only seam routes may reach it through. */
 export function testLinearConnection(apiKey: string): Promise<boolean> {
   return testImpl(apiKey);
+}
+
+/**
+ * Check a key live and return its account, or null when the source rejects it.
+ *
+ * @remarks Re-throws every failure that is not a credential rejection so the route can answer
+ * unreachable.
+ */
+export function checkSourceKey(
+  sourceId: string,
+  apiKey: string,
+): Promise<{ account?: string } | null> {
+  resolveSource(sourceId);
+  return fetchLinearAccount(apiKey);
 }
 
 /** The source when it is registered and enabled, for services that write to it. */

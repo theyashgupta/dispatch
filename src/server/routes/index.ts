@@ -15,6 +15,7 @@ import { pushRouter } from "./push.route.js";
 import { viewerRouter } from "./viewer.route.js";
 import { accountsRouter } from "./accounts.route.js";
 import { itemsRouter } from "./items.route.js";
+import { connectionRouter } from "./connection.route.js";
 import { linearRouter } from "./linear.route.js";
 
 /**
@@ -41,4 +42,5 @@ apiRouter.use(pushRouter);
 apiRouter.use(viewerRouter);
 apiRouter.use(accountsRouter);
 apiRouter.use(itemsRouter);
+apiRouter.use(connectionRouter);
 apiRouter.use(linearRouter);

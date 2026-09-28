@@ -129,6 +129,66 @@ export function updateLinearApiKey(apiKey: string): void {
 }
 
 /**
+ * Remove the stored Linear key from `~/.dispatch/config.json` and from the held config.
+ *
+ * @remarks Deletes only `sources.linear.apiKey` and a legacy flat `linearApiKey`, carrying every
+ * other key (the Linear filters included) forward verbatim at mode 0600. A file with no stored key
+ * is left byte-identical, so a repeated disconnect writes nothing. The held config keeps its typed
+ * empty state (`""`), which the registry reads as keyless on the next rebuild.
+ */
+export function clearLinearApiKey(): void {
+  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
+  let parsed: Record<string, unknown>;
+  try {
+    const p = JSON.parse(raw) as unknown;
+    if (typeof p !== "object" || p === null || Array.isArray(p)) {
+      throw new Error("not an object");
+    }
+    parsed = p as Record<string, unknown>;
+  } catch (err) {
+    const pos = /position (\d+)/.exec((err as Error).message)?.[1];
+    throw new Error(
+      `config at ${CONFIG_PATH} is not valid JSON${pos ? ` (near position ${pos})` : ""}`,
+      { cause: err },
+    );
+  }
+
+  const sources =
+    typeof parsed.sources === "object" &&
+    parsed.sources !== null &&
+    !Array.isArray(parsed.sources)
+      ? (parsed.sources as Record<string, unknown>)
+      : {};
+  const linear =
+    typeof sources.linear === "object" &&
+    sources.linear !== null &&
+    !Array.isArray(sources.linear)
+      ? (sources.linear as Record<string, unknown>)
+      : null;
+
+  if ((linear && "apiKey" in linear) || "linearApiKey" in parsed) {
+    const next: Record<string, unknown> = { ...parsed };
+    delete next.linearApiKey;
+    if (linear) {
+      const nextLinear = { ...linear };
+      delete nextLinear.apiKey;
+      next.sources = { ...sources, linear: nextLinear };
+    }
+    writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
+      mode: 0o600,
+    });
+    fs.chmodSync(CONFIG_PATH, 0o600);
+  }
+
+  if (orchestrationConfig) {
+    orchestrationConfig.linearApiKey = "";
+    if (orchestrationConfig.sources?.linear) {
+      orchestrationConfig.sources.linear.apiKey = "";
+    }
+  }
+}
+
+/**
  * Read `~/.dispatch/config.json`, merge the flat top-level keys in `patch`, and write it back
  * atomically at mode 0600, mutating the in-memory config the same way so the change is live.
  * @remarks Shared by every flat-key writer below; nested `sources` writers keep their own merge.

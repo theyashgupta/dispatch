@@ -2131,6 +2131,24 @@ Sync-to-Linear requires a one-time interactive Linear MCP OAuth authorization on
 `claude`, type `/mcp`, choose `linear`, and authenticate in the browser. The workspace selected during
 that OAuth flow is the write target for every subsequent headless sync (done for Yash-Test 2026-07-20).
 
+**Connection routes (LOCAL-32).** `routes/connection.route.ts` owns the Linear connection after
+first-run setup. `GET /api/sources/:source/connection` answers `{ configured, connected, account?,
+error? }`: no stored key means no network call; a stored key runs the live viewer check
+(`linear.source.ts#fetchLinearAccount`, `viewer { id name email }`), and a rejection or an outage comes
+back as `error: "rejected"` or `"unreachable"` with `configured: true`. `PUT
+/api/sources/:source/key` is test-before-persist like `POST /api/setup`: a rejected key answers
+400 and an unreachable Linear answers 502, both with `config.json` byte-identical; a valid key is
+written by `updateLinearApiKey`, the registry is rebuilt and the enabled pollers restart, and the
+body carries only the account label. `DELETE /api/sources/:source/key` removes the key through
+`config-holder.ts#clearLinearApiKey` (the filters and every other key survive; the held config
+keeps `""`), rebuilds the registry so Linear is disabled, restarts the enabled pollers so the
+Linear loop retires, and answers 204, also when nothing was stored. Cards are untouched. Only
+`linear` stores a key, so every other source id answers 404 on all three. A key with a character
+outside printable ASCII answers 400 before any network call, a config write failure answers 500
+`save-failed`, and a replace whose key check was still in flight when a disconnect landed answers
+409 `superseded` and writes nothing. The key never appears in a response, a log line or an error
+body.
+
 **Status push (LOCAL-23).** A manual move (`POST /cards/:id/move`, including mirrored group members) and the start saga's To Do to In Progress push the matching Linear workflow state. The map lives in `sources.linear.stateMap` (team id to column to state id or `null` for "do not sync"), validated by `shared/linear-state-map.ts#parseStateMap` and served by `GET`/`PUT /api/config/linear-state-map`; `resolveTargetState` fills unmapped columns with type defaults (To Do the lowest unstarted state, In Progress and Needs Input the lowest started, Done the lowest completed, In Review and Parked do not sync). Settings edits it in the Sync filters tab (`features/settings/LinearStateMapSection.tsx`). `store.moveCardManual` returns the column changes it made, read inside its own mutation so two overlapping moves each record their own columns, and the route hands them to `services/orchestration/linear-outbound.ts#pushColumnChanges`, which queues the pushes off the request path, chained per card so two quick moves reach Linear in order; `start-session.ts#completeStartAndPush` snapshots the columns around `completeStart` (`snapshotColumns`, `columnChangesSince`). Agent-driven moves (`applyMarker`, `flipBack`) never push. A push is skipped when the target equals the card's `linearState` or `pendingState`. Success runs `issueUpdate` with the state (`LinearSource.updateState`), then `store.recordLinearPush` sets `linearState` and `pendingState { id, at }` and clears `linearError` in one mutation and a poll follows; `reconcile()` holds the pushed state against a different incoming one for 300000 ms or until Linear reports it, keeps a To Do card with a fresh hold or a queued push (`store.setPushing`), and `trackedIssueIds` tracks a held card. Failure leaves the column, `linearState` and `pendingState` as they were and sets `linearError` to "Linear state not updated. " plus the fixed outbound copy. Every attempt writes one `linear_state_pushed` activity event (reason: the state name or `failed: <copy>`).
 
 **Tickets page and Move to (LOCAL-42).** `#/tickets` (`features/tickets/TicketsPage.tsx`, a lazy chunk with its own bundle budget line) lists every Linear card on the wire (`lib/linear-state.ts#isTicketCard`: source linear and no group) ordered by priority then recency, grouped by status, priority, project, cycle, team or none (`features/tickets/ticket-rows.ts`, the choice kept in `localStorage` `dsp.tickets.groupBy`). Row actions and the j, k, Enter, e, o keys follow `ticket-actions.ts#ticketActionsFor`, which mirrors the move route guards (no Done for Inbox, grouped or starting cards). The detail panel's Move to select calls `POST /cards/:id/linear-state { stateId }`: `linear-outbound.ts#moveLinearState` refuses an unknown card (404), a non-Linear or teamless card (409) and a state outside the card's team (400) before any write, then `setLinearState` runs the same per-card push chain as a board move with the card's current column as both `fromCol` and `toCol`, so the column never changes; a failure answers 502 with the recorded card notice.
@@ -3091,6 +3109,20 @@ retired literal inside the sync strip until the strip retired with it (see
 [App Shell Zones](#app-shell-zones)); a third, directory-scoped check (`checkBoardReadingRhythm`, `NEW-19`, above) covers
 the fifth; and a fourth, file-scoped check (`checkTerminalFence`, `NEW-20`, above) covers the
 sixth — proving only the fenced subject set, never the fenced contents, as stated above.
+
+**Connection card (LOCAL-32).** Every source connection renders through two presentational
+primitives: `primitives/ConnectionCard.tsx` (source icon, name, status chip, credential line, and a
+body with the numbered setup guide, the scopes as monospace chips, the token page link, the form
+slot, the privacy footer and an optional details section below it, where Settings puts the Linear
+filters) and `primitives/CredentialForm.tsx` (password input, Connect or
+Replace, Test, and a two-step Disconnect that re-arms after 5 s). The body reveals with the
+Collapsible grid-rows pair and never measures; once open it stops clipping so dropdowns inside it
+can overflow. The status is the shared `SourceCardStatus` union (checking, disconnected, connected with
+an optional account, error with its copy, soon); a soon card renders the header only. The Linear
+composition lives in `features/connections/LinearConnectionCard.tsx` behind the feature barrel so
+the setup wizard can reuse it; Settings is its consumer today. `hooks/useLinearConnection.ts` reads
+the status on mount and on Test only, shows Checking until the first read settles, and keeps
+Connect disabled until then.
 
 ### App Shell Zones
 
