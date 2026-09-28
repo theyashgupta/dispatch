@@ -52,10 +52,16 @@ test("existing todo and inbox cards refresh in place and clear the gone flag", (
   );
 });
 
-test("a card past To Do is not refreshed", () => {
+test("a card past To Do keeps its board-owned fields when only the title changed in Linear", () => {
   const r = reconcile(
     [issue("a", { title: "new" })],
-    current(card("a", { column: "in_progress", title: "old" })),
+    current(
+      card("a", {
+        column: "in_progress",
+        title: "old",
+        linearState: { name: "Todo", type: "unstarted" },
+      }),
+    ),
   );
   assert.deepEqual(r.upserts, []);
   assert.deepEqual(r.reappearedIds, []);
@@ -64,7 +70,13 @@ test("a card past To Do is not refreshed", () => {
 test("a gone card past To Do whose issue returns is reported as reappeared only", () => {
   const r = reconcile(
     [issue("a")],
-    current(card("a", { column: "done", goneFromLinear: true })),
+    current(
+      card("a", {
+        column: "done",
+        goneFromLinear: true,
+        linearState: { name: "Todo", type: "unstarted" },
+      }),
+    ),
   );
   assert.deepEqual(r.upserts, []);
   assert.deepEqual(r.reappearedIds, ["a"]);
