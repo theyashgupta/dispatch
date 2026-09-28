@@ -25,39 +25,27 @@ function respond(status: number, body: unknown): string[] {
 
 test("202 starts a poll on the encoded source route", async () => {
   const calls = respond(202, { polling: "linear" });
-  assert.deepEqual(await pollSource("linear"), { ok: true });
+  await pollSource("linear");
   assert.deepEqual(calls, ["POST /api/sources/linear/poll"]);
   const encoded = respond(202, {});
   await pollSource("a/b");
   assert.deepEqual(encoded, ["POST /api/sources/a%2Fb/poll"]);
 });
 
-test("409 and 404 carry the server's error text", async () => {
+test("409 and 404 reject with the server's error text", async () => {
   respond(409, { error: "source disabled" });
-  assert.deepEqual(await pollSource("linear"), {
-    ok: false,
-    error: "source disabled",
-  });
+  await assert.rejects(pollSource("linear"), { message: "source disabled" });
   respond(404, { error: "unknown source" });
-  assert.deepEqual(await pollSource("nope"), {
-    ok: false,
-    error: "unknown source",
-  });
+  await assert.rejects(pollSource("nope"), { message: "unknown source" });
 });
 
 test("a body without error text falls back to the status", async () => {
   globalThis.fetch = () =>
     Promise.resolve(new Response("oops", { status: 500 }));
-  assert.deepEqual(await pollSource("linear"), {
-    ok: false,
-    error: "poll failed (500)",
-  });
+  await assert.rejects(pollSource("linear"), { message: "poll failed (500)" });
 });
 
-test("a network failure resolves as server unreachable, never throws", async () => {
+test("a network failure rejects as server unreachable", async () => {
   globalThis.fetch = () => Promise.reject(new TypeError("Failed to fetch"));
-  assert.deepEqual(await pollSource("linear"), {
-    ok: false,
-    error: "server unreachable",
-  });
+  await assert.rejects(pollSource("linear"), { message: "server unreachable" });
 });
