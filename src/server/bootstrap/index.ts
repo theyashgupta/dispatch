@@ -49,10 +49,7 @@ import {
   setMacCalendarReader,
 } from "../sources/registry.js";
 import { readMacEvents } from "../adapters/calendar-mac.js";
-import {
-  CALENDAR_ICAL_KEY,
-  resolveIcalUrl,
-} from "../services/orchestration/calendar.js";
+import { resolveIcalCredential } from "../services/orchestration/calendar.js";
 import { resolveGithubToken } from "../services/domain/github-token.js";
 import { resolveSentryToken } from "../services/domain/sentry-token.js";
 import { resolveSlackToken } from "../services/domain/slack-token.js";
@@ -318,12 +315,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   setCredentialResolver("sentry", resolveSentryToken);
   setCredentialResolver("slack", resolveSlackToken);
   setMacCalendarReader(readMacEvents);
-  setCredentialResolver("calendar", async () => {
-    const token = await resolveIcalUrl();
-    return token === null
-      ? null
-      : { token, via: "vault", key: CALENDAR_ICAL_KEY };
-  });
+  setCredentialResolver("calendar", resolveIcalCredential);
   buildRegistry(config);
   loadOrCreateVapidKeys();
   console.log(`[push] VAPID keypair loaded from ${VAPID_KEYS_PATH}`);
