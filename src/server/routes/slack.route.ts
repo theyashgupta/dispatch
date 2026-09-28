@@ -9,7 +9,9 @@ import {
 import {
   resolveSlackChannel,
   slackChannelOptions,
+  slackThread,
   type SlackRefusal,
+  type SlackThreadRefusal,
 } from "../services/domain/slack.js";
 import {
   getOrchestrationConfig,
@@ -17,7 +19,7 @@ import {
 } from "../services/infra/config-holder.js";
 
 /**
- * Slack setup routes: list the channels to pick, resolve a pasted link, save the picked list.
+ * Slack routes: list the channels to pick, resolve a pasted link, save the picked list, load a thread.
  *
  * @remarks Listing and resolving talk to Slack only while the Slack switch is on, and a save polls
  * Slack at once when the source is running. Errors answer an error kind and, for Slack's own
@@ -34,12 +36,24 @@ const REFUSAL_STATUS: Record<SlackRefusal["error"], number> = {
   unreachable: 502,
 };
 
+const THREAD_STATUS: Record<SlackThreadRefusal["error"], number> = {
+  "not-found": 404,
+  disabled: 409,
+  "no-credential": 409,
+  rejected: 401,
+  "rate-limited": 429,
+  unreachable: 502,
+};
+
 /** Answer a refusal from the Slack domain service with its status and error kind. */
-function sendRefusal(res: Response, refusal: SlackRefusal): void {
-  const code = "code" in refusal ? refusal.code : undefined;
-  res.status(REFUSAL_STATUS[refusal.error]).json({
+function sendRefusal<E extends string>(
+  res: Response,
+  refusal: { error: E; code?: string },
+  statuses: Record<E, number>,
+): void {
+  res.status(statuses[refusal.error]).json({
     error: refusal.error,
-    ...(isProviderCode(code) ? { providerError: code } : {}),
+    ...(isProviderCode(refusal.code) ? { providerError: refusal.code } : {}),
   });
 }
 
@@ -55,7 +69,7 @@ async function guarded(res: Response, run: () => Promise<void>): Promise<void> {
 slackRouter.get("/slack/channels", (_req, res) =>
   guarded(res, async () => {
     const result = await slackChannelOptions();
-    if ("error" in result) sendRefusal(res, result);
+    if ("error" in result) sendRefusal(res, result, REFUSAL_STATUS);
     else res.status(200).json(result);
   }),
 );
@@ -68,7 +82,7 @@ slackRouter.post("/slack/channels/resolve", (req, res) => {
   }
   return guarded(res, async () => {
     const result = await resolveSlackChannel(input);
-    if ("error" in result) sendRefusal(res, result);
+    if ("error" in result) sendRefusal(res, result, REFUSAL_STATUS);
     else res.status(200).json(result);
   });
 });
@@ -99,3 +113,11 @@ slackRouter.put("/sources/slack/channels", (req, res) => {
   pollNow("slack");
   res.status(200).json({ channels: clean });
 });
+
+slackRouter.get("/slack/thread/:itemId", (req, res) =>
+  guarded(res, async () => {
+    const result = await slackThread(req.params.itemId);
+    if ("error" in result) sendRefusal(res, result, THREAD_STATUS);
+    else res.status(200).json(result);
+  }),
+);

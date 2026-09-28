@@ -88,3 +88,41 @@ export async function slackAuthTest(
     ...(botId ? { botId } : {}),
   };
 }
+
+const PERMANENT_USER_CODES = new Set([
+  "user_not_found",
+  "user_not_visible",
+  "missing_scope",
+]);
+
+/**
+ * A user's display name, from the cache or users.info while the caller's lookup budget lasts.
+ *
+ * @remarks A refusal that will not change on retry caches the id as the name, so an unknown
+ * author does not spend the lookup budget on every call.
+ */
+export async function slackUserName(
+  token: string,
+  userId: string,
+  names: Map<string, string>,
+  budget: { left: number },
+): Promise<string> {
+  const known = names.get(userId);
+  if (known !== undefined) return known;
+  if (budget.left <= 0) return userId;
+  budget.left -= 1;
+  const body = await slackGet(token, "users.info", { user: userId });
+  if (!body.ok) {
+    if (PERMANENT_USER_CODES.has(text(body.error))) names.set(userId, userId);
+    return userId;
+  }
+  const user = body.user as Record<string, unknown> | undefined;
+  const profile = user?.profile as Record<string, unknown> | undefined;
+  const name =
+    text(profile?.display_name) ||
+    text(profile?.real_name) ||
+    text(user?.name) ||
+    userId;
+  names.set(userId, name);
+  return name;
+}
