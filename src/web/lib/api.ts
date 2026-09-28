@@ -1581,3 +1581,25 @@ export async function askQuestion(
   if (res.status === 400) return { ok: false, error: "invalid" };
   return { ok: false, error: "failed" };
 }
+
+/**
+ * Ask the server to poll one source now.
+ *
+ * @remarks 202 means a poll started; 409 (disabled or not polling), 404 (unknown source) and a
+ * network failure all resolve with error text so the caller can show it.
+ */
+export async function pollSource(
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/sources/${encodeURIComponent(id)}/poll`, {
+      method: "POST",
+    });
+  } catch {
+    return { ok: false, error: "server unreachable" };
+  }
+  if (res.status === 202) return { ok: true };
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  return { ok: false, error: body.error ?? `poll failed (${res.status})` };
+}
