@@ -153,6 +153,11 @@ const MeetingsPage = lazy(() =>
     default: m.MeetingsPage,
   })),
 );
+const CalendarPage = lazy(() =>
+  import("./features/calendar/index.js").then((m) => ({
+    default: m.CalendarPage,
+  })),
+);
 const CheatSheet = lazy(() =>
   import("./features/palette/index.js").then((m) => ({
     default: m.CheatSheet,
@@ -504,6 +509,7 @@ export function App() {
   const undoToast = useUndoToast();
   const items = useItems(board);
   const meetingItems = items.filter((item) => item.source === "meeting");
+  const inboxItems = items.filter((item) => item.source !== "calendar");
   const { show: showUndo, notice: showNotice } = undoToast;
   const actionServices = useMemo<ActionServices>(
     () => ({
@@ -520,7 +526,7 @@ export function App() {
       showUndo,
       notice: showNotice,
       openUrl: (url) => {
-        window.open(url, "_blank", "noopener");
+        window.open(url, "_blank", "noopener,noreferrer");
       },
       copyText: (text) =>
         navigator.clipboard
@@ -715,7 +721,7 @@ export function App() {
     />
   ) : null;
 
-  const inboxCount = inboxWaitingCount(board.cards, items);
+  const inboxCount = inboxWaitingCount(board.cards, inboxItems);
   const sessionRows = flattenSessions(board.cards, nowMs());
   const liveSessionCount = sessionRows.filter((row) => row.running).length;
   const pageMeta: Record<Page, { title: string; count?: number }> = {
@@ -733,6 +739,7 @@ export function App() {
     vault: { title: "Vault", count: vaultCount },
     archive: { title: "Archive", count: archiveCount },
     meetings: { title: "Meetings", count: meetingItems.length },
+    calendar: { title: "Calendar" },
   };
   const pageTitle = pageMeta[route.page].title;
 
@@ -861,7 +868,7 @@ export function App() {
             ) : route.page === "inbox" ? (
               <InboxView
                 board={board}
-                items={items}
+                items={inboxItems}
                 selectedCardId={selectedCard ? selectedCardId : null}
                 onSelectCard={selectCard}
                 services={actionServices}
@@ -903,6 +910,14 @@ export function App() {
               />
             ) : route.page === "vault" ? (
               <VaultPage onCountChange={setVaultCount} />
+            ) : route.page === "calendar" ? (
+              <CalendarPage
+                items={items}
+                cards={board.cards}
+                services={actionServices}
+                onStartPromoted={(cardId) => setStartRequest({ cardId })}
+                onOpenSettings={() => navigate("settings")}
+              />
             ) : route.page === "meetings" ? (
               <MeetingsPage
                 items={meetingItems}

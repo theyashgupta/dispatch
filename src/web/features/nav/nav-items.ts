@@ -1,6 +1,7 @@
 import {
   Activity,
   Archive,
+  CalendarDays,
   ClipboardList,
   Inbox,
   Kanban,
@@ -50,6 +51,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { page: "vault", label: "Vault", icon: KeyRound, group: "System" },
   { page: "archive", label: "Archive", icon: Archive, group: "System" },
   { page: "meetings", label: "Meetings", icon: Mic, group: "Sources" },
+  {
+    page: "calendar",
+    label: "Calendar",
+    icon: CalendarDays,
+    group: "Sources",
+  },
 ];
 
 /**
