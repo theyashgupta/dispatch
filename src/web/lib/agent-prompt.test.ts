@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { PrDetail } from "../../shared/types.js";
+import { fenceUntrusted } from "../../shared/untrusted.js";
 import {
-  fenceUntrusted,
   fixCiPrompt,
   PROMPT_CONTEXT_MAX,
   reviewPrompt,

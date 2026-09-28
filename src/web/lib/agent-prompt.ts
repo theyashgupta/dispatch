@@ -1,26 +1,9 @@
 import type { PrDetail, SentryIssueDetail } from "../../shared/types.js";
-
-export const PROMPT_CONTEXT_MAX = 6000;
+import { fenceUntrusted } from "../../shared/untrusted.js";
 
 const MARKER = /DISPATCH_STATUS:/gi;
 
-/**
- * Wrap provider text in a code fence the text cannot close, with every status marker disarmed.
- *
- * @remarks The kickoff reaches a Claude session whose pane the marker parser reads, so a PR body or an
- * exception message holding "DISPATCH_STATUS:" could fake a status line; the rewrite breaks the
- * token. The fence is one backtick longer than the longest run inside, so the text stays inside it.
- */
-export function fenceUntrusted(text: string, cap: number): string {
-  let body = text.replace(MARKER, "DISPATCH-STATUS:");
-  if (body.length > cap) body = `${body.slice(0, cap)}\n(truncated)`;
-  const longest = Math.max(
-    0,
-    ...Array.from(body.matchAll(/`+/g), (m) => m[0].length),
-  );
-  const fence = "`".repeat(Math.max(3, longest + 1));
-  return `${fence}\n${body}\n${fence}`;
-}
+export const PROMPT_CONTEXT_MAX = 6000;
 
 /** The kickoff text for an adversarial review that posts nothing. */
 export function reviewPrompt(

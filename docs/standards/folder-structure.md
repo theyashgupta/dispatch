@@ -44,6 +44,7 @@ src/web/
 │   ├── nav/        # SidebarNav, NavRow, SyncStatus, nav-items
 │   ├── modals/     # StartModal, CleanupModal, MultiSelect
 │   ├── settings/   # SettingsScreen (full-screen, sidebar-nav), PlaybookEditorModal
+│   ├── slack/      # SlackThread, reused by the Inbox row and the Slack page through the barrel
 │   └── badges/     # GoneBadge, PlanReadyBadge, SourceBadge — shared leaf feature (see import direction)
 ├── hooks/          # data/effect hooks: useBoardStream, useUnseenActivity, useTransitionNotifications, useResumeFeedback, useMediaQuery
 ├── lib/            # non-UI helpers: api.ts, card-badges.ts, format-age.ts, resume-feedback.ts, start-request.ts

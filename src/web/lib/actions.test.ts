@@ -69,6 +69,11 @@ function ctx() {
         if (id === "bad") throw new Error("409");
         await Promise.resolve();
       },
+      getSlackThread: async (id) => {
+        calls.push(`thread ${id}`);
+        await Promise.resolve();
+        return { ok: false as const, reason: "unreachable" as const };
+      },
     },
     showUndo: (label, u) => {
       calls.push(`undo-toast ${label}`);
@@ -79,6 +84,10 @@ function ctx() {
     openUrl: (url) => calls.push(`open ${url}`),
     copyText: async (text) => {
       calls.push(`copy ${text}`);
+      await Promise.resolve();
+    },
+    startAgent: async (target) => {
+      calls.push(`start ${target.itemId}`);
       await Promise.resolve();
     },
   };

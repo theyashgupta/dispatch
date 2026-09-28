@@ -13,9 +13,11 @@
  *     dms?: [{ id, is_im?, is_mpim?, name?, is_user_deleted? }],
  *     history?: { "<id>": [{ ts, user?, text?, subtype?, bot_id?, thread_ts?, reply_count? }] },
  *     historyErrors?: { "<id>": "<code>" }, users?: { "<id>": { name, display_name? } },
+ *     replies?: { "<channel>:<thread ts>": [{ ts, user?, text?, bot_id?, username? }] },
  *     listRestricted?: boolean, rateLimited?: boolean, down?: boolean }
  * Serves auth.test, users.conversations (channels, im and mpim), conversations.info,
- * conversations.history (oldest exclusive, newest first, limit and has_more) and users.info;
+ * conversations.history (oldest exclusive, newest first, limit and has_more), conversations.replies
+ * (the parent from history, then its replies oldest first, limit and has_more) and users.info;
  * anything else answers unknown_method. A state file that does not parse answers 500 until it is fixed. It binds
  * 127.0.0.1 only and refuses ports 4700 and 4710.
  */
@@ -124,6 +126,26 @@ function answer(method, params, caller, state) {
       ok: true,
       messages: newer.slice(0, limit),
       has_more: newer.length > limit,
+    };
+  }
+  if (method === "conversations.replies") {
+    const id = params.get("channel") ?? "";
+    const ts = params.get("ts") ?? "";
+    const parent = (state.history?.[id] ?? []).find((m) => m.ts === ts);
+    const replies = state.replies?.[`${id}:${ts}`];
+    if (!parent && !replies) return { ok: false, error: "thread_not_found" };
+    const limit = Math.max(
+      1,
+      Math.min(Number(params.get("limit") ?? 1000), 1000),
+    );
+    const thread = [
+      ...(parent ? [parent] : []),
+      ...[...(replies ?? [])].sort((a, b) => Number(a.ts) - Number(b.ts)),
+    ];
+    return {
+      ok: true,
+      messages: thread.slice(0, limit),
+      has_more: thread.length > limit,
     };
   }
   if (method === "users.info") {

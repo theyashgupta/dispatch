@@ -165,6 +165,17 @@ export const ITEM_STATES = ["unread", "read", "snoozed", "done"] as const;
 export type ItemState = (typeof ITEM_STATES)[number];
 export type SettableItemState = Exclude<ItemState, "snoozed">;
 
+export interface SlackThreadMessage {
+  author: string;
+  time: string;
+  text: string;
+}
+
+export interface SlackThread {
+  messages: SlackThreadMessage[];
+  truncated: boolean;
+}
+
 export interface SourceCursor {
   cursor?: string;
   polledAt: string;

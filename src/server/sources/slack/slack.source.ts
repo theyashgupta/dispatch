@@ -8,13 +8,9 @@ import type {
   SourceIssue,
 } from "../../../shared/types.js";
 import type { TicketSource } from "../ticket.source.js";
-import { slackAuthTest, slackGet, text } from "./slack-api.js";
+import { slackAuthTest, slackGet, slackUserName, text } from "./slack-api.js";
 import { listConversations } from "./slack-channels.js";
-import {
-  classifyMessage,
-  slackItem,
-  type SlackMessage,
-} from "./slack-message.js";
+import { classifyMessage, isMessage, slackItem } from "./slack-message.js";
 import {
   historyOldest,
   nextCursorState,
@@ -32,39 +28,6 @@ const SKIPPED_CODES = new Set([
   "not_in_channel",
   "missing_scope",
 ]);
-
-const TS_SHAPE = /^\d{1,11}(\.\d{1,6})?$/;
-
-const PERMANENT_USER_CODES = new Set([
-  "user_not_found",
-  "user_not_visible",
-  "missing_scope",
-]);
-
-const optionalString = (value: unknown): boolean =>
-  value === undefined || typeof value === "string";
-
-/**
- * Keep a history row only when its ts is Slack-shaped and its other read fields have Slack's types.
- *
- * @remarks Any other row is dropped rather than trusted, because a malformed one would throw while
- * building its item and stall every later poll of that conversation.
- */
-function isMessage(row: unknown): row is SlackMessage {
-  if (typeof row !== "object" || row === null) return false;
-  const { ts, text, user, thread_ts, reply_count } = row as Record<
-    string,
-    unknown
-  >;
-  return (
-    typeof ts === "string" &&
-    TS_SHAPE.test(ts) &&
-    optionalString(text) &&
-    optionalString(user) &&
-    optionalString(thread_ts) &&
-    (reply_count === undefined || typeof reply_count === "number")
-  );
-}
 
 /**
  * List the user's direct and group DMs as poll targets.
@@ -119,39 +82,6 @@ export class SlackSource implements TicketSource {
   ) {}
 
   /**
-   * A user's display name, from the cache or users.info while this poll's lookup budget lasts.
-   *
-   * @remarks A refusal that will not change on retry caches the id as the name, so an unknown
-   * author does not spend the lookup budget on every poll.
-   */
-  private async nameOf(
-    token: string,
-    userId: string,
-    budget: { left: number },
-  ): Promise<string> {
-    const known = this.names.get(userId);
-    if (known !== undefined) return known;
-    if (budget.left <= 0) return userId;
-    budget.left -= 1;
-    const body = await slackGet(token, "users.info", { user: userId });
-    if (!body.ok) {
-      if (PERMANENT_USER_CODES.has(text(body.error))) {
-        this.names.set(userId, userId);
-      }
-      return userId;
-    }
-    const user = body.user as Record<string, unknown> | undefined;
-    const profile = user?.profile as Record<string, unknown> | undefined;
-    const name =
-      text(profile?.display_name) ||
-      text(profile?.real_name) ||
-      text(user?.name) ||
-      userId;
-    this.names.set(userId, name);
-    return name;
-  }
-
-  /**
    * Read one conversation's history window and turn its asks into items.
    *
    * @remarks A conversation Slack refuses to show is skipped for this poll only; its polledAt still
@@ -200,7 +130,12 @@ export class SlackSource implements TicketSource {
           channelId: target.id,
           channelName: target.name,
           conversation: target.conversation,
-          author: await this.nameOf(token, message.user, poll.budget),
+          author: await slackUserName(
+            token,
+            message.user,
+            this.names,
+            poll.budget,
+          ),
           names: this.names,
           teamUrl: poll.teamUrl,
         }),
@@ -248,7 +183,7 @@ export class SlackSource implements TicketSource {
       if (prev[target.id]) next[target.id] = prev[target.id];
     }
     const budget = { left: NAME_LOOKUP_MAX };
-    await this.nameOf(token, auth.userId, budget);
+    await slackUserName(token, auth.userId, this.names, budget);
     const poll = { me: auth.userId, teamUrl: auth.teamUrl, polledAt, budget };
     const items: Item[] = [];
     for (const target of orderTargets(channels, dms, prev)) {

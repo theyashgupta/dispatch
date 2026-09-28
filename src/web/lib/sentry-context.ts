@@ -1,5 +1,6 @@
 import type { SentryFrame, SentryIssueDetail } from "../../shared/types.js";
-import { fenceUntrusted, PROMPT_CONTEXT_MAX } from "./agent-prompt.js";
+import { fenceUntrusted } from "../../shared/untrusted.js";
+import { PROMPT_CONTEXT_MAX } from "./agent-prompt.js";
 
 const LINE_MAX = 1000;
 

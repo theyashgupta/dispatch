@@ -12,6 +12,33 @@ export interface SlackMessage {
 
 export type SlackConversation = "channel" | "im" | "mpim";
 
+const TS_SHAPE = /^\d{1,11}(\.\d{1,6})?$/;
+
+const optionalString = (value: unknown): boolean =>
+  value === undefined || typeof value === "string";
+
+/**
+ * Keep a history row only when its ts is Slack-shaped and its other read fields have Slack's types.
+ *
+ * @remarks Any other row is dropped rather than trusted, because a malformed one would throw while
+ * building its item and stall every later poll of that conversation.
+ */
+export function isMessage(row: unknown): row is SlackMessage {
+  if (typeof row !== "object" || row === null) return false;
+  const { ts, text, user, thread_ts, reply_count } = row as Record<
+    string,
+    unknown
+  >;
+  return (
+    typeof ts === "string" &&
+    TS_SHAPE.test(ts) &&
+    optionalString(text) &&
+    optionalString(user) &&
+    optionalString(thread_ts) &&
+    (reply_count === undefined || typeof reply_count === "number")
+  );
+}
+
 const KEPT_SUBTYPES = new Set(["thread_broadcast", "file_share"]);
 
 const TITLE_MAX = 80;

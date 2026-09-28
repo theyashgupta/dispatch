@@ -27,6 +27,10 @@ export {
   listSlackChannels,
   slackChannelInfo,
 } from "../sources/slack/slack-channels.js";
+export {
+  fetchSlackThread,
+  SlackThreadCache,
+} from "../sources/slack/slack-thread.js";
 import {
   fetchPrDetail,
   postPrReview,
