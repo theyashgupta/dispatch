@@ -16,6 +16,7 @@ import { viewerRouter } from "./viewer.route.js";
 import { accountsRouter } from "./accounts.route.js";
 import { itemsRouter } from "./items.route.js";
 import { connectionRouter } from "./connection.route.js";
+import { githubRouter } from "./github.route.js";
 import { profileRouter } from "./profile.route.js";
 import { linearRouter } from "./linear.route.js";
 
@@ -44,5 +45,6 @@ apiRouter.use(viewerRouter);
 apiRouter.use(accountsRouter);
 apiRouter.use(itemsRouter);
 apiRouter.use(connectionRouter);
+apiRouter.use(githubRouter);
 apiRouter.use(profileRouter);
 apiRouter.use(linearRouter);

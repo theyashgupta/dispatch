@@ -4,6 +4,7 @@ import path from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import type {
   Config,
+  ItemSourceConfig,
   LinearStateMap,
   SourceFilters,
   StatusChannel,
@@ -171,21 +172,22 @@ function readLastUsedPlaybook(
 }
 
 /**
- * Read the well-formed `sources.linear` object from a parsed config.
+ * Read the well-formed `sources.<id>` object from a parsed config.
  *
- * @remarks Returns undefined when `sources` or `sources.linear` is absent, null, an array or not
+ * @remarks Returns undefined when `sources` or `sources.<id>` is absent, null, an array or not
  * an object, so each caller applies its own fallback.
  */
-function nestedLinear(
+function nestedSource(
   parsed: Record<string, unknown>,
+  id: string,
 ): Record<string, unknown> | undefined {
   const sources = parsed.sources;
   if (typeof sources !== "object" || sources === null || Array.isArray(sources))
     return undefined;
-  const linear = (sources as Record<string, unknown>).linear;
-  if (typeof linear !== "object" || linear === null || Array.isArray(linear))
+  const source = (sources as Record<string, unknown>)[id];
+  if (typeof source !== "object" || source === null || Array.isArray(source))
     return undefined;
-  return linear as Record<string, unknown>;
+  return source as Record<string, unknown>;
 }
 
 /**
@@ -195,7 +197,7 @@ function nestedLinear(
  * which keeps the boot migration idempotent.
  */
 function readNestedKey(parsed: Record<string, unknown>): string {
-  const apiKey = nestedLinear(parsed)?.apiKey;
+  const apiKey = nestedSource(parsed, "linear")?.apiKey;
   return typeof apiKey === "string" ? apiKey.trim() : "";
 }
 
@@ -206,7 +208,7 @@ function readNestedKey(parsed: Record<string, unknown>): string {
  * `apiKey` but no `filters` still yields the assigned-to-me pull.
  */
 function readNestedFilters(parsed: Record<string, unknown>): SourceFilters {
-  const filters = nestedLinear(parsed)?.filters;
+  const filters = nestedSource(parsed, "linear")?.filters;
   if (typeof filters !== "object" || filters === null || Array.isArray(filters))
     return DEFAULT_FILTERS;
   const f = filters as Record<string, unknown>;
@@ -229,7 +231,7 @@ function readNestedFilters(parsed: Record<string, unknown>): SourceFilters {
 function readNestedStateMap(
   parsed: Record<string, unknown>,
 ): LinearStateMap | undefined {
-  const raw = nestedLinear(parsed)?.stateMap;
+  const raw = nestedSource(parsed, "linear")?.stateMap;
   if (raw === undefined) return undefined;
   const result = parseStateMap(raw);
   if (result.ok) return result.map;
@@ -238,25 +240,25 @@ function readNestedStateMap(
 }
 
 /**
- * Read the optional `enabled` and `pollIntervalMs` fields of `sources.linear`.
+ * Read the optional `enabled` and `pollIntervalMs` fields of `sources.<id>`.
  *
  * @remarks A non-boolean `enabled` and a non-positive or non-finite interval are dropped, so the
- * resolved config falls back to "enabled when a key is present" and the global interval.
+ * resolved config falls back to the source's default and the global interval.
  */
-function readNestedSourceSettings(parsed: Record<string, unknown>): {
-  enabled?: boolean;
-  pollIntervalMs?: number;
-} {
-  const linear = nestedLinear(parsed);
-  if (!linear) return {};
-  const out: { enabled?: boolean; pollIntervalMs?: number } = {};
-  if (typeof linear.enabled === "boolean") out.enabled = linear.enabled;
+function readNestedSourceSettings(
+  parsed: Record<string, unknown>,
+  id: string,
+): ItemSourceConfig {
+  const source = nestedSource(parsed, id);
+  if (!source) return {};
+  const out: ItemSourceConfig = {};
+  if (typeof source.enabled === "boolean") out.enabled = source.enabled;
   if (
-    typeof linear.pollIntervalMs === "number" &&
-    Number.isFinite(linear.pollIntervalMs) &&
-    linear.pollIntervalMs > 0
+    typeof source.pollIntervalMs === "number" &&
+    Number.isFinite(source.pollIntervalMs) &&
+    source.pollIntervalMs > 0
   )
-    out.pollIntervalMs = linear.pollIntervalMs;
+    out.pollIntervalMs = source.pollIntervalMs;
   return out;
 }
 
@@ -416,9 +418,10 @@ export function loadConfig(): Config {
       linear: {
         apiKey: rawKey,
         filters: readNestedFilters(parsed),
-        ...readNestedSourceSettings(parsed),
+        ...readNestedSourceSettings(parsed, "linear"),
         ...(stateMap ? { stateMap } : {}),
       },
+      github: readNestedSourceSettings(parsed, "github"),
     },
     lastUsedPlaybook: readLastUsedPlaybook(parsed),
     cleanupDelayDays: readWholeDays(

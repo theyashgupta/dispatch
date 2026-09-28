@@ -1,6 +1,7 @@
 import {
   Activity,
   Archive,
+  GitPullRequest,
   ClipboardList,
   Inbox,
   Kanban,
@@ -50,6 +51,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   { page: "vault", label: "Vault", icon: KeyRound, group: "System" },
   { page: "archive", label: "Archive", icon: Archive, group: "System" },
+  {
+    page: "pull-requests",
+    label: "Pull Requests",
+    icon: GitPullRequest,
+    group: "Sources",
+  },
 ];
 
 /**

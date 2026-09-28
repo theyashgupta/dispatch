@@ -12,7 +12,7 @@ src/server/
 ├── routes/        # HTTP transport: route handlers (thin), SSE broadcaster, loopback/DNS-rebinding guard
 ├── services/      # orchestration: the start/cleanup saga, kickoff, config validation, rollback
 ├── adapters/      # subprocess + external I/O: tmux, ttyd, git, the exec chokepoint, claude-trust, marker parse/watcher, Linear poller, editors
-├── sources/       # ticket sources: provider seam (linear.source.ts), source registry, per-source filters
+├── sources/       # ticket and item sources: provider seams (linear.source.ts, github/github.source.ts), source registry, per-source filters
 └── store/         # single-writer state: board.store (never split) + Linear→Card mapping
 ```
 
@@ -62,6 +62,7 @@ src/web/
 | `SettingsScreen.tsx`, `PlaybookEditorModal.tsx`                                                                          | `features/settings/`             |
 | `GoneBadge.tsx`, `PlanReadyBadge.tsx`, `SourceBadge.tsx`                                                                 | `features/badges/` (shared leaf) |
 | `SessionsPage.tsx`, `SessionRow.tsx`                                                                                     | `features/sessions/`             |
+| `PullRequestsPage.tsx`, `PrList.tsx`, `PrDetail.tsx`                                                                     | `features/pull-requests/`        |
 | `useBoardStream.ts`, `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts` | `hooks/`                         |
 | `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`                                    | `lib/`                           |
 | `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Glyph` / `Markdown`                                            | `primitives/`                    |

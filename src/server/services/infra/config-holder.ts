@@ -3,6 +3,7 @@ import writeFileAtomic from "write-file-atomic";
 import {
   DEFAULT_CLAUDE_ACCOUNT_ID,
   type Config,
+  type ItemSourceId,
   type LinearStateMap,
   type SourceConfig,
   type SourceFilters,
@@ -344,5 +345,61 @@ export function updateActiveClaudeAccountId(id: string): void {
     } else {
       orchestrationConfig.activeClaudeAccountId = id;
     }
+  }
+}
+
+/**
+ * Persist whether an item source may poll, and make it live for the next registry rebuild.
+ *
+ * @remarks Only `sources.<id>.enabled` changes; every other key, including the rest of that source's
+ * block, is carried verbatim. The connection routes are the only callers, after a credential check.
+ */
+export function setSourceEnabled(
+  sourceId: ItemSourceId,
+  enabled: boolean,
+): void {
+  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
+  let parsed: Record<string, unknown>;
+  try {
+    const p = JSON.parse(raw) as unknown;
+    if (typeof p !== "object" || p === null || Array.isArray(p)) {
+      throw new Error("not an object");
+    }
+    parsed = p as Record<string, unknown>;
+  } catch (err) {
+    const pos = /position (\d+)/.exec((err as Error).message)?.[1];
+    throw new Error(
+      `config at ${CONFIG_PATH} is not valid JSON${pos ? ` (near position ${pos})` : ""}`,
+      { cause: err },
+    );
+  }
+
+  const sources =
+    typeof parsed.sources === "object" &&
+    parsed.sources !== null &&
+    !Array.isArray(parsed.sources)
+      ? (parsed.sources as Record<string, unknown>)
+      : {};
+  const prior =
+    typeof sources[sourceId] === "object" &&
+    sources[sourceId] !== null &&
+    !Array.isArray(sources[sourceId])
+      ? (sources[sourceId] as Record<string, unknown>)
+      : {};
+
+  const next = {
+    ...parsed,
+    sources: { ...sources, [sourceId]: { ...prior, enabled } },
+  };
+  writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
+    mode: 0o600,
+  });
+  fs.chmodSync(CONFIG_PATH, 0o600);
+
+  if (orchestrationConfig) {
+    orchestrationConfig.sources = {
+      ...orchestrationConfig.sources,
+      [sourceId]: { ...orchestrationConfig.sources?.[sourceId], enabled },
+    };
   }
 }

@@ -72,6 +72,12 @@ const BUDGETS = [
     budgetGzipBytes: 3943, // seed: 3584 (re-seeded 2026-09-25 with the sessions toolbar, bulk bar, confirm dialog and keyboard rows)
   },
   {
+    label: "assets/pull-requests-*.js",
+    match: (f) =>
+      f.startsWith(`assets${sep}pull-requests-`) && f.endsWith(".js"),
+    budgetGzipBytes: 4861, // seed: 4419 (re-seeded with the Pull Requests detail pane, LOCAL-45)
+  },
+  {
     label: "assets/palette-*.js",
     match: (f) => f.startsWith(`assets${sep}palette-`) && f.endsWith(".js"),
     budgetGzipBytes: 2595, // seed: 2359 (the command palette and the cheat sheet, lazy)

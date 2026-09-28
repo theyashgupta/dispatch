@@ -91,6 +91,7 @@ import { buildCommands } from "./lib/commands.js";
 import { GLOBAL_SHORTCUTS, bindShortcuts } from "./lib/shortcuts.js";
 import { useShortcuts } from "./hooks/useShortcuts.js";
 import { useItems } from "./hooks/useItems.js";
+import { buildPrRows } from "./lib/pr-rows.js";
 import { nowMs } from "./lib/format-age.js";
 import { flattenSessions } from "./lib/sessions.js";
 import type { UnwindDestination } from "../shared/types.js";
@@ -147,6 +148,11 @@ const PlaybooksPage = lazy(() =>
 const VaultPage = lazy(() =>
   import("./features/vault/index.js").then((m) => ({
     default: m.VaultPage,
+  })),
+);
+const PullRequestsPage = lazy(() =>
+  import("./features/pull-requests/index.js").then((m) => ({
+    default: m.PullRequestsPage,
   })),
 );
 const SessionsPage = lazy(() =>
@@ -580,6 +586,28 @@ export function App() {
     setStartRequest(typeof req === "string" ? { cardId: req } : req);
   };
 
+  const startAgent = async (
+    target: { itemId?: string; cardId?: string },
+    extraDirection: string,
+  ) => {
+    try {
+      if (target.cardId) {
+        setStartRequest({
+          cardId: target.cardId,
+          newSession: true,
+          extraDirection,
+        });
+        return;
+      }
+      if (!target.itemId) return;
+      const { card } = await promoteItem(target.itemId);
+      if (card.column === "inbox") await moveCard(card.id, "todo");
+      setStartRequest({ cardId: card.id, extraDirection });
+    } catch {
+      showNotice("Couldn't start the agent. Try again.");
+    }
+  };
+
   const [cleanupCardId, setCleanupCardId] = useState<string | null>(null);
   const cleanupCard =
     board?.cards.find((card) => card.id === cleanupCardId) ??
@@ -735,6 +763,11 @@ export function App() {
   const inboxCount = inboxWaitingCount(board.cards, items);
   const sessionRows = flattenSessions(board.cards, nowMs());
   const liveSessionCount = sessionRows.filter((row) => row.running).length;
+  const githubEnabled = board.enabledSources?.includes("github") === true;
+  const prCount = githubEnabled
+    ? items.filter((item) => item.source === "github" && item.state !== "done")
+        .length
+    : 0;
   const ticketsCount = board.cards.filter(isTicketCard).length;
   const pageMeta: Record<Page, { title: string; count?: number }> = {
     board: { title: "Board", count: board.cards.length },
@@ -751,6 +784,10 @@ export function App() {
     playbooks: { title: "Playbooks", count: playbookCount },
     vault: { title: "Vault", count: vaultCount },
     archive: { title: "Archive", count: archiveCount },
+    "pull-requests": {
+      title: "Pull Requests",
+      count: githubEnabled ? buildPrRows(items, board.cards).length : 0,
+    },
   };
   const pageTitle = pageMeta[route.page].title;
 
@@ -765,6 +802,7 @@ export function App() {
       onToggleCollapsed={nav.toggle}
       inboxCount={inboxCount}
       liveSessionCount={liveSessionCount}
+      prCount={prCount}
       ticketsCount={ticketsCount}
       syncedAt={board.syncedAt ?? null}
       connection={connection}
@@ -872,6 +910,23 @@ export function App() {
                 board={board}
                 selectedCardId={selectedCard ? selectedCardId : null}
                 onSelectCard={selectCard}
+              />
+            ) : route.page === "pull-requests" ? (
+              <PullRequestsPage
+                board={board}
+                items={items}
+                selectedKey={route.id ?? null}
+                onSelect={(key) =>
+                  navigate("pull-requests", key ?? undefined, { replace: true })
+                }
+                onMarkRead={(id) => void setItemState(id, "read")}
+                onNotice={showNotice}
+                onStartAgent={(row, prompt) =>
+                  void startAgent(
+                    { itemId: row.itemId, cardId: row.cardId },
+                    prompt,
+                  )
+                }
               />
             ) : route.page === "inbox" ? (
               <InboxView
@@ -997,6 +1052,7 @@ export function App() {
           key={`${startRequest.cardId}:${startRequest.newSession === true ? "new" : "start"}`}
           card={startCard}
           newSession={startRequest.newSession === true}
+          extraDirection={startRequest.extraDirection}
           onClose={() => setStartRequest(null)}
           onEditPlaybooks={() => {
             setStartRequest(null);

@@ -35,6 +35,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Orchestration Saga](#orchestration-saga)
   - [Exec Chokepoint](#exec-chokepoint)
   - [Linear Sync](#linear-sync)
+  - [GitHub Source](#github-source)
   - [SSE Transport](#sse-transport)
   - [Startup Preflight](#startup-preflight)
   - [Cleanup Lifecycle](#cleanup-lifecycle)
@@ -2149,6 +2150,25 @@ outside printable ASCII answers 400 before any network call, a config write fail
 409 `superseded` and writes nothing. The key never appears in a response, a log line or an error
 body.
 
+**Token sources (LOCAL-45).** The same three routes also serve `github`, dispatched through
+`services/domain/token-connection.ts`. A GitHub token lives in the Dispatch Vault under
+`GITHUB_TOKEN`; when that value is empty, `services/domain/github-token.ts#resolveGithubToken` asks
+`adapters/gh.ts#readGhToken` (`gh auth token` through the exec chokepoint) on every call and never
+caches or logs the result. A token that is not printable ASCII resolves to no credential. The
+registry receives that resolver from bootstrap (`setCredentialResolver`), because sources may not
+import the Vault or the exec chokepoint. `GET` reports `configured` when a credential resolves, `via`
+(`vault` or `gh`), and `connected` only while `sources.github.enabled` is true and `GET /user`
+answers; an SSO block answers `error: "sso-required"` with the authorization URL. `PUT` checks a
+pasted token with `GET /user`, stores it with the Vault service (creating the key with its purpose
+when absent), and writes `sources.github.enabled: true` through
+`config-holder.ts#setSourceEnabled`. `POST /api/sources/:source/connect` (token sources only) turns
+polling on with the credential already present (a filled Vault value or the gh login) and answers
+400 `no-credential` when there is none; like `PUT`, it answers 409 `superseded` when a `DELETE`
+landed while it was checking. `DELETE` clears the Vault value and its previous value with
+`vault.ts#clearValue`, keeping the key name and purpose, and writes `enabled: false`. A filled Vault
+value or a logged-in `gh` is a credential, not consent: GitHub polls, and the pull request routes
+answer, only after one of these routes enabled it.
+
 **Profile route (LOCAL-43).** `routes/profile.route.ts` owns the About you profile. `GET
 /api/config/profile` answers the stored profile or `{}`; `PUT /api/config/profile` runs the body
 through the shared `profile.ts#parseProfile` (strings trimmed and blanks stored as absent; name,
@@ -2163,6 +2183,34 @@ gate, so an authenticated remote session can read and write the profile like a l
 **Status push (LOCAL-23).** A manual move (`POST /cards/:id/move`, including mirrored group members) and the start saga's To Do to In Progress push the matching Linear workflow state. The map lives in `sources.linear.stateMap` (team id to column to state id or `null` for "do not sync"), validated by `shared/linear-state-map.ts#parseStateMap` and served by `GET`/`PUT /api/config/linear-state-map`; `resolveTargetState` fills unmapped columns with type defaults (To Do the lowest unstarted state, In Progress and Needs Input the lowest started, Done the lowest completed, In Review and Parked do not sync). Settings edits it in the Sync filters tab (`features/settings/LinearStateMapSection.tsx`). `store.moveCardManual` returns the column changes it made, read inside its own mutation so two overlapping moves each record their own columns, and the route hands them to `services/orchestration/linear-outbound.ts#pushColumnChanges`, which queues the pushes off the request path, chained per card so two quick moves reach Linear in order; `start-session.ts#completeStartAndPush` snapshots the columns around `completeStart` (`snapshotColumns`, `columnChangesSince`). Agent-driven moves (`applyMarker`, `flipBack`) never push. A push is skipped when the target equals the card's `linearState` or `pendingState`. Success runs `issueUpdate` with the state (`LinearSource.updateState`), then `store.recordLinearPush` sets `linearState` and `pendingState { id, at }` and clears `linearError` in one mutation and a poll follows; `reconcile()` holds the pushed state against a different incoming one for 300000 ms or until Linear reports it, keeps a To Do card with a fresh hold or a queued push (`store.setPushing`), and `trackedIssueIds` tracks a held card. Failure leaves the column, `linearState` and `pendingState` as they were and sets `linearError` to "Linear state not updated. " plus the fixed outbound copy. Every attempt writes one `linear_state_pushed` activity event (reason: the state name or `failed: <copy>`).
 
 **Tickets page and Move to (LOCAL-42).** `#/tickets` (`features/tickets/TicketsPage.tsx`, a lazy chunk with its own bundle budget line) lists every Linear card on the wire (`lib/linear-state.ts#isTicketCard`: source linear and no group) ordered by priority then recency, grouped by status, priority, project, cycle, team or none (`features/tickets/ticket-rows.ts`, the choice kept in `localStorage` `dsp.tickets.groupBy`). Row actions and the j, k, Enter, e, o keys follow `ticket-actions.ts#ticketActionsFor`, which mirrors the move route guards (no Done for Inbox, grouped or starting cards). The detail panel's Move to select calls `POST /cards/:id/linear-state { stateId }`: `linear-outbound.ts#moveLinearState` refuses an unknown card (404), a non-Linear or teamless card (409) and a state outside the card's team (400) before any write, then `setLinearState` runs the same per-card push chain as a board move with the card's current column as both `fromCol` and `toCol`, so the column never changes; a failure answers 502 with the recorded card notice.
+
+### GitHub Source
+
+`sources/github/github.source.ts` is a snapshot item source (LOCAL-45). Each poll resolves the token
+through the registry's credential resolver (the Vault `GITHUB_TOKEN`, else `gh auth token`) and runs
+three searches in order, each one page of 100: `is:open is:pr review-requested:@me`,
+`is:open is:pr mentions:@me`, `is:open is:pr assignee:@me`. `mergeSearchResults` keeps the first
+category a PR appears in (types `pr_review` at priority 75, `pr_mention` and `pr_assigned` at 50)
+and marks the pull partial when a category has more than 100 results, reports incomplete results,
+or carries the `X-GitHub-SSO: partial-results` header; a partial pull never auto-resolves an item.
+Item ids are `github:<owner>/<name>#<number>` and `createdAt` is the PR's last update. A 401 fails
+the poll with last-known-good kept, an exhausted rate limit raises `RateLimited`, and a 403 with
+`X-GitHub-SSO: required` raises `GitHubSsoError` with the authorization URL.
+`DISPATCH_GITHUB_API_URL` replaces the API base for sandbox runs against `scripts/fake-github.mjs`,
+started as `node scripts/fake-github.mjs <port> <state.json>` from a copy of
+`scripts/fixtures/fake-github-state.json`, with `scripts/fixtures/gh-shim-g5.sh` copied to `gh` on the
+sandbox server's PATH.
+
+`routes/github.route.ts` serves the Pull Requests page through `services/domain/github.ts` and the
+source gateway. `GET /api/github/pr/:owner/:repo/:number` answers the PR with at most 50 files, each
+patch cut at 6000 characters (both cuts flagged), and one check list merged from check runs and
+legacy statuses, sorted fail, pending, pass (`github-pr.ts#classifyCheckRun` passes only success,
+skipped and neutral). `POST .../review` posts `APPROVE`, `REQUEST_CHANGES` or `COMMENT` (a body is
+required for the last two, at most 20000 characters). `POST .../merge` squash merges with the head
+SHA the client saw, so a head that moved answers 409 `not-mergeable`. Owner, repo, number and SHA are
+validated before any GitHub call; errors answer an error kind (`rejected`, `not-found`,
+`sso-required`, `rate-limited`, `unreachable`, `no-credential`) and only GitHub's own message text
+for its refusals, never the token or a raw body. A successful write calls `pollNow("github")`.
 
 ### SSE Transport
 

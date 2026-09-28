@@ -24,6 +24,7 @@ import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { Notice } from "../../primitives/Notice.js";
 import {
+  GitHubConnectionCard,
   LinearConnectionCard,
   SoonConnectionCards,
 } from "../connections/index.js";
@@ -534,6 +535,7 @@ export function ConnectionsTabSection({
         <h2 style={syncFiltersHeadingStyle}>Sync filters</h2>
         <FiltersTabSection filters={filters} />
       </LinearConnectionCard>
+      <GitHubConnectionCard />
       <SoonConnectionCards />
     </div>
   );

@@ -1,9 +1,10 @@
 import type {
-  TerminalAppearance,
   ActivityEvent,
   ArchivedGroupSummary,
-  UnwindDestination,
   Card,
+  ClaudeAccountSummary,
+  ClaudeLoginView,
+  ClaudeUsageSnapshot,
   Column,
   DirListing,
   DiscoveredRepo,
@@ -14,19 +15,20 @@ import type {
   LinearWorkflow,
   Playbook,
   PlaybookPickerResponse,
+  PrDetail,
   PrerequisiteStatus,
+  PrReviewEvent,
+  SettableItemState,
   SetupStatus,
+  SourceConnection,
   SourceFilters,
+  SourceKeyError,
+  TerminalAppearance,
+  UnwindDestination,
   UpdateRunResult,
   UpdateStatus,
-  VaultKeySummary,
-  ClaudeAccountSummary,
-  ClaudeUsageSnapshot,
-  ClaudeLoginView,
-  SettableItemState,
-  SourceConnection,
-  SourceKeyError,
   UserProfile,
+  VaultKeySummary,
 } from "../../shared/types.js";
 import type { CardSearchResult } from "../../shared/search.js";
 
@@ -1652,6 +1654,31 @@ export async function getSourceConnection(
   return (await res.json()) as SourceConnection;
 }
 
+const SOURCE_KEY_ERRORS = new Set<string>([
+  "rejected",
+  "unreachable",
+  "sso-required",
+  "superseded",
+  "no-credential",
+]);
+
+/**
+ * Read the error kind a failed key save or connect answered.
+ *
+ * @remarks The server names the kind in the body; the status fallback covers a body that is not
+ * JSON, such as a proxy error page.
+ */
+async function sourceKeyReason(res: Response): Promise<SourceKeyError> {
+  const body = (await res.json().catch(() => ({}))) as { error?: unknown };
+  if (typeof body.error === "string" && SOURCE_KEY_ERRORS.has(body.error)) {
+    return body.error as SourceKeyError;
+  }
+  if (res.status === 400) return "rejected";
+  if (res.status === 502) return "unreachable";
+  if (res.status === 409) return "superseded";
+  return "failed";
+}
+
 /**
  * Store a new key for a source: PUT /api/sources/:source/key.
  *
@@ -1673,15 +1700,28 @@ export async function saveSourceKey(
   if (res.ok) {
     return { ok: true, ...((await res.json()) as { account?: string }) };
   }
-  const reason: SourceKeyError =
-    res.status === 400
-      ? "rejected"
-      : res.status === 502
-        ? "unreachable"
-        : res.status === 409
-          ? "superseded"
-          : "failed";
-  return { ok: false, reason };
+  return { ok: false, reason: await sourceKeyReason(res) };
+}
+
+/**
+ * Turn a token source on with the credential it already has: POST /api/sources/:source/connect.
+ *
+ * @remarks Used when the Vault already holds the token or the gh CLI is logged in, so nothing is
+ * pasted and no secret crosses the wire.
+ */
+export async function connectSource(
+  source: string,
+): Promise<
+  { ok: true; account?: string } | { ok: false; reason: SourceKeyError }
+> {
+  const res = await fetch(
+    `/api/sources/${encodeURIComponent(source)}/connect`,
+    { method: "POST" },
+  );
+  if (res.ok) {
+    return { ok: true, ...((await res.json()) as { account?: string }) };
+  }
+  return { ok: false, reason: await sourceKeyReason(res) };
 }
 
 /** Remove a source's stored key: DELETE /api/sources/:source/key. Throws on non-2xx. */
@@ -1692,6 +1732,85 @@ export async function deleteSourceKey(source: string): Promise<void> {
   if (!res.ok) {
     throw new Error(`deleteSourceKey failed: ${res.status}`);
   }
+}
+
+export type PrRequestResult<T> =
+  | ({ ok: true } & T)
+  | { ok: false; error: string; message?: string; ssoUrl?: string };
+
+/** Fetch a pull request route, turning a network failure into a response-shaped failure. */
+async function prFetch(
+  url: string,
+  init?: RequestInit,
+): Promise<Response | null> {
+  try {
+    return await fetch(url, init);
+  } catch {
+    return null;
+  }
+}
+
+async function prFailure(
+  res: Response | null,
+): Promise<{ ok: false; error: string; message?: string; ssoUrl?: string }> {
+  if (!res) return { ok: false, error: "unreachable" };
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: unknown;
+    message?: unknown;
+    ssoUrl?: unknown;
+  };
+  return {
+    ok: false,
+    error: typeof body.error === "string" ? body.error : "unreachable",
+    ...(typeof body.message === "string" ? { message: body.message } : {}),
+    ...(typeof body.ssoUrl === "string" ? { ssoUrl: body.ssoUrl } : {}),
+  };
+}
+
+function prPath(owner: string, repo: string, number: number): string {
+  return `/api/github/pr/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`;
+}
+
+/** Read one pull request's detail: GET /api/github/pr/:owner/:repo/:number. */
+export async function getPullRequest(
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<PrRequestResult<{ detail: PrDetail }>> {
+  const res = await prFetch(prPath(owner, repo, number));
+  if (!res?.ok) return prFailure(res);
+  return { ok: true, detail: (await res.json()) as PrDetail };
+}
+
+/** Post a review on a pull request: POST /api/github/pr/:owner/:repo/:number/review. */
+export async function reviewPullRequest(
+  owner: string,
+  repo: string,
+  number: number,
+  event: PrReviewEvent,
+  body?: string,
+): Promise<PrRequestResult<object>> {
+  const res = await prFetch(`${prPath(owner, repo, number)}/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ? { event, body } : { event }),
+  });
+  return res?.ok ? { ok: true } : prFailure(res);
+}
+
+/** Squash merge a pull request at the head the user saw: POST .../merge. */
+export async function mergePullRequest(
+  owner: string,
+  repo: string,
+  number: number,
+  sha: string,
+): Promise<PrRequestResult<object>> {
+  const res = await prFetch(`${prPath(owner, repo, number)}/merge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sha }),
+  });
+  return res?.ok ? { ok: true } : prFailure(res);
 }
 
 /** Read the About you profile: GET /api/config/profile. Throws on non-2xx. */
