@@ -1,4 +1,6 @@
 import type {
+  CalendarErrorCode,
+  CalendarStatus,
   GranolaCheckState,
   GranolaError,
   GranolaStatus,
@@ -90,4 +92,52 @@ export function granolaRunLine(status: GranolaStatus, now: number): string {
   const age = formatAge(status.lastRunAt, now);
   if (count === undefined) return `Last run ${age}`;
   return `Last run ${age}, ${count === 1 ? "1 action item" : `${count} action items`}`;
+}
+
+export const CALENDAR_ERROR_COPY: Record<CalendarErrorCode, string> = {
+  "calendar-denied":
+    "Dispatch needs access to your calendars. Open System Settings, Privacy and Security, Calendars, and allow the app that runs Dispatch.",
+  "ical-url-missing": "Fill CALENDAR_ICAL_URL in Settings, Vault first.",
+  "ical-url-invalid": "The iCal URL in the Vault is not a valid https address.",
+  "ical-unreachable":
+    "Couldn't fetch the iCal URL. Check the address in the Vault.",
+  "ical-invalid": "The iCal URL did not return a calendar.",
+  "ical-too-large": "The calendar is larger than 5 MB.",
+  timeout: "Reading the calendar took longer than 30 seconds.",
+  failed: "Couldn't read the calendar.",
+};
+
+export const CALENDAR_LOAD_FAILED_COPY =
+  "Couldn't load the Calendar status. Reload the page.";
+
+/**
+ * Map the Calendar status to the status its connection card shows (U4-10).
+ *
+ * @remarks A refused Connect or Load outranks the saved state, so the card shows why the click
+ * failed instead of a stale Not connected.
+ */
+export function calendarCardStatus(
+  status: CalendarStatus | null,
+  actionError: CalendarErrorCode | null = null,
+  loadFailed = false,
+): SourceCardStatus {
+  if (status === null) {
+    return loadFailed
+      ? { kind: "error", message: CALENDAR_LOAD_FAILED_COPY }
+      : { kind: "checking" };
+  }
+  if (actionError !== null) {
+    return { kind: "error", message: CALENDAR_ERROR_COPY[actionError] };
+  }
+  if (!status.enabled) return { kind: "disconnected" };
+  if (status.lastError !== undefined) {
+    return { kind: "error", message: CALENDAR_ERROR_COPY[status.lastError] };
+  }
+  const account =
+    status.mode === "ical"
+      ? "iCal URL"
+      : status.calendars.length === 0
+        ? "All calendars"
+        : `${status.calendars.length} calendars`;
+  return { kind: "connected", account };
 }

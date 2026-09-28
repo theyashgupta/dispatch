@@ -1,4 +1,5 @@
 import {
+  CalendarConnectionCard,
   GranolaConnectionCard,
   LinearConnectionCard,
 } from "../connections/index.js";
@@ -71,7 +72,7 @@ import {
   readPushSubscription,
   type PushEnableResult,
 } from "../../lib/push.js";
-import { useMediaQuery } from "../../hooks/useMediaQuery.js";
+import { CAROUSEL_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
 import { Button } from "../../primitives/Button.js";
 import { Collapsible } from "../../primitives/Collapsible.js";
 import { Field } from "../../primitives/Field.js";
@@ -1937,6 +1938,36 @@ const navListStyle: CSSProperties = {
   gap: "2px",
 };
 
+const narrowPageStyle: CSSProperties = {
+  ...pageStyle,
+  flexDirection: "column",
+};
+
+const narrowSidebarStyle: CSSProperties = {
+  ...sidebarStyle,
+  width: "auto",
+  maxWidth: "none",
+  flexDirection: "row",
+  alignItems: "center",
+  padding: "var(--space-sm) var(--space-lg)",
+  borderRight: "none",
+  borderBottom: "1px solid var(--border)",
+  overflowX: "auto",
+  overflowY: "hidden",
+};
+
+const narrowNavGroupLabelStyle: CSSProperties = {
+  ...navGroupLabelStyle,
+  padding: "0 var(--space-sm)",
+};
+
+const narrowNavListStyle: CSSProperties = {
+  ...navListStyle,
+  flexDirection: "row",
+  alignItems: "center",
+  flex: "0 0 auto",
+};
+
 const contentColumnStyle: CSSProperties = {
   flex: "1 1 auto",
   minWidth: 0,
@@ -2002,6 +2033,7 @@ const navButtonBaseStyle: CSSProperties = {
   fontWeight: "var(--weight-semibold)",
   lineHeight: "var(--line-label)",
   textAlign: "left",
+  whiteSpace: "nowrap",
   cursor: "pointer",
   outline: "none",
 };
@@ -2073,14 +2105,21 @@ export function SettingsScreen({
   const remoteTab = useRemoteTab();
   const cleanupTab = useCleanupTab(onSaved);
 
+  const narrow = useMediaQuery(CAROUSEL_QUERY);
+
   const activeSection =
     SETTINGS_SECTIONS.find((section) => section.id === tab) ??
     SETTINGS_SECTIONS[0];
 
+  const listStyle = narrow ? narrowNavListStyle : navListStyle;
+
   return (
-    <div style={pageStyle}>
-      <nav aria-label="Settings sections" style={sidebarStyle}>
-        <div style={navListStyle}>
+    <div style={narrow ? narrowPageStyle : pageStyle}>
+      <nav
+        aria-label="Settings sections"
+        style={narrow ? narrowSidebarStyle : sidebarStyle}
+      >
+        <div style={listStyle}>
           {SETTINGS_SECTIONS.map((section) => (
             <SettingsNavItem
               key={section.id}
@@ -2091,8 +2130,10 @@ export function SettingsScreen({
             />
           ))}
         </div>
-        <div style={navListStyle}>
-          <div style={navGroupLabelStyle}>Pages</div>
+        <div style={listStyle}>
+          <div style={narrow ? narrowNavGroupLabelStyle : navGroupLabelStyle}>
+            Pages
+          </div>
           {SETTINGS_PAGE_LINKS.map((link) => (
             <SettingsNavItem
               key={link.page}
@@ -2117,6 +2158,7 @@ export function SettingsScreen({
                 <SettingsScreen.FiltersTab filters={filters} />
               </LinearConnectionCard>
               <GranolaConnectionCard />
+              <CalendarConnectionCard />
             </div>
           )}
           {tab === "models" && (

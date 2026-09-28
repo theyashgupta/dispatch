@@ -17,6 +17,7 @@ import { ConnectionCard } from "../../primitives/ConnectionCard.js";
 import { Field } from "../../primitives/Field.js";
 import { Select } from "../../primitives/Select.js";
 import { Spinner } from "../../primitives/Spinner.js";
+import { controlsStyle, rowStyle } from "./card-styles.js";
 
 type WindowKey = `${(typeof GRANOLA_WINDOW_HOURS)[number]}`;
 
@@ -26,19 +27,6 @@ const WINDOW_LABELS: Record<WindowKey, string> = {
   "72": "Last 3 days",
   "168": "Last 7 days",
   "336": "Last 14 days",
-};
-
-const controlsStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "var(--space-sm)",
-};
-
-const rowStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  flexWrap: "wrap",
-  gap: "var(--space-sm)",
 };
 
 const lineStyle: CSSProperties = {

@@ -37,3 +37,18 @@ export const MEETING_CONNECTION: ConnectionMeta = {
   footer:
     "Dispatch runs Claude Code on this machine with only the Granola tool allowed. Each round uses your Claude plan. Action items are stored in board.db on this machine.",
 };
+
+export const CALENDAR_CONNECTION: ConnectionMeta = {
+  source: "calendar",
+  name: "Calendar",
+  credentialLabel: "This Mac's Calendar or a secret iCal URL",
+  steps: [
+    "Choose This Mac's Calendar to read the calendars on this Mac, or iCal URL for a secret calendar address.",
+    "For This Mac's Calendar, press Load calendars and pick the ones to show. macOS asks once for access to your calendars.",
+    "For an iCal URL, copy the secret address in iCal format (Google Calendar: Settings, Integrate calendar) into CALENDAR_ICAL_URL in Settings, Vault.",
+    "Press Connect. Dispatch reads the next 48 hours once before it saves.",
+  ],
+  scopes: [],
+  footer:
+    "Dispatch reads events from one hour ago to 48 hours ahead on this machine and stores them in board.db. The iCal URL stays in the Dispatch Vault.",
+};
