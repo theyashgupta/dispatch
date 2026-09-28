@@ -20,7 +20,7 @@ import { Spinner } from "../../primitives/Spinner.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { Glyph, wordmarkStyle } from "../../primitives/Glyph.js";
 import { IconButton } from "../../primitives/IconButton.js";
-import { NAV_ITEMS, navGroups } from "./nav-items.js";
+import { navGroups, type NavItem } from "./nav-items.js";
 import { NavRow } from "./NavRow.js";
 import { SyncStatus } from "./SyncStatus.js";
 
@@ -31,11 +31,17 @@ interface SidebarNavProps {
   onToggleCollapsed: () => void;
   inboxCount: number;
   liveSessionCount: number;
+  prCount: number;
+  slackCount: number;
+  navItems: readonly NavItem[];
+  ticketsCount: number;
+  errorCount: number;
   syncedAt: string | null;
   connection: ConnectionStatus;
   pollIntervalMs: number | null;
   syncWarning: string | null;
   syncUnreachable?: boolean;
+  noSource?: boolean;
   accountSlot?: ReactNode;
   onOpenCreateTicket: () => void;
   onOpenActivity: () => void;
@@ -157,8 +163,6 @@ const unseenDotStyle: CSSProperties = {
   pointerEvents: "none",
 };
 
-const GROUPS = navGroups(NAV_ITEMS);
-
 export function SidebarNav({
   route,
   onNavigate,
@@ -166,11 +170,17 @@ export function SidebarNav({
   onToggleCollapsed,
   inboxCount,
   liveSessionCount,
+  prCount,
+  slackCount,
+  navItems,
+  ticketsCount,
+  errorCount,
   syncedAt,
   connection,
   pollIntervalMs,
   syncWarning,
   syncUnreachable,
+  noSource,
   accountSlot,
   onOpenCreateTicket,
   onOpenActivity,
@@ -190,11 +200,12 @@ export function SidebarNav({
   const [indicatorTop, setIndicatorTop] = useState<number | null>(null);
   const [newTicketHovered, setNewTicketHovered] = useState(false);
   const [newTicketFocused, setNewTicketFocused] = useState(false);
+  const groups = navGroups(navItems);
 
   useLayoutEffect(() => {
     const el = rowRefs.current.get(route.page);
     setIndicatorTop(el == null ? null : el.offsetTop);
-  }, [route.page, collapsed]);
+  }, [route.page, collapsed, navItems]);
 
   return (
     <nav
@@ -229,7 +240,7 @@ export function SidebarNav({
             transform: `translateY(${indicatorTop ?? 0}px)`,
           }}
         />
-        {GROUPS.map((entry, index) => (
+        {groups.map((entry, index) => (
           <div key={entry.group}>
             {collapsed ? (
               index > 0 ? (
@@ -255,6 +266,14 @@ export function SidebarNav({
                     <Chip tone="accent">{inboxCount}</Chip>
                   ) : item.page === "sessions" && liveSessionCount > 0 ? (
                     <Chip tone="accent">{liveSessionCount}</Chip>
+                  ) : item.page === "pull-requests" && prCount > 0 ? (
+                    <Chip tone="accent">{prCount}</Chip>
+                  ) : item.page === "tickets" && ticketsCount > 0 ? (
+                    <Chip>{ticketsCount}</Chip>
+                  ) : item.page === "errors" && errorCount > 0 ? (
+                    <Chip tone="accent">{errorCount}</Chip>
+                  ) : item.page === "slack" && slackCount > 0 ? (
+                    <Chip tone="accent">{slackCount}</Chip>
                   ) : undefined
                 }
                 onSelect={() => onNavigate(item.page)}
@@ -272,6 +291,7 @@ export function SidebarNav({
           pollIntervalMs={pollIntervalMs}
           syncWarning={syncWarning}
           syncUnreachable={syncUnreachable}
+          noSource={noSource}
           collapsed={collapsed}
         />
         {accountSlot != null && (

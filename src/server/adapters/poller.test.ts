@@ -518,3 +518,145 @@ test("startEnabledPollers stamps the enabled source ids on the snapshot, and cle
   assert.deepEqual(store.snapshot().enabledSources, []);
   stopPollers();
 });
+
+async function seedPastTodo(source: string, id: string): Promise<void> {
+  await store.applyIssues([issue(id)], new Date().toISOString(), { source });
+  await store.moveCardManual(id, "todo");
+  await store.moveCardManual(id, "in_review");
+}
+
+const STARTED = { id: "s-started", name: "In Progress", type: "started" };
+
+test("the poller hands exactly the tracked ids to fetchByIds and applies the refresh", async () => {
+  await seedPastTodo("trk", "trk-k1");
+  const asked: string[][] = [];
+  const src = {
+    ...makeFakeSource({
+      id: "trk",
+      pollIntervalMs: 10,
+      fetch: () =>
+        Promise.resolve({ issues: [issue("trk-k0")], truncated: false }),
+    }),
+    fetchByIds: (ids: string[]) => {
+      asked.push(ids);
+      return Promise.resolve([issue("trk-k1", { state: STARTED })]);
+    },
+  };
+  startPollers([src]);
+  await sleep(40);
+  stopPollers();
+  assert.deepEqual(asked[0], ["trk-k1"]);
+  const k1 = store.getCard("trk-k1");
+  assert.equal(k1?.column, "in_review");
+  assert.equal(k1?.linearState?.name, "In Progress");
+  assert.equal(k1?.goneFromLinear, false);
+});
+
+test("a throwing fetchByIds keeps the main result and flags no card gone", async () => {
+  await seedPastTodo("trkfail", "trk-f1");
+  const src = {
+    ...makeFakeSource({
+      id: "trkfail",
+      pollIntervalMs: 10,
+      fetch: () =>
+        Promise.resolve({ issues: [issue("trk-f0")], truncated: false }),
+    }),
+    fetchByIds: () => Promise.reject(new Error("tracked down")),
+  };
+  startPollers([src]);
+  await sleep(40);
+  stopPollers();
+  assert.deepEqual(cardsOf("trkfail"), ["trk-f0", "trk-f1"]);
+  assert.equal(store.getCard("trk-f1")?.goneFromLinear, false);
+});
+
+test("a truncated main pull never calls fetchByIds", async () => {
+  await seedPastTodo("trktrunc", "trk-u1");
+  let calls = 0;
+  const src = {
+    ...makeFakeSource({
+      id: "trktrunc",
+      pollIntervalMs: 10,
+      fetch: () => Promise.resolve({ issues: [], truncated: true }),
+    }),
+    fetchByIds: () => {
+      calls += 1;
+      return Promise.resolve([]);
+    },
+  };
+  startPollers([src]);
+  await sleep(40);
+  stopPollers();
+  assert.equal(calls, 0);
+  assert.equal(store.getCard("trk-u1")?.goneFromLinear, false);
+});
+
+test("a source without fetchByIds keeps the plain rule and flags a missing card gone", async () => {
+  await seedPastTodo("trkplain", "trk-p1");
+  const src = makeFakeSource({
+    id: "trkplain",
+    pollIntervalMs: 10,
+    fetch: () => Promise.resolve({ issues: [], truncated: false }),
+  });
+  startPollers([src]);
+  await sleep(40);
+  stopPollers();
+  assert.equal(store.getCard("trk-p1")?.goneFromLinear, true);
+});
+
+test("with no card past To Do missing, fetchByIds is never called", async () => {
+  let calls = 0;
+  const src = {
+    ...makeFakeSource({
+      id: "trkzero",
+      pollIntervalMs: 10,
+      fetch: () =>
+        Promise.resolve({ issues: [issue("trk-z1")], truncated: false }),
+    }),
+    fetchByIds: () => {
+      calls += 1;
+      return Promise.resolve([]);
+    },
+  };
+  startPollers([src]);
+  await sleep(40);
+  stopPollers();
+  assert.equal(calls, 0);
+  assert.deepEqual(cardsOf("trkzero"), ["trk-z1"]);
+});
+
+test("a pollNow during the tracked await discards the stale refresh", async () => {
+  await seedPastTodo("trkstale", "trk-s1");
+  let release: (v: SourceIssue[]) => void = () => undefined;
+  let byIdCalls = 0;
+  const src = {
+    ...makeFakeSource({
+      id: "trkstale",
+      pollIntervalMs: 60_000,
+      fetch: () => Promise.resolve({ issues: [], truncated: false }),
+    }),
+    fetchByIds: () => {
+      byIdCalls += 1;
+      if (byIdCalls === 1) {
+        return new Promise<SourceIssue[]>((r) => {
+          release = r;
+        });
+      }
+      return Promise.resolve([]);
+    },
+  };
+  startPollers([src]);
+  await sleep(20);
+  assert.equal(pollNow("trkstale"), true);
+  await sleep(20);
+  release([
+    issue("trk-s1", {
+      state: { id: "stale", name: "Stale", type: "started" },
+    }),
+  ]);
+  await sleep(20);
+  stopPollers();
+  assert.equal(byIdCalls, 2);
+  assert.notEqual(store.getCard("trk-s1")?.linearState?.name, "Stale");
+  assert.equal(store.getCard("trk-s1")?.goneFromLinear, true);
+});

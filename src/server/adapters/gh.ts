@@ -210,3 +210,24 @@ export async function listPrsForBranch(
     return { ok: false, category };
   }
 }
+
+const GH_TOKEN_TIMEOUT_MS = 5_000;
+
+/**
+ * Read the gh CLI login token, or null when gh is missing, logged out or prints nothing.
+ *
+ * @remarks Failures are swallowed without a log because gh's stderr or an exec error could echo
+ * the token.
+ */
+export async function readGhToken(): Promise<string | null> {
+  try {
+    const { stdout } = await run("gh", ["auth", "token"], {
+      timeout: GH_TOKEN_TIMEOUT_MS,
+      killEscalationMs: GH_TOKEN_TIMEOUT_MS,
+    });
+    const token = stdout.trim();
+    return token === "" ? null : token;
+  } catch {
+    return null;
+  }
+}

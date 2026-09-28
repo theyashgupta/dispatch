@@ -21,16 +21,21 @@ test("empty, bare and unknown hashes map to the board with no id", () => {
   }
 });
 
-test("the route table holds exactly the ten shell pages", () => {
+test("the route table holds exactly the shell and source pages", () => {
   assert.deepEqual([...PAGES].sort(), [
     "accounts",
     "activity",
     "archive",
     "board",
+    "errors",
     "inbox",
     "playbooks",
+    "pull-requests",
     "sessions",
     "settings",
+    "slack",
+    "tickets",
+    "today",
     "vault",
     "workspace",
   ]);

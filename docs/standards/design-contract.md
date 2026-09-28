@@ -130,6 +130,15 @@ toggle (`Button` with `aria-pressed`, used by Inbox Unread only and Sessions Liv
 accent `Chip` as the inbox badge. The command palette (LOCAL-33) marks its active palette row,
 the one Enter runs, with the same 16 percent accent tint and accent text.
 
+Accent consumers added by G6 (LOCAL-47), same job: the sidebar Slack unread count uses the same
+accent `Chip` as the inbox badge, and the Slack page's DM and Mention pills are accent `Chip`s that
+mark a message addressed to the user.
+
+The Pull Requests patch view (LOCAL-45) colors an added line with the text color the success
+`Chip` tone uses (`--status-ok`) and a removed line with the danger tone's text color
+(`--destructive-text`); hunk headers use `--text-muted` and context lines `--text`. No new token:
+a diff line means "added" or "removed", the same meaning those two chip tones already carry.
+
 ## Source colors
 
 One color per source, ratified 2026-09-23 for the multi-source dispatcher (`docs/research/dispatch-platform-plan.md` section 7.2). Each token is consumed only through the `SOURCE_ACCENT` map in `src/web/features/badges/source-accent.ts`; `scripts/check-invariants.mjs` (`NEW-24`) denies the hex values anywhere else under `src/web`. `SourceBadge.tsx` renders the token as the badge text over a 16 percent tint of the token on `--surface-card` (the first contrast column; LOCAL-41, Unit 3 of the v3.7 roadmap); the second column records the same text on plain `--surface-card`. Both ratios are WCAG contrast computed with the relative luminance formula; every value clears the 4.5:1 floor. The tint is fixed over `--surface-card`, so a hovered card (`--surface-card-hover`) does not change the badge background. `local` and `group` cards carry no source meaning and render the neutral entry (`--text-muted`) as an outlined badge (1px `--border`, no tint): the neutral tint measured 4.2:1 in the browser on 2026-09-24, below the floor, so the neutral entry stays on the row surface. The measured column records the LOCAL-41 browser reading of each rendered badge (relative luminance over the computed `color-mix` background), taken with `scripts/contrast-113.mjs` as the independent check.
@@ -143,6 +152,10 @@ One color per source, ratified 2026-09-23 for the multi-source dispatcher (`docs
 | `--src-meeting`  | #c792ea | violet                                                         | 5.39:1             | 5.39:1                        | 7.15:1                         |
 | `--src-calendar` | #efb14a | amber                                                          | 6.53:1             | 6.53:1                        | 9.06:1                         |
 | `--src-agent`    | #4fd1c5 | teal                                                           | 6.64:1             | 6.63:1                        | 9.22:1                         |
+
+## Linear state colors
+
+The Linear workflow state chip (`src/web/primitives/StateChip.tsx`, rendered through `LinearStateChip` in `src/web/features/badges/`) shows the state in Linear's own color. That color is API data, not a design token: `stateChipColor` in `src/web/lib/linear-state.ts` accepts it only as a 6-digit hex and passes it to a style value, so it sits outside the `NEW-24` token maps. When Linear sends no color, or a value that is not a 6-digit hex, the chip falls back by state type to existing tokens: unstarted, triage and backlog `--col-todo` (gray), started `--prio-medium` (yellow), completed `--col-in-review` (purple), canceled `--col-done` (slate), any other type `--text-muted`. The chip is the `Chip` primitive with a 6px dot in the color, text in the color, no border, and a background of the color mixed 12 percent into transparent. Test fixtures under `src/web` must not use a `tokens.css` palette hex as a Linear color, because `NEW-24` flags those literals.
 
 ## State palette
 
