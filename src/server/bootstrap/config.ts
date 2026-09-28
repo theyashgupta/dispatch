@@ -4,6 +4,7 @@ import path from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import type {
   Config,
+  LinearStateMap,
   SourceFilters,
   StatusChannel,
   TerminalAppearance,
@@ -20,6 +21,7 @@ import {
   DEFAULT_TERMINAL_APPEARANCE,
   validateTerminalAppearance,
 } from "../../shared/terminal-appearance.js";
+import { parseStateMap } from "../../shared/linear-state-map.js";
 import { StartupError } from "./binary-check.js";
 import { CONFIG_PATH, DISPATCH_DIR } from "../services/infra/paths.js";
 
@@ -48,6 +50,8 @@ const CONFIG_TEMPLATE = {
   "// updateCheck":
     "Set to false to disable the on-boot update check. Default true.",
   updateCheck: true,
+  "// linearSyncViaClaude":
+    "Set to true to keep the old Claude MCP path for Sync to Linear for one release. Default false (direct GraphQL).",
   "// cleanupDelayDays":
     "Days a finished card keeps its workspace before automatic cleanup. 0 = clean up immediately on Done. Default 7, max 90.",
   cleanupDelayDays: DEFAULT_CLEANUP_DELAY_DAYS,
@@ -205,6 +209,22 @@ function readNestedFilters(parsed: Record<string, unknown>): SourceFilters {
     currentCycle: f.currentCycle === true,
     includeActive: f.includeActive === true,
   };
+}
+
+/**
+ * Read `sources.linear.stateMap` through parseStateMap.
+ *
+ * @remarks An invalid stored map is ignored with a warning, so the push falls back to the defaults.
+ */
+function readNestedStateMap(
+  parsed: Record<string, unknown>,
+): LinearStateMap | undefined {
+  const raw = nestedLinear(parsed)?.stateMap;
+  if (raw === undefined) return undefined;
+  const result = parseStateMap(raw);
+  if (result.ok) return result.map;
+  console.warn(`[config] ignoring sources.linear.stateMap: ${result.error}`);
+  return undefined;
 }
 
 /**
@@ -368,6 +388,7 @@ export function loadConfig(): Config {
       : DEFAULT_WORKSPACE_ROOT;
 
   const activeClaudeAccountId = readActiveClaudeAccountId(parsed);
+  const stateMap = readNestedStateMap(parsed);
   const config: Config = {
     linearApiKey: rawKey,
     port: typeof parsed.port === "number" ? parsed.port : DEFAULT_PORT,
@@ -380,11 +401,13 @@ export function loadConfig(): Config {
     workspaceRoot,
     statusChannel: readStatusChannel(parsed),
     updateCheck: readUpdateCheck(parsed),
+    linearSyncViaClaude: parsed.linearSyncViaClaude === true,
     sources: {
       linear: {
         apiKey: rawKey,
         filters: readNestedFilters(parsed),
         ...readNestedSourceSettings(parsed),
+        ...(stateMap ? { stateMap } : {}),
       },
     },
     lastUsedPlaybook: readLastUsedPlaybook(parsed),

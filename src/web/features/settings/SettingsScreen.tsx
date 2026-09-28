@@ -78,6 +78,7 @@ import { Notice } from "../../primitives/Notice.js";
 import { QrCode } from "../../primitives/QrCode.js";
 import { MultiSelect } from "../modals/index.js";
 import { WorkspaceAdd } from "../workspaces/index.js";
+import { LinearStateMapSection } from "./LinearStateMapSection.js";
 import type { SettingsTab } from "../../lib/settings-tab.js";
 import { NAV_ITEMS } from "../nav/index.js";
 import type { Page } from "../../lib/route.js";
@@ -485,6 +486,8 @@ function FiltersTabSection({ filters }: FiltersTabSectionProps) {
               label="Couldn't save filters. Try again."
             />
           )}
+
+          <LinearStateMapSection />
         </div>
       )}
     </>

@@ -314,14 +314,18 @@ full removal) is recorded in `docs/BASELINES.md`. This does not change store-sid
 fields and the underlying session RECORD, which persists regardless of how many wire projections the
 client reads.
 
-**`Card.sessionSummaries` (Phase 92, `UI-03`) follows `sessionCount`'s absent-at-0-or-1 idiom, never
-spread.** Built in `redactCard` immediately after `sessionCount`: absent when a card has 0 or 1
-sessions, a 2+-element array of `{ id, ordinal, lost }` otherwise — one explicit three-key
-object-literal pick per session (`{ id: s.id, ordinal: i + 1, lost: s.tmuxSession == null }`), never
-`{ ...s }`, so a future `Session` field (`hookToken`, `claudeSessionId`, `workspacePath`) cannot ride
-along even if the entity grows. It deliberately carries no per-entry `active` flag — the client
-compares `entry.id === card.activeSessionId` against the wire's own single source of truth, rather
-than trusting a second, independently-computed boolean that could disagree with it.
+**`Card.sessionSummaries` (Phase 92, `UI-03`; widened for LOCAL-39) is present for every card with
+at least one session and is never spread.** Built in `redactCard` immediately after `sessionCount`
+(which keeps its absent-at-0-or-1 idiom): absent when a card has no session, otherwise one entry per
+session, sorted by `createdAt`, carrying `id`, `ordinal`, `lost`, `active`, `createdAt`,
+`updatedAt`, `branch`, `workspaceFolder` (the basename of `workspace.folder`, never the path),
+`lastMarker`, `claudeAccountId`, `cleanupBlocked`, `prs`, `previews` and `parentOrdinal`. It is one
+explicit object-literal pick per session, never `{ ...s }`, so `hookToken`, `claudeSessionId`,
+`claudeSessions` and `workspacePath` cannot ride along even if the entity grows. `active` is
+computed in the same pick from `card.activeSessionId`, the wire's single source of truth, so it
+cannot disagree with it; the Sessions page needs it because it lists rows without the card. The
+detail panel's switcher and the cleanup modal's plural copy render only when the array holds two or
+more entries.
 
 ### Session Inheritance
 
@@ -571,6 +575,10 @@ legal source column(s), target, and owning code path:
 | Unwind (LOCAL-17)                                            | group card in any column                                                         | members to `todo` / `inbox`; group card archived | `services/orchestration/unwind.ts#unwindGroup` -> `board.store.ts#unwindGroup`            |
 | Restore (LOCAL-17)                                           | archived group, members in the unwind destination                                | group's archived column (members mirror)         | `board.store.ts#restoreGroup`, all-or-nothing via `#restoreBlocker`                       |
 | Reset (LOCAL-20)                                             | any column, card holds a session, workspace or branch                            | `inbox`, every session detached                  | `services/orchestration/reset.ts#resetCard` -> `board.store.ts#resetCard`                 |
+
+Two rows also push a Linear state (LOCAL-23): the manual move and the start-saga success schedule
+the mapped workflow state after the column changes; no agent-driven row does (see the status push
+paragraph under [Linear Sync](#linear-sync)).
 
 Every conflict this spec was written to name is now closed and reflected in the table above:
 `flipBack`'s guard is `FLIP_BACK_SOURCES` rather than `needs_input` alone; the Inbox marker-guard
@@ -1595,8 +1603,9 @@ protect the board's scanning density; session creation spends that same budget r
 a second one on the card face.
 
 **The session row's render gate is an OR, not the switcher's own `sessionSummaries != null`.**
-`sessionSummaries` is absent at N=1 (`91-UI-SPEC.md`'s absent-means-nothing-to-report idiom) —
-exactly the moment a person needs to create session 2. The row now renders when EITHER the
+The switcher renders only when `sessionSummaries` holds two or more entries. At N=1 the array is
+present (LOCAL-39, for the Sessions page) but the switcher stays hidden, and N=1 is exactly the
+moment a person needs to create session 2. The row now renders when EITHER the
 switcher has something to show OR the button has a reason to exist, so the affordance is reachable
 at N=1 without the switcher's own gate widening.
 
@@ -1992,7 +2001,12 @@ ever upserts, and `store.applyIssues` enforces that rule with the pull's partial
 loop fetches the assigned-unstarted issue set from Linear's GraphQL API. It never
 computes column-sensitive decisions from a snapshot (a queued-but-unapplied user move could
 otherwise be reverted), never sorts (To Do ordering is owned by `store.snapshot()` in `store/board.store.ts`), and
-never touches cards past To Do (that rule lives in `reconcile()`). The set is filtered by
+never changes a card's column (that rule lives in `reconcile()`). After a complete pull it also
+runs the tracked query: `LinearSource.fetchByIds` asks Linear by id, 250 ids per request, for the
+cards past To Do and Inbox that the pull did not return (`store.trackedIssueIds`: cards not in Done
+first, gone-flagged cards last in each group, 1000 ids at most), so a card whose issue moved to a
+state outside the filter keeps its display fields current; a failed tracked query requests nothing,
+so no card past To Do is flagged gone that cycle. The set is filtered by
 workflow-state TYPE `"unstarted"`, NOT by name — state names are workspace-customizable. The loop
 self-reschedules with a `setTimeout` (never `setInterval`, which could overlap) that is `unref()`'d
 so it never pins the process, runs one poll immediately on startup, and is fire-and-forget.
@@ -2015,10 +2029,12 @@ issue with NO existing card upserts a fresh Inbox card — new tickets land in I
 in To Do, so To Do stays 100% user-curated; a returned issue whose card is in `todo` OR `inbox`
 upserts an in-place refresh of title/url/description/priority/updatedAt/project and CLEARS
 `goneFromLinear` (ONE widened rule, not a separate branch — promoting a card to To Do simply moves
-it into the other half of the same refresh scope); a returned issue whose card is PAST that point is
-NOT upserted — the poller never touches cards past To Do/Inbox. Exception: a card past that point
-currently flagged `goneFromLinear` whose issue REAPPEARS emits a flag-only correction via
-`reappearedIds` (nothing else on the card is touched), because `goneFromLinear` is poller-owned
+it into the other half of the same refresh scope); a returned issue (from the pull or the tracked
+query) whose card is PAST that point gets a display-only upsert: `linearState`, `team`, `cycle` and
+`assignee` are refreshed and `goneFromLinear` cleared, emitted only when one of them changed, while
+the column, title, description, priority, project, identifier, url and `updatedAt` are never touched.
+A card past that point flagged `goneFromLinear` whose issue REAPPEARS with unchanged display fields
+emits a flag-only correction via `reappearedIds`, because `goneFromLinear` is poller-owned
 derived state, not user board state. `reconcile` does NOT sort; it carries
 `priority`/`updatedAt`/`project` faithfully so the store orders the To Do column on read.
 
@@ -2026,7 +2042,8 @@ derived state, not user board state. `reconcile` does NOT sort; it carries
 handled by column: in `todo` OR `inbox` → `removeIds` (an issue that vanished is removed
 IMMEDIATELY while in To Do or Inbox — Inbox does NOT inherit vanish-handling the way cards past To
 Do do; it is treated exactly like a vanished To Do ticket, never `goneFromLinear`-flagged and kept
-forever); past that point → `goneIds` (the card is KEPT and flagged `goneFromLinear`). CR-01
+forever); past that point → `goneIds` (the card is KEPT and flagged `goneFromLinear`), and only
+when the tracked query requested the issue by id and did not get it back. CR-01
 carve-out: a To Do card with a start saga IN FLIGHT (or already carrying provisioning/session state
 from one) is treated like a card past To Do — never removed, only flagged — because removing it
 mid-saga would orphan a live `claude` session and its worktrees with no card to reach them; an
@@ -2034,6 +2051,10 @@ Inbox card is structurally never mid-saga (no session can start from Inbox), so 
 harmless no-op there. The muted "Gone from Linear" badge (`web/features/badges/GoneBadge.tsx`, shown
 only on cards past To Do/Inbox) is INFORMATIONAL, not destructive: the issue disappearing from
 Linear on a card past that point is EXPECTED, so it uses muted text/border, never red.
+A card adopted from a local card on Sync to Linear (`mapping.ts#isAdopted`: its id differs from its
+issue id) is the exception in To Do: its issue can sit outside the board filter, so absence never
+removes it. Like a card past To Do it joins the tracked query, is refreshed by id and is flagged
+gone only when that query requested it and did not get it back.
 
 **Sync-status precedence (`SYNC-04`).** The sidebar footer status (`web/features/nav/SyncStatus.tsx`) reports sync
 freshness + connection health as TEXT only (no spinner — the board must feel instant), and its
@@ -2048,14 +2069,34 @@ degrades to the plain `Synced` label rather than computing a relative age or a s
 JSDoc (the comment standard's tsx carve-out — [comments.md](standards/comments.md) rule 2 — forbids
 JSDoc in `src/web/**/*.tsx`, enforced by the `allowJsdoc: false` lint scoping in `eslint.config.ts`).
 
+**Linear comments.** The poll selects the last five comments on every issue node, main and tracked
+queries alike, so a card in any column receives new comments on the next poll. The mapping sorts
+them oldest first, caps each body at 600 characters and names a user-less comment "Linear". Comments
+live on the server card only: `redactCard` swaps them for `commentCount` and `lastCommentId` (so a
+new comment on a card already at five still changes the wire), because every mutation broadcasts the
+whole snapshot and five bodies per card would bloat each frame. The panel reads them through `GET
+/cards/:id/comments`, which serves the store and never calls Linear. `POST /cards/:id/comment`
+validates the body (`comment-body.ts`: empty, over 20000 characters, or carrying the agent status
+marker answer 400), then `linear-outbound.ts#postComment` calls the source's `addComment` through
+`source-gateway.ts`. A success clears `Card.linearError` and polls Linear at once; a failure stores
+fixed copy from `outbound-error.ts` in `Card.linearError` and answers 502, so raw provider text
+never reaches the card or the response.
+
 **Sync out — promoting a local card to Linear (`PUSH-01/02/03`).** The inbound half above mirrors
 Linear INTO the board; this half pushes a `source:"local"` card OUT to a real Linear issue on
 explicit user action (`POST /cards/:id/sync-linear`, `services/orchestration/linear-sync.ts`).
-MCP-only writes: the stored Linear API key is READ-ONLY toward Linear everywhere in this app — the
-sync path never uses it to create or update anything, instead spawning a headless `claude -p` that
+Key writes through source mutations only: the stored Linear API key writes to Linear solely
+through `LinearSource` mutation methods called from a service in `services/orchestration/`, never
+from a route (`commentCreate` and `issueUpdate` from `linear-outbound.ts`, `issueCreate` from
+`linear-sync.ts#syncCardDirect`). By default Sync to Linear takes the direct path: the route needs a
+`teamId` (400 otherwise), `FindSync` searches for the card's `dispatch-sync:<cardId>` token and a
+hit is adopted with no create, and a miss sends `issueCreate` with the token as the last
+description line (`create-input.ts#buildCreateInput`). With `linearSyncViaClaude: true` in config
+the old path runs for one release instead: it does not use the key to create anything; it spawns a
+headless `claude -p` that
 reuses the CLI's own user-scope Linear MCP OAuth session, restricted via `--allowedTools` to five
 read/write tools (`list_issues`, `save_issue`, `list_teams`, `list_users`, `list_issue_statuses`).
-The sole sanctioned exceptions to "API key never writes" are (1) GraphQL `issueDelete` for
+Two further sanctioned key uses sit beside those mutations: (1) GraphQL `issueDelete` for
 TEST-cleanup only (user decision 2026-07-20), and (2) a single READ-ONLY `issue(id:...) { id }`
 lookup the sync service makes with the stored key AFTER the MCP create/find succeeds — 62-03 live
 smoke found that no Linear MCP tool in this allowlist (nor `get_issue`, checked live) ever exposes
@@ -2107,6 +2148,10 @@ outside printable ASCII answers 400 before any network call, a config write fail
 `save-failed`, and a replace whose key check was still in flight when a disconnect landed answers
 409 `superseded` and writes nothing. The key never appears in a response, a log line or an error
 body.
+
+**Status push (LOCAL-23).** A manual move (`POST /cards/:id/move`, including mirrored group members) and the start saga's To Do to In Progress push the matching Linear workflow state. The map lives in `sources.linear.stateMap` (team id to column to state id or `null` for "do not sync"), validated by `shared/linear-state-map.ts#parseStateMap` and served by `GET`/`PUT /api/config/linear-state-map`; `resolveTargetState` fills unmapped columns with type defaults (To Do the lowest unstarted state, In Progress and Needs Input the lowest started, Done the lowest completed, In Review and Parked do not sync). Settings edits it in the Sync filters tab (`features/settings/LinearStateMapSection.tsx`). `store.moveCardManual` returns the column changes it made, read inside its own mutation so two overlapping moves each record their own columns, and the route hands them to `services/orchestration/linear-outbound.ts#pushColumnChanges`, which queues the pushes off the request path, chained per card so two quick moves reach Linear in order; `start-session.ts#completeStartAndPush` snapshots the columns around `completeStart` (`snapshotColumns`, `columnChangesSince`). Agent-driven moves (`applyMarker`, `flipBack`) never push. A push is skipped when the target equals the card's `linearState` or `pendingState`. Success runs `issueUpdate` with the state (`LinearSource.updateState`), then `store.recordLinearPush` sets `linearState` and `pendingState { id, at }` and clears `linearError` in one mutation and a poll follows; `reconcile()` holds the pushed state against a different incoming one for 300000 ms or until Linear reports it, keeps a To Do card with a fresh hold or a queued push (`store.setPushing`), and `trackedIssueIds` tracks a held card. Failure leaves the column, `linearState` and `pendingState` as they were and sets `linearError` to "Linear state not updated. " plus the fixed outbound copy. Every attempt writes one `linear_state_pushed` activity event (reason: the state name or `failed: <copy>`).
+
+**Tickets page and Move to (LOCAL-42).** `#/tickets` (`features/tickets/TicketsPage.tsx`, a lazy chunk with its own bundle budget line) lists every Linear card on the wire (`lib/linear-state.ts#isTicketCard`: source linear and no group) ordered by priority then recency, grouped by status, priority, project, cycle, team or none (`features/tickets/ticket-rows.ts`, the choice kept in `localStorage` `dsp.tickets.groupBy`). Row actions and the j, k, Enter, e, o keys follow `ticket-actions.ts#ticketActionsFor`, which mirrors the move route guards (no Done for Inbox, grouped or starting cards). The detail panel's Move to select calls `POST /cards/:id/linear-state { stateId }`: `linear-outbound.ts#moveLinearState` refuses an unknown card (404), a non-Linear or teamless card (409) and a state outside the card's team (400) before any write, then `setLinearState` runs the same per-card push chain as a board move with the card's current column as both `fromCol` and `toCol`, so the column never changes; a failure answers 502 with the recorded card notice.
 
 ### SSE Transport
 
@@ -2976,7 +3021,7 @@ to prevent.
 not a consumer cap: `RETIRED_PATTERNS`'s literal scan over `src/**/*.{ts,tsx}` catches the retired
 `0 6px 16px rgba(0,0,0,0.45)` value reappearing anywhere outside `tokens.css`, which is what makes
 "one definition" mechanical. Measured today it is consumed at seven call sites — the card drag
-overlay (`CardView.tsx:171`), the selection bar (`SelectionBar.tsx:29`), the search results
+overlay (`CardView.tsx:171`), the floating selection bar (`FloatBar.tsx`), the search results
 listbox (`SearchBox.tsx:321`), the carousel search overlay (`SearchBox.tsx:400`), the move-to
 picker (`MoveToPicker.tsx:97`), the multi-select dropdown (`MultiSelect.tsx:248`), and the modal
 (`Modal.tsx:110`). Cards and columns carry no shadow at rest; a second, independently-defined
@@ -3149,6 +3194,25 @@ read `--page-header-height` (52px, stepped to 44px below 768px for the same card
 strip once recorded). The strip's zone grid, its width-dependent template, the narrow-width
 wordmark removal and the view-switch rendering (Candidate C and its retune) are history, recorded
 in `docs/standards/design-contract.md`'s Deferred decisions rows 2 and 5.
+
+**Keyboard.** Every key binding goes through one hook, `useShortcuts(bindings, { menuOpen,
+scopeId })` in `src/web/hooks/useShortcuts.ts`, over the pure `resolveShortcut` and the binding
+tables in `src/web/lib/shortcuts.ts`: `GLOBAL_SHORTCUTS` (Cmd or Ctrl+K opens the command
+palette, n opens New ticket, ? opens the cheat sheet), mounted once in App; `BOARD_SHORTCUTS`
+(j, k, h, l move the focused card, 1 to 7 move it to a column through the board's own move path;
+Enter stays with the focused card, a role button that opens itself, as the resolver leaves Enter
+to activatable targets);
+`INBOX_SHORTCUTS`; and `SESSIONS_SHORTCUTS`. The inert rule: a plain key never fires while the user types in an input, textarea, select or
+contentEditable, with a modifier held, outside the owning view, or while a Modal or a row menu is
+open; a meta binding fires only with Cmd or Ctrl and never with Shift. The global keys are also
+inert while the Activity drawer or the nav sheet is open and before setup finishes, and the board
+keys are inert while the undocked detail panel is open. Closing the palette, the cheat sheet or
+New ticket returns focus to the element that had it, unless a palette command ran.
+The palette (`features/palette/CommandPalette.tsx`) is a Modal, so its Escape and focus trap sit in
+the modal stack; its commands come from `buildCommands` in `src/web/lib/commands.ts` over the
+card actions in `src/web/lib/actions.ts`. The cheat sheet renders the four tables, so a binding
+cannot ship without its row. The sidebar sits above the detail panel scrim, and a change to any
+page other than Workspace closes the undocked panel, so one sidebar click navigates.
 
 ### Modal Focus Containment
 
