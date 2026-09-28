@@ -20,7 +20,7 @@ interface InboxGroup {
   rows: InboxRowModel[];
 }
 
-const ACRONYMS: Record<string, string> = { pr: "PR", ci: "CI" };
+const ACRONYMS: Record<string, string> = { pr: "PR", ci: "CI", dm: "DM" };
 const DAY_MS = 86_400_000;
 
 /** Turn a connector type key such as `pr_review` into the label `PR review`. */

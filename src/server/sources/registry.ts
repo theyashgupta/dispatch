@@ -7,11 +7,14 @@ import type { TicketSource } from "./ticket.source.js";
 import { GitHubSource } from "./github/github.source.js";
 import { LinearSource } from "./linear/linear.source.js";
 import { SentrySource } from "./sentry/sentry.source.js";
+import { SlackSource } from "./slack/slack.source.js";
 
 /** The boot-built ticket sources, keyed by id. Empty until buildRegistry() runs at boot. */
 const sources = new Map<string, TicketSource>();
 
 const enabled = new Set<string>();
+
+const SLACK_POLL_MS = 120_000;
 
 type CredentialResolver = () => Promise<SourceCredential | null>;
 
@@ -37,8 +40,8 @@ export function setCredentialResolver(
  *
  * @remarks Every source object is built even when disabled, because the filter and options routes
  * need the Linear object with an empty key; only the poll loop consults the enabled set. The Linear
- * source reads filters through a live accessor over the SAME `config` object, which
- * `updateSourceFilters` mutates in place, so a settings save is visible to the next poll.
+ * filters and the Slack channel list are read through live accessors over the SAME `config` object,
+ * which the settings writers mutate in place, so a save is visible to the next poll.
  */
 export function buildRegistry(config: Config): void {
   sources.clear();
@@ -73,6 +76,14 @@ export function buildRegistry(config: Config): void {
   );
   sources.set(sentry.id, sentry);
   if (sentryConfig?.enabled === true) enabled.add(sentry.id);
+  const slackPollMs = config.sources?.slack?.pollIntervalMs ?? SLACK_POLL_MS;
+  const slack = new SlackSource(
+    () => (resolvers.get("slack") ?? noCredential)(),
+    () => config.sources?.slack?.channels ?? [],
+    slackPollMs,
+  );
+  sources.set(slack.id, slack);
+  if (config.sources?.slack?.enabled === true) enabled.add(slack.id);
 }
 
 export function getSource(id: string): TicketSource | undefined {

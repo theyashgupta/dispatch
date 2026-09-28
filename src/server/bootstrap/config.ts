@@ -49,7 +49,7 @@ const CONFIG_TEMPLATE = {
   "// port": "Backend HTTP port (loopback only). Default 4700.",
   port: DEFAULT_PORT,
   "// pollIntervalMs":
-    "Default poll interval in ms for every source; sources.<id>.pollIntervalMs overrides it. Default 60000 (60s).",
+    "Default poll interval in ms for Linear and GitHub (Slack uses 120000 unless sources.slack.pollIntervalMs is set); sources.<id>.pollIntervalMs overrides it. Default 60000 (60s).",
   pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
   "// workspaceRoot": "Root folder for per-ticket workspaces.",
   workspaceRoot: DEFAULT_WORKSPACE_ROOT,

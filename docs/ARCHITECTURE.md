@@ -172,7 +172,11 @@ upsert: an existing row keeps `state`, `snoozedUntil` and `cardId`; `meta` merge
 connector's keys winning and app keys surviving; a complete pull of a `snapshot` source marks that
 source's missing rows `done`; an `append` source or a partial pull never does. A source hands
 items to the poller as an optional `items` field on its `fetch()` result and the poller calls
-`store.upsertItems(source.id, items, { kind, partial })` right after `applyIssues`. `promoteItem`
+`store.upsertItems(source.id, items, { kind, partial })` right after `applyIssues`. A source that
+reads incrementally receives its stored cursors as `fetch({ cursors })` and may return `cursors`;
+the poller writes them with `store.setSourceCursors` only after `upsertItems` resolves, so a failed
+upsert or a thrown fetch never moves a cursor (the map lives in the board meta as `sourceCursors`,
+keyed `<source>:<target>`). `promoteItem`
 mints a local Inbox card (`LOCAL-n`, `issueId` = the item id, description from the snippet, the
 source link and the meta pairs) and marks the item `done` with `cardId` in one mutation; a second
 promote returns the existing card. It is the only item mutation that emits an activity event
@@ -1997,7 +2001,9 @@ self-rescheduling loop per enabled source, each on its own `pollIntervalMs`, and
 to the store; it is the ONLY I/O half of the sync. A per-source in-flight guard means a source
 never overlaps itself (a sync-now or restart that lands mid-fetch runs once more after settlement), and a
 per-source generation means `pollNow(sourceId)` discards only that source's stale fetch.
-`POST /api/sources/:id/poll` exposes `pollNow` for a manual sync. Every source declares a `kind`:
+`POST /api/sources/:id/poll` exposes `pollNow` for a manual sync. Each poll reads the source's
+stored cursors before `fetch` and replaces them after the item upsert when the source returns any.
+Every source declares a `kind`:
 a `snapshot` source's complete pull may remove or flag vanished cards, an `append` source only
 ever upserts, and `store.applyIssues` enforces that rule with the pull's partial flag. The Linear
 loop fetches the assigned-unstarted issue set from Linear's GraphQL API. It never
@@ -2288,7 +2294,32 @@ answers the saved list and `PUT /api/sources/slack/channels`
 validates and saves `sources.slack.channels` (`{ id, name }[]`, at most 200, the first entry per id
 kept) through
 `config-holder.ts#setSlackChannels`. Errors answer `rejected` (Slack auth codes), `missing-scope`,
-`unreachable` or `not-a-channel`, never the token or a raw body.
+`unreachable` or `not-a-channel`, never the token or a raw body. A save polls Slack at once
+(`pollNow("slack")`) when the source is running.
+
+`sources/slack/slack.source.ts#SlackSource` is an `append` item source (id `slack`, 120 s default
+interval, enabled only while `sources.slack.enabled` is true). Each poll checks the token with
+`auth.test` (the user id is "me", the workspace URL feeds permalinks), lists the user's DMs and
+group DMs (`users.conversations` `im,mpim`, at most 5 pages of 200 with a warning past that,
+deleted users dropped; a `missing_scope` refusal logs one warning, reads the picked channels only
+and keeps every stored cursor), then reads `conversations.history` one conversation at a time for
+at most 40 targets (`slack-targets.ts#orderTargets`): up to 10 slots stay with DMs, picked channels
+fill the rest and DMs take any channel slot left over, each group least recently read first with
+never-read first, so every target is read in turn and dormant DMs never delay a picked channel.
+A group DM that is also a picked channel is read once, as the channel. A history
+answer with `has_more` logs that older messages in the window were skipped. History starts at the
+target's cursor minus 600 s, or 24 h back on first sight, and the new cursor is the newest ts seen,
+never older than the last one; cursors live in the board meta through the cursor hand-off above.
+`slack-message.ts#classifyMessage` keeps a DM from anyone else and a channel message that mentions
+the user, and drops the user's own, bot, user-less and subtype messages except `thread_broadcast`
+and `file_share`. An item's id is `slack:<channel>:<ts>`, its title
+`<author> in #<channel>: <first 80 characters>` (`in DM` or `in group DM` for DMs) and its url the
+message permalink; authors come from `users.info`, at most 50 lookups per poll, and an author Slack
+will never name (`user_not_found`, `user_not_visible`, `missing_scope`) is cached as their id. A
+history row whose `ts`, `text`, `user`, `thread_ts` or `reply_count` has the wrong type is dropped. A conversation Slack
+refuses (`channel_not_found`, `not_in_channel`, `missing_scope`) is skipped for that poll with one
+warning; a 429 drops the whole poll through the rate-limit back-off and moves no cursor. Mentions
+inside thread replies are not read (R-17).
 
 ### SSE Transport
 

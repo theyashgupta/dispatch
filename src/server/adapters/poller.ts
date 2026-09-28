@@ -74,7 +74,9 @@ async function pollOnce(loop: Loop): Promise<void> {
   const gen = loop.generation;
   const source = loop.source;
   try {
-    const { issues, items, truncated } = await source.fetch();
+    const { issues, items, truncated, cursors } = await source.fetch({
+      cursors: store.getSourceCursors(source.id),
+    });
     if (gen !== loop.generation) return;
     if (truncated) {
       console.warn(
@@ -95,6 +97,7 @@ async function pollOnce(loop: Loop): Promise<void> {
         partial: truncated,
       });
     }
+    if (cursors !== undefined) await store.setSourceCursors(source.id, cursors);
     if (gen !== loop.generation) return;
     loop.backoffMs = baseInterval(source);
     scheduleNext(loop, loop.backoffMs);

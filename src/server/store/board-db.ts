@@ -10,6 +10,7 @@ import type {
   EventType,
   ArchivedGroup,
   Item,
+  SourceCursor,
 } from "../../shared/types.js";
 
 export const BOARD_DB_PATH = path.join(DISPATCH_DATA_DIR, "board.db");
@@ -83,6 +84,7 @@ export interface BoardMeta {
    * target version, the migration pass never runs again against the same database.
    */
   schemaVersion?: number;
+  sourceCursors?: Record<string, SourceCursor>;
 }
 
 export interface ItemWrites {

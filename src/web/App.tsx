@@ -29,6 +29,7 @@ import {
   TopBar,
 } from "./features/nav/index.js";
 import { effectiveNavState } from "./lib/nav-state.js";
+import { hideDisabledSlack } from "./lib/hide-disabled-slack.js";
 import {
   CAROUSEL_QUERY,
   NARROW_QUERY,
@@ -540,6 +541,14 @@ export function App() {
 
   const undoToast = useUndoToast();
   const items = useItems(board);
+  const inboxItems = useMemo(
+    () =>
+      hideDisabledSlack(
+        feedItems(items, errorsInFeeds),
+        board?.enabledSources ?? [],
+      ),
+    [items, errorsInFeeds, board?.enabledSources],
+  );
   const { show: showUndo, notice: showNotice } = undoToast;
   const actionServices = useMemo<ActionServices>(
     () => ({
@@ -786,7 +795,6 @@ export function App() {
     />
   ) : null;
 
-  const inboxItems = feedItems(items, errorsInFeeds);
   const inboxCount = inboxWaitingCount(board.cards, inboxItems);
   const sessionRows = flattenSessions(board.cards, nowMs());
   const liveSessionCount = sessionRows.filter((row) => row.running).length;

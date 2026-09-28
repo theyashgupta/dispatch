@@ -46,7 +46,7 @@ test("an empty key builds the object but enables nothing", () => {
   assert.equal(getLinearSource().id, "linear");
   assert.deepEqual(
     listSources().map((s) => s.id),
-    ["linear", "github", "sentry"],
+    ["linear", "github", "sentry", "slack"],
   );
   assert.deepEqual(enabledSources(), []);
   assert.equal(isSourceEnabled("linear"), false);

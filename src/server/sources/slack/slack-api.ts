@@ -36,7 +36,8 @@ export interface SlackAuth {
  *
  * @remarks The only Slack caller in the app: the method must be on the frozen read allowlist, so no
  * code path can reach a write method. The token rides the Authorization header, never the URL. A 429
- * raises RateLimited for the poller's back-off; any other non-200 throws a plain error.
+ * raises RateLimited for the poller's back-off; any other non-200 or a body that is not JSON throws
+ * a plain error that never quotes the body.
  */
 export async function slackGet(
   token: string,
@@ -56,7 +57,10 @@ export async function slackGet(
   });
   if (res.status === 429) throw new RateLimited();
   if (res.status !== 200) throw new Error(`Slack answered HTTP ${res.status}`);
-  return (await res.json()) as SlackResponse;
+  return (await res.json().catch((err: unknown) => {
+    if (!(err instanceof SyntaxError)) throw err;
+    throw new Error("Slack answered a body that is not JSON");
+  })) as SlackResponse;
 }
 
 /** A Slack body field as a string, or "" when it is missing or not a string. */
