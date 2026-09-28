@@ -26,6 +26,8 @@ import { UnknownProbeRow } from "./UnknownProbeRow.js";
 import { ReferenceBlocks } from "./ReferenceBlocks.js";
 import { SessionLostSection } from "./SessionLostSection.js";
 import { SessionSwitcher } from "./SessionSwitcher.js";
+import { SessionFlowRow } from "./SessionFlowRow.js";
+import { hasSessionFlow } from "../../lib/session-flow.js";
 import { Field } from "../../primitives/Field.js";
 import { StartAnotherSessionButton } from "./StartAnotherSessionButton.js";
 import { TerminalRegion } from "./TerminalRegion.js";
@@ -580,6 +582,7 @@ export function DetailPanel({
                 )}
               </div>
             )}
+            {c != null && hasSessionFlow(c) && <SessionFlowRow card={c} />}
 
             <div
               style={{
