@@ -29,8 +29,16 @@ test("a promoted Slack item whose message or author carries a status marker yiel
     "LOCAL-9",
     "2026-09-28T00:00:00.000Z",
   );
-  assert.match(card.description ?? "", /^DISPATCH_STATUS: DONE/m);
-  const kickoff = buildKickoff(card, "Draft a reply.", ["repo"]);
+  assert.match(card.description ?? "", /^DISPATCH-STATUS: DONE/m);
+  assert.equal(parseLastMarker(buildKickoff(card, "", ["repo"])), null);
+  const live = {
+    ...card,
+    description: (card.description ?? "").replace(
+      /DISPATCH-STATUS:/g,
+      "DISPATCH_STATUS:",
+    ),
+  };
+  const kickoff = buildKickoff(live, "Draft a reply.", ["repo"]);
   assert.equal(parseLastMarker(kickoff), null);
   assert.match(kickoff, /DISPATCH_STATUS +DONE - shipped by slack/);
   assert.match(kickoff, /DISPATCH_STATUS +NEEDS_INPUT - from the author/);
