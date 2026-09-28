@@ -4,9 +4,13 @@ import path from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import type {
   Config,
+  ItemSourceConfig,
+  LinearStateMap,
+  SlackSourceConfig,
   SourceFilters,
   StatusChannel,
   TerminalAppearance,
+  UserProfile,
 } from "../../shared/types.js";
 import {
   DEFAULT_CLAUDE_ARGS,
@@ -20,7 +24,14 @@ import {
   DEFAULT_TERMINAL_APPEARANCE,
   validateTerminalAppearance,
 } from "../../shared/terminal-appearance.js";
+import { parseProfile } from "../../shared/profile.js";
+import { parseStateMap } from "../../shared/linear-state-map.js";
 import { StartupError } from "./binary-check.js";
+import {
+  isSlackChannel,
+  normalizeSlackChannels,
+  SLACK_CHANNEL_MAX,
+} from "../sources/slack/channel-ref.js";
 import { CONFIG_PATH, DISPATCH_DIR } from "../services/infra/paths.js";
 
 const DEFAULT_PORT = 4700;
@@ -38,7 +49,7 @@ const CONFIG_TEMPLATE = {
   "// port": "Backend HTTP port (loopback only). Default 4700.",
   port: DEFAULT_PORT,
   "// pollIntervalMs":
-    "Default poll interval in ms for every source; sources.<id>.pollIntervalMs overrides it. Default 60000 (60s).",
+    "Default poll interval in ms for Linear and GitHub (Slack uses 120000 unless sources.slack.pollIntervalMs is set); sources.<id>.pollIntervalMs overrides it. Default 60000 (60s).",
   pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
   "// workspaceRoot": "Root folder for per-ticket workspaces.",
   workspaceRoot: DEFAULT_WORKSPACE_ROOT,
@@ -48,6 +59,8 @@ const CONFIG_TEMPLATE = {
   "// updateCheck":
     "Set to false to disable the on-boot update check. Default true.",
   updateCheck: true,
+  "// linearSyncViaClaude":
+    "Set to true to keep the old Claude MCP path for Sync to Linear for one release. Default false (direct GraphQL).",
   "// cleanupDelayDays":
     "Days a finished card keeps its workspace before automatic cleanup. 0 = clean up immediately on Done. Default 7, max 90.",
   cleanupDelayDays: DEFAULT_CLEANUP_DELAY_DAYS,
@@ -106,6 +119,14 @@ function readWholeDays(
     : fallback;
 }
 
+/** Read the About you profile tolerantly: a malformed or empty profile loads as absent. */
+function readProfile(parsed: Record<string, unknown>): UserProfile | undefined {
+  const result = parseProfile(parsed.profile);
+  return result.ok && Object.keys(result.value).length > 0
+    ? result.value
+    : undefined;
+}
+
 /**
  * Read the `terminal` appearance block: absent, partial, or invalid resolves to the shipped
  * default, same tolerance posture as {@link readWholeDays}.
@@ -157,21 +178,22 @@ function readLastUsedPlaybook(
 }
 
 /**
- * Read the well-formed `sources.linear` object from a parsed config.
+ * Read the well-formed `sources.<id>` object from a parsed config.
  *
- * @remarks Returns undefined when `sources` or `sources.linear` is absent, null, an array or not
+ * @remarks Returns undefined when `sources` or `sources.<id>` is absent, null, an array or not
  * an object, so each caller applies its own fallback.
  */
-function nestedLinear(
+function nestedSource(
   parsed: Record<string, unknown>,
+  id: string,
 ): Record<string, unknown> | undefined {
   const sources = parsed.sources;
   if (typeof sources !== "object" || sources === null || Array.isArray(sources))
     return undefined;
-  const linear = (sources as Record<string, unknown>).linear;
-  if (typeof linear !== "object" || linear === null || Array.isArray(linear))
+  const source = (sources as Record<string, unknown>)[id];
+  if (typeof source !== "object" || source === null || Array.isArray(source))
     return undefined;
-  return linear as Record<string, unknown>;
+  return source as Record<string, unknown>;
 }
 
 /**
@@ -181,7 +203,7 @@ function nestedLinear(
  * which keeps the boot migration idempotent.
  */
 function readNestedKey(parsed: Record<string, unknown>): string {
-  const apiKey = nestedLinear(parsed)?.apiKey;
+  const apiKey = nestedSource(parsed, "linear")?.apiKey;
   return typeof apiKey === "string" ? apiKey.trim() : "";
 }
 
@@ -192,7 +214,7 @@ function readNestedKey(parsed: Record<string, unknown>): string {
  * `apiKey` but no `filters` still yields the assigned-to-me pull.
  */
 function readNestedFilters(parsed: Record<string, unknown>): SourceFilters {
-  const filters = nestedLinear(parsed)?.filters;
+  const filters = nestedSource(parsed, "linear")?.filters;
   if (typeof filters !== "object" || filters === null || Array.isArray(filters))
     return DEFAULT_FILTERS;
   const f = filters as Record<string, unknown>;
@@ -208,26 +230,59 @@ function readNestedFilters(parsed: Record<string, unknown>): SourceFilters {
 }
 
 /**
- * Read the optional `enabled` and `pollIntervalMs` fields of `sources.linear`.
+ * Read `sources.linear.stateMap` through parseStateMap.
+ *
+ * @remarks An invalid stored map is ignored with a warning, so the push falls back to the defaults.
+ */
+function readNestedStateMap(
+  parsed: Record<string, unknown>,
+): LinearStateMap | undefined {
+  const raw = nestedSource(parsed, "linear")?.stateMap;
+  if (raw === undefined) return undefined;
+  const result = parseStateMap(raw);
+  if (result.ok) return result.map;
+  console.warn(`[config] ignoring sources.linear.stateMap: ${result.error}`);
+  return undefined;
+}
+
+/**
+ * Read the optional `enabled` and `pollIntervalMs` fields of `sources.<id>`.
  *
  * @remarks A non-boolean `enabled` and a non-positive or non-finite interval are dropped, so the
- * resolved config falls back to "enabled when a key is present" and the global interval.
+ * resolved config falls back to the source's default and the global interval.
  */
-function readNestedSourceSettings(parsed: Record<string, unknown>): {
-  enabled?: boolean;
-  pollIntervalMs?: number;
-} {
-  const linear = nestedLinear(parsed);
-  if (!linear) return {};
-  const out: { enabled?: boolean; pollIntervalMs?: number } = {};
-  if (typeof linear.enabled === "boolean") out.enabled = linear.enabled;
+function readNestedSourceSettings(
+  parsed: Record<string, unknown>,
+  id: string,
+): ItemSourceConfig {
+  const source = nestedSource(parsed, id);
+  if (!source) return {};
+  const out: ItemSourceConfig = {};
+  if (typeof source.enabled === "boolean") out.enabled = source.enabled;
   if (
-    typeof linear.pollIntervalMs === "number" &&
-    Number.isFinite(linear.pollIntervalMs) &&
-    linear.pollIntervalMs > 0
+    typeof source.pollIntervalMs === "number" &&
+    Number.isFinite(source.pollIntervalMs) &&
+    source.pollIntervalMs > 0
   )
-    out.pollIntervalMs = linear.pollIntervalMs;
+    out.pollIntervalMs = source.pollIntervalMs;
   return out;
+}
+
+/**
+ * Read `sources.slack`: the item-source settings plus the picked channels.
+ *
+ * @remarks config.json is user-edited, so a malformed channel entry is dropped and the list is cut at
+ * the save route's cap instead of failing boot.
+ */
+function readSlackSettings(parsed: Record<string, unknown>): SlackSourceConfig {
+  const settings: SlackSourceConfig = readNestedSourceSettings(parsed, "slack");
+  const channels = nestedSource(parsed, "slack")?.channels;
+  if (Array.isArray(channels)) {
+    settings.channels = normalizeSlackChannels(
+      channels.filter(isSlackChannel),
+    ).slice(0, SLACK_CHANNEL_MAX);
+  }
+  return settings;
 }
 
 /**
@@ -368,6 +423,7 @@ export function loadConfig(): Config {
       : DEFAULT_WORKSPACE_ROOT;
 
   const activeClaudeAccountId = readActiveClaudeAccountId(parsed);
+  const stateMap = readNestedStateMap(parsed);
   const config: Config = {
     linearApiKey: rawKey,
     port: typeof parsed.port === "number" ? parsed.port : DEFAULT_PORT,
@@ -380,12 +436,17 @@ export function loadConfig(): Config {
     workspaceRoot,
     statusChannel: readStatusChannel(parsed),
     updateCheck: readUpdateCheck(parsed),
+    linearSyncViaClaude: parsed.linearSyncViaClaude === true,
     sources: {
       linear: {
         apiKey: rawKey,
         filters: readNestedFilters(parsed),
-        ...readNestedSourceSettings(parsed),
+        ...readNestedSourceSettings(parsed, "linear"),
+        ...(stateMap ? { stateMap } : {}),
       },
+      github: readNestedSourceSettings(parsed, "github"),
+      sentry: readNestedSourceSettings(parsed, "sentry"),
+      slack: readSlackSettings(parsed),
     },
     lastUsedPlaybook: readLastUsedPlaybook(parsed),
     cleanupDelayDays: readWholeDays(
@@ -404,6 +465,9 @@ export function loadConfig(): Config {
     ...(activeClaudeAccountId !== undefined ? { activeClaudeAccountId } : {}),
     terminal: readTerminal(parsed),
   };
+  const profile = readProfile(parsed);
+  if (profile) config.profile = profile;
+  if (parsed.onboardingDone === true) config.onboardingDone = true;
 
   const hasKey = config.linearApiKey.length > 0;
   console.log(`[config] loaded ${CONFIG_PATH} (api key present: ${hasKey})`);

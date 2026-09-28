@@ -35,6 +35,7 @@ function ctx() {
     openCard: (id) => calls.push(`open ${id}`),
     navigate: (page) => calls.push(`go ${page}`),
     newTicket: () => calls.push("new"),
+    meetingNotes: () => calls.push("meeting-notes"),
     syncNow: () => calls.push("sync"),
   };
   return { context, calls };
@@ -54,12 +55,23 @@ test("with no card only the page commands, New ticket and Sync now appear", () =
     "go:board",
     "go:settings",
     "new-ticket",
+    "meeting-notes",
     "sync-now",
   ]);
 });
 
+test("the meeting notes command opens the paste flow", () => {
+  const { context, calls } = ctx();
+  const command = buildCommands(context, nav, null).find(
+    (c) => c.id === "meeting-notes",
+  );
+  assert.equal(command?.label, "New tickets from meeting notes");
+  void command?.run();
+  assert.deepEqual(calls, ["meeting-notes"]);
+});
+
 test("a To Do card puts Start and every allowed Move to first, in column order, never In Progress or Agent Done", () => {
-  const cardIds = ids(card()).slice(0, -5);
+  const cardIds = ids(card()).slice(0, -6);
   assert.deepEqual(cardIds, [
     "start",
     "move:needs_input",
@@ -72,7 +84,7 @@ test("a To Do card puts Start and every allowed Move to first, in column order, 
 test("a Done card with a live session yields Open terminal and Clean up and never a move to its own column", () => {
   const cardIds = ids(
     card({ column: "done", tmuxSession: "dsp-LOCAL-7" }),
-  ).slice(0, -5);
+  ).slice(0, -6);
   assert.deepEqual(cardIds, [
     "open-terminal",
     "move:todo",
@@ -130,7 +142,7 @@ test("filter is a case-insensitive substring over the label that keeps order", (
 });
 
 test("an Inbox card offers only Move to To Do and a grouped member gets no card commands", () => {
-  assert.deepEqual(ids(card({ column: "inbox" })).slice(0, -5), ["move:todo"]);
+  assert.deepEqual(ids(card({ column: "inbox" })).slice(0, -6), ["move:todo"]);
   assert.deepEqual(ids(card({ groupId: "g1" })), ids(null));
 });
 
@@ -140,4 +152,20 @@ test("an already cleaned Done card offers no Clean up", () => {
     ids(card({ column: "done", workspacePath: "/ws" })).includes("cleanup"),
     true,
   );
+});
+
+test("the palette has Go to Slack only when the filtered nav list keeps the Slack row", () => {
+  const withSlack = [
+    { page: "inbox" as const, label: "Inbox" },
+    { page: "slack" as const, label: "Slack" },
+  ];
+  const goTo = (list: typeof withSlack) =>
+    buildCommands(ctx().context, list, null)
+      .map((c) => c.label)
+      .filter((label) => label.startsWith("Go to"));
+  assert.ok(goTo(withSlack).includes("Go to Slack"));
+  assert.deepEqual(goTo(withSlack.slice(0, 1)), [
+    "Go to Inbox",
+    "Go to Settings",
+  ]);
 });

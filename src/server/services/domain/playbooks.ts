@@ -4,6 +4,7 @@ import type { Dirent } from "node:fs";
 import writeFileAtomic from "write-file-atomic";
 import type { InvalidPlaybook, Playbook } from "../../../shared/types.js";
 import { DISPATCH_DIR } from "../infra/paths.js";
+import { hasDispatchMarker } from "../../../shared/marker-key.js";
 
 const PLAYBOOKS_DIR = path.join(DISPATCH_DIR, "playbooks");
 
@@ -80,16 +81,7 @@ function parseFrontMatter(raw: string): Playbook | null {
   return { name, body };
 }
 
-/**
- * The single write-time-AND-load-time footgun predicate: a playbook body must never be able to
- * smuggle the status-protocol marker into a kickoff. Both `loadPlaybooks` (skip) and the write
- * path (reject) call this one expression so the two checks can never drift apart. Exported so
- * `ticket-generate.ts`'s parse-time guard and `cards.route.ts`'s accept-time guard reuse the exact
- * same predicate for AI-generated ticket titles/descriptions (Phase 61 footgun defense-in-depth).
- */
-export function hasDispatchMarker(body: string): boolean {
-  return body.includes("DISPATCH_STATUS:");
-}
+export { hasDispatchMarker };
 
 /**
  * Derive an on-disk-safe slug from a display name: lowercase, collapse every run of

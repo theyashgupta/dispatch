@@ -104,6 +104,8 @@ exit 44
 /**
  * Point every path constant at a throwaway tree and put a fake `claude` first on PATH. Must run
  * before the module under test is imported, since `paths.ts` reads the environment once.
+ * The provider API overrides a QA shell exports are cleared, so fetch mocks keyed on the real
+ * provider hosts still match.
  */
 export function isolateEnv(): IsolatedEnv {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dispatch-test-"));
@@ -145,11 +147,15 @@ export function isolateEnv(): IsolatedEnv {
     DISPATCH_DIR: process.env.DISPATCH_DIR,
     PATH: process.env.PATH,
     FAKE_KEYCHAIN_DIR: process.env.FAKE_KEYCHAIN_DIR,
+    DISPATCH_GITHUB_API_URL: process.env.DISPATCH_GITHUB_API_URL,
+    DISPATCH_SLACK_API_URL: process.env.DISPATCH_SLACK_API_URL,
   };
   process.env.FAKE_KEYCHAIN_DIR = keychainDir;
   process.env.HOME = home;
   process.env.DISPATCH_DIR = dispatchDir;
   process.env.PATH = `${binDir}:${process.env.PATH ?? ""}`;
+  delete process.env.DISPATCH_GITHUB_API_URL;
+  delete process.env.DISPATCH_SLACK_API_URL;
   const cleanup = (): void => {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];

@@ -48,7 +48,8 @@ export type EventType =
   | "group_restored"
   | "archive_deleted"
   | "session_reset"
-  | "item_promoted";
+  | "item_promoted"
+  | "linear_state_pushed";
 
 /** One immutable board-activity log row; append-only; carries no secrets. */
 export interface ActivityEvent {
@@ -164,6 +165,22 @@ export const ITEM_STATES = ["unread", "read", "snoozed", "done"] as const;
 export type ItemState = (typeof ITEM_STATES)[number];
 export type SettableItemState = Exclude<ItemState, "snoozed">;
 
+export interface SlackThreadMessage {
+  author: string;
+  time: string;
+  text: string;
+}
+
+export interface SlackThread {
+  messages: SlackThreadMessage[];
+  truncated: boolean;
+}
+
+export interface SourceCursor {
+  cursor?: string;
+  polledAt: string;
+}
+
 export interface Item {
   id: string;
   source: string;
@@ -196,10 +213,17 @@ export interface Card {
    */
   project?: { id: string; name: string } | null;
   /**
-   * Linear workflow state { name, type }; optional/nullable so pre-this-plan cards backfill on the
-   * next poll like `project`. WIRE field — rides `snapshot()` unredacted.
+   * Linear workflow state { id, name, type, color }; optional/nullable so older cards backfill on
+   * the next poll like `project`. WIRE field, rides `snapshot()` unredacted.
    */
-  linearState?: { name: string; type: string } | null;
+  linearState?: LinearState | null;
+  pendingState?: { id: string; at: string } | null;
+  team?: LinearTeam;
+  cycle?: number;
+  assignee?: LinearAssignee;
+  comments?: LinearComment[];
+  commentCount?: number;
+  lastCommentId?: string;
   /** Linear priority integer: 0 none, 1 urgent, 2 high, 3 normal, 4 low. */
   priority: number;
   column: Column;
@@ -447,6 +471,7 @@ export interface Card {
    * stdout (SECURITY — mirrors `startError.stderr`'s no-pane-dump discipline).
    */
   syncError?: string | null;
+  linearError?: string | null;
 
   /**
    * Originating ticket source (a registered TicketSource.id — "linear" is the only value today).
@@ -906,7 +931,7 @@ export interface PlaybookPickerResponse {
 export type StatusChannel = "hooks" | "pane" | "auto";
 
 /**
- * Per-binary presence result surfaced by the boot probe and the first-run setup screen. Shared here
+ * Per-binary presence result surfaced by the boot probe and the setup wizard. Shared here
  * so the `/api/setup` route and the web client agree on the shape without either reaching across the
  * server boundary; `hint` is populated only when the binary is absent.
  * @remarks `installable` is true only for the package-manager targets (tmux/ttyd/git) that get the
@@ -924,9 +949,20 @@ export interface PrerequisiteStatus {
 
 /**
  * The single-source-of-truth preflight snapshot shared by `dispatch doctor`, ordinary boot, and the
- * web first-run setup screen. Every field is INFORMATIVE — a below-floor Node, missing binary, or
+ * web setup wizard. Every field is INFORMATIVE: a below-floor Node, missing binary, or
  * unhealthy storage renders a status line but never blocks boot (PRE-01/02/03).
  */
+export interface SetupChecks {
+  prerequisites: PrerequisiteStatus[];
+  node: PreflightReport["node"];
+  storage: PreflightReport["storage"];
+}
+
+export interface SetupStatus extends SetupChecks {
+  needsKey: boolean;
+  onboardingDone: boolean;
+}
+
 export interface PreflightReport {
   binaries: PrerequisiteStatus[];
   node: { version: string; floor: string; ok: boolean };
@@ -966,21 +1002,44 @@ export type SourceKind = "snapshot" | "append";
 
 export const DEFAULT_POLL_INTERVAL_MS = 60_000;
 
+export type MappedColumn = Exclude<Column, "agent_done" | "inbox">;
+
+export interface ColumnChange {
+  id: string;
+  fromCol: Column;
+  toCol: Column;
+}
+
+export type TeamStateMap = Partial<Record<MappedColumn, string | null>>;
+
+export type LinearStateMap = Record<string, TeamStateMap>;
+
 export interface SourceConfig {
   apiKey: string;
   filters?: SourceFilters;
   enabled?: boolean;
   pollIntervalMs?: number;
+  stateMap?: LinearStateMap;
 }
 
 export type SourceKeyError =
-  "rejected" | "unreachable" | "superseded" | "failed";
+  | "rejected"
+  | "unreachable"
+  | "superseded"
+  | "failed"
+  | "sso-required"
+  | "no-credential";
 
 export interface SourceConnection {
   configured: boolean;
   connected: boolean;
   account?: string;
-  error?: Exclude<SourceKeyError, "superseded" | "failed">;
+  via?: "vault" | "gh";
+  enabled?: boolean;
+  error?: Exclude<SourceKeyError, "superseded" | "failed" | "no-credential">;
+  ssoUrl?: string;
+  providerError?: string;
+  tokenKind?: "user" | "bot";
 }
 
 export type SourceCardStatus =
@@ -989,6 +1048,68 @@ export type SourceCardStatus =
   | { kind: "connected"; account?: string }
   | { kind: "error"; message: string }
   | { kind: "soon" };
+
+export type ItemSourceConfig = Pick<SourceConfig, "enabled" | "pollIntervalMs">;
+
+export type ItemSourceId = "github" | "sentry" | "slack";
+
+export interface SourceCredential {
+  token: string;
+  via: "vault" | "gh";
+  key?: string;
+  kind?: "user" | "bot";
+}
+
+export interface SlackChannel {
+  id: string;
+  name: string;
+}
+
+export interface SlackChannelOption extends SlackChannel {
+  private: boolean;
+}
+
+export type SlackSourceConfig = ItemSourceConfig & {
+  channels?: SlackChannel[];
+};
+
+export type PrCheckState = "pass" | "pending" | "fail";
+
+export interface PrCheck {
+  name: string;
+  state: PrCheckState;
+  url?: string;
+}
+
+export interface PrFile {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  patch?: string;
+  patchTruncated: boolean;
+}
+
+export interface PrDetail {
+  title: string;
+  url: string;
+  author: string;
+  state: "open" | "closed" | "merged";
+  draft: boolean;
+  body: string;
+  base: string;
+  head: string;
+  headSha: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  files: PrFile[];
+  filesTruncated: boolean;
+  checksTruncated: boolean;
+  checks: PrCheck[];
+}
+
+export type PrReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
 
 /** Contents of ~/.dispatch/config.json. */
 export interface Config {
@@ -1000,9 +1121,15 @@ export interface Config {
   workspaceRoot?: string;
   /** Status-source selection (`hooks | pane | auto`); absent resolves to `auto` at load. */
   statusChannel?: StatusChannel;
-  sources?: { linear?: SourceConfig };
+  sources?: {
+    linear?: SourceConfig;
+    github?: ItemSourceConfig;
+    sentry?: ItemSourceConfig;
+    slack?: SlackSourceConfig;
+  };
   /** On-boot update check; absent or any non-`false` value resolves to on. */
   updateCheck?: boolean;
+  linearSyncViaClaude?: boolean;
   /** The playbook name remembered from the last successful kickoff; absent when never set. */
   lastUsedPlaybook?: string;
   /**
@@ -1025,6 +1152,16 @@ export interface Config {
   activeClaudeAccountId?: string;
   /** Terminal appearance chosen in Settings; absent or invalid resolves to the shipped default. */
   terminal?: TerminalAppearance;
+  profile?: UserProfile;
+  onboardingDone?: boolean;
+}
+
+export interface UserProfile {
+  name?: string;
+  email?: string;
+  handles?: string[];
+  role?: string;
+  brief?: string;
 }
 
 export interface TerminalAppearance {
@@ -1168,8 +1305,76 @@ export interface SourceIssue {
   updatedAt: string;
   /** Linear project { id, name }; null when the issue has no project. */
   project: { id: string; name: string } | null;
-  /** Linear workflow state name+type; null when the issue has no state. */
-  state: { name: string; type: string } | null;
+  /** Linear workflow state with its id and Linear's own color; null when the issue has no state. */
+  state: LinearState | null;
+  team?: LinearTeam;
+  cycle?: number;
+  assignee?: LinearAssignee;
+  comments?: LinearComment[];
+}
+
+export interface TrackedRefresh {
+  issues: SourceIssue[];
+  requested: ReadonlySet<string>;
+}
+
+export interface LinearState {
+  id?: string;
+  name: string;
+  type: string;
+  color?: string;
+}
+
+export interface WorkflowState extends LinearState {
+  id: string;
+  position: number;
+}
+
+export interface WorkflowTeam extends LinearTeam {
+  states: WorkflowState[];
+}
+
+export interface LinearWorkflow {
+  viewerId: string;
+  teams: WorkflowTeam[];
+}
+
+export interface NewLinearIssue {
+  teamId: string;
+  title: string;
+  description: string | null;
+  token: string;
+  stateId?: string;
+  priority?: number;
+}
+
+export interface CreatedLinearIssue {
+  created: boolean;
+  issue: {
+    id: string;
+    identifier: string;
+    url: string;
+    title: string;
+    description: string;
+  };
+}
+
+export interface LinearComment {
+  id: string;
+  body: string;
+  createdAt: string;
+  author: string;
+}
+
+export interface LinearTeam {
+  id: string;
+  key: string;
+  name: string;
+}
+
+export interface LinearAssignee {
+  id: string;
+  name: string;
 }
 
 /** Result of reconciling a Linear poll against the current board. */
@@ -1212,4 +1417,43 @@ export interface ArchivedGroupSummary {
   destination: UnwindDestination;
   members: { id: string; identifier: string }[];
   deleteBlocked?: string;
+}
+
+export interface SentryFrame {
+  function: string | null;
+  file: string | null;
+  line: number | null;
+  column: number | null;
+  inApp: boolean;
+  module: string | null;
+  context: { line: number; code: string }[];
+}
+
+export interface SentryBreadcrumb {
+  timestamp: string | null;
+  type: string | null;
+  category: string | null;
+  level: string | null;
+  message: string | null;
+}
+
+export interface SentryIssueDetail {
+  id: string;
+  shortId: string;
+  title: string;
+  culprit: string;
+  permalink: string | null;
+  level: string;
+  project: string;
+  status: string;
+  count: number;
+  userCount: number;
+  firstSeen: string | null;
+  lastSeen: string | null;
+  exception: { type: string | null; value: string | null } | null;
+  frames: SentryFrame[];
+  breadcrumbs: SentryBreadcrumb[];
+  tags: { key: string; value: string }[];
+  logger: string | null;
+  platform: string | null;
 }

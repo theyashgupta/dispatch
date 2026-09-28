@@ -15,6 +15,7 @@ import type {
   BoardSnapshot,
   Card,
   Column,
+  ColumnChange,
   EventType,
   PreviewInfo,
   PrInfo,
@@ -23,13 +24,16 @@ import type {
   SessionFields,
   SourceIssue,
   SourceKind,
+  TrackedRefresh,
   Item,
   SettableItemState,
   StartError,
   TerminalError,
   ArchivedGroup,
   ArchivedGroupSummary,
+  SourceCursor,
   UnwindDestination,
+  WorkflowState,
 } from "../../shared/types.js";
 import { DEFAULT_CLEANUP_DELAY_DAYS } from "../../shared/types.js";
 import type { CardSearchResult } from "../../shared/search.js";
@@ -50,7 +54,14 @@ import {
 import { NEEDS_INPUT_MARKER_PREFIX } from "../../shared/marker-key.js";
 import { isDemoteEligible } from "../../shared/demote-eligibility.js";
 import { DEFAULT_ARCHIVE_RETENTION_DAYS } from "../../shared/types.js";
-import { isStartingCard, reconcile } from "./mapping.js";
+import { LINEAR_PUSH_FAILED_PREFIX } from "../../shared/linear-state-map.js";
+import {
+  hasFreshPending,
+  isAdopted,
+  isPastTodo,
+  isStartingCard,
+  reconcile,
+} from "./mapping.js";
 import { latestClaudeSession, touchClaudeSession } from "./claude-sessions.js";
 
 export const BOARD_PATH = path.join(DISPATCH_DATA_DIR, "board.json");
@@ -149,7 +160,7 @@ export function redactArchivedGroup(row: ArchivedGroup): ArchivedGroupSummary {
 /**
  * Strip a card's secrets before it leaves the process — the SINGLE sanctioned place a card loses
  * them. Every new read path (windowed `snapshot()`, and any future one) must call this rather than
- * duplicate the strip, so the redaction boundary can never drift. Three responsibilities:
+ * duplicate the strip, so the redaction boundary can never drift. Four responsibilities:
  * (1) remove the card's own secret field; (2) remove `sessions` outright — the full array is
  * server-side only and carries every session's own secret field (the active session's own
  * `ttydPort`/`activeSessionId` already ride the wire unconditionally via the card's own flat
@@ -165,6 +176,9 @@ export function redactArchivedGroup(row: ArchivedGroup): ArchivedGroupSummary {
  * ABSENCE by explicit branch, never `undefined` leaking through a bare lookup. Resolves exactly one
  * hop — `builtFrom` is never traversed transitively (decision `D-C`). Operates on the shallow
  * copy only; never mutates the source card's `sessions` array or any session object.
+ * (4) replace Linear `comments` with `commentCount` and `lastCommentId`, so comment bodies never
+ * ride the broadcast snapshot.
+ * @see docs/ARCHITECTURE.md#linear-sync
  * @see docs/ARCHITECTURE.md#session-projection-chokepoint
  * @see docs/ARCHITECTURE.md#session-inheritance
  */
@@ -172,6 +186,11 @@ export function redactCard(card: Card): Card {
   const wireCard = { ...card };
   delete wireCard.hookToken;
   delete wireCard.sessions;
+  if (card.comments !== undefined) {
+    wireCard.commentCount = card.comments.length;
+    wireCard.lastCommentId = card.comments.at(-1)?.id;
+  }
+  delete wireCard.comments;
   const activeAccount = card.sessions?.find(
     (s) => s.id === card.activeSessionId,
   )?.claudeAccountId;
@@ -229,7 +248,7 @@ function syncedFieldsChanged(prev: Card, next: Card): boolean {
     prev.description !== next.description ||
     prev.priority !== next.priority ||
     prev.updatedAt !== next.updatedAt ||
-    prev.goneFromLinear !== next.goneFromLinear ||
+    (prev.goneFromLinear ?? false) !== (next.goneFromLinear ?? false) ||
     prev.project?.id !== next.project?.id
   );
 }
@@ -520,6 +539,7 @@ class BoardStore extends EventEmitter {
   /** Folder used on the last successful start, preselected in the modal; null when none yet. */
   private lastUsedFolder: string | null = null;
   private identifierCounters: Record<string, number> = {};
+  private sourceCursors: Record<string, SourceCursor> = {};
   private readonly items = new Map<string, Item>();
   private pendingItemUpserts: Item[] = [];
   /**
@@ -542,6 +562,7 @@ class BoardStore extends EventEmitter {
    * To Do card whose Linear issue vanished mid-saga (which would orphan a live session).
    */
   private readonly inFlightStarts = new Set<string>();
+  private readonly pushesInFlight = new Set<string>();
   /**
    * Card ids with a Sync-to-Linear request currently in flight (PUSH-01/03). Mirrors
    * `inFlightStarts` EXACTLY: transient, in-memory, NOT persisted — no sync survives a restart, so
@@ -962,6 +983,7 @@ class BoardStore extends EventEmitter {
       localTicketCounter: this.identifierCounters.LOCAL ?? 0,
       groupTicketCounter: this.identifierCounters.GROUP ?? 0,
       schemaVersion: this.schemaVersion,
+      sourceCursors: { ...this.sourceCursors },
     };
   }
 
@@ -1044,6 +1066,7 @@ class BoardStore extends EventEmitter {
       lastUsed: meta.lastUsed,
     });
     this.identifierCounters = seedIdentifierCounters(meta);
+    this.sourceCursors = { ...(meta.sourceCursors ?? {}) };
     this.items.clear();
     for (const item of this.db.readAllItems()) this.items.set(item.id, item);
     console.log(`[store] loaded ${this.cards.size} card(s) from board.db.`);
@@ -1268,9 +1291,54 @@ class BoardStore extends EventEmitter {
     this.editors = e;
   }
 
-  /** Record which sources the registry enabled so the Inbox can tell an empty feed from no feed. */
+  /** One source's stored poll cursors, keyed by target id without the source prefix. */
+  getSourceCursors(sourceId: string): Record<string, SourceCursor> {
+    const prefix = `${sourceId}:`;
+    return Object.fromEntries(
+      Object.entries(this.sourceCursors)
+        .filter(([key]) => key.startsWith(prefix))
+        .map(([key, entry]) => [key.slice(prefix.length), { ...entry }]),
+    );
+  }
+
+  /**
+   * Replace every stored cursor of one source, leaving other sources' cursors untouched.
+   *
+   * @remarks A target the source no longer polls loses its entry, so the meta row never grows
+   * without bound (U2-09).
+   */
+  setSourceCursors(
+    sourceId: string,
+    cursors: Record<string, SourceCursor>,
+  ): Promise<void> {
+    const prefix = `${sourceId}:`;
+    return this.enqueue(() => {
+      const next = Object.fromEntries(
+        Object.entries(this.sourceCursors).filter(
+          ([key]) => !key.startsWith(prefix),
+        ),
+      );
+      for (const [key, entry] of Object.entries(cursors)) {
+        next[prefix + key] = { ...entry };
+      }
+      this.sourceCursors = next;
+      return [];
+    });
+  }
+
+  /**
+   * Record which sources the registry enabled so the Inbox can tell an empty feed from no feed.
+   *
+   * @remarks A change is broadcast so open pages see a source switched on or off at once; the
+   * Inbox hides Slack items while Slack is off (U2-11).
+   */
   setEnabledSources(ids: string[]): void {
-    this.enabledSourceIds = [...ids];
+    const next = [...ids];
+    const same =
+      next.length === this.enabledSourceIds.length &&
+      next.every((id, i) => id === this.enabledSourceIds[i]);
+    this.enabledSourceIds = next;
+    if (!same) this.emit("change");
   }
 
   /**
@@ -1290,6 +1358,34 @@ class BoardStore extends EventEmitter {
   /** Does a card with this id exist? Synchronous read for REST payload validation. */
   hasCard(id: string): boolean {
     return this.cards.has(id);
+  }
+
+  /**
+   * List the upstream ids the poller's by-id refresh should request, capped at `limit`.
+   *
+   * @remarks Cards not in Done come before Done, and cards not flagged gone before gone ones, so the
+   * cap drops old Done cards first; a gone card stays eligible so a found issue clears its flag.
+   */
+  trackedIssueIds(
+    sourceId: string,
+    returnedIds: ReadonlySet<string>,
+    limit = 1000,
+  ): string[] {
+    const now = Date.now();
+    const tier = (c: Card): number =>
+      (c.column === "done" ? 2 : 0) + (c.goneFromLinear ? 1 : 0);
+    return [...this.cards.values()]
+      .filter(
+        (c) =>
+          (c.source ?? "linear") === sourceId &&
+          (isPastTodo(c) || isAdopted(c) || hasFreshPending(c, now)) &&
+          !returnedIds.has(c.issueId),
+      )
+      .sort(
+        (a, b) => tier(a) - tier(b) || b.updatedAt.localeCompare(a.updatedAt),
+      )
+      .slice(0, limit)
+      .map((c) => c.issueId);
   }
 
   /**
@@ -1388,6 +1484,12 @@ class BoardStore extends EventEmitter {
    */
   listPushSubscriptions(): PushSubscriptionRow[] {
     return this.db.listPushSubscriptions();
+  }
+
+  /** Mark or clear a queued Linear state push for a card, so a poll keeps the card meanwhile. */
+  setPushing(id: string, pushing: boolean): void {
+    if (pushing) this.pushesInFlight.add(id);
+    else this.pushesInFlight.delete(id);
   }
 
   /**
@@ -2883,14 +2985,25 @@ class BoardStore extends EventEmitter {
    * (`LIFE-03`) is the one other writer of the field, but it never mints a fresh delay — it only
    * re-instates a schedule the scheduler's own abandon path cleared moments earlier.
    */
-  moveCardManual(id: string, column: Column): Promise<void> {
+  moveCardManual(id: string, column: Column): Promise<ColumnChange[]> {
+    let changes: ColumnChange[] = [];
     return this.enqueue(() => {
       const c = this.cards.get(id);
       if (!c) return [];
       const from = c.column;
       if (!isManualMoveAllowed(from, column)) return [];
+      const moved = [c, ...(c.memberIds ?? []).map((m) => this.cards.get(m))]
+        .filter((card): card is Card => card != null)
+        .map((card) => ({ card, fromCol: card.column }));
       c.column = column;
       this.mirrorMemberColumn(c, column);
+      changes = moved
+        .filter(({ card, fromCol }) => card.column !== fromCol)
+        .map(({ card, fromCol }) => ({
+          id: card.id,
+          fromCol,
+          toCol: card.column,
+        }));
       if (from !== "done" && column === "done") {
         const sessions = c.sessions ?? [];
         const dueAt = Date.now() + this.cleanupDelayMs;
@@ -2928,7 +3041,7 @@ class BoardStore extends EventEmitter {
           source: "user",
         }),
       ];
-    });
+    }).then(() => changes);
   }
 
   /**
@@ -3815,7 +3928,8 @@ class BoardStore extends EventEmitter {
    * here (its hook token released through the clearHookToken chokepoint) so the sync-triggered card
    * (stable `Card.id`) stays the sole owner of the issueId, meeting PUSH-02's zero-duplicate
    * guarantee even when this race window is hit. The delete carries `reconcile()`'s removal guards:
-   * a duplicate that is past To Do/Inbox, is linked into a group (`groupId != null` — deleting it
+   * a duplicate that is itself an adopted card (another synced card, not a race leftover), past
+   * To Do/Inbox, is linked into a group (`groupId != null`: deleting it
    * would leave the group's `memberIds` referencing a nonexistent card, the two-sided-invariant
    * hazard), or is starting/carries session state (isStartingCard) is NEVER deleted — deleting an
    * active one would orphan a live tmux/ttyd session (the `inFlightStarts` hazard). In that case
@@ -3840,6 +3954,7 @@ class BoardStore extends EventEmitter {
       );
       const unsafe = duplicates.find(
         (dup) =>
+          isAdopted(dup) ||
           (dup.column !== "todo" && dup.column !== "inbox") ||
           dup.groupId != null ||
           isStartingCard(dup, this.inFlightStarts),
@@ -3869,6 +3984,52 @@ class BoardStore extends EventEmitter {
           cardId: id,
           source: "linear",
           reason: `synced to Linear as ${adopted.identifier}`,
+        }),
+      ];
+    });
+  }
+
+  /** Set or clear the card's Linear write failure copy; a no-op for an unknown id. */
+  setLinearError(id: string, copy: string | null): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) card.linearError = copy;
+      return [];
+    });
+  }
+
+  /**
+   * Record one Linear state push: the pushed state and its hold on success, the notice on failure.
+   *
+   * @remarks One enqueue writes the card fields and the `linear_state_pushed` event together; a
+   * failure leaves the column, `linearState` and `pendingState` untouched.
+   */
+  recordLinearPush(
+    id: string,
+    push: { fromCol: Column; toCol: Column } & (
+      { ok: true; state: WorkflowState } | { ok: false; copy: string }
+    ),
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      if (push.ok) {
+        const { id: stateId, name, type, color } = push.state;
+        card.linearState = { id: stateId, name, type, color };
+        card.pendingState = { id: stateId, at: new Date().toISOString() };
+        card.linearError = null;
+      } else {
+        card.linearError = push.copy;
+      }
+      return [
+        this.event("linear_state_pushed", {
+          cardId: id,
+          source: "user",
+          fromCol: push.fromCol,
+          toCol: push.toCol,
+          reason: push.ok
+            ? push.state.name
+            : `${LINEAR_PUSH_FAILED_PREFIX}${push.copy}`,
         }),
       ];
     });
@@ -3995,6 +4156,7 @@ class BoardStore extends EventEmitter {
    */
   promoteItem(
     id: string,
+    context?: string,
   ): Promise<{ card: Card; created: boolean } | undefined> {
     let result: { card: Card; created: boolean } | undefined;
     return this.enqueue(() => {
@@ -4012,6 +4174,7 @@ class BoardStore extends EventEmitter {
         current,
         this.nextIdentifier("LOCAL"),
         now,
+        context,
       );
       this.cards.set(card.id, card);
       this.stageItem({ ...withState(current, "done"), cardId: card.id });
@@ -4046,6 +4209,9 @@ class BoardStore extends EventEmitter {
    * `append` source's fetch is a point-in-time slice, so its absences prove nothing
    * either: removals and gone-flags apply only to a complete pull of a `snapshot` source.
    *
+   * `tracked` is the by-id refresh of cards past To Do that the main pull did not return; a card
+   * past To Do is flagged gone only when its id was requested there and did not come back.
+   *
    * The cards Map stays keyed by raw upstream id, so the per-source reconcile filter
    * alone cannot stop a cross-source id collision: an upsert whose id already belongs
    * to a DIFFERENT source's card is skipped with a warning rather than clobbering that
@@ -4054,7 +4220,12 @@ class BoardStore extends EventEmitter {
   applyIssues(
     issues: SourceIssue[],
     syncedAt: string,
-    opts: { partial?: boolean; source?: string; kind?: SourceKind } = {},
+    opts: {
+      partial?: boolean;
+      source?: string;
+      kind?: SourceKind;
+      tracked?: TrackedRefresh;
+    } = {},
   ): Promise<void> {
     return this.enqueue(() => {
       const src = opts.source ?? "linear";
@@ -4063,7 +4234,15 @@ class BoardStore extends EventEmitter {
           .filter((c) => (c.source ?? "linear") === src)
           .map((c) => [c.issueId, c] as const),
       );
-      const r = reconcile(issues, current, this.inFlightStarts, src);
+      const r = reconcile(
+        issues,
+        current,
+        this.inFlightStarts,
+        src,
+        opts.tracked,
+        Date.now(),
+        this.pushesInFlight,
+      );
       const applied: string[] = [];
       const syncedIn: string[] = [];
       for (const card of r.upserts) {
@@ -4074,7 +4253,12 @@ class BoardStore extends EventEmitter {
           );
           continue;
         }
-        if (!existing || syncedFieldsChanged(existing, card)) {
+        const displayOnly =
+          existing != null && existing.groupId == null && isPastTodo(existing);
+        if (
+          !existing ||
+          (!displayOnly && syncedFieldsChanged(existing, card))
+        ) {
           syncedIn.push(card.id);
         }
         this.cards.set(card.id, card);
