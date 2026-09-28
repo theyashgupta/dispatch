@@ -293,7 +293,7 @@ export function DetailPanel({
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       if (cleanupDragRef.current != null) {
         cleanupDragRef.current();
         return;
@@ -389,6 +389,7 @@ export function DetailPanel({
       <aside
         aria-label="Ticket detail"
         ref={asideRef}
+        inert={!docked && !open}
         style={{
           position: "fixed",
           top: docked ? "var(--chrome-top, var(--page-header-height))" : 0,
@@ -554,7 +555,7 @@ export function DetailPanel({
                 </span>
               </div>
             )}
-            {(c?.sessionSummaries != null || showStartAnother) && (
+            {((c?.sessionSummaries?.length ?? 0) >= 2 || showStartAnother) && (
               <div
                 style={{
                   display: "flex",
@@ -566,7 +567,9 @@ export function DetailPanel({
                   borderBottom: "1px solid var(--border)",
                 }}
               >
-                {c?.sessionSummaries != null && <SessionSwitcher card={c} />}
+                {c != null && (c.sessionSummaries?.length ?? 0) >= 2 && (
+                  <SessionSwitcher card={c} />
+                )}
                 {showStartAnother && c != null && (
                   <StartAnotherSessionButton
                     card={c}

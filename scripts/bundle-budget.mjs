@@ -34,7 +34,7 @@ const BUDGETS = [
   {
     label: "index.html",
     match: (f) => f === "index.html",
-    budgetGzipBytes: 517, // seed: 470 (re-seeded 2026-09-24 with the sidebar shell)
+    budgetGzipBytes: 576, // seed: 524 (re-seeded 2026-09-25 with the sessions page preload)
   },
   {
     label: "assets/main-*.js",
@@ -65,6 +65,16 @@ const BUDGETS = [
     label: "assets/vault-*.js",
     match: (f) => f.startsWith(`assets${sep}vault-`) && f.endsWith(".js"),
     budgetGzipBytes: 5310, // seed: 4828 (the vault page, lazy)
+  },
+  {
+    label: "assets/sessions-*.js",
+    match: (f) => f.startsWith(`assets${sep}sessions-`) && f.endsWith(".js"),
+    budgetGzipBytes: 3943, // seed: 3584 (re-seeded 2026-09-25 with the sessions toolbar, bulk bar, confirm dialog and keyboard rows)
+  },
+  {
+    label: "assets/palette-*.js",
+    match: (f) => f.startsWith(`assets${sep}palette-`) && f.endsWith(".js"),
+    budgetGzipBytes: 2595, // seed: 2359 (the command palette and the cheat sheet, lazy)
   },
   {
     label: "assets/archive-*.js",
