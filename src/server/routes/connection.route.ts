@@ -22,8 +22,8 @@ import {
  *
  * @remarks Replace is test-before-persist, so a rejected or unreachable key never reaches disk, and
  * a disconnect that lands while a replace is still checking its key wins. Linear keeps its key in
- * config.json while GitHub uses the Vault or the gh login. A key is never echoed, logged or placed in
- * an error body.
+ * config.json while the token sources (GitHub, Sentry) use the Vault, GitHub also the gh login. A key
+ * is never echoed, logged or placed in an error body.
  */
 export const connectionRouter = Router();
 

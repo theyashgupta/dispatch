@@ -1,6 +1,7 @@
 import {
   GitHubConnectionCard,
   LinearConnectionCard,
+  SentryConnectionCard,
 } from "../connections/index.js";
 import {
   useCallback,
@@ -2055,6 +2056,8 @@ interface SettingsScreenProps {
   tunnelState: TunnelState;
   soundEnabled: boolean;
   onToggleSound: (enabled: boolean) => void;
+  errorsInFeeds: boolean;
+  onToggleErrorsInFeeds: (on: boolean) => void;
 }
 
 export function SettingsScreen({
@@ -2065,6 +2068,8 @@ export function SettingsScreen({
   tunnelState,
   soundEnabled,
   onToggleSound,
+  errorsInFeeds,
+  onToggleErrorsInFeeds,
 }: SettingsScreenProps) {
   const filters = useFiltersTab(onSaved);
   const modelsTab = useModelsTab(onSaved);
@@ -2117,6 +2122,10 @@ export function SettingsScreen({
                 <SettingsScreen.FiltersTab filters={filters} />
               </LinearConnectionCard>
               <GitHubConnectionCard />
+              <SentryConnectionCard
+                errorsInFeeds={errorsInFeeds}
+                onToggleErrorsInFeeds={onToggleErrorsInFeeds}
+              />
             </div>
           )}
           {tab === "models" && (

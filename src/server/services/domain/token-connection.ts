@@ -5,6 +5,7 @@ import type {
 } from "../../../shared/types.js";
 import {
   checkGithubToken,
+  checkSentryToken,
   GitHubSsoError,
 } from "../../adapters/source-gateway.js";
 import {
@@ -12,6 +13,7 @@ import {
   setSourceEnabled,
 } from "../infra/config-holder.js";
 import { GITHUB_TOKEN_KEY, resolveGithubToken } from "./github-token.js";
+import { resolveSentryToken, SENTRY_TOKEN_KEY } from "./sentry-token.js";
 import { clearValue, createKey, listKeys, setValue } from "./vault.js";
 
 export interface TokenSourceDef {
@@ -30,6 +32,14 @@ export const TOKEN_SOURCES: Record<ItemSourceId, TokenSourceDef> = {
       "GitHub token for the Pull Requests source (repo scope). Empty means Dispatch uses gh auth token.",
     resolve: resolveGithubToken,
     check: checkGithubToken,
+  },
+  sentry: {
+    id: "sentry",
+    vaultKey: SENTRY_TOKEN_KEY,
+    purpose:
+      "Sentry user auth token for the Errors source (org:read, event:read, event:write).",
+    resolve: resolveSentryToken,
+    check: checkSentryToken,
   },
 };
 
