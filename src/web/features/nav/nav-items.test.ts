@@ -41,3 +41,10 @@ test("the System group lists the four moved pages in order", () => {
     ["accounts", "playbooks", "vault", "archive"],
   );
 });
+
+test("the Work group lists Board, Sessions, Workspace and Activity in order", () => {
+  assert.deepEqual(
+    NAV_ITEMS.filter((item) => item.group === "Work").map((item) => item.page),
+    ["board", "sessions", "workspace", "activity"],
+  );
+});

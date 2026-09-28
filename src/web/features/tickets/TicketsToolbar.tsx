@@ -75,7 +75,7 @@ export function TicketsToolbar({
       <Select
         label="Group by"
         value={groupBy}
-        onChange={(next) => onGroupByChange(next as TicketsGroupBy)}
+        onChange={onGroupByChange}
         style={{ flex: "0 0 auto" }}
       >
         {TICKETS_GROUP_BY.map((key) => (

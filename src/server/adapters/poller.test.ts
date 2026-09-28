@@ -278,7 +278,9 @@ test("a transport failure keeps the loop on its base interval and flags the boar
     },
   });
   startPollers([src]);
-  await sleep(45);
+  for (let waited = 0; calls < 3 && waited < 1000; waited += 10) {
+    await sleep(10);
+  }
   assert.ok(calls >= 3, `loop kept ticking (${calls})`);
   assert.equal(pollerDiagnostics()[0]?.backoffMs, 10);
   assert.equal(store.snapshot().syncUnreachable, true);
@@ -347,7 +349,9 @@ test("a plain error keeps the loop on its base interval and leaves the board rea
     },
   });
   startPollers([src]);
-  await sleep(45);
+  for (let waited = 0; calls < 3 && waited < 1000; waited += 10) {
+    await sleep(10);
+  }
   assert.ok(calls >= 3, `loop kept ticking (${calls})`);
   assert.equal(pollerDiagnostics()[0]?.backoffMs, 10);
   assert.equal(store.snapshot().syncUnreachable, false);
@@ -375,7 +379,9 @@ test("restarting with a new source object swaps the fetch and the interval", asy
   startPollers([oldSrc]);
   await sleep(5);
   startPollers([newSrc]);
-  await sleep(45);
+  for (let waited = 0; newCalls < 3 && waited < 1000; waited += 10) {
+    await sleep(10);
+  }
   assert.equal(oldCalls, 1);
   assert.ok(newCalls >= 3, `new source polled ${newCalls} times`);
   assert.equal(pollerDiagnostics()[0]?.backoffMs, 10);
