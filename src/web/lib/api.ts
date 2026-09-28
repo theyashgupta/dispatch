@@ -1675,6 +1675,7 @@ async function sourceKeyReason(res: Response): Promise<SourceKeyError> {
   }
   if (res.status === 400) return "rejected";
   if (res.status === 502) return "unreachable";
+  if (res.status === 409) return "superseded";
   return "failed";
 }
 

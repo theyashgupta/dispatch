@@ -156,9 +156,9 @@ connectionRouter.put("/sources/:source/key", async (req, res) => {
 connectionRouter.delete("/sources/:source/key", async (req, res) => {
   const { source } = req.params;
   if (refuseUnknown(source, res)) return;
-  keyGenerations.set(source, generationOf(source) + 1);
   const def = tokenSource(source);
   if (def) {
+    keyGenerations.set(source, generationOf(source) + 1);
     if (!(await disconnectTokenSource(def))) {
       res.status(500).json({ error: "save-failed" });
       return;
@@ -170,6 +170,7 @@ connectionRouter.delete("/sources/:source/key", async (req, res) => {
       res.status(500).json({ error: "save-failed" });
       return;
     }
+    keyGenerations.set(source, generationOf(source) + 1);
   }
   reloadSources();
   res.status(204).end();
