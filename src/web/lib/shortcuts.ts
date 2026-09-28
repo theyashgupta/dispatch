@@ -32,6 +32,14 @@ export const INBOX_SHORTCUTS: readonly { key: string; label: string }[] = [
   { key: "u", label: "Toggle read" },
 ];
 
+export const TICKETS_BINDINGS: readonly { key: string; label: string }[] = [
+  { key: "j", label: "Next row" },
+  { key: "k", label: "Previous row" },
+  { key: "Enter", label: "Open" },
+  { key: "e", label: "Done" },
+  { key: "o", label: "Open link" },
+];
+
 const EDITABLE_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 const ACTIVATABLE_TAGS = new Set(["BUTTON", "A", "SUMMARY"]);
 const ACTIVATABLE_ROLES = new Set([

@@ -310,7 +310,10 @@ export function PanelHeader({
 
         {!docked && (
           <IconButton
-            onClick={onClose}
+            onClick={(event) => {
+              event.currentTarget.blur();
+              onClose();
+            }}
             aria-label={takeover ? "Back to board" : "Close panel"}
             style={takeover ? { width: "44px", height: "44px" } : undefined}
           >

@@ -7,6 +7,7 @@ interface SelectProps {
   onChange: (value: string) => void;
   children: ReactNode;
   style?: CSSProperties;
+  disabled?: boolean;
 }
 
 const selectStyle: CSSProperties = {
@@ -29,18 +30,25 @@ export function Select({
   onChange,
   children,
   style,
+  disabled,
 }: SelectProps) {
   const [focused, setFocused] = useState(false);
   return (
     <select
       aria-label={label}
       value={value}
+      disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
       onFocus={(event) =>
         setFocused(event.currentTarget.matches(":focus-visible"))
       }
       onBlur={() => setFocused(false)}
-      style={{ ...selectStyle, ...style, ...focusRing(focused) }}
+      style={{
+        ...selectStyle,
+        ...style,
+        ...focusRing(focused),
+        ...(disabled ? { cursor: "default", opacity: 0.5 } : null),
+      }}
     >
       {children}
     </select>

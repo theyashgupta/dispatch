@@ -15,7 +15,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   ref?: Ref<HTMLButtonElement>;
 }
 
-const secondaryStyle: CSSProperties = {
+export const secondaryStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   gap: "var(--space-xs)",
