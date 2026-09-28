@@ -125,6 +125,11 @@ function retry(): Promise<void> {
   return send(last.text);
 }
 
+/**
+ * The Ask conversation store: its state, a subscribe and the send, cancel, clear and retry actions.
+ *
+ * @public The store's own spec (`use-ask.test.ts`) drives it directly and ships in the G8 specs PR.
+ */
 export const askStore = {
   getState: () => state,
   subscribe,
