@@ -46,7 +46,7 @@ src/web/
 │   ├── settings/   # SettingsScreen (full-screen, sidebar-nav), PlaybookEditorModal
 │   └── badges/     # GoneBadge, PlanReadyBadge, SourceBadge — shared leaf feature (see import direction)
 ├── hooks/          # data/effect hooks: useBoardStream, useUnseenActivity, useTransitionNotifications, useResumeFeedback, useMediaQuery
-├── lib/            # non-UI helpers: api.ts, card-badges.ts, format-age.ts, resume-feedback.ts, start-request.ts
+├── lib/            # non-UI helpers: api.ts, card-badges.ts, format-age.ts, resume-feedback.ts, start-request.ts, meetings.ts
 └── styles/         # tokens.css — the design-token source of truth, survives unchanged
 ```
 
@@ -62,9 +62,9 @@ src/web/
 | `SettingsScreen.tsx`, `PlaybookEditorModal.tsx`                                                                          | `features/settings/`             |
 | `GoneBadge.tsx`, `PlanReadyBadge.tsx`, `SourceBadge.tsx`                                                                 | `features/badges/` (shared leaf) |
 | `SessionsPage.tsx`, `SessionRow.tsx`                                                                                     | `features/sessions/`             |
-| `MeetingNotesModal.tsx`                                                                                                  | `features/meetings/`             |
+| `MeetingNotesModal.tsx`, `MeetingsPage.tsx`, `MeetingList.tsx`, `MeetingDetail.tsx`                                      | `features/meetings/`             |
 | `useBoardStream.ts`, `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts` | `hooks/`                         |
-| `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`                                    | `lib/`                           |
+| `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`, `meetings.ts`                     | `lib/`                           |
 | `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Glyph` / `Markdown`                                            | `primitives/`                    |
 | `tokens.css`                                                                                                             | `styles/`                        |
 
