@@ -76,6 +76,7 @@ import {
 } from "./hooks/useUndoToast.js";
 import {
   moveCard,
+  getSlackThread,
   pollSource,
   promoteItem,
   resetCard as resetCardApi,
@@ -504,6 +505,32 @@ export function App() {
     [items, board?.enabledSources],
   );
   const { show: showUndo, notice: showNotice } = undoToast;
+  const [startRequest, setStartRequest] = useState<StartRequest | null>(null);
+  const startAgent = useCallback(
+    async (
+      target: { itemId?: string; cardId?: string },
+      extraDirection: string,
+    ) => {
+      try {
+        if (target.cardId) {
+          setStartRequest({
+            cardId: target.cardId,
+            newSession: true,
+            extraDirection,
+          });
+          return;
+        }
+        if (!target.itemId) return;
+        const { card } = await promoteItem(target.itemId);
+        if (card.column === "inbox") await moveCard(card.id, "todo");
+        setStartRequest({ cardId: card.id, extraDirection });
+      } catch {
+        showNotice("Couldn't start the agent. Try again.");
+      }
+    },
+    [showNotice],
+  );
+
   const actionServices = useMemo<ActionServices>(
     () => ({
       api: {
@@ -515,6 +542,7 @@ export function App() {
         switchSession,
         resumeCard,
         pollSource,
+        getSlackThread,
       },
       showUndo,
       notice: showNotice,
@@ -525,8 +553,9 @@ export function App() {
         navigator.clipboard
           ? navigator.clipboard.writeText(text)
           : Promise.reject(new Error("Clipboard unavailable over http")),
+      startAgent,
     }),
-    [showUndo, showNotice],
+    [showUndo, showNotice, startAgent],
   );
   const requestUnwind = useCallback(
     (id: string, to: UnwindDestination) => {
@@ -553,7 +582,6 @@ export function App() {
     [undoToast],
   );
 
-  const [startRequest, setStartRequest] = useState<StartRequest | null>(null);
   const startCard =
     board?.cards.find((card) => card.id === startRequest?.cardId) ??
     actionablePinnedCard(startRequest?.cardId, pinned);
@@ -572,28 +600,6 @@ export function App() {
     if (!wantsNewSession && card.column !== "todo" && card.sessionLost !== true)
       return;
     setStartRequest(typeof req === "string" ? { cardId: req } : req);
-  };
-
-  const startAgent = async (
-    target: { itemId?: string; cardId?: string },
-    extraDirection: string,
-  ) => {
-    try {
-      if (target.cardId) {
-        setStartRequest({
-          cardId: target.cardId,
-          newSession: true,
-          extraDirection,
-        });
-        return;
-      }
-      if (!target.itemId) return;
-      const { card } = await promoteItem(target.itemId);
-      if (card.column === "inbox") await moveCard(card.id, "todo");
-      setStartRequest({ cardId: card.id, extraDirection });
-    } catch {
-      showNotice("Couldn't start the agent. Try again.");
-    }
   };
 
   const [cleanupCardId, setCleanupCardId] = useState<string | null>(null);
