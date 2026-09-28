@@ -171,7 +171,11 @@ export function pushColumnChanges(
   return Promise.all(runs).then(() => undefined);
 }
 
-/** Push a chosen state for a card without a map lookup, in order with its other pushes. */
+/**
+ * Push a chosen state for a card without a map lookup, in order with its other pushes.
+ *
+ * @public The panel "Move to" route in the Tickets unit becomes the consumer; until then only its spec calls it.
+ */
 export function setLinearState(
   cardId: string,
   stateId: string,
