@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import type { SourceConnection } from "../../../shared/types.js";
 import { SourceIcon } from "../badges/index.js";
 import { useLinearConnection } from "../../hooks/useLinearConnection.js";
 import { LINEAR_CONNECTION } from "../../lib/connection-meta.js";
@@ -8,10 +9,17 @@ import { CredentialForm } from "../../primitives/CredentialForm.js";
 
 interface LinearConnectionCardProps {
   children?: ReactNode;
+  onConnection?: (connection: SourceConnection) => void;
 }
 
-export function LinearConnectionCard({ children }: LinearConnectionCardProps) {
+export function LinearConnectionCard({
+  children,
+  onConnection,
+}: LinearConnectionCardProps) {
   const linear = useLinearConnection();
+  useEffect(() => {
+    if (linear.connection) onConnection?.(linear.connection);
+  }, [linear.connection, onConnection]);
   const configured = linear.connection?.configured ?? false;
   return (
     <ConnectionCard
