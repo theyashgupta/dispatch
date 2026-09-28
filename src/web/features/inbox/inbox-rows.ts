@@ -1,9 +1,10 @@
 import type { Card, FilterOption, Item } from "../../../shared/types.js";
 import type { InboxRowModel } from "../../lib/actions.js";
 import { cardPriorityScore } from "../../lib/card-priority.js";
+import { stateTypeRank } from "../../lib/linear-state.js";
 
 export type InboxRange = "all" | "today" | "3d" | "week";
-export type InboxGroupBy = "none" | "source" | "type";
+export type InboxGroupBy = "none" | "source" | "type" | "state";
 
 interface InboxFilter {
   query: string;
@@ -128,12 +129,20 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-/** Bucket rows by source or type, keeping the incoming order inside each group. */
+const NO_STATE = "No state";
+
+/**
+ * Bucket rows by source, type or Linear state, keeping the incoming order inside each group.
+ *
+ * @remarks State groups run in workflow order (type, then name), and rows without a Linear state,
+ * items included, land in a "No state" group placed last.
+ */
 export function groupInboxRows(
   rows: readonly InboxRowModel[],
   by: InboxGroupBy,
 ): InboxGroup[] {
   if (by === "none") return [{ key: "all", label: "All", rows: [...rows] }];
+  if (by === "state") return groupByState(rows);
   const groups = new Map<string, InboxGroup>();
   for (const row of rows) {
     const label =
@@ -143,6 +152,27 @@ export function groupInboxRows(
     groups.set(label, group);
   }
   return [...groups.values()];
+}
+
+function groupByState(rows: readonly InboxRowModel[]): InboxGroup[] {
+  const groups = new Map<string, InboxGroup & { rank: number }>();
+  for (const row of rows) {
+    const state = row.card?.linearState;
+    const key = state ? `state:${state.name}` : "none";
+    const rank = state ? stateTypeRank(state.type) : Number.POSITIVE_INFINITY;
+    const group = groups.get(key) ?? {
+      key,
+      label: state?.name ?? NO_STATE,
+      rows: [],
+      rank,
+    };
+    group.rank = Math.min(group.rank, rank);
+    group.rows.push(row);
+    groups.set(key, group);
+  }
+  return [...groups.values()]
+    .sort((a, b) => a.rank - b.rank || a.label.localeCompare(b.label))
+    .map(({ key, label, rows: members }) => ({ key, label, rows: members }));
 }
 
 /** Ids of the item rows a Mark all read call should touch: visible and unread, never a card. */

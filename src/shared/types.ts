@@ -48,7 +48,8 @@ export type EventType =
   | "group_restored"
   | "archive_deleted"
   | "session_reset"
-  | "item_promoted";
+  | "item_promoted"
+  | "linear_state_pushed";
 
 /** One immutable board-activity log row; append-only; carries no secrets. */
 export interface ActivityEvent {
@@ -196,10 +197,17 @@ export interface Card {
    */
   project?: { id: string; name: string } | null;
   /**
-   * Linear workflow state { name, type }; optional/nullable so pre-this-plan cards backfill on the
-   * next poll like `project`. WIRE field — rides `snapshot()` unredacted.
+   * Linear workflow state { id, name, type, color }; optional/nullable so older cards backfill on
+   * the next poll like `project`. WIRE field, rides `snapshot()` unredacted.
    */
-  linearState?: { name: string; type: string } | null;
+  linearState?: LinearState | null;
+  pendingState?: { id: string; at: string } | null;
+  team?: LinearTeam;
+  cycle?: number;
+  assignee?: LinearAssignee;
+  comments?: LinearComment[];
+  commentCount?: number;
+  lastCommentId?: string;
   /** Linear priority integer: 0 none, 1 urgent, 2 high, 3 normal, 4 low. */
   priority: number;
   column: Column;
@@ -447,6 +455,7 @@ export interface Card {
    * stdout (SECURITY — mirrors `startError.stderr`'s no-pane-dump discipline).
    */
   syncError?: string | null;
+  linearError?: string | null;
 
   /**
    * Originating ticket source (a registered TicketSource.id — "linear" is the only value today).
@@ -906,7 +915,7 @@ export interface PlaybookPickerResponse {
 export type StatusChannel = "hooks" | "pane" | "auto";
 
 /**
- * Per-binary presence result surfaced by the boot probe and the first-run setup screen. Shared here
+ * Per-binary presence result surfaced by the boot probe and the setup wizard. Shared here
  * so the `/api/setup` route and the web client agree on the shape without either reaching across the
  * server boundary; `hint` is populated only when the binary is absent.
  * @remarks `installable` is true only for the package-manager targets (tmux/ttyd/git) that get the
@@ -924,9 +933,20 @@ export interface PrerequisiteStatus {
 
 /**
  * The single-source-of-truth preflight snapshot shared by `dispatch doctor`, ordinary boot, and the
- * web first-run setup screen. Every field is INFORMATIVE — a below-floor Node, missing binary, or
+ * web setup wizard. Every field is INFORMATIVE: a below-floor Node, missing binary, or
  * unhealthy storage renders a status line but never blocks boot (PRE-01/02/03).
  */
+export interface SetupChecks {
+  prerequisites: PrerequisiteStatus[];
+  node: PreflightReport["node"];
+  storage: PreflightReport["storage"];
+}
+
+export interface SetupStatus extends SetupChecks {
+  needsKey: boolean;
+  onboardingDone: boolean;
+}
+
 export interface PreflightReport {
   binaries: PrerequisiteStatus[];
   node: { version: string; floor: string; ok: boolean };
@@ -966,11 +986,24 @@ export type SourceKind = "snapshot" | "append";
 
 export const DEFAULT_POLL_INTERVAL_MS = 60_000;
 
+export type MappedColumn = Exclude<Column, "agent_done" | "inbox">;
+
+export interface ColumnChange {
+  id: string;
+  fromCol: Column;
+  toCol: Column;
+}
+
+export type TeamStateMap = Partial<Record<MappedColumn, string | null>>;
+
+export type LinearStateMap = Record<string, TeamStateMap>;
+
 export interface SourceConfig {
   apiKey: string;
   filters?: SourceFilters;
   enabled?: boolean;
   pollIntervalMs?: number;
+  stateMap?: LinearStateMap;
 }
 
 export type SourceKeyError =
@@ -1062,6 +1095,7 @@ export interface Config {
   };
   /** On-boot update check; absent or any non-`false` value resolves to on. */
   updateCheck?: boolean;
+  linearSyncViaClaude?: boolean;
   /** The playbook name remembered from the last successful kickoff; absent when never set. */
   lastUsedPlaybook?: string;
   /**
@@ -1084,6 +1118,16 @@ export interface Config {
   activeClaudeAccountId?: string;
   /** Terminal appearance chosen in Settings; absent or invalid resolves to the shipped default. */
   terminal?: TerminalAppearance;
+  profile?: UserProfile;
+  onboardingDone?: boolean;
+}
+
+export interface UserProfile {
+  name?: string;
+  email?: string;
+  handles?: string[];
+  role?: string;
+  brief?: string;
 }
 
 export interface TerminalAppearance {
@@ -1227,8 +1271,76 @@ export interface SourceIssue {
   updatedAt: string;
   /** Linear project { id, name }; null when the issue has no project. */
   project: { id: string; name: string } | null;
-  /** Linear workflow state name+type; null when the issue has no state. */
-  state: { name: string; type: string } | null;
+  /** Linear workflow state with its id and Linear's own color; null when the issue has no state. */
+  state: LinearState | null;
+  team?: LinearTeam;
+  cycle?: number;
+  assignee?: LinearAssignee;
+  comments?: LinearComment[];
+}
+
+export interface TrackedRefresh {
+  issues: SourceIssue[];
+  requested: ReadonlySet<string>;
+}
+
+export interface LinearState {
+  id?: string;
+  name: string;
+  type: string;
+  color?: string;
+}
+
+export interface WorkflowState extends LinearState {
+  id: string;
+  position: number;
+}
+
+export interface WorkflowTeam extends LinearTeam {
+  states: WorkflowState[];
+}
+
+export interface LinearWorkflow {
+  viewerId: string;
+  teams: WorkflowTeam[];
+}
+
+export interface NewLinearIssue {
+  teamId: string;
+  title: string;
+  description: string | null;
+  token: string;
+  stateId?: string;
+  priority?: number;
+}
+
+export interface CreatedLinearIssue {
+  created: boolean;
+  issue: {
+    id: string;
+    identifier: string;
+    url: string;
+    title: string;
+    description: string;
+  };
+}
+
+export interface LinearComment {
+  id: string;
+  body: string;
+  createdAt: string;
+  author: string;
+}
+
+export interface LinearTeam {
+  id: string;
+  key: string;
+  name: string;
+}
+
+export interface LinearAssignee {
+  id: string;
+  name: string;
 }
 
 /** Result of reconciling a Linear poll against the current board. */

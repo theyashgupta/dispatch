@@ -54,3 +54,16 @@ export const SENTRY_CONNECTION: ConnectionMeta = {
   footer:
     "Your token is checked against Sentry and stored only in the Dispatch Vault on this machine.",
 };
+
+export const SOON_CONNECTIONS: { source: string; name: string }[] = [
+  { source: "slack", name: "Slack" },
+  { source: "meeting", name: "Meetings" },
+  { source: "calendar", name: "Calendar" },
+];
+
+export const ALL_CONNECTIONS: { source: string; name: string }[] = [
+  { source: LINEAR_CONNECTION.source, name: LINEAR_CONNECTION.name },
+  { source: GITHUB_CONNECTION.source, name: GITHUB_CONNECTION.name },
+  { source: SENTRY_CONNECTION.source, name: SENTRY_CONNECTION.name },
+  ...SOON_CONNECTIONS,
+];
