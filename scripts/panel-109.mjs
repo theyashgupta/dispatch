@@ -1246,7 +1246,7 @@ async function checkPushRowStateMachine(violations) {
   }
 }
 
-/** `--break push-row-state-machine`: mutates `SettingsScreen.tsx`'s enabled-state comparison
+/** `--break push-row-state-machine`: mutates `NotificationsTab.tsx`'s enabled-state comparison
  * (`hasSubscription === true` -> `hasSubscription === false`), rebuilds via `resetBuildCache()`,
  * and requires leg 2's violation by name. Restores the captured bytes in a `finally`
  * unconditionally, so a thrown check error still leaves the source untouched. */
@@ -1254,7 +1254,7 @@ async function runBreakPushRowStateMachine() {
   assertBuilt();
   const settingsPath = join(
     REPO_ROOT,
-    "src/web/features/settings/SettingsScreen.tsx",
+    "src/web/features/settings/NotificationsTab.tsx",
   );
   const TARGET = "hasSubscription === true";
   const REPLACEMENT = "hasSubscription === false";
@@ -1384,7 +1384,7 @@ async function runBreakDeniedStateNoButton() {
   assertBuilt();
   const settingsPath = join(
     REPO_ROOT,
-    "src/web/features/settings/SettingsScreen.tsx",
+    "src/web/features/settings/NotificationsTab.tsx",
   );
   const TARGET = 'permission === "denied"';
   const REPLACEMENT = 'permission === "never-denied"';

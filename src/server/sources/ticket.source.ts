@@ -1,9 +1,13 @@
 import type {
+  CreatedLinearIssue,
+  LinearWorkflow,
+  NewLinearIssue,
   FilterCapabilities,
   FilterDimension,
   FilterOption,
   SourceFilters,
   Item,
+  SourceCursor,
   SourceIssue,
   SourceKind,
 } from "../../shared/types.js";
@@ -38,11 +42,19 @@ export interface TicketSource {
   readonly pollIntervalMs: number;
   readonly vaultKeys: readonly string[];
   readonly itemsOnly?: boolean;
-  fetch(): Promise<{
+  fetch(opts?: { cursors?: Record<string, SourceCursor> }): Promise<{
     issues: SourceIssue[];
     items?: Item[];
     truncated: boolean;
+    cursors?: Record<string, SourceCursor>;
   }>;
+  fetchByIds?(ids: string[]): Promise<SourceIssue[]>;
+  addComment?(issueId: string, body: string): Promise<void>;
+  assignIssue?(issueId: string, assigneeId: string): Promise<void>;
+  updateState?(issueId: string, stateId: string): Promise<void>;
+  viewerId?(): Promise<string>;
+  workflow?(): Promise<LinearWorkflow>;
+  createIssue?(input: NewLinearIssue): Promise<CreatedLinearIssue>;
   readonly capabilities: FilterCapabilities;
   listOptions(
     dimension: Exclude<FilterDimension, "cycle">,

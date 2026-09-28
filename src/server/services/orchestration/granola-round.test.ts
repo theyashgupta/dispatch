@@ -144,7 +144,7 @@ function alive(pid: number): boolean {
 
 const granolaItems = () =>
   store.listItems().filter((i) => i.id.startsWith("meeting:granola:"));
-const cursor = () => store.getSourceCursors("meeting")["meeting:granola"];
+const cursor = () => store.getSourceCursors("meeting").granola;
 
 test("a connected round runs claude with only the Granola tool and upserts four items", async () => {
   stub("connected", "ok");

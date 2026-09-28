@@ -4,6 +4,7 @@ import type {
   CalendarSettingsPatch,
   CalendarSourceConfig,
   CalendarStatus,
+  SourceCredential,
 } from "../../../shared/types.js";
 import {
   calendarErrorCode,
@@ -35,6 +36,14 @@ type CalendarResult<T> =
 export async function resolveIcalUrl(): Promise<string | null> {
   const result = await readCurrent(CALENDAR_ICAL_KEY);
   return result.ok && result.value.trim() !== "" ? result.value : null;
+}
+
+/** The iCal URL as the Vault credential the source registry hands the calendar source. */
+export async function resolveIcalCredential(): Promise<SourceCredential | null> {
+  const token = await resolveIcalUrl();
+  return token === null
+    ? null
+    : { token, via: "vault", key: CALENDAR_ICAL_KEY };
 }
 
 function currentSettings(): CalendarSourceConfig {

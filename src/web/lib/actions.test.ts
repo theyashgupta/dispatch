@@ -35,6 +35,7 @@ function row(extra: Partial<InboxRowModel> = {}): InboxRowModel {
 
 function ctx() {
   const calls: string[] = [];
+  const prompts: string[] = [];
   let undo: (() => Promise<void>) | null = null;
   const context: ActionContext = {
     api: {
@@ -71,6 +72,30 @@ function ctx() {
         if (id === "bad") throw new Error("409");
         await Promise.resolve();
       },
+      getSlackThread: async (id) => {
+        calls.push(`thread ${id}`);
+        await Promise.resolve();
+        return id.endsWith(":fail")
+          ? { ok: false as const, reason: "unreachable" as const }
+          : {
+              ok: true as const,
+              thread: {
+                messages: [
+                  {
+                    author: "ben",
+                    time: "2026-09-28T10:00:00.000Z",
+                    text: "ship it?",
+                  },
+                  {
+                    author: "ana",
+                    time: "2026-09-28T10:01:00.000Z",
+                    text: "not yet",
+                  },
+                ],
+                truncated: false,
+              },
+            };
+      },
     },
     showUndo: (label, u) => {
       calls.push(`undo-toast ${label}`);
@@ -83,8 +108,13 @@ function ctx() {
       calls.push(`copy ${text}`);
       await Promise.resolve();
     },
+    startAgent: async (target, extraDirection) => {
+      calls.push(`start ${target.itemId}`);
+      prompts.push(extraDirection);
+      await Promise.resolve();
+    },
   };
-  return { context, calls, undo: () => undo };
+  return { context, calls, prompts, undo: () => undo };
 }
 
 const action = (id: string) => {
@@ -160,8 +190,28 @@ test("snooze never runs on a card, and a refused api call becomes a notice", asy
   assert.deepEqual(c.calls, []);
   c.context.api.setItemState = () =>
     Promise.reject(new Error("item is promoted"));
-  await runAction(action("toggleRead"), c.context, row());
+  assert.equal(await runAction(action("toggleRead"), c.context, row()), false);
   assert.deepEqual(c.calls, ["notice item is promoted"]);
+});
+
+test("runAction and snoozeRow resolve true only when the action succeeded", async () => {
+  const c = ctx();
+  assert.equal(await runAction(action("done"), c.context, row()), true);
+  assert.equal(
+    await snoozeRow(c.context, row(), "1h", new Date(2026, 8, 22, 14, 30)),
+    true,
+  );
+  assert.equal(
+    await snoozeRow(
+      c.context,
+      row({ kind: "card", id: "LIN-1" }),
+      "1h",
+      new Date(),
+    ),
+    false,
+  );
+  c.context.api.snoozeItem = () => Promise.reject(new Error("item is gone"));
+  assert.equal(await snoozeRow(c.context, row(), "1h", new Date()), false);
 });
 
 test("snoozeRow snoozes an item to the preset time, offers undo, and skips a card", async () => {
@@ -367,4 +417,78 @@ test("Sync now posts nothing with no enabled source and names a refused source",
     "poll bad",
     "notice Sync refused: bad",
   ]);
+});
+
+function slackRow(id: string, meta: Record<string, string>): InboxRowModel {
+  return row({
+    id,
+    source: "slack",
+    item: {
+      id,
+      source: "slack",
+      type: "mention",
+      title: "ben in #eng-platform: ship it?",
+      snippet: "@g6-tester ship it?",
+      url: "https://acme.slack.com/archives/C1/p1700000000000100",
+      createdAt: "2026-09-28T10:00:00.000Z",
+      priority: 75,
+      state: "unread",
+      meta: {
+        channel: "C1",
+        channelName: "eng-platform",
+        author: "ben",
+        conversation: "channel",
+        ...meta,
+      },
+    },
+  });
+}
+
+test("Draft reply applies only to Slack item rows", () => {
+  const draft = action("draftReply");
+  assert.equal(draft.label, "Draft reply");
+  assert.equal(draft.key, undefined);
+  assert.equal(draft.appliesTo(slackRow("slack:C1:1", {})), true);
+  assert.equal(draft.appliesTo(row()), false);
+  assert.equal(
+    draft.appliesTo(row({ kind: "card", id: "LOCAL-1", source: "slack" })),
+    false,
+  );
+  assert.ok(
+    actionsFor(slackRow("slack:C1:1", {})).some((a) => a.id === "draftReply"),
+  );
+});
+
+test("Draft reply loads the thread, then starts the agent with the prompt holding it", async () => {
+  const { context, calls, prompts } = ctx();
+  await runAction(
+    action("draftReply"),
+    context,
+    slackRow("slack:C1:1", { threadTs: "1700000000.000100" }),
+  );
+  assert.deepEqual(calls, ["thread slack:C1:1", "start slack:C1:1"]);
+  assert.match(prompts[0], /Thread \(oldest first\):/);
+  assert.match(prompts[0], /ana \(2026-09-28T10:01:00.000Z\): not yet/);
+});
+
+test("Draft reply still drafts when the thread load fails, and skips the load without a thread", async () => {
+  const failed = ctx();
+  await runAction(
+    action("draftReply"),
+    failed.context,
+    slackRow("slack:C1:fail", { threadTs: "1700000000.000100" }),
+  );
+  assert.deepEqual(failed.calls, [
+    "thread slack:C1:fail",
+    "start slack:C1:fail",
+  ]);
+  assert.match(failed.prompts[0], /The thread could not be loaded\./);
+  const plain = ctx();
+  await runAction(
+    action("draftReply"),
+    plain.context,
+    slackRow("slack:C1:2", {}),
+  );
+  assert.deepEqual(plain.calls, ["start slack:C1:2"]);
+  assert.doesNotMatch(plain.prompts[0], /Thread|could not be loaded/);
 });

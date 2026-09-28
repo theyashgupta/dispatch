@@ -41,7 +41,7 @@ const {
 } = await import("../adapters/source-gateway.js");
 const { readMacEvents } = await import("../adapters/calendar-mac.js");
 const { stopPollers } = await import("../adapters/poller.js");
-const { resolveIcalUrl } =
+const { resolveIcalCredential } =
   await import("../services/orchestration/calendar.js");
 const { createKey, setValue } = await import("../services/domain/vault.js");
 const { calendarRouter } = await import("./calendar.route.js");
@@ -52,7 +52,7 @@ const config: import("../../shared/types.js").Config = {
 };
 setOrchestrationConfig(config);
 setMacCalendarReader(readMacEvents);
-setCredentialResolver("calendar", resolveIcalUrl);
+setCredentialResolver("calendar", resolveIcalCredential);
 rebuildSources(config);
 await store.load();
 
