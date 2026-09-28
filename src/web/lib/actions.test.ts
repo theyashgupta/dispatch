@@ -17,6 +17,7 @@ import {
   type CardActionContext,
   type InboxRowModel,
 } from "./actions.js";
+import { askAboutQuestion } from "./ask.js";
 
 function row(extra: Partial<InboxRowModel> = {}): InboxRowModel {
   return {
@@ -492,4 +493,47 @@ test("Draft reply still drafts when the thread load fails, and skips the load wi
   );
   assert.deepEqual(plain.calls, ["start slack:C1:2"]);
   assert.doesNotMatch(plain.prompts[0], /Thread|could not be loaded/);
+});
+
+test("ask applies to item rows and card rows with key a", () => {
+  const ask = action("ask");
+  assert.equal(ask.key, "a");
+  assert.equal(ask.label, "Ask about this");
+  assert.ok(actionsFor(row({ typeLabel: "Issue assigned" })).includes(ask));
+  assert.ok(actionsFor(row({ kind: "card", id: "LOCAL-926" })).includes(ask));
+});
+
+test("running ask on an item row calls askAbout with the item question", async () => {
+  const c = ctx();
+  await runAction(
+    action("ask"),
+    c.context,
+    row({
+      source: "linear",
+      typeLabel: "Issue assigned",
+      title: "Review the importer",
+    }),
+  );
+  assert.deepEqual(c.calls, [
+    `ask ${askAboutQuestion({ kind: "item", source: "linear", typeLabel: "Issue assigned", title: "Review the importer" })}`,
+  ]);
+});
+
+test("running ask on a card row calls askAbout with the card question", async () => {
+  const c = ctx();
+  await runAction(
+    action("ask"),
+    c.context,
+    row({
+      kind: "card",
+      id: "LOCAL-926",
+      title: "Triage the flaky build report",
+      card: { id: "LOCAL-926", identifier: "LOCAL-926" } as NonNullable<
+        InboxRowModel["card"]
+      >,
+    }),
+  );
+  assert.deepEqual(c.calls, [
+    `ask ${askAboutQuestion({ kind: "card", identifier: "LOCAL-926", title: "Triage the flaky build report" })}`,
+  ]);
 });

@@ -25,6 +25,18 @@ test("run with an empty input closes stdin so a reader finishes", async () => {
   assert.equal(stdout, "");
 });
 
+test("a timeout escalates to SIGKILL for a child that ignores SIGTERM", async () => {
+  const started = Date.now();
+  await assert.rejects(
+    run("sh", ["-c", "trap '' TERM; exec sleep 30"], {
+      timeout: 500,
+      killEscalationMs: 500,
+    }),
+    (err: unknown) => (err as { killed?: boolean }).killed === true,
+  );
+  assert.ok(Date.now() - started < 10_000, "the child outlived the escalation");
+});
+
 test("an aborted run with escalation settles only after a SIGTERM-ignoring child is killed", async () => {
   const controller = new AbortController();
   const started = Date.now();

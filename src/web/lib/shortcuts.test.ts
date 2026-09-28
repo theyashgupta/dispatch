@@ -230,3 +230,10 @@ test("Cmd+Shift+K does not open the palette", () => {
     null,
   );
 });
+
+test("a is bound in the Inbox table with its label", () => {
+  assert.deepEqual(
+    INBOX_SHORTCUTS.find((s) => s.key === "a"),
+    { key: "a", label: "Ask about this" },
+  );
+});
