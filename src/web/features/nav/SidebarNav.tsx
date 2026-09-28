@@ -32,11 +32,13 @@ interface SidebarNavProps {
   inboxCount: number;
   liveSessionCount: number;
   prCount: number;
+  ticketsCount: number;
   syncedAt: string | null;
   connection: ConnectionStatus;
   pollIntervalMs: number | null;
   syncWarning: string | null;
   syncUnreachable?: boolean;
+  noSource?: boolean;
   accountSlot?: ReactNode;
   onOpenCreateTicket: () => void;
   onOpenActivity: () => void;
@@ -168,11 +170,13 @@ export function SidebarNav({
   inboxCount,
   liveSessionCount,
   prCount,
+  ticketsCount,
   syncedAt,
   connection,
   pollIntervalMs,
   syncWarning,
   syncUnreachable,
+  noSource,
   accountSlot,
   onOpenCreateTicket,
   onOpenActivity,
@@ -259,6 +263,8 @@ export function SidebarNav({
                     <Chip tone="accent">{liveSessionCount}</Chip>
                   ) : item.page === "pull-requests" && prCount > 0 ? (
                     <Chip tone="accent">{prCount}</Chip>
+                  ) : item.page === "tickets" && ticketsCount > 0 ? (
+                    <Chip>{ticketsCount}</Chip>
                   ) : undefined
                 }
                 onSelect={() => onNavigate(item.page)}
@@ -276,6 +282,7 @@ export function SidebarNav({
           pollIntervalMs={pollIntervalMs}
           syncWarning={syncWarning}
           syncUnreachable={syncUnreachable}
+          noSource={noSource}
           collapsed={collapsed}
         />
         {accountSlot != null && (

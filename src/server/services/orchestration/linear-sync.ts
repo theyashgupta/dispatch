@@ -2,6 +2,17 @@ import { run } from "../../adapters/exec.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { getOrchestrationConfig } from "../infra/config-holder.js";
 import { DISPATCH_DIR } from "../infra/paths.js";
+import {
+  enabledSource,
+  LINEAR_GRAPHQL_URL,
+  type TicketSource,
+} from "../../adapters/source-gateway.js";
+import {
+  carriesSyncToken,
+  syncToken,
+  withoutSyncTokens,
+} from "../../../shared/sync-token.js";
+import type { Card } from "../../../shared/types.js";
 
 /**
  * A run of line breaks plus the whitespace hugging it, as one flattenable unit. Kept wider than a
@@ -14,8 +25,6 @@ const LINE_BREAK_RUN_RE = /[\s\u0085]*[\n\r\u0085\u2028\u2029]+[\s\u0085]*/g;
 
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9]+-\d+$/;
 
-const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
-
 const SYNC_MCP_TOOLS = [
   "mcp__linear__list_issues",
   "mcp__linear__save_issue",
@@ -23,11 +32,6 @@ const SYNC_MCP_TOOLS = [
   "mcp__linear__list_users",
   "mcp__linear__list_issue_statuses",
 ];
-
-/** Idempotency token for a card's Sync-to-Linear run — the ONLY thing a retry's search can match on, and the value {@link resolveIssueId}'s post-create verification requires in the adopted issue's description. */
-function syncToken(cardId: string): string {
-  return `dispatch-sync:${cardId}`;
-}
 
 /**
  * Build the Sync-to-Linear prompt. Idempotency comes FIRST (search before any create) so a retry
@@ -52,7 +56,7 @@ function buildPrompt(card: {
   return `You are syncing a local Dispatch kanban ticket out to Linear via the Linear MCP tools. Follow these steps exactly, in order.
 
 Step 1: idempotency check (do this FIRST, before anything else):
-Call mcp__linear__list_issues searching for the exact literal token "${token}". If any returned issue's description contains this token, STOP. Do not create anything, and skip straight to Step 4 using that issue's own identifier/url/id and its CURRENT title/description.
+Call mcp__linear__list_issues searching for the exact literal token "${token}". If any returned issue was created by the authenticated user (the one whose credentials are running this session) and its description has a line containing exactly this token, STOP. Do not create anything, and skip straight to Step 4 using that issue's own identifier/url/id and its CURRENT title/description.
 
 Step 2: gather ids (only if Step 1 found nothing):
 Call mcp__linear__list_teams to find the workspace's team. Call mcp__linear__list_issue_statuses to find the unstarted "To Do"-type state for that team. Call mcp__linear__list_users to find the authenticated user (the one whose credentials are running this session).
@@ -67,7 +71,7 @@ ${title}
 ----- END DISPATCH TICKET TITLE -----
 
 ----- BEGIN DISPATCH TICKET CONTENT -----
-${card.description ?? "(no description provided)"}
+${withoutSyncTokens(card.description ?? "") || "(no description provided)"}
 ----- END DISPATCH TICKET CONTENT -----
 
 The description you write MUST end with its own final line containing exactly this literal text and nothing else on that line:
@@ -206,11 +210,11 @@ export function parseSyncResult(stdout: string): {
  * A 200 carrying a GraphQL `errors` array throws with the error CODES only — never the key or raw
  * messages — instead of collapsing into the generic no-id message. Also the post-create
  * injection backstop (SECURITY, WR-04): the same lookup fetches the issue's CURRENT description
- * and throws unless it carries the exact idempotency `token`, so a prompt-injected model that
- * touched some OTHER issue (`save_issue` is upsert-shaped) or dropped the token line can never get
- * that issue's identity adopted onto the card.
+ * and throws unless it carries the exact idempotency `token` and this Linear user created it, so
+ * neither a prompt-injected model that touched some OTHER issue (`save_issue` is upsert-shaped) nor
+ * a teammate's issue carrying the same `LOCAL-N` token can get its identity adopted onto the card.
  */
-async function resolveIssueId(
+export async function resolveIssueId(
   identifier: string,
   token: string,
 ): Promise<string> {
@@ -222,7 +226,8 @@ async function resolveIssueId(
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: apiKey },
     body: JSON.stringify({
-      query: "query($id: String!) { issue(id: $id) { id description } }",
+      query:
+        "query($id: String!) { issue(id: $id) { id description creator { isMe } } }",
       variables: { id: identifier },
     }),
     signal: AbortSignal.timeout(15_000),
@@ -231,7 +236,13 @@ async function resolveIssueId(
     throw new Error(`issue id lookup failed: HTTP ${res.status}`);
   }
   const data = (await res.json()) as {
-    data?: { issue?: { id?: string; description?: string | null } | null };
+    data?: {
+      issue?: {
+        id?: string;
+        description?: string | null;
+        creator?: { isMe?: boolean } | null;
+      } | null;
+    };
     errors?: { extensions?: { code?: string } }[];
   };
   if (Array.isArray(data.errors) && data.errors.length > 0) {
@@ -245,12 +256,14 @@ async function resolveIssueId(
   if (typeof id !== "string" || id.trim() === "") {
     throw new Error(`issue id lookup returned no id for ${identifier}`);
   }
-  if (
-    typeof issue?.description !== "string" ||
-    !issue.description.includes(token)
-  ) {
+  if (!carriesSyncToken(issue?.description, token)) {
     throw new Error(
       `issue ${identifier} does not carry the sync idempotency token, refusing adoption`,
+    );
+  }
+  if (issue?.creator?.isMe !== true) {
+    throw new Error(
+      `issue ${identifier} was not created by this Linear user, refusing adoption`,
     );
   }
   return id;
@@ -259,8 +272,8 @@ async function resolveIssueId(
 /**
  * Sync a `source:"local"` card out to Linear via a headless `claude -p` subprocess restricted to
  * the five Linear MCP tools, reusing the USER-SCOPE MCP config already registered for the CLI —
- * the stored, read-only Linear API key never creates or updates anything (PUSH-01); it is only
- * used afterward, by {@link resolveIssueId}, for a read lookup of the created issue's internal id.
+ * the stored Linear API key never creates the issue (PUSH-01); this path uses it only afterward,
+ * by {@link resolveIssueId}, for a read lookup of the created issue's internal id.
  * Deliberately deviates from
  * `ticket-generate.ts`'s invocation in two ways, both load-bearing: NO `--tools ""` and NO
  * `--strict-mcp-config` — both would sever the user-scope Linear MCP this feature exists to use.
@@ -319,4 +332,62 @@ export async function syncCardToLinear(card: {
   const parsed = parseSyncResult(stdout);
   const issueId = await resolveIssueId(parsed.identifier, syncToken(card.id));
   return { ...parsed, issueId };
+}
+
+type SyncCardInput = Pick<Card, "id" | "title" | "description" | "priority">;
+
+/** Whether Sync to Linear takes the old Claude MCP path (config flag exactly true). */
+export function syncViaClaude(): boolean {
+  return getOrchestrationConfig()?.linearSyncViaClaude === true;
+}
+
+export interface SyncTarget {
+  teamId: string;
+  stateId?: string;
+}
+
+interface SyncedIssue {
+  identifier: string;
+  url: string;
+  issueId: string;
+  title: string;
+  description: string;
+}
+
+/** Sync a local card by a direct issueCreate after the token search, with the stored key. */
+export async function syncCardDirect(
+  card: SyncCardInput,
+  target: SyncTarget,
+  source: TicketSource | undefined = enabledSource("linear"),
+): Promise<SyncedIssue> {
+  if (!source?.createIssue) throw new Error("Linear is not connected");
+  const { issue } = await source.createIssue({
+    ...target,
+    title: card.title,
+    description: card.description,
+    token: syncToken(card.id),
+    priority: card.priority,
+  });
+  return {
+    identifier: issue.identifier,
+    url: issue.url,
+    issueId: issue.id,
+    title: issue.title,
+    description: issue.description,
+  };
+}
+
+/** Sync a local card through the direct path, or the Claude MCP path when the flag is on. */
+export function syncCard(
+  card: SyncCardInput,
+  target: SyncTarget | undefined,
+  deps = {
+    viaClaude: syncViaClaude,
+    direct: syncCardDirect,
+    claude: syncCardToLinear,
+  },
+): Promise<SyncedIssue> {
+  if (deps.viaClaude()) return deps.claude(card);
+  if (!target) return Promise.reject(new Error("teamId is required"));
+  return deps.direct(card, target);
 }

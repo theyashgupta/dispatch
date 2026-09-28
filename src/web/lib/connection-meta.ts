@@ -39,3 +39,16 @@ export const GITHUB_CONNECTION: ConnectionMeta = {
   footer:
     "Your token is checked against GitHub and stored only in the Dispatch Vault on this machine. With gh login, Dispatch asks gh for the token on each sync and never stores it.",
 };
+
+export const SOON_CONNECTIONS: { source: string; name: string }[] = [
+  { source: "slack", name: "Slack" },
+  { source: "sentry", name: "Sentry" },
+  { source: "meeting", name: "Meetings" },
+  { source: "calendar", name: "Calendar" },
+];
+
+export const ALL_CONNECTIONS: { source: string; name: string }[] = [
+  { source: LINEAR_CONNECTION.source, name: LINEAR_CONNECTION.name },
+  { source: GITHUB_CONNECTION.source, name: GITHUB_CONNECTION.name },
+  ...SOON_CONNECTIONS,
+];

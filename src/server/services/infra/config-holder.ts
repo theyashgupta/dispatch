@@ -4,9 +4,12 @@ import {
   DEFAULT_CLAUDE_ACCOUNT_ID,
   type Config,
   type ItemSourceId,
+  type LinearStateMap,
+  type SourceConfig,
   type SourceFilters,
   type StatusChannel,
   type TerminalAppearance,
+  type UserProfile,
 } from "../../../shared/types.js";
 import { CONFIG_PATH } from "./paths.js";
 
@@ -49,17 +52,58 @@ export function getHooksRuntime(): HooksRuntime | null {
 }
 
 /**
- * Persist a source's filter selection to `~/.dispatch/config.json` and make it live immediately.
+ * Rewrite one `sources.linear` field in config.json and mirror it onto the held config.
  *
- * @remarks The single writer for the secret-adjacent config file. It re-reads the raw file, mutates
- * ONLY `sources.linear.filters`, and carries every other top-level key plus `sources.linear.apiKey`
- * forward verbatim, so the write never drops the Linear key or a user-added field. The write is
- * atomic at mode 0600 because the file holds the API key at rest; the key is never read, logged, or
- * returned — it is copied as an opaque value. The held in-memory Config is mutated IN PLACE so the
- * registry's live-filters accessor closure sees the new scope on the very next poll with no restart.
- * A JSON parse failure reports the byte position only, never the parser message, which embeds a
- * snippet of the file around the failure — and a mis-quoted key sits exactly there.
+ * @remarks The write is atomic at mode 0600 because the file holds the Linear key at rest. A parse
+ * failure reports the byte position only: the parser message quotes the file, key included.
  */
+function writeLinearField<K extends keyof SourceConfig>(
+  field: K,
+  value: SourceConfig[K],
+): void {
+  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
+  let parsed: Record<string, unknown>;
+  try {
+    const p = JSON.parse(raw) as unknown;
+    if (typeof p !== "object" || p === null || Array.isArray(p)) {
+      throw new Error("not an object");
+    }
+    parsed = p as Record<string, unknown>;
+  } catch (err) {
+    const pos = /position (\d+)/.exec((err as Error).message)?.[1];
+    throw new Error(
+      `config at ${CONFIG_PATH} is not valid JSON${pos ? ` (near position ${pos})` : ""}`,
+    );
+  }
+
+  const priorSources =
+    typeof parsed.sources === "object" &&
+    parsed.sources !== null &&
+    !Array.isArray(parsed.sources)
+      ? (parsed.sources as Record<string, unknown>)
+      : {};
+  const priorLinear =
+    typeof priorSources.linear === "object" &&
+    priorSources.linear !== null &&
+    !Array.isArray(priorSources.linear)
+      ? (priorSources.linear as Record<string, unknown>)
+      : {};
+
+  const next = {
+    ...parsed,
+    sources: { ...priorSources, linear: { ...priorLinear, [field]: value } },
+  };
+
+  writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
+    mode: 0o600,
+  });
+  fs.chmodSync(CONFIG_PATH, 0o600);
+
+  const held = orchestrationConfig?.sources?.linear;
+  if (held) held[field] = value;
+}
+
+/** Persist a source's filter selection so the next poll uses it. */
 export function updateSourceFilters(
   sourceId: string,
   filters: SourceFilters,
@@ -67,113 +111,23 @@ export function updateSourceFilters(
   if (sourceId !== "linear") {
     throw new Error(`unknown source: ${sourceId}`);
   }
+  writeLinearField("filters", filters);
+}
 
-  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
-  let parsed: Record<string, unknown>;
-  try {
-    const p = JSON.parse(raw) as unknown;
-    if (typeof p !== "object" || p === null || Array.isArray(p)) {
-      throw new Error("not an object");
-    }
-    parsed = p as Record<string, unknown>;
-  } catch (err) {
-    const pos = /position (\d+)/.exec((err as Error).message)?.[1];
-    throw new Error(
-      `config at ${CONFIG_PATH} is not valid JSON${pos ? ` (near position ${pos})` : ""}`,
-    );
-  }
-
-  const priorSources =
-    typeof parsed.sources === "object" &&
-    parsed.sources !== null &&
-    !Array.isArray(parsed.sources)
-      ? (parsed.sources as Record<string, unknown>)
-      : {};
-  const priorLinear =
-    typeof priorSources.linear === "object" &&
-    priorSources.linear !== null &&
-    !Array.isArray(priorSources.linear)
-      ? (priorSources.linear as Record<string, unknown>)
-      : {};
-
-  const next = {
-    ...parsed,
-    sources: {
-      ...priorSources,
-      linear: { ...priorLinear, filters },
-    },
-  };
-
-  writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
-    mode: 0o600,
-  });
-  fs.chmodSync(CONFIG_PATH, 0o600);
-
-  if (orchestrationConfig?.sources?.linear) {
-    orchestrationConfig.sources.linear.filters = filters;
-  }
+/** Persist the Linear column-to-state map so the next push uses it. */
+export function updateLinearStateMap(stateMap: LinearStateMap): void {
+  writeLinearField("stateMap", stateMap);
 }
 
 /**
- * Persist the Linear API key to `~/.dispatch/config.json` and make it live immediately, mirroring
- * `updateSourceFilters` exactly.
+ * Persist the Linear API key so the next poll uses it.
  *
- * @remarks The first-run setup route calls this only after a live Linear check has passed, so a
- * rejected key never reaches disk. It re-reads the raw file, mutates ONLY `sources.linear.apiKey`,
- * and carries every other top-level key plus `sources.linear.filters` forward verbatim. The write is
- * atomic at mode 0600 because the file holds the key at rest; the key is copied as an opaque value —
- * never read back, logged, or returned. Both the resolved `linearApiKey` read and the nested
- * `sources.linear.apiKey` on the held Config are mutated IN PLACE so the registry's key-carrying
- * source and the keyless-boot signal both flip on the next poll with no restart.
+ * @remarks The setup route calls this only after a live Linear check passed, so a rejected key
+ * never reaches disk.
  */
 export function updateLinearApiKey(apiKey: string): void {
-  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
-  let parsed: Record<string, unknown>;
-  try {
-    const p = JSON.parse(raw) as unknown;
-    if (typeof p !== "object" || p === null || Array.isArray(p)) {
-      throw new Error("not an object");
-    }
-    parsed = p as Record<string, unknown>;
-  } catch (err) {
-    const pos = /position (\d+)/.exec((err as Error).message)?.[1];
-    throw new Error(
-      `config at ${CONFIG_PATH} is not valid JSON${pos ? ` (near position ${pos})` : ""}`,
-    );
-  }
-
-  const priorSources =
-    typeof parsed.sources === "object" &&
-    parsed.sources !== null &&
-    !Array.isArray(parsed.sources)
-      ? (parsed.sources as Record<string, unknown>)
-      : {};
-  const priorLinear =
-    typeof priorSources.linear === "object" &&
-    priorSources.linear !== null &&
-    !Array.isArray(priorSources.linear)
-      ? (priorSources.linear as Record<string, unknown>)
-      : {};
-
-  const next = {
-    ...parsed,
-    sources: {
-      ...priorSources,
-      linear: { ...priorLinear, apiKey },
-    },
-  };
-
-  writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
-    mode: 0o600,
-  });
-  fs.chmodSync(CONFIG_PATH, 0o600);
-
-  if (orchestrationConfig) {
-    orchestrationConfig.linearApiKey = apiKey;
-    if (orchestrationConfig.sources?.linear) {
-      orchestrationConfig.sources.linear.apiKey = apiKey;
-    }
-  }
+  writeLinearField("apiKey", apiKey);
+  if (orchestrationConfig) orchestrationConfig.linearApiKey = apiKey;
 }
 
 /**
@@ -326,6 +280,27 @@ export function updateClaudeArgs(args: string): void {
  */
 export function updateTerminalAppearance(appearance: TerminalAppearance): void {
   patchConfig({ terminal: appearance });
+}
+
+/**
+ * Record that the setup wizard was closed so it never opens on its own again.
+ *
+ * @remarks Idempotent: every close path in the wizard calls it, and a repeat writes the same flag.
+ */
+export function markOnboardingDone(): void {
+  patchConfig({ onboardingDone: true });
+}
+
+/**
+ * Persist the About you profile (Settings ▸ About you) and make it live.
+ *
+ * @remarks Called only from the validated `PUT /config/profile` route. An empty profile is stored
+ * as an absent key, because JSON serialization drops the undefined value.
+ */
+export function updateProfile(profile: UserProfile): void {
+  patchConfig({
+    profile: Object.keys(profile).length > 0 ? profile : undefined,
+  });
 }
 
 /**

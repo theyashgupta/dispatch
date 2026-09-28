@@ -10,12 +10,16 @@ import type {
   DiscoveredRepo,
   FilterCapabilities,
   FilterOption,
+  LinearComment,
+  LinearStateMap,
+  LinearWorkflow,
   Playbook,
   PlaybookPickerResponse,
   PrDetail,
   PrerequisiteStatus,
   PrReviewEvent,
   SettableItemState,
+  SetupStatus,
   SourceConnection,
   SourceFilters,
   SourceKeyError,
@@ -23,6 +27,7 @@ import type {
   UnwindDestination,
   UpdateRunResult,
   UpdateStatus,
+  UserProfile,
   VaultKeySummary,
 } from "../../shared/types.js";
 import type { CardSearchResult } from "../../shared/search.js";
@@ -188,37 +193,30 @@ export async function startGroup(input: {
 }
 
 /**
- * Promote a `source:"local"` card to a real Linear issue: POST /api/cards/:id/sync-linear. Mirrors
- * createLocalTicket's discrimination exactly: 200 → `{ ok: true, card }` (the swapped Card, already
- * reflecting the new identifier); 409 → `{ ok: false, error }` (the parsed body's renderable copy —
- * non-local card or a sync already in flight); 404/502/network → `{ ok: false, error: null }`
- * (generic, no server-side detail to surface). The response is held open for the duration of the
- * sync (up to ~150s) — the server owns that bound, there is no client-side timeout/abort. The
- * authoritative identity swap always arrives over SSE regardless of this response, since the panel
- * stays open on the same `Card.id` throughout.
+ * Promote a local card to a Linear issue: POST /api/cards/:id/sync-linear.
+ *
+ * @remarks 200 carries the adopted card; 400 and 409 carry renderable copy; any other failure
+ * answers `error: null`, and the card's `syncError` arrives over SSE.
  */
 export async function syncCardToLinear(
   id: string,
+  target: { teamId: string; stateId?: string },
 ): Promise<{ ok: true; card: Card } | { ok: false; error: string | null }> {
   try {
     const res = await fetch(
       `/api/cards/${encodeURIComponent(id)}/sync-linear`,
       {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(target),
       },
     );
-    if (res.status === 409) {
-      const body = (await res.json().catch((err) => {
-        console.error("syncCardToLinear: failed to parse 409 body", err);
-        return {};
-      })) as { error?: string };
+    if (res.ok) return { ok: true, card: (await res.json()) as Card };
+    if (res.status === 400 || res.status === 409) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
       return { ok: false, error: body.error ?? null };
     }
-    if (!res.ok) {
-      return { ok: false, error: null };
-    }
-    const card = (await res.json()) as Card;
-    return { ok: true, card };
+    return { ok: false, error: null };
   } catch {
     return { ok: false, error: null };
   }
@@ -1051,33 +1049,35 @@ export async function saveClaudeArgs(
 }
 
 /**
- * Read first-run status: GET /api/setup. Fired once on app mount to gate the setup screen vs the
- * board. Returns `needsKey` plus the live prerequisite checklist; the Linear key never crosses this
- * boundary. Throws on any non-2xx so the caller can fail-open to the board rather than trapping a
- * fresh install behind a fetch error.
+ * Read setup status: GET /api/setup. Read on app mount to decide whether the setup wizard opens, and
+ * again when Run setup guide reopens it, so the prerequisite rows are current. The Linear key never
+ * crosses this boundary. Throws on any non-2xx so the caller can render the app with no wizard.
  */
-export async function getSetup(): Promise<{
-  needsKey: boolean;
-  prerequisites: PrerequisiteStatus[];
-  node: { version: string; floor: string; ok: boolean };
-  storage: { ok: boolean; path: string };
-}> {
+export async function getSetup(): Promise<SetupStatus> {
   const res = await fetch("/api/setup");
   if (!res.ok) {
     throw new Error(`getSetup failed: ${res.status} ${res.statusText}`);
   }
-  return (await res.json()) as {
-    needsKey: boolean;
-    prerequisites: PrerequisiteStatus[];
-    node: { version: string; floor: string; ok: boolean };
-    storage: { ok: boolean; path: string };
-  };
+  return (await res.json()) as SetupStatus;
 }
 
 /**
- * Run the guided install for one prerequisite on first run: POST /api/setup/install { target }.
+ * Mark the setup wizard done: POST /api/setup/onboarding-done. Throws on any non-2xx so the caller
+ * can log it; the wizard closes either way.
+ */
+export async function markOnboardingDone(): Promise<void> {
+  const res = await fetch("/api/setup/onboarding-done", { method: "POST" });
+  if (!res.ok) {
+    throw new Error(
+      `markOnboardingDone failed: ${res.status} ${res.statusText}`,
+    );
+  }
+}
+
+/**
+ * Run the guided install for one prerequisite from the setup wizard: POST /api/setup/install { target }.
  * Drives the shared preflight `runInstall` over the loopback route (whitelist-validated to
- * tmux/ttyd/git server-side) and resolves the re-probed status so the setup screen can flip the row.
+ * tmux/ttyd/git server-side) and resolves the re-probed status so the wizard checklist can flip the row.
  * The Linear key never crosses this boundary and there is no streaming — a single request/response.
  * Resolves `{ ok, command, status }` on 2xx; throws on any non-2xx so the component renders the
  * failure state (mirrors moveCard's reject-on-non-2xx).
@@ -1102,37 +1102,6 @@ export async function runPrerequisiteInstall(target: string): Promise<{
     command: string;
     status: PrerequisiteStatus;
   };
-}
-
-/**
- * Submit the Linear key on first run: POST /api/setup. The server tests the key against Linear
- * before persisting, so the discriminated result maps each failure mode distinctly: 200 → { ok:true }
- * (board hydrates over the live SSE, no reload); 502 → { ok:false, reason:"unreachable" } (couldn't
- * reach Linear); 409 → { ok:false, reason:"already-configured" } (a key already exists — a benign
- * two-tab race, NOT a bad key, so the caller can transition straight to the board); any other non-2xx
- * (400) → { ok:false, reason:"rejected" }. The key is sent once and never echoed back.
- */
-export async function saveLinearKey(
-  apiKey: string,
-): Promise<
-  | { ok: true }
-  | { ok: false; reason: "rejected" | "unreachable" | "already-configured" }
-> {
-  const res = await fetch("/api/setup", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ apiKey }),
-  });
-  if (res.ok) {
-    return { ok: true };
-  }
-  if (res.status === 502) {
-    return { ok: false, reason: "unreachable" };
-  }
-  if (res.status === 409) {
-    return { ok: false, reason: "already-configured" };
-  }
-  return { ok: false, reason: "rejected" };
 }
 
 /**
@@ -1222,6 +1191,125 @@ export async function getCard(
     throw new Error(`getCard failed: ${res.status} ${res.statusText}`);
   }
   return (await res.json()) as { card: Card; members: Card[] };
+}
+
+/** The stored Linear comments of a card, oldest first: GET /api/cards/:id/comments. Throws on non-2xx. */
+export async function getCardComments(id: string): Promise<LinearComment[]> {
+  const res = await fetch(`/api/cards/${encodeURIComponent(id)}/comments`);
+  if (!res.ok) {
+    throw new Error(`getCardComments failed: ${res.status} ${res.statusText}`);
+  }
+  return ((await res.json()) as { comments: LinearComment[] }).comments;
+}
+
+/**
+ * Post a Linear comment: POST /api/cards/:id/comment.
+ *
+ * @remarks A 502 also sets the card's `linearError`, which arrives over SSE; `error` carries the
+ * server's fixed copy, or null when the request never got an answer.
+ */
+export async function postCardComment(
+  id: string,
+  body: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string | null }> {
+  try {
+    const res = await fetch(`/api/cards/${encodeURIComponent(id)}/comment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+    });
+    if (res.ok) return { ok: true };
+    const parsed = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, status: res.status, error: parsed.error ?? null };
+  } catch {
+    return { ok: false, status: 0, error: null };
+  }
+}
+
+/** The viewer and the Linear teams with their states: GET /api/sources/linear/workflow. */
+export async function getLinearWorkflow(): Promise<
+  { ok: true; workflow: LinearWorkflow } | { ok: false; error: string }
+> {
+  try {
+    const res = await fetch("/api/sources/linear/workflow");
+    if (res.ok) {
+      return { ok: true, workflow: (await res.json()) as LinearWorkflow };
+    }
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: body.error ?? "Could not load Linear teams." };
+  } catch {
+    return { ok: false, error: "Could not reach Dispatch. Try again." };
+  }
+}
+
+/** Read the saved column-to-state map: GET /api/config/linear-state-map. Throws on non-2xx. */
+export async function getLinearStateMap(): Promise<LinearStateMap> {
+  const res = await fetch("/api/config/linear-state-map");
+  if (!res.ok) {
+    throw new Error(
+      `getLinearStateMap failed: ${res.status} ${res.statusText}`,
+    );
+  }
+  return ((await res.json()) as { stateMap: LinearStateMap }).stateMap;
+}
+
+/** Save the whole column-to-state map: PUT /api/config/linear-state-map. */
+export async function saveLinearStateMap(
+  stateMap: LinearStateMap,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch("/api/config/linear-state-map", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stateMap }),
+    });
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return {
+      ok: false,
+      error: body.error ?? "Couldn't save the state map. Try again.",
+    };
+  } catch {
+    return { ok: false, error: "Could not reach Dispatch. Try again." };
+  }
+}
+
+/** Assign a Linear card to the viewer: POST /api/cards/:id/assign-me. */
+export async function assignCardToMe(
+  id: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string | null }> {
+  try {
+    const res = await fetch(`/api/cards/${encodeURIComponent(id)}/assign-me`, {
+      method: "POST",
+    });
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, status: res.status, error: body.error ?? null };
+  } catch {
+    return { ok: false, status: 0, error: null };
+  }
+}
+
+/** Move a Linear card to one of its team's states: POST /api/cards/:id/linear-state. */
+export async function setCardLinearState(
+  id: string,
+  stateId: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string | null }> {
+  try {
+    const res = await fetch(
+      `/api/cards/${encodeURIComponent(id)}/linear-state`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stateId }),
+      },
+    );
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, status: res.status, error: body.error ?? null };
+  } catch {
+    return { ok: false, status: 0, error: null };
+  }
 }
 
 /**
@@ -1722,4 +1810,37 @@ export async function mergePullRequest(
     body: JSON.stringify({ sha }),
   });
   return res?.ok ? { ok: true } : prFailure(res);
+}
+
+/** Read the About you profile: GET /api/config/profile. Throws on non-2xx. */
+export async function getProfile(): Promise<UserProfile> {
+  const res = await fetch("/api/config/profile");
+  if (!res.ok) {
+    throw new Error(`getProfile failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as UserProfile;
+}
+
+/**
+ * Save the About you profile: PUT /api/config/profile.
+ *
+ * @remarks A 400 carries the server's field-named message for the tab to show verbatim; any other
+ * non-2xx throws. The 200 body is the normalized profile as stored.
+ */
+export async function saveProfile(
+  profile: UserProfile,
+): Promise<{ ok: true; profile: UserProfile } | { ok: false; error: string }> {
+  const res = await fetch("/api/config/profile", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profile),
+  });
+  if (res.ok) {
+    return { ok: true, profile: (await res.json()) as UserProfile };
+  }
+  if (res.status === 400) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: body.error ?? "Invalid profile" };
+  }
+  throw new Error(`saveProfile failed: ${res.status} ${res.statusText}`);
 }

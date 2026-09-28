@@ -49,11 +49,11 @@ test("the Work group lists Board, Sessions, Workspace and Activity in order", ()
   );
 });
 
-test("the Sources group holds Pull Requests", () => {
+test("the Sources group holds Tickets, then Pull Requests", () => {
   assert.deepEqual(
     NAV_ITEMS.filter((item) => item.group === "Sources").map(
       (item) => item.page,
     ),
-    ["pull-requests"],
+    ["tickets", "pull-requests"],
   );
 });
