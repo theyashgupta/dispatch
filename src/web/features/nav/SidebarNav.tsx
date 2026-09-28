@@ -30,6 +30,7 @@ interface SidebarNavProps {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   inboxCount: number;
+  meetingCount: number;
   liveSessionCount: number;
   syncedAt: string | null;
   connection: ConnectionStatus;
@@ -165,6 +166,7 @@ export function SidebarNav({
   collapsed,
   onToggleCollapsed,
   inboxCount,
+  meetingCount,
   liveSessionCount,
   syncedAt,
   connection,
@@ -255,6 +257,8 @@ export function SidebarNav({
                     <Chip tone="accent">{inboxCount}</Chip>
                   ) : item.page === "sessions" && liveSessionCount > 0 ? (
                     <Chip tone="accent">{liveSessionCount}</Chip>
+                  ) : item.page === "meetings" && meetingCount > 0 ? (
+                    <Chip tone="accent">{meetingCount}</Chip>
                   ) : undefined
                 }
                 onSelect={() => onNavigate(item.page)}
