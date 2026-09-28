@@ -123,6 +123,11 @@ const BUDGETS = [
     budgetGzipBytes: 1955, // seed: 1777 (the ask page, lazy)
   },
   {
+    label: "assets/flow-*.js",
+    match: (f) => f.startsWith(`assets${sep}flow-`) && f.endsWith(".js"),
+    budgetGzipBytes: 3391, // seed: 3082 (the flow page with its toolbar and tokens, lazy; FlowStage rides main through the detail panel)
+  },
+  {
     label: "assets/index-*.css",
     match: (f) => f.startsWith(`assets${sep}index-`) && f.endsWith(".css"),
     budgetGzipBytes: 898, // seed: 816

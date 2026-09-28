@@ -719,14 +719,21 @@ export async function removeWorkspaceFolder(path: string): Promise<void> {
  * Ask the server to poll one source now: POST /api/sources/:id/poll.
  *
  * @remarks Throws on any non-2xx so Sync now can report a refused source; the poll result arrives
- * over SSE like any scheduled poll.
+ * over SSE like any scheduled poll. The error message is the server's own reason (source disabled,
+ * unknown source) or "server unreachable", so the Flow page can show it as is.
  */
 export async function pollSource(id: string): Promise<void> {
-  const res = await fetch(`/api/sources/${encodeURIComponent(id)}/poll`, {
-    method: "POST",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`/api/sources/${encodeURIComponent(id)}/poll`, {
+      method: "POST",
+    });
+  } catch {
+    throw new Error("server unreachable");
+  }
   if (!res.ok) {
-    throw new Error(`pollSource failed: ${res.status} ${res.statusText}`);
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `poll failed (${res.status})`);
   }
 }
 

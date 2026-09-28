@@ -104,6 +104,7 @@
   --motion-count-change: 120ms;
   --motion-splash-in: 400ms;
   --motion-splash-out: 300ms;
+  --motion-flow-pulse: 1s;
   --easing-enter: ease-out;
   --easing-exit: ease-in;
   --hover-transition: background-color 80ms var(--easing-enter);
@@ -256,6 +257,23 @@ body {
   }
   to {
     opacity: 0;
+  }
+}
+@keyframes flow-travel {
+  from {
+    offset-distance: 0%;
+  }
+  to {
+    offset-distance: 100%;
+  }
+}
+@keyframes flow-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
   }
 }
 @keyframes spin {

@@ -221,6 +221,9 @@ const WorkspacesPage = lazy(() =>
 const AskPage = lazy(() =>
   import("./features/ask/index.js").then((m) => ({ default: m.AskPage })),
 );
+const FlowPage = lazy(() =>
+  import("./features/flow/index.js").then((m) => ({ default: m.FlowPage })),
+);
 
 const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
   "settings",
@@ -229,6 +232,7 @@ const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
   "vault",
   "archive",
   "ask",
+  "flow",
 ]);
 
 const headerNoteStyle: CSSProperties = {
@@ -925,6 +929,7 @@ export function App() {
     calendar: { title: "Calendar" },
     workspaces: { title: "Workspaces", count: workspacesSummary?.count },
     ask: { title: "Ask", count: ask.turns.length },
+    flow: { title: "Flow" },
   };
   const pageTitle = pageMeta[route.page].title;
 
@@ -1214,6 +1219,8 @@ export function App() {
                 prefill={route.id}
                 onPrefillConsumed={consumeAskPrefill}
               />
+            ) : route.page === "flow" ? (
+              <FlowPage board={board} onOpenList={() => navigate("inbox")} />
             ) : (
               <Board
                 board={board}

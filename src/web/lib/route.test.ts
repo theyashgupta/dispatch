@@ -30,6 +30,7 @@ test("the route table holds exactly the shell and source pages", () => {
     "board",
     "calendar",
     "errors",
+    "flow",
     "inbox",
     "meetings",
     "playbooks",
@@ -44,6 +45,7 @@ test("the route table holds exactly the shell and source pages", () => {
     "workspaces",
   ]);
   assert.equal(parseRoute("#/workspaces").page, "workspaces");
+  assert.deepEqual(parseRoute("#/flow"), { page: "flow" });
   assert.deepEqual(parseRoute("#/accounts/whatever"), {
     page: "accounts",
     id: "whatever",

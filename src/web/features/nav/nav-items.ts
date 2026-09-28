@@ -17,6 +17,7 @@ import {
   Sun,
   Ticket,
   Users,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 import type { ItemSourceId } from "../../../shared/types.js";
@@ -89,6 +90,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: HardDrive,
     group: "System",
   },
+  { page: "flow", label: "Flow", icon: Workflow, group: "System" },
 ];
 
 /**
