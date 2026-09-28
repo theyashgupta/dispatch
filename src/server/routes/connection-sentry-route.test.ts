@@ -113,13 +113,13 @@ beforeEach(async () => {
     "fetch",
     (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input instanceof Request ? input.url : input);
-      if (url.startsWith("https://sentry.io")) {
+      if (new URL(url).hostname === "sentry.io") {
         sentryCalls += 1;
         const auth = new Headers(init?.headers).get("authorization");
         if (auth !== `Bearer ${TOKEN}`) return Promise.resolve(json(401, {}));
         return Promise.resolve(orgsAnswer());
       }
-      if (url.startsWith("https://api.github.com")) {
+      if (new URL(url).hostname === "api.github.com") {
         return Promise.resolve(json(401, {}));
       }
       return realFetch(input, init);

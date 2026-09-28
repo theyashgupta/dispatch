@@ -116,7 +116,7 @@ beforeEach(async () => {
     "fetch",
     (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input instanceof Request ? input.url : input);
-      if (url.startsWith("https://api.github.com")) {
+      if (new URL(url).hostname === "api.github.com") {
         githubCalls += 1;
         const headers = new Headers(init?.headers);
         const token = (headers.get("authorization") ?? "").replace(
@@ -271,7 +271,7 @@ test("PUT that a DELETE overtakes answers superseded and stores nothing", async 
     "fetch",
     async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input instanceof Request ? input.url : input);
-      if (url.startsWith("https://api.github.com")) {
+      if (new URL(url).hostname === "api.github.com") {
         await held;
         return json(200, { login: "g5-tester" });
       }

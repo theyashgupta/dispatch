@@ -260,10 +260,14 @@ test("org-scoped calls use an allowed region and never an outside host", async (
   const { items } = await source().fetch();
   const origins = seen.map((u) => `${u.origin}${u.pathname}`);
   assert.ok(
-    origins.includes("https://de.sentry.io/api/0/organizations/eu/issues/"),
+    origins.some(
+      (o) => o === "https://de.sentry.io/api/0/organizations/eu/issues/",
+    ),
   );
   assert.ok(
-    origins.includes("https://sentry.io/api/0/organizations/bad/issues/"),
+    origins.some(
+      (o) => o === "https://sentry.io/api/0/organizations/bad/issues/",
+    ),
   );
   assert.ok(seen.every((u) => u.hostname !== "evil.example"));
   assert.equal(

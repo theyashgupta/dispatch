@@ -113,7 +113,8 @@ beforeEach(async () => {
     async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input instanceof Request ? input.url : input));
       if (
-        url.hostname.endsWith("sentry.io") ||
+        url.hostname === "sentry.io" ||
+        url.hostname.endsWith(".sentry.io") ||
         url.hostname === "evil.example"
       ) {
         const record: SentryCall = {
