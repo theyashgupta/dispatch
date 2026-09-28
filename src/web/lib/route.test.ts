@@ -26,6 +26,7 @@ test("the route table holds exactly the shell and source pages", () => {
     "accounts",
     "activity",
     "archive",
+    "ask",
     "board",
     "calendar",
     "errors",
