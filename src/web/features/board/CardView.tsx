@@ -21,12 +21,13 @@ import { formatCleanupCountdown } from "../../lib/format-cleanup-countdown.js";
 import { useResumeFeedback } from "../../hooks/useResumeFeedback.js";
 import {
   GoneBadge,
-  LinearStateBadge,
+  LinearStateChip,
   PrBadge,
   PrOverflowChip,
   PR_CHIP_CAP,
   PreviewBadge,
   SourceBadge,
+  TeamCycleText,
   UnknownProbeBadge,
 } from "../badges/index.js";
 import { Button } from "../../primitives/Button.js";
@@ -43,6 +44,7 @@ import {
 import { GroupPrRow } from "./GroupPrRow.js";
 import { MemberRow } from "./MemberRow.js";
 import { cardPrs } from "./card-prs.js";
+import { WarningIcon } from "../../primitives/WarningIcon.js";
 
 export const PRIORITY_DOT: Record<number, { color: string; label: string }> = {
   1: { color: "var(--prio-urgent)", label: "Urgent priority" },
@@ -270,7 +272,9 @@ export function CardView({
                 }}
               />
             )}
-            <Field mono>{card.identifier}</Field>
+            <Field mono style={{ whiteSpace: "nowrap" }}>
+              {card.identifier}
+            </Field>
           </div>
           <div
             style={{
@@ -279,10 +283,11 @@ export function CardView({
               gap: "var(--space-xs)",
               flexWrap: "wrap",
               justifyContent: "flex-end",
+              minWidth: 0,
             }}
           >
             <SourceBadge source={card.source ?? "linear"} />
-            <LinearStateBadge card={card} />
+            <LinearStateChip card={card} />
             {!isGroup &&
               prs
                 .slice(0, PR_CHIP_CAP)
@@ -378,6 +383,7 @@ export function CardView({
           >
             {formatAge(card.updatedAt, nowMs())}
           </span>
+          <TeamCycleText card={card} />
           {isCarousel && onMoveTo && (
             <Button
               variant="secondary"
@@ -430,14 +436,7 @@ export function CardView({
                 <>
                   <Notice
                     tone="destructive"
-                    icon={
-                      <AlertTriangle
-                        size={12}
-                        strokeWidth={2}
-                        aria-hidden="true"
-                        style={{ flex: "0 0 auto" }}
-                      />
-                    }
+                    icon={<WarningIcon />}
                     label={heading}
                   />
                   {detail != null && (
@@ -535,14 +534,7 @@ export function CardView({
           >
             <Notice
               tone="destructive"
-              icon={
-                <AlertTriangle
-                  size={12}
-                  strokeWidth={2}
-                  aria-hidden="true"
-                  style={{ flex: "0 0 auto" }}
-                />
-              }
+              icon={<WarningIcon />}
               label="Session lost"
             />
 
@@ -604,14 +596,7 @@ export function CardView({
           <div style={{ marginTop: "var(--space-xs)" }}>
             <Notice
               tone="destructive"
-              icon={
-                <AlertTriangle
-                  size={12}
-                  strokeWidth={2}
-                  aria-hidden="true"
-                  style={{ flex: "0 0 auto" }}
-                />
-              }
+              icon={<WarningIcon />}
               label={card.syncError}
             />
           </div>
@@ -620,6 +605,16 @@ export function CardView({
         ) : card.startWarning != null && card.startWarning.trim() !== "" ? (
           <Notice tone="muted">{card.startWarning}</Notice>
         ) : null}
+
+        {card.linearError != null && (
+          <div style={{ marginTop: "var(--space-xs)" }}>
+            <Notice
+              tone="destructive"
+              icon={<WarningIcon />}
+              label={card.linearError}
+            />
+          </div>
+        )}
 
         {card.cleanupWarning != null && card.cleanupWarning.trim() !== "" && (
           <div style={{ marginTop: "var(--space-xs)" }}>
@@ -631,14 +626,7 @@ export function CardView({
           <div style={{ marginTop: "var(--space-xs)" }}>
             <Notice
               tone="destructive"
-              icon={
-                <AlertTriangle
-                  size={12}
-                  strokeWidth={2}
-                  aria-hidden="true"
-                  style={{ flex: "0 0 auto" }}
-                />
-              }
+              icon={<WarningIcon />}
               label="Uncommitted work: cleanup blocked"
             />
           </div>

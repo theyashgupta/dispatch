@@ -25,6 +25,7 @@ import { WorkspaceAdd } from "../workspaces/index.js";
 interface StartModalProps {
   card: CardModel;
   newSession?: boolean;
+  extraDirection?: string;
   onClose: () => void;
   onEditPlaybooks: () => void;
 }
@@ -1204,13 +1205,14 @@ function PlaybookPickerSection({
 export function StartModal({
   card,
   newSession,
+  extraDirection: initialExtraDirection,
   onClose,
   onEditPlaybooks,
 }: StartModalProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modalRef = useRef<ModalControl>(null);
   const [extraDirection, setExtraDirection] = useState(
-    card.extraDirection ?? "",
+    initialExtraDirection ?? card.extraDirection ?? "",
   );
   const [error, setError] = useState<{
     text: string;

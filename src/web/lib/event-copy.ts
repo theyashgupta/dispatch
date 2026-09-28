@@ -1,3 +1,4 @@
+import { LINEAR_PUSH_FAILED_PREFIX } from "../../shared/linear-state-map.js";
 import type { ActivityEvent, Column } from "../../shared/types.js";
 
 /**
@@ -89,6 +90,10 @@ export function describeEvent(event: ActivityEvent): string {
       return "reset to Inbox";
     case "item_promoted":
       return `promoted an item from ${event.source ?? "a source"}`;
+    case "linear_state_pushed":
+      return event.reason?.startsWith(LINEAR_PUSH_FAILED_PREFIX)
+        ? event.reason.slice(LINEAR_PUSH_FAILED_PREFIX.length)
+        : `Linear state set to ${event.reason ?? "a new state"}`;
     default:
       return describeUnknownEvent(event.type);
   }
