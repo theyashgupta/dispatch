@@ -1,0 +1,27 @@
+{
+  "data": {
+    "issues": {
+      "nodes": [
+        {
+          "id": "issue-4",
+          "identifier": "ENG-4",
+          "title": "Tracked issue now in progress",
+          "url": "https://linear.app/acme/issue/ENG-4",
+          "description": null,
+          "priority": 2,
+          "updatedAt": "2026-09-25T10:00:00.000Z",
+          "state": {
+            "id": "state-started",
+            "name": "In Progress",
+            "type": "started",
+            "color": "#f2c94c"
+          },
+          "team": { "id": "team-eng", "key": "ENG", "name": "Engineering" },
+          "cycle": { "number": 14 },
+          "project": null,
+          "assignee": null
+        }
+      ]
+    }
+  }
+}

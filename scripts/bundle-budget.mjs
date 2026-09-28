@@ -34,7 +34,7 @@ const BUDGETS = [
   {
     label: "index.html",
     match: (f) => f === "index.html",
-    budgetGzipBytes: 576, // seed: 524 (re-seeded 2026-09-25 with the sessions page preload)
+    budgetGzipBytes: 635, // seed: 577 (re-seeded 2026-09-28 with the Errors page route, LOCAL-46)
   },
   {
     label: "assets/main-*.js",
@@ -78,6 +78,16 @@ const BUDGETS = [
     budgetGzipBytes: 4861, // seed: 4419 (re-seeded with the Pull Requests detail pane, LOCAL-45)
   },
   {
+    label: "assets/errors-*.js",
+    match: (f) => f.startsWith(`assets${sep}errors-`) && f.endsWith(".js"),
+    budgetGzipBytes: 4266, // seed: 3878 (re-seeded 2026-09-28 with the Errors detail pane and its actions, lazy, LOCAL-46)
+  },
+  {
+    label: "assets/today-*.js",
+    match: (f) => f.startsWith(`assets${sep}today-`) && f.endsWith(".js"),
+    budgetGzipBytes: 4023, // seed: 3657 (the Today page with chips, list and agenda, lazy, LOCAL-48)
+  },
+  {
     label: "assets/palette-*.js",
     match: (f) => f.startsWith(`assets${sep}palette-`) && f.endsWith(".js"),
     budgetGzipBytes: 2595, // seed: 2359 (the command palette and the cheat sheet, lazy)
@@ -86,6 +96,11 @@ const BUDGETS = [
     label: "assets/archive-*.js",
     match: (f) => f.startsWith(`assets${sep}archive-`) && f.endsWith(".js"),
     budgetGzipBytes: 2132, // seed: 1939 (the archive page, lazy; the accounts page rides main because the accounts barrel is eager)
+  },
+  {
+    label: "assets/tickets-*.js",
+    match: (f) => f.startsWith(`assets${sep}tickets-`) && f.endsWith(".js"),
+    budgetGzipBytes: 3744, // seed: 3403 (the tickets page with its row model, lazy)
   },
   {
     label: "assets/index-*.css",

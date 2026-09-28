@@ -36,6 +36,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Exec Chokepoint](#exec-chokepoint)
   - [Linear Sync](#linear-sync)
   - [GitHub Source](#github-source)
+  - [Sentry Source](#sentry-source)
   - [SSE Transport](#sse-transport)
   - [Startup Preflight](#startup-preflight)
   - [Cleanup Lifecycle](#cleanup-lifecycle)
@@ -580,6 +581,10 @@ legal source column(s), target, and owning code path:
 | Unwind (LOCAL-17)                                            | group card in any column                                                         | members to `todo` / `inbox`; group card archived | `services/orchestration/unwind.ts#unwindGroup` -> `board.store.ts#unwindGroup`            |
 | Restore (LOCAL-17)                                           | archived group, members in the unwind destination                                | group's archived column (members mirror)         | `board.store.ts#restoreGroup`, all-or-nothing via `#restoreBlocker`                       |
 | Reset (LOCAL-20)                                             | any column, card holds a session, workspace or branch                            | `inbox`, every session detached                  | `services/orchestration/reset.ts#resetCard` -> `board.store.ts#resetCard`                 |
+
+Two rows also push a Linear state (LOCAL-23): the manual move and the start-saga success schedule
+the mapped workflow state after the column changes; no agent-driven row does (see the status push
+paragraph under [Linear Sync](#linear-sync)).
 
 Every conflict this spec was written to name is now closed and reflected in the table above:
 `flipBack`'s guard is `FLIP_BACK_SOURCES` rather than `needs_input` alone; the Inbox marker-guard
@@ -2004,7 +2009,12 @@ ever upserts, and `store.applyIssues` enforces that rule with the pull's partial
 loop fetches the assigned-unstarted issue set from Linear's GraphQL API. It never
 computes column-sensitive decisions from a snapshot (a queued-but-unapplied user move could
 otherwise be reverted), never sorts (To Do ordering is owned by `store.snapshot()` in `store/board.store.ts`), and
-never touches cards past To Do (that rule lives in `reconcile()`). The set is filtered by
+never changes a card's column (that rule lives in `reconcile()`). After a complete pull it also
+runs the tracked query: `LinearSource.fetchByIds` asks Linear by id, 250 ids per request, for the
+cards past To Do and Inbox that the pull did not return (`store.trackedIssueIds`: cards not in Done
+first, gone-flagged cards last in each group, 1000 ids at most), so a card whose issue moved to a
+state outside the filter keeps its display fields current; a failed tracked query requests nothing,
+so no card past To Do is flagged gone that cycle. The set is filtered by
 workflow-state TYPE `"unstarted"`, NOT by name — state names are workspace-customizable. The loop
 self-reschedules with a `setTimeout` (never `setInterval`, which could overlap) that is `unref()`'d
 so it never pins the process, runs one poll immediately on startup, and is fire-and-forget.
@@ -2027,10 +2037,12 @@ issue with NO existing card upserts a fresh Inbox card — new tickets land in I
 in To Do, so To Do stays 100% user-curated; a returned issue whose card is in `todo` OR `inbox`
 upserts an in-place refresh of title/url/description/priority/updatedAt/project and CLEARS
 `goneFromLinear` (ONE widened rule, not a separate branch — promoting a card to To Do simply moves
-it into the other half of the same refresh scope); a returned issue whose card is PAST that point is
-NOT upserted — the poller never touches cards past To Do/Inbox. Exception: a card past that point
-currently flagged `goneFromLinear` whose issue REAPPEARS emits a flag-only correction via
-`reappearedIds` (nothing else on the card is touched), because `goneFromLinear` is poller-owned
+it into the other half of the same refresh scope); a returned issue (from the pull or the tracked
+query) whose card is PAST that point gets a display-only upsert: `linearState`, `team`, `cycle` and
+`assignee` are refreshed and `goneFromLinear` cleared, emitted only when one of them changed, while
+the column, title, description, priority, project, identifier, url and `updatedAt` are never touched.
+A card past that point flagged `goneFromLinear` whose issue REAPPEARS with unchanged display fields
+emits a flag-only correction via `reappearedIds`, because `goneFromLinear` is poller-owned
 derived state, not user board state. `reconcile` does NOT sort; it carries
 `priority`/`updatedAt`/`project` faithfully so the store orders the To Do column on read.
 
@@ -2038,7 +2050,8 @@ derived state, not user board state. `reconcile` does NOT sort; it carries
 handled by column: in `todo` OR `inbox` → `removeIds` (an issue that vanished is removed
 IMMEDIATELY while in To Do or Inbox — Inbox does NOT inherit vanish-handling the way cards past To
 Do do; it is treated exactly like a vanished To Do ticket, never `goneFromLinear`-flagged and kept
-forever); past that point → `goneIds` (the card is KEPT and flagged `goneFromLinear`). CR-01
+forever); past that point → `goneIds` (the card is KEPT and flagged `goneFromLinear`), and only
+when the tracked query requested the issue by id and did not get it back. CR-01
 carve-out: a To Do card with a start saga IN FLIGHT (or already carrying provisioning/session state
 from one) is treated like a card past To Do — never removed, only flagged — because removing it
 mid-saga would orphan a live `claude` session and its worktrees with no card to reach them; an
@@ -2046,6 +2059,10 @@ Inbox card is structurally never mid-saga (no session can start from Inbox), so 
 harmless no-op there. The muted "Gone from Linear" badge (`web/features/badges/GoneBadge.tsx`, shown
 only on cards past To Do/Inbox) is INFORMATIONAL, not destructive: the issue disappearing from
 Linear on a card past that point is EXPECTED, so it uses muted text/border, never red.
+A card adopted from a local card on Sync to Linear (`mapping.ts#isAdopted`: its id differs from its
+issue id) is the exception in To Do: its issue can sit outside the board filter, so absence never
+removes it. Like a card past To Do it joins the tracked query, is refreshed by id and is flagged
+gone only when that query requested it and did not get it back.
 
 **Sync-status precedence (`SYNC-04`).** The sidebar footer status (`web/features/nav/SyncStatus.tsx`) reports sync
 freshness + connection health as TEXT only (no spinner — the board must feel instant), and its
@@ -2060,14 +2077,34 @@ degrades to the plain `Synced` label rather than computing a relative age or a s
 JSDoc (the comment standard's tsx carve-out — [comments.md](standards/comments.md) rule 2 — forbids
 JSDoc in `src/web/**/*.tsx`, enforced by the `allowJsdoc: false` lint scoping in `eslint.config.ts`).
 
+**Linear comments.** The poll selects the last five comments on every issue node, main and tracked
+queries alike, so a card in any column receives new comments on the next poll. The mapping sorts
+them oldest first, caps each body at 600 characters and names a user-less comment "Linear". Comments
+live on the server card only: `redactCard` swaps them for `commentCount` and `lastCommentId` (so a
+new comment on a card already at five still changes the wire), because every mutation broadcasts the
+whole snapshot and five bodies per card would bloat each frame. The panel reads them through `GET
+/cards/:id/comments`, which serves the store and never calls Linear. `POST /cards/:id/comment`
+validates the body (`comment-body.ts`: empty, over 20000 characters, or carrying the agent status
+marker answer 400), then `linear-outbound.ts#postComment` calls the source's `addComment` through
+`source-gateway.ts`. A success clears `Card.linearError` and polls Linear at once; a failure stores
+fixed copy from `outbound-error.ts` in `Card.linearError` and answers 502, so raw provider text
+never reaches the card or the response.
+
 **Sync out — promoting a local card to Linear (`PUSH-01/02/03`).** The inbound half above mirrors
 Linear INTO the board; this half pushes a `source:"local"` card OUT to a real Linear issue on
 explicit user action (`POST /cards/:id/sync-linear`, `services/orchestration/linear-sync.ts`).
-MCP-only writes: the stored Linear API key is READ-ONLY toward Linear everywhere in this app — the
-sync path never uses it to create or update anything, instead spawning a headless `claude -p` that
+Key writes through source mutations only: the stored Linear API key writes to Linear solely
+through `LinearSource` mutation methods called from a service in `services/orchestration/`, never
+from a route (`commentCreate` and `issueUpdate` from `linear-outbound.ts`, `issueCreate` from
+`linear-sync.ts#syncCardDirect`). By default Sync to Linear takes the direct path: the route needs a
+`teamId` (400 otherwise), `FindSync` searches for the card's `dispatch-sync:<cardId>` token and a
+hit is adopted with no create, and a miss sends `issueCreate` with the token as the last
+description line (`create-input.ts#buildCreateInput`). With `linearSyncViaClaude: true` in config
+the old path runs for one release instead: it does not use the key to create anything; it spawns a
+headless `claude -p` that
 reuses the CLI's own user-scope Linear MCP OAuth session, restricted via `--allowedTools` to five
 read/write tools (`list_issues`, `save_issue`, `list_teams`, `list_users`, `list_issue_statuses`).
-The sole sanctioned exceptions to "API key never writes" are (1) GraphQL `issueDelete` for
+Two further sanctioned key uses sit beside those mutations: (1) GraphQL `issueDelete` for
 TEST-cleanup only (user decision 2026-07-20), and (2) a single READ-ONLY `issue(id:...) { id }`
 lookup the sync service makes with the stored key AFTER the MCP create/find succeeds — 62-03 live
 smoke found that no Linear MCP tool in this allowlist (nor `get_issue`, checked live) ever exposes
@@ -2102,8 +2139,8 @@ Sync-to-Linear requires a one-time interactive Linear MCP OAuth authorization on
 `claude`, type `/mcp`, choose `linear`, and authenticate in the browser. The workspace selected during
 that OAuth flow is the write target for every subsequent headless sync (done for Yash-Test 2026-07-20).
 
-**Connection routes (LOCAL-32).** `routes/connection.route.ts` owns the Linear connection after
-first-run setup. `GET /api/sources/:source/connection` answers `{ configured, connected, account?,
+**Connection routes (LOCAL-32).** `routes/connection.route.ts` owns the Linear connection for
+Settings and the setup wizard. `GET /api/sources/:source/connection` answers `{ configured, connected, account?,
 error? }`: no stored key means no network call; a stored key runs the live viewer check
 (`linear.source.ts#fetchLinearAccount`, `viewer { id name email }`), and a rejection or an outage comes
 back as `error: "rejected"` or `"unreachable"` with `configured: true`. `PUT
@@ -2120,8 +2157,10 @@ outside printable ASCII answers 400 before any network call, a config write fail
 409 `superseded` and writes nothing. The key never appears in a response, a log line or an error
 body.
 
-**Token sources (LOCAL-45).** The same three routes also serve `github`, dispatched through
-`services/domain/token-connection.ts`. A GitHub token lives in the Dispatch Vault under
+**Token sources (LOCAL-45, LOCAL-46).** The same three routes also serve `github` and `sentry`,
+dispatched through `services/domain/token-connection.ts` (`TOKEN_SOURCES`). A Sentry token lives only
+in the Vault under `SENTRY_TOKEN` (`services/domain/sentry-token.ts`, no CLI fallback); its check lists
+the organizations the token sees and the account names up to three of them plus a count of the rest. A GitHub token lives in the Dispatch Vault under
 `GITHUB_TOKEN`; when that value is empty, `services/domain/github-token.ts#resolveGithubToken` asks
 `adapters/gh.ts#readGhToken` (`gh auth token` through the exec chokepoint) on every call and never
 caches or logs the result. A token that is not printable ASCII resolves to no credential. The
@@ -2138,6 +2177,21 @@ landed while it was checking. `DELETE` clears the Vault value and its previous v
 `vault.ts#clearValue`, keeping the key name and purpose, and writes `enabled: false`. A filled Vault
 value or a logged-in `gh` is a credential, not consent: GitHub polls, and the pull request routes
 answer, only after one of these routes enabled it.
+
+**Profile route (LOCAL-43).** `routes/profile.route.ts` owns the About you profile. `GET
+/api/config/profile` answers the stored profile or `{}`; `PUT /api/config/profile` runs the body
+through the shared `profile.ts#parseProfile` (strings trimmed and blanks stored as absent; name,
+email and role at most 200 characters, brief at most 4000, at most 20 handles of at most 100
+characters, trimmed and de-duplicated; unknown keys dropped) and answers 400 with the field named
+and `config.json` byte-identical, or writes it through `config-holder.ts#updateProfile` and answers
+the normalized profile. An empty profile is stored as an absent key. `loadConfig` reads the profile
+with the same function and treats a malformed one as absent. The profile is never copied onto the
+board snapshot or any SSE frame (`sse-profile.test.ts`). The routes sit behind the shared remote
+gate, so an authenticated remote session can read and write the profile like a local one.
+
+**Status push (LOCAL-23).** A manual move (`POST /cards/:id/move`, including mirrored group members) and the start saga's To Do to In Progress push the matching Linear workflow state. The map lives in `sources.linear.stateMap` (team id to column to state id or `null` for "do not sync"), validated by `shared/linear-state-map.ts#parseStateMap` and served by `GET`/`PUT /api/config/linear-state-map`; `resolveTargetState` fills unmapped columns with type defaults (To Do the lowest unstarted state, In Progress and Needs Input the lowest started, Done the lowest completed, In Review and Parked do not sync). Settings edits it in the Sync filters tab (`features/settings/LinearStateMapSection.tsx`). `store.moveCardManual` returns the column changes it made, read inside its own mutation so two overlapping moves each record their own columns, and the route hands them to `services/orchestration/linear-outbound.ts#pushColumnChanges`, which queues the pushes off the request path, chained per card so two quick moves reach Linear in order; `start-session.ts#completeStartAndPush` snapshots the columns around `completeStart` (`snapshotColumns`, `columnChangesSince`). Agent-driven moves (`applyMarker`, `flipBack`) never push. A push is skipped when the target equals the card's `linearState` or `pendingState`. Success runs `issueUpdate` with the state (`LinearSource.updateState`), then `store.recordLinearPush` sets `linearState` and `pendingState { id, at }` and clears `linearError` in one mutation and a poll follows; `reconcile()` holds the pushed state against a different incoming one for 300000 ms or until Linear reports it, keeps a To Do card with a fresh hold or a queued push (`store.setPushing`), and `trackedIssueIds` tracks a held card. Failure leaves the column, `linearState` and `pendingState` as they were and sets `linearError` to "Linear state not updated. " plus the fixed outbound copy. Every attempt writes one `linear_state_pushed` activity event (reason: the state name or `failed: <copy>`).
+
+**Tickets page and Move to (LOCAL-42).** `#/tickets` (`features/tickets/TicketsPage.tsx`, a lazy chunk with its own bundle budget line) lists every Linear card on the wire (`lib/linear-state.ts#isTicketCard`: source linear and no group) ordered by priority then recency, grouped by status, priority, project, cycle, team or none (`features/tickets/ticket-rows.ts`, the choice kept in `localStorage` `dsp.tickets.groupBy`). Row actions and the j, k, Enter, e, o keys follow `ticket-actions.ts#ticketActionsFor`, which mirrors the move route guards (no Done for Inbox, grouped or starting cards). The detail panel's Move to select calls `POST /cards/:id/linear-state { stateId }`: `linear-outbound.ts#moveLinearState` refuses an unknown card (404), a non-Linear or teamless card (409) and a state outside the card's team (400) before any write, then `setLinearState` runs the same per-card push chain as a board move with the card's current column as both `fromCol` and `toCol`, so the column never changes; a failure answers 502 with the recorded card notice.
 
 ### GitHub Source
 
@@ -2166,6 +2220,45 @@ SHA the client saw, so a head that moved answers 409 `not-mergeable`. Owner, rep
 validated before any GitHub call; errors answer an error kind (`rejected`, `not-found`,
 `sso-required`, `rate-limited`, `unreachable`, `no-credential`) and only GitHub's own message text
 for its refusals, never the token or a raw body. A successful write calls `pollNow("github")`.
+
+### Sentry Source
+
+`sources/sentry/sentry.source.ts` is a snapshot item source (LOCAL-46). Each poll resolves the token
+from the Vault `SENTRY_TOKEN` only (`services/domain/sentry-token.ts`), lists the organizations on the
+base URL, and for at most 10 organizations runs two issue queries in order, each with a 14-day period
+and one page of 100: `is:unresolved assigned:me`, then `is:unresolved`. The first query an issue
+appears in wins (types `error_assigned` at priority 100 or 75, `error` at 50 or 25, the higher value
+for fatal and error levels), so every assigned issue ranks above every organization-wide one. The
+pull is partial when a query fills its page or announces a next page, when the organization cap cuts
+organizations, or when an organization answers 403 (that organization is skipped); a partial pull
+never auto-resolves an item. Organization-scoped calls go to the organization's region URL only when
+`sentry.source.ts#allowedRegion` accepts it (an https origin on sentry.io or a subdomain, or the base
+itself), else to the base URL, so the token never follows an arbitrary host. Item ids are
+`sentry:<issue id>` and `createdAt` is the issue's last seen time. A 401 fails the poll with
+last-known-good kept and a 429 or an exhausted rate limit raises `RateLimited`.
+`DISPATCH_SENTRY_API_URL` replaces the base URL for sandbox runs against `scripts/fake-sentry.mjs`,
+started as `node scripts/fake-sentry.mjs <port> <state.json>` from a copy of
+`scripts/fixtures/fake-sentry-state.json`; its organizations report the fake's own origin as their
+region URL, which the allowlist accepts as the configured base.
+
+`routes/sentry.route.ts` serves the Errors page through `services/domain/sentry.ts` and the source
+gateway. `GET /api/sentry/issue/:id` answers the issue with its latest event (`sentry-issue.ts#mapSentryDetail`):
+the impact fields with the count as a number, the outermost exception's type and value, its newest 25
+frames newest first with their context lines, the last 12 breadcrumbs oldest first, the tags, the
+logger and the platform. `POST /api/sentry/issue/:id/resolve` sets the issue to resolved in Sentry and
+only then marks the item done (204). A latest event Sentry refuses or lacks leaves the detail without
+one instead of failing it. The id must be digits only (else 400) and must name a stored item
+(else 404), both before any Sentry call, because the item's meta names the organization and region;
+the stored region is re-checked through `allowedRegion` on every call. A disconnected source answers
+`no-credential`; other errors answer an error kind (`rejected`, `forbidden`, `not-found`,
+`rate-limited`, `unreachable`), never the token or a raw body.
+
+`POST /api/items/:id/promote` accepts an optional `context` string of at most 8000 characters and
+appends it under a `## Context` heading at the end of the new card's description, trimming the rest so
+the whole description stays within 20000 characters. Every `DISPATCH_STATUS:` token in the promoted
+description, provider text and context alike, is disarmed to `DISPATCH-STATUS:`, because the kickoff
+inlines the description into a pane the marker parser reads. A second promote returns the existing
+card and ignores the context.
 
 ### Slack Source
 
@@ -2351,18 +2444,30 @@ freshness guarantee for the point where a start actually gets requested.
 Preflight is INFORMATIVE, never a gate (`BOARD-05`, `PRE-01`/`PRE-02`/`PRE-03`). `services/infra/preflight.ts` is
 the single source of truth for prerequisite / Node-version / storage-health status and per-platform
 install commands, and it is consumed identically by three surfaces: `dispatch doctor` and ordinary
-boot (`bootstrap/cli.ts`, `bootstrap/index.ts`) and the web first-run setup screen
-(`routes/setup.route.ts` → `web/lib/api.ts` → `features/setup/FirstRunSetup.tsx`). `probePreflight()`
+boot (`bootstrap/cli.ts`, `bootstrap/index.ts`) and the Welcome step of the web setup wizard
+(`routes/setup.route.ts` → `web/lib/api.ts` → `features/setup/PrerequisiteChecklist.tsx`). `probePreflight()`
 probes EVERY required binary — `tmux`, `ttyd`, `claude`, `git` — with no short-circuit, and returns
 each one's presence plus its exact platform-appropriate install command, alongside the running Node
 version compared against the `engines.node` floor and a read-only storage-health line.
 
 The backend BOOTS REGARDLESS: a missing binary, a below-floor Node, or unhealthy storage renders a
-line and the server still listens, so the browser always reaches a live setup screen with current
-status. (Sessions that actually need a missing binary still fail at use-time, on the card.) `dispatch
+line and the server still listens, so the browser always reaches the app, and the setup wizard
+shows current status. (Sessions that actually need a missing binary still fail at use-time, on the card.) `dispatch
 doctor` is likewise a diagnostic, not a gate — it ALWAYS exits 0. The only fail-fast path left is a
 missing/incomplete config, which throws `StartupError` (the class still homed in
 `bootstrap/binary-check.ts`, now its sole remaining export, raised from `bootstrap/config.ts`).
+
+The setup wizard (`features/setup/SetupWizard.tsx`) opens over the running app, never in place of
+it. `App.tsx` opens it on its own only when `lib/setup-wizard.ts` sees `needsKey` and not
+`onboardingDone` in `GET /api/setup`; every way of closing it calls `POST /api/setup/onboarding-done`,
+which writes the flat `onboardingDone` config flag (204, idempotent), so it never opens on its own
+again. A failed status read renders the app with no wizard. Settings, Connections, Run setup guide
+reopens it at Welcome after a fresh `GET /api/setup`, so the checklist is current, and the Linear
+card in Settings remounts when it closes so it reads the new connection. An app that already has a
+Linear key and no flag marks onboarding done on load, so a later disconnect never reopens the
+wizard on its own. The same helper holds
+Next on the Connect Linear step until the Linear card reports a connection; Skip this connection
+moves on without one.
 
 A missing binary is one guided command away on either surface: in an interactive terminal preflight
 offers `[Y/n]` and runs the install on confirm; under a pipe/CI it prints the command and never
@@ -3195,9 +3300,24 @@ Collapsible grid-rows pair and never measures; once open it stops clipping so dr
 can overflow. The status is the shared `SourceCardStatus` union (checking, disconnected, connected with
 an optional account, error with its copy, soon); a soon card renders the header only. The Linear
 composition lives in `features/connections/LinearConnectionCard.tsx` behind the feature barrel so
-the setup wizard can reuse it; Settings is its consumer today. `hooks/useLinearConnection.ts` reads
+the setup wizard reuses it; Settings and the wizard are its consumers. `hooks/useLinearConnection.ts` reads
 the status on mount and on Test only, shows Checking until the first read settles, and keeps
 Connect disabled until then.
+
+**Settings tabs (LOCAL-43).** Settings is a rail of nine tab ids: connections, board, appearance,
+notifications, remote, workspaces, about-you, updates and about. `web/lib/settings-tab.ts` holds
+the list and `settingsTabFrom`, which maps the legacy ids (filters, models, cleanup, terminal and
+the retired ids) to their current tab without rewriting the hash. Each tab lives in its own file
+under `web/features/settings/` and exports its section; every tab except Notifications and About
+also exports its use hook (the Board tab exports three, the About tab reuses `useUpdatesTab`).
+`web/features/settings/SettingsScreen.tsx` is the rail plus a switch and invokes each hook once, so
+unsaved drafts and the update run result survive a tab switch. Style constants shared across tab
+files live in `web/features/settings/settings-styles.ts`. Connections shows the Linear card, then a Coming soon card per
+`web/lib/connection-meta.ts#SOON_CONNECTIONS` entry. `web/features/settings/AboutYouTab.tsx`
+reads and saves the profile route above, with the comma-separated handles field parsed by
+`web/lib/profile-handles.ts`. `web/features/settings/UpdatesTab.tsx#useUpdatesTab` reads `GET /api/update` once when Settings
+mounts and feeds both the Updates and About tabs; the repository
+link and license come from `web/lib/about-meta.ts`, which a test pins to `package.json`.
 
 ### App Shell Zones
 

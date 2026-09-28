@@ -34,7 +34,17 @@ import {
   generateGroupTitlePhrase,
   type GroupTitleMember,
 } from "../services/orchestration/group-title-generate.js";
-import { syncCardToLinear } from "../services/orchestration/linear-sync.js";
+import {
+  syncCard,
+  syncViaClaude,
+} from "../services/orchestration/linear-sync.js";
+import {
+  assignToMe,
+  moveLinearState,
+  postComment,
+  pushColumnChanges,
+} from "../services/orchestration/linear-outbound.js";
+import { validateCommentBody } from "../../shared/comment-body.js";
 import {
   ATTACHMENT_NAME_RE,
   CARD_ID_RE,
@@ -44,6 +54,7 @@ import {
   commitAttachments,
 } from "../services/domain/attachments.js";
 import { attachmentsDir } from "../services/infra/paths.js";
+import { enabledSource } from "../adapters/source-gateway.js";
 
 export const cardsRouter = Router();
 
@@ -138,6 +149,55 @@ function getCardById(req: Request<{ id: string }>, res: Response): void {
 
 cardsRouter.get("/cards/:id", getCardById);
 
+cardsRouter.get("/cards/:id/comments", (req, res) => {
+  const card = store.getCard(req.params.id);
+  if (!card) {
+    res.status(404).json({ error: `unknown card id: ${req.params.id}` });
+    return;
+  }
+  res.status(200).json({ comments: card.comments ?? [] });
+});
+
+cardsRouter.post("/cards/:id/comment", async (req, res) => {
+  const body: unknown = (req.body as { body?: unknown } | undefined)?.body;
+  const invalid = validateCommentBody(body);
+  if (invalid != null) {
+    res.status(400).json({ error: invalid });
+    return;
+  }
+  const outcome = await postComment(req.params.id, body as string);
+  if (!outcome.ok) {
+    res.status(outcome.status).json({ error: outcome.error });
+    return;
+  }
+  res.status(201).json({ ok: true });
+});
+
+cardsRouter.post("/cards/:id/assign-me", async (req, res) => {
+  const outcome = await assignToMe(req.params.id);
+  if (!outcome.ok) {
+    res.status(outcome.status).json({ error: outcome.error });
+    return;
+  }
+  res.status(204).end();
+});
+
+cardsRouter.post("/cards/:id/linear-state", async (req, res) => {
+  const stateId = (req.body as { stateId?: unknown } | undefined)?.stateId;
+  if (typeof stateId !== "string" || stateId === "" || stateId.length > 200) {
+    res.status(400).json({
+      error: "stateId must be a string of 1 to 200 characters",
+    });
+    return;
+  }
+  const outcome = await moveLinearState(req.params.id, stateId);
+  if (!outcome.ok) {
+    res.status(outcome.status).json({ error: outcome.error });
+    return;
+  }
+  res.status(204).end();
+});
+
 cardsRouter.post("/cards/:id/move", async (req, res) => {
   const { id } = req.params;
   const column = (req.body as { column?: unknown } | undefined)?.column;
@@ -174,7 +234,7 @@ cardsRouter.post("/cards/:id/move", async (req, res) => {
     return;
   }
 
-  await store.moveCardManual(id, column as Column);
+  void pushColumnChanges(await store.moveCardManual(id, column as Column));
   res.status(204).end();
 });
 
@@ -1109,12 +1169,14 @@ function screenAdoptedFields(
  * guard follows the `isStarting` discipline EXACTLY: `store.isSyncing` is checked and
  * `store.beginSync` is called SYNCHRONOUSLY with no `await` between them, so a concurrent request
  * for the SAME card can never race past the guard; a DIFFERENT card's sync is unaffected (the guard
- * is keyed by card id, never a global flag). The subprocess call carries NO abort-on-disconnect
+ * is keyed by card id, never a global flag). The sync call (direct or Claude path) carries NO abort-on-disconnect
  * wiring — the service's own no-signal decision — so the server owns the full timeout bound and a
  * client disconnect can never orphan a created-but-unadopted Linear issue mid-flight. The 200 body
  * passes the card through `redactCard()` — the same redaction applied by `snapshot()`, reached
  * directly rather than by building a whole board to find one card — never the live Map entry, so a
  * started local card's `hookToken` can never ride the response (SECURITY).
+ * The direct path (the default) needs a `teamId` in the body (400 otherwise) and a connected
+ * Linear source (409 "Linear is not connected").
  */
 async function syncLinearHandler(
   req: Request<{ id: string }>,
@@ -1147,15 +1209,40 @@ async function syncLinearHandler(
     return;
   }
 
+  const { teamId, stateId } = (req.body ?? {}) as {
+    teamId?: unknown;
+    stateId?: unknown;
+  };
+  const target =
+    typeof teamId === "string" && teamId !== ""
+      ? {
+          teamId,
+          ...(typeof stateId === "string" && stateId !== "" ? { stateId } : {}),
+        }
+      : undefined;
+  const viaClaude = syncViaClaude();
+  if (!target && !viaClaude) {
+    res.status(400).json({ error: "teamId is required" });
+    return;
+  }
+  if (!viaClaude && !enabledSource("linear")?.createIssue) {
+    res.status(409).json({ error: "Linear is not connected" });
+    return;
+  }
+
   store.beginSync(id);
   void store.setSyncing(id, true);
 
   try {
-    const result = await syncCardToLinear({
-      id: card.id,
-      title: card.title,
-      description: card.description,
-    });
+    const result = await syncCard(
+      {
+        id: card.id,
+        title: card.title,
+        description: card.description,
+        priority: card.priority,
+      },
+      target,
+    );
 
     const adopted = screenAdoptedFields(result, card);
     await store.adoptLinearIdentity(id, adopted);
