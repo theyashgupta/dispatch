@@ -660,3 +660,38 @@ test("a pollNow during the tracked await discards the stale refresh", async () =
   assert.notEqual(store.getCard("trk-s1")?.linearState?.name, "Stale");
   assert.equal(store.getCard("trk-s1")?.goneFromLinear, true);
 });
+
+test("an items-only source leaves the board sync status alone on success, partial and failure", async () => {
+  await store.applyIssues([], "2026-09-24T09:00:00.000Z", {
+    source: "linear",
+    kind: "snapshot",
+  });
+  await store.setSyncUnreachable(true);
+  const before = store.snapshot();
+  let call = 0;
+  const src = makeFakeSource({
+    id: "itemsonly",
+    itemsOnly: true,
+    pollIntervalMs: 10,
+    fetch: () => {
+      call += 1;
+      if (call === 3) return Promise.reject(new Error("read failed"));
+      return Promise.resolve({
+        issues: [],
+        items: [fakeItem("a", { source: "itemsonly" })],
+        truncated: call === 2,
+      });
+    },
+  });
+  startPollers([src]);
+  for (let waited = 0; call < 4 && waited < 1000; waited += 10) {
+    await sleep(10);
+  }
+  stopPollers();
+  assert.ok(call >= 4, `polled ${call} times`);
+  const after = store.snapshot();
+  assert.equal(after.syncedAt, before.syncedAt);
+  assert.equal(after.syncWarning, before.syncWarning);
+  assert.equal(after.syncUnreachable, true);
+  await store.setSyncUnreachable(false);
+});

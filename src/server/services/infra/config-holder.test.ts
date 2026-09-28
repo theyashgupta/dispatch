@@ -10,8 +10,13 @@ process.env.HOME = home;
 const configPath = path.join(home, ".dispatch", "config.json");
 const { CONFIG_PATH } = await import("./paths.js");
 assert.ok(CONFIG_PATH.startsWith(home), "CONFIG_PATH escaped the temp HOME");
-const { updateLinearApiKey, updateSourceFilters } =
-  await import("./config-holder.js");
+const {
+  getOrchestrationConfig,
+  patchSourceConfig,
+  setOrchestrationConfig,
+  updateLinearApiKey,
+  updateSourceFilters,
+} = await import("./config-holder.js");
 
 after(() => fs.rmSync(home, { recursive: true, force: true }));
 
@@ -59,4 +64,31 @@ test("updateSourceFilters refuses an unknown source", () => {
     () => updateSourceFilters("slack", DEFAULT_FILTERS),
     /unknown source/,
   );
+});
+
+test("patchSourceConfig writes only sources.meeting, keeps the Linear block and mode 0600", () => {
+  writeConfig();
+  updateSourceFilters("linear", { ...DEFAULT_FILTERS, teams: ["t1"] });
+  setOrchestrationConfig({
+    linearApiKey: "k",
+    sources: { linear: { apiKey: "k" }, meeting: { windowHours: 48 } },
+  });
+  patchSourceConfig("meeting", { enabled: true });
+  patchSourceConfig("meeting", { windowHours: 168 });
+  const parsed = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
+    port: number;
+    sources: Record<string, Record<string, unknown>>;
+  };
+  assert.equal(parsed.port, 4700);
+  assert.deepEqual(parsed.sources.meeting, { enabled: true, windowHours: 168 });
+  const linear = parsed.sources.linear;
+  assert.equal(linear.apiKey, "k");
+  assert.equal(linear.pollIntervalMs, 15000);
+  assert.deepEqual((linear.filters as { teams: string[] }).teams, ["t1"]);
+  assert.equal(fs.statSync(configPath).mode & 0o777, 0o600);
+  assert.deepEqual(getOrchestrationConfig()?.sources?.meeting, {
+    enabled: true,
+    windowHours: 168,
+  });
+  assert.equal(getOrchestrationConfig()?.sources?.linear?.apiKey, "k");
 });

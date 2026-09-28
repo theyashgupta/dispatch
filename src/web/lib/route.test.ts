@@ -63,9 +63,20 @@ test("routeHash round-trips every valid hash", () => {
     "#/playbooks",
     "#/vault",
     "#/archive",
+    "#/meetings",
   ]) {
     assert.equal(routeHash(parseRoute(hash)), hash);
   }
+});
+
+test("a meetings id with colons round-trips through routeHash and parseRoute", () => {
+  const route = parseRoute(
+    routeHash({ page: "meetings", id: "meeting:paste:2026-01-01-sync:key" }),
+  );
+  assert.deepEqual(route, {
+    page: "meetings",
+    id: "meeting:paste:2026-01-01-sync:key",
+  });
 });
 
 test("a malformed percent sequence in the id never throws", () => {
