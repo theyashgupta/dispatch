@@ -215,6 +215,8 @@ interface SettingsScreenProps {
   tunnelState: TunnelState;
   soundEnabled: boolean;
   onToggleSound: (enabled: boolean) => void;
+  onRunSetup?: () => Promise<boolean>;
+  connectionKey?: number;
 }
 
 export function SettingsScreen({
@@ -225,6 +227,8 @@ export function SettingsScreen({
   tunnelState,
   soundEnabled,
   onToggleSound,
+  onRunSetup,
+  connectionKey,
 }: SettingsScreenProps) {
   const filters = useFiltersTab(onSaved);
   const modelsTab = useModelsTab(onSaved);
@@ -297,7 +301,13 @@ export function SettingsScreen({
         </div>
 
         <div style={contentBodyStyle}>
-          {tab === "connections" && <ConnectionsTabSection filters={filters} />}
+          {tab === "connections" && (
+            <ConnectionsTabSection
+              filters={filters}
+              onRunSetup={onRunSetup}
+              connectionKey={connectionKey}
+            />
+          )}
           {tab === "board" && (
             <BoardTabSection
               modelsTab={modelsTab}

@@ -15,6 +15,7 @@ import type {
   Playbook,
   PlaybookPickerResponse,
   PrerequisiteStatus,
+  SetupStatus,
   SourceFilters,
   UpdateRunResult,
   UpdateStatus,
@@ -1046,33 +1047,35 @@ export async function saveClaudeArgs(
 }
 
 /**
- * Read first-run status: GET /api/setup. Fired once on app mount to gate the setup screen vs the
- * board. Returns `needsKey` plus the live prerequisite checklist; the Linear key never crosses this
- * boundary. Throws on any non-2xx so the caller can fail-open to the board rather than trapping a
- * fresh install behind a fetch error.
+ * Read setup status: GET /api/setup. Read on app mount to decide whether the setup wizard opens, and
+ * again when Run setup guide reopens it, so the prerequisite rows are current. The Linear key never
+ * crosses this boundary. Throws on any non-2xx so the caller can render the app with no wizard.
  */
-export async function getSetup(): Promise<{
-  needsKey: boolean;
-  prerequisites: PrerequisiteStatus[];
-  node: { version: string; floor: string; ok: boolean };
-  storage: { ok: boolean; path: string };
-}> {
+export async function getSetup(): Promise<SetupStatus> {
   const res = await fetch("/api/setup");
   if (!res.ok) {
     throw new Error(`getSetup failed: ${res.status} ${res.statusText}`);
   }
-  return (await res.json()) as {
-    needsKey: boolean;
-    prerequisites: PrerequisiteStatus[];
-    node: { version: string; floor: string; ok: boolean };
-    storage: { ok: boolean; path: string };
-  };
+  return (await res.json()) as SetupStatus;
 }
 
 /**
- * Run the guided install for one prerequisite on first run: POST /api/setup/install { target }.
+ * Mark the setup wizard done: POST /api/setup/onboarding-done. Throws on any non-2xx so the caller
+ * can log it; the wizard closes either way.
+ */
+export async function markOnboardingDone(): Promise<void> {
+  const res = await fetch("/api/setup/onboarding-done", { method: "POST" });
+  if (!res.ok) {
+    throw new Error(
+      `markOnboardingDone failed: ${res.status} ${res.statusText}`,
+    );
+  }
+}
+
+/**
+ * Run the guided install for one prerequisite from the setup wizard: POST /api/setup/install { target }.
  * Drives the shared preflight `runInstall` over the loopback route (whitelist-validated to
- * tmux/ttyd/git server-side) and resolves the re-probed status so the setup screen can flip the row.
+ * tmux/ttyd/git server-side) and resolves the re-probed status so the wizard checklist can flip the row.
  * The Linear key never crosses this boundary and there is no streaming — a single request/response.
  * Resolves `{ ok, command, status }` on 2xx; throws on any non-2xx so the component renders the
  * failure state (mirrors moveCard's reject-on-non-2xx).
@@ -1097,37 +1100,6 @@ export async function runPrerequisiteInstall(target: string): Promise<{
     command: string;
     status: PrerequisiteStatus;
   };
-}
-
-/**
- * Submit the Linear key on first run: POST /api/setup. The server tests the key against Linear
- * before persisting, so the discriminated result maps each failure mode distinctly: 200 → { ok:true }
- * (board hydrates over the live SSE, no reload); 502 → { ok:false, reason:"unreachable" } (couldn't
- * reach Linear); 409 → { ok:false, reason:"already-configured" } (a key already exists — a benign
- * two-tab race, NOT a bad key, so the caller can transition straight to the board); any other non-2xx
- * (400) → { ok:false, reason:"rejected" }. The key is sent once and never echoed back.
- */
-export async function saveLinearKey(
-  apiKey: string,
-): Promise<
-  | { ok: true }
-  | { ok: false; reason: "rejected" | "unreachable" | "already-configured" }
-> {
-  const res = await fetch("/api/setup", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ apiKey }),
-  });
-  if (res.ok) {
-    return { ok: true };
-  }
-  if (res.status === 502) {
-    return { ok: false, reason: "unreachable" };
-  }
-  if (res.status === 409) {
-    return { ok: false, reason: "already-configured" };
-  }
-  return { ok: false, reason: "rejected" };
 }
 
 /**

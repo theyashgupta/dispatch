@@ -37,6 +37,7 @@ interface SidebarNavProps {
   pollIntervalMs: number | null;
   syncWarning: string | null;
   syncUnreachable?: boolean;
+  noSource?: boolean;
   accountSlot?: ReactNode;
   onOpenCreateTicket: () => void;
   onOpenActivity: () => void;
@@ -173,6 +174,7 @@ export function SidebarNav({
   pollIntervalMs,
   syncWarning,
   syncUnreachable,
+  noSource,
   accountSlot,
   onOpenCreateTicket,
   onOpenActivity,
@@ -276,6 +278,7 @@ export function SidebarNav({
           pollIntervalMs={pollIntervalMs}
           syncWarning={syncWarning}
           syncUnreachable={syncUnreachable}
+          noSource={noSource}
           collapsed={collapsed}
         />
         {accountSlot != null && (

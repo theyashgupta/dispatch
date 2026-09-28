@@ -439,6 +439,7 @@ export function loadConfig(): Config {
   };
   const profile = readProfile(parsed);
   if (profile) config.profile = profile;
+  if (parsed.onboardingDone === true) config.onboardingDone = true;
 
   const hasKey = config.linearApiKey.length > 0;
   console.log(`[config] loaded ${CONFIG_PATH} (api key present: ${hasKey})`);

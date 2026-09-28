@@ -31,3 +31,8 @@ export const SOON_CONNECTIONS: { source: string; name: string }[] = [
   { source: "meeting", name: "Meetings" },
   { source: "calendar", name: "Calendar" },
 ];
+
+export const ALL_CONNECTIONS: { source: string; name: string }[] = [
+  { source: LINEAR_CONNECTION.source, name: LINEAR_CONNECTION.name },
+  ...SOON_CONNECTIONS,
+];
