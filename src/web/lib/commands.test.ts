@@ -141,3 +141,19 @@ test("an already cleaned Done card offers no Clean up", () => {
     true,
   );
 });
+
+test("the palette has Go to Slack only when the filtered nav list keeps the Slack row", () => {
+  const withSlack = [
+    { page: "inbox" as const, label: "Inbox" },
+    { page: "slack" as const, label: "Slack" },
+  ];
+  const goTo = (list: typeof withSlack) =>
+    buildCommands(ctx().context, list, null)
+      .map((c) => c.label)
+      .filter((label) => label.startsWith("Go to"));
+  assert.ok(goTo(withSlack).includes("Go to Slack"));
+  assert.deepEqual(goTo(withSlack.slice(0, 1)), [
+    "Go to Inbox",
+    "Go to Settings",
+  ]);
+});

@@ -114,6 +114,8 @@ test("a card row carries the mapped priority, project, url and Ticket type; an i
   assert.equal(i?.typeLabel, "PR review");
   assert.equal(humanizeType("ci_failure"), "CI failure");
   assert.equal(humanizeType(""), "");
+  assert.equal(humanizeType("dm"), "DM");
+  assert.equal(humanizeType("mention"), "Mention");
 });
 
 const base = {
