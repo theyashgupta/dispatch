@@ -13,6 +13,7 @@ import { IconButton } from "../../primitives/IconButton.js";
 import { Modal, type ModalControl } from "../../primitives/Modal.js";
 import { Notice } from "../../primitives/Notice.js";
 import { FolderBrowserModal } from "../workspaces/index.js";
+import { hasDispatchMarker } from "../../../shared/marker-key.js";
 
 const FOOTGUN_MESSAGE =
   "Remove the text DISPATCH_STATUS: from the playbook body and try again.";
@@ -54,7 +55,7 @@ export function PlaybookEditorModal({
   const [draftNotice, setDraftNotice] = useState(false);
 
   const trimmedName = name.trim();
-  const hasFootgun = body.includes("DISPATCH_STATUS:");
+  const hasFootgun = hasDispatchMarker(body);
   const canSave = trimmedName !== "" && !saving && !hasFootgun;
 
   function checkNameCollision() {

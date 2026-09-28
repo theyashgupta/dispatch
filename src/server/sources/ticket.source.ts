@@ -1,4 +1,7 @@
 import type {
+  CreatedLinearIssue,
+  LinearWorkflow,
+  NewLinearIssue,
   FilterCapabilities,
   FilterDimension,
   FilterOption,
@@ -42,6 +45,13 @@ export interface TicketSource {
     items?: Item[];
     truncated: boolean;
   }>;
+  fetchByIds?(ids: string[]): Promise<SourceIssue[]>;
+  addComment?(issueId: string, body: string): Promise<void>;
+  assignIssue?(issueId: string, assigneeId: string): Promise<void>;
+  updateState?(issueId: string, stateId: string): Promise<void>;
+  viewerId?(): Promise<string>;
+  workflow?(): Promise<LinearWorkflow>;
+  createIssue?(input: NewLinearIssue): Promise<CreatedLinearIssue>;
   readonly capabilities: FilterCapabilities;
   listOptions(
     dimension: Exclude<FilterDimension, "cycle">,

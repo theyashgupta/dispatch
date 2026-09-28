@@ -1,4 +1,4 @@
-import type { PrDetail } from "../../shared/types.js";
+import type { PrDetail, SentryIssueDetail } from "../../shared/types.js";
 
 export const PROMPT_CONTEXT_MAX = 6000;
 
@@ -54,5 +54,28 @@ export function fixCiPrompt(
     "Failing checks:",
     fenceUntrusted(lines.join("\n"), PROMPT_CONTEXT_MAX),
     "Reproduce each failure locally, fix the cause and commit. Do not push; report what you changed.",
+  ].join("\n");
+}
+
+/**
+ * The kickoff text for fixing a Sentry error whose context the ticket description carries.
+ *
+ * @remarks The short id, project and title are provider text outside a fence, so each is flattened
+ * to one line, cut to 300 characters and has its status marker disarmed.
+ */
+export function sentryFixPrompt(
+  detail: Pick<SentryIssueDetail, "shortId" | "project" | "title">,
+): string {
+  const line = (text: string) =>
+    text
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 300)
+      .replace(MARKER, "DISPATCH-STATUS:");
+  return [
+    `Fix the Sentry error ${line(detail.shortId)} in ${line(detail.project)}: ${line(detail.title)}.`,
+    "The error context is in the ticket description under Context.",
+    "Find the root cause in the code, fix it, and add a test that fails without the fix.",
+    "Commit the fix. Do not push, and do not resolve the issue in Sentry; report what you changed.",
   ].join("\n");
 }

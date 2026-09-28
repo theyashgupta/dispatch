@@ -51,6 +51,19 @@ export function slackSaidLine(code: string | null | undefined): string | null {
   return isProviderCode(code) ? `Slack said: ${code}.` : null;
 }
 
+export const SENTRY_ERROR_COPY: Record<SourceKeyError, string> = {
+  rejected: "Sentry rejected that token. Double-check it and try again.",
+  unreachable: "Couldn't reach Sentry. Check your connection and try again.",
+  superseded:
+    "Sentry was disconnected while this token was being checked. Paste it again to reconnect.",
+  failed:
+    "Dispatch couldn't save the token. Check the Dispatch Vault and try again.",
+  "sso-required":
+    "Sentry refused the token for your organization's single sign-on. Check it and try again.",
+  "no-credential":
+    "No token is stored in the Vault. Paste one and press Connect.",
+};
+
 /**
  * Map the server's connection report to the status a connection card shows.
  *

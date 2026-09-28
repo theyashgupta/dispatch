@@ -5,6 +5,8 @@ import { redactCard, store } from "../store/board.store.js";
 
 export const itemsRouter = Router();
 
+const PROMOTE_CONTEXT_MAX = 8000;
+
 const MAX_SNOOZE_MS = Date.UTC(9999, 11, 31, 23, 59, 59);
 
 function isItemState(value: unknown): value is ItemState {
@@ -84,7 +86,15 @@ itemsRouter.post("/items/:id/snooze", async (req, res) => {
 });
 
 itemsRouter.post("/items/:id/promote", async (req, res) => {
-  const result = await store.promoteItem(req.params.id);
+  const context = (req.body as { context?: unknown } | undefined)?.context;
+  if (
+    context !== undefined &&
+    (typeof context !== "string" || context.length > PROMOTE_CONTEXT_MAX)
+  ) {
+    res.status(400).json({ error: "invalid context" });
+    return;
+  }
+  const result = await store.promoteItem(req.params.id, context);
   if (!result) {
     res.status(404).json({ error: "unknown item" });
     return;

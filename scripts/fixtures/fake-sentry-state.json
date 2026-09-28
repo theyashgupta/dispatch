@@ -1,0 +1,861 @@
+{
+  "auth": true,
+  "token": "g5-fake-sentry-token",
+  "orgs": [
+    {
+      "slug": "acme"
+    }
+  ],
+  "issues": [
+    {
+      "id": "101",
+      "org": "acme",
+      "project": "api",
+      "title": "TypeError: cannot read id",
+      "culprit": "resolveUser(src/users)",
+      "level": "fatal",
+      "count": "1532",
+      "userCount": 87,
+      "firstSeen": "2026-09-18T10:00:00Z",
+      "lastSeen": "2026-09-25T09:00:00Z",
+      "shortId": "API-101",
+      "assigned": true,
+      "event": {
+        "id": "ev101",
+        "eventID": "ev101",
+        "platform": "node",
+        "logger": "server",
+        "dateCreated": "2026-09-25T09:00:00Z",
+        "entries": [
+          {
+            "type": "exception",
+            "data": {
+              "values": [
+                {
+                  "type": "TypeError",
+                  "value": "cannot read id",
+                  "stacktrace": {
+                    "frames": [
+                      {
+                        "function": "fn0",
+                        "filename": "node_modules/dep/dep0.js",
+                        "absPath": "/app/src/lib/mod0.ts",
+                        "lineNo": 10,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod0",
+                        "context": [
+                          [9, "  const before = 1;"],
+                          [10, "  work0();"],
+                          [11, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn1",
+                        "filename": "node_modules/dep/dep1.js",
+                        "absPath": "/app/src/lib/mod1.ts",
+                        "lineNo": 11,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod1",
+                        "context": [
+                          [10, "  const before = 1;"],
+                          [11, "  work1();"],
+                          [12, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn2",
+                        "filename": "node_modules/dep/dep2.js",
+                        "absPath": "/app/src/lib/mod2.ts",
+                        "lineNo": 12,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod2",
+                        "context": [
+                          [11, "  const before = 1;"],
+                          [12, "  work2();"],
+                          [13, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn3",
+                        "filename": "node_modules/dep/dep3.js",
+                        "absPath": "/app/src/lib/mod3.ts",
+                        "lineNo": 13,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod3",
+                        "context": [
+                          [12, "  const before = 1;"],
+                          [13, "  work3();"],
+                          [14, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn4",
+                        "filename": "node_modules/dep/dep4.js",
+                        "absPath": "/app/src/lib/mod4.ts",
+                        "lineNo": 14,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod4",
+                        "context": [
+                          [13, "  const before = 1;"],
+                          [14, "  work4();"],
+                          [15, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn5",
+                        "filename": "node_modules/dep/dep5.js",
+                        "absPath": "/app/src/lib/mod5.ts",
+                        "lineNo": 15,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod5",
+                        "context": [
+                          [14, "  const before = 1;"],
+                          [15, "  work5();"],
+                          [16, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn6",
+                        "filename": "node_modules/dep/dep6.js",
+                        "absPath": "/app/src/lib/mod6.ts",
+                        "lineNo": 16,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod6",
+                        "context": [
+                          [15, "  const before = 1;"],
+                          [16, "  work6();"],
+                          [17, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn7",
+                        "filename": "node_modules/dep/dep7.js",
+                        "absPath": "/app/src/lib/mod7.ts",
+                        "lineNo": 17,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod7",
+                        "context": [
+                          [16, "  const before = 1;"],
+                          [17, "  work7();"],
+                          [18, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn8",
+                        "filename": "node_modules/dep/dep8.js",
+                        "absPath": "/app/src/lib/mod8.ts",
+                        "lineNo": 18,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod8",
+                        "context": [
+                          [17, "  const before = 1;"],
+                          [18, "  work8();"],
+                          [19, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn9",
+                        "filename": "node_modules/dep/dep9.js",
+                        "absPath": "/app/src/lib/mod9.ts",
+                        "lineNo": 19,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod9",
+                        "context": [
+                          [18, "  const before = 1;"],
+                          [19, "  work9();"],
+                          [20, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn10",
+                        "filename": "node_modules/dep/dep10.js",
+                        "absPath": "/app/src/lib/mod10.ts",
+                        "lineNo": 20,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod10",
+                        "context": [
+                          [19, "  const before = 1;"],
+                          [20, "  work10();"],
+                          [21, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn11",
+                        "filename": "node_modules/dep/dep11.js",
+                        "absPath": "/app/src/lib/mod11.ts",
+                        "lineNo": 21,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod11",
+                        "context": [
+                          [20, "  const before = 1;"],
+                          [21, "  work11();"],
+                          [22, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn12",
+                        "filename": "node_modules/dep/dep12.js",
+                        "absPath": "/app/src/lib/mod12.ts",
+                        "lineNo": 22,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod12",
+                        "context": [
+                          [21, "  const before = 1;"],
+                          [22, "  work12();"],
+                          [23, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn13",
+                        "filename": "node_modules/dep/dep13.js",
+                        "absPath": "/app/src/lib/mod13.ts",
+                        "lineNo": 23,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod13",
+                        "context": [
+                          [22, "  const before = 1;"],
+                          [23, "  work13();"],
+                          [24, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn14",
+                        "filename": "node_modules/dep/dep14.js",
+                        "absPath": "/app/src/lib/mod14.ts",
+                        "lineNo": 24,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod14",
+                        "context": [
+                          [23, "  const before = 1;"],
+                          [24, "  work14();"],
+                          [25, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn15",
+                        "filename": "node_modules/dep/dep15.js",
+                        "absPath": "/app/src/lib/mod15.ts",
+                        "lineNo": 25,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod15",
+                        "context": [
+                          [24, "  const before = 1;"],
+                          [25, "  work15();"],
+                          [26, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn16",
+                        "filename": "node_modules/dep/dep16.js",
+                        "absPath": "/app/src/lib/mod16.ts",
+                        "lineNo": 26,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod16",
+                        "context": [
+                          [25, "  const before = 1;"],
+                          [26, "  work16();"],
+                          [27, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn17",
+                        "filename": "node_modules/dep/dep17.js",
+                        "absPath": "/app/src/lib/mod17.ts",
+                        "lineNo": 27,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod17",
+                        "context": [
+                          [26, "  const before = 1;"],
+                          [27, "  work17();"],
+                          [28, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn18",
+                        "filename": "node_modules/dep/dep18.js",
+                        "absPath": "/app/src/lib/mod18.ts",
+                        "lineNo": 28,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod18",
+                        "context": [
+                          [27, "  const before = 1;"],
+                          [28, "  work18();"],
+                          [29, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn19",
+                        "filename": "node_modules/dep/dep19.js",
+                        "absPath": "/app/src/lib/mod19.ts",
+                        "lineNo": 29,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod19",
+                        "context": [
+                          [28, "  const before = 1;"],
+                          [29, "  work19();"],
+                          [30, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn20",
+                        "filename": "node_modules/dep/dep20.js",
+                        "absPath": "/app/src/lib/mod20.ts",
+                        "lineNo": 30,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod20",
+                        "context": [
+                          [29, "  const before = 1;"],
+                          [30, "  work20();"],
+                          [31, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn21",
+                        "filename": "node_modules/dep/dep21.js",
+                        "absPath": "/app/src/lib/mod21.ts",
+                        "lineNo": 31,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod21",
+                        "context": [
+                          [30, "  const before = 1;"],
+                          [31, "  work21();"],
+                          [32, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn22",
+                        "filename": "node_modules/dep/dep22.js",
+                        "absPath": "/app/src/lib/mod22.ts",
+                        "lineNo": 32,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod22",
+                        "context": [
+                          [31, "  const before = 1;"],
+                          [32, "  work22();"],
+                          [33, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn23",
+                        "filename": "node_modules/dep/dep23.js",
+                        "absPath": "/app/src/lib/mod23.ts",
+                        "lineNo": 33,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod23",
+                        "context": [
+                          [32, "  const before = 1;"],
+                          [33, "  work23();"],
+                          [34, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn24",
+                        "filename": "node_modules/dep/dep24.js",
+                        "absPath": "/app/src/lib/mod24.ts",
+                        "lineNo": 34,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod24",
+                        "context": [
+                          [33, "  const before = 1;"],
+                          [34, "  work24();"],
+                          [35, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn25",
+                        "filename": "node_modules/dep/dep25.js",
+                        "absPath": "/app/src/lib/mod25.ts",
+                        "lineNo": 35,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod25",
+                        "context": [
+                          [34, "  const before = 1;"],
+                          [35, "  work25();"],
+                          [36, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn26",
+                        "filename": "node_modules/dep/dep26.js",
+                        "absPath": "/app/src/lib/mod26.ts",
+                        "lineNo": 36,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod26",
+                        "context": [
+                          [35, "  const before = 1;"],
+                          [36, "  work26();"],
+                          [37, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn27",
+                        "filename": "node_modules/dep/dep27.js",
+                        "absPath": "/app/src/lib/mod27.ts",
+                        "lineNo": 37,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod27",
+                        "context": [
+                          [36, "  const before = 1;"],
+                          [37, "  work27();"],
+                          [38, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn28",
+                        "filename": "node_modules/dep/dep28.js",
+                        "absPath": "/app/src/lib/mod28.ts",
+                        "lineNo": 38,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod28",
+                        "context": [
+                          [37, "  const before = 1;"],
+                          [38, "  work28();"],
+                          [39, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn29",
+                        "filename": "node_modules/dep/dep29.js",
+                        "absPath": "/app/src/lib/mod29.ts",
+                        "lineNo": 39,
+                        "colNo": 5,
+                        "inApp": false,
+                        "module": "mod29",
+                        "context": [
+                          [38, "  const before = 1;"],
+                          [39, "  work29();"],
+                          [40, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn30",
+                        "filename": "src/lib/mod30.ts",
+                        "absPath": "/app/src/lib/mod30.ts",
+                        "lineNo": 40,
+                        "colNo": 5,
+                        "inApp": true,
+                        "module": "mod30",
+                        "context": [
+                          [39, "  const before = 1;"],
+                          [40, "  work30();"],
+                          [41, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn31",
+                        "filename": "src/lib/mod31.ts",
+                        "absPath": "/app/src/lib/mod31.ts",
+                        "lineNo": 41,
+                        "colNo": 5,
+                        "inApp": true,
+                        "module": "mod31",
+                        "context": [
+                          [40, "  const before = 1;"],
+                          [41, "  work31();"],
+                          [42, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn32",
+                        "filename": "src/lib/mod32.ts",
+                        "absPath": "/app/src/lib/mod32.ts",
+                        "lineNo": 42,
+                        "colNo": 5,
+                        "inApp": true,
+                        "module": "mod32",
+                        "context": [
+                          [41, "  const before = 1;"],
+                          [42, "  work32();"],
+                          [43, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn33",
+                        "filename": "src/lib/mod33.ts",
+                        "absPath": "/app/src/lib/mod33.ts",
+                        "lineNo": 43,
+                        "colNo": 5,
+                        "inApp": true,
+                        "module": "mod33",
+                        "context": [
+                          [42, "  const before = 1;"],
+                          [43, "  work33();"],
+                          [44, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn34",
+                        "filename": "src/lib/mod34.ts",
+                        "absPath": "/app/src/lib/mod34.ts",
+                        "lineNo": 44,
+                        "colNo": 5,
+                        "inApp": true,
+                        "module": "mod34",
+                        "context": [
+                          [43, "  const before = 1;"],
+                          [44, "  work34();"],
+                          [45, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn35",
+                        "filename": "src/lib/mod35.ts",
+                        "absPath": "/app/src/lib/mod35.ts",
+                        "lineNo": 45,
+                        "colNo": 5,
+                        "inApp": true,
+                        "module": "mod35",
+                        "context": [
+                          [44, "  const before = 1;"],
+                          [45, "  work35();"],
+                          [46, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn36",
+                        "filename": "src/lib/mod36.ts",
+                        "absPath": "/app/src/lib/mod36.ts",
+                        "lineNo": 46,
+                        "colNo": 5,
+                        "inApp": true,
+                        "module": "mod36",
+                        "context": [
+                          [45, "  const before = 1;"],
+                          [46, "  work36();"],
+                          [47, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn37",
+                        "filename": "src/lib/mod37.ts",
+                        "absPath": "/app/src/lib/mod37.ts",
+                        "lineNo": 47,
+                        "colNo": 5,
+                        "inApp": true,
+                        "module": "mod37",
+                        "context": [
+                          [46, "  const before = 1;"],
+                          [47, "  work37();"],
+                          [48, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "fn38",
+                        "filename": "src/lib/mod38.ts",
+                        "absPath": "/app/src/lib/mod38.ts",
+                        "lineNo": 48,
+                        "colNo": 5,
+                        "inApp": true,
+                        "module": "mod38",
+                        "context": [
+                          [47, "  const before = 1;"],
+                          [48, "  work38();"],
+                          [49, "  return before;"]
+                        ]
+                      },
+                      {
+                        "function": "resolveUser",
+                        "filename": "src/users.ts",
+                        "absPath": "/app/src/users.ts",
+                        "lineNo": 42,
+                        "colNo": 17,
+                        "inApp": true,
+                        "module": "users",
+                        "context": [
+                          [40, "export function resolveUser(req) {"],
+                          [41, "  const session = req.session;"],
+                          [42, "  return session.user.id;"],
+                          [43, "}"]
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "breadcrumbs",
+            "data": {
+              "values": [
+                {
+                  "timestamp": "2026-09-25T08:00:00Z",
+                  "category": "console",
+                  "level": "info",
+                  "message": "step 0",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:01:00Z",
+                  "category": "http",
+                  "level": "info",
+                  "message": "step 1",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:02:00Z",
+                  "category": "console",
+                  "level": "info",
+                  "message": "step 2",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:03:00Z",
+                  "category": "http",
+                  "level": "info",
+                  "message": "step 3",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:04:00Z",
+                  "category": "console",
+                  "level": "info",
+                  "message": "step 4",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:05:00Z",
+                  "category": "http",
+                  "level": "info",
+                  "message": "step 5",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:06:00Z",
+                  "category": "console",
+                  "level": "info",
+                  "message": "step 6",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:07:00Z",
+                  "category": "http",
+                  "level": "info",
+                  "message": "step 7",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:08:00Z",
+                  "category": "console",
+                  "level": "info",
+                  "message": "step 8",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:09:00Z",
+                  "category": "http",
+                  "level": "info",
+                  "message": "step 9",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:10:00Z",
+                  "category": "console",
+                  "level": "info",
+                  "message": "step 10",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:11:00Z",
+                  "category": "http",
+                  "level": "info",
+                  "message": "step 11",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:12:00Z",
+                  "category": "console",
+                  "level": "info",
+                  "message": "step 12",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:13:00Z",
+                  "category": "http",
+                  "level": "info",
+                  "message": "step 13",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:14:00Z",
+                  "category": "console",
+                  "level": "info",
+                  "message": "step 14",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:15:00Z",
+                  "category": "http",
+                  "level": "info",
+                  "message": "step 15",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:16:00Z",
+                  "category": "console",
+                  "level": "info",
+                  "message": "step 16",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:17:00Z",
+                  "category": "http",
+                  "level": "info",
+                  "message": "step 17",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:18:00Z",
+                  "category": "console",
+                  "level": "info",
+                  "message": "step 18",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:19:00Z",
+                  "category": "http",
+                  "level": "info",
+                  "message": "step 19",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:20:00Z",
+                  "category": "console",
+                  "level": "info",
+                  "message": "step 20",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:21:00Z",
+                  "category": "http",
+                  "level": "info",
+                  "message": "step 21",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:22:00Z",
+                  "category": "console",
+                  "level": "info",
+                  "message": "step 22",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:23:00Z",
+                  "category": "http",
+                  "level": "info",
+                  "message": "step 23",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:24:00Z",
+                  "category": "console",
+                  "level": "info",
+                  "message": "step 24",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:25:00Z",
+                  "category": "http",
+                  "level": "info",
+                  "message": "step 25",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:26:00Z",
+                  "category": "console",
+                  "level": "info",
+                  "message": "step 26",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:27:00Z",
+                  "category": "http",
+                  "level": "info",
+                  "message": "step 27",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:28:00Z",
+                  "category": "console",
+                  "level": "info",
+                  "message": "step 28",
+                  "type": "default"
+                },
+                {
+                  "timestamp": "2026-09-25T08:29:00Z",
+                  "category": "http",
+                  "level": "info",
+                  "message": "step 29",
+                  "type": "default"
+                }
+              ]
+            }
+          }
+        ],
+        "tags": [
+          {
+            "key": "env",
+            "value": "prod"
+          },
+          {
+            "key": "release",
+            "value": "1.2.3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "102",
+      "org": "acme",
+      "project": "api",
+      "title": "Error: payment webhook timed out",
+      "culprit": "handleWebhook(src/payments)",
+      "level": "error",
+      "count": "40",
+      "userCount": 12,
+      "lastSeen": "2026-09-25T08:00:00Z",
+      "shortId": "API-102"
+    },
+    {
+      "id": "103",
+      "org": "acme",
+      "project": "api",
+      "title": "Warning: slow query on orders",
+      "culprit": "listOrders(src/orders)",
+      "level": "warning",
+      "count": "9",
+      "userCount": 2,
+      "lastSeen": "2026-09-25T07:00:00Z",
+      "shortId": "API-103"
+    }
+  ]
+}
