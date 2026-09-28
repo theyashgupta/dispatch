@@ -24,6 +24,7 @@ import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { Notice } from "../../primitives/Notice.js";
 import {
+  CalendarConnectionCard,
   GitHubConnectionCard,
   GranolaConnectionCard,
   LinearConnectionCard,
@@ -549,6 +550,7 @@ export function ConnectionsTabSection({
       />
       <SlackConnectionCard />
       <GranolaConnectionCard />
+      <CalendarConnectionCard />
       <SoonConnectionCards />
     </div>
   );

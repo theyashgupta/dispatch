@@ -46,7 +46,7 @@ test("an empty key builds the object but enables nothing", () => {
   assert.equal(getLinearSource().id, "linear");
   assert.deepEqual(
     listSources().map((s) => s.id),
-    ["linear", "github", "sentry", "slack"],
+    ["linear", "github", "sentry", "slack", "calendar"],
   );
   assert.deepEqual(enabledSources(), []);
   assert.equal(isSourceEnabled("linear"), false);
@@ -89,4 +89,41 @@ test("a config with no sources block still builds Linear from the flat key", () 
   buildRegistry({ linearApiKey: "k", pollIntervalMs: 25_000 });
   assert.equal(getSource("linear")?.pollIntervalMs, 25_000);
   assert.equal(isSourceEnabled("linear"), true);
+});
+
+test("the calendar source is built always and enabled only by enabled true", () => {
+  buildRegistry(config());
+  const calendar = getSource("calendar");
+  assert.equal(calendar?.kind, "snapshot");
+  assert.equal(calendar?.pollIntervalMs, 300_000);
+  assert.deepEqual(calendar?.vaultKeys, ["CALENDAR_ICAL_URL"]);
+  assert.equal(isSourceEnabled("calendar"), false);
+  for (const enabledValue of [undefined, false]) {
+    buildRegistry(
+      config({
+        sources: {
+          linear: { apiKey: "k" },
+          calendar: {
+            mode: "macos",
+            ...(enabledValue !== undefined ? { enabled: enabledValue } : {}),
+          },
+        },
+      }),
+    );
+    assert.equal(isSourceEnabled("calendar"), false);
+  }
+  buildRegistry(
+    config({
+      sources: {
+        linear: { apiKey: "k" },
+        calendar: { enabled: true, mode: "ical", pollIntervalMs: 90_000 },
+      },
+    }),
+  );
+  assert.equal(isSourceEnabled("calendar"), true);
+  assert.equal(getSource("calendar")?.pollIntervalMs, 90_000);
+  assert.deepEqual(
+    enabledSources().map((s) => s.id),
+    ["linear", "calendar"],
+  );
 });

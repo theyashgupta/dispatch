@@ -43,7 +43,13 @@ import {
 } from "../services/orchestration/granola-round.js";
 import { sendPushForCard } from "../services/domain/push-send.js";
 import { startArtifactDetectionLoop } from "../adapters/artifact-detect.js";
-import { buildRegistry, setCredentialResolver } from "../sources/registry.js";
+import {
+  buildRegistry,
+  setCredentialResolver,
+  setMacCalendarReader,
+} from "../sources/registry.js";
+import { readMacEvents } from "../adapters/calendar-mac.js";
+import { resolveIcalCredential } from "../services/orchestration/calendar.js";
 import { resolveGithubToken } from "../services/domain/github-token.js";
 import { resolveSentryToken } from "../services/domain/sentry-token.js";
 import { resolveSlackToken } from "../services/domain/slack-token.js";
@@ -308,6 +314,8 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   setCredentialResolver("github", resolveGithubToken);
   setCredentialResolver("sentry", resolveSentryToken);
   setCredentialResolver("slack", resolveSlackToken);
+  setMacCalendarReader(readMacEvents);
+  setCredentialResolver("calendar", resolveIcalCredential);
   buildRegistry(config);
   loadOrCreateVapidKeys();
   console.log(`[push] VAPID keypair loaded from ${VAPID_KEYS_PATH}`);

@@ -15,6 +15,7 @@ export const PAGES = [
   "today",
   "slack",
   "meetings",
+  "calendar",
 ] as const;
 
 export type Page = (typeof PAGES)[number];

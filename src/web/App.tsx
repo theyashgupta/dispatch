@@ -194,6 +194,11 @@ const MeetingsPage = lazy(() =>
     default: m.MeetingsPage,
   })),
 );
+const CalendarPage = lazy(() =>
+  import("./features/calendar/index.js").then((m) => ({
+    default: m.CalendarPage,
+  })),
+);
 const CheatSheet = lazy(() =>
   import("./features/palette/index.js").then((m) => ({
     default: m.CheatSheet,
@@ -572,6 +577,10 @@ export function App() {
     [board?.enabledSources],
   );
   const meetingItems = items.filter((item) => item.source === "meeting");
+  const inboxRows = useMemo(
+    () => inboxItems.filter((item) => item.source !== "calendar"),
+    [inboxItems],
+  );
   const { show: showUndo, notice: showNotice } = undoToast;
   const [startRequest, setStartRequest] = useState<StartRequest | null>(null);
   const startAgent = useCallback(
@@ -616,7 +625,7 @@ export function App() {
       showUndo,
       notice: showNotice,
       openUrl: (url) => {
-        window.open(url, "_blank", "noopener");
+        window.open(url, "_blank", "noopener,noreferrer");
       },
       copyText: (text) =>
         navigator.clipboard
@@ -824,7 +833,7 @@ export function App() {
     />
   ) : null;
 
-  const inboxCount = inboxWaitingCount(board.cards, inboxItems);
+  const inboxCount = inboxWaitingCount(board.cards, inboxRows);
   const sessionRows = flattenSessions(board.cards, nowMs());
   const liveSessionCount = sessionRows.filter((row) => row.running).length;
   const githubEnabled = board.enabledSources?.includes("github") === true;
@@ -859,6 +868,7 @@ export function App() {
     today: { title: "Today" },
     slack: { title: "Slack", count: slack.length },
     meetings: { title: "Meetings", count: meetingItems.length },
+    calendar: { title: "Calendar" },
   };
   const pageTitle = pageMeta[route.page].title;
 
@@ -1050,7 +1060,7 @@ export function App() {
             ) : route.page === "inbox" ? (
               <InboxView
                 board={board}
-                items={inboxItems}
+                items={inboxRows}
                 selectedCardId={selectedCard ? selectedCardId : null}
                 onSelectCard={selectCard}
                 services={actionServices}
@@ -1105,6 +1115,14 @@ export function App() {
               />
             ) : route.page === "vault" ? (
               <VaultPage onCountChange={setVaultCount} />
+            ) : route.page === "calendar" ? (
+              <CalendarPage
+                items={items}
+                cards={board.cards}
+                services={actionServices}
+                onStartPromoted={(cardId) => setStartRequest({ cardId })}
+                onOpenSettings={() => navigate("settings")}
+              />
             ) : route.page === "meetings" ? (
               <MeetingsPage
                 items={meetingItems}

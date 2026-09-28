@@ -1,4 +1,8 @@
-import type { Config, SourceCredential } from "../../shared/types.js";
+import type {
+  CalendarSourceConfig,
+  Config,
+  SourceCredential,
+} from "../../shared/types.js";
 import {
   DEFAULT_FILTERS,
   DEFAULT_POLL_INTERVAL_MS,
@@ -8,6 +12,11 @@ import { GitHubSource } from "./github/github.source.js";
 import { LinearSource } from "./linear/linear.source.js";
 import { SentrySource } from "./sentry/sentry.source.js";
 import { SlackSource } from "./slack/slack.source.js";
+import {
+  CALENDAR_POLL_INTERVAL_MS,
+  CalendarSource,
+  type MacCalendarReader,
+} from "./calendar/calendar.source.js";
 
 /** The boot-built ticket sources, keyed by id. Empty until buildRegistry() runs at boot. */
 const sources = new Map<string, TicketSource>();
@@ -33,6 +42,13 @@ export function setCredentialResolver(
   resolve: CredentialResolver,
 ): void {
   resolvers.set(id, resolve);
+}
+
+let macCalendarReader: MacCalendarReader | undefined;
+
+/** Register the macOS Calendar reader (the osascript adapter); boot calls this before buildRegistry. */
+export function setMacCalendarReader(read: MacCalendarReader): void {
+  macCalendarReader = read;
 }
 
 /**
@@ -84,6 +100,30 @@ export function buildRegistry(config: Config): void {
   );
   sources.set(slack.id, slack);
   if (config.sources?.slack?.enabled === true) enabled.add(slack.id);
+  const calendar = calendarSourceFor(
+    () => config.sources?.calendar ?? { mode: "macos" },
+  );
+  sources.set(calendar.id, calendar);
+  if (config.sources?.calendar?.enabled === true) enabled.add(calendar.id);
+}
+
+/**
+ * A calendar source over the given settings with the boot-injected readers.
+ *
+ * @remarks The settings route builds a throwaway one to run the test read before it saves.
+ */
+export function calendarSourceFor(
+  settings: () => CalendarSourceConfig,
+): CalendarSource {
+  return new CalendarSource(
+    settings,
+    {
+      mac: () => macCalendarReader,
+      resolveIcalUrl: async () =>
+        (await (resolvers.get("calendar") ?? noCredential)())?.token ?? null,
+    },
+    settings().pollIntervalMs ?? CALENDAR_POLL_INTERVAL_MS,
+  );
 }
 
 export function getSource(id: string): TicketSource | undefined {

@@ -63,6 +63,7 @@ async function fetchTracked(
  * its own poll, so an older in-flight fetch that settles afterwards neither applies its stale
  * result nor reschedules. A poll requested while one is in flight only sets `rerun`, and the
  * in-flight poll runs once more when it settles, so the same source never has two fetches open.
+ * An items-only source (the calendar) never writes the board sync status, which reports card sources.
  */
 async function pollOnce(loop: Loop): Promise<void> {
   if (loop.stopped) return;
@@ -80,17 +81,21 @@ async function pollOnce(loop: Loop): Promise<void> {
     if (gen !== loop.generation) return;
     if (truncated) {
       console.warn(
-        `[poller] partial ${source.id} pull (pages remained beyond the source page cap or the cursor was missing), applying upserts only, skipping removals/gone-flags this cycle.`,
+        source.itemsOnly === true
+          ? `[poller] partial ${source.id} pull, applying upserts only, skipping auto-resolve this cycle.`
+          : `[poller] partial ${source.id} pull (pages remained beyond the source page cap or the cursor was missing), applying upserts only, skipping removals/gone-flags this cycle.`,
       );
     }
-    const tracked = await fetchTracked(source, issues, truncated);
-    if (gen !== loop.generation) return;
-    await store.applyIssues(issues, new Date().toISOString(), {
-      partial: truncated,
-      source: source.id,
-      kind: source.kind,
-      tracked,
-    });
+    if (source.itemsOnly !== true) {
+      const tracked = await fetchTracked(source, issues, truncated);
+      if (gen !== loop.generation) return;
+      await store.applyIssues(issues, new Date().toISOString(), {
+        partial: truncated,
+        source: source.id,
+        kind: source.kind,
+        tracked,
+      });
+    }
     if (items !== undefined) {
       await store.upsertItems(source.id, items, {
         kind: source.kind,
@@ -108,7 +113,7 @@ async function pollOnce(loop: Loop): Promise<void> {
       console.warn(
         `[poller] ${source.id} rate-limited, backing off ${Math.round(loop.backoffMs / 1000)}s, keeping last-known-good.`,
       );
-      void store.setSyncUnreachable(false);
+      if (source.itemsOnly !== true) void store.setSyncUnreachable(false);
       scheduleNext(loop, loop.backoffMs);
     } else if (
       err instanceof TypeError &&
@@ -117,13 +122,13 @@ async function pollOnce(loop: Loop): Promise<void> {
       console.error(
         `[poller] ${source.id} network-level poll failure, keeping last-known-good: ${err.message}`,
       );
-      void store.setSyncUnreachable(true);
+      if (source.itemsOnly !== true) void store.setSyncUnreachable(true);
       scheduleNext(loop, baseInterval(source));
     } else {
       console.error(
         `[poller] ${source.id} poll failed, keeping last-known-good: ${(err as Error).message}`,
       );
-      void store.setSyncUnreachable(false);
+      if (source.itemsOnly !== true) void store.setSyncUnreachable(false);
       scheduleNext(loop, baseInterval(source));
     }
   } finally {

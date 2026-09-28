@@ -113,6 +113,11 @@ const BUDGETS = [
     budgetGzipBytes: 4769, // seed: 4335 (re-seeded 2026-09-28 with the meeting detail pane and its four actions)
   },
   {
+    label: "assets/calendar-*.js",
+    match: (f) => f.startsWith(`assets${sep}calendar-`) && f.endsWith(".js"),
+    budgetGzipBytes: 2655, // seed: 2413 (the Calendar page agenda, lazy)
+  },
+  {
     label: "assets/index-*.css",
     match: (f) => f.startsWith(`assets${sep}index-`) && f.endsWith(".css"),
     budgetGzipBytes: 898, // seed: 816

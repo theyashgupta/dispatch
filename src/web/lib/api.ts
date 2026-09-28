@@ -1,4 +1,8 @@
 import type {
+  CalendarChoice,
+  CalendarErrorCode,
+  CalendarSettingsPatch,
+  CalendarStatus,
   GranolaCheckResult,
   GranolaStatus,
   MeetingSourceConfig,
@@ -2165,4 +2169,60 @@ export async function checkGranola(): Promise<GranolaCheckResult> {
  */
 export async function runGranola(): Promise<void> {
   await fetch("/api/meetings/granola/run", { method: "POST" });
+}
+
+/** Read the Calendar source status: GET /api/calendar/status. */
+export async function getCalendarStatus(): Promise<CalendarStatus> {
+  const res = await fetch("/api/calendar/status");
+  if (!res.ok) throw new Error(`getCalendarStatus failed: ${res.status}`);
+  return (await res.json()) as CalendarStatus;
+}
+
+type CalendarResult<T> =
+  { ok: true; value: T } | { ok: false; error: CalendarErrorCode };
+
+async function calendarResult<T>(
+  res: Response,
+  read: (body: unknown) => T,
+): Promise<CalendarResult<T>> {
+  if (res.status === 409) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: (body.error ?? "failed") as CalendarErrorCode };
+  }
+  if (!res.ok) throw new Error(`calendar request failed: ${res.status}`);
+  return { ok: true, value: read(await res.json()) };
+}
+
+/**
+ * List this Mac's calendars: POST /api/calendar/calendars with no body.
+ *
+ * @remarks A POST, so a cross-site page cannot trigger the macOS Calendars prompt. A 409 carries
+ * the read's error code, which the card shows; other failures throw.
+ */
+export async function listCalendars(): Promise<
+  CalendarResult<CalendarChoice[]>
+> {
+  return calendarResult(
+    await fetch("/api/calendar/calendars", { method: "POST" }),
+    (body) => (body as { calendars: CalendarChoice[] }).calendars,
+  );
+}
+
+/**
+ * Save Calendar settings: PUT /api/calendar/settings.
+ *
+ * @remarks Enabling runs one test read on the server; a 409 carries its error code and nothing was
+ * saved.
+ */
+export async function putCalendarSettings(
+  patch: CalendarSettingsPatch,
+): Promise<CalendarResult<CalendarStatus>> {
+  return calendarResult(
+    await fetch("/api/calendar/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }),
+    (body) => body as CalendarStatus,
+  );
 }

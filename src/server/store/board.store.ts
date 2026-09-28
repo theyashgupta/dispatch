@@ -4142,7 +4142,13 @@ class BoardStore extends EventEmitter {
         return [];
       }
       outcome = "ok";
-      this.stageItem({ ...current, state: "snoozed", snoozedUntil: untilIso });
+      const next: Item = {
+        ...current,
+        state: "snoozed",
+        snoozedUntil: untilIso,
+      };
+      delete next.autoResolved;
+      this.stageItem(next);
       return [];
     }).then(() => outcome);
   }

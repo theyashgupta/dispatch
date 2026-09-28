@@ -41,6 +41,7 @@ export interface TicketSource {
   readonly kind: SourceKind;
   readonly pollIntervalMs: number;
   readonly vaultKeys: readonly string[];
+  readonly itemsOnly?: boolean;
   fetch(opts?: { cursors?: Record<string, SourceCursor> }): Promise<{
     issues: SourceIssue[];
     items?: Item[];

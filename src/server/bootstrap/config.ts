@@ -7,6 +7,7 @@ import type {
   ItemSourceConfig,
   LinearStateMap,
   SlackSourceConfig,
+  CalendarSourceConfig,
   MeetingSourceConfig,
   SourceFilters,
   StatusChannel,
@@ -18,6 +19,8 @@ import {
   DEFAULT_CLEANUP_DELAY_DAYS,
   DEFAULT_ARCHIVE_RETENTION_DAYS,
   ARCHIVE_RETENTION_MAX_DAYS,
+  CALENDAR_TITLE_MAX,
+  CALENDARS_MAX,
   DEFAULT_FILTERS,
   DEFAULT_GRANOLA_WINDOW_HOURS,
   DEFAULT_POLL_INTERVAL_MS,
@@ -294,15 +297,7 @@ function readSlackSettings(parsed: Record<string, unknown>): SlackSourceConfig {
 function readMeetingSource(
   parsed: Record<string, unknown>,
 ): MeetingSourceConfig {
-  const sources = parsed.sources;
-  const block =
-    typeof sources === "object" && sources !== null && !Array.isArray(sources)
-      ? (sources as Record<string, unknown>).meeting
-      : undefined;
-  const meeting =
-    typeof block === "object" && block !== null && !Array.isArray(block)
-      ? (block as Record<string, unknown>)
-      : {};
+  const meeting = nestedSource(parsed, "meeting") ?? {};
   const windowHours = GRANOLA_WINDOW_HOURS.find(
     (hours) => hours === meeting.windowHours,
   );
@@ -311,6 +306,41 @@ function readMeetingSource(
       ? { enabled: meeting.enabled }
       : {}),
     windowHours: windowHours ?? DEFAULT_GRANOLA_WINDOW_HOURS,
+  };
+}
+
+/**
+ * Read `sources.calendar`, keeping at most 50 calendar titles of at most 200 characters.
+ *
+ * @remarks An unknown mode reads as macos, so a hand-edited typo never switches the source to the
+ * iCal path, which needs a Vault key the user may not have.
+ */
+function readCalendarSource(
+  parsed: Record<string, unknown>,
+): CalendarSourceConfig {
+  const calendar = nestedSource(parsed, "calendar") ?? {};
+  const interval = calendar.pollIntervalMs;
+  const titles = Array.isArray(calendar.calendars)
+    ? calendar.calendars
+        .filter(
+          (title): title is string =>
+            typeof title === "string" &&
+            title.trim() !== "" &&
+            title.length <= CALENDAR_TITLE_MAX,
+        )
+        .slice(0, CALENDARS_MAX)
+    : undefined;
+  return {
+    ...(typeof calendar.enabled === "boolean"
+      ? { enabled: calendar.enabled }
+      : {}),
+    ...(typeof interval === "number" &&
+    Number.isFinite(interval) &&
+    interval > 0
+      ? { pollIntervalMs: interval }
+      : {}),
+    mode: calendar.mode === "ical" ? "ical" : "macos",
+    ...(titles !== undefined ? { calendars: titles } : {}),
   };
 }
 
@@ -477,6 +507,7 @@ export function loadConfig(): Config {
       sentry: readNestedSourceSettings(parsed, "sentry"),
       slack: readSlackSettings(parsed),
       meeting: readMeetingSource(parsed),
+      calendar: readCalendarSource(parsed),
     },
     lastUsedPlaybook: readLastUsedPlaybook(parsed),
     cleanupDelayDays: readWholeDays(

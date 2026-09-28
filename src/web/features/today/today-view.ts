@@ -124,8 +124,8 @@ export function agendaItems(items: readonly Item[], now: Date): Item[] {
 /**
  * Return the agenda rows to render, empty unless a calendar source is enabled.
  *
- * @remarks No calendar reader exists yet (R-21), so the enabled-source check is what keeps the
- * agenda hidden even if a stray calendar item reaches the feed.
+ * @remarks Calendar items stay in the board after the source is turned off, so the enabled-source
+ * check keeps the agenda hidden until the Calendar source is on again.
  */
 export function visibleAgenda(
   enabledSources: readonly string[] | undefined,

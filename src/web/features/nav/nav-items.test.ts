@@ -49,12 +49,12 @@ test("the Work group lists Board, Sessions, Workspace and Activity in order", ()
   );
 });
 
-test("the Sources group holds Tickets, Pull Requests, Errors, Meetings and Slack", () => {
+test("the Sources group holds Tickets, Pull Requests, Errors, Meetings, Calendar and Slack", () => {
   assert.deepEqual(
     NAV_ITEMS.filter((item) => item.group === "Sources").map(
       (item) => item.page,
     ),
-    ["tickets", "pull-requests", "errors", "meetings", "slack"],
+    ["tickets", "pull-requests", "errors", "meetings", "calendar", "slack"],
   );
 });
 

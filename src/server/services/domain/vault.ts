@@ -532,8 +532,9 @@ export const readPrevious = (name: string) =>
 
 /**
  * Read a key's current value, from `values.env`.
- * @remarks Exists for exactly one caller, the rotate flow, which must show the outgoing value so
- * the user can revoke it upstream or roll back before the new one lands.
+ *
+ * @remarks Two callers: the rotate flow, which must show the outgoing value so the user can revoke it
+ * upstream, and the calendar iCal URL resolver, which hands the value only to the feed fetch.
  */
 export const readCurrent = (name: string) =>
   readStoredValue(VAULT_VALUES_PATH, name);

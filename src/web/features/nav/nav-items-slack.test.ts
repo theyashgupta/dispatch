@@ -14,7 +14,7 @@ test("the Slack row shows only while Slack is enabled, as the last Sources row",
   );
   assert.deepEqual(
     sources?.items.map((item) => item.label),
-    ["Tickets", "Pull Requests", "Errors", "Meetings", "Slack"],
+    ["Tickets", "Pull Requests", "Errors", "Meetings", "Calendar", "Slack"],
   );
 });
 

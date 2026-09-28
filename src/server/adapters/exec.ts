@@ -113,6 +113,7 @@ export async function run(
       stderr?: string;
       stdout?: string;
       code?: number | string;
+      killed?: boolean;
     };
     if (disarm !== null && opts.signal?.aborted === true) {
       await childExit(pending.child);
@@ -121,6 +122,7 @@ export async function run(
       stderr: e.stderr ?? "",
       stdout: e.stdout ?? "",
       code: e.code,
+      killed: e.killed === true,
     });
   } finally {
     if (disarm !== null) void childExit(pending.child).then(disarm);
