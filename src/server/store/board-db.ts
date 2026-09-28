@@ -83,6 +83,12 @@ export interface BoardMeta {
    * target version, the migration pass never runs again against the same database.
    */
   schemaVersion?: number;
+  sourceCursors?: Record<string, SourceCursor>;
+}
+
+export interface SourceCursor {
+  cursor: string;
+  polledAt: string;
 }
 
 export interface ItemWrites {

@@ -37,6 +37,7 @@ import {
   BOARD_DB_PATH,
   type BoardDb,
   type BoardMeta,
+  type SourceCursor,
   type PushSubscriptionRow,
   openBoardDb,
 } from "./board-db.js";
@@ -441,6 +442,24 @@ export interface ReservedSession {
 }
 
 /**
+ * The well-formed source cursors from a loaded meta row.
+ */
+function readSourceCursors(
+  meta: Partial<BoardMeta>,
+): Record<string, SourceCursor> {
+  const cursors: Record<string, SourceCursor> = {};
+  for (const [key, entry] of Object.entries(meta.sourceCursors ?? {})) {
+    if (
+      typeof entry?.cursor === "string" &&
+      typeof entry.polledAt === "string"
+    ) {
+      cursors[key] = { cursor: entry.cursor, polledAt: entry.polledAt };
+    }
+  }
+  return cursors;
+}
+
+/**
  * Fold the legacy per-prefix meta fields into the counter map on load.
  *
  * @remarks Takes the larger of the map entry and the legacy field per prefix, so a database
@@ -520,6 +539,7 @@ class BoardStore extends EventEmitter {
   /** Folder used on the last successful start, preselected in the modal; null when none yet. */
   private lastUsedFolder: string | null = null;
   private identifierCounters: Record<string, number> = {};
+  private sourceCursors: Record<string, SourceCursor> = {};
   private readonly items = new Map<string, Item>();
   private pendingItemUpserts: Item[] = [];
   /**
@@ -962,6 +982,7 @@ class BoardStore extends EventEmitter {
       localTicketCounter: this.identifierCounters.LOCAL ?? 0,
       groupTicketCounter: this.identifierCounters.GROUP ?? 0,
       schemaVersion: this.schemaVersion,
+      sourceCursors: { ...this.sourceCursors },
     };
   }
 
@@ -1044,6 +1065,7 @@ class BoardStore extends EventEmitter {
       lastUsed: meta.lastUsed,
     });
     this.identifierCounters = seedIdentifierCounters(meta);
+    this.sourceCursors = readSourceCursors(meta);
     this.items.clear();
     for (const item of this.db.readAllItems()) this.items.set(item.id, item);
     console.log(`[store] loaded ${this.cards.size} card(s) from board.db.`);
@@ -1515,6 +1537,43 @@ class BoardStore extends EventEmitter {
       if (!this.workspaceFolders.includes(path)) {
         this.workspaceFolders.push(path);
       }
+      return [];
+    });
+  }
+
+  /**
+   * The cursors a source keeps, keyed `<source>:<feed>`.
+   */
+  getSourceCursors(id: string): Record<string, SourceCursor> {
+    const prefix = `${id}:`;
+    return Object.fromEntries(
+      Object.entries(this.sourceCursors).filter(([key]) =>
+        key.startsWith(prefix),
+      ),
+    );
+  }
+
+  /**
+   * Replace every cursor of one source; an empty map clears them.
+   *
+   * @remarks Keys outside the `<id>:` prefix are refused, so one source can never overwrite
+   * another source's cursor.
+   */
+  setSourceCursors(
+    id: string,
+    cursors: Record<string, SourceCursor>,
+  ): Promise<void> {
+    const prefix = `${id}:`;
+    if (Object.keys(cursors).some((key) => !key.startsWith(prefix))) {
+      return Promise.reject(
+        new Error(`source cursor keys must start with ${prefix}`),
+      );
+    }
+    return this.enqueue(() => {
+      const kept = Object.entries(this.sourceCursors).filter(
+        ([key]) => !key.startsWith(prefix),
+      );
+      this.sourceCursors = { ...Object.fromEntries(kept), ...cursors };
       return [];
     });
   }
