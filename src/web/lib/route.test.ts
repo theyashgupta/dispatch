@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PAGES, parseRoute, routeHash } from "./route.js";
+import { PAGES, parseRoute, rememberedHash, routeHash } from "./route.js";
 
 test("every page parses to itself", () => {
   for (const page of PAGES) {
@@ -21,18 +21,23 @@ test("empty, bare and unknown hashes map to the board with no id", () => {
   }
 });
 
-test("the route table holds exactly the nine shell pages", () => {
+test("the route table holds exactly the shell pages", () => {
   assert.deepEqual([...PAGES].sort(), [
     "accounts",
     "activity",
     "archive",
+    "ask",
     "board",
+    "flow",
     "inbox",
     "playbooks",
     "settings",
     "vault",
     "workspace",
+    "workspaces",
   ]);
+  assert.equal(parseRoute("#/workspaces").page, "workspaces");
+  assert.deepEqual(parseRoute("#/flow"), { page: "flow" });
   assert.deepEqual(parseRoute("#/accounts/whatever"), {
     page: "accounts",
     id: "whatever",
@@ -75,4 +80,20 @@ test("a trailing slash and an empty id both mean no id", () => {
 test("routeHash encodes an id with reserved characters", () => {
   const route = parseRoute(routeHash({ page: "settings", id: "a b/c" }));
   assert.deepEqual(route, { page: "settings", id: "a b/c" });
+});
+
+test("an Ask route is remembered without its prefilled question", () => {
+  assert.equal(
+    rememberedHash(routeHash({ page: "ask", id: "Tell me about LOCAL-1" })),
+    "#/ask",
+  );
+  assert.equal(rememberedHash("#/ask"), "#/ask");
+});
+
+test("other routes are remembered with their id", () => {
+  assert.equal(
+    rememberedHash("#/settings/workspaces"),
+    "#/settings/workspaces",
+  );
+  assert.equal(rememberedHash("#/board"), "#/board");
 });
