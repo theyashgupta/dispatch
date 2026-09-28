@@ -33,6 +33,7 @@ test("the route table holds exactly the shell and source pages", () => {
     "pull-requests",
     "sessions",
     "settings",
+    "slack",
     "tickets",
     "today",
     "vault",

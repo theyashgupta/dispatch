@@ -170,37 +170,47 @@ export function actionsFor(row: InboxRowModel): InboxAction[] {
   return INBOX_ACTIONS.filter((a) => a.appliesTo(row));
 }
 
-/** Run one action; a refusal or failure becomes a notice instead of an unhandled rejection. */
+/**
+ * Run one action and resolve whether it ran and succeeded.
+ *
+ * @remarks A refusal or failure becomes a notice instead of an unhandled rejection.
+ */
 export function runAction(
   action: InboxAction,
   ctx: ActionContext,
   row: InboxRowModel,
-): Promise<void> {
-  if (!action.appliesTo(row)) return Promise.resolve();
-  return action.run(ctx, row).catch((err: unknown) => {
-    ctx.notice(err instanceof Error ? err.message : `${action.label} failed`);
-  });
+): Promise<boolean> {
+  if (!action.appliesTo(row)) return Promise.resolve(false);
+  return action.run(ctx, row).then(
+    () => true,
+    (err: unknown) => {
+      ctx.notice(err instanceof Error ? err.message : `${action.label} failed`);
+      return false;
+    },
+  );
 }
 
-/** Snooze an item row to a preset and offer Undo; a refusal becomes a notice. */
+/** Snooze an item row to a preset, offer Undo, and resolve whether it snoozed; a refusal becomes a notice. */
 export function snoozeRow(
   ctx: ActionContext,
   row: InboxRowModel,
   preset: SnoozePreset,
   now: Date,
-): Promise<void> {
-  if (row.kind !== "item") return Promise.resolve();
+): Promise<boolean> {
+  if (row.kind !== "item") return Promise.resolve(false);
   return Promise.resolve()
     .then(() =>
       ctx.api.snoozeItem(row.id, snoozeUntil(preset, now).toISOString()),
     )
-    .then(() =>
+    .then(() => {
       ctx.showUndo(`${row.title} snoozed for ${SNOOZE_LABELS[preset]}`, () =>
         ctx.api.setItemState(row.id, priorState(row)),
-      ),
-    )
+      );
+      return true;
+    })
     .catch((err: unknown) => {
       ctx.notice(err instanceof Error ? err.message : "Snooze failed");
+      return false;
     });
 }
 

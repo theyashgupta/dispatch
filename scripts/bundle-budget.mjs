@@ -88,6 +88,11 @@ const BUDGETS = [
     budgetGzipBytes: 4023, // seed: 3657 (the Today page with chips, list and agenda, lazy, LOCAL-48)
   },
   {
+    label: "assets/SlackPage-*.js",
+    match: (f) => f.startsWith(`assets${sep}SlackPage-`) && f.endsWith(".js"),
+    budgetGzipBytes: 2613, // seed: 2375 (the Slack page list and detail, lazy through the slack barrel's loadSlackPage, LOCAL-47)
+  },
+  {
     label: "assets/palette-*.js",
     match: (f) => f.startsWith(`assets${sep}palette-`) && f.endsWith(".js"),
     budgetGzipBytes: 2595, // seed: 2359 (the command palette and the cheat sheet, lazy)

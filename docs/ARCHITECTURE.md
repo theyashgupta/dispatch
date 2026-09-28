@@ -2342,11 +2342,25 @@ never cached.
 In the Inbox, an expanded Slack item with `meta.threadTs` shows `features/slack/SlackThread`: a
 collapsed "Thread" section whose "Load thread" button fetches the route through
 `hooks/useSlackThread` (never on mount or a timer) and lists the messages as plain text. Every
-expanded Slack item also offers "Draft reply" (`lib/actions.ts`, no key): it loads the thread when
+expanded Slack item, and the Slack page detail below, also offers "Draft reply" (`lib/actions.ts`, no key): it loads the thread when
 there is one, builds the kickoff with `lib/slack-prompt.ts#draftReplyPrompt` (the message and the
 thread fenced by `fenceUntrusted`, the channel named, posting forbidden) and calls App's
 `startAgent`, which promotes the item, moves the card to To Do and opens StartModal prefilled. The
 reply is printed in the session; Dispatch still calls no Slack write method.
+
+The Slack page (`#/slack` and `#/slack/<id>`, LOCAL-47) lists the same Slack items.
+`lib/slack-rows.ts` builds its rows (`slackRows`: Slack items not done, newest first, as Inbox row
+models), pills (`slackPills`: From, DM or Mention, Thread) and conversation groups
+(`groupSlackRows`); it sits in `lib/` so App counts the rows for the nav chip and the page title
+without loading the page chunk. App lazy-loads the page through the slack barrel's
+`loadSlackPage()`, because the Inbox imports `SlackThread` from the same barrel eagerly. At 1024 px
+and wider the list and the detail sit side by side; below that the detail replaces the list and
+offers Back. Selecting a row marks it read. The detail runs `INBOX_ACTIONS` by id (Draft reply,
+Promote to ticket, Snooze, Done, Copy link), wraps promote to show "Created <identifier>", and
+clears the selection after a successful Promote, Done or snooze preset when that row is still
+selected (`runAction` and `snoozeRow` resolve whether the action succeeded). With Slack off the page shows only a
+notice that links to Settings; with no Slack items it shows only an empty message; an id that is
+not a listed row shows the list (and, when wide, the detail's "Pick a message" state).
 
 ### SSE Transport
 
@@ -3380,11 +3394,18 @@ shifts the docked panel by style values alone and never remounts the terminal if
 absolutely positioned element inside the rows container carries the tint
 (`color-mix(in srgb, var(--accent) 16%, var(--surface-column))`, the formula the inbox count badge
 and the session switcher already use) and is translated by the active row's `offsetTop`, read from
-a per-row ref map in a layout effect when the route or the collapsed state changes. Switching pages
+a per-row ref map in a layout effect when the route, the collapsed state or the visible rows change. Switching pages
 moves one transform and re-renders no row; the active row only changes its text color to
 `var(--accent)`, the "active sidebar row" accent job. Rows are 32px tall, take keyboard focus
 through `focusRing()` only, and expose `aria-current="page"`. Groups with no rows are omitted, so
 Sources and System stay hidden until a page exists for them.
+
+**A nav row tied to a source shows only while that source is enabled.** `NavItem` has an optional
+`source`; `visibleNavItems(NAV_ITEMS, board.enabledSources)` in `nav-items.ts` drops a row whose
+source is not enabled and keeps every row without one. `SidebarNav` derives its groups from that
+list, and `App.tsx` passes the same list to `buildCommands`, so the palette's "Go to" command
+follows the same rule. Only the Slack row (last in Sources, with the unread non-done Slack count)
+carries a source today; every other row is always present.
 
 **The footer status truncation chain moved with the status.** The sync status is the sidebar's only
 elastic text and the one piece that can be arbitrarily long (the server-supplied `syncWarning` has

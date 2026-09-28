@@ -13,6 +13,7 @@ export const PAGES = [
   "pull-requests",
   "errors",
   "today",
+  "slack",
 ] as const;
 
 export type Page = (typeof PAGES)[number];

@@ -20,7 +20,7 @@ import { Spinner } from "../../primitives/Spinner.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { Glyph, wordmarkStyle } from "../../primitives/Glyph.js";
 import { IconButton } from "../../primitives/IconButton.js";
-import { NAV_ITEMS, navGroups } from "./nav-items.js";
+import { navGroups, type NavItem } from "./nav-items.js";
 import { NavRow } from "./NavRow.js";
 import { SyncStatus } from "./SyncStatus.js";
 
@@ -32,6 +32,8 @@ interface SidebarNavProps {
   inboxCount: number;
   liveSessionCount: number;
   prCount: number;
+  slackCount: number;
+  navItems: readonly NavItem[];
   ticketsCount: number;
   errorCount: number;
   syncedAt: string | null;
@@ -161,8 +163,6 @@ const unseenDotStyle: CSSProperties = {
   pointerEvents: "none",
 };
 
-const GROUPS = navGroups(NAV_ITEMS);
-
 export function SidebarNav({
   route,
   onNavigate,
@@ -171,6 +171,8 @@ export function SidebarNav({
   inboxCount,
   liveSessionCount,
   prCount,
+  slackCount,
+  navItems,
   ticketsCount,
   errorCount,
   syncedAt,
@@ -198,11 +200,12 @@ export function SidebarNav({
   const [indicatorTop, setIndicatorTop] = useState<number | null>(null);
   const [newTicketHovered, setNewTicketHovered] = useState(false);
   const [newTicketFocused, setNewTicketFocused] = useState(false);
+  const groups = navGroups(navItems);
 
   useLayoutEffect(() => {
     const el = rowRefs.current.get(route.page);
     setIndicatorTop(el == null ? null : el.offsetTop);
-  }, [route.page, collapsed]);
+  }, [route.page, collapsed, navItems]);
 
   return (
     <nav
@@ -237,7 +240,7 @@ export function SidebarNav({
             transform: `translateY(${indicatorTop ?? 0}px)`,
           }}
         />
-        {GROUPS.map((entry, index) => (
+        {groups.map((entry, index) => (
           <div key={entry.group}>
             {collapsed ? (
               index > 0 ? (
@@ -269,6 +272,8 @@ export function SidebarNav({
                     <Chip>{ticketsCount}</Chip>
                   ) : item.page === "errors" && errorCount > 0 ? (
                     <Chip tone="accent">{errorCount}</Chip>
+                  ) : item.page === "slack" && slackCount > 0 ? (
+                    <Chip tone="accent">{slackCount}</Chip>
                   ) : undefined
                 }
                 onSelect={() => onNavigate(item.page)}

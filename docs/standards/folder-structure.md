@@ -44,7 +44,7 @@ src/web/
 │   ├── nav/        # SidebarNav, NavRow, SyncStatus, nav-items
 │   ├── modals/     # StartModal, CleanupModal, MultiSelect
 │   ├── settings/   # SettingsScreen (full-screen, sidebar-nav), PlaybookEditorModal
-│   ├── slack/      # SlackThread, reused by the Inbox row and the Slack page through the barrel
+│   ├── slack/      # SlackPage, SlackList, SlackDetail, SlackThread (the Inbox row reuses SlackThread through the barrel)
 │   └── badges/     # GoneBadge, PlanReadyBadge, SourceBadge — shared leaf feature (see import direction)
 ├── hooks/          # data/effect hooks: useBoardStream, useUnseenActivity, useTransitionNotifications, useResumeFeedback, useMediaQuery
 ├── lib/            # non-UI helpers: api.ts, card-badges.ts, format-age.ts, resume-feedback.ts, start-request.ts
@@ -66,6 +66,7 @@ src/web/
 | `PullRequestsPage.tsx`, `PrList.tsx`, `PrDetail.tsx`                                                                         | `features/pull-requests/`        |
 | `ErrorsPage.tsx`, `ErrorList.tsx`, `ErrorDetail.tsx`, `error-rows.ts`                                                        | `features/errors/`               |
 | `TodayPage.tsx`, `P0Card.tsx`, `CountChips.tsx`, `TodayList.tsx`, `Agenda.tsx`, `EntryRow.tsx`, `today-view.ts`              | `features/today/`                |
+| `SlackPage.tsx`, `SlackList.tsx`, `SlackDetail.tsx`, `SlackThread.tsx`                                                       | `features/slack/`                |
 | `useBoardStream.ts`, `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts`     | `hooks/`                         |
 | `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`                                        | `lib/`                           |
 | `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Glyph` / `Markdown` / `SplitView` / `ListGroup` / `DetailPaneBody` | `primitives/`                    |

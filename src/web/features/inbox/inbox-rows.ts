@@ -1,7 +1,10 @@
 import type { Card, FilterOption, Item } from "../../../shared/types.js";
 import type { InboxRowModel } from "../../lib/actions.js";
+import { capitalize, humanizeType, itemRow } from "../../lib/inbox-row.js";
 import { cardPriorityScore } from "../../lib/card-priority.js";
 import { stateTypeRank } from "../../lib/linear-state.js";
+
+export { humanizeType };
 
 export type InboxRange = "all" | "today" | "3d" | "week";
 export type InboxGroupBy = "none" | "source" | "type" | "state";
@@ -20,35 +23,7 @@ interface InboxGroup {
   rows: InboxRowModel[];
 }
 
-const ACRONYMS: Record<string, string> = { pr: "PR", ci: "CI", dm: "DM" };
 const DAY_MS = 86_400_000;
-
-/** Turn a connector type key such as `pr_review` into the label `PR review`. */
-export function humanizeType(type: string): string {
-  return capitalize(
-    type
-      .split(/[_\s-]+/)
-      .filter(Boolean)
-      .map((w) => ACRONYMS[w] ?? w)
-      .join(" "),
-  );
-}
-
-function itemRow(item: Item): InboxRowModel {
-  return {
-    kind: "item",
-    id: item.id,
-    source: item.source,
-    title: item.title,
-    snippet: item.snippet,
-    priority: item.priority,
-    time: item.createdAt,
-    unread: item.state === "unread",
-    url: item.url,
-    typeLabel: humanizeType(item.type),
-    item,
-  };
-}
 
 function cardRow(card: Card, opened: boolean): InboxRowModel {
   return {
@@ -123,10 +98,6 @@ export function filterInboxRows(
       (!filter.unreadOnly || row.unread) &&
       (q === "" || matchesQuery(row, q)),
   );
-}
-
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 const NO_STATE = "No state";

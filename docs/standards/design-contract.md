@@ -130,6 +130,10 @@ toggle (`Button` with `aria-pressed`, used by Inbox Unread only and Sessions Liv
 accent `Chip` as the inbox badge. The command palette (LOCAL-33) marks its active palette row,
 the one Enter runs, with the same 16 percent accent tint and accent text.
 
+Accent consumers added by G6 (LOCAL-47), same job: the sidebar Slack unread count uses the same
+accent `Chip` as the inbox badge, and the Slack page's DM and Mention pills are accent `Chip`s that
+mark a message addressed to the user.
+
 The Pull Requests patch view (LOCAL-45) colors an added line with the text color the success
 `Chip` tone uses (`--status-ok`) and a removed line with the danger tone's text color
 (`--destructive-text`); hunk headers use `--text-muted` and context lines `--text`. No new token:

@@ -7,6 +7,7 @@ import {
   Inbox,
   Kanban,
   KeyRound,
+  MessageSquare,
   PanelLeft,
   SquareTerminal,
   Sun,
@@ -14,6 +15,7 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
+import type { ItemSourceId } from "../../../shared/types.js";
 import type { Page } from "../../lib/route.js";
 
 export type NavGroup = "Home" | "Work" | "Sources" | "System";
@@ -23,6 +25,7 @@ export interface NavItem {
   label: string;
   icon: LucideIcon;
   group: NavGroup;
+  source?: ItemSourceId;
 }
 
 export const NAV_GROUPS: readonly NavGroup[] = [
@@ -61,6 +64,13 @@ export const NAV_ITEMS: readonly NavItem[] = [
     group: "Sources",
   },
   { page: "errors", label: "Errors", icon: AlertTriangle, group: "Sources" },
+  {
+    page: "slack",
+    label: "Slack",
+    icon: MessageSquare,
+    group: "Sources",
+    source: "slack",
+  },
 ];
 
 /**
@@ -74,4 +84,18 @@ export function navGroups(
     group,
     items: items.filter((item) => item.group === group),
   })).filter((entry) => entry.items.length > 0);
+}
+
+/**
+ * Return the nav rows to show: a row tied to a source appears only while that source is enabled.
+ *
+ * @remarks Rows without a source always show. The palette's "Go to" commands take this same list.
+ */
+export function visibleNavItems(
+  items: readonly NavItem[],
+  enabledSources: readonly string[],
+): NavItem[] {
+  return items.filter(
+    (item) => item.source === undefined || enabledSources.includes(item.source),
+  );
 }
