@@ -1,0 +1,14 @@
+{
+  "data": {
+    "issueCreate": {
+      "success": true,
+      "issue": {
+        "id": "issue-10",
+        "identifier": "ENG-10",
+        "url": "https://linear.app/acme/issue/ENG-10",
+        "title": "Local sync card",
+        "description": "Body line\n\ndispatch-sync:LOCAL-1"
+      }
+    }
+  }
+}
