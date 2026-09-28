@@ -17,9 +17,11 @@ const selectStyle: CSSProperties = {
 
 interface SelectProps<T extends string> {
   label: string;
-  value: T;
+  value: T | "";
   labels: Record<T, string>;
   onChange: (value: T) => void;
+  placeholder?: string;
+  disabled?: boolean;
 }
 
 export function Select<T extends string>({
@@ -27,19 +29,31 @@ export function Select<T extends string>({
   value,
   labels,
   onChange,
+  placeholder,
+  disabled,
 }: SelectProps<T>) {
   const [focused, setFocused] = useState(false);
   return (
     <select
       aria-label={label}
       value={value}
+      disabled={disabled}
       onChange={(e) => onChange(e.target.value as T)}
       onFocus={(event) =>
         setFocused(event.currentTarget.matches(":focus-visible"))
       }
       onBlur={() => setFocused(false)}
-      style={{ ...selectStyle, ...focusRing(focused) }}
+      style={{
+        ...selectStyle,
+        ...focusRing(focused && !disabled),
+        ...(disabled ? { cursor: "default", opacity: 0.5 } : null),
+      }}
     >
+      {placeholder != null ? (
+        <option value="" disabled>
+          {placeholder}
+        </option>
+      ) : null}
       {(Object.keys(labels) as T[]).map((key) => (
         <option key={key} value={key}>
           {labels[key]}
