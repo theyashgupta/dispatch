@@ -1,5 +1,6 @@
 import { Router, type Response } from "express";
 import { isProviderCode } from "../../shared/credential.js";
+import { pollNow } from "../adapters/poller.js";
 import {
   isSlackChannel,
   normalizeSlackChannels,
@@ -18,8 +19,9 @@ import {
 /**
  * Slack setup routes: list the channels to pick, resolve a pasted link, save the picked list.
  *
- * @remarks Listing and resolving talk to Slack only while the Slack switch is on. Errors answer an
- * error kind and, for Slack's own refusals, Slack's error code; never the token or a raw body.
+ * @remarks Listing and resolving talk to Slack only while the Slack switch is on, and a save polls
+ * Slack at once when the source is running. Errors answer an error kind and, for Slack's own
+ * refusals, Slack's error code; never the token or a raw body.
  */
 export const slackRouter = Router();
 
@@ -94,5 +96,6 @@ slackRouter.put("/sources/slack/channels", (req, res) => {
     res.status(500).json({ error: "save-failed" });
     return;
   }
+  pollNow("slack");
   res.status(200).json({ channels: clean });
 });
