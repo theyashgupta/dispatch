@@ -108,6 +108,11 @@ const BUDGETS = [
     budgetGzipBytes: 3744, // seed: 3403 (the tickets page with its row model, lazy)
   },
   {
+    label: "assets/meetings-*.js",
+    match: (f) => f.startsWith(`assets${sep}meetings-`) && f.endsWith(".js"),
+    budgetGzipBytes: 2735, // seed: 2486 (the meeting notes modal, lazy)
+  },
+  {
     label: "assets/index-*.css",
     match: (f) => f.startsWith(`assets${sep}index-`) && f.endsWith(".css"),
     budgetGzipBytes: 898, // seed: 816

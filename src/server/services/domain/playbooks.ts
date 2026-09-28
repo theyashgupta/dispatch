@@ -87,14 +87,14 @@ export { hasDispatchMarker };
  * Derive an on-disk-safe slug from a display name: lowercase, collapse every run of
  * non-`[a-z0-9]` characters to a single hyphen, trim leading/trailing hyphens. The result always
  * matches `^[a-z0-9][a-z0-9-]*$` by construction — this is the path-traversal defense, since a raw
- * client name string is NEVER passed to `path.join`.
+ * client name string is NEVER passed to `path.join`. A caller's `fallback` must itself be a slug.
  */
-function slugify(name: string): string {
+export function slugify(name: string, fallback = "playbook"): string {
   const slug = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return slug === "" ? "playbook" : slug;
+  return slug === "" ? fallback : slug;
 }
 
 /**

@@ -2042,3 +2042,62 @@ export async function resolveSentryIssue(
   );
   return res?.ok ? { ok: true } : prFailure(res);
 }
+
+export interface MeetingDraft {
+  key: string;
+  title: string;
+  description: string;
+}
+
+/**
+ * Draft the user's action items from meeting notes: POST /api/cards/draft-many.
+ *
+ * @remarks Non-OK statuses resolve `{ ok: false, error }` with the server's error code; an abort
+ * or a network failure rejects, left for the caller's catch, like `generateTicketDraft`.
+ */
+export async function draftMeetingItems(
+  meeting: string,
+  notes: string,
+  me: string,
+  signal: AbortSignal,
+): Promise<
+  { ok: true; drafts: MeetingDraft[] } | { ok: false; error: string | null }
+> {
+  const res = await fetch("/api/cards/draft-many", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ meeting, notes, me }),
+    signal,
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: body.error ?? null };
+  }
+  const body = (await res.json()) as { drafts: MeetingDraft[] };
+  return { ok: true, drafts: body.drafts };
+}
+
+/** Create the checked meeting drafts as Inbox items: POST /api/meetings/items. Never throws. */
+export async function createMeetingItems(
+  meeting: string,
+  drafts: readonly MeetingDraft[],
+): Promise<
+  | { ok: true; created: number; updated: number }
+  | { ok: false; error: string | null }
+> {
+  try {
+    const res = await fetch("/api/meetings/items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ meeting, drafts }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      return { ok: false, error: body.error ?? null };
+    }
+    const body = (await res.json()) as { created: number; updated: number };
+    return { ok: true, created: body.created, updated: body.updated };
+  } catch {
+    return { ok: false, error: null };
+  }
+}

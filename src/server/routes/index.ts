@@ -21,6 +21,7 @@ import { profileRouter } from "./profile.route.js";
 import { linearRouter } from "./linear.route.js";
 import { sentryRouter } from "./sentry.route.js";
 import { slackRouter } from "./slack.route.js";
+import { meetingsRouter } from "./meetings.route.js";
 
 /**
  * Plain composition of the sub-routers — no nested gate here. The single enforcement point for
@@ -52,3 +53,4 @@ apiRouter.use(profileRouter);
 apiRouter.use(linearRouter);
 apiRouter.use(sentryRouter);
 apiRouter.use(slackRouter);
+apiRouter.use(meetingsRouter);

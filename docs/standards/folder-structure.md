@@ -67,6 +67,7 @@ src/web/
 | `ErrorsPage.tsx`, `ErrorList.tsx`, `ErrorDetail.tsx`, `error-rows.ts`                                                        | `features/errors/`               |
 | `TodayPage.tsx`, `P0Card.tsx`, `CountChips.tsx`, `TodayList.tsx`, `Agenda.tsx`, `EntryRow.tsx`, `today-view.ts`              | `features/today/`                |
 | `SlackPage.tsx`, `SlackList.tsx`, `SlackDetail.tsx`, `SlackThread.tsx`                                                       | `features/slack/`                |
+| `MeetingNotesModal.tsx`                                                                                                      | `features/meetings/`             |
 | `useBoardStream.ts`, `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts`     | `hooks/`                         |
 | `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`                                        | `lib/`                           |
 | `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Glyph` / `Markdown` / `SplitView` / `ListGroup` / `DetailPaneBody` | `primitives/`                    |
