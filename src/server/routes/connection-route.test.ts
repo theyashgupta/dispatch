@@ -250,12 +250,12 @@ test("every route answers 404 for a source the registry does not serve", async (
   seed(true);
   linearAnswers(VIEWER);
   const before = sha();
-  assert.equal((await call("GET", "/github/connection")).status, 404);
+  assert.equal((await call("GET", "/slack/connection")).status, 404);
   assert.equal(
-    (await call("PUT", "/github/key", { apiKey: NEW_KEY })).status,
+    (await call("PUT", "/slack/key", { apiKey: NEW_KEY })).status,
     404,
   );
-  assert.equal((await call("DELETE", "/github/key")).status, 404);
+  assert.equal((await call("DELETE", "/slack/key")).status, 404);
   assert.equal(sha(), before);
   assert.equal(linearCalls, 0);
 });
