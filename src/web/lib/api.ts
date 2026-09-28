@@ -1298,6 +1298,28 @@ export async function assignCardToMe(
   }
 }
 
+/** Move a Linear card to one of its team's states: POST /api/cards/:id/linear-state. */
+export async function setCardLinearState(
+  id: string,
+  stateId: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string | null }> {
+  try {
+    const res = await fetch(
+      `/api/cards/${encodeURIComponent(id)}/linear-state`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stateId }),
+      },
+    );
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, status: res.status, error: body.error ?? null };
+  } catch {
+    return { ok: false, status: 0, error: null };
+  }
+}
+
 /**
  * Every Claude account with its usage snapshot plus the active pointer: GET /api/accounts.
  * Throws on non-2xx, mirroring `getVaultKeys`.

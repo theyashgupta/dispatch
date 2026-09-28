@@ -1,17 +1,25 @@
 import { useState, type CSSProperties } from "react";
-import { Send, UserPlus } from "lucide-react";
+import { ExternalLink, Send, UserPlus } from "lucide-react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { useCardComments } from "../../hooks/useCardComments.js";
 import { useLinearWorkflow } from "../../hooks/useLinearWorkflow.js";
-import { assignCardToMe, postCardComment } from "../../lib/api.js";
+import {
+  assignCardToMe,
+  postCardComment,
+  setCardLinearState,
+} from "../../lib/api.js";
+import { isWebUrl } from "../../lib/actions.js";
+import { moveErrorCopy } from "./move-error-copy.js";
 import { formatAge, nowMs } from "../../lib/format-age.js";
 import { Button } from "../../primitives/Button.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Collapsible } from "../../primitives/Collapsible.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { IconButton } from "../../primitives/IconButton.js";
+import { LinkButton } from "../../primitives/LinkButton.js";
 import { Markdown } from "../../primitives/Markdown.js";
 import { Notice } from "../../primitives/Notice.js";
+import { Select } from "../../primitives/Select.js";
 import { WarningIcon } from "../../primitives/WarningIcon.js";
 
 interface LinearSectionProps {
@@ -100,10 +108,19 @@ export function LinearSection({ card }: LinearSectionProps) {
   const [postError, setPostError] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
   const workflow = useLinearWorkflow();
   const viewerId =
     workflow.status === "ready" ? workflow.workflow.viewerId : undefined;
   const assignedToMe = viewerId !== undefined && card.assignee?.id === viewerId;
+  const teamStates =
+    workflow.status === "ready" && card.team
+      ? [
+          ...(workflow.workflow.teams.find((t) => t.id === card.team?.id)
+            ?.states ?? []),
+        ].sort((a, b) => a.position - b.position)
+      : [];
   const [focused, setFocused] = useState(false);
   const count = comments.length;
   const rows = Math.min(6, Math.max(2, draft.split("\n").length));
@@ -119,6 +136,16 @@ export function LinearSection({ card }: LinearSectionProps) {
         ? "Linear is not connected."
         : (result.error ?? "Could not reach Dispatch. Try again."),
     );
+  };
+
+  const handleMove = async (stateId: string) => {
+    if (stateId === "") return;
+    setMoving(true);
+    setMoveError(null);
+    const result = await setCardLinearState(card.id, stateId);
+    setMoving(false);
+    if (result.ok || result.status === 502) return;
+    setMoveError(moveErrorCopy(result.status, result.error));
   };
 
   const handleSend = async () => {
@@ -143,8 +170,29 @@ export function LinearSection({ card }: LinearSectionProps) {
         />
       )}
       <div style={actionPanelStyle}>
-        {!assignedToMe && (
-          <div style={actionRowStyle}>
+        <div style={actionRowStyle}>
+          {teamStates.length > 0 && (
+            <Select
+              label="Move to a Linear state"
+              value=""
+              disabled={moving}
+              onChange={(stateId) => void handleMove(stateId)}
+            >
+              <option value="">
+                {`Move to... (now: ${card.linearState?.name ?? "unknown"})`}
+              </option>
+              {teamStates.map((state) => (
+                <option
+                  key={state.id}
+                  value={state.id}
+                  disabled={state.id === card.linearState?.id}
+                >
+                  {state.name}
+                </option>
+              ))}
+            </Select>
+          )}
+          {!assignedToMe && (
             <Button
               variant="secondary"
               disabled={assigning}
@@ -153,14 +201,23 @@ export function LinearSection({ card }: LinearSectionProps) {
               <UserPlus size={12} strokeWidth={2} aria-hidden="true" />
               Assign to me
             </Button>
-            {assignError != null && (
-              <Notice
-                tone="destructive"
-                icon={<WarningIcon />}
-                label={assignError}
-              />
-            )}
-          </div>
+          )}
+          {isWebUrl(card.url) && (
+            <LinkButton href={card.url}>
+              <ExternalLink size={12} strokeWidth={2} aria-hidden="true" />
+              Open in Linear
+            </LinkButton>
+          )}
+        </div>
+        {assignError != null && (
+          <Notice
+            tone="destructive"
+            icon={<WarningIcon />}
+            label={assignError}
+          />
+        )}
+        {moveError != null && (
+          <Notice tone="destructive" icon={<WarningIcon />} label={moveError} />
         )}
         <div style={composerStyle}>
           <textarea
