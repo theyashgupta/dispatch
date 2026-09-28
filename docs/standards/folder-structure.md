@@ -44,7 +44,7 @@ src/web/
 │   ├── nav/        # SidebarNav, NavRow, SyncStatus, nav-items
 │   ├── modals/     # StartModal, CleanupModal, MultiSelect
 │   ├── settings/   # SettingsScreen (full-screen, sidebar-nav), PlaybookEditorModal
-│   ├── slack/      # SlackThread, reused by the Inbox row and the Slack page through the barrel
+│   ├── slack/      # SlackPage, SlackList, SlackDetail, SlackThread (the Inbox row reuses SlackThread through the barrel)
 │   └── badges/     # GoneBadge, PlanReadyBadge, SourceBadge — shared leaf feature (see import direction)
 ├── hooks/          # data/effect hooks: useBoardStream, useUnseenActivity, useTransitionNotifications, useResumeFeedback, useMediaQuery
 ├── lib/            # non-UI helpers: api.ts, card-badges.ts, format-age.ts, resume-feedback.ts, start-request.ts
@@ -64,6 +64,7 @@ src/web/
 | `GoneBadge.tsx`, `PlanReadyBadge.tsx`, `SourceBadge.tsx`                                                                 | `features/badges/` (shared leaf) |
 | `SessionsPage.tsx`, `SessionRow.tsx`                                                                                     | `features/sessions/`             |
 | `PullRequestsPage.tsx`, `PrList.tsx`, `PrDetail.tsx`                                                                     | `features/pull-requests/`        |
+| `SlackPage.tsx`, `SlackList.tsx`, `SlackDetail.tsx`, `SlackThread.tsx`                                                   | `features/slack/`                |
 | `useBoardStream.ts`, `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts` | `hooks/`                         |
 | `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`                                    | `lib/`                           |
 | `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Glyph` / `Markdown`                                            | `primitives/`                    |
