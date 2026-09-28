@@ -36,6 +36,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Exec Chokepoint](#exec-chokepoint)
   - [Linear Sync](#linear-sync)
   - [GitHub Source](#github-source)
+  - [Sentry Source](#sentry-source)
   - [SSE Transport](#sse-transport)
   - [Startup Preflight](#startup-preflight)
   - [Cleanup Lifecycle](#cleanup-lifecycle)
@@ -2114,8 +2115,10 @@ outside printable ASCII answers 400 before any network call, a config write fail
 409 `superseded` and writes nothing. The key never appears in a response, a log line or an error
 body.
 
-**Token sources (LOCAL-45).** The same three routes also serve `github`, dispatched through
-`services/domain/token-connection.ts`. A GitHub token lives in the Dispatch Vault under
+**Token sources (LOCAL-45, LOCAL-46).** The same three routes also serve `github` and `sentry`,
+dispatched through `services/domain/token-connection.ts` (`TOKEN_SOURCES`). A Sentry token lives only
+in the Vault under `SENTRY_TOKEN` (`services/domain/sentry-token.ts`, no CLI fallback); its check lists
+the organizations the token sees and the account names up to three of them plus a count of the rest. A GitHub token lives in the Dispatch Vault under
 `GITHUB_TOKEN`; when that value is empty, `services/domain/github-token.ts#resolveGithubToken` asks
 `adapters/gh.ts#readGhToken` (`gh auth token` through the exec chokepoint) on every call and never
 caches or logs the result. A token that is not printable ASCII resolves to no credential. The
@@ -2160,6 +2163,45 @@ SHA the client saw, so a head that moved answers 409 `not-mergeable`. Owner, rep
 validated before any GitHub call; errors answer an error kind (`rejected`, `not-found`,
 `sso-required`, `rate-limited`, `unreachable`, `no-credential`) and only GitHub's own message text
 for its refusals, never the token or a raw body. A successful write calls `pollNow("github")`.
+
+### Sentry Source
+
+`sources/sentry/sentry.source.ts` is a snapshot item source (LOCAL-46). Each poll resolves the token
+from the Vault `SENTRY_TOKEN` only (`services/domain/sentry-token.ts`), lists the organizations on the
+base URL, and for at most 10 organizations runs two issue queries in order, each with a 14-day period
+and one page of 100: `is:unresolved assigned:me`, then `is:unresolved`. The first query an issue
+appears in wins (types `error_assigned` at priority 100 or 75, `error` at 50 or 25, the higher value
+for fatal and error levels), so every assigned issue ranks above every organization-wide one. The
+pull is partial when a query fills its page or announces a next page, when the organization cap cuts
+organizations, or when an organization answers 403 (that organization is skipped); a partial pull
+never auto-resolves an item. Organization-scoped calls go to the organization's region URL only when
+`sentry.source.ts#allowedRegion` accepts it (an https origin on sentry.io or a subdomain, or the base
+itself), else to the base URL, so the token never follows an arbitrary host. Item ids are
+`sentry:<issue id>` and `createdAt` is the issue's last seen time. A 401 fails the poll with
+last-known-good kept and a 429 or an exhausted rate limit raises `RateLimited`.
+`DISPATCH_SENTRY_API_URL` replaces the base URL for sandbox runs against `scripts/fake-sentry.mjs`,
+started as `node scripts/fake-sentry.mjs <port> <state.json>` from a copy of
+`scripts/fixtures/fake-sentry-state.json`; its organizations report the fake's own origin as their
+region URL, which the allowlist accepts as the configured base.
+
+`routes/sentry.route.ts` serves the Errors page through `services/domain/sentry.ts` and the source
+gateway. `GET /api/sentry/issue/:id` answers the issue with its latest event (`sentry-issue.ts#mapSentryDetail`):
+the impact fields with the count as a number, the outermost exception's type and value, its newest 25
+frames newest first with their context lines, the last 12 breadcrumbs oldest first, the tags, the
+logger and the platform. `POST /api/sentry/issue/:id/resolve` sets the issue to resolved in Sentry and
+only then marks the item done (204). A latest event Sentry refuses or lacks leaves the detail without
+one instead of failing it. The id must be digits only (else 400) and must name a stored item
+(else 404), both before any Sentry call, because the item's meta names the organization and region;
+the stored region is re-checked through `allowedRegion` on every call. A disconnected source answers
+`no-credential`; other errors answer an error kind (`rejected`, `forbidden`, `not-found`,
+`rate-limited`, `unreachable`), never the token or a raw body.
+
+`POST /api/items/:id/promote` accepts an optional `context` string of at most 8000 characters and
+appends it under a `## Context` heading at the end of the new card's description, trimming the rest so
+the whole description stays within 20000 characters. Every `DISPATCH_STATUS:` token in the promoted
+description, provider text and context alike, is disarmed to `DISPATCH-STATUS:`, because the kickoff
+inlines the description into a pane the marker parser reads. A second promote returns the existing
+card and ignores the context.
 
 ### SSE Transport
 
