@@ -34,6 +34,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Claude Accounts](#claude-accounts)
   - [Orchestration Saga](#orchestration-saga)
   - [Exec Chokepoint](#exec-chokepoint)
+  - [Workspaces Inventory](#workspaces-inventory)
   - [Linear Sync](#linear-sync)
   - [GitHub Source](#github-source)
   - [Sentry Source](#sentry-source)
@@ -2170,6 +2171,21 @@ the runner renders it on the card (`ORCH-04`) — swapping in a library whose re
 
 See also [Security Threat Model](#security-threat-model) for the `T-04-01` argv-only injection
 control and the inert-stdout property (captured pane text is data, never a command).
+
+### Workspaces Inventory
+
+`GET /api/workspaces` (`routes/workspaces.route.ts`) feeds the Workspaces page: the registered
+workspace folders with the repos discovered in each, and one row per session record that owns a
+workspace, across every card. `services/orchestration/workspace-inventory.ts` `buildInventory`
+reads the FULL card set through `store.listCards()`, never the windowed wire snapshot, because the
+Done cards past the `DONE_PAGE_SIZE` window are the ones awaiting cleanup. It never enqueues a store
+mutation: sizes come from `du -sk` (`adapters/disk-usage.ts`) and last commit times from
+`git log -1 --format=%ct` (`adapters/git.ts` `lastCommitAt`), both through the exec chokepoint's
+async `run()`, so a slow scan delays only this response and never a board frame. Results are cached
+per workspace path (sizes 5 minutes, commit times and folder discovery 60 s, all cleared by
+`?fresh=1`), at most 4 subprocesses run at once per inventory build, and a failed or timed-out probe yields `null`
+instead of failing the response. `scripts/perf-workspaces.mjs` measures board frame latency during
+a cold scan; the result is recorded in `docs/BASELINES.md`.
 
 ### Linear Sync
 

@@ -5,6 +5,7 @@ import {
   GitPullRequest,
   CalendarDays,
   ClipboardList,
+  HardDrive,
   Inbox,
   Kanban,
   KeyRound,
@@ -79,6 +80,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: MessageSquare,
     group: "Sources",
     source: "slack",
+  },
+  {
+    page: "workspaces",
+    label: "Workspaces",
+    icon: HardDrive,
+    group: "System",
   },
 ];
 

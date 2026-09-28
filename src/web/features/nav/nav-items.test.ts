@@ -33,12 +33,12 @@ test("an empty item list yields no groups", () => {
   assert.deepEqual(navGroups([]), []);
 });
 
-test("the System group lists the four moved pages in order", () => {
+test("the System group lists its pages in order, Workspaces after Archive", () => {
   assert.deepEqual(
     NAV_ITEMS.filter((item) => item.group === "System").map(
       (item) => item.page,
     ),
-    ["accounts", "playbooks", "vault", "archive"],
+    ["accounts", "playbooks", "vault", "archive", "workspaces"],
   );
 });
 

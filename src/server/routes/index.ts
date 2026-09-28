@@ -23,6 +23,7 @@ import { sentryRouter } from "./sentry.route.js";
 import { slackRouter } from "./slack.route.js";
 import { meetingsRouter } from "./meetings.route.js";
 import { calendarRouter } from "./calendar.route.js";
+import { workspacesRouter } from "./workspaces.route.js";
 
 /**
  * Plain composition of the sub-routers — no nested gate here. The single enforcement point for
@@ -56,3 +57,4 @@ apiRouter.use(sentryRouter);
 apiRouter.use(slackRouter);
 apiRouter.use(meetingsRouter);
 apiRouter.use(calendarRouter);
+apiRouter.use(workspacesRouter);

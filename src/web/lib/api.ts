@@ -40,6 +40,7 @@ import type {
   UpdateStatus,
   UserProfile,
   VaultKeySummary,
+  WorkspacesInventory,
 } from "../../shared/types.js";
 import { isProviderCode } from "../../shared/credential.js";
 import type { CardSearchResult } from "../../shared/search.js";
@@ -2225,4 +2226,20 @@ export async function putCalendarSettings(
     }),
     (body) => body as CalendarStatus,
   );
+}
+
+const WORKSPACES_TIMEOUT_MS = 60_000;
+
+/** Read the Workspaces inventory; `fresh` drops the server's inventory caches first. */
+export async function getWorkspaces(
+  fresh: boolean,
+): Promise<WorkspacesInventory> {
+  const res = await fetch(
+    fresh ? "/api/workspaces?fresh=1" : "/api/workspaces",
+    { signal: AbortSignal.timeout(WORKSPACES_TIMEOUT_MS) },
+  );
+  if (!res.ok) {
+    throw new Error(`getWorkspaces failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as WorkspacesInventory;
 }

@@ -71,6 +71,7 @@ src/web/
 | `SlackPage.tsx`, `SlackList.tsx`, `SlackDetail.tsx`, `SlackThread.tsx`                                                       | `features/slack/`                |
 | `MeetingNotesModal.tsx`, `MeetingsPage.tsx`, `MeetingList.tsx`, `MeetingDetail.tsx`                                          | `features/meetings/`             |
 | `CalendarPage.tsx`                                                                                                           | `features/calendar/`             |
+| `WorkspacesPage.tsx`, `WorktreeRow.tsx`, `WorkspaceFolders.tsx`, `WorkspaceAdd.tsx`, `FolderBrowserModal.tsx`                | `features/workspaces/`           |
 | `useBoardStream.ts`, `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts`     | `hooks/`                         |
 | `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`, `meetings.ts`, `calendar.ts`          | `lib/`                           |
 | `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Glyph` / `Markdown` / `SplitView` / `ListGroup` / `DetailPaneBody` | `primitives/`                    |

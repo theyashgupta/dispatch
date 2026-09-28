@@ -16,6 +16,7 @@ export const PAGES = [
   "slack",
   "meetings",
   "calendar",
+  "workspaces",
 ] as const;
 
 export type Page = (typeof PAGES)[number];

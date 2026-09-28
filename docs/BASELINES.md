@@ -1070,3 +1070,19 @@ above; every `dispatch-perf-board-*` sandbox directory was confirmed gone after 
 prior entry's own recorded diagnosis). The temporary debug-dump instrumentation used for the
 field-by-field attribution above was never committed; `git diff --stat scripts/perf-board.mjs`
 after the investigation showed zero changes to that file.
+
+## Workspaces inventory SSE latency
+
+- **Date:** 2026-09-25
+- **Git SHA measured:** working tree on `6dcc624` (G8 unit 1, before its boundary commit)
+- **Machine:** Apple Silicon, local
+- **Command:** `node scripts/perf-workspaces.mjs port=47952 dir=<scratch dir>` after `npm run build`
+- **Method:** the production build boots with `DISPATCH_DIR` at a scratch dir, seeded with 12
+  in-progress cards whose workspaces hold 20000 small files each plus one plain To Do card. One raw
+  `GET /api/stream` reader times the next board `data:` frame after each local
+  `POST /api/cards/:id/move` of the plain card: 10 moves idle, then moves back to back while a cold
+  `GET /api/workspaces?fresh=1` runs `du` over every workspace. Only moves started before the
+  inventory response arrived count as busy samples. Pass line: the busy median exceeds the idle
+  median by at most 50 ms.
+- **Result:** `PERF-WORKSPACES idle_median_ms=2.8 busy_median_ms=2.1 busy_max_ms=9.1 inventory_ms=715 busy_samples=333 result=pass`
+- **Re-run on the final unit build** (after the cache key, limiter and discovery changes): `PERF-WORKSPACES idle_median_ms=2.3 busy_median_ms=2.0 busy_max_ms=21.9 inventory_ms=742 busy_samples=322 result=pass`
