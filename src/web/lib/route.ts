@@ -11,6 +11,7 @@ export const PAGES = [
   "archive",
   "pull-requests",
   "errors",
+  "today",
 ] as const;
 
 export type Page = (typeof PAGES)[number];
