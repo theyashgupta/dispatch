@@ -17,6 +17,14 @@ interface ConnectionCardProps {
   footer?: ReactNode;
   details?: ReactNode;
   defaultOpen?: boolean;
+  toggle?: ConnectionToggle;
+}
+
+export interface ConnectionToggle {
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
 }
 
 const cardStyle: CSSProperties = {
@@ -145,12 +153,39 @@ const stepTextStyle: CSSProperties = {
   paddingTop: "1px",
 };
 
-const NEUTRAL_CHIP_LABEL: Record<"checking" | "disconnected" | "soon", string> =
-  {
-    checking: "Checking",
-    disconnected: "Not connected",
-    soon: "Coming soon",
-  };
+const NEUTRAL_CHIP_LABEL: Record<
+  "checking" | "disconnected" | "soon" | "off",
+  string
+> = {
+  checking: "Checking",
+  disconnected: "Not connected",
+  soon: "Coming soon",
+  off: "Off",
+};
+
+const headerRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--space-sm)",
+  paddingRight: "var(--space-lg)",
+};
+
+const toggleLabelStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "var(--space-xs)",
+  flex: "0 0 auto",
+  fontSize: "var(--font-label)",
+  lineHeight: "var(--line-label)",
+  color: "var(--text)",
+  cursor: "pointer",
+};
+
+const toggleInputStyle: CSSProperties = {
+  margin: 0,
+  accentColor: "var(--accent)",
+  cursor: "inherit",
+};
 
 const guideStyle: CSSProperties = {
   display: "flex",
@@ -209,6 +244,35 @@ function StatusChip({ status }: StatusChipProps) {
   return <Chip tone="neutral">{NEUTRAL_CHIP_LABEL[status.kind]}</Chip>;
 }
 
+interface HeaderToggleProps {
+  toggle: ConnectionToggle;
+}
+
+function HeaderToggle({ toggle }: HeaderToggleProps) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <label
+      style={{
+        ...toggleLabelStyle,
+        ...(toggle.disabled ? { cursor: "default", opacity: 0.5 } : {}),
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={toggle.checked}
+        disabled={toggle.disabled}
+        onChange={(event) => toggle.onChange(event.target.checked)}
+        onFocus={(event) =>
+          setFocused(event.currentTarget.matches(":focus-visible"))
+        }
+        onBlur={() => setFocused(false)}
+        style={{ ...toggleInputStyle, ...focusRing(focused) }}
+      />
+      {toggle.label}
+    </label>
+  );
+}
+
 interface TokenLinkProps {
   url: string;
 }
@@ -244,6 +308,7 @@ export function ConnectionCard({
   footer,
   details,
   defaultOpen = false,
+  toggle,
 }: ConnectionCardProps) {
   const [toggled, setToggled] = useState<boolean | null>(null);
   const [focused, setFocused] = useState(false);
@@ -272,30 +337,41 @@ export function ConnectionCard({
     );
   }
 
+  const expandButton = (
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-controls={bodyId}
+      onClick={() => setToggled(!open)}
+      onFocus={(event) =>
+        setFocused(event.currentTarget.matches(":focus-visible"))
+      }
+      onBlur={() => setFocused(false)}
+      style={{ ...headerStyle, ...focusRing(focused) }}
+    >
+      {heading}
+      <ChevronDown
+        size={16}
+        strokeWidth={2}
+        aria-hidden="true"
+        style={{
+          ...chevronStyle,
+          transform: open ? "rotate(180deg)" : "none",
+        }}
+      />
+    </button>
+  );
+
   return (
     <div style={cardStyle}>
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={bodyId}
-        onClick={() => setToggled(!open)}
-        onFocus={(event) =>
-          setFocused(event.currentTarget.matches(":focus-visible"))
-        }
-        onBlur={() => setFocused(false)}
-        style={{ ...headerStyle, ...focusRing(focused) }}
-      >
-        {heading}
-        <ChevronDown
-          size={16}
-          strokeWidth={2}
-          aria-hidden="true"
-          style={{
-            ...chevronStyle,
-            transform: open ? "rotate(180deg)" : "none",
-          }}
-        />
-      </button>
+      {toggle ? (
+        <div style={headerRowStyle}>
+          {expandButton}
+          <HeaderToggle toggle={toggle} />
+        </div>
+      ) : (
+        expandButton
+      )}
       <div
         id={bodyId}
         style={{ ...bodyStyle, gridTemplateRows: open ? "1fr" : "0fr" }}

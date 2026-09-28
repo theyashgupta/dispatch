@@ -1,4 +1,7 @@
 import type {
+  GranolaCheckResult,
+  GranolaStatus,
+  MeetingSourceConfig,
   ActivityEvent,
   ArchivedGroupSummary,
   Card,
@@ -2100,4 +2103,41 @@ export async function createMeetingItems(
   } catch {
     return { ok: false, error: null };
   }
+}
+
+/** Read the Granola round status: GET /api/meetings/granola. */
+export async function getGranola(): Promise<GranolaStatus> {
+  const res = await fetch("/api/meetings/granola");
+  if (!res.ok) throw new Error(`getGranola failed: ${res.status}`);
+  return (await res.json()) as GranolaStatus;
+}
+
+/** Save Granola settings: PUT /api/meetings/granola; answers the status after the change. */
+export async function putGranola(
+  patch: MeetingSourceConfig,
+): Promise<GranolaStatus> {
+  const res = await fetch("/api/meetings/granola", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`putGranola failed: ${res.status}`);
+  return (await res.json()) as GranolaStatus;
+}
+
+/** Check connection: POST /api/meetings/granola/check runs a fresh claude mcp list. */
+export async function checkGranola(): Promise<GranolaCheckResult> {
+  const res = await fetch("/api/meetings/granola/check", { method: "POST" });
+  if (!res.ok) throw new Error(`checkGranola failed: ${res.status}`);
+  return (await res.json()) as GranolaCheckResult;
+}
+
+/**
+ * Analyze now: POST /api/meetings/granola/run.
+ *
+ * @remarks A 409 (running or off) needs no message of its own: the status read that follows shows
+ * the round running or the card Off.
+ */
+export async function runGranola(): Promise<void> {
+  await fetch("/api/meetings/granola/run", { method: "POST" });
 }

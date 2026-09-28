@@ -37,6 +37,10 @@ import { unregisterHookToken } from "../services/domain/hook-tokens.js";
 import { reapActivityThrottle } from "../services/domain/hook-events.js";
 import { seedPlaybooks } from "../services/domain/playbooks.js";
 import { startEnabledPollers } from "../adapters/poller.js";
+import {
+  startGranolaRound,
+  stopGranolaRound,
+} from "../services/orchestration/granola-round.js";
 import { sendPushForCard } from "../services/domain/push-send.js";
 import { startArtifactDetectionLoop } from "../adapters/artifact-detect.js";
 import { buildRegistry, setCredentialResolver } from "../sources/registry.js";
@@ -211,11 +215,14 @@ function handleUpgrade(
   terminalProxyUpgrade(req, socket, head);
 }
 
+const SHUTDOWN_WAIT_MS = 6_000;
+
 /**
  * The FIRST `process.on("SIGINT"/"SIGTERM", ...)` handler in this codebase — every other
  * subprocess (ttyd, tmux, git) is either deliberately detached-to-survive or short-lived-and-
  * awaited, so nothing else needed a "clean up before I die" hook until cloudflared. Scoped
- * NARROWLY to `disableTunnel()` (kills cloudflared + clears the token) — it does NOT tear down
+ * NARROWLY to `disableTunnel()` (kills cloudflared + clears the token) and a running Granola round,
+ * which exit waits for (at most 6 s) so its claude child is gone first; it does NOT tear down
  * ttyd/tmux sessions, which intentionally survive a backend restart.
  * @remarks T-74-03: `disableTunnel()`'s `clearToken()` call is synchronous, so the token stops
  * validating immediately even though cloudflared's own default 30s grace period means the OS
@@ -226,7 +233,8 @@ function handleUpgrade(
 function shutdown(signal: NodeJS.Signals): void {
   console.log(`[shutdown] ${signal} received, tearing down remote access`);
   disableTunnel();
-  process.exit(0);
+  setTimeout(() => process.exit(0), SHUTDOWN_WAIT_MS).unref();
+  void stopGranolaRound().finally(() => process.exit(0));
 }
 
 /** Options for {@link main}; `desiredPort` overrides the configured port (the CLI's `--port`). */
@@ -400,6 +408,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
 
   setHooksRuntime({ capable, port, statusChannel });
   startEnabledPollers();
+  startGranolaRound();
   startMarkerWatcher(statusChannel);
   store.on("activity", (event: ActivityEvent) => {
     if (event.type !== "status_needs_input" || event.cardId == null) return;

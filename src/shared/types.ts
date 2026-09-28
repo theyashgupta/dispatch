@@ -1022,6 +1022,35 @@ export interface SourceConfig {
   stateMap?: LinearStateMap;
 }
 
+export const GRANOLA_WINDOW_HOURS = [24, 48, 72, 168, 336] as const;
+export const DEFAULT_GRANOLA_WINDOW_HOURS = 48;
+
+export interface MeetingSourceConfig {
+  enabled?: boolean;
+  windowHours?: number;
+}
+
+export type GranolaCheckState =
+  "connected" | "needs-auth" | "failed" | "not-found" | "claude-missing";
+
+export type GranolaCheckResult =
+  | { state: "connected"; server: string }
+  | { state: Exclude<GranolaCheckState, "connected">; server?: string };
+
+export type GranolaError =
+  Exclude<GranolaCheckState, "connected"> | "timeout" | "unreadable";
+
+export interface GranolaStatus {
+  enabled: boolean;
+  windowHours: number;
+  running: boolean;
+  lastRunAt?: string;
+  lastError?: GranolaError;
+  lastCount?: number;
+  polledAt?: string;
+  server?: string;
+}
+
 export type SourceKeyError =
   | "rejected"
   | "unreachable"
@@ -1047,7 +1076,8 @@ export type SourceCardStatus =
   | { kind: "disconnected" }
   | { kind: "connected"; account?: string }
   | { kind: "error"; message: string }
-  | { kind: "soon" };
+  | { kind: "soon" }
+  | { kind: "off" };
 
 export type ItemSourceConfig = Pick<SourceConfig, "enabled" | "pollIntervalMs">;
 
@@ -1126,6 +1156,7 @@ export interface Config {
     github?: ItemSourceConfig;
     sentry?: ItemSourceConfig;
     slack?: SlackSourceConfig;
+    meeting?: MeetingSourceConfig;
   };
   /** On-boot update check; absent or any non-`false` value resolves to on. */
   updateCheck?: boolean;

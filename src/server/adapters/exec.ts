@@ -39,7 +39,8 @@ function armKillEscalation(
   const onAbort = (): void => {
     timers.push(setTimeout(() => child.kill("SIGKILL"), graceMs));
   };
-  opts.signal?.addEventListener("abort", onAbort, { once: true });
+  if (opts.signal?.aborted === true) onAbort();
+  else opts.signal?.addEventListener("abort", onAbort, { once: true });
   if (opts.timeout !== undefined) {
     timers.push(
       setTimeout(() => child.kill("SIGKILL"), opts.timeout + graceMs),
@@ -62,6 +63,8 @@ function armKillEscalation(
  * `killEscalationMs` (opt-in, inert when unset) arms {@link armKillEscalation} for callers whose
  * child may ignore the abort/timeout SIGTERM (headless `claude -p` drafts). `env` adds variables on
  * top of the inherited process environment (a per-account `CLAUDE_CONFIG_DIR`), never replaces it.
+ * With escalation armed, an aborted run settles only once the child has exited, so a caller's
+ * single flight never releases while the old child still runs.
  * @param input written to the child's stdin, which is then closed; for stream-json requests. The
  * stdin error event is swallowed because a child that exits before draining a large input raises
  * EPIPE outside the awaited promise, which would otherwise take the whole server down.
@@ -111,14 +114,34 @@ export async function run(
       stdout?: string;
       code?: number | string;
     };
+    if (disarm !== null && opts.signal?.aborted === true) {
+      await childExit(pending.child);
+    }
     throw Object.assign(new Error(e.message), {
       stderr: e.stderr ?? "",
       stdout: e.stdout ?? "",
       code: e.code,
     });
   } finally {
-    disarm?.();
+    if (disarm !== null) void childExit(pending.child).then(disarm);
   }
+}
+
+/**
+ * Resolves once the child has exited; at once for one that already exited or never spawned.
+ *
+ * @remarks An abort rejects the exec promise before the child is gone, so escalation timers are
+ * released on exit instead, which is what lets the SIGKILL reach a child that ignores SIGTERM.
+ */
+function childExit(child: ChildProcess): Promise<void> {
+  if (
+    child.pid === undefined ||
+    child.exitCode !== null ||
+    child.signalCode !== null
+  ) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => child.once("exit", () => resolve()));
 }
 
 /**

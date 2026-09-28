@@ -17,7 +17,8 @@ export interface MeetingDraftInput {
  * Draft the user's action items from pasted meeting notes through one headless `claude -p` run.
  *
  * @remarks The prompt goes on stdin, never argv, because up to 100000 characters of notes would
- * otherwise be visible in the process list.
+ * otherwise be visible in the process list. A paste is one meeting, so any meeting, date or link
+ * line the model echoes is dropped and each key appears once.
  */
 export async function generateMeetingDrafts(
   input: MeetingDraftInput,
@@ -44,5 +45,11 @@ export async function generateMeetingDrafts(
       input: buildPastePrompt(input.meeting, input.notes, input.me),
     },
   );
-  return parseActionItems(stdout);
+  const drafts: ActionDraft[] = [];
+  for (const { key, title, description } of parseActionItems(stdout)) {
+    if (!drafts.some((draft) => draft.key === key)) {
+      drafts.push({ key, title, description });
+    }
+  }
+  return drafts;
 }

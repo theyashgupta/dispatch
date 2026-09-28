@@ -191,12 +191,52 @@ export function clearLinearApiKey(): void {
   }
 }
 
+type SourceBlocks = NonNullable<Config["sources"]>;
+
 /**
- * Read `~/.dispatch/config.json`, merge the flat top-level keys in `patch`, and write it back
- * atomically at mode 0600, mutating the in-memory config the same way so the change is live.
- * @remarks Shared by every flat-key writer below; nested `sources` writers keep their own merge.
+ * Patch one `sources.<id>` block in `~/.dispatch/config.json` and in the held config.
+ *
+ * @remarks Every other top-level key and every other source block, including the Linear key, is
+ * carried forward verbatim; the write is atomic at mode 0600 like the other writers here.
  */
-function patchConfig(patch: Partial<Config>): void {
+export function patchSourceConfig<K extends keyof SourceBlocks>(
+  id: K,
+  patch: Partial<NonNullable<SourceBlocks[K]>>,
+): void {
+  const parsed = readConfigObject();
+  const priorSources =
+    typeof parsed.sources === "object" &&
+    parsed.sources !== null &&
+    !Array.isArray(parsed.sources)
+      ? (parsed.sources as Record<string, unknown>)
+      : {};
+  const prior = priorSources[id];
+  const priorBlock =
+    typeof prior === "object" && prior !== null && !Array.isArray(prior)
+      ? (prior as Record<string, unknown>)
+      : {};
+  const next = {
+    ...parsed,
+    sources: { ...priorSources, [id]: { ...priorBlock, ...patch } },
+  };
+  writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
+    mode: 0o600,
+  });
+  fs.chmodSync(CONFIG_PATH, 0o600);
+  if (orchestrationConfig) {
+    const sources: SourceBlocks = orchestrationConfig.sources ?? {};
+    sources[id] = { ...sources[id], ...patch };
+    orchestrationConfig.sources = sources;
+  }
+}
+
+/**
+ * Read `~/.dispatch/config.json` as a JSON object.
+ *
+ * @remarks A parse failure reports the byte position only, never the parser message, which embeds
+ * a snippet of the file and so can carry the API key.
+ */
+function readConfigObject(): Record<string, unknown> {
   const raw = fs.readFileSync(CONFIG_PATH, "utf8");
   let parsed: Record<string, unknown>;
   try {
@@ -212,8 +252,16 @@ function patchConfig(patch: Partial<Config>): void {
       { cause: err },
     );
   }
+  return parsed;
+}
 
-  const next = { ...parsed, ...patch };
+/**
+ * Read `~/.dispatch/config.json`, merge the flat top-level keys in `patch`, and write it back
+ * atomically at mode 0600, mutating the in-memory config the same way so the change is live.
+ * @remarks Shared by every flat-key writer below; nested `sources` writers keep their own merge.
+ */
+function patchConfig(patch: Partial<Config>): void {
+  const next = { ...readConfigObject(), ...patch };
 
   writeFileAtomic.sync(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
     mode: 0o600,

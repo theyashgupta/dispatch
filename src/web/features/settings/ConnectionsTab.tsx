@@ -25,6 +25,7 @@ import { focusRing } from "../../primitives/focus-ring.js";
 import { Notice } from "../../primitives/Notice.js";
 import {
   GitHubConnectionCard,
+  GranolaConnectionCard,
   LinearConnectionCard,
   SentryConnectionCard,
   SlackConnectionCard,
@@ -547,6 +548,7 @@ export function ConnectionsTabSection({
         onToggleErrorsInFeeds={onToggleErrorsInFeeds}
       />
       <SlackConnectionCard />
+      <GranolaConnectionCard />
       <SoonConnectionCards />
     </div>
   );

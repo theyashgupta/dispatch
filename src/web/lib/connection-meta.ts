@@ -4,7 +4,7 @@ export interface ConnectionMeta {
   credentialLabel: string;
   steps: string[];
   scopes: string[];
-  tokenPageUrl: string;
+  tokenPageUrl?: string;
   footer: string;
 }
 
@@ -109,8 +109,21 @@ export const SENTRY_CONNECTION: ConnectionMeta = {
     "Your token is checked against Sentry and stored only in the Dispatch Vault on this machine.",
 };
 
+export const MEETING_CONNECTION: ConnectionMeta = {
+  source: "meeting",
+  name: "Granola",
+  credentialLabel: "No key. Uses your Claude Code login.",
+  steps: [
+    "Connect Granola to Claude Code: add the Granola connector in claude.ai under Settings, Connectors.",
+    "Press Check connection. Dispatch runs claude mcp list and looks for a connected Granola server.",
+    "Turn on Enabled. Once an hour Dispatch asks Claude for your action items from recent meetings.",
+  ],
+  scopes: [],
+  footer:
+    "Dispatch runs Claude Code on this machine with only the Granola tool allowed. Each round uses your Claude plan. Action items are stored in board.db on this machine.",
+};
+
 export const SOON_CONNECTIONS: { source: string; name: string }[] = [
-  { source: "meeting", name: "Meetings" },
   { source: "calendar", name: "Calendar" },
 ];
 
@@ -119,5 +132,6 @@ export const ALL_CONNECTIONS: { source: string; name: string }[] = [
   { source: GITHUB_CONNECTION.source, name: GITHUB_CONNECTION.name },
   { source: SENTRY_CONNECTION.source, name: SENTRY_CONNECTION.name },
   { source: SLACK_CONNECTION.source, name: SLACK_CONNECTION.name },
+  { source: MEETING_CONNECTION.source, name: MEETING_CONNECTION.name },
   ...SOON_CONNECTIONS,
 ];

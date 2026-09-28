@@ -111,7 +111,8 @@ function parseSection(body: string): ActionDraft | null {
  * Parse model output into action drafts.
  *
  * @remarks Invalid sections are dropped rather than failing the whole run, so one malformed item
- * never costs the user the rest; the run fails only when nothing valid is left. A section carrying
+ * never costs the user the rest; the run fails only when nothing valid is left. A duplicate is the
+ * same key in the same meeting on the same date, so a recurring meeting keeps both weeks' items. A section carrying
  * the status marker is dropped here, and the create route refuses it again at accept time.
  */
 export function parseActionItems(
@@ -135,8 +136,11 @@ export function parseActionItems(
   const seen = new Set<string>();
   for (const body of bodies) {
     const draft = parseSection(body.join("\n"));
-    if (draft === null || seen.has(draft.key)) continue;
-    seen.add(draft.key);
+    if (draft === null) continue;
+    const meeting = draft.meeting?.trim().toLowerCase() ?? "";
+    const identity = `${meeting}\n${draft.date ?? ""}\n${draft.key}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
     drafts.push(draft);
   }
   if (drafts.length === 0) {
@@ -182,6 +186,26 @@ export function localDate(date: Date): string {
 }
 
 /**
+ * The link as an item url when it is an https URL, else undefined.
+ *
+ * @remarks The link comes from model output, so anything but a plain https URL (javascript:, http:,
+ * a bare word, or credentials that disguise the real host) never reaches a clickable Source line.
+ */
+function httpsUrl(link: string | undefined): string | undefined {
+  if (link === undefined) return undefined;
+  try {
+    const url = new URL(link);
+    return url.protocol === "https:" &&
+      url.username === "" &&
+      url.password === ""
+      ? link
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Turn one meeting's drafts into meeting items, each listing its siblings.
  *
  * @remarks The meeting date is part of the id, so a recurring meeting's repeated action becomes a
@@ -205,12 +229,14 @@ export function buildMeetingItems(input: {
         0,
         ITEM_DESCRIPTION_MAX,
       );
+    const url = httpsUrl(draft.link);
     return {
       id: `meeting:${id}:${draft.key}`,
       source: "meeting",
       type: "action_item",
       title: draft.title.slice(0, ITEM_TITLE_MAX),
       snippet,
+      ...(url !== undefined ? { url } : {}),
       createdAt: input.now,
       priority: MEETING_PRIORITY,
       state: "unread",
