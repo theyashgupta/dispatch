@@ -30,5 +30,5 @@ test("sourceState distinguishes enabled, disabled and unknown", () => {
     sources: { linear: { apiKey: "k", enabled: false } },
   });
   assert.equal(sourceState("linear"), "disabled");
-  assert.equal(sourceState("slack"), "unknown");
+  assert.equal(sourceState("meeting"), "unknown");
 });
