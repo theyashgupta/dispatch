@@ -3158,6 +3158,22 @@ strip once recorded). The strip's zone grid, its width-dependent template, the n
 wordmark removal and the view-switch rendering (Candidate C and its retune) are history, recorded
 in `docs/standards/design-contract.md`'s Deferred decisions rows 2 and 5.
 
+**Flow page.** `features/flow/FlowPage.tsx` draws the work pipeline on the client only, from the
+board stream (`items`, `cards`, `enabledSources`, `syncedAt`, `pollIntervalMs`,
+`syncUnreachable`); no server route
+backs it, and Sync now reuses `POST /api/sources/:id/poll` through `pollSource` in `lib/api.ts`.
+A ref guards Sync now while its requests are in flight, because a second click can land before
+the `disabled` re-render and would send a duplicate POST.
+The pure decisions live in `features/flow/flow-model.ts` (rows, trays, lit sources, arrivals, the
+poller tone) and `lib/flow-geometry.ts` (anchor sides, cubic edge paths, the 40 token cap). The
+diagram and the detail panel's `SessionFlowRow` both render on the `FlowStage` primitive: a fixed
+coordinate stage scaled to its container, one SVG of edges, HTML nodes on top, and tokens that
+travel an edge with CSS `offset-path` and the `flow-travel` keyframe. While
+`prefers-reduced-motion: reduce` matches, `FlowStage` renders no token element at all, and the
+global reduced-motion rule in `tokens.css` stops the poller pulse; nodes, edges and counts still
+update. Below 768 px the page shows a notice and a static list of the same counts instead of the
+stage.
+
 ### Modal Focus Containment
 
 `Modal.tsx` traps `Tab`/`Shift+Tab` inside the TOPMOST dialog only, mirroring the discipline its

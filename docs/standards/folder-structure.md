@@ -63,9 +63,10 @@ src/web/
 | `GoneBadge.tsx`, `PlanReadyBadge.tsx`, `SourceBadge.tsx`                                                                 | `features/badges/` (shared leaf) |
 | `WorkspacesPage.tsx`, `WorktreeRow.tsx`, `WorkspaceFolders.tsx`, `WorkspaceAdd.tsx`, `FolderBrowserModal.tsx`            | `features/workspaces/`           |
 | `AskPage.tsx`, `AskComposer.tsx`, `AskMessage.tsx`                                                                       | `features/ask/`                  |
+| `FlowPage.tsx`, `FlowToolbar.tsx`, `FlowDiagram.tsx`, `FlowNarrow.tsx`, `flow-model.ts`                                  | `features/flow/`                 |
 | `useBoardStream.ts`, `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts` | `hooks/`                         |
 | `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`                                    | `lib/`                           |
-| `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Glyph` / `Markdown`                                            | `primitives/`                    |
+| `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Glyph` / `Markdown` / `FlowStage`                              | `primitives/`                    |
 | `tokens.css`                                                                                                             | `styles/`                        |
 
 A component lives in the folder of the feature that consumes it; a component consumed by exactly one feature is co-located with that consumer (`PlaybookEditorModal` sits in `settings/` because `SettingsScreen` is its only consumer). `MultiSelect` stays in `modals/` even though both `settings/` and `inbox/` now consume it — cross-feature reuse goes through the owning feature's `index.ts` barrel rather than forcing a move.
