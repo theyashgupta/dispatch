@@ -40,7 +40,9 @@ test("the route table holds exactly the shell and source pages", () => {
     "today",
     "vault",
     "workspace",
+    "workspaces",
   ]);
+  assert.equal(parseRoute("#/workspaces").page, "workspaces");
   assert.deepEqual(parseRoute("#/accounts/whatever"), {
     page: "accounts",
     id: "whatever",
