@@ -23,9 +23,10 @@ const shrinkableSelectStyle: CSSProperties = {
 
 type SelectProps<T extends string> = {
   label: string;
-  value: T;
+  value: T | "";
   onChange: (value: T) => void;
   style?: CSSProperties;
+  placeholder?: string;
   disabled?: boolean;
 } & (
   | { labels: Record<T, string>; children?: never }
@@ -37,6 +38,7 @@ export function Select<T extends string>({
   value,
   onChange,
   style,
+  placeholder,
   disabled,
   labels,
   children,
@@ -55,10 +57,15 @@ export function Select<T extends string>({
       style={{
         ...(labels ? selectStyle : shrinkableSelectStyle),
         ...style,
-        ...focusRing(focused),
+        ...focusRing(focused && !disabled),
         ...(disabled ? { cursor: "default", opacity: 0.5 } : null),
       }}
     >
+      {placeholder != null ? (
+        <option value="" disabled>
+          {placeholder}
+        </option>
+      ) : null}
       {labels
         ? (Object.keys(labels) as T[]).map((key) => (
             <option key={key} value={key}>

@@ -47,7 +47,7 @@ src/web/
 │   ├── slack/      # SlackPage, SlackList, SlackDetail, SlackThread (the Inbox row reuses SlackThread through the barrel)
 │   └── badges/     # GoneBadge, PlanReadyBadge, SourceBadge — shared leaf feature (see import direction)
 ├── hooks/          # data/effect hooks: useBoardStream, useUnseenActivity, useTransitionNotifications, useResumeFeedback, useMediaQuery
-├── lib/            # non-UI helpers: api.ts, card-badges.ts, format-age.ts, resume-feedback.ts, start-request.ts
+├── lib/            # non-UI helpers: api.ts, card-badges.ts, format-age.ts, resume-feedback.ts, start-request.ts, meetings.ts
 └── styles/         # tokens.css — the design-token source of truth, survives unchanged
 ```
 
@@ -67,9 +67,9 @@ src/web/
 | `ErrorsPage.tsx`, `ErrorList.tsx`, `ErrorDetail.tsx`, `error-rows.ts`                                                        | `features/errors/`               |
 | `TodayPage.tsx`, `P0Card.tsx`, `CountChips.tsx`, `TodayList.tsx`, `Agenda.tsx`, `EntryRow.tsx`, `today-view.ts`              | `features/today/`                |
 | `SlackPage.tsx`, `SlackList.tsx`, `SlackDetail.tsx`, `SlackThread.tsx`                                                       | `features/slack/`                |
-| `MeetingNotesModal.tsx`                                                                                                      | `features/meetings/`             |
+| `MeetingNotesModal.tsx`, `MeetingsPage.tsx`, `MeetingList.tsx`, `MeetingDetail.tsx`                                          | `features/meetings/`             |
 | `useBoardStream.ts`, `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts`     | `hooks/`                         |
-| `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`                                        | `lib/`                           |
+| `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`, `meetings.ts`                         | `lib/`                           |
 | `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Glyph` / `Markdown` / `SplitView` / `ListGroup` / `DetailPaneBody` | `primitives/`                    |
 | `tokens.css`                                                                                                                 | `styles/`                        |
 

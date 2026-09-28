@@ -216,6 +216,26 @@ on one day updates its rows and keeps their state, while a weekly meeting gets n
 Each item carries `meta.meeting`, `meta.meetingDate`, `meta.meetingId`, `meta.key` and
 `meta.siblings` (the other titles from the same meeting as JSON).
 
+`POST /api/meetings/items` also stores the pasted notes it was sent, at most 100000 characters,
+under `DISPATCH_DIR/meetings/<sha256 hex of the meeting id>.txt` through `write-file-atomic` at
+mode 0600, after the item upsert succeeds, and stamps `meta.transcript = "paste"` on every item of
+that create. A repeat create for the same meeting on the same day overwrites the file; a write
+failure answers 500 `transcript-write-failed` with the same created, updated and ids fields, and
+leaves the items in place; the modal then reports the created items and that the notes were not
+saved. The file store is `services/orchestration/meeting-transcripts.ts`. `GET
+/api/meetings/transcript?meetingId=<id>` validates the id shape, then answers 200 `{ text }`, 400
+on a bad id, 404 when no transcript is stored, or 500 `transcript-read-failed`. The notes never
+appear in a log, the SSE frame or an error body.
+
+The Meetings page (`features/meetings/MeetingsPage.tsx`) lives under a "Sources" nav group with one
+"Meetings" row. `src/web/lib/meetings.ts` groups the meeting items by `meta.meetingId`, newest
+`meetingDate` first, and parses `meta.siblings`. The detail pane (`MeetingDetail.tsx`) shows the
+selected item, the sibling action items from the same meeting with the current one highlighted, an
+"Open in Granola" link when the item has a web url, a "Load transcript" button when the item has a
+stored transcript, and four actions: promote to ticket, run agent (which promotes the item, moves
+the card to To Do, then opens the existing start flow), and mark done and snooze, which run the
+same `lib/actions.ts` helpers as the Inbox and offer the same Undo.
+
 ### Granola round
 
 The Granola round pulls the user's action items from Granola through their own `claude` login. It
@@ -3452,8 +3472,8 @@ and the session switcher already use) and is translated by the active row's `off
 a per-row ref map in a layout effect when the route, the collapsed state or the visible rows change. Switching pages
 moves one transform and re-renders no row; the active row only changes its text color to
 `var(--accent)`, the "active sidebar row" accent job. Rows are 32px tall, take keyboard focus
-through `focusRing()` only, and expose `aria-current="page"`. Groups with no rows are omitted, so
-Sources and System stay hidden until a page exists for them.
+through `focusRing()` only, and expose `aria-current="page"`. Groups with no rows are omitted.
+Sources holds one row, Meetings, and stays present because the paste flow needs no connection.
 
 **A nav row tied to a source shows only while that source is enabled.** `NavItem` has an optional
 `source`; `visibleNavItems(NAV_ITEMS, board.enabledSources)` in `nav-items.ts` drops a row whose
@@ -3589,7 +3609,9 @@ real membership directly, independent of windowing` below for the full envelope 
    by `GET /api/cards/:id/attachments/:name` (`services/domain/attachments.ts`). For a local card
    whose description carries such links, `services/domain/kickoff.ts` rewrites them to absolute paths
    and adds an `## Attached images` section that tells the session to Read each file first; Linear
-   and group cards never get that section (`T-116-04`).
+   and group cards never get that section (`T-116-04`). Pasted meeting notes live under
+   `~/.dispatch/meetings/<sha256 hex of the meeting id>.txt` (folder `0700`, files `0600`), written
+   and read by `services/orchestration/meeting-transcripts.ts`.
 5. **tmux invocations (argv-exact).** Session name `dsp-<identifier>`;
    `new-session -d -s <name> -c <cwd> -x 200 -y 50 [-e KEY=VALUE ...]` with NO command argv (tmux runs
    its `default-shell` as a login shell, `SHELL-01`); the claude launch is `send-keys -l -t =<name>:

@@ -189,6 +189,11 @@ const MeetingNotesModal = lazy(() =>
     default: m.MeetingNotesModal,
   })),
 );
+const MeetingsPage = lazy(() =>
+  import("./features/meetings/index.js").then((m) => ({
+    default: m.MeetingsPage,
+  })),
+);
 const CheatSheet = lazy(() =>
   import("./features/palette/index.js").then((m) => ({
     default: m.CheatSheet,
@@ -566,6 +571,7 @@ export function App() {
     () => visibleNavItems(NAV_ITEMS, board?.enabledSources ?? []),
     [board?.enabledSources],
   );
+  const meetingItems = items.filter((item) => item.source === "meeting");
   const { show: showUndo, notice: showNotice } = undoToast;
   const [startRequest, setStartRequest] = useState<StartRequest | null>(null);
   const startAgent = useCallback(
@@ -852,6 +858,7 @@ export function App() {
     errors: { title: "Errors", count: errorCount },
     today: { title: "Today" },
     slack: { title: "Slack", count: slack.length },
+    meetings: { title: "Meetings", count: meetingItems.length },
   };
   const pageTitle = pageMeta[route.page].title;
 
@@ -865,6 +872,7 @@ export function App() {
       collapsed={navMode === "collapsed"}
       onToggleCollapsed={nav.toggle}
       inboxCount={inboxCount}
+      meetingCount={meetingItems.length}
       liveSessionCount={liveSessionCount}
       prCount={prCount}
       ticketsCount={ticketsCount}
@@ -905,6 +913,10 @@ export function App() {
             onClick={() => setPlaybookCreateRequest((n) => n + 1)}
           >
             New playbook
+          </Button>
+        ) : route.page === "meetings" ? (
+          <Button variant="primary" onClick={openOverlay(setMeetingNotesOpen)}>
+            From meeting notes
           </Button>
         ) : route.page === "activity" ? (
           <>
@@ -1093,6 +1105,15 @@ export function App() {
               />
             ) : route.page === "vault" ? (
               <VaultPage onCountChange={setVaultCount} />
+            ) : route.page === "meetings" ? (
+              <MeetingsPage
+                items={meetingItems}
+                selectedId={route.id}
+                onSelect={(id) => navigate("meetings", id ?? undefined)}
+                onOpenMeetingNotes={openOverlay(setMeetingNotesOpen)}
+                services={actionServices}
+                onStartPromoted={(cardId) => setStartRequest({ cardId })}
+              />
             ) : (
               <Board
                 board={board}

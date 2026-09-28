@@ -8,6 +8,7 @@ import {
   Kanban,
   KeyRound,
   MessageSquare,
+  Mic,
   PanelLeft,
   SquareTerminal,
   Sun,
@@ -64,6 +65,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     group: "Sources",
   },
   { page: "errors", label: "Errors", icon: AlertTriangle, group: "Sources" },
+  { page: "meetings", label: "Meetings", icon: Mic, group: "Sources" },
   {
     page: "slack",
     label: "Slack",

@@ -14,6 +14,7 @@ export const PAGES = [
   "errors",
   "today",
   "slack",
+  "meetings",
 ] as const;
 
 export type Page = (typeof PAGES)[number];

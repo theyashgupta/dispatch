@@ -245,7 +245,11 @@ function ReviewItem({ row, disabled, onChange }: ReviewItemProps) {
 
 interface MeetingNotesModalProps {
   onClose: () => void;
-  onCreated: (result: { created: number; updated: number }) => void;
+  onCreated: (result: {
+    created: number;
+    updated: number;
+    notesSaved: boolean;
+  }) => void;
 }
 
 export function MeetingNotesModal({
@@ -332,9 +336,14 @@ export function MeetingNotesModal({
     const result = await createMeetingItems(
       trimmedMeeting,
       checkedRows.map((row) => ({ ...row.draft, title: row.title.trim() })),
+      notes,
     );
     if (result.ok) {
-      onCreated({ created: result.created, updated: result.updated });
+      onCreated({
+        created: result.created,
+        updated: result.updated,
+        notesSaved: result.notesSaved,
+      });
       if (mountedRef.current) onClose();
       return;
     }

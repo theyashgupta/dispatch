@@ -175,6 +175,8 @@ export const SERVICE_ERR_LOG_PATH = path.join(DISPATCH_DIR, "service.err.log");
 
 export const ATTACHMENTS_DIR = path.join(DISPATCH_DIR, "attachments");
 
+export const MEETINGS_DIR = path.join(DISPATCH_DIR, "meetings");
+
 /**
  * Resolve the absolute folder holding one card's pasted images.
  */

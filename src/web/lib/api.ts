@@ -2080,29 +2080,54 @@ export async function draftMeetingItems(
   return { ok: true, drafts: body.drafts };
 }
 
-/** Create the checked meeting drafts as Inbox items: POST /api/meetings/items. Never throws. */
+/**
+ * Create the checked meeting drafts and store the notes: POST /api/meetings/items. Never throws.
+ *
+ * @remarks A 500 transcript-write-failed still created the items, so it resolves ok with
+ * notesSaved false.
+ */
 export async function createMeetingItems(
   meeting: string,
   drafts: readonly MeetingDraft[],
+  notes?: string,
 ): Promise<
-  | { ok: true; created: number; updated: number }
+  | { ok: true; created: number; updated: number; notesSaved: boolean }
   | { ok: false; error: string | null }
 > {
   try {
     const res = await fetch("/api/meetings/items", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ meeting, drafts }),
+      body: JSON.stringify({ meeting, drafts, notes }),
     });
-    if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      created?: number;
+      updated?: number;
+    };
+    const { created, updated } = body;
+    if (typeof created !== "number" || typeof updated !== "number") {
       return { ok: false, error: body.error ?? null };
     }
-    const body = (await res.json()) as { created: number; updated: number };
-    return { ok: true, created: body.created, updated: body.updated };
+    if (res.ok || body.error === "transcript-write-failed") {
+      return { ok: true, created, updated, notesSaved: res.ok };
+    }
+    return { ok: false, error: body.error ?? null };
   } catch {
     return { ok: false, error: null };
   }
+}
+
+/** Read a meeting's stored transcript: GET /api/meetings/transcript. Throws on non-2xx. */
+export async function getMeetingTranscript(meetingId: string): Promise<string> {
+  const res = await fetch(
+    `/api/meetings/transcript?meetingId=${encodeURIComponent(meetingId)}`,
+  );
+  if (!res.ok) {
+    throw new Error(`getMeetingTranscript failed: ${res.status}`);
+  }
+  const body = (await res.json()) as { text: string };
+  return body.text;
 }
 
 /** Read the Granola round status: GET /api/meetings/granola. */
