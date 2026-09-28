@@ -44,7 +44,10 @@ test("an empty key builds the object but enables nothing", () => {
     config({ linearApiKey: "", sources: { linear: { apiKey: "" } } }),
   );
   assert.equal(getLinearSource().id, "linear");
-  assert.equal(listSources().length, 1);
+  assert.deepEqual(
+    listSources().map((s) => s.id),
+    ["linear", "github"],
+  );
   assert.deepEqual(enabledSources(), []);
   assert.equal(isSourceEnabled("linear"), false);
 });
