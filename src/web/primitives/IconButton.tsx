@@ -51,7 +51,7 @@ export function IconButton({
     background:
       callerBackground != null
         ? pressed
-          ? `color-mix(in srgb, black 12%, ${callerBackground})`
+          ? `color-mix(in srgb, var(--press-shade) 12%, ${callerBackground})`
           : hovered
             ? "color-mix(in srgb, var(--accent) 22%, var(--surface-column))"
             : callerBackground

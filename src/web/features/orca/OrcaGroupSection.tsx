@@ -1,4 +1,5 @@
 import type { Column } from "../../../shared/types.js";
+import { dataInk } from "../../primitives/data-ink.js";
 import { SINGLE_LINE_COPY } from "../board/index.js";
 import type { GroupDimension, WorkspaceGroup } from "./orca-selectors.js";
 import { OrcaNavRow } from "./OrcaNavRow.js";
@@ -54,7 +55,7 @@ export function OrcaGroupSection({
             background: group.accent
               ? `color-mix(in srgb, ${group.accent} 16%, var(--surface-column))`
               : "var(--surface-card)",
-            color: group.accent ?? "var(--text-muted)",
+            color: group.accent ? dataInk(group.accent) : "var(--text-muted)",
             borderRadius: "var(--radius-sm)",
             padding: "0 var(--space-xs)",
             fontSize: "var(--font-micro)",

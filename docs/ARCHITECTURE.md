@@ -3469,6 +3469,24 @@ route, the shape `pollNow()` already has for the Linear poller) and because the 
 the guard returns: the promise of the tick ALREADY in flight, not a fresh scan. A caller wanting
 guaranteed-fresh results has to wait for the in-flight tick to settle and then run another.
 
+### Theme Engine
+
+The web UI has a dark and a light theme. The html element always carries `data-theme` with the resolved value, `light` or `dark`. `src/web/styles/tokens.css` holds the dark palette in the top-level `:root` block and the light palette in one `:root[data-theme="light"]` block. There is no `prefers-color-scheme` copy of the light palette.
+
+**The preference.** The user's choice is `system`, `light` or `dark`, stored in `localStorage` under the key `dsp.theme`. An absent value and any value outside that closed set mean `system`. `parseThemePreference` and `resolveTheme` in `src/web/lib/theme.ts` are the single definition of both rules.
+
+**Before first paint.** `src/web/index.html` and `src/web/viewer.html` hold the same inline classic script as the first script of the head. It reads the stored value inside a try block, resolves `system` through `matchMedia("(prefers-color-scheme: light)")`, falls back to `dark`, and sets `data-theme` and the content of the `color-scheme` meta. It holds no comment and no colour literal. `src/web/lib/theme.test.ts` runs the script text of both shells in a sandbox for every stored value and both system values, and asserts that it paints what `resolveTheme` resolves and that the two texts are identical.
+
+**After load.** `useTheme` in `src/web/hooks/useTheme.ts` is called once in `App.tsx` and once in `viewer-main.tsx`. It keeps the attribute, the `color-scheme` meta and the `theme-color` meta current after a manual choice, a change of the system scheme, and a change of the stored value in another tab (the `storage` event, read through the same parser). The `theme-color` meta takes the computed value of `--bg`, so no html shell holds a colour.
+
+**A switch is instant.** While the attribute changes, the hook sets `data-theme-switching` on the html element for two animation frames, and one rule in `tokens.css` turns transitions off under that attribute.
+
+**Signal tokens.** Each status, column, priority and source token keeps one hex, in the `:root` block. The light block redefines a token by its own name as `color-mix(in srgb, <the same hex> P%, black)` with a share per token. `src/web/styles/tokens.test.ts` asserts that the hex inside each light mix equals the root hex and that no signal token has a second bare hex, so the palette parser of `NEW-24` still reads one hex per name.
+
+**The terminal is not themed.** `terminal.html` and `terminal-main.ts` do not change with the theme. A theme switch changes an attribute and token values only, never the element tree, so the terminal iframe is not remounted (`PANEL-03`).
+
+**The instrument.** `scripts/contrast-113.mjs` measures every text and graphic token pair once per theme, against that theme's own ladder order: dark rises bg, column, card, card-hover; light rises bg, column, card-hover, card. The light token map is the dark map overlaid with the light block. A colour role resolves from three value forms: a 6-digit hex, a `color-mix(in srgb, ...)` of one colour with `black` or `white`, and a `var()` of another token; a colour role in any other form is a violation, never a skip.
+
 ### Design System Invariants
 
 **Keyboard focus is an outline, never a box-shadow (`NEW-15`).** The rule, authored in `docs/standards/frontend-design-system.md`: "a keyboard focus ring must never look identical to selection."
@@ -3488,6 +3506,8 @@ listbox (`SearchBox.tsx:321`), the carousel search overlay (`SearchBox.tsx:400`)
 picker (`MoveToPicker.tsx:97`), the multi-select dropdown (`MultiSelect.tsx:248`), and the modal
 (`Modal.tsx:110`). Cards and columns carry no shadow at rest; a second, independently-defined
 shadow value is the regression the gate catches, not an additional consumer of the one token.
+
+Since 2026-09-29 (G9 Unit 1) the light block of `tokens.css` declares `--shadow-float` a second time, with a lighter value for the light theme (decision U1-07). The invariant does not change: the token keeps one name and one definition for each theme, and no file outside `tokens.css` holds a shadow literal.
 
 **One wordmark definition (`NEW-17`).** `wordmarkStyle` in `src/web/primitives/Glyph.tsx` is the
 only place the DISPATCH wordmark's type treatment (size, weight, letter-spacing) is written down.
@@ -3562,6 +3582,8 @@ confirmatory rather than a cleanup of a present violation; the same ledger recor
 trips proving the check can fail: a reintroduced literal at a real consuming site, a deleted
 palette declaration hitting the missing-subject sentinel, and a renamed `COLUMN_ACCENT` hitting
 the mechanism half.
+
+Since 2026-09-29 (G9 Unit 1) `tokens.css` holds a light block that names the same tokens again. The count above does not change: the check reads the twenty declarations whose value is a bare hex, all in the `:root` block, and it skips a declaration whose value starts with `color-mix`, which is the only form the light block uses for these names. `--col-parked` is a twenty-first signal token that the check does not fence; the light block treats it the same way. See [Theme Engine](#theme-engine).
 
 `scripts/check-invariants.mjs` mechanically covered all six through four separate checks, one of which has since retired: a
 global retired-pattern scan over `src/**/*.{ts,tsx}` catches the retired box-shadow focus

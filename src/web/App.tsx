@@ -40,6 +40,7 @@ import { PageHeader } from "./primitives/PageHeader.js";
 import { pendingRestore, useRoute } from "./hooks/useRoute.js";
 import type { Page } from "./lib/route.js";
 import { useNavState } from "./hooks/useNavState.js";
+import { useTheme } from "./hooks/useTheme.js";
 import { UsageChip } from "./features/accounts/index.js";
 import { useClaudeAccounts } from "./hooks/useClaudeAccounts.js";
 import { Glyph, wordmarkStyle } from "./primitives/Glyph.js";
@@ -355,6 +356,8 @@ export function App() {
   const ask = useAsk();
   const { route, navigate } = useRoute();
   const nav = useNavState();
+  const { preference: themePreference, setPreference: setThemePreference } =
+    useTheme();
   const carousel = useMediaQuery(CAROUSEL_QUERY);
   const narrow = useMediaQuery(NARROW_QUERY);
   const [archiveCount, setArchiveCount] = useState<number | undefined>();
@@ -1160,6 +1163,8 @@ export function App() {
                 tunnelState={tunnelState}
                 soundEnabled={soundEnabled}
                 onToggleSound={setSoundEnabled}
+                themePreference={themePreference}
+                onThemePreferenceChange={setThemePreference}
                 onRunSetup={openSetupWizard}
                 connectionKey={setupRuns}
                 errorsInFeeds={errorsInFeeds}

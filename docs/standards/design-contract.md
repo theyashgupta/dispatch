@@ -67,6 +67,14 @@ decoration.
 | Panel section rhythm - `--panel-section-gap`                                                       | 16px      | >=1600px, 1024-1599px, 768-1023px, <768px | Landed by Phase 115, replacing `ReferenceBlocks.tsx`, `PrList.tsx`, `CardTimeline.tsx` and `Notice.tsx`'s own ad hoc one-sided margins with one shared token, applied once as a flex-column `gap` at both `DetailPanel.tsx` reading-surface wrappers. Every raw gap value measured byte-identical to the pre-change baseline at every breakpoint (16px); the change is architectural, not a numeric retune: BEFORE, the uniform 16px was an accident of this fixture's own block combination (CSS's max-of-adjoining-margins collapse, with only one zero-margin block that never sat between two zero-margin neighbours); AFTER, the same 16px is produced by one token applied once, so the rhythm holds even for block combinations this fixture does not exercise. Break-proven via `scripts/panel-115.mjs`'s `CHECKS.rhythm`/`BREAKS.rhythm`. |
 | Scan-surface padding (card padding, column inner padding, inter-card gap) — `scan-surface-padding` | unchanged | >=1600px, 1024-1599px, 768-1023px, <768px | Proof row, not a new value: the same seeded card's rendered height was measured before and after the reading-surface change and was identical at every breakpoint — the reading-surface rule does not leak into scan surfaces. **SUPERSEDED BY v3.4: the `### Density scale (v3.4)` table below now fixes `card-padding`, `inter-card-gap`, `row-rhythm` and `column-header-height` in px; "unchanged" no longer describes this row's scan surfaces.**                                                                                                                                                                                                                                                                                                                                                                                             |
 
+**Record, 2026-09-29 (G9 Unit 1, LOCAL-55).** The spacing scale gains a 12px step, `--space-md`, so the scale
+is 4/8/12/16/24/32/48. Four declarations already read `var(--space-md)` on the base commit
+(`ArchiveSection.tsx` row gap and row padding, `Toast.tsx` gap and padding) while no token declared
+it, so each of them computed to an invalid value. This record supersedes the sentence below that
+says the scale is 4/8/16/24/32/48 and unchanged; it supersedes no table row. Measured in a real
+browser on the landed source: an archive row reads padding 8px 12px and the archive section reads
+gap 12px; the toast reads padding 8px 12px 8px 16px and gap 12px.
+
 The rule that changes: reading surfaces (detail panel body, modal body) get asymmetric padding
 with more vertical rhythm than horizontal; scan surfaces (board, cards, sidebar) keep symmetric
 tight padding exactly as today. The underlying 4/8/16/24/32/48 spacing scale itself is unchanged —
@@ -99,6 +107,17 @@ scanned":
 | Large - modal dialog, the search dropdown, `MoveToPicker` - `--radius-lg` | 10px                 | >=1600px, 1024-1599px, 768-1023px, <768px | Held, matches the research starting value. An 8px alternative was tried at the widest breakpoint (where "soft" would show first against the dark surface) and did not read better; 10px stands. Phase 86 correction: the search dropdown and `MoveToPicker` moved into this bucket from the workhorse row - both are dismissible floating menus that share the modal's `--shadow-float` elevation treatment, so their radius now matches that elevation class rather than a raw height reading that under-measured the dropdown's typical multi-row height. Both independently clear the ~200px threshold too: `MoveToPicker`'s realistic height is 228px (5 rows × 44px + 8px gap) and the listbox's `maxHeight` is 360px. The modal dialog remains the bucket's tallest member (measured 630–909px tall depending on breakpoint) - the detail panel's outer shell has no visible edge to round today.                                                                                                                                                                                                                                  |
 | Excluded surfaces - `radius-scope`                                        | excluded - no radius | >=1600px, 1024-1599px, 768-1023px, <768px | Resize handles stay undecorated, as today. **The scrollbar thumb does not, and the "as today" half of this row was wrong when it was written.** Phase 89 measured `::-webkit-scrollbar-thumb` on a genuinely scrolling container (`scrollHeight > clientHeight` true) and read `border-radius: 6px`, from `tokens.css`'s app-wide `*::-webkit-scrollbar-thumb { border-radius: var(--radius); }` - a rule that predates this contract. The row is amended rather than the CSS, deliberately: the declaration sits inside the hard-won scrollbar block this document names as untouched, its value is inherited from the workhorse token rather than assigned to the thumb by the role-based rule below, and stripping a 6px radius off a 10px-wide thumb would be authoring a new visual decision, which an audit has no mandate to do. What the exclusion means in practice is that the vocabulary does not REACH the thumb - no rule below assigns it a bucket - not that the thumb renders square.                                                                                                                                    |
 
+**Record, 2026-09-29 (G9 Unit 1, LOCAL-55).** `--radius` is 8px and `--radius-lg` is 12px. `--radius-sm` stays
+4px. A new token, `--radius-pill` (999px), exists and has no consumer in this unit; until a
+consumer takes it, the role rule below stands and a chip takes `--radius-sm`. This record supersedes the Value cell of the Workhorse row (6px) and of the Large row (10px),
+and the measured 6px scrollbar thumb in the `radius-scope` row and in the paragraph below: the
+thumb still inherits `var(--radius)` from the untouched scrollbar block, so it takes 8px with the
+token. The role rule and its height thresholds stay in force. No component was edited for radius:
+every consumer of the two tokens changes with the token. Measured in a real browser on the landed
+source: a board card reads 8px, a source chip on the card reads 4px at 18px tall, the New ticket
+modal reads 12px, a toast reads 12px. The phase harnesses that assert a computed 6px measure the
+earlier look and are not kept green (see `## How values were checked`).
+
 The vocabulary is tied to element ROLE, expressed as a height threshold a reader can apply: an
 element up to roughly 19–27px tall (a chip or badge) takes `--radius-sm`; an element from there up
 to roughly 200px tall (buttons, inputs, cards, columns) takes the workhorse `--radius`; an element
@@ -123,6 +142,72 @@ block went stale as `tokens.css` grew; the block is cited by name now so it cann
 | Text - `--text`, `--text-muted`                                                 | primary text / muted text (identifiers, headers, counts, timestamps); unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | >=1600px, 1024-1599px, 768-1023px, <768px |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Keyboard focus - `focus-ring`                                                   | outline: 2px solid var(--accent); outline-offset: 2px                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | >=1600px, 1024-1599px, 768-1023px, <768px | Replaces `boxShadow: "0 0 0 2px var(--accent)"`, which was structurally identical to selection. The rule: **a keyboard focus ring must never look identical to selection.** This rule is authored here and lands in `frontend-design-system.md` during Phase 84, alongside the primitive changes that implement it. Confirmed keyboard-only via real Tab traversal and a real pointer click that leaves no ring, at every breakpoint. One rendering nuance, not blocking, **with its mechanism corrected in Phase 89**: at the narrowest breakpoint the first card in a column loses 1px of its ring on the top, left and right edges. The cause is not the sticky header - Phase 89 measured `headerBottom === listTop === cardTop` at both the collapsed 20.7969px and the shipped 32px header height, so the header does not overlay the list at all. The first card fills the list's width and sits flush at its top, so the 1px `outline: auto` ring is clipped at the scroll container's own boundary, which merely coincides with the header's bottom edge. The condition is identical at both header heights (obscured delta 0.00px on all four sides), predates this contract, and the bottom edge stays fully inside the client rect.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Semantic palettes - `--prio-*`, `--col-*`, `--status-*`                         | untouched                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | >=1600px, 1024-1599px, 768-1023px, <768px | Already correctly separated from the accent and from each other; out of scope for this narrowing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+
+**Record, 2026-09-29 (G9 Unit 1, LOCAL-55).** Dispatch has a dark and a light theme. The html element carries
+`data-theme` with the resolved value, the dark palette stays in the top-level `:root` block with
+every value unchanged, and the light palette lives in one block, `:root[data-theme="light"]`
+(mechanism: `docs/ARCHITECTURE.md#theme-engine`). This record supersedes the word "unchanged" in
+the `--bg`, elevation ladder, `--border` and text rows and the word "untouched" in the semantic
+palettes row, for the light theme only. It also supersedes "Dispatch stays dark" in
+`docs/research/dispatch-platform-plan.md` section 7.2. The accent job list does not change.
+
+| Role                               | Dark                    | Light                   |
+| ---------------------------------- | ----------------------- | ----------------------- |
+| `--bg`                             | `#0b0c0e`               | `#eceef1`               |
+| `--surface-column`                 | `#131417`               | `#f4f5f7`               |
+| `--surface-card`                   | `#1a1b1f`               | `#ffffff`               |
+| `--surface-card-hover`             | `#202126`               | `#f7f8fa`               |
+| `--surface-inset` (new)            | `#0e0f12`               | `#e4e6ea`               |
+| `--border`                         | unchanged               | `#d9dce1`               |
+| `--border-strong` (new)            | `#3a3c43`               | `#b4b9c2`               |
+| `--accent`                         | `#5e6ad2`               | `#4f5bc9`               |
+| `--accent-soft` (new)              | accent 16%, transparent | the same formula        |
+| `--accent-text` (new)              | white 30% over accent   | black 12% over accent   |
+| `--text`                           | unchanged               | `#1a1b1f`               |
+| `--text-muted`                     | unchanged               | `#5b616e`               |
+| `--destructive-text`               | `#ea6d71`               | `#ab2429`               |
+| `--on-accent`, `--on-danger` (new) | `#ffffff`               | `#ffffff`               |
+| `--scrim` (new)                    | `rgba(0, 0, 0, 0.4)`    | `rgba(15, 17, 21, 0.4)` |
+| `--qr-surface` (new)               | `#ffffff`               | `#ffffff`               |
+| `--press-shade` (new)              | `black`                 | `black`                 |
+
+New roles: `--surface-inset` is a recessed surface for inputs and pills, `--border-strong` is the
+edge of a control, `--accent-soft` is the accent tint that sits on any surface, and `--accent-text`
+is the accent as TEXT, held at 4.5:1 or more on every tier and on the accent tint in both themes.
+`--accent` itself stays a graphic token. As text on its own 16 percent tint it is below the 4.5:1
+floor in both themes (4.21:1 in light and 3.34:1 in dark, from the pixels of the active sidebar
+row), so every site that renders the accent as text reads `--accent-text` now: the toggled
+`Button`, the accent `Chip` tone, the active sidebar row, the active palette row, the active
+session segment, the active status pill, the current row of the move picker, the two account
+badges, the active entry of the viewer table of contents and the links. Where a paragraph below
+says "accent text", it means this text role. Measured from pixels: the active sidebar row and a
+pressed toggle read 5.09:1 in light and 5.72:1 in dark, a sidebar count badge 5.52:1 and 5.29:1.
+An icon, a border or a fill keeps `--accent`.
+
+The swap tokens: `--scrim` replaces the scrim literal in `Modal.tsx` and in `DetailPanel.tsx`,
+`--edge-highlight` the literal of the column top edge, `--qr-surface` the ground of the QR code,
+`--press-shade` the `black` of the `IconButton` press mix and `--on-danger` the white label of the
+danger `Button`; none of these changes a rendered value in the dark theme. `--on-accent` replaces
+`var(--text)` as the label of the primary `Button` and of the count badge of a multi-card drag, so
+that label changes from #e8e9ea to #ffffff in the dark theme (the record under `## State palette`
+holds the ratios). One text consumer of the fill token `--destructive` was left, the validation
+error on Settings, Appearance; it reads `--destructive-text` now, so no text reads the fill token.
+
+Semantic palettes in the light theme: each `--prio-*`, `--col-*`, `--status-*` and `--src-*` token
+keeps its one hex in the `:root` block. The light block redefines a token by its own name as
+`color-mix(in srgb, <the same hex> P%, black)` with a share per token, and
+`src/web/styles/tokens.test.ts` fails when the hex inside a mix differs from the root hex. A token
+that a consumer renders as text (`--status-ok`, `--status-stale`, every `--src-*`) takes the 4.5:1
+floor; a graphic token takes 3:1. The column tokens are graphic tokens in both themes. As text a
+column token is below the 4.5:1 floor (2.90:1 to 3.66:1 on its tint on the light Board), so a
+consumer that renders a column colour as text (the column count chip, the status pills, the
+search result chip, the merged and closed PR chips, the Workspace rail counts) takes the rule of
+the state chip through `dataInk` in `src/web/primitives/data-ink.ts`: 35 percent of the token
+mixed with `--text`. On the 16 percent tint of the same token that text measures 7.16:1 or more
+in light and 7.35:1 or more in dark over the five background tiers. A colour that comes from
+Linear is not a token; the record under `## Linear state colors` holds its rule. A placeholder
+reads `--text-muted` through one `::placeholder` rule. The destructive fill keeps its hex in the
+light theme.
 
 Accent consumers added by G2 (LOCAL-39, LOCAL-40), same job as the rows above: a pressed filter
 toggle (`Button` with `aria-pressed`, used by Inbox Unread only and Sessions Live only) takes the
@@ -157,6 +242,31 @@ One color per source, ratified 2026-09-23 for the multi-source dispatcher (`docs
 
 The Linear workflow state chip (`src/web/primitives/StateChip.tsx`, rendered through `LinearStateChip` in `src/web/features/badges/`) shows the state in Linear's own color. That color is API data, not a design token: `stateChipColor` in `src/web/lib/linear-state.ts` accepts it only as a 6-digit hex and passes it to a style value, so it sits outside the `NEW-24` token maps. When Linear sends no color, or a value that is not a 6-digit hex, the chip falls back by state type to existing tokens: unstarted, triage and backlog `--col-todo` (gray), started `--prio-medium` (yellow), completed `--col-in-review` (purple), canceled `--col-done` (slate), any other type `--text-muted`. The chip is the `Chip` primitive with a 6px dot in the color, text in the color, no border, and a background of the color mixed 12 percent into transparent. Test fixtures under `src/web` must not use a `tokens.css` palette hex as a Linear color, because `NEW-24` flags those literals.
 
+**Record, 2026-09-30 (G9 Unit 1, LOCAL-55).** The label of the state chip no longer takes the
+Linear colour as it is. It reads `color-mix(in srgb, <the Linear colour> 35%, var(--text))`, so
+the label keeps the hue of the state and takes its lightness from the text colour of the theme.
+The 6px dot keeps the true Linear colour, and the ground keeps the 12 percent tint of it. This
+record supersedes the words "shows the state in Linear's own color" and "text in the color" above,
+for the label only; the fallback tokens by state type pass through the same rule. Why: a pale workflow colour as text on
+a light surface cannot be read (white 1.00:1, `#f2c94c` 1.50:1), and the light theme is the
+default for a user with a light system. The rule holds 4.5:1 or more for any colour on the four
+tiers of the ladder in both themes; the lowest values are 4.67:1 in light (a near white colour on
+the page ground) and 5.76:1 in dark (a near black colour on the card hover tier), with the
+channels rounded. It does not hold everywhere in light: a near white Linear colour gives 4.39:1 on
+`--surface-inset`, 4.19:1 on a pressed card and 3.96:1 on a pressed hovered card. No state chip
+sits on the recessed tier, and a press lasts a moment. In dark the rule holds on those three
+grounds too (5.96:1 or more).
+
+| Linear colour | Light, label on its ground | Dark, label on its ground |
+| ------------- | -------------------------- | ------------------------- |
+| `#f2c94c`     | 6.63:1 (was 1.50:1)        | 9.81:1 (was 8.30:1)       |
+| `#1f2937`     | 12.96:1 (was 11.65:1)      | 6.89:1 (was 1.15:1)       |
+| `#ffffff`     | 5.33:1 (was 1.00:1)        | 10.66:1 (was 12.07:1)     |
+| `#000000`     | 14.20:1 (was 15.91:1)      | 6.08:1 (was 1.18:1)       |
+
+The values are measured in a real browser on a Board card (the label from its computed colour,
+the ground from the pixels of a screenshot).
+
 ## State palette
 
 Hover, pressed and focus-visible values for every interactive board element, transcribed from the
@@ -181,6 +291,29 @@ without changing the ring itself. **The `focus-ring` row in `## Color roles` sta
 | `pressed-formula`                                               | `color-mix(in srgb, black 12%, <element's own resting background>)`                                                                                                      | >=1600px, 1024-1599px, 768-1023px, <768px                                  | No `:active` or pressed state exists anywhere in `src/web/` today, new surface not a retune. One formula covers both solid tiers (opaque elements darken their own hex) and `transparent` tiers (translucent black overlay). Computed at 12%: `--surface-card` #1a1b1f to #17181b; `--surface-card-hover` #202126 to #1c1d21; `--surface-column` #131417 to #111214. Tested on 4 elements incl. the resize handle at >=1600px/1024-1599px, 3 elements (no resize handle) at 768-1023px/<768px, rendered-state application since no `:active` handler exists to dispatch a real mousedown against. Re-measured through `scripts/contrast-113.mjs --extra-bg`: `--destructive-text` (the text-role token Phase 115 landed, see `## Contrast floor`) on pressed-`--surface-card-hover` (#1c1d21) now measures 5.55:1, clear of the 4.5:1 floor; the former 4.30:1 pressed-tier residual is closed at the value level (`## Deferred decisions` row 12). See the elevation-ladder rule under `## Elevation`: the pressed state does not enter that ladder.                                                                                                                                                                                                                                                                                                                                                         |
 | `focus-visible-coverage`                                        | every interactive element reachable by keyboard, treated with `focusRing()`'s governed `2px solid var(--accent)` ring, never rendering identically to hover or selection | >=1600px, 1024-1599px, 768-1023px, <768px                                  | `IconButton`/`Button` secondary/primary/danger/New-ticket/view-switch segments and `SearchBox` already consume `focusRing()`, no gap. Column header: not focusable, correct. **Gap 1**: `CardView.tsx` carries no `tabIndex`, but `Card.tsx` spreads `useDraggable()`'s default `attributes` (`role="button"`, `tabIndex={0}`) onto every card, so it IS keyboard-focusable today and renders the browser's ungoverned native outline, never `focusRing()`, a worse gap than "not focusable." **Gap 2**: the resize handle's hover, keyboard focus and active-dragging states render via the identical `hoveringHandle \|\| resizing \|\| handleFocused` expression (`Column.tsx:314`) and never call `focusRing()`; the landed `hover-resize-handle` value distinguishes hover but focus and dragging remain visually identical to each other. **Both gaps CLOSED by Phase 114** (Deferred decisions rows 13 and 14): `Card.tsx` now composes its focus handler onto `focusRing()`'s governed ring, and `Column.tsx`'s resize handle now calls `focusRing(handleFocused, true)` for a flush treatment distinct from its own border-based hover/dragging state; both confirmed live by `node scripts/panel-114.mjs --check board-states`. >=1600px and 1024-1599px used a real 14-press Tab traversal plus a real pointer click; 768-1023px and <768px are rendered-state checks reading `tabIndex` directly. |
 
+**Record, 2026-09-29 (G9 Unit 1, LOCAL-55).** Filled buttons darken on hover and press, in both themes, and
+their label is white (`--on-accent`, `--on-danger`). This record supersedes the Value cell of the
+`hover-button-primary` row (a white 12% lighten, #717cd7), of the `hover-button-danger` row (a
+white 12% lighten, #c84a4e) and of the `hover-transition` row (80ms, `background-color` only), and
+it narrows the `pressed-formula` row: a filled button presses at black 24%, every other element
+keeps black 12% over its own resting tier.
+
+| State                    | Formula                                                         | Dark    | Light   |
+| ------------------------ | --------------------------------------------------------------- | ------- | ------- |
+| `hover-button-primary`   | `color-mix(in srgb, black 12%, var(--accent))`                  | #535db9 | #4650b1 |
+| `pressed-button-primary` | `color-mix(in srgb, black 24%, var(--accent))`                  | #4751a0 | #3c4599 |
+| `hover-button-danger`    | `color-mix(in srgb, black 12%, var(--destructive-button-fill))` | #a92b30 | #a92b30 |
+| `pressed-button-danger`  | `color-mix(in srgb, black 24%, var(--destructive-button-fill))` | #922529 | #922529 |
+
+Why: measured on the base commit in the dark theme, the primary label was `--text` on `--accent`
+at 3.87:1 at rest and 3.10:1 on the white hover, both below the 4.5:1 text floor, and the
+instrument never measured the pair. The white label now measures 4.70:1 at rest, 5.78:1 on hover
+and 7.11:1 pressed in the dark theme, and 5.72:1, 6.90:1 and 8.39:1 in the light theme. The danger
+label measures 5.62:1, 6.83:1 and 8.34:1 in both themes. `hover-transition` is now four
+transitions (`background-color`, `border-color`, `color`, `box-shadow`), each over
+`var(--motion-hover)` with `var(--easing-enter)`; see the record under `## Motion`. The
+background-tier-only hover rule, the `focus-ring` treatment and every other row stay in force.
+
 ## Elevation
 
 | Token or rule                                     | Value                                                                                                                                                   | Checked at                                          | Note                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -188,6 +321,26 @@ without changing the ring itself. **The `focus-ring` row in `## Color roles` sta
 | Float shadow — `--shadow-float`                   | 0 6px 16px rgba(0,0,0,0.45)                                                                                                                             | >=1600px, 1024-1599px, 768-1023px, <768px           | Formalizes the existing copy-pasted literal (already shipped on the search dropdown) as a named token. A tighter `0 4px 12px` alternative was tried at the widest and narrowest breakpoints and did not read as an improvement against the dark surfaces; the current literal stands.                                                                                                                                                                                                                                                                                                                                                 |
 | `elevation-ladder`                                | strictly increasing relative luminance: 0.00366 / 0.00701 / 0.01102 / 0.01535 (`--bg` / `--surface-column` / `--surface-card` / `--surface-card-hover`) | n/a, viewport-independent; computed from tokens.css | Re-verified by `scripts/contrast-113.mjs`, break-proven, a mutated copy with `--surface-card` darker than `--surface-column` trips the check. Confirms the ladder's lightness-rank rule holds with no exception; the single-shadow-token invariant is unrelated and already gated by `scripts/check-invariants.mjs`. Phase 115 additionally verified the ladder live on rendered surfaces, panel and board, at all four breakpoints via `scripts/panel-115.mjs`'s break-proven `CHECKS.elevation`, not only computed from `tokens.css`.                                                                                               |
 | Terminal recessed tier - `terminal-recessed-tier` | `--bg`, recessed below `--surface-column`, ACCEPTED EXCEPTION                                                                                           | n/a, viewport-independent; computed from tokens.css | The terminal viewport sits on the base `--bg` background tier deliberately, recessed below the panel's own `--surface-column` tier, because it is a distinct, self-contained reading surface: its own connecting-state and error-state text renders at 6.02:1 (`--text-muted`) and 6.45:1 (`--destructive-text`) against `--bg`, both well clear of the 4.5:1 floor, and its live-session state delegates entirely to xterm.js's own, separately-verified theme. This is the one deliberate exception to the ladder's rank ordering, verified by measurement in `115-MEASUREMENTS.md`'s `## Elevation` section, not a silent anomaly. |
+
+**Record, 2026-09-29 (G9 Unit 1, LOCAL-55).** The ladder has a light order, the float shadow has a light
+value, and the column top edge reads a token. This record supersedes the Value cell of the
+`elevation-ladder` row and of the Float shadow row for the light theme only, and the literal
+`inset 0 1px 0 rgba(255,255,255,0.02)` in the paragraph below; every dark value stays.
+
+| Rule               | Dark                                                             | Light                                                            |
+| ------------------ | ---------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `elevation-ladder` | bg, column, card, card-hover: 0.00366, 0.00701, 0.01102, 0.01535 | bg, column, card-hover, card: 0.85333, 0.91253, 0.93811, 1.00000 |
+| `--shadow-float`   | `0 6px 16px rgba(0, 0, 0, 0.45)`                                 | `0 6px 16px rgba(15, 17, 21, 0.16)`                              |
+| `--edge-highlight` | `rgba(255, 255, 255, 0.02)`                                      | `rgba(255, 255, 255, 0.7)`                                       |
+
+In the light theme a card is white and its hover tier is one step darker, so the ladder rises bg,
+column, card-hover, card; `scripts/contrast-113.mjs` checks each theme against its own order.
+`--surface-inset` is a recessed tier and does not enter the ladder: it sits between `--bg` and
+`--surface-column` in the dark theme and below `--bg` in the light theme. `--shadow-float` stays
+the only shadow token; the light block gives it a second value, not a second definition of a
+shadow. The column inset keeps its geometry and its accepted status and reads
+`var(--edge-highlight)`. `scripts/panel-115.mjs` asserts the computed dark value, so its
+assertion holds in the dark theme and not in the light theme.
 
 The surface ladder stays exactly as it is: `--bg` / `--surface-column` / `--surface-card` /
 `--surface-card-hover`, hairline borders, no drop shadow at rest. `--shadow-float` is the only
@@ -234,6 +387,29 @@ background, never a fixed rank position.
 | `contrast-destructive-text`    | 4.82:1 worst case, above the 4.5:1 floor         | n/a, viewport-independent; computed from tokens.css | LANDED, Phase 115. `--destructive-text` (`#ea6d71`, a white 20% lighten of `--destructive`) replaces `--destructive` at all 17 text call sites; its worst-case background is not a ladder tier but the real Lost-chip tint (`color-mix(in srgb, var(--destructive) 16%, var(--surface-card))`, `#3a2226`). Full 8-background ratio table in `115-MEASUREMENTS.md`'s `## Contrast` section. Continuously guarded since the Phase 115 review fix (WR-02): the tint pair is generated in `scripts/contrast-113.mjs`'s default derived-pairs list, re-derived from the live token values on every run (tied to `CardView.tsx:149`), so a tint-percentage bump or a `--destructive`/`--surface-card` retune that drops this worst case below floor now trips the instrument. The chip background is one opaque computed color pinned to the resting `--surface-card` tier; it does not re-base when the card behind it hovers, and deliberately so: at 16% over `--surface-card-hover` the mix (`#40272c`) would measure 4.48:1 against `--destructive-text`, below the floor, so any future re-base of the tint onto the hover tier must change the tint formula and the derived-pairs list, never land silently. |
 | `contrast-danger-button-label` | 5.62:1 rest, 4.62:1 hover, above the 4.5:1 floor | n/a, viewport-independent; computed from tokens.css | LANDED, Phase 115 review fix (WR-01). The danger `Button` renders a white `#ffffff` label on its own fill; on the former fill (`--destructive`, `#e5484d`) this measured 3.91:1 at rest and 3.38:1 on the 12% white hover lighten, both below the text floor and invisible to the generated pair set (the label is a literal, not a token, and the fill is not a ladder tier). The fill split to `--destructive-button-fill` (`#c03136`, same 358deg hue family, darkened); `--destructive` itself is unchanged for non-text signals. Both the rest and hover pairs are generated in `scripts/contrast-113.mjs`'s default derived-pairs list, so this class of pair can no longer ship unchecked.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
+**Record, 2026-09-29 (G9 Unit 1, LOCAL-55).** The instrument measures each theme on its own. Both runs
+report 185 pairs, 0 failing, 0 residual (115 text pairs and 70 graphic pairs each). This record
+supersedes the Value cell of the `contrast-danger-button-label` row (5.62:1 rest, 4.62:1 hover) and
+the "all four surface tiers" wording of the two floor rows: `--surface-inset` is a fifth
+background. 108 of the 110 pairs of the earlier dark run keep their name and their ratio.
+
+| Measure                       | Dark                                                | Light                                                             |
+| ----------------------------- | --------------------------------------------------- | ----------------------------------------------------------------- |
+| Lowest text pair              | 4.70:1, `--on-accent` on `--accent`                 | 4.51:1, `--accent-text` on the accent tint over `--surface-inset` |
+| Lowest graphic pair           | 3.32:1, `--prio-low` and `--col-done` on card-hover | 3.01:1, `--col-todo` and `--col-in-review` on `--surface-inset`   |
+| `--text-muted`, worst tier    | 4.95:1 on `--surface-card-hover`                    | 4.97:1 on `--surface-inset`                                       |
+| `--destructive-text`, worst   | 4.82:1 on the Lost-chip tint                        | 5.22:1 on the pace badge tint                                     |
+| Danger label (`--on-danger`)  | 5.62:1 rest, 6.83:1 hover, 8.34:1 pressed           | the same                                                          |
+| Primary label (`--on-accent`) | 4.70:1 rest, 5.78:1 hover, 7.11:1 pressed           | 5.72:1 rest, 6.90:1 hover, 8.39:1 pressed                         |
+
+`--status-ok` and `--status-stale` are in the text set in both themes, because consumers render
+them as text. 35 of the text pairs are derived pairs for a column colour as text: the mix of 35
+percent of each of the seven column tokens with `--text`, on the 16 percent tint of that token
+over each of the five background tiers. The instrument resolves three value forms: a hex, a `color-mix` of a colour with
+black or white, and a `var()` of a token, also as the coloured part of a mix. It fails on a pair
+below its floor, on a ladder out of order and on a colour role value it cannot resolve, per theme.
+The `RESIDUALS` allowlist stays empty.
+
 `scripts/contrast-113.mjs` is the instrument that measures this floor: a zero-dependency Node
 script that parses every color token in `tokens.css`, generates the full background x foreground
 pair set plus a small derived-pairs list (real rendered text backgrounds that are not raw tokens:
@@ -268,6 +444,17 @@ absorbing them, and any future failing pair is a hard failure with nowhere to hi
 | `motion-flow-pulse`           | 1s `easing-enter`, looping `opacity` 1 to 0.45 to 1 on the Flow poller dot                                                                                                                                                   | 1280px, 390px                                                                | LOCAL-52: runs from a Sync now click until `syncedAt` changes or 30 s pass, and for 1200 ms after any `syncedAt` change. The global reduced-motion block stops it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `flow-travel` (LOCAL-52)      | `offset-distance` 0% to 100%, `linear`, duration set per token (2400 ms divided by the speed on the Flow page, a 1600 ms loop in the session row)                                                                            | 1280px, 390px                                                                | A token rides an edge at constant speed, so it is `linear` by design; the duration is data (the speed control), not a token. The only moving element FlowStage renders.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Flow token reduced motion     | `FlowStage` renders no token element while `prefers-reduced-motion: reduce` matches                                                                                                                                          | 1280px                                                                       | The one exception to `reduced-motion-mechanism`: a token that is never shown cannot be stopped by CSS alone without leaving it frozen on its path, so the primitive reads `matchMedia` itself (changed decision U3-04).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+
+**Record, 2026-09-29 (G9 Unit 1, LOCAL-55).** Two duration tokens exist: `--motion-hover` (120ms) and
+`--motion-press` (80ms). `--hover-transition` is four transitions (`background-color`,
+`border-color`, `color`, `box-shadow`), each over `var(--motion-hover)` with
+`var(--easing-enter)`. This record supersedes the `hover-transition` row of `## State palette`
+(80ms, `background-color` only); it supersedes no row of the table above. `--motion-press` has no
+consumer in this unit and no press transition token exists. `--resize-handle-transition` is
+unchanged. Measured in a real browser on the landed source: a `Button` reads the four properties
+at 0.12s each. A theme switch has no motion: the theme hook sets `data-theme-switching` on the
+html element for two animation frames and one rule turns every transition off under it. Measured
+with a control: a switch with no lock reads 36 running transitions, a switch with the lock reads 0.
 
 No springs, no bounce: motion stays budgeted, not decorative. The table above is what each named
 interaction gets, not a license to add more; a future motion absent from this table is a new
@@ -405,3 +592,19 @@ starting candidate, the checked value won and the disagreement is recorded above
 deviation note.
 
 Phase 115 extended this method with live rendered-surface reads, never runtime custom-property overrides, driven by a break-proven `scripts/panel-115.mjs` harness that mutates and restores real source to prove each check's own negative control.
+
+**Record, 2026-09-29 (G9 Unit 1, LOCAL-55).** The G9 method. One isolated instance, built from the working tree and
+started by a script on port 47990 with a relocated data folder (`DISPATCH_DIR`) and the real `HOME`
+untouched, a stub `claude` first on `PATH`, no Linear key, and four loopback fakes for the
+sources. A seed writes 28 cards over the eight columns, a group with three members, pale and dark
+Linear state colours and 26 source items. Unlike the two methods above, a value is checked on the
+landed source, not as a runtime override, because a theme is a block of values that must hold
+together. Each page is viewed in a real browser at 1440, 1024 and 390 px in both themes, with the
+theme chosen through the real control. A script reads every visible text node against its
+composited background; for a text in the viewport the ground is read from the pixels of a
+screenshot, so a ground that another element paints is seen there and not below the fold. The
+image of each case is graded by an agent that did not drive the browser. Every zero has a control in the same run. The first painted frame is taken from a CDP
+screencast under a Slow 3G throttle with the cache off. The phase harnesses (`scripts/panel-*.mjs`,
+`density-91.mjs`, `mobile-term-101.mjs`, `terminal-appearance-e2e.mjs`) measure the earlier look,
+sit outside `npm run check`, and are not kept green by G9; each record above names the measured
+rows it supersedes.
