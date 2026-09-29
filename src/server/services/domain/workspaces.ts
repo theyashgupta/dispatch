@@ -12,6 +12,7 @@ import {
   branchExists,
   currentBranch,
   gitCommonDir,
+  isMainCheckout,
 } from "../../adapters/git.js";
 
 /**
@@ -53,16 +54,6 @@ export async function validateFolder(
 async function hasGitEntry(dir: string): Promise<boolean> {
   return fsp.stat(path.join(dir, ".git")).then(
     () => true,
-    () => false,
-  );
-}
-
-/**
- * True when `dir/.git` is a directory, i.e. the main checkout rather than a worktree's `.git` file.
- */
-async function isMainCheckout(dir: string): Promise<boolean> {
-  return fsp.stat(path.join(dir, ".git")).then(
-    (stat) => stat.isDirectory(),
     () => false,
   );
 }
