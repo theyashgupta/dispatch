@@ -252,3 +252,23 @@ export async function lastCommitAt(
     return null;
   }
 }
+
+/**
+ * The realpath of the git common dir behind the checkout at `dir`, or null when it is not one.
+ *
+ * @remarks A main checkout and every worktree cut from it report the same common dir, so this is
+ * the identity that tells "two repos" apart from "one repo in two folders".
+ */
+export async function gitCommonDir(dir: string): Promise<string | null> {
+  try {
+    const { stdout } = await run(
+      "git",
+      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { cwd: dir },
+    );
+    const commonDir = stdout.trim();
+    return await fsp.realpath(commonDir).catch(() => commonDir);
+  } catch {
+    return null;
+  }
+}
