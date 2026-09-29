@@ -23,20 +23,25 @@ async function initRepo(repo: string): Promise<void> {
   );
 }
 
-async function addWorktree(repo: string, worktree: string): Promise<void> {
-  await run("git", ["worktree", "add", "-q", "-b", "wt", worktree, "main"], {
+async function addWorktree(
+  repo: string,
+  worktree: string,
+  branch = "wt",
+): Promise<void> {
+  await run("git", ["worktree", "add", "-q", "-b", branch, worktree, "main"], {
     cwd: repo,
   });
 }
 
-void test("discoverRepos keeps the main checkout and drops its worktree in the same folder", async () => {
+void test("discoverRepos keeps the main checkout and drops its worktrees, whichever is discovered first", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dispatch-discover-"));
   try {
-    const a = path.join(root, "a");
-    const b = path.join(root, "b");
+    const a = path.join(root, "m-main");
+    const b = path.join(root, "n-other");
     await initRepo(a);
     await initRepo(b);
-    await addWorktree(a, path.join(root, "a-wt"));
+    await addWorktree(a, path.join(root, "a-wt"), "wt-before");
+    await addWorktree(a, path.join(root, "z-wt"), "wt-after");
     const repos = await discoverRepos(root);
     assert.deepEqual(repos.map((r) => r.path).sort(), [a, b]);
   } finally {
