@@ -19,6 +19,8 @@ The frontend has massive style-object and JSX duplication: the secondary-button 
 | `Field`      | The repeated `<span>` label + body pairs                                                             | Small, high-frequency label/value building block.                                                                                                                                                             |
 | `FlowStage`  | Nothing (first diagram primitive); exports `FlowBox` and `FlowChip`                                  | Fixed-coordinate node and edge stage with `offset-path` tokens and no token under reduced motion. Consumers: `features/detail/SessionFlowRow.tsx` (inside `DetailPanel`) and `features/flow/FlowDiagram.tsx`. |
 
+Amended 2026-09-29 (G9 Unit 1, LOCAL-55): the `Button` row says that `secondary` is the only current variant. `Button` has three variants in code: `secondary`, `primary` and `danger`. A filled variant (`primary`, `danger`) carries a white label and darkens on hover and press; the values are in `design-contract.md` under State palette.
+
 ## Styling approach — DECISIVE
 
 **Keep inline styles + `tokens.css`, and extract the repeated style objects into typed `CSSProperties` constants colocated in the primitives.** `tokens.css` survives unchanged as the single source of design tokens. Because the extracted style objects are byte-identical to today's inline ones, the refactor is diff-free at the pixel level.
@@ -48,6 +50,8 @@ The app is already hooks-first: `useBoardStream`, `useUnseenActivity`, and `useT
 ## Depth
 
 Medium depth. Build the five primitives and the typed style-object module; do **not** build a variant/theme engine, a Storybook, or a component-doc site — all over-engineering for a young, one-user tool. Each primitive lands as a pure refactor, smoke-gated on sync → start → terminal → markers → cleanup, with pixel-identical rendering at every adopted call site.
+
+Amended 2026-09-29 (G9 Unit 1, LOCAL-55): two statements above no longer hold. First, "do not build a variant/theme engine": a theme engine exists, because the product now has a light theme. It is small by design: one attribute on the html element, one light block in `tokens.css`, two pure helpers and one hook (`docs/ARCHITECTURE.md#theme-engine`). The ban on a variant engine, a Storybook and a component-doc site stays. Second, "pixel-identical rendering": it was the bar for the primitive extraction, where a refactor must not change a pixel. G9 changes token values on purpose (radius, motion, filled button states, a light palette), so its bar is the dated records in `design-contract.md`, measured in both themes.
 
 ## Component anatomy
 
