@@ -164,7 +164,7 @@ closed without much ceremony. Bring judgment, not just generation.
 ## Code style
 
 The conventions that matter are written down in [`docs/standards/`](docs/standards/): backend design,
-the frontend design system, folder structure, and how we comment. Match the surrounding code, and skim
+the [frontend architecture](docs/standards/frontend-architecture.md) (the module layers and the shadcn rule), the frontend design system, folder structure, and how we comment. Match the surrounding code, and skim
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before changing anything structural.
 
 ## Scope
