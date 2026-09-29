@@ -2,6 +2,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type Dispatch,
   type ReactNode,
   type SetStateAction,
@@ -16,6 +17,7 @@ import {
   validateTerminalAppearance,
 } from "../../../shared/terminal-appearance.js";
 import { FONT_FAMILY } from "../../../shared/nerd-font-mono.js";
+import { THEME_PREFERENCES, type ThemePreference } from "../../lib/theme.js";
 import {
   detectInstalledFonts,
   fontOptionLabel,
@@ -28,7 +30,59 @@ import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { Notice } from "../../primitives/Notice.js";
-import { settingsInputStyle } from "./settings-styles.js";
+import {
+  settingsInputStyle,
+  settingsMutedTextStyle,
+} from "./settings-styles.js";
+
+const THEME_LABELS: Record<ThemePreference, string> = {
+  system: "System",
+  light: "Light",
+  dark: "Dark",
+};
+
+const themeRowStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "var(--space-sm)",
+};
+
+const themeGroupStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "var(--space-xs)",
+};
+
+interface ThemeSectionProps {
+  preference: ThemePreference;
+  onPreferenceChange: (preference: ThemePreference) => void;
+}
+
+export function ThemeSection({
+  preference,
+  onPreferenceChange,
+}: ThemeSectionProps) {
+  return (
+    <div style={themeRowStyle}>
+      <Field>Theme</Field>
+      <div role="group" aria-label="Theme" style={themeGroupStyle}>
+        {THEME_PREFERENCES.map((value) => (
+          <Button
+            key={value}
+            variant="secondary"
+            aria-pressed={preference === value}
+            onClick={() => onPreferenceChange(value)}
+          >
+            {THEME_LABELS[value]}
+          </Button>
+        ))}
+      </div>
+      <span style={settingsMutedTextStyle}>
+        System follows your operating system.
+      </span>
+    </div>
+  );
+}
 
 type TerminalDraft = Omit<TerminalAppearance, "fontSize">;
 
@@ -263,7 +317,7 @@ export function TerminalTabSection({ terminalTab }: TerminalTabSectionProps) {
             fontSize: "var(--font-label)",
             fontWeight: "var(--weight-semibold)",
             lineHeight: "var(--line-label)",
-            color: "var(--destructive)",
+            color: "var(--destructive-text)",
           }}
         >
           {validationError}
