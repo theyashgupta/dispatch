@@ -90,7 +90,7 @@ const remoteMonoTextStyle = {
 
 const remoteMonoLinkStyle = {
   ...remoteMonoTextStyle,
-  color: "var(--accent)",
+  color: "var(--accent-text)",
   textDecoration: "none",
 } as const;
 

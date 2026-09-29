@@ -30,7 +30,7 @@ const spinnerRowStyle: CSSProperties = {
 };
 
 const linkStyle: CSSProperties = {
-  color: "var(--accent)",
+  color: "var(--accent-text)",
   wordBreak: "break-all",
   fontSize: "var(--font-label)",
   lineHeight: "var(--line-label)",
