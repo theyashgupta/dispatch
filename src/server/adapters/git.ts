@@ -272,3 +272,23 @@ export async function gitCommonDir(dir: string): Promise<string | null> {
     return null;
   }
 }
+
+/**
+ * True when `dir` is the main checkout of its repo rather than a worktree of it.
+ *
+ * @remarks A main checkout's git dir IS the common dir, while a worktree's git dir sits under
+ * `<common dir>/worktrees/`. Asking git keeps the answer off the filesystem API.
+ */
+export async function isMainCheckout(dir: string): Promise<boolean> {
+  try {
+    const { stdout } = await run(
+      "git",
+      ["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"],
+      { cwd: dir },
+    );
+    const [commonDir, gitDir] = stdout.trim().split("\n");
+    return commonDir !== undefined && commonDir === gitDir;
+  } catch {
+    return false;
+  }
+}
