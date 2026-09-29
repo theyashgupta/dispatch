@@ -34,6 +34,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Claude Accounts](#claude-accounts)
   - [Orchestration Saga](#orchestration-saga)
   - [Exec Chokepoint](#exec-chokepoint)
+  - [Repo Discovery](#repo-discovery)
   - [Workspaces Inventory](#workspaces-inventory)
   - [Ask](#ask)
   - [Linear Sync](#linear-sync)
@@ -2175,6 +2176,25 @@ the runner renders it on the card (`ORCH-04`) — swapping in a library whose re
 See also [Security Threat Model](#security-threat-model) for the `T-04-01` argv-only injection
 control and the inert-stdout property (captured pane text is data, never a command).
 
+### Repo Discovery
+
+`services/domain/workspaces.ts` `discoverRepos` finds the repos of a registered workspace folder
+with a depth-1 sweep: the folder itself and each immediate child directory that carries a `.git`
+entry, which is a directory for a main checkout and a file for a worktree. A repo is identified by
+its git common dir (`adapters/git.ts` `gitCommonDir`, `git rev-parse --path-format=absolute
+--git-common-dir`, realpath-resolved), not by its folder, because a main checkout and every
+worktree cut from it share one common dir and one branch namespace. One folder is kept per common
+dir: the main checkout when it is in the folder (its `.git` entry is a directory), else the first
+worktree in discovery order. A folder whose common dir cannot be read keeps its own path as the key,
+so a corrupt `.git` still lists rather than disappears.
+
+The saga keeps a matching guard because discovery only shapes NEW cards: a card saved before this
+rule may still list a worktree beside its main checkout in `card.workspace.repos`, and cutting the
+card branch twice in one repo fails with `branch-conflict`. `createWorktrees` therefore skips any
+repo whose common dir an earlier entry of the same card already covered and records one
+`ctx.warnings` entry naming the skipped folder, so the card starts and shows the warning instead of
+failing. Nothing on disk is touched for a skipped entry.
+
 ### Workspaces Inventory
 
 `GET /api/workspaces` (`routes/workspaces.route.ts`) feeds the Workspaces page: the registered
@@ -2903,9 +2923,11 @@ clean run calls `finishCleanup`.
 (preflight `worktreeStatus`, teardown `worktreeRemove`, `worktreePrune`) run their per-repo work
 CONCURRENTLY across a card's `card.workspace.repos` via `Promise.allSettled`, measured in
 `docs/BASELINES.md`'s `## Cleanup` section at a 2.4x mean-latency reduction for a 3-repo card. No
-same-repo guard exists or is needed: every entry in `card.workspace.repos` is, by construction, a
-distinct `.git` directory (folder-discovery mints one entry per discovered root), so two concurrently
-running repos never contend on the same git lock. Every store mutation
+same-repo guard exists: discovery keeps one entry per git common dir (see Repo Discovery), so two
+concurrently running repos of a card discovered under that rule never contend on the same git lock.
+A card saved before that rule may still list a worktree beside its main checkout; both entries then
+run against one common dir, and a prune or remove that loses the race lands in the muted warning
+rather than failing the cleanup. Every store mutation
 (`recordCleanupBlocked`/`noteCleanupWarning`/`recordCleanupWarning`/`finishCleanup`) stays OUTSIDE the
 fan-out, called exactly once after the results settle — one card-level outcome still produces exactly
 one SSE-visible mutation, unchanged from the pre-concurrency saga.
