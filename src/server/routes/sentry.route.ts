@@ -1,4 +1,5 @@
-import { Router, type Response } from "express";
+import { Router } from "express";
+import { z } from "zod";
 import {
   SentryAuthError,
   SentryRequestError,
@@ -10,7 +11,14 @@ import {
   SentryItemUnknown,
   SentryNotConnected,
 } from "../services/domain/sentry.js";
+import {
+  HttpError,
+  NotFoundError,
+  UpstreamError,
+} from "../services/domain/errors.js";
 import { store } from "../store/board.store.js";
+import { httpErrorHandler } from "./error-handler.js";
+import { parseOrThrow } from "./parse-input.js";
 
 /**
  * Sentry issue detail and resolve for the Errors page.
@@ -23,55 +31,52 @@ export const sentryRouter = Router();
 
 const ISSUE_ID = /^[1-9][0-9]{0,19}$/;
 
-/** The issue id segment, or null after answering 400 when it is not digits only. */
-function issueId(params: Record<string, string>, res: Response): string | null {
-  const id = params.id ?? "";
-  if (!ISSUE_ID.test(id)) {
-    res.status(400).json({ error: "invalid issue" });
-    return null;
-  }
-  return id;
-}
+const issueParamsSchema = z.object(
+  {
+    id: z
+      .string("invalid issue")
+      .refine((id) => ISSUE_ID.test(id), "invalid issue"),
+  },
+  "invalid issue",
+);
 
-/** Map a Sentry failure to its status and error kind. */
-function sendSentryError(res: Response, err: unknown): void {
-  if (err instanceof SentryItemUnknown) {
-    res.status(404).json({ error: "unknown item" });
-  } else if (err instanceof SentryNotConnected) {
-    res.status(401).json({ error: "no-credential" });
-  } else if (err instanceof SentryAuthError) {
-    res.status(401).json({ error: "rejected" });
-  } else if (err instanceof SentryRequestError && err.status === 403) {
-    res.status(403).json({ error: "forbidden" });
-  } else if (err instanceof SourceRateLimited) {
-    res.status(429).json({ error: "rate-limited" });
-  } else if (err instanceof SentryRequestError && err.status === 404) {
-    res.status(404).json({ error: "not-found" });
-  } else {
-    res.status(502).json({ error: "unreachable" });
+/** Map a Sentry failure to the typed error that carries its status and error kind. */
+function toHttpError(err: unknown): HttpError {
+  if (err instanceof SentryItemUnknown)
+    return new NotFoundError("unknown item");
+  if (err instanceof SentryNotConnected)
+    return new HttpError(401, "no-credential");
+  if (err instanceof SentryAuthError) return new HttpError(401, "rejected");
+  if (err instanceof SentryRequestError && err.status === 403) {
+    return new HttpError(403, "forbidden");
   }
+  if (err instanceof SourceRateLimited)
+    return new HttpError(429, "rate-limited");
+  if (err instanceof SentryRequestError && err.status === 404) {
+    return new NotFoundError("not-found");
+  }
+  return new UpstreamError("unreachable");
 }
 
 sentryRouter.get("/sentry/issue/:id", async (req, res) => {
-  const id = issueId(req.params, res);
-  if (!id) return;
+  const { id } = parseOrThrow(issueParamsSchema, req.params);
   try {
     res.status(200).json(await getSentryIssue(id));
   } catch (err) {
-    sendSentryError(res, err);
+    throw toHttpError(err);
   }
 });
 
 sentryRouter.post("/sentry/issue/:id/resolve", async (req, res) => {
-  const id = issueId(req.params, res);
-  if (!id) return;
+  const { id } = parseOrThrow(issueParamsSchema, req.params);
   let itemId: string;
   try {
     itemId = await resolveSentryIssueItem(id);
   } catch (err) {
-    sendSentryError(res, err);
-    return;
+    throw toHttpError(err);
   }
   await store.setItemState(itemId, "done");
   res.status(204).end();
 });
+
+sentryRouter.use(httpErrorHandler);
