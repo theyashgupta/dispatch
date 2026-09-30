@@ -7,6 +7,7 @@ import {
 import type {
   ActivityEvent,
   BoardSnapshot,
+  ConnectionStatus,
   TunnelState,
 } from "../../shared/types.js";
 import { activityKeys, mergeActivity } from "./activity-queries.js";
@@ -21,11 +22,56 @@ export const tunnelKeys = {
   state: ["tunnel"] as const,
 };
 
+/**
+ * Build the query options for the board snapshot at a done limit.
+ *
+ * @remarks
+ * A stream frame written during the fetch wins, so an older GET never rolls the board back.
+ */
 export function boardSnapshotQueryOptions(doneLimit: number) {
   return queryOptions({
     queryKey: boardSnapshotKeys.detail(doneLimit),
-    queryFn: () => fetchBoardSnapshot(doneLimit),
+    queryFn: async ({ client, queryKey }) => {
+      const startedAt = Date.now();
+      const snapshot = await fetchBoardSnapshot(doneLimit);
+      const state = client.getQueryState<BoardSnapshot>(queryKey);
+      return state?.data !== undefined && state.dataUpdatedAt > startedAt
+        ? state.data
+        : snapshot;
+    },
   });
+}
+
+/**
+ * Decide whether the root route should start the first board fetch.
+ *
+ * @remarks
+ * Any cached data, in-flight fetch or error means the board already has an owner, so a prefetch would duplicate the GET or hide the error.
+ */
+export function shouldPrefetchBoard(
+  queries: ReadonlyArray<{
+    state: { data: unknown; status: string; fetchStatus: string };
+  }>,
+): boolean {
+  return queries.every(
+    (q) =>
+      q.state.data === undefined &&
+      q.state.fetchStatus !== "fetching" &&
+      q.state.status !== "error",
+  );
+}
+
+/**
+ * Pick the board to render, keeping the previous snapshot while the current one is missing.
+ *
+ * @remarks
+ * A done-limit change briefly has no data, and showing the last board avoids a blank flash.
+ */
+export function latestBoard(
+  current: BoardSnapshot | undefined,
+  previous: BoardSnapshot | null,
+): BoardSnapshot | null {
+  return current ?? previous;
 }
 
 export function applyBoardSnapshot(
@@ -52,8 +98,6 @@ export function applyTunnelState(
   queryClient.setQueryData(tunnelKeys.state, state);
 }
 
-export type ConnectionStatus = "connecting" | "connected" | "disconnected";
-
 interface StreamSource {
   onopen: ((event: Event) => void) | null;
   onmessage: ((event: MessageEvent) => void) | null;
@@ -72,7 +116,7 @@ export interface ConnectBoardStreamOptions extends BoardStreamCallbacks {
   doneLimit: number;
   queryClient: QueryClient;
   eventSource?: new (url: string) => StreamSource;
-  fetchSnapshot?: (doneLimit: number) => Promise<BoardSnapshot>;
+  fetchSnapshot?: (doneLimit: number, force: boolean) => Promise<BoardSnapshot>;
   onConnection?: (status: ConnectionStatus) => void;
 }
 
@@ -91,14 +135,20 @@ const POLL_MAX_MS = 30_000;
  * Own the single `/api/stream` connection for a done limit and write every frame into the query cache.
  *
  * @remarks
- * It opens one source at a time and the returned dispose closes it and clears the timers it holds, so a remount leaks nothing (T-01-04c). An open after the first one invalidates `boardSnapshotKeys.all`, because frames missed while disconnected are not replayed.
+ * It opens one source at a time and the returned dispose closes it and clears the timers it holds, so a remount leaks nothing (T-01-04c).
  */
 export function connectBoardStream(
   options: ConnectBoardStreamOptions,
 ): () => void {
   const { doneLimit, queryClient } = options;
   const Source = options.eventSource ?? EventSource;
-  const fetchSnapshot = options.fetchSnapshot ?? fetchBoardSnapshot;
+  const fetchSnapshot =
+    options.fetchSnapshot ??
+    ((limit: number, force: boolean) =>
+      queryClient.fetchQuery({
+        ...boardSnapshotQueryOptions(limit),
+        ...(force && { staleTime: 0 }),
+      }));
   const setConnection = (status: ConnectionStatus) =>
     options.onConnection?.(status);
 
@@ -113,7 +163,6 @@ export function connectBoardStream(
   let pollFailures = 0;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
   let boardGen = 0;
-  let hasOpened = false;
 
   const publishSnapshot = (snapshot: BoardSnapshot) => {
     options.onBoardUpdate?.(snapshot);
@@ -136,10 +185,10 @@ export function connectBoardStream(
     }, delay);
   };
 
-  const fetchBoard = async (): Promise<boolean> => {
+  const fetchBoard = async (force: boolean): Promise<boolean> => {
     const gen = ++boardGen;
     try {
-      const snap = await fetchSnapshot(doneLimit);
+      const snap = await fetchSnapshot(doneLimit, force);
       if (!disposed && gen === boardGen && !sseHealthy) {
         publishSnapshot(snap);
         setConnection("connected");
@@ -161,7 +210,7 @@ export function connectBoardStream(
   const scheduleNextPoll = (delay: number) => {
     pollTimer = setTimeout(() => {
       void (async () => {
-        const ok = await fetchBoard();
+        const ok = await fetchBoard(true);
         if (disposed || pollTimer == null) return;
         pollFailures = ok ? 0 : pollFailures + 1;
         scheduleNextPoll(
@@ -190,10 +239,6 @@ export function connectBoardStream(
 
     src.onopen = () => {
       lastEventAt = Date.now();
-      if (hasOpened) {
-        void queryClient.invalidateQueries({ queryKey: boardSnapshotKeys.all });
-      }
-      hasOpened = true;
       setConnection("connected");
     };
     src.onmessage = (e) => {
@@ -234,7 +279,7 @@ export function connectBoardStream(
     };
   };
 
-  void fetchBoard();
+  void fetchBoard(false);
   connect();
 
   watchdog = setInterval(() => {
