@@ -153,7 +153,7 @@ The rules are in `docs/standards/backend-design.md`, in the sections "Layer defi
 1. Parse each route input with a zod schema in the route file. Give each field schema its error code as the message.
 2. Throw a typed error from `src/server/services/domain/errors.ts`, for example `NotFoundError("<slice>-not-found")`. Do not call `res.status` with a 4xx or 5xx code.
 3. Keep business logic in the service. Do not read `req` or `res` in a service.
-4. Do not call `exec`, tmux, git or the store in the route.
+4. Do not call `exec`, tmux or git in the route. Call the board store only through `boardRepository` from `src/server/store/board-repository.ts`.
 5. Use `.refine((s) => s.length <= MAX)` for a length limit. The zod `.max()` counts code points, not the JavaScript `length`.
 6. Put a `node:test` file next to each new route, service and domain file.
 

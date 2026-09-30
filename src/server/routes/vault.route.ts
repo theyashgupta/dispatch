@@ -11,7 +11,7 @@ import {
   readPrevious,
   readCurrent,
   importFromEnvVault,
-} from "../services/domain/vault.js";
+} from "../services/infra/vault.js";
 import {
   ENV_VAULT_SCHEMA_PATH,
   ENV_VAULT_VALUES_PATH,

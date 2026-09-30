@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Card } from "../../../shared/types.js";
-import { attachmentsDir } from "../infra/paths.js";
+import { attachmentsDir } from "./paths.js";
 import { buildKickoff } from "./kickoff.js";
 
 const NAME_A = "aaaaaaaaaaaaaaaa.png";

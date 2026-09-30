@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { ConflictError, NotFoundError } from "../services/domain/errors.js";
-import { redactCard, store } from "../store/board.store.js";
+import {
+  redactCard,
+  boardRepository as store,
+} from "../store/board-repository.js";
 import { httpErrorHandler } from "./error-handler.js";
 import {
   listQuerySchema,

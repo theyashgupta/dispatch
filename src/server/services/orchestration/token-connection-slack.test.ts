@@ -9,7 +9,7 @@ const configPath = path.join(env.dispatchDir, "config.json");
 const { TOKEN_SOURCES, saveTokenSourceKey, disconnectTokenSource } =
   await import("./token-connection.js");
 const { createKey, listKeys, readCurrent, clearValue, setValue } =
-  await import("./vault.js");
+  await import("../infra/vault.js");
 const { setOrchestrationConfig } = await import("../infra/config-holder.js");
 
 after(() => env.cleanup());

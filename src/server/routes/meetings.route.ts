@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import {
   buildMeetingItems,
   localDate,
-} from "../services/domain/meeting-actions.js";
+} from "../services/orchestration/meeting-actions.js";
 import { generateMeetingDrafts } from "../services/orchestration/meeting-draft.js";
 import {
   applyGranolaSettings,
@@ -17,7 +17,7 @@ import {
   writeTranscript,
 } from "../services/orchestration/meeting-transcripts.js";
 import type { MeetingSourceConfig } from "../../shared/types.js";
-import { store } from "../store/board.store.js";
+import { boardRepository as store } from "../store/board-repository.js";
 import {
   ConflictError,
   InternalError,

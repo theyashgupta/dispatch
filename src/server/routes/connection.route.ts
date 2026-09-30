@@ -18,7 +18,7 @@ import {
   TOKEN_SOURCES,
   type TokenFailure,
   type TokenSourceDef,
-} from "../services/domain/token-connection.js";
+} from "../services/orchestration/token-connection.js";
 import {
   HttpError,
   InternalError,

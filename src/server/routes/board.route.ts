@@ -7,7 +7,7 @@ import {
 import { DONE_PAGE_SIZE } from "../../shared/done-limit.js";
 import { DEFAULT_TERMINAL_APPEARANCE } from "../../shared/terminal-appearance.js";
 import { SEARCH_RESULT_LIMIT } from "../../shared/search.js";
-import { store } from "../store/board.store.js";
+import { boardRepository as store } from "../store/board-repository.js";
 import {
   ConflictError,
   NotFoundError,
@@ -35,7 +35,7 @@ import {
   validateFolder,
   discoverRepos,
   browseDirectory,
-} from "../services/domain/workspaces.js";
+} from "../services/orchestration/workspaces.js";
 import {
   archiveRetentionBodySchema,
   boardQuerySchema,

@@ -13,7 +13,7 @@ import {
   loadPlaybooks,
   loadPlaybooksForPicker,
   type PlaybookWriteResult,
-} from "../services/domain/playbooks.js";
+} from "../services/infra/playbooks.js";
 import {
   generatePlaybookDraft,
   SourceUnreadableError,

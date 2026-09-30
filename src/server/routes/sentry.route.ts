@@ -10,13 +10,13 @@ import {
   resolveSentryIssueItem,
   SentryItemUnknown,
   SentryNotConnected,
-} from "../services/domain/sentry.js";
+} from "../services/orchestration/sentry.js";
 import {
   HttpError,
   NotFoundError,
   UpstreamError,
 } from "../services/domain/errors.js";
-import { store } from "../store/board.store.js";
+import { boardRepository as store } from "../store/board-repository.js";
 import { httpErrorHandler } from "./error-handler.js";
 import { parseOrThrow } from "./parse-input.js";
 

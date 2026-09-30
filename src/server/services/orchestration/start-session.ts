@@ -4,10 +4,13 @@ import type {
   SessionFields,
   StartError,
 } from "../../../shared/types.js";
-import { store, type ReservedSession } from "../../store/board.store.js";
+import {
+  boardRepository as store,
+  type ReservedSession,
+} from "../../store/board-repository.js";
 import { hasSession } from "../../adapters/tmux.js";
-import { registerHookToken } from "../domain/hook-tokens.js";
-import { loadPlaybooks } from "../domain/playbooks.js";
+import { registerHookToken } from "./hook-tokens.js";
+import { loadPlaybooks } from "../infra/playbooks.js";
 import { updateLastUsedPlaybook } from "../infra/config-holder.js";
 import {
   columnChangesSince,

@@ -10,7 +10,7 @@ import {
 } from "node:crypto";
 import type { Card } from "../../../shared/types.js";
 import { loadOrCreateVapidKeys } from "../infra/push-keys.js";
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 import type { PushSubscriptionRow } from "../../store/board-db.js";
 
 /**

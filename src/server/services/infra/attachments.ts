@@ -5,7 +5,7 @@ import {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
 } from "../../../shared/types.js";
-import { ATTACHMENTS_DIR, attachmentsDir } from "../infra/paths.js";
+import { ATTACHMENTS_DIR, attachmentsDir } from "./paths.js";
 
 export type ImageExt = "png" | "jpg" | "gif" | "webp";
 

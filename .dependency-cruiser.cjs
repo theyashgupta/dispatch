@@ -6,8 +6,8 @@ const legacyCycleFiles = [
 
 const serviceDirection = (name, from, to) => ({
   name,
-  severity: "warn",
-  comment: `${from} breaks the service import direction (docs/standards/backend-design.md, Import direction inside services). Ticket 18 moves it.`,
+  severity: "error",
+  comment: `${from} breaks the service import direction (docs/standards/backend-design.md, Import direction inside services).`,
   from: {
     path: `^src/server/services/${from}/`,
     pathNot: "\\.test\\.ts$",
@@ -43,6 +43,28 @@ module.exports = {
         "A module does not import the legacy tree (docs/standards/frontend-architecture.md, Import matrix).",
       from: { path: "^src/web/modules/" },
       to: { path: "^src/web/features/" },
+    },
+    {
+      name: "board-store-through-repository",
+      severity: "error",
+      comment:
+        "Routes and services call the board store through boardRepository (docs/standards/backend-design.md, Agent rules block rule 3).",
+      from: {
+        path: "^src/server/(routes|services)/",
+        pathNot: "\\.test\\.ts$",
+      },
+      to: { path: "^src/server/store/board\\.store\\.ts$" },
+    },
+    {
+      name: "test-support-in-tests-only",
+      severity: "error",
+      comment:
+        "Only test files import src/server/test-support (docs/standards/backend-design.md, Tests).",
+      from: {
+        path: "^src/",
+        pathNot: ["\\.test\\.ts$", "^src/server/test-support/"],
+      },
+      to: { path: "^src/server/test-support/" },
     },
     serviceDirection(
       "services-domain-direction",

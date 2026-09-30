@@ -14,7 +14,7 @@ import {
   slackThread,
   type SlackRefusal,
   type SlackThreadRefusal,
-} from "../services/domain/slack.js";
+} from "../services/orchestration/slack.js";
 import {
   getOrchestrationConfig,
   setSlackChannels,

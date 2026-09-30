@@ -1,13 +1,13 @@
 import { z } from "zod";
 import { COLUMNS, type Column } from "../../shared/types.js";
 import { validateCommentBody } from "../../shared/comment-body.js";
-import { hasDispatchMarker } from "../services/domain/playbooks.js";
+import { hasDispatchMarker } from "../services/infra/playbooks.js";
 import {
   ATTACHMENT_NAME_RE,
   CARD_ID_RE,
   decodeImages,
   screenshotsSection,
-} from "../services/domain/attachments.js";
+} from "../services/infra/attachments.js";
 import { ITEM_DESCRIPTION_MAX, ITEM_TITLE_MAX } from "../store/items.js";
 import {
   MARKER_ERROR,

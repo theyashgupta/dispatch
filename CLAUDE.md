@@ -23,10 +23,11 @@
 
 1. Parse each route input with a zod schema in the route file.
 2. Throw a typed error from `services/domain/errors.ts`. Do not call `res.status` with a 4xx or 5xx code.
-3. Keep routes free of `exec`, tmux and git calls. Do not call the store in a new route file.
+3. Keep routes free of `exec`, tmux and git calls. A new route file calls `boardRepository`, not `board.store.ts`.
 4. Keep business logic in services, not in routes or handlers.
 5. Do not read `req` or `res` in a service.
 6. Write board state only through the store.
 7. Spawn a subprocess only through `adapters/exec.ts` or a named exception in `code-review-rules.md`.
-8. Keep new files in `services/domain/` free of adapter, store, infra and orchestration imports.
-9. Put a `node:test` file next to each new route, service and domain file.
+8. Put a `node:test` file next to each new route, service and domain file.
+9. A file imports only from its own folder and from folders earlier in this list: `src/shared/`, `store/` and `sources/`, `adapters/`, `services/infra/`, `services/orchestration/`, `routes/`. `store/` and `sources/` do not import each other, and among these folders only `adapters/` imports `sources/`. A file in `services/domain/` imports `src/shared/` only; orchestration files and routes can import it. The one exception is `adapters/image-proxy.ts`, which imports `services/infra/config-holder.ts`.
+10. Use `bootstrap/` as the composition root. It can import every folder. Only `bootstrap/index.ts` calls `setBoardRepository(store)` in source code. A test can call `setBoardRepository` to install `fakeBoardRepository`.

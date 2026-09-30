@@ -14,15 +14,15 @@ import {
   setSourceEnabled,
 } from "../infra/config-holder.js";
 import { GITHUB_TOKEN_KEY, resolveGithubToken } from "./github-token.js";
-import { resolveSentryToken, SENTRY_TOKEN_KEY } from "./sentry-token.js";
+import { resolveSentryToken, SENTRY_TOKEN_KEY } from "../infra/sentry-token.js";
 import { checkSlackAuth } from "./slack.js";
 import {
   resolveSlackToken,
   SLACK_BOT_TOKEN_KEY,
   SLACK_USER_TOKEN_KEY,
   slackKeyFor,
-} from "./slack-token.js";
-import { clearValue, createKey, listKeys, setValue } from "./vault.js";
+} from "../infra/slack-token.js";
+import { clearValue, createKey, listKeys, setValue } from "../infra/vault.js";
 
 export interface TokenSourceDef {
   id: ItemSourceId;

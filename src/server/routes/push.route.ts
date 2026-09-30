@@ -5,7 +5,7 @@ import { parseOrThrow } from "./parse-input.js";
 import { subscribeSchema, unsubscribeSchema } from "./push-schemas.js";
 import { getKnownPublicHost } from "../services/orchestration/tunnel.js";
 import { loadOrCreateVapidKeys } from "../services/infra/push-keys.js";
-import { store } from "../store/board.store.js";
+import { boardRepository as store } from "../store/board-repository.js";
 import { InternalError, ValidationError } from "../services/domain/errors.js";
 
 /**

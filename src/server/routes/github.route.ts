@@ -11,7 +11,7 @@ import {
   GithubNotConnected,
   mergePullRequest,
   reviewPullRequest,
-} from "../services/domain/github.js";
+} from "../services/orchestration/github.js";
 import {
   ConflictError,
   HttpError,

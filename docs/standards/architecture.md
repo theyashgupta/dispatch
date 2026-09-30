@@ -1,6 +1,6 @@
 # Architecture Decisions — v2.1 Restructure
 
-This document ratifies the target shape for the v2.1 "Code Health & Scalable Architecture" milestone before any file moves happen. It records four user-approved decisions (2026-07-19) — the backend target shape, the rejection of a generic Repository pattern, per-file rulings for every `node:child_process` importer, and the bundle-budget policy — plus the Phase 53 audit's violation triage and tier-labeled gap list. Phases 54-57 execute against the rulings recorded here; nothing in this doc changes runtime behavior.
+This document ratifies the target shape for the v2.1 "Code Health & Scalable Architecture" milestone before any file moves happen. It records four user-approved decisions (2026-07-19): the backend target shape, the Repository pattern ruling (reversed for the board store on 2026-09-30), per-file rulings for every `node:child_process` importer, and the bundle-budget policy. It also records the Phase 53 audit's violation triage and tier-labeled gap list. Phases 54-57 execute against the rulings recorded here; nothing in this doc changes runtime behavior.
 
 ## Backend target shape — Option A
 
@@ -9,10 +9,11 @@ This document ratifies the target shape for the v2.1 "Code Health & Scalable Arc
 ```
 src/server/services/
 ├── orchestration/   start-session.ts, steps.ts, resume-session.ts, cleanup.ts,
-│                    terminal.ts, uninstall.ts, update.ts, playbook-generate.ts
-├── domain/          kickoff.ts, workspace-paths.ts, workspaces.ts, playbooks.ts,
-│                    hook-events.ts, hook-tokens.ts
-└── infra/           config-holder.ts, paths.ts, preflight.ts
+│                    terminal.ts, uninstall.ts, update.ts, playbook-generate.ts,
+│                    workspaces.ts, hook-events.ts, hook-tokens.ts
+├── domain/          workspace-paths.ts
+└── infra/           config-holder.ts, paths.ts, preflight.ts, kickoff.ts,
+                     playbooks.ts
 ```
 
 ### Current → target mapping (all 19 `services/` files)
@@ -27,17 +28,19 @@ src/server/services/
 | `uninstall.ts`         | `orchestration/`                                          | Scan-plan-execute saga (`scanFootprint` → `renderPlan`/`runUninstall`).                                                                                                                                                                          |
 | `update.ts`            | `orchestration/`                                          | Self-update saga: registry check, install-mode detection, `npm i -g` spawn.                                                                                                                                                                      |
 | `playbook-generate.ts` | `orchestration/`                                          | Spawns `claude` to author a playbook from source ingestion.                                                                                                                                                                                      |
-| `kickoff.ts`           | `domain/`                                                 | Pure string builder (kickoff prompt assembly) — zero imports besides the `Card` type.                                                                                                                                                            |
+| `kickoff.ts`           | `infra/`                                                  | Infra plumbing that builds the kickoff prompt string. It imports `attachments.ts`, `paths.ts` and `shared/untrusted.ts`.                                                                                                                         |
 | `workspace-paths.ts`   | `domain/`                                                 | One pure function (`worktreePath`) — do-not-change contract #8 (`NEW-12`).                                                                                                                                                                       |
-| `workspaces.ts`        | `domain/`                                                 | Folder/workspace domain rules: path normalization, validation, repo discovery.                                                                                                                                                                   |
-| `playbooks.ts`         | `domain/`                                                 | CRUD + front-matter parsing over the `Playbook` entity.                                                                                                                                                                                          |
-| `hook-events.ts`       | `domain/`                                                 | Channel-policy business rules; structurally a producer (only calls store mutations), not a saga.                                                                                                                                                 |
-| `hook-tokens.ts`       | `domain/`                                                 | Small in-memory identity registry (token→cardId) — pure state + lookup.                                                                                                                                                                          |
+| `workspaces.ts`        | `orchestration/`                                          | Folder/workspace orchestration: path normalization, validation, repo discovery through `adapters/git.ts`.                                                                                                                                        |
+| `playbooks.ts`         | `infra/`                                                  | CRUD + front-matter parsing over the `Playbook` entity.                                                                                                                                                                                          |
+| `hook-events.ts`       | `orchestration/`                                          | Channel-policy business rules; structurally a producer (only calls store mutations), not a saga.                                                                                                                                                 |
+| `hook-tokens.ts`       | `orchestration/`                                          | Small in-memory identity registry (token→cardId) and lookup. It imports the store through `boardRepository`.                                                                                                                                     |
 | `config-holder.ts`     | `infra/`                                                  | Config file read-merge-write plumbing + in-memory holders, consumed across every capability.                                                                                                                                                     |
 | `paths.ts`             | `infra/`                                                  | Pure path constants — a shared sink, imported by nearly every other `services/*` file.                                                                                                                                                           |
 | `preflight.ts`         | `infra/`                                                  | Binary/Node/storage health probing + per-platform install commands — diagnostic plumbing.                                                                                                                                                        |
 | `image-proxy.ts`       | **`adapters/`** (correction, not a `services/` subfolder) | External I/O against a third-party (Linear-hosted image), same shape as `adapters/poller.ts` — a misplaced file, not a `services/` role.                                                                                                         |
 | `session-status.ts`    | **deleted** (correction)                                  | One-line dead re-export shim (`export { hasSession } from "../adapters/tmux.js"`). Its one caller (`terminal.ts`) can import `hasSession` from `adapters/tmux.ts` directly — already legal under the current boundaries config. No seam is lost. |
+
+On 2026-09-30, ticket 18 moved `kickoff.ts` and `playbooks.ts` to `infra/`, and `workspaces.ts`, `hook-events.ts` and `hook-tokens.ts` to `orchestration/`. The split count in the next paragraph is the count before that move.
 
 **Split: 8 orchestration + 6 domain + 3 infra + 2 corrections (image-proxy re-homed, session-status deleted) = 19 files, exactly matching the current `services/` inventory.** Cross-checked against `.planning/research/ARCHITECTURE.md`'s own file-by-file table (which additionally labels `image-proxy.ts` "Infra, misplaced" and `session-status.ts` "Dead indirection" as two extra rows beyond its "8:6:4:1" summary) — **no discrepancy found**: the research table's `4` ("infra") count included `image-proxy.ts` as a fourth infra-shaped row before flagging it as misplaced, and its `1` ("misplaced") is that same file counted twice for emphasis; once `image-proxy.ts` is pulled out to its correction row and `session-status.ts` is pulled out to its deletion row, both this document's 8/6/3+2 split and the research table's classification agree on every one of the 19 files' target destination.
 
@@ -47,7 +50,13 @@ src/server/services/
 
 **The generic Repository pattern is rejected.** `src/server/store/board.store.ts` (single-writer class, 1203 LOC) plus `src/server/store/board-db.ts` (the SQLite engine seam, 514 LOC) are **already** the repository: they hide the on-disk `board.json`/`board.db` shape behind method calls (`applyMarker`, `flipBack`, `setTtydPortIfSession`, `snapshot()`, …), and `board.store.ts` is the sole writer of board state — that is the Repository pattern's job description under a domain-specific name, not a generic `save()/find()` interface. `docs/standards/backend-design.md` rule 1 ("Store is the sole writer of board state") already locks this invariant; this document does not restate it, only names the two files so the term "Repository" is never reinvented as a new class wrapping `board.store.ts`. A generic `Repository<T>` wrapper adds an indirection layer with no behavioral value and a real risk: any wrapper that fails to preserve "column-sensitive checks happen INSIDE the mutator, against live state" (`WR-04`) silently reintroduces the exact race the single-writer queue exists to prevent. `board.store.ts` stays one cohesive class — it is never split (`docs/standards/folder-structure.md`).
 
-On 2026-09-30, `docs/standards/backend-design.md` (v2) reopened this ruling. Ticket 18 adds a `BoardRepository` interface in front of the store. `board.store.ts` stays the single writer, and the interface adds no second writer. The ruling above stays in force until ticket 18 lands.
+**Reversal record (2026-09-30), board store only.** Ticket 18 reverses the ruling above for the board store.
+
+1. `BoardRepository` in `src/server/store/board-repository.ts` declares the public methods that code outside the store calls.
+2. `board.store.ts` matches `BoardRepository`. The typed default target in `board-repository.ts` makes the compiler check this. The store stays the single writer of board state.
+3. Services and routes get the store through `boardRepository`. `bootstrap/index.ts` sets it with `setBoardRepository(store)`.
+4. `items.ts`, `mapping.ts` and `claude-sessions.ts` stay direct, because no service test mocks them. Only `items.ts` has importers outside the store. The exception: `routes/cards-schemas.ts`, `routes/meetings-schemas.ts` and `services/orchestration/meeting-actions.ts` import the `ITEM_*_MAX` constants from `store/items.js`. These files import constants only. They do not call the store.
+5. The ruling above stays in force for every other store module.
 
 ## Exec-chokepoint rulings
 

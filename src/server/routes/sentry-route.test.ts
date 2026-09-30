@@ -12,7 +12,7 @@ const { store } = await import("../store/board.store.js");
 const { sentryRouter } = await import("./sentry.route.js");
 const { setOrchestrationConfig } =
   await import("../services/infra/config-holder.js");
-const { createKey } = await import("../services/domain/vault.js");
+const { createKey } = await import("../services/infra/vault.js");
 
 setOrchestrationConfig({ linearApiKey: "" });
 await store.load();

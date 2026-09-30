@@ -1,5 +1,8 @@
 import { Router } from "express";
-import { store, redactArchivedGroup } from "../store/board.store.js";
+import {
+  boardRepository as store,
+  redactArchivedGroup,
+} from "../store/board-repository.js";
 import { deleteArchivedGroup } from "../services/orchestration/archive-delete.js";
 import {
   ConflictError,

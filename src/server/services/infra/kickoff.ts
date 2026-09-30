@@ -1,8 +1,8 @@
 import type { Card } from "../../../shared/types.js";
 import { fenceUntrusted } from "../../../shared/untrusted.js";
 import { attachmentLinks, withAbsoluteAttachments } from "./attachments.js";
-import { attachmentsDir } from "../infra/paths.js";
-import { VAULT_RUN_PATH, VAULT_SCHEMA_PATH } from "../infra/paths.js";
+import { attachmentsDir } from "./paths.js";
+import { VAULT_RUN_PATH, VAULT_SCHEMA_PATH } from "./paths.js";
 
 /**
  * Describe the workspace layout for any repo count (N ≥ 1): a comma-joined list of `<name>/`

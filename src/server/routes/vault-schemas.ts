@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { VAULT_NAME_RE } from "../services/domain/vault.js";
+import { VAULT_NAME_RE } from "../services/infra/vault.js";
 
 const MAX_NAME_LEN = 64;
 const MAX_PURPOSE_LEN = 200;
