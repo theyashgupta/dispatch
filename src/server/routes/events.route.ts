@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { httpErrorHandler } from "./error-handler.js";
 import { z } from "zod";
 import { parseOrThrow } from "./parse-input.js";
-import { store } from "../store/board.store.js";
+import { boardRepository as store } from "../store/board-repository.js";
 
 export const eventsRouter = Router();
 

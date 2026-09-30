@@ -10,7 +10,7 @@ import {
   VAULT_SCHEMA_PATH,
   ENV_VAULT_SCHEMA_PATH,
   ENV_VAULT_VALUES_PATH,
-} from "../infra/paths.js";
+} from "./paths.js";
 
 /**
  * Env-var-style key name: uppercase letters, digits and underscores, never starting with a digit.

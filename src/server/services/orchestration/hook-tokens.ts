@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 
 /**
  * In-memory token→{cardId, sessionId} registry for hook-POST auth. Rebuilt from persisted

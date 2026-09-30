@@ -5,8 +5,8 @@ import {
   isActionKey,
   isMeetingId,
   type ActionDraft,
-} from "../services/domain/meeting-actions.js";
-import { hasDispatchMarker } from "../services/domain/playbooks.js";
+} from "../services/orchestration/meeting-actions.js";
+import { hasDispatchMarker } from "../services/infra/playbooks.js";
 import { ITEM_DESCRIPTION_MAX, ITEM_TITLE_MAX } from "../store/items.js";
 import { MARKER_ERROR, boundedText, fieldsOf } from "./schema-primitives.js";
 

@@ -3,7 +3,7 @@ import {
   parseLastMarker,
   type Marker,
 } from "../../adapters/markers/parse.js";
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 import { getHooksRuntime } from "../infra/config-holder.js";
 
 /**

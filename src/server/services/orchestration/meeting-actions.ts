@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Item } from "../../../shared/types.js";
 import { ITEM_DESCRIPTION_MAX, ITEM_TITLE_MAX } from "../../store/items.js";
-import { hasDispatchMarker, slugify } from "./playbooks.js";
+import { hasDispatchMarker, slugify } from "../infra/playbooks.js";
 
 export type MeetingFeed = "paste" | "granola";
 

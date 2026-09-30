@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { resolveHookToken } from "../services/domain/hook-tokens.js";
-import { applyHookEvent } from "../services/domain/hook-events.js";
+import { resolveHookToken } from "../services/orchestration/hook-tokens.js";
+import { applyHookEvent } from "../services/orchestration/hook-events.js";
 import { HttpError } from "../services/domain/errors.js";
 import { httpErrorHandler } from "./error-handler.js";
 import { parseOrThrow } from "./parse-input.js";

@@ -3,9 +3,9 @@ import {
   fetchSentryIssue,
   resolveSentryIssue,
 } from "../../adapters/source-gateway.js";
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 import { getOrchestrationConfig } from "../infra/config-holder.js";
-import { resolveSentryToken } from "./sentry-token.js";
+import { resolveSentryToken } from "../infra/sentry-token.js";
 
 export class SentryNotConnected extends Error {
   constructor() {

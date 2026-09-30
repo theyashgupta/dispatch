@@ -4,7 +4,7 @@ import {
   getActiveAccountId,
   readRegistry,
   setActiveAccount,
-} from "../services/domain/claude-accounts.js";
+} from "../services/orchestration/claude-accounts.js";
 import {
   listAccountSummaries,
   removeAccountAndLogout,

@@ -13,9 +13,9 @@ import {
   SlackThreadCache,
   SourceRateLimited,
 } from "../../adapters/source-gateway.js";
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 import { getOrchestrationConfig } from "../infra/config-holder.js";
-import { resolveSlackToken } from "./slack-token.js";
+import { resolveSlackToken } from "../infra/slack-token.js";
 
 const NAME_FALLBACK_CODES = new Set([
   "missing_scope",

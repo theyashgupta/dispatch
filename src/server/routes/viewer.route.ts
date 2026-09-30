@@ -6,7 +6,7 @@ import fsp, { constants as fsConstants } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
-import { store } from "../store/board.store.js";
+import { boardRepository as store } from "../store/board-repository.js";
 import { HttpError, NotFoundError } from "../services/domain/errors.js";
 
 const MD_EXT = /\.(md|markdown)$/i;

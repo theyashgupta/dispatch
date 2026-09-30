@@ -3,7 +3,7 @@ import {
   DEFAULT_CLAUDE_ACCOUNT_ID,
   MAX_LOGIN_CODE_LEN,
 } from "../../shared/types.js";
-import { isAccountId } from "../services/domain/claude-accounts.js";
+import { isAccountId } from "../services/orchestration/claude-accounts.js";
 import { fieldsOf } from "./schema-primitives.js";
 
 /** A registry account id, or the virtual `default` account. */

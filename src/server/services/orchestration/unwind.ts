@@ -1,4 +1,4 @@
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 import type {
   ArchivedGroup,
   UnwindDestination,

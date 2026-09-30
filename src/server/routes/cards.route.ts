@@ -10,8 +10,8 @@ import { isDemoteEligible } from "../../shared/demote-eligibility.js";
 import {
   redactArchivedGroup,
   redactCard,
-  store,
-} from "../store/board.store.js";
+  boardRepository as store,
+} from "../store/board-repository.js";
 import {
   blocksAgentDoneManualEntry,
   blocksTodoToInProgressManualMove,
@@ -28,11 +28,11 @@ import { resetCard } from "../services/orchestration/reset.js";
 import { runClaude } from "../services/orchestration/run-claude.js";
 import { editorPath, launchEditor } from "../adapters/editors.js";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
-import { restatRepos } from "../services/domain/workspaces.js";
+import { restatRepos } from "../services/orchestration/workspaces.js";
 import {
   loadPlaybooks,
   hasDispatchMarker,
-} from "../services/domain/playbooks.js";
+} from "../services/infra/playbooks.js";
 import {
   ConflictError,
   HttpError,
@@ -59,7 +59,7 @@ import {
 import {
   stageAttachments,
   commitAttachments,
-} from "../services/domain/attachments.js";
+} from "../services/infra/attachments.js";
 import { attachmentsDir } from "../services/infra/paths.js";
 import { enabledSource } from "../adapters/source-gateway.js";
 import {

@@ -6,7 +6,7 @@ import { isolateEnv } from "../../test-support/fixtures.js";
 
 const env = isolateEnv();
 const ghPath = path.join(env.binDir, "gh");
-const { createKey, setValue, clearValue } = await import("./vault.js");
+const { createKey, setValue, clearValue } = await import("../infra/vault.js");
 const { resolveGithubToken } = await import("./github-token.js");
 
 after(() => env.cleanup());
