@@ -37,7 +37,7 @@ export const CHIP_TONES: Record<ChipTone, CSSProperties> = {
     border: "1px solid var(--border)",
   },
   accent: {
-    color: "var(--accent)",
+    color: "var(--accent-text)",
     background: "color-mix(in srgb, var(--accent) 16%, var(--surface-card))",
   },
   success: {

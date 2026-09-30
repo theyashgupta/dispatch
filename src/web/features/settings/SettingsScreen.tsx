@@ -17,11 +17,13 @@ import { settingsTabFrom, type SettingsTab } from "../../lib/settings-tab.js";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
 import { NAV_ITEMS } from "../nav/index.js";
 import type { Page } from "../../lib/route.js";
+import type { ThemePreference } from "../../lib/theme.js";
 import { AboutTabSection } from "./AboutTab.js";
 import { AboutYouTabSection, useAboutYouTab } from "./AboutYouTab.js";
 import {
   TerminalSaveButton,
   TerminalTabSection,
+  ThemeSection,
   useTerminalTab,
 } from "./AppearanceTab.js";
 import {
@@ -215,6 +217,8 @@ interface SettingsScreenProps {
   tunnelState: TunnelState;
   soundEnabled: boolean;
   onToggleSound: (enabled: boolean) => void;
+  themePreference: ThemePreference;
+  onThemePreferenceChange: (preference: ThemePreference) => void;
   onRunSetup?: () => Promise<boolean>;
   connectionKey?: number;
   errorsInFeeds: boolean;
@@ -229,6 +233,8 @@ export function SettingsScreen({
   tunnelState,
   soundEnabled,
   onToggleSound,
+  themePreference,
+  onThemePreferenceChange,
   onRunSetup,
   connectionKey,
   errorsInFeeds,
@@ -322,7 +328,13 @@ export function SettingsScreen({
             />
           )}
           {tab === "appearance" && (
-            <TerminalTabSection terminalTab={terminalTab} />
+            <>
+              <ThemeSection
+                preference={themePreference}
+                onPreferenceChange={onThemePreferenceChange}
+              />
+              <TerminalTabSection terminalTab={terminalTab} />
+            </>
           )}
           {tab === "notifications" && (
             <NotificationsTabSection

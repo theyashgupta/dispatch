@@ -404,7 +404,7 @@ export function DetailPanel({
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.4)",
+            background: "var(--scrim)",
             opacity: open ? 1 : 0,
             pointerEvents: open ? "auto" : "none",
             transition: scrimTransition,

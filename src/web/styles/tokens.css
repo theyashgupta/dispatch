@@ -14,13 +14,33 @@
   --accent: #5e6ad2; /* interactive/selected-state signal only: active view toggle, active inbox badge, drag-target highlight, needs-attention card border, resize-handle hover, active search result row; the full job list is docs/standards/design-contract.md ## Color roles, Accent row */
   --destructive: #e5484d; /* Sync-failure / disconnected / config error: fills, stripes, borders, icon glyphs, status dots (non-text only) */
   --destructive-text: #ea6d71; /* Destructive TEXT role only, split from --destructive (LUI-07): white 20% lighten, measured 4.5:1+ on all elevation/pressed tiers and the real Lost-chip tint */
-  --destructive-button-fill: #c03136; /* Danger Button fill only, split from --destructive (115 review WR-01): same 358deg hue darkened so the white label clears the 4.5:1 text floor at rest (5.62:1) and on the 12% white hover lighten (4.62:1); guarded by contrast-113's derived pair set */
+  --destructive-button-fill: #c03136; /* Danger Button fill only, split from --destructive (115 review WR-01): same 358deg hue darkened so the white label clears the 4.5:1 text floor at rest (5.62:1) and on the 12% black hover darken (6.83:1); guarded by contrast-113's derived pair set */
   --text: #e8e9ea; /* Primary text: titles, headings, description body */
   --text-muted: #8a8f98; /* Muted: identifiers, headers, counts, timestamps */
+  color-scheme: dark;
+  --surface-inset: #0e0f12; /* Recessed tier for inputs and pills, below the column tier */
+  --border-strong: #3a3c43; /* Stronger hairline for a control edge */
+  --accent-soft: color-mix(
+    in srgb,
+    var(--accent) 16%,
+    transparent
+  ); /* Soft accent tint, sits on any surface */
+  --accent-text: color-mix(
+    in srgb,
+    white 30%,
+    var(--accent)
+  ); /* Accent TEXT role only, 4.5:1 or more on every tier and on the accent tint */
+  --on-accent: #ffffff; /* Label on the accent fill */
+  --on-danger: #ffffff; /* Label on the danger fill */
+  --scrim: rgba(0, 0, 0, 0.4); /* Modal and panel scrim */
+  --edge-highlight: rgba(255, 255, 255, 0.02); /* Column top edge */
+  --qr-surface: #ffffff; /* QR code surface, white in both themes so the code scans */
+  --press-shade: black; /* The shade the IconButton press mix takes over a caller background */
 
   /* Spacing — 8-point scale. */
   --space-xs: 4px; /* icon-to-text gaps, inline badge padding */
   --space-sm: 8px; /* inter-card gap, column inner gap, card padding */
+  --space-md: 12px; /* toast and archive row gap and padding */
   --space-lg: 16px; /* column inner padding, board gutter */
   --space-xl: 24px; /* slide-over/error screen block spacing */
   --space-2xl: 32px; /* error screen outer padding */
@@ -60,8 +80,9 @@
   --nav-width-collapsed: 56px; /* sidebar, icons only; forced at or below 1023px */
   --page-header-height: 52px; /* per-page header row; swapped per breakpoint below */
   --radius-sm: 4px; /* chips and badges, up to ~19-27px tall */
-  --radius: 6px;
-  --radius-lg: 10px; /* modal dialog, ~200px tall and above */
+  --radius: 8px;
+  --radius-lg: 12px; /* modal dialog, ~200px tall and above */
+  --radius-pill: 999px; /* pill shape; no consumer yet, a chip keeps --radius-sm */
   --shadow-float: 0 6px 16px rgba(0, 0, 0, 0.45); /* the only shadow token; see docs/ARCHITECTURE.md#design-system-invariants for the consumer list */
 
   /* Priority signal palette (card stripe) */
@@ -107,7 +128,13 @@
   --motion-flow-pulse: 1s;
   --easing-enter: ease-out;
   --easing-exit: ease-in;
-  --hover-transition: background-color 80ms var(--easing-enter);
+  --motion-hover: 120ms;
+  --motion-press: 80ms;
+  --hover-transition:
+    background-color var(--motion-hover) var(--easing-enter),
+    border-color var(--motion-hover) var(--easing-enter),
+    color var(--motion-hover) var(--easing-enter),
+    box-shadow var(--motion-hover) var(--easing-enter);
   --resize-handle-transition:
     border-left-color 80ms var(--easing-enter),
     border-right-color 80ms var(--easing-enter);
@@ -116,16 +143,16 @@
      base surface tokens, never a resolved hex, so the single-source
      relationship survives a palette change - see
      docs/standards/design-contract.md ## State palette. */
-  --hover-button-primary: color-mix(in srgb, white 12%, var(--accent));
+  --hover-button-primary: color-mix(in srgb, black 12%, var(--accent));
   /* prettier-ignore */
-  --hover-button-danger: color-mix(in srgb, white 12%, var(--destructive-button-fill));
+  --hover-button-danger: color-mix(in srgb, black 12%, var(--destructive-button-fill));
   --hover-resize-handle: color-mix(in srgb, var(--accent) 55%, transparent);
   --pressed-card: color-mix(in srgb, black 12%, var(--surface-card));
   /* prettier-ignore */
   --pressed-card-hover: color-mix(in srgb, black 12%, var(--surface-card-hover));
-  --pressed-button-primary: color-mix(in srgb, black 12%, var(--accent));
+  --pressed-button-primary: color-mix(in srgb, black 24%, var(--accent));
   /* prettier-ignore */
-  --pressed-button-danger: color-mix(in srgb, black 12%, var(--destructive-button-fill));
+  --pressed-button-danger: color-mix(in srgb, black 24%, var(--destructive-button-fill));
 
   /* Dimensions */
   --stripe-width: 3px;
@@ -133,6 +160,47 @@
   --drawer-width: 360px; /* activity drawer; narrower than the panel — swapped per breakpoint below */
   --board-gutter-lg: 24px; /* wider board gutter at >=1600px (large displays) */
   --orca-nav-width: 280px; /* Orca side-nav fixed width; not resizable this phase */
+}
+
+/* Light theme. The html element carries data-theme with the resolved value;
+   this block holds the light values of these tokens. A signal token keeps its
+   hex in the root block and is redefined here as a mix of the same hex with
+   black, with a share per token, so the status colour gate (NEW-24) still
+   reads one hex per name. Measured values: docs/standards/design-contract.md
+   ## Contrast floor. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #eceef1;
+  --surface-column: #f4f5f7;
+  --surface-card: #ffffff;
+  --surface-card-hover: #f7f8fa;
+  --surface-inset: #e4e6ea;
+  --border: #d9dce1;
+  --border-strong: #b4b9c2;
+  --accent: #4f5bc9;
+  --text: #1a1b1f;
+  --text-muted: #5b616e;
+  --accent-text: color-mix(in srgb, black 12%, var(--accent));
+  --destructive-text: #ab2429;
+  --prio-high: color-mix(in srgb, #ef8e3b 78%, black);
+  --prio-medium: color-mix(in srgb, #d9b23c 72%, black);
+  --col-todo: color-mix(in srgb, #8a8f98 92%, black);
+  --col-needs-input: color-mix(in srgb, #ef8e3b 78%, black);
+  --col-agent-done: color-mix(in srgb, #3fb950 80%, black);
+  --col-in-review: color-mix(in srgb, #a371f7 94%, black);
+  --col-parked: color-mix(in srgb, #b08968 90%, black);
+  --status-ok: color-mix(in srgb, #3fb950 54%, black);
+  --status-stale: color-mix(in srgb, #ef8e3b 52%, black);
+  --src-github: color-mix(in srgb, #79c0ff 48%, black);
+  --src-linear: color-mix(in srgb, #8b93ff 56%, black);
+  --src-slack: color-mix(in srgb, #4ac78f 48%, black);
+  --src-sentry: color-mix(in srgb, #f0708b 58%, black);
+  --src-meeting: color-mix(in srgb, #c792ea 52%, black);
+  --src-calendar: color-mix(in srgb, #efb14a 46%, black);
+  --src-agent: color-mix(in srgb, #4fd1c5 46%, black);
+  --scrim: rgba(15, 17, 21, 0.4);
+  --edge-highlight: rgba(255, 255, 255, 0.7);
+  --shadow-float: 0 6px 16px rgba(15, 17, 21, 0.16);
 }
 
 /* Panel-width breakpoint swaps — DetailPanel reads --panel-width; PANEL-03
@@ -218,6 +286,13 @@ body {
   background: color-mix(in srgb, var(--text-muted) 50%, transparent);
 }
 
+/* Without a rule a placeholder keeps the browser grey, which is below the text
+   floor on the column tier in light and on every tier in dark. */
+::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
@@ -232,6 +307,16 @@ body {
 #root {
   height: 100vh;
   overflow: hidden;
+}
+
+/* A theme switch is instant. The theme hook sets this attribute for two frames
+   while the theme attribute changes, so no element with a hover transition
+   lags behind its neighbours. */
+:root[data-theme-switching],
+:root[data-theme-switching] *,
+:root[data-theme-switching] *::before,
+:root[data-theme-switching] *::after {
+  transition: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

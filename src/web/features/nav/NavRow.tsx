@@ -71,7 +71,7 @@ export function NavRow({
         ...rowStyle,
         justifyContent: collapsed ? "center" : "flex-start",
         padding: collapsed ? 0 : rowStyle.padding,
-        color: active ? "var(--accent)" : "var(--text-muted)",
+        color: active ? "var(--accent-text)" : "var(--text-muted)",
         background:
           hovered && !active ? "var(--surface-card-hover)" : "transparent",
         ...focusRing(focused),

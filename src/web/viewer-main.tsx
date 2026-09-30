@@ -11,6 +11,8 @@ import {
 } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles/tokens.css";
+import "./viewer/viewer.css";
+import { useTheme } from "./hooks/useTheme.js";
 
 const ViewerDoc = lazy(() => import("./viewer/ViewerDoc.js"));
 
@@ -140,6 +142,7 @@ class ChunkErrorBoundary extends Component<
 }
 
 function ViewerApp() {
+  useTheme();
   const [state, setState] = useState<ViewState>(LOADING);
   const [fragment, setFragment] = useState("");
   const navSeq = useRef(0);

@@ -1,4 +1,5 @@
 import { Chip } from "./Chip.js";
+import { dataInk } from "./data-ink.js";
 
 interface StateChipProps {
   name: string;
@@ -26,7 +27,7 @@ export function StateChip({ name, color, title }: StateChipProps) {
         flex: "0 1 auto",
         minWidth: 0,
         maxWidth: "100%",
-        color,
+        color: dataInk(color),
         border: "none",
         background: `color-mix(in srgb, ${color} 12%, transparent)`,
       }}

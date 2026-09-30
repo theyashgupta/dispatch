@@ -12,6 +12,7 @@ import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { IconButton } from "../../primitives/IconButton.js";
 import { COLUMN_ACCENT, COLUMN_LABELS } from "./column-meta.js";
+import { dataInk } from "../../primitives/data-ink.js";
 
 const SEARCH_MIN_WIDTH = 280;
 const SEARCH_MAX_WIDTH = 360;
@@ -272,7 +273,7 @@ export function SearchBox({ onSelectResult }: SearchBoxProps) {
           style={{
             flex: "0 0 auto",
             background: `color-mix(in srgb, ${COLUMN_ACCENT[result.column]} 16%, var(--surface-column))`,
-            color: COLUMN_ACCENT[result.column],
+            color: dataInk(COLUMN_ACCENT[result.column]),
             borderRadius: "var(--radius-sm)",
             padding: "0 var(--space-xs)",
             fontSize: "var(--font-label)",
