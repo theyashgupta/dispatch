@@ -100,6 +100,15 @@ const COLUMN_INK_NAMES = [
   "col-done",
 ];
 const DATA_INK_SHARE = 0.35;
+const MARK_NAMES = [
+  "src-github",
+  "src-linear",
+  "src-slack",
+  "src-sentry",
+  "src-meeting",
+  "src-calendar",
+  "src-agent",
+];
 
 // ---------------------------------------------------------------------------
 // WCAG relative luminance and contrast ratio
@@ -333,7 +342,7 @@ function srgbMix(hexA, hexB, pctA) {
 }
 
 /**
- * Real rendered text pairs whose background (or foreground) is not itself a raw token, so the
+ * Real rendered pairs whose background (or foreground) is not itself a raw token, so the
  * generated ladder-tier cross-product can never produce them (115 review WR-01/WR-02):
  *
  * 1. The filled Button labels, `--on-accent` and `--on-danger`, on their fill at rest, on the
@@ -352,6 +361,8 @@ function srgbMix(hexA, hexB, pctA) {
  * 4. A column colour as text (`dataInk` in src/web/primitives/data-ink.ts): 35% of the `--col-*` token
  *    mixed with `--text`, on the 16% tint of the same token over every background tier. The
  *    column tokens themselves stay graphic tokens.
+ * 5. A source mark (SourceBadge.tsx, SourceIcon.tsx): the `--src-*` token as a graphic on the 16%
+ *    tint of the same token over every background tier, at the 3:1 floor.
  *
  * A referenced token missing from the parsed file is pushed as a violation, never silently
  * skipped, so deleting a token cannot retire its guard.
@@ -459,6 +470,21 @@ function buildDerivedTextPairs(tokens, violations) {
         bg: `${name}-tint-on-${tier.slice(2)}(computed)`,
         bgHex: srgbMix(col, tierHex, 0.16),
         role: "text",
+      });
+    }
+  }
+  for (const name of MARK_NAMES) {
+    const mark = need(name);
+    if (mark == null) continue;
+    for (const tier of BACKGROUND_NAMES) {
+      const tierHex = tokens.get(tier);
+      if (tierHex == null) continue;
+      pairs.push({
+        fg: `${name}-mark(computed)`,
+        fgHex: mark,
+        bg: `${name}-tint-on-${tier.slice(2)}(computed)`,
+        bgHex: srgbMix(mark, tierHex, 0.16),
+        role: "nontext",
       });
     }
   }

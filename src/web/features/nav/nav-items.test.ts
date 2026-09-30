@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PAGES, parseRoute } from "../../lib/route.js";
+import { SOURCE_MARK } from "../badges/source-mark.js";
 import { NAV_ITEMS, navGroups } from "./nav-items.js";
 
 test("every route page except settings has exactly one nav row", () => {
@@ -62,5 +63,30 @@ test("the Home group lists Today first, then Inbox, then Ask", () => {
   assert.deepEqual(
     NAV_ITEMS.filter((item) => item.group === "Home").map((item) => item.page),
     ["today", "inbox", "ask"],
+  );
+});
+
+test("every Sources row shows the mark of its brand, and no other row has a brand", () => {
+  for (const item of NAV_ITEMS) {
+    if (item.group !== "Sources") {
+      assert.equal(item.brand, undefined, item.page);
+      continue;
+    }
+    assert.ok(item.brand !== undefined, item.page);
+    assert.equal(item.icon, SOURCE_MARK[item.brand], item.page);
+  }
+  assert.deepEqual(
+    NAV_ITEMS.filter((item) => item.group === "Sources").map((item) => [
+      item.page,
+      item.brand,
+    ]),
+    [
+      ["tickets", "linear"],
+      ["pull-requests", "github"],
+      ["errors", "sentry"],
+      ["meetings", "meeting"],
+      ["calendar", "calendar"],
+      ["slack", "slack"],
+    ],
   );
 });
