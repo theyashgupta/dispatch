@@ -20,7 +20,7 @@ const STORED_VALUES = ["system", "light", "dark", null, "garbage", "LIGHT", ""];
 /** Returns the text of the pre-paint script of an html shell, one trimmed line per line. */
 function prepaintScript(shell: string): string {
   const html = readFileSync(join(WEB_ROOT, shell), "utf8");
-  const match = /<script>([\s\S]*?)<\/script>/.exec(html);
+  const match = /<script>([\s\S]*?)<\/script>/i.exec(html);
   assert.ok(match, `${shell} holds no inline classic script`);
   return match[1]
     .split("\n")
@@ -145,7 +145,7 @@ void test("the color scheme meta sits above the pre-paint script", () => {
 void test("the pre-paint script tag carries no attribute", () => {
   for (const shell of SHELLS) {
     const html = readFileSync(join(WEB_ROOT, shell), "utf8");
-    const tags = [...html.matchAll(/<script\b([^>]*)>/g)].map((m) => m[1]);
+    const tags = [...html.matchAll(/<script\b([^>]*)>/gi)].map((m) => m[1]);
     assert.equal(tags.filter((attributes) => attributes === "").length, 1);
     assert.equal(tags[0], "");
   }

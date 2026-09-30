@@ -11,6 +11,8 @@ import {
   originHeadRef,
   branchExists,
   currentBranch,
+  gitCommonDir,
+  isMainCheckout,
 } from "../../adapters/git.js";
 
 /**
@@ -57,11 +59,18 @@ async function hasGitEntry(dir: string): Promise<boolean> {
 }
 
 /**
- * Discover git repos under a registered folder with a DEPTH-1 fs sweep only — never git, never
- * recursion. Discovery must stay cheap and predictable (a deep git crawl of an arbitrary folder is
- * the anti-pattern), so a repo is either the folder itself or one of its immediate child directories.
- * Base detection (the only git touch) runs per discovered repo. A registered-but-deleted folder
- * yields `[]` rather than throwing, so the modal shows an empty list instead of an error.
+ * Discover git repos under a registered folder with a DEPTH-1 fs sweep only, never recursion.
+ * Discovery must stay cheap and predictable (a deep git crawl of an arbitrary folder is the
+ * anti-pattern), so a repo is either the folder itself or one of its immediate child directories.
+ * Git is touched per discovered folder only, for its common dir and its base branch. A
+ * registered-but-deleted folder yields `[]` rather than throwing, so the modal shows an empty list
+ * instead of an error.
+ *
+ * @remarks A repo is identified by its git common dir, not its folder: a worktree placed beside its
+ * main checkout is the same repo, and listing both would make the start saga cut the card branch
+ * twice. One folder is kept per common dir, the main checkout when it is present, else the first
+ * worktree in discovery order.
+ * @see docs/ARCHITECTURE.md#repo-discovery
  */
 export async function discoverRepos(
   absPath: string,
@@ -81,8 +90,16 @@ export async function discoverRepos(
     if (await hasGitEntry(childPath)) repoPaths.push(childPath);
   }
 
-  const repos: DiscoveredRepo[] = [];
+  const byCommonDir = new Map<string, string>();
   for (const repoPath of repoPaths) {
+    const key = (await gitCommonDir(repoPath)) ?? repoPath;
+    if (!byCommonDir.has(key) || (await isMainCheckout(repoPath))) {
+      byCommonDir.set(key, repoPath);
+    }
+  }
+
+  const repos: DiscoveredRepo[] = [];
+  for (const repoPath of byCommonDir.values()) {
     repos.push({
       path: repoPath,
       name: path.basename(repoPath),
