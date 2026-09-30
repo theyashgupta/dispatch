@@ -738,7 +738,7 @@ export default tseslint.config(
       ".dependency-cruiser.cjs",
       "eslint-local/**",
       "scripts/**",
-      ".claude/**",
+      ".claude/worktrees/**",
       "src/web/public/**",
       ".planning/**",
     ],
@@ -753,6 +753,12 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+  },
+
+  {
+    files: [".claude/**/*.mjs"],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: { globals: globals.node },
   },
 
   {
