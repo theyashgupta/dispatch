@@ -4,6 +4,7 @@ import type {
   Column as ColumnId,
 } from "../../../shared/types.js";
 import { COLUMN_ACCENT, COLUMN_LABELS } from "./column-meta.js";
+import { dataInk } from "../../primitives/data-ink.js";
 
 interface StatusPillSwitcherProps {
   cards: CardModel[];
@@ -66,7 +67,7 @@ export function StatusPillSwitcher({
                   ? "1px solid var(--accent)"
                   : "1px solid var(--border)",
                 background: "var(--surface-column)",
-                color: isActive ? "var(--accent)" : "var(--text-muted)",
+                color: isActive ? "var(--accent-text)" : "var(--text-muted)",
                 fontSize: "var(--font-label)",
                 fontWeight: "var(--weight-semibold)",
                 lineHeight: "var(--line-label)",
@@ -78,7 +79,7 @@ export function StatusPillSwitcher({
               <span
                 style={{
                   background: `color-mix(in srgb, ${COLUMN_ACCENT[column]} 16%, var(--surface-column))`,
-                  color: COLUMN_ACCENT[column],
+                  color: dataInk(COLUMN_ACCENT[column]),
                   borderRadius: "var(--radius-sm)",
                   padding: "0 var(--space-xs)",
                   fontSize: "var(--font-label)",

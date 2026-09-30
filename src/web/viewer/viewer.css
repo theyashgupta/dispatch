@@ -5,6 +5,15 @@
  * .reading-surface re-scopes --line-body, never touching the global :root block.
  */
 
+/* The board root is a fixed, clipped frame (tokens.css). The viewer is a plain
+   scrolling document, so its root grows with the content. This stylesheet
+   loads on the viewer page only. */
+html body #root {
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+}
+
 .viewer-root {
   --font-md-h1: 24px;
   --font-md-h2: 19px;
@@ -27,6 +36,17 @@
   max-width: calc(720px + var(--space-2xl) + 220px);
   margin: 0 auto;
   padding: var(--space-xl) var(--space-lg);
+}
+
+/* Light highlight colours, the same hue families, each 4.5:1 or more on every
+   light surface tier. */
+:root[data-theme="light"] .viewer-root {
+  --hl-keyword: #7551b2;
+  --hl-string: #287633;
+  --hl-number: #7a6422;
+  --hl-comment: #63676d;
+  --hl-title: #44689d;
+  --hl-attr: #945825;
 }
 
 .viewer-content {
@@ -81,7 +101,7 @@
 }
 
 .viewer-toc-entry[data-active="true"] {
-  color: var(--accent);
+  color: var(--accent-text);
   border-left-color: var(--accent);
 }
 

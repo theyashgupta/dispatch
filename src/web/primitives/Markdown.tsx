@@ -78,7 +78,7 @@ const liStyle: CSSProperties = {
 };
 
 const anchorStyle: CSSProperties = {
-  color: "var(--accent)",
+  color: "var(--accent-text)",
   textDecoration: "underline",
 };
 
