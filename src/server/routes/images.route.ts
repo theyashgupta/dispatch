@@ -1,6 +1,10 @@
 import { Router } from "express";
+import { httpErrorHandler } from "./error-handler.js";
+import { z } from "zod";
+import { parseOrThrow } from "./parse-input.js";
 import { fetchLinearImage, ImageProxyError } from "../adapters/image-proxy.js";
 import { isLinearUploadUrl } from "../../shared/linear-asset-url.js";
+import { InternalError, UpstreamError } from "../services/domain/errors.js";
 
 /**
  * Loopback-gated inline-image proxy behind the shared `/api` guard.
@@ -14,21 +18,26 @@ import { isLinearUploadUrl } from "../../shared/linear-asset-url.js";
  */
 export const imagesRouter = Router();
 
+const querySchema = z.object(
+  {
+    url: z.string("invalid-url").refine(isLinearUploadUrl, "invalid-url"),
+  },
+  "invalid-url",
+);
+
 imagesRouter.get("/images", async (req, res) => {
-  const url = req.query.url;
-  if (typeof url !== "string" || !isLinearUploadUrl(url)) {
-    res.status(400).json({ error: "invalid-url" });
-    return;
-  }
+  const { url } = parseOrThrow(querySchema, req.query);
   try {
     await fetchLinearImage(url, res);
   } catch (err) {
-    if (!res.headersSent) {
-      res
-        .status(err instanceof ImageProxyError ? 502 : 500)
-        .json({ error: "image-fetch-failed" });
-    } else {
+    if (res.headersSent) {
       res.destroy();
+      return;
     }
+    throw err instanceof ImageProxyError
+      ? new UpstreamError("image-fetch-failed")
+      : new InternalError("image-fetch-failed");
   }
 });
+
+imagesRouter.use(httpErrorHandler);
