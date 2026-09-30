@@ -15,6 +15,8 @@ Scope: this doc exists for what layer 1 cannot express — a route file with zer
 - [ ] Validates synchronously and returns 4xx before any async work begins; handlers stay thin (`docs/standards/backend-design.md` — Transport contract).
 - [ ] Never imports `adapters/{exec,git,tmux}.ts` directly — subprocess calls go through `services`/`adapters` only (lint-enforced at error; this is the intent check behind that rule).
 - [ ] Fire-and-forgets anything slower than ~50ms (cold ttyd start, the saga) and carries state to the client over SSE rather than blocking the response.
+- [ ] Parses `params`, `query` and `body` with a zod schema and throws typed errors from `services/domain/errors.ts` (`docs/standards/backend-design.md`, Validation and Errors).
+- [ ] A converted route does not call `res.status` with a 4xx or 5xx code.
 
 ## Backend: `services/orchestration/`
 

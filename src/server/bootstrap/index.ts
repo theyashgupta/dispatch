@@ -16,6 +16,7 @@ import { disableTunnel } from "../services/orchestration/tunnel.js";
 import { stopAskRuns } from "../services/orchestration/ask.js";
 import { terminalProxyRouter } from "../routes/terminal-proxy.route.js";
 import { viewerPageRouter } from "../routes/viewer-page.route.js";
+import { httpErrorHandler } from "../routes/error-handler.js";
 import {
   rejectUpgrade,
   terminalProxyUpgrade,
@@ -404,6 +405,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   }
 
   app.use(jsonBodyErrorHandler);
+  app.use(httpErrorHandler);
 
   const desiredPort = opts.desiredPort ?? config.port ?? DEFAULT_PORT;
   const { server, port } = await listenWithFallback(app, desiredPort);

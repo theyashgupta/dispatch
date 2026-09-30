@@ -1,17 +1,27 @@
 import { Router } from "express";
+import { z } from "zod";
+import { parseOrThrow } from "./parse-input.js";
 import {
   createPlaybook,
   updatePlaybook,
   deletePlaybook,
   loadPlaybooks,
   loadPlaybooksForPicker,
-  type PlaybookWriteInput,
+  type PlaybookWriteResult,
 } from "../services/domain/playbooks.js";
 import {
   generatePlaybookDraft,
   SourceUnreadableError,
 } from "../services/orchestration/playbook-generate.js";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
+import {
+  ConflictError,
+  HttpError,
+  InternalError,
+  NotFoundError,
+  UpstreamError,
+  ValidationError,
+} from "../services/domain/errors.js";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 const MAX_NAME_LEN = 80;
@@ -35,6 +45,68 @@ const MAX_SOURCE_PATHS = 8;
  */
 export const playbooksRouter = Router();
 
+const invalidName = { error: "invalid-name" } as const;
+const invalidBody = { error: "invalid-body" } as const;
+const invalidDirection = { error: "invalid-direction" } as const;
+const invalidSources = { error: "invalid-sources" } as const;
+
+const nameSchema = z
+  .string(invalidName)
+  .trim()
+  .min(1, invalidName)
+  .refine((name) => name.length <= MAX_NAME_LEN, invalidName)
+  .refine((name) => !name.includes("\n") && !name.includes("\r"), invalidName);
+
+const bodySchema = z
+  .string(invalidBody)
+  .refine(
+    (body) => Buffer.byteLength(body, "utf8") <= MAX_BODY_BYTES,
+    invalidBody,
+  );
+
+const writeSchema = z.object(
+  { name: nameSchema, body: bodySchema },
+  invalidName,
+);
+
+const slugSchema = z.string().regex(SLUG_RE, { error: "invalid-slug" });
+
+const generateSchema = z.object(
+  {
+    direction: z
+      .string(invalidDirection)
+      .trim()
+      .min(1, invalidDirection)
+      .refine(
+        (direction) => direction.length <= MAX_DIRECTION_LEN,
+        invalidDirection,
+      ),
+    sourcePaths: z
+      .array(z.string(invalidSources), invalidSources)
+      .max(MAX_SOURCE_PATHS, invalidSources)
+      .optional(),
+  },
+  invalidDirection,
+);
+
+/** Map a failed playbook write to the typed error that carries its status. */
+function toHttpError(
+  code: Extract<PlaybookWriteResult, { ok: false }>["error"],
+): HttpError {
+  switch (code) {
+    case "not-found":
+      return new NotFoundError(code);
+    case "name-exists":
+      return new ConflictError(code);
+    case "footgun":
+      return new ValidationError(code);
+  }
+}
+
+function writeFailed(): never {
+  throw new InternalError("playbook-write-failed");
+}
+
 playbooksRouter.get("/playbooks", async (_req, res) => {
   const playbooks = await loadPlaybooks();
   res.status(200).json({ playbooks });
@@ -46,109 +118,30 @@ playbooksRouter.get("/playbooks/picker", async (_req, res) => {
     const lastUsed = getOrchestrationConfig()?.lastUsedPlaybook ?? null;
     res.status(200).json({ valid, invalid, lastUsed });
   } catch {
-    res.status(500).json({ error: "playbook-picker-failed" });
+    throw new InternalError("playbook-picker-failed");
   }
 });
 
-/** Shape and length-check a POST/PUT playbook body; returns the validated input or the 400 error key. */
-function validateInput(
-  body: unknown,
-): { ok: true; input: PlaybookWriteInput } | { ok: false; error: string } {
-  const b = body as { name?: unknown; body?: unknown } | undefined;
-
-  const rawName = b?.name;
-  if (typeof rawName !== "string") {
-    return { ok: false, error: "invalid-name" };
-  }
-  const name = rawName.trim();
-  if (
-    name === "" ||
-    name.length > MAX_NAME_LEN ||
-    name.includes("\n") ||
-    name.includes("\r")
-  ) {
-    return { ok: false, error: "invalid-name" };
-  }
-
-  const rawBody = b?.body;
-  if (
-    typeof rawBody !== "string" ||
-    Buffer.byteLength(rawBody, "utf8") > MAX_BODY_BYTES
-  ) {
-    return { ok: false, error: "invalid-body" };
-  }
-
-  return { ok: true, input: { name, body: rawBody } };
-}
-
 playbooksRouter.post("/playbooks", async (req, res) => {
-  const validated = validateInput(req.body);
-  if (!validated.ok) {
-    res.status(400).json({ error: validated.error });
-    return;
-  }
-
-  try {
-    const result = await createPlaybook(validated.input);
-    if (!result.ok) {
-      const status = result.error === "name-exists" ? 409 : 400;
-      res.status(status).json({ error: result.error });
-      return;
-    }
-    res.status(200).json({ playbook: result.playbook });
-  } catch {
-    res.status(500).json({ error: "playbook-write-failed" });
-  }
+  const input = parseOrThrow(writeSchema, req.body);
+  const result = await createPlaybook(input).catch(writeFailed);
+  if (!result.ok) throw toHttpError(result.error);
+  res.status(200).json({ playbook: result.playbook });
 });
 
 playbooksRouter.put("/playbooks/:slug", async (req, res) => {
-  const { slug } = req.params;
-  if (!SLUG_RE.test(slug)) {
-    res.status(400).json({ error: "invalid-slug" });
-    return;
-  }
-
-  const validated = validateInput(req.body);
-  if (!validated.ok) {
-    res.status(400).json({ error: validated.error });
-    return;
-  }
-
-  try {
-    const result = await updatePlaybook(slug, validated.input);
-    if (!result.ok) {
-      const status =
-        result.error === "not-found"
-          ? 404
-          : result.error === "name-exists"
-            ? 409
-            : 400;
-      res.status(status).json({ error: result.error });
-      return;
-    }
-    res.status(200).json({ playbook: result.playbook });
-  } catch {
-    res.status(500).json({ error: "playbook-write-failed" });
-  }
+  const slug = parseOrThrow(slugSchema, req.params.slug);
+  const input = parseOrThrow(writeSchema, req.body);
+  const result = await updatePlaybook(slug, input).catch(writeFailed);
+  if (!result.ok) throw toHttpError(result.error);
+  res.status(200).json({ playbook: result.playbook });
 });
 
 playbooksRouter.delete("/playbooks/:slug", async (req, res) => {
-  const { slug } = req.params;
-  if (!SLUG_RE.test(slug)) {
-    res.status(400).json({ error: "invalid-slug" });
-    return;
-  }
-
-  try {
-    const result = await deletePlaybook(slug);
-    if (!result.ok) {
-      res.status(404).json({ error: result.error });
-      return;
-    }
-    res.status(200).json({ ok: true });
-  } catch {
-    res.status(500).json({ error: "playbook-write-failed" });
-  }
+  const slug = parseOrThrow(slugSchema, req.params.slug);
+  const result = await deletePlaybook(slug).catch(writeFailed);
+  if (!result.ok) throw toHttpError(result.error);
+  res.status(200).json({ ok: true });
 });
 
 /**
@@ -162,34 +155,11 @@ playbooksRouter.delete("/playbooks/:slug", async (req, res) => {
 let generateInFlight = false;
 
 playbooksRouter.post("/playbooks/generate", async (req, res) => {
-  const b = req.body as
-    { direction?: unknown; sourcePaths?: unknown } | undefined;
-
-  const rawDirection = b?.direction;
-  const direction = typeof rawDirection === "string" ? rawDirection.trim() : "";
-  if (direction === "" || direction.length > MAX_DIRECTION_LEN) {
-    res.status(400).json({ error: "invalid-direction" });
-    return;
-  }
-
-  const rawSourcePaths = b?.sourcePaths;
-  let sourcePaths: string[] = [];
-  if (rawSourcePaths !== undefined) {
-    if (
-      !Array.isArray(rawSourcePaths) ||
-      rawSourcePaths.length > MAX_SOURCE_PATHS ||
-      !rawSourcePaths.every((p) => typeof p === "string")
-    ) {
-      res.status(400).json({ error: "invalid-sources" });
-      return;
-    }
-    sourcePaths = rawSourcePaths;
-  }
-
-  if (generateInFlight) {
-    res.status(409).json({ error: "generate-in-progress" });
-    return;
-  }
+  const { direction, sourcePaths = [] } = parseOrThrow(
+    generateSchema,
+    req.body,
+  );
+  if (generateInFlight) throw new ConflictError("generate-in-progress");
 
   generateInFlight = true;
   try {
@@ -197,10 +167,9 @@ playbooksRouter.post("/playbooks/generate", async (req, res) => {
     res.status(200).json({ draft });
   } catch (err) {
     if (err instanceof SourceUnreadableError) {
-      res.status(400).json({ error: "source-unreadable" });
-      return;
+      throw new ValidationError("source-unreadable");
     }
-    res.status(502).json({ error: "generate-failed" });
+    throw new UpstreamError("generate-failed");
   } finally {
     generateInFlight = false;
   }
