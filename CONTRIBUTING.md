@@ -55,7 +55,7 @@ It runs, in order:
 | ----------- | --------------------------------------- | ---------------------------------------------------------------- |
 | Format      | `prettier --check .`                    | Consistent formatting (`npm run format` to fix)                  |
 | Lint        | `eslint .`                              | Style and module-boundary rules (`npm run lint:fix`)             |
-| Types       | `tsc --noEmit`                          | Strict TypeScript, no `any` escapes                              |
+| Types       | `tsc --noEmit` (root and `src/web`)     | Strict TypeScript, no `any` escapes                              |
 | Dead code   | `knip`                                  | No unused exports, deps, or files                                |
 | Replay gate | `tsx scripts/replay-watcher.ts --check` | Watcher decisions still match the recorded golden, byte for byte |
 | Tests       | `npm test`                              | Unit suites under `src/**/*.test.ts` on `node:test` via `tsx`    |
