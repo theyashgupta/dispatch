@@ -17,6 +17,9 @@ export function isSubmittableCode(raw: string): boolean {
 /**
  * Whether the server still has this login moving; `idle`, `done` and `error` are terminal for
  * polling purposes.
+ *
+ * @remarks Only its test imports it.
+ * @internal
  */
 export function loginInFlight(state: ClaudeLoginView): boolean {
   return (
