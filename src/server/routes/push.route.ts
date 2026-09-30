@@ -1,11 +1,12 @@
 import { Router, type Request } from "express";
+import { httpErrorHandler } from "./error-handler.js";
 import { isLocalRequest } from "./loopback.js";
+import { parseOrThrow } from "./parse-input.js";
+import { subscribeSchema, unsubscribeSchema } from "./push-schemas.js";
 import { getKnownPublicHost } from "../services/orchestration/tunnel.js";
 import { loadOrCreateVapidKeys } from "../services/infra/push-keys.js";
 import { store } from "../store/board.store.js";
-
-const MAX_ENDPOINT_LEN = 2048;
-const MAX_KEY_LEN = 512;
+import { InternalError, ValidationError } from "../services/domain/errors.js";
 
 /**
  * Push subscription routes, mounted behind the single app-level gate hoisted in
@@ -42,48 +43,6 @@ function deriveOrigin(req: Request): string | null {
   return host;
 }
 
-/** Validate a push endpoint: an `https://` URL string, 1 to 2048 characters. */
-function validateEndpoint(
-  raw: unknown,
-): { ok: true; endpoint: string } | { ok: false; error: "invalid-endpoint" } {
-  if (
-    typeof raw !== "string" ||
-    raw.length === 0 ||
-    raw.length > MAX_ENDPOINT_LEN ||
-    !raw.startsWith("https://")
-  ) {
-    return { ok: false, error: "invalid-endpoint" };
-  }
-  try {
-    new URL(raw);
-  } catch {
-    return { ok: false, error: "invalid-endpoint" };
-  }
-  return { ok: true, endpoint: raw };
-}
-
-/** Validate a subscription's keys: non-empty `p256dh` and `auth` strings, each at most 512 chars. */
-function validateKeys(
-  raw: unknown,
-):
-  | { ok: true; p256dh: string; auth: string }
-  | { ok: false; error: "invalid-keys" } {
-  const keys = raw as { p256dh?: unknown; auth?: unknown } | undefined;
-  const p256dh = keys?.p256dh;
-  const auth = keys?.auth;
-  if (
-    typeof p256dh !== "string" ||
-    p256dh.length === 0 ||
-    p256dh.length > MAX_KEY_LEN ||
-    typeof auth !== "string" ||
-    auth.length === 0 ||
-    auth.length > MAX_KEY_LEN
-  ) {
-    return { ok: false, error: "invalid-keys" };
-  }
-  return { ok: true, p256dh, auth };
-}
-
 pushRouter.get("/push/public-key", (_req, res) => {
   try {
     res
@@ -91,65 +50,45 @@ pushRouter.get("/push/public-key", (_req, res) => {
       .json({ publicKey: loadOrCreateVapidKeys().publicKeyBase64Url });
   } catch (err) {
     console.error("[push] public-key read failed:", (err as Error).message);
-    res.status(500).json({ error: "push-key-read-failed" });
+    throw new InternalError("push-key-read-failed");
   }
 });
 
 pushRouter.post("/push/subscribe", (req, res) => {
-  const body = req.body as { endpoint?: unknown; keys?: unknown } | undefined;
-
-  const endpointResult = validateEndpoint(body?.endpoint);
-  if (!endpointResult.ok) {
-    res.status(400).json({ error: endpointResult.error });
-    return;
-  }
-  const { endpoint } = endpointResult;
-
-  const keysResult = validateKeys(body?.keys);
-  if (!keysResult.ok) {
-    res.status(400).json({ error: keysResult.error });
-    return;
-  }
-  const { p256dh, auth } = keysResult;
+  const {
+    endpoint,
+    keys: { p256dh, auth },
+  } = parseOrThrow(subscribeSchema, req.body);
 
   const origin = deriveOrigin(req);
-  if (!origin) {
-    res.status(400).json({ error: "unknown-origin" });
-    return;
-  }
+  if (!origin) throw new ValidationError("unknown-origin");
 
+  let stored: boolean;
   try {
-    const stored = store.addPushSubscription({
+    stored = store.addPushSubscription({
       endpoint,
       p256dh,
       auth,
       origin,
       createdAt: new Date().toISOString(),
     });
-    if (!stored) {
-      res.status(400).json({ error: "too-many-subscriptions" });
-      return;
-    }
-    res.status(200).json({ ok: true });
   } catch (err) {
     console.error("[push] subscribe failed:", (err as Error).message);
-    res.status(500).json({ error: "push-subscribe-failed" });
+    throw new InternalError("push-subscribe-failed");
   }
+  if (!stored) throw new ValidationError("too-many-subscriptions");
+  res.status(200).json({ ok: true });
 });
 
 pushRouter.post("/push/unsubscribe", (req, res) => {
-  const body = req.body as { endpoint?: unknown } | undefined;
-  const endpointResult = validateEndpoint(body?.endpoint);
-  if (!endpointResult.ok) {
-    res.status(400).json({ error: endpointResult.error });
-    return;
-  }
-
+  const { endpoint } = parseOrThrow(unsubscribeSchema, req.body);
   try {
-    const removed = store.removePushSubscription(endpointResult.endpoint);
+    const removed = store.removePushSubscription(endpoint);
     res.status(200).json({ ok: true, removed });
   } catch (err) {
     console.error("[push] unsubscribe failed:", (err as Error).message);
-    res.status(500).json({ error: "push-unsubscribe-failed" });
+    throw new InternalError("push-unsubscribe-failed");
   }
 });
+
+pushRouter.use(httpErrorHandler);
