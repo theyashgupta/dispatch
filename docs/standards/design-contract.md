@@ -521,6 +521,8 @@ Honest caveat: a future milestone that wants a genuinely different visual langua
 illustration, marketing surfaces, a public-facing site — would make Tailwind defensible. This
 ratification is scoped to the current milestone and is not permanent.
 
+Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. New code in the new tree uses Tailwind v4 and shadcn/ui. The density scale, source colors, contrast floors, elevation ladder and motion budget in this document stay in force. Until ticket 16, this section still applies to the legacy tree that the new standard names in "Status and scope".
+
 ## What this does NOT change
 
 This section exists so later phases cannot quietly expand scope beyond what this contract fixes.

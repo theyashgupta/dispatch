@@ -55,28 +55,108 @@ Scope: this doc exists for what layer 1 cannot express — a route file with zer
 
 ## Frontend: `primitives/`
 
+Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
+
 - [ ] Props in, no data fetching: zero imports from `hooks/`, `lib/`, `feature`, or `web` (lint-enforced at error; this is the intent check — a primitive that reaches into `lib/` for formatting is a layering violation, e.g. the one Phase 57 fixed in `ActivityItem.tsx` by hoisting the formatting calls to its callers).
 - [ ] Purely presentational; a props type is declared immediately above the component (`docs/standards/frontend-design-system.md` anatomy checklist).
 
 ## Frontend: `hooks/`
+
+Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
 
 - [ ] May import `lib/` (data hooks legitimately sit on `lib/api`), but never `feature` or `web` — import direction is `primitives -> hooks/lib -> features -> App`.
 - [ ] Filename is `useX.ts` camelCase (`docs/standards/folder-structure.md` naming convention).
 
 ## Frontend: `lib/`
 
+Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
+
 - [ ] Never imports React or `react-dom` (lint-enforced at error via `no-restricted-imports` scoped to `src/web/lib/**/*.ts`) — `lib` is the pure-helper floor of the tier.
 - [ ] Never imports `primitives/`, `hooks/`, `feature`, or `web` — the asymmetric rule: `hooks` may import `lib`, `lib` never imports upward into `hooks`.
 
 ## Frontend: `features/`
+
+Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
 
 - [ ] Cross-feature imports go through the target feature's `index.ts` barrel only — a deep import into a sibling feature's internals is a violation (lint-enforced at error).
 - [ ] The `features/* -> badges` shared-leaf edge is the one sanctioned cross-feature exception: `badges/` is a shared leaf feature whose components import nothing of their own and may be imported by any feature.
 
 ## Frontend: web root (`App.tsx`, `main.tsx`)
 
+Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
+
 - [ ] Composes features through their `index.ts` barrel only — no reach-in past a feature's public entry point.
 - [ ] Zero `createContext`/`useContext` usage anywhere in `src/web` — plain props over Context is the standing decision (`docs/standards/frontend-design-system.md`).
+
+## Frontend module: route (`src/web/routes/`)
+
+- [ ] The file renders exactly one view, or one shared layout component that gets module views as children. The root route `__root.tsx` is exempt from this section (`docs/standards/frontend-architecture.md`, Layer definitions, Route).
+- [ ] The file has no business logic, no JSX layout and no data transform.
+- [ ] Search params go through `validateSearch` with a zod schema.
+- [ ] The loader calls `queryOptions` from a module barrel or from `src/web/queries/`, never from a file in a layer folder.
+
+## Frontend module: view (`modules/<feature>/views/`)
+
+- [ ] The view composes containers and layout. It calls no query hook (`docs/standards/frontend-architecture.md`, Layer definitions, View).
+- [ ] The file name ends in `View`, and no file outside `views/` ends in `View`.
+
+## Frontend module: container (`modules/<feature>/containers/`)
+
+- [ ] Data comes only through the module's query hooks or a shared query in `src/web/queries/` (`docs/standards/frontend-architecture.md`, Layer definitions, Container).
+- [ ] Mutations, selection state and editing state live here. The container gives plain props to its child components.
+- [ ] The container renders components and `components/ui` primitives. It renders no host element that has a `className`.
+- [ ] The file name ends in `Container`, and no file outside `containers/` ends in `Container`.
+
+## Frontend module: component (`modules/<feature>/components/`)
+
+- [ ] The component takes props and returns JSX. It imports no TanStack Query, TanStack Router or HTTP client. It does not call `fetch` (`docs/standards/frontend-architecture.md`, Layer definitions, Component).
+- [ ] The component composes `components/ui` primitives, or it is in an allowed custom family folder. It uses no JSX `style` prop outside a `components/dnd/` folder and no colour value.
+
+## Frontend module: hook (`modules/<feature>/hooks/`)
+
+- [ ] The hook holds reusable logic that is not a query. It does not import TanStack Query. A wrapper of `useQuery` or `useMutation` goes in a `queries/` folder (`docs/standards/frontend-architecture.md`, Layer definitions, Hook).
+- [ ] The file name is kebab-case, for example `use-drag-reorder.ts`.
+
+## Frontend module: domain (`modules/<feature>/domain/`)
+
+- [ ] The file holds pure functions, constants and types. It imports no React, TanStack Query, TanStack Router or HTTP client. It uses no `fetch`, `window`, `document`, `localStorage` or `EventSource` (`docs/standards/frontend-architecture.md`, Layer definitions, Domain utility).
+- [ ] Each non-test domain file has a colocated `<subject>.test.ts` file.
+
+## Frontend module: query (`modules/<feature>/queries/`)
+
+- [ ] The folder holds the key factory, `queryOptions`, the query and mutation wrappers, and the fetch or SSE glue (`docs/standards/frontend-architecture.md`, Layer definitions, Query).
+- [ ] Only query files, in a module `queries/` folder or in `src/web/queries/`, import `src/web/lib/http.ts`.
+- [ ] The wrapper returns a 400, 409 or 502 response with the body `{ "error": "<code>" }` as typed data. It does not throw it.
+- [ ] The file renders no JSX.
+- [ ] The `useMutation` wrapper owns optimistic updates and rollback.
+- [ ] Each `*-queries.ts` file has a colocated `<subject>.test.ts` file that also covers the `*-api.ts` glue.
+
+## Frontend modules, every layer folder
+
+- [ ] No file imports a sibling module or the legacy tree (`docs/standards/frontend-architecture.md`, Import matrix, Global bans).
+- [ ] The module `index.ts` exports only views and `queryOptions` factories.
+
+## Frontend shared: `src/web/components/ui/`
+
+- [ ] A primitive file came from `npx shadcn@latest add`. A change is a `cva` variant in the same file, or an edit that "Primitive conventions" names (`docs/standards/frontend-architecture.md`, The only-shadcn rule).
+- [ ] The file has no `ring-*` class. Focus uses the outline classes.
+
+## Frontend shared: `src/web/components/`
+
+- [ ] The file serves two or more modules, or it is the layout where a route composes two modules. It can also be in `icons/`, `markdown/`, `AppState.tsx` or `ThemeProvider.tsx` (`docs/standards/frontend-architecture.md`, Shared tiers, Shared components).
+- [ ] The file imports no file of a module.
+
+## Frontend shared: `src/web/queries/`
+
+- [ ] Two or more modules read this data. Data that one module reads stays in that module. Files follow the `<name>-api.ts` and `<name>-queries.ts` pattern, and each `*-queries.ts` file has a colocated test (`docs/standards/frontend-architecture.md`, Shared tiers, Shared queries).
+
+## Frontend shared: `src/web/lib/`
+
+- [ ] A new file is `http.ts`, `query-client.ts` or `utils.ts`. It imports no module or component and holds no React state. Legacy helpers keep their legacy rules (`docs/standards/frontend-architecture.md`, Shared tiers, Configured clients).
+
+## Frontend shared: `src/web/styles/`
+
+- [ ] A colour value appears only in `tokens.css`. `globals.css` maps names to tokens through `var()` only (`docs/standards/frontend-architecture.md`, Shared tiers, Styles).
 
 ## Named exceptions (do NOT flag these)
 

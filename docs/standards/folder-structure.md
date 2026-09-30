@@ -55,6 +55,8 @@ src/web/
 
 `features/badges/brands/` (since 2026-09-30, G9 Unit 3) holds the six brand mark components (`GitHubMark.tsx`, `LinearMark.tsx`, `SlackMark.tsx`, `SentryMark.tsx`, `GranolaMark.tsx`, `CalendarMark.tsx`) and their shared svg shell `MarkSvg.tsx`. Only `features/badges/source-mark.ts` and its test import from the folder; every file outside `features/badges/` reads a mark through `sourceMark()` of the badges barrel, with one exception: `features/nav/nav-items.test.ts` reads the map `SOURCE_MARK` from `source-mark.ts` direct.
 
+Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. The new tree is `src/web/routes/`, `src/web/modules/<feature>/` with six layer folders, `src/web/components/ui/`, `src/web/components/`, `src/web/queries/`, the new files in `src/web/lib/` and `src/web/styles/globals.css`. Until ticket 16, this section still applies to the legacy tree that the new standard names in "Status and scope".
+
 ### Component placement (frontend)
 
 | Artifact                                                                                                                                   | Home                             |
@@ -83,6 +85,8 @@ src/web/
 
 A component lives in the folder of the feature that consumes it; a component consumed by exactly one feature is co-located with that consumer (`PlaybookEditorModal` sits in `settings/` because `SettingsScreen` is its only consumer). `MultiSelect` stays in `modals/` even though both `settings/` and `inbox/` now consume it: cross-feature reuse goes through the owning feature's `index.ts` barrel rather than forcing a move. `features/connections/` follows the same rule: `LinearConnectionCard` composes the connection primitives with the Linear hook, and Settings imports it through the `connections` barrel so the setup wizard can reuse the same card instead of forking it.
 
+Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. Place a new file in a layer that the new standard defines. Until ticket 16, this section still applies to the legacy tree that the new standard names in "Status and scope".
+
 ## Import direction (unidirectional)
 
 Imports flow one way; the lower a layer sits, the fewer things it may import. This encodes the layering the code already follows and is **enforced at error severity** by `eslint-plugin-boundaries`'s `boundaries/dependencies` rule, gating `npm run check` — a wrong-direction import fails the build, it is not merely a style convention. See `docs/standards/code-review-rules.md` for the per-layer review checklist derived from this rule.
@@ -92,6 +96,8 @@ Imports flow one way; the lower a layer sits, the fewer things it may import. Th
 **Frontend:** `primitives` → `hooks`/`lib` → `features` → `App`. Primitives are purely presentational (props in, no data fetching); hooks own data and effects; features compose them. Within the `hooks`/`lib` tier the rule is asymmetric: `hooks` may import `lib` (data hooks legitimately sit on `lib/api`), but `lib` never imports `hooks` — `lib` is the pure-helper floor of the tier. Two files carry a temporary `warn`-severity exception to this rule rather than `error`: `lib/card-badges.ts` (imports `hooks/useUnseenActivity`) and `primitives/ActivityItem.tsx` (imports `lib/event-copy` and `lib/format-age`). The exception is recorded as a named, trailing file-glob carve-out block (`feWebBoundariesWarnCarveout`) in `eslint.config.ts`, and tracked as open debt in `docs/standards/architecture.md`'s "Triage-derived layering-violation fixes" gap-list entry — Phase 57 work, not a silent gap.
 
 Feature folders never import from sibling feature folders — cross-feature sharing goes through `primitives/`, `hooks/`, `lib/`, or `shared/`. The single sanctioned exception is `features/* → badges`: `badges/` is a shared LEAF feature — its components import nothing of their own and may be imported by any feature. The edge is encoded in `eslint.config.ts` as an explicit allow policy, enforced at error alongside the rest of the frontend import-direction rule; the graph stays acyclic.
+
+Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. The Frontend paragraph of this section describes the legacy tree only. The new tree follows the import matrix of the new standard. Until ticket 16, this section still applies to the legacy tree that the new standard names in "Status and scope".
 
 ## Naming convention
 
@@ -111,6 +117,8 @@ One convention spans the whole tree. Every artifact kind has a fixed pattern and
 The enforceable rule: `.tsx` → PascalCase; `hooks/*.ts` → `useX` camelCase; every other `.ts` → kebab-case; `route`/`store`/`source` suffixes layered on via glob. Role suffixes apply **only** where a folder groups by resource (`routes/`, `store/`, `sources/`) — everywhere else the folder already encodes the layer, so the suffix is dropped (the Angular v20 lesson: no redundant type suffixes). Helpers that live inside a resource folder but are not themselves the resource module (`store/mapping.ts`, `sources/registry.ts`, `sources/linear/filter.ts`, `routes/loopback.ts`) stay plain kebab-case.
 
 The server tree and the web tree both conform fully — the table above states the pattern every new file must follow. The naming convention is lint-enforced at error severity by `eslint-plugin-check-file` (`filename-naming-convention` per file class plus `folder-naming-convention` for kebab-case folders) inside `npm run check`, so a wrongly-named file or folder fails the gate rather than landing silently.
+
+Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. The web rows of this table describe the legacy tree only. New web files follow the Naming section of the new standard. In that section, hook files are kebab-case. Until ticket 16, this section still applies to the legacy tree that the new standard names in "Status and scope".
 
 ## Build artifacts
 
