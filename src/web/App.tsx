@@ -10,6 +10,12 @@ import {
   type CSSProperties,
   useMemo,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  applyActivityEvent,
+  applyBoardSnapshot,
+  applyTunnelState,
+} from "./queries/board-snapshot-queries.js";
 import {
   useBoardStream,
   type ConnectionStatus,
@@ -400,10 +406,18 @@ export function App() {
     kind: "not-found" | "network";
   } | null>(null);
   const pinFetchGenRef = useRef(0);
+  const queryClient = useQueryClient();
   const { board, connection } = useBoardStream(doneLimit, {
-    onActivity: feed.append,
-    onTunnelState: setTunnelState,
+    onActivity: (event) => {
+      feed.append(event);
+      applyActivityEvent(queryClient, event);
+    },
+    onTunnelState: (state) => {
+      setTunnelState(state);
+      applyTunnelState(queryClient, state);
+    },
     onBoardUpdate: (snapshot) => {
+      applyBoardSnapshot(queryClient, doneLimit, snapshot);
       if (selectedCardId == null) return;
       const live = snapshot.cards.find((card) => card.id === selectedCardId);
       if (live != null)
