@@ -53,6 +53,8 @@ src/web/
 └── styles/         # tokens.css — the design-token source of truth, survives unchanged
 ```
 
+`features/badges/brands/` (since 2026-09-30, G9 Unit 3) holds the six brand mark components (`GitHubMark.tsx`, `LinearMark.tsx`, `SlackMark.tsx`, `SentryMark.tsx`, `GranolaMark.tsx`, `CalendarMark.tsx`) and their shared svg shell `MarkSvg.tsx`. Only `features/badges/source-mark.ts` and its test import from the folder; every file outside `features/badges/` reads a mark through `sourceMark()` of the badges barrel, with one exception: `features/nav/nav-items.test.ts` reads the map `SOURCE_MARK` from `source-mark.ts` direct.
+
 Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. The new tree is `src/web/routes/`, `src/web/modules/<feature>/` with six layer folders, `src/web/components/ui/`, `src/web/components/`, `src/web/queries/`, the new files in `src/web/lib/` and `src/web/styles/globals.css`. Until ticket 16, this section still applies to the legacy tree that the new standard names in "Status and scope".
 
 ### Component placement (frontend)

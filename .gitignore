@@ -1,6 +1,9 @@
 .planning/
 node_modules
 dist/
-CLAUDE.md
 docs/superpowers/
-.claude/
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+!.claude/skills/
+*/**/.claude/

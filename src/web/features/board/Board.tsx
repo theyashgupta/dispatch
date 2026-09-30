@@ -702,7 +702,7 @@ export function Board({
                   alignItems: "center",
                   justifyContent: "center",
                   background: "var(--accent)",
-                  color: "var(--text)",
+                  color: "var(--on-accent)",
                   fontSize: "var(--font-label)",
                   fontWeight: "var(--weight-semibold)",
                   lineHeight: "var(--line-label)",

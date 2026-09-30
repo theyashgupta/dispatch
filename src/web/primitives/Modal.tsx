@@ -110,7 +110,7 @@ function extractSlot(children: ReactNode, slot: typeof ModalHeader): ReactNode {
 const scrimStyle: CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0,0,0,0.4)",
+  background: "var(--scrim)",
   zIndex: 20,
 };
 

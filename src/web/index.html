@@ -2,17 +2,30 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="color-scheme" content="dark light" />
+    <script>
+      (function () {
+        var stored = null;
+        try {
+          stored = localStorage.getItem("dsp.theme");
+        } catch (error) {}
+        var theme = "dark";
+        if (stored === "light" || stored === "dark") {
+          theme = stored;
+        } else if (matchMedia("(prefers-color-scheme: light)").matches) {
+          theme = "light";
+        }
+        document.documentElement.setAttribute("data-theme", theme);
+        document
+          .querySelector('meta[name="color-scheme"]')
+          .setAttribute("content", theme);
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Dispatch</title>
-    <style>
-      html {
-        background: #0b0c0e;
-        color: #e8e9ea;
-      }
-    </style>
   </head>
   <body>
     <div id="root"></div>

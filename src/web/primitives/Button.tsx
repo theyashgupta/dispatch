@@ -39,7 +39,7 @@ const primaryStyle: CSSProperties = {
   background: "var(--accent)",
   border: "none",
   borderRadius: "var(--radius)",
-  color: "var(--text)",
+  color: "var(--on-accent)",
   fontFamily: "var(--font-ui)",
   fontSize: "var(--font-label)",
   fontWeight: "var(--weight-semibold)",
@@ -55,7 +55,7 @@ const dangerStyle: CSSProperties = {
   background: "var(--destructive-button-fill)",
   border: "none",
   borderRadius: "var(--radius)",
-  color: "#ffffff",
+  color: "var(--on-danger)",
   fontFamily: "var(--font-ui)",
   fontSize: "var(--font-label)",
   fontWeight: "var(--weight-semibold)",
@@ -101,7 +101,7 @@ export function Button({
   const toggledOn = rest["aria-pressed"] === true;
   const composed: CSSProperties = {
     ...base,
-    ...(toggledOn ? { color: "var(--accent)" } : null),
+    ...(toggledOn ? { color: "var(--accent-text)" } : null),
     background:
       variant === "secondary"
         ? pressed

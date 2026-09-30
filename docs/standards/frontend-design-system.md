@@ -19,6 +19,8 @@ The frontend has massive style-object and JSX duplication: the secondary-button 
 | `Field`      | The repeated `<span>` label + body pairs                                                             | Small, high-frequency label/value building block.                                                                                                                                                             |
 | `FlowStage`  | Nothing (first diagram primitive); exports `FlowBox` and `FlowChip`                                  | Fixed-coordinate node and edge stage with `offset-path` tokens and no token under reduced motion. Consumers: `features/detail/SessionFlowRow.tsx` (inside `DetailPanel`) and `features/flow/FlowDiagram.tsx`. |
 
+Amended 2026-09-29 (G9 Unit 1, LOCAL-55): the `Button` row says that `secondary` is the only current variant. `Button` has three variants in code: `secondary`, `primary` and `danger`. A filled variant (`primary`, `danger`) carries a white label and darkens on hover and press; the values are in `design-contract.md` under State palette.
+
 Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. New code uses shadcn primitives in `src/web/components/ui/`. This table describes the legacy primitives only. Until ticket 16, this section still applies to the legacy tree that the new standard names in "Status and scope".
 
 ## Styling approach — DECISIVE
@@ -39,7 +41,7 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. New code 
 
 What this means in this codebase: focus is expressed as `outline: 2px solid var(--accent)` with `outline-offset: 2px`, defined once in `src/web/primitives/focus-ring.ts` and consumed everywhere by spreading its return value onto a style object. Selection and needs-attention are expressed separately, as a border plus a 1px ring on the card itself. The failure mode this rule prevents: writing the focus ring as an accent box-shadow ring makes it structurally identical to the selection ring, indistinguishable to a keyboard user — exactly what shipped before this rule was written.
 
-Where an `overflow: hidden` ancestor clips the outline, drop the offset to 0 at that site. Never revert to an accent box-shadow ring to work around clipping.
+Where an `overflow: hidden` ancestor clips the outline, drop the offset to 0 at that site. Never revert to an accent box-shadow ring to work around clipping. If the outline is still clipped at offset 0, draw it inside the element with a negative offset (`-outline-offset-2`) and keep the element inside the clipping ancestor. Menu and select items use this inset form, `focus-visible:-outline-offset-2`.
 
 The accent's job list lives in the accent row of `design-contract.md`'s `## Color roles` table (the checked source toggle is its newest job). That row is the source and wins on any conflict with this file; it is not copied here, so it cannot drift.
 
@@ -54,6 +56,8 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. New code 
 ## Depth
 
 Medium depth. Build the five primitives and the typed style-object module; do **not** build a variant/theme engine, a Storybook, or a component-doc site — all over-engineering for a young, one-user tool. Each primitive lands as a pure refactor, smoke-gated on sync → start → terminal → markers → cleanup, with pixel-identical rendering at every adopted call site.
+
+Amended 2026-09-29 (G9 Unit 1, LOCAL-55): two statements above no longer hold. First, "do not build a variant/theme engine": a theme engine exists, because the product now has a light theme. It is small by design: one attribute on the html element, one light block in `tokens.css`, two pure helpers and one hook (`docs/ARCHITECTURE.md#theme-engine`). The ban on a variant engine, a Storybook and a component-doc site stays. Second, "pixel-identical rendering": it was the bar for the primitive extraction, where a refactor must not change a pixel. G9 changes token values on purpose (radius, motion, filled button states, a light palette), so its bar is the dated records in `design-contract.md`, measured in both themes.
 
 Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. New code extends a primitive with a `cva` variant in its shadcn file. Until ticket 16, this section still applies to the legacy tree that the new standard names in "Status and scope".
 

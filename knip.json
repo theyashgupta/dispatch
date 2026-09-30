@@ -1,15 +1,21 @@
 {
   "entry": [
-    "src/server/bootstrap/index.ts",
-    "src/server/bootstrap/cli.ts",
-    "src/web/main.tsx",
-    "src/web/index.html",
-    "src/web/terminal-main.ts",
-    "src/web/viewer-main.tsx",
-    "src/web/viewer.html",
-    "src/**/*.test.ts"
+    "src/server/bootstrap/index.ts!",
+    "src/server/bootstrap/cli.ts!",
+    "src/web/main.tsx!",
+    "src/web/index.html!",
+    "src/web/terminal-main.ts!",
+    "src/web/viewer-main.tsx!",
+    "src/web/viewer.html!",
+    "src/web/gallery-main.tsx",
+    "src/web/gallery.html",
+    "src/**/*.test.ts",
+    "eslint-local/**/*.test.ts",
+    "src/web/vite-env.d.ts",
+    "src/web/lib/utils.ts",
+    "src/web/components/ui/**/*.{ts,tsx}"
   ],
-  "project": ["src/**/*.{ts,tsx}"],
+  "project": ["src/**/*.{ts,tsx}!", "!src/server/test-support/**!"],
   "ignoreExportsUsedInFile": true,
   "ignoreBinaries": [
     "which",
@@ -18,5 +24,6 @@
     "launchctl",
     "lsof",
     "tmux"
-  ]
+  ],
+  "ignoreDependencies": ["tailwindcss"]
 }

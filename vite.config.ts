@@ -1,13 +1,18 @@
 import { resolve } from "node:path";
 import { defineConfig, type PluginOption } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { visualizer } from "rollup-plugin-visualizer";
 
 export default defineConfig({
   root: "src/web",
   base: "./",
+  resolve: {
+    alias: { "@": resolve(import.meta.dirname, "src/web") },
+  },
   plugins: [
     react(),
+    tailwindcss(),
     ...(process.env.ANALYZE === "1"
       ? [
           visualizer({

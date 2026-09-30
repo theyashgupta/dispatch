@@ -8,14 +8,116 @@ import checkFile from "eslint-plugin-check-file";
 import prettier from "eslint-config-prettier";
 import commentsJsdocOnly from "./eslint-local/comments-jsdoc-only.js";
 
+const importResolver = {
+  typescript: {
+    project: [
+      `${import.meta.dirname}/tsconfig.json`,
+      `${import.meta.dirname}/src/web/tsconfig.json`,
+    ],
+    noWarnOnMultipleProjects: true,
+  },
+};
+
+const serviceTypes = [
+  "services-orchestration",
+  "services-domain",
+  "services-infra",
+  "services",
+];
+const moduleLayerTypes = [
+  "view",
+  "container",
+  "component",
+  "hook",
+  "domain",
+  "query",
+];
+const moduleTypes = [...moduleLayerTypes, "module"];
+const moduleImportMatrix: Record<string, string[]> = {
+  module: ["view", "query"],
+  view: ["view", "container", "component"],
+  container: ["container", "component", "hook", "query", "domain"],
+  component: ["component", "hook", "domain"],
+  hook: ["hook", "domain"],
+  query: ["query", "domain"],
+  domain: ["domain"],
+};
+const legacyWebTypes = ["primitives", "hooks", "feature", "web"];
+const uiTier = { type: "ui" };
+const uiPrimitiveTier = { type: "ui", fileInternalPath: "!hooks/**" };
+const sharedComponentTier = { type: "shared-component" };
+const sharedQueryTier = { type: "shared-query" };
+const libTier = { type: "lib", fileInternalPath: "!{api,http}.ts" };
+const libNotUtilsTier = {
+  type: "lib",
+  fileInternalPath: "!{api,http,utils}.ts",
+};
+const moduleSharedTiers: Record<
+  string,
+  { allowed: string; disallow: Record<string, string>[] }
+> = {
+  module: {
+    allowed: "src/shared/",
+    disallow: [uiTier, sharedComponentTier, sharedQueryTier, libTier],
+  },
+  view: {
+    allowed:
+      "components/ui, shared components, src/web/lib/utils.ts, src/shared/",
+    disallow: [sharedQueryTier, libNotUtilsTier],
+  },
+  container: {
+    allowed:
+      "components/ui, shared components, src/web/queries/, src/web/lib/utils.ts, src/shared/",
+    disallow: [libNotUtilsTier],
+  },
+  component: {
+    allowed:
+      "components/ui, shared components, src/web/lib/utils.ts, src/shared/",
+    disallow: [sharedQueryTier, libNotUtilsTier],
+  },
+  hook: {
+    allowed: "components/ui/hooks/, src/web/lib/utils.ts, src/shared/",
+    disallow: [
+      uiPrimitiveTier,
+      sharedComponentTier,
+      sharedQueryTier,
+      libNotUtilsTier,
+    ],
+  },
+  query: {
+    allowed:
+      "src/web/queries/, src/web/lib/http.ts, src/web/lib/utils.ts, src/shared/",
+    disallow: [uiTier, sharedComponentTier, libNotUtilsTier],
+  },
+  domain: {
+    allowed: "src/web/lib/utils.ts, src/shared/",
+    disallow: [uiTier, sharedComponentTier, sharedQueryTier, libNotUtilsTier],
+  },
+};
+const newWebTypes = [
+  "route",
+  ...moduleTypes,
+  "ui",
+  "shared-component",
+  "shared-query",
+];
+const webTypes = [
+  ...newWebTypes,
+  "primitives",
+  "hooks",
+  "lib",
+  "feature",
+  "web",
+];
+
 /**
  * Shared element descriptors for both boundary blocks below (backend +
  * frontend `boundaries/dependencies` rule instances) so a file classifies
- * identically under either rule. First-match-wins: the four frontend
- * sub-elements (primitives/hooks/lib/feature) are listed BEFORE the general
- * `web` catch-all so files under those subtrees classify as their sub-element
- * instead of falling through to `web`. `web` remains the catch-all for
- * App.tsx/main.tsx/styles.
+ * identically under either rule. First match wins, so order matters in three
+ * places: the module layer elements come before `module`, which then matches
+ * only the barrel and stray files of a module; `ui` comes before
+ * `shared-component`; and every frontend element comes before the `web`
+ * catch-all, which keeps App.tsx, main.tsx, the viewer and styles.
  *
  * `exec.ts`/`git.ts`/`tmux.ts`/`image-proxy.ts` classify as plain `adapters`
  * here — their transport-narrowing and config-consumer carve-out are enforced
@@ -29,11 +131,36 @@ import commentsJsdocOnly from "./eslint-local/comments-jsdoc-only.js";
 const boundaryElements = [
   { type: "bootstrap", pattern: "src/server/bootstrap" },
   { type: "routes", pattern: "src/server/routes" },
+  {
+    type: "services-orchestration",
+    pattern: "src/server/services/orchestration",
+  },
+  { type: "services-domain", pattern: "src/server/services/domain" },
+  { type: "services-infra", pattern: "src/server/services/infra" },
   { type: "services", pattern: "src/server/services" },
   { type: "adapters", pattern: "src/server/adapters" },
   { type: "sources", pattern: "src/server/sources" },
   { type: "store", pattern: "src/server/store" },
   { type: "shared", pattern: "src/shared" },
+  { type: "route", pattern: "src/web/routes" },
+  { type: "view", pattern: "src/web/modules/*/views", capture: ["module"] },
+  {
+    type: "container",
+    pattern: "src/web/modules/*/containers",
+    capture: ["module"],
+  },
+  {
+    type: "component",
+    pattern: "src/web/modules/*/components",
+    capture: ["module"],
+  },
+  { type: "hook", pattern: "src/web/modules/*/hooks", capture: ["module"] },
+  { type: "domain", pattern: "src/web/modules/*/domain", capture: ["module"] },
+  { type: "query", pattern: "src/web/modules/*/queries", capture: ["module"] },
+  { type: "module", pattern: "src/web/modules/*", capture: ["module"] },
+  { type: "ui", pattern: "src/web/components/ui" },
+  { type: "shared-component", pattern: "src/web/components" },
+  { type: "shared-query", pattern: "src/web/queries" },
   { type: "primitives", pattern: "src/web/primitives" },
   { type: "hooks", pattern: "src/web/hooks" },
   { type: "lib", pattern: "src/web/lib" },
@@ -97,26 +224,26 @@ const boundaryFiles = [
  * tmux adapter, which is legal because services may import any adapter
  * (including the subprocess ones).
  *
- * The `from`/`allow`/`disallow` lists below name the four new frontend
- * sub-elements alongside `web` so this error-level rule stays green now that
- * those sub-elements exist (AUDIT-02) — the fine-grained frontend import
- * direction is enforced separately by `feWebBoundariesConfig` below, at error
- * as of Phase 56's ENF-01 flip.
+ * The `from`/`allow`/`disallow` lists below name every frontend element
+ * (`webTypes`) so this error-level rule stays green for them (AUDIT-02). The
+ * fine-grained frontend import direction is enforced separately by
+ * `feWebBoundariesConfig` below. The three service elements share one allow
+ * list here; their direction is a warning in `.dependency-cruiser.cjs`.
  *
  * `adapters/image-proxy.ts` carries the `adapters-config-consumer` file
  * category (see `boundaryFiles`) and gets a trailing allow policy below to
- * import `services`: it is an adapter-tier file (external Linear-CDN I/O per
+ * import the service elements: it is an adapter-tier file (external Linear-CDN I/O per
  * docs/standards/architecture.md's correction row) that reads orchestration
  * config directly from `services/infra/config-holder.ts`, unlike every other
  * adapter which receives config as an injected parameter. Never widen the
- * general `adapters -> services` allow from this precedent — the carve-out
+ * general adapters to services allow from this precedent; the carve-out
  * stays scoped to the file category.
  */
 const boundariesConfig = {
   files: ["src/**/*.{ts,tsx}"],
   plugins: { boundaries },
   settings: {
-    "import/resolver": { typescript: {} },
+    "import/resolver": importResolver,
     "boundaries/elements": boundaryElements,
     "boundaries/files": boundaryFiles,
   },
@@ -138,13 +265,13 @@ const boundariesConfig = {
             from: [
               "bootstrap",
               "routes",
-              "services",
+              ...serviceTypes,
               "adapters",
               "sources",
               "store",
               "shared",
             ],
-            disallow: ["web", "primitives", "hooks", "lib", "feature"],
+            disallow: webTypes,
             message: "Backend must not import frontend code.",
           },
           {
@@ -152,7 +279,7 @@ const boundariesConfig = {
             allow: [
               "bootstrap",
               "routes",
-              "services",
+              ...serviceTypes,
               "adapters",
               "sources",
               "store",
@@ -161,7 +288,7 @@ const boundariesConfig = {
           },
           {
             from: "routes",
-            allow: ["routes", "services", "adapters", "store", "shared"],
+            allow: ["routes", ...serviceTypes, "adapters", "store", "shared"],
           },
           {
             // Deliberately disallow: transport never touches exec/tmux/git
@@ -174,8 +301,8 @@ const boundariesConfig = {
               "Routes must not import the subprocess adapters (exec/git/tmux) directly — backend-design.md transport rule.",
           },
           {
-            from: "services",
-            allow: ["services", "adapters", "store", "shared"],
+            from: serviceTypes,
+            allow: [...serviceTypes, "adapters", "store", "shared"],
           },
           {
             from: "adapters",
@@ -210,15 +337,12 @@ const boundariesConfig = {
           },
           {
             from: { file: { categories: "adapters-config-consumer" } },
-            allow: { element: { type: "services" } },
+            allow: { element: { type: serviceTypes } },
           },
           { from: "sources", allow: ["sources", "shared"] },
           { from: "store", allow: ["store", "shared"] },
           { from: "shared", allow: ["shared"] },
-          {
-            from: ["web", "primitives", "hooks", "lib", "feature"],
-            allow: ["web", "primitives", "hooks", "lib", "feature", "shared"],
-          },
+          { from: webTypes, allow: [...webTypes, "shared"] },
         ],
       },
     ],
@@ -226,12 +350,14 @@ const boundariesConfig = {
 };
 
 /**
- * Frontend import-direction + feature entry-point policies, used by
- * `feWebBoundariesConfig` below.
- * `default: "allow"` is deliberate — the frontend's edges were enumerated as
- * of Phase 56's restructure, so only the explicit `disallow` policies below
- * produce findings (an unenumerated `disallow`-by-default would flag the
- * entire tree). Uses `policies` (not the deprecated `rules` alias) and
+ * Frontend import policies, used by `feWebBoundariesConfig` below: the legacy
+ * import direction and feature entry points, then the new-tree rows of
+ * docs/standards/frontend-architecture.md (Import matrix), which are module
+ * capture, the layer order inside one module, each layer's shared tiers, the
+ * legacy-tree ban and the route, ui, shared-component and shared-query rows.
+ * `default: "allow"` is deliberate: only the explicit `disallow` policies
+ * below produce findings, so an unlisted legacy edge stays allowed. Uses
+ * `policies` (not the deprecated `rules` alias) and
  * `{{ }}` Handlebars capture templates — the plugin's current, non-deprecated
  * syntax.
  *
@@ -266,7 +392,7 @@ const feWebBoundaryPolicies = {
         "Cross-feature import must go through the feature's index.ts barrel (docs/standards/folder-structure.md).",
     },
     {
-      from: { element: { type: "web" } },
+      from: { element: { type: ["web", ...newWebTypes] } },
       disallow: {
         element: { type: "feature", fileInternalPath: "!index.ts" },
       },
@@ -276,35 +402,35 @@ const feWebBoundaryPolicies = {
     {
       from: { element: { type: "primitives" } },
       disallow: {
-        element: { type: ["hooks", "lib", "feature", "web"] },
+        element: { type: ["hooks", "lib", "feature", "web", ...newWebTypes] },
       },
       message:
         "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
     },
     {
       from: { element: { type: "hooks" } },
-      disallow: { element: { type: ["feature", "web"] } },
+      disallow: { element: { type: ["feature", "web", ...newWebTypes] } },
       message:
         "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
     },
     {
       from: { element: { type: "lib" } },
       disallow: {
-        element: { type: ["primitives", "hooks", "feature", "web"] },
+        element: {
+          type: ["primitives", "hooks", "feature", "web", ...newWebTypes],
+        },
       },
       message:
         "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
     },
     {
-      from: {
-        element: { type: ["web", "primitives", "hooks", "lib", "feature"] },
-      },
+      from: { element: { type: webTypes } },
       disallow: {
         element: {
           type: [
             "bootstrap",
             "routes",
-            "services",
+            ...serviceTypes,
             "adapters",
             "sources",
             "store",
@@ -312,6 +438,103 @@ const feWebBoundaryPolicies = {
         },
       },
       message: "Frontend must not import backend code.",
+    },
+    {
+      from: { element: { type: moduleTypes } },
+      disallow: {
+        element: {
+          type: moduleTypes,
+          captured: { module: "!{{from.captured.module}}" },
+        },
+      },
+      message:
+        "A module does not import a sibling module. Compose modules in src/web/routes/ or a shared layout component (docs/standards/frontend-architecture.md, Import matrix).",
+    },
+    ...Object.entries(moduleImportMatrix).map(([from, allowed]) => ({
+      from: { element: { type: from } },
+      disallow: {
+        element: {
+          type: moduleTypes.filter((type) => !allowed.includes(type)),
+          captured: { module: "{{from.captured.module}}" },
+        },
+      },
+      message: `A module ${from === "module" ? "barrel" : `${from} file`} imports only these layers of its own module: ${allowed.join(", ")} (docs/standards/frontend-architecture.md, Import matrix).`,
+    })),
+    ...Object.entries(moduleSharedTiers).map(([from, tiers]) => ({
+      from: { element: { type: from } },
+      disallow: tiers.disallow.map((element) => ({ element })),
+      message: `A module ${from === "module" ? "barrel" : `${from} file`} imports only these shared tiers: ${tiers.allowed} (docs/standards/frontend-architecture.md, Import matrix).`,
+    })),
+    {
+      from: { element: { type: moduleTypes } },
+      disallow: { element: { type: "route" } },
+      message:
+        "A module file does not import a route file (docs/standards/frontend-architecture.md, Import matrix).",
+    },
+    {
+      from: { element: { type: moduleTypes } },
+      disallow: { element: { type: legacyWebTypes } },
+      message:
+        "A module file does not import the legacy tree (docs/standards/frontend-architecture.md, Import matrix).",
+    },
+    {
+      from: { element: { type: "route" } },
+      disallow: [
+        { element: { type: moduleLayerTypes } },
+        { element: { type: "module", fileInternalPath: "!index.ts" } },
+      ],
+      message:
+        "A route imports a module only through its index.ts barrel (docs/standards/frontend-architecture.md, Import matrix).",
+    },
+    {
+      from: { element: { type: "route" } },
+      disallow: {
+        element: { type: legacyWebTypes },
+      },
+      message:
+        "A route imports only module barrels, src/web/queries/, src/web/lib/, components/ui and shared components (docs/standards/frontend-architecture.md, Import matrix).",
+    },
+    {
+      from: { element: { type: "ui" } },
+      disallow: {
+        element: {
+          type: webTypes.filter((type) => type !== "ui" && type !== "lib"),
+        },
+      },
+      message:
+        "A components/ui file imports only components/ui and src/web/lib/ (docs/standards/frontend-architecture.md, Import matrix).",
+    },
+    {
+      from: { element: { type: "shared-component" } },
+      disallow: [
+        {
+          element: {
+            type: ["route", ...moduleTypes, "shared-query", ...legacyWebTypes],
+          },
+        },
+        { element: libNotUtilsTier },
+      ],
+      message:
+        "A shared component imports only components/ui, src/web/lib/utils.ts, other shared components and src/shared/ (docs/standards/frontend-architecture.md, Import matrix).",
+    },
+    {
+      from: { element: { type: "shared-query" } },
+      disallow: [
+        {
+          element: {
+            type: [
+              "route",
+              ...moduleTypes,
+              "ui",
+              "shared-component",
+              ...legacyWebTypes,
+            ],
+          },
+        },
+        { element: libTier },
+      ],
+      message:
+        "A shared query imports only src/web/lib/http.ts, other shared queries and src/shared/ (docs/standards/frontend-architecture.md, Import matrix).",
     },
     {
       from: { element: { type: "feature" } },
@@ -354,7 +577,7 @@ const feWebBoundariesConfig = {
   files: ["src/web/**/*.{ts,tsx}"],
   plugins: { boundaries },
   settings: {
-    "import/resolver": { typescript: {} },
+    "import/resolver": importResolver,
     "boundaries/elements": boundaryElements,
   },
   rules: {
@@ -394,6 +617,110 @@ const jsdocRules = {
  */
 const externalFactPattern = "(https?:\\/\\/|#\\d+|\\b[A-Z][A-Z0-9]+-\\d+\\b)";
 
+const copyNodePrefixes = [
+  "Literal:not([regex])[value=",
+  "TemplateElement[value.raw=",
+  "JSXText[value=",
+];
+const copyGuardSelectors = copyNodePrefixes.map((prefix) => ({
+  selector: `${prefix}/\u2014| \u2013 |(^|[^-\\w])-{2}($|[^-\\w])/]`,
+  message:
+    "No em dashes, spaced en dashes, or double hyphens in copy. Use a comma, period, colon, or rephrase.",
+}));
+const styleBan = [
+  {
+    selector: 'JSXAttribute[name.name="style"]',
+    message:
+      "Do not use the JSX style prop. Use Tailwind token classes (docs/standards/frontend-architecture.md, The only-shadcn rule).",
+  },
+];
+const hexBan = copyNodePrefixes.map((prefix) => ({
+  selector: `${prefix}/#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\\b/]`,
+  message:
+    "Do not write a hex colour. Add a token to src/web/styles/tokens.css and use its Tailwind token class (docs/standards/frontend-architecture.md, The only-shadcn rule).",
+}));
+const fetchBan = [
+  'CallExpression[callee.name="fetch"]',
+  'NewExpression[callee.name="EventSource"]',
+].map((selector) => ({
+  selector,
+  message:
+    "Only query files call fetch or create an EventSource (docs/standards/frontend-architecture.md, Import matrix).",
+}));
+const radixBan = {
+  group: ["@radix-ui/*", "radix-ui", "radix-ui/*"],
+  message:
+    "Import Radix only in components/ui. Compose the shadcn primitive (docs/standards/frontend-architecture.md, The only-shadcn rule).",
+};
+const apiBan = {
+  regex: "(^|/)lib/api(\\.[cm]?[jt]sx?)?$",
+  message:
+    "src/web/lib/api.ts is part of the legacy tree, and the new tree does not import the legacy tree. A query file calls src/web/lib/http.ts (docs/standards/frontend-architecture.md, Status and scope, Import matrix global ban 3).",
+};
+const httpBan = {
+  regex: "(^|/)lib/http(\\.[cm]?[jt]sx?)?$",
+  message:
+    "Only query files import src/web/lib/http.ts (docs/standards/frontend-architecture.md, Layer definitions).",
+};
+const queryBan = {
+  group: ["@tanstack/react-query"],
+  message:
+    "Import TanStack Query only in query files, containers and src/web/queries/, and in a route only as a type. Views, components, hooks and domain files never import it (docs/standards/frontend-architecture.md, Layer definitions).",
+};
+const routerBan = {
+  group: ["@tanstack/react-router"],
+  message:
+    "Import TanStack Router only in routes, views and containers. Components and domain files never import it (docs/standards/frontend-architecture.md, Layer definitions).",
+};
+const newTreeSyntax = [...styleBan, ...hexBan, ...fetchBan];
+const newTreeZones = [
+  {
+    files: ["src/web/{modules,routes,components}/**/*.{ts,tsx}"],
+    syntax: newTreeSyntax,
+    imports: [radixBan, apiBan, httpBan, queryBan, routerBan],
+  },
+  {
+    files: ["src/web/routes/**/*.{ts,tsx}"],
+    syntax: newTreeSyntax,
+    imports: [
+      radixBan,
+      apiBan,
+      httpBan,
+      { ...queryBan, allowTypeImports: true },
+    ],
+  },
+  {
+    files: ["src/web/modules/*/views/**/*.{ts,tsx}"],
+    syntax: newTreeSyntax,
+    imports: [radixBan, apiBan, httpBan, queryBan],
+  },
+  {
+    files: ["src/web/modules/*/containers/**/*.{ts,tsx}"],
+    syntax: newTreeSyntax,
+    imports: [radixBan, apiBan, httpBan],
+  },
+  {
+    files: ["src/web/modules/*/components/dnd/**/*.{ts,tsx}"],
+    syntax: [...hexBan, ...fetchBan],
+    imports: [radixBan, apiBan, httpBan, queryBan, routerBan],
+  },
+  {
+    files: ["src/web/modules/*/queries/**/*.{ts,tsx}"],
+    syntax: [...styleBan, ...hexBan],
+    imports: [radixBan, apiBan, routerBan],
+  },
+  {
+    files: ["src/web/components/ui/**/*.{ts,tsx}"],
+    syntax: [...hexBan, ...fetchBan],
+    imports: [apiBan, httpBan, queryBan, routerBan],
+  },
+  {
+    files: ["src/web/queries/**/*.{ts,tsx}"],
+    syntax: [],
+    imports: [radixBan, apiBan, routerBan],
+  },
+];
+
 /**
  * Extglob kebab-case segment shared by the check-file role-suffix patterns.
  * Mirrors the plugin's built-in KEBAB_CASE exactly (leading lowercase letter
@@ -407,9 +734,11 @@ export default tseslint.config(
       "dist/**",
       "node_modules/**",
       "eslint.config.ts",
+      "src/web/routeTree.gen.ts",
+      ".dependency-cruiser.cjs",
       "eslint-local/**",
       "scripts/**",
-      ".claude/**",
+      ".claude/worktrees/**",
       "src/web/public/**",
       ".planning/**",
     ],
@@ -424,6 +753,12 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+  },
+
+  {
+    files: [".claude/**/*.mjs"],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: { globals: globals.node },
   },
 
   {
@@ -530,20 +865,17 @@ export default tseslint.config(
   {
     files: ["src/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-syntax": [
-        "error",
-        ...[
-          "Literal:not([regex])[value=",
-          "TemplateElement[value.raw=",
-          "JSXText[value=",
-        ].map((prefix) => ({
-          selector: `${prefix}/\u2014| \u2013 |(^|[^-\\w])--($|[^-\\w])/]`,
-          message:
-            "No em dashes, spaced en dashes, or double hyphens in copy. Use a comma, period, colon, or rephrase.",
-        })),
-      ],
+      "no-restricted-syntax": ["error", ...copyGuardSelectors],
     },
   },
+
+  ...newTreeZones.map(({ files, syntax, imports }) => ({
+    files,
+    rules: {
+      "no-restricted-syntax": ["error", ...copyGuardSelectors, ...syntax],
+      "no-restricted-imports": ["error", { patterns: imports }],
+    },
+  })),
 
   {
     files: ["src/**/*.{ts,tsx}"],
@@ -563,8 +895,8 @@ export default tseslint.config(
 
   /**
    * File/folder naming enforcement (docs/standards/folder-structure.md):
-   * PascalCase .tsx everywhere (main.tsx and viewer-main.tsx exempt ONLY at
-   * src/web root via the root-scoped !(main|viewer-main) key: a nested
+   * PascalCase .tsx everywhere (main.tsx, viewer-main.tsx and gallery-main.tsx exempt ONLY at
+   * src/web root via the root-scoped !(main|viewer-main|gallery-main) key: a nested
    * main.tsx still fails PascalCase),
    * kebab-case .ts, kebab-case folders. Layered override blocks exist because
    * overlapping glob keys inside ONE check-file options object require ALL
@@ -583,7 +915,7 @@ export default tseslint.config(
       "check-file/filename-naming-convention": [
         "error",
         {
-          "src/web/!(main|viewer-main).tsx": "PASCAL_CASE",
+          "src/web/!(main|viewer-main|gallery-main).tsx": "PASCAL_CASE",
           "src/web/*/**/*.tsx": "PASCAL_CASE",
           "src/!(web)/**/*.tsx": "PASCAL_CASE",
           "src/**/*.ts": "KEBAB_CASE",
@@ -644,6 +976,17 @@ export default tseslint.config(
         { "src/server/sources/**/*.ts": `${KEBAB}?(.source)` },
         { ignoreMiddleExtensions: false },
       ],
+    },
+  },
+  {
+    files: ["src/web/components/ui/**/*.{ts,tsx}"],
+    rules: {
+      "check-file/filename-naming-convention": [
+        "error",
+        { "src/web/components/ui/**/*.{ts,tsx}": "KEBAB_CASE" },
+        { ignoreMiddleExtensions: false },
+      ],
+      "local/comments-jsdoc-only": "off",
     },
   },
   {
