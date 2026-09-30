@@ -3487,6 +3487,23 @@ The web UI has a dark and a light theme. The html element always carries `data-t
 
 **The instrument.** `scripts/contrast-113.mjs` measures every text and graphic token pair once per theme, against that theme's own ladder order: dark rises bg, column, card, card-hover; light rises bg, column, card-hover, card. The light token map is the dark map overlaid with the light block. A colour role resolves from three value forms: a 6-digit hex, a `color-mix(in srgb, ...)` of one colour with `black` or `white`, and a `var()` of another token; a colour role in any other form is a violation, never a skip.
 
+### Brand Marks
+
+Since 2026-09-30 (G9 Unit 3) a source shows as the mark of its product. `src/web/features/badges/brands/` holds six mark components and one shared shell, `MarkSvg.tsx`, that renders the svg element: a 24 viewBox, `width` and `height` from the one prop `size` (each mark component sets the default 16), `fill="currentColor"`, `aria-hidden` and not focusable. A mark holds shapes only. It takes no colour prop and holds no colour literal: the colour comes from `sourceAccent()` through `currentColor`, so `SOURCE_ACCENT` stays the single definition of a source colour (`NEW-24`), and no file of the `brands` folder names a source token.
+
+`src/web/features/badges/source-mark.ts` maps a source id to its mark. The six product ids map to the marks; `agent`, `local` and `group` keep the lucide glyphs `Bot`, `FileText` and `Layers`. `sourceMark()` reads the map through an own-property check and answers the lucide `Tag` glyph for any other id, so an id from data that names a prototype key never reaches a component slot. `src/web/features/badges/source-mark.test.ts` asserts that the map and `SOURCE_ACCENT` hold the same keys. Brand marks reach the screen in two forms. On a tile: `SourceBadge.tsx` draws the 18px tile and carries the name of the source as its accessible name, and `SourceIcon.tsx` draws the 32px tile and is decorative. With no tile: the six Sources rows of the sidebar (`NavRow.tsx`) and the source nodes and rows of the Flow page (`FlowDiagram.tsx`, `FlowNarrow.tsx`) show the bare mark in the colour of the source.
+
+Each mark names an integration and nothing else, with one case to know: the Granola mark stands for the source id `meeting`, and a pasted meeting note carries the same id, so it shows the mark too; the name of that badge reads "Meeting". The table is the record of where every path comes from; a tsx file carries no comment, so the record lives here.
+
+| Mark           | Source of the path                                                                                                                       | Licence of the source | Taken on   | Note                                                                                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GitHubMark`   | simple-icons 16.33.0, `icons/github.svg`, the path copied byte for byte                                                                  | CC0 1.0               | 2026-09-30 |                                                                                                                                                                |
+| `LinearMark`   | simple-icons 16.33.0, `icons/linear.svg`, the path copied byte for byte                                                                  | CC0 1.0               | 2026-09-30 |                                                                                                                                                                |
+| `SentryMark`   | simple-icons 16.33.0, `icons/sentry.svg`, the path copied byte for byte                                                                  | CC0 1.0               | 2026-09-30 |                                                                                                                                                                |
+| `SlackMark`    | simple-icons 15.22.0, `icons/slack.svg`, the path copied byte for byte                                                                   | CC0 1.0               | 2026-09-30 | simple-icons holds the file through 15.22.0 and answers 404 for it from 16.0.0 on                                                                              |
+| `GranolaMark`  | drawn in-house: a spiral band of one and a half turns with a solid centre, a one colour redraw of the mark in the public Granola favicon | drawn for Dispatch    | 2026-09-30 | the favicon is a raster image, so no path was copied; the ink is 19.75 by 22.93 units on the 24 grid                                                           |
+| `CalendarMark` | drawn in-house: a rounded frame, a header band, two binding tabs and one date block                                                      | drawn for Dispatch    | 2026-09-30 | every feature is 2 units wide or more and every edge sits on an even unit of the 24 grid, so the mark lands on whole pixels at 12px; the ink is 20 by 20 units |
+
 ### Design System Invariants
 
 **Keyboard focus is an outline, never a box-shadow (`NEW-15`).** The rule, authored in `docs/standards/frontend-design-system.md`: "a keyboard focus ring must never look identical to selection."
@@ -3569,7 +3586,8 @@ definition of "which colour a column renders" is `COLUMN_ACCENT` in
 `StatusPillSwitcher.tsx`), and the single definition of "which colour a priority renders" is
 `PRIORITY_DOT` in `src/web/features/board/CardView.tsx`, and the single definition of "which colour
 a source renders" is `SOURCE_ACCENT` in `src/web/features/badges/source-accent.ts` (consumed by
-`SourceBadge.tsx`; `local` and `group` map to the neutral `--text-muted`; every `--src-*` entry must
+`SourceBadge.tsx`, `SourceIcon.tsx`, the sidebar, the Flow page and the setup map through
+`sourceAccent()`; `local` and `group` map to the neutral `--text-muted`; every `--src-*` entry must
 name a declared token, and no other file under `src/web` except `tokens.css` may reference a
 `--src-` token at all, so the map cannot be bypassed by an inline `var()`). All three must still exist
 and still hold only `var(--col-*)`/`var(--accent)`, `var(--prio-*)` or `var(--src-*)`/`var(--text-muted)`
