@@ -98,6 +98,7 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "concurrently": "10.0.3",
+    "dependency-cruiser": "18.4.0",
     "eslint": "10.6.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-import-resolver-typescript": "4.4.5",
