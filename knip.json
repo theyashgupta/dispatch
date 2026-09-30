@@ -7,6 +7,8 @@
     "src/web/terminal-main.ts!",
     "src/web/viewer-main.tsx!",
     "src/web/viewer.html!",
+    "src/web/gallery-main.tsx",
+    "src/web/gallery.html",
     "src/**/*.test.ts",
     "eslint-local/**/*.test.ts",
     "src/web/vite-env.d.ts",
@@ -25,5 +27,5 @@
     "lsof",
     "tmux"
   ],
-  "ignoreDependencies": ["class-variance-authority", "tailwindcss"]
+  "ignoreDependencies": ["tailwindcss"]
 }

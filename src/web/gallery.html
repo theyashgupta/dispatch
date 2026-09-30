@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="color-scheme" content="dark light" />
+    <script>
+      (function () {
+        var stored = null;
+        try {
+          stored = localStorage.getItem("dsp.theme");
+        } catch (error) {}
+        var theme = "dark";
+        if (stored === "light" || stored === "dark") {
+          theme = stored;
+        } else if (matchMedia("(prefers-color-scheme: light)").matches) {
+          theme = "light";
+        }
+        document.documentElement.setAttribute("data-theme", theme);
+        document
+          .querySelector('meta[name="color-scheme"]')
+          .setAttribute("content", theme);
+      })();
+    </script>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Dispatch UI Gallery</title>
+  </head>
+  <body>
+    <div id="gallery"></div>
+    <script type="module" src="/gallery-main.tsx"></script>
+  </body>
+</html>
