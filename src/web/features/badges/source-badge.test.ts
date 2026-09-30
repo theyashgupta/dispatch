@@ -5,6 +5,18 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { SourceBadge } from "./SourceBadge.js";
 import { SourceIcon } from "./SourceIcon.js";
 
+/** Returns the text of static markup, so a nested tag cannot survive a single pass. */
+function textOf(html: string): string {
+  let text = "";
+  let inTag = false;
+  for (const char of html) {
+    if (char === "<") inTag = true;
+    else if (char === ">") inTag = false;
+    else if (!inTag) text += char;
+  }
+  return text;
+}
+
 function render(source: string, label = false): string {
   return renderToStaticMarkup(createElement(SourceBadge, { source, label }));
 }
@@ -12,7 +24,7 @@ function render(source: string, label = false): string {
 void test("a badge is an image with the source name and no visible text", () => {
   const html = render("github");
   assert.match(html, /^<span role="img" aria-label="GitHub" title="GitHub"/);
-  assert.equal(html.replace(/<[^>]+>/g, ""), "");
+  assert.equal(textOf(html), "");
   assert.match(html, /<svg viewBox="0 0 24 24" width="12" height="12"/);
   assert.match(
     html,
@@ -42,7 +54,7 @@ void test("a meeting badge is named Meeting", () => {
 
 void test("a labelled badge shows the name once and hides the tile", () => {
   const html = render("linear", true);
-  assert.equal(html.replace(/<[^>]+>/g, ""), "Linear");
+  assert.equal(textOf(html), "Linear");
   assert.match(html, /<span aria-hidden="true"/);
   assert.doesNotMatch(html, /role="img"|aria-label=|title=/);
 });
