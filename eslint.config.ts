@@ -8,6 +8,16 @@ import checkFile from "eslint-plugin-check-file";
 import prettier from "eslint-config-prettier";
 import commentsJsdocOnly from "./eslint-local/comments-jsdoc-only.js";
 
+const importResolver = {
+  typescript: {
+    project: [
+      `${import.meta.dirname}/tsconfig.json`,
+      `${import.meta.dirname}/src/web/tsconfig.json`,
+    ],
+    noWarnOnMultipleProjects: true,
+  },
+};
+
 /**
  * Shared element descriptors for both boundary blocks below (backend +
  * frontend `boundaries/dependencies` rule instances) so a file classifies
@@ -42,6 +52,8 @@ const boundaryElements = [
     pattern: "src/web/features/*",
     capture: ["feature"],
   },
+  { type: "ui", pattern: "src/web/components/ui" },
+  { type: "modules", pattern: "src/web/modules/*", capture: ["module"] },
   { type: "web", pattern: "src/web" },
 ];
 
@@ -116,7 +128,7 @@ const boundariesConfig = {
   files: ["src/**/*.{ts,tsx}"],
   plugins: { boundaries },
   settings: {
-    "import/resolver": { typescript: {} },
+    "import/resolver": importResolver,
     "boundaries/elements": boundaryElements,
     "boundaries/files": boundaryFiles,
   },
@@ -144,7 +156,15 @@ const boundariesConfig = {
               "store",
               "shared",
             ],
-            disallow: ["web", "primitives", "hooks", "lib", "feature"],
+            disallow: [
+              "web",
+              "ui",
+              "modules",
+              "primitives",
+              "hooks",
+              "lib",
+              "feature",
+            ],
             message: "Backend must not import frontend code.",
           },
           {
@@ -216,8 +236,25 @@ const boundariesConfig = {
           { from: "store", allow: ["store", "shared"] },
           { from: "shared", allow: ["shared"] },
           {
-            from: ["web", "primitives", "hooks", "lib", "feature"],
-            allow: ["web", "primitives", "hooks", "lib", "feature", "shared"],
+            from: [
+              "web",
+              "ui",
+              "modules",
+              "primitives",
+              "hooks",
+              "lib",
+              "feature",
+            ],
+            allow: [
+              "web",
+              "ui",
+              "modules",
+              "primitives",
+              "hooks",
+              "lib",
+              "feature",
+              "shared",
+            ],
           },
         ],
       },
@@ -266,7 +303,7 @@ const feWebBoundaryPolicies = {
         "Cross-feature import must go through the feature's index.ts barrel (docs/standards/folder-structure.md).",
     },
     {
-      from: { element: { type: "web" } },
+      from: { element: { type: ["web", "ui", "modules"] } },
       disallow: {
         element: { type: "feature", fileInternalPath: "!index.ts" },
       },
@@ -276,28 +313,40 @@ const feWebBoundaryPolicies = {
     {
       from: { element: { type: "primitives" } },
       disallow: {
-        element: { type: ["hooks", "lib", "feature", "web"] },
+        element: { type: ["hooks", "lib", "feature", "web", "ui", "modules"] },
       },
       message:
         "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
     },
     {
       from: { element: { type: "hooks" } },
-      disallow: { element: { type: ["feature", "web"] } },
+      disallow: { element: { type: ["feature", "web", "ui", "modules"] } },
       message:
         "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
     },
     {
       from: { element: { type: "lib" } },
       disallow: {
-        element: { type: ["primitives", "hooks", "feature", "web"] },
+        element: {
+          type: ["primitives", "hooks", "feature", "web", "ui", "modules"],
+        },
       },
       message:
         "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
     },
     {
       from: {
-        element: { type: ["web", "primitives", "hooks", "lib", "feature"] },
+        element: {
+          type: [
+            "web",
+            "ui",
+            "modules",
+            "primitives",
+            "hooks",
+            "lib",
+            "feature",
+          ],
+        },
       },
       disallow: {
         element: {
@@ -354,7 +403,7 @@ const feWebBoundariesConfig = {
   files: ["src/web/**/*.{ts,tsx}"],
   plugins: { boundaries },
   settings: {
-    "import/resolver": { typescript: {} },
+    "import/resolver": importResolver,
     "boundaries/elements": boundaryElements,
   },
   rules: {
@@ -644,6 +693,17 @@ export default tseslint.config(
         { "src/server/sources/**/*.ts": `${KEBAB}?(.source)` },
         { ignoreMiddleExtensions: false },
       ],
+    },
+  },
+  {
+    files: ["src/web/components/ui/**/*.{ts,tsx}"],
+    rules: {
+      "check-file/filename-naming-convention": [
+        "error",
+        { "src/web/components/ui/**/*.{ts,tsx}": "KEBAB_CASE" },
+        { ignoreMiddleExtensions: false },
+      ],
+      "local/comments-jsdoc-only": "off",
     },
   },
   {

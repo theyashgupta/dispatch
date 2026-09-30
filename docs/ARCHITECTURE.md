@@ -4223,7 +4223,8 @@ question; none of them read prose for truth.
 
 - **`npm run check`** — the standing CI-shaped gate: `format:check`, `lint`, `typecheck`, `test`,
   `deadcode` (knip), `replay-gate`, `doc-drift`, and `invariants` (all below), run in sequence.
-- **`npm test`** — `node --import tsx --test "src/**/*.test.ts"`: unit tests on pure modules and
+- **`npm test`**: two `node --import tsx --test` passes, `src/server` and `src/shared` under the root
+  tsconfig, then `src/web` with `TSX_TSCONFIG_PATH=src/web/tsconfig.json`: unit tests on pure modules and
   wiring tests that boot a router on port 0 under a temporary `HOME`. No framework beyond Node's
   built-in runner; test files are excluded from the server build.
 - **`node scripts/check-invariants.mjs`** (`npm run invariants`, wired into `npm run check`) —
