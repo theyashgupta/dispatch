@@ -13,8 +13,8 @@ import {
   Plus,
   Settings,
 } from "lucide-react";
-import type { ConnectionStatus } from "../../hooks/useBoardStream.js";
-import type { Page, Route } from "../../lib/route.js";
+import type { ConnectionStatus } from "../../../shared/types.js";
+import type { Page, Route } from "../../../shared/route.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Spinner } from "../../primitives/Spinner.js";
 import { focusRing } from "../../primitives/focus-ring.js";
@@ -203,11 +203,12 @@ export function SidebarNav({
   const [newTicketHovered, setNewTicketHovered] = useState(false);
   const [newTicketFocused, setNewTicketFocused] = useState(false);
   const groups = navGroups(navItems);
+  const currentPage = route.page;
 
   useLayoutEffect(() => {
-    const el = rowRefs.current.get(route.page);
+    const el = rowRefs.current.get(currentPage);
     setIndicatorTop(el == null ? null : el.offsetTop);
-  }, [route.page, collapsed, navItems]);
+  }, [currentPage, collapsed, navItems]);
 
   return (
     <nav
@@ -256,7 +257,7 @@ export function SidebarNav({
                 key={item.page}
                 icon={item.icon}
                 label={item.label}
-                active={route.page === item.page}
+                active={currentPage === item.page}
                 collapsed={collapsed}
                 iconSlot={
                   item.page === "sessions" && liveSessionCount > 0 ? (
@@ -364,7 +365,7 @@ export function SidebarNav({
         <NavRow
           icon={Settings}
           label="Settings"
-          active={route.page === "settings"}
+          active={currentPage === "settings"}
           collapsed={collapsed}
           onSelect={() => onNavigate("settings")}
           rowRef={registerRow("settings")}

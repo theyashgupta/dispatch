@@ -1007,6 +1007,8 @@ export interface PreflightReport {
   platform: { os: "darwin" | "linux" | "other"; packageManager: string | null };
 }
 
+export type ConnectionStatus = "connecting" | "connected" | "disconnected";
+
 /**
  * The on-demand Cloudflare Quick Tunnel's status, broadcast on the `tunnel` SSE frame and shared
  * verbatim with the web Remote tab. `code` on the `on` variant is the live in-memory passphrase —

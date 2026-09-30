@@ -92,3 +92,32 @@ export function initialHash(
   }
   return "#/board";
 }
+
+/** Map an unmatched pathname to the canonical page path, or `/board` when it is already canonical. */
+export function notFoundTarget(pathname: string): string {
+  const target = routeHash(parseRoute(`#${pathname}`)).slice(1);
+  return target === pathname ? "/board" : target;
+}
+
+/**
+ * Resolve the committed route from the deepest router match, falling back to the pathname.
+ *
+ * @remarks
+ * The root, a missing match and a notFound match carry no page, so the pathname is parsed instead. A page leaf keeps its param as the router decoded it.
+ */
+export function routeFromMatch(
+  leaf:
+    { routeId: string; params: { id?: string }; status?: string } | undefined,
+  pathname: string,
+): Route {
+  if (
+    leaf === undefined ||
+    leaf.routeId === "__root__" ||
+    leaf.status === "notFound"
+  ) {
+    return parseRoute(`#${pathname}`);
+  }
+  const page = parseRoute(`#/${leaf.routeId.split("/")[1] ?? ""}`).page;
+  const id = leaf.params.id;
+  return id === undefined ? { page } : { page, id };
+}

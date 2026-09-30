@@ -378,6 +378,10 @@ const boundariesConfig = {
  *
  * Exception R-05, dated 2026-09-30: only src/web/lib/api.ts and src/web/lib/push.ts
  * can import a query or shared-query file. Ticket 16 removes both barrels and this allow.
+ *
+ * Exception R-14, dated 2026-09-30: route files (which include the `__root.tsx` import of
+ * src/web/styles/*) can import the legacy tree, and src/web/components/AppState.tsx can
+ * import the legacy pages. Ticket 16 removes both allows.
  */
 const feWebBoundaryPolicies = {
   default: "allow",
@@ -557,6 +561,16 @@ const feWebBoundaryPolicies = {
     {
       from: { element: { type: "lib", fileInternalPath: "{api,push}.ts" } },
       allow: { element: { type: ["query", "shared-query"] } },
+    },
+    {
+      from: { element: { type: "route" } },
+      allow: { element: { type: legacyWebTypes } },
+    },
+    {
+      from: {
+        element: { type: "shared-component", fileInternalPath: "AppState.tsx" },
+      },
+      allow: { element: { type: legacyWebTypes } },
     },
   ],
 };
@@ -995,6 +1009,14 @@ export default tseslint.config(
       ],
       "local/comments-jsdoc-only": "off",
     },
+  },
+  /**
+   * Exception R-14, dated 2026-09-30: TanStack route file names are exempt from the case
+   * rule. Ticket 16 removes this block.
+   */
+  {
+    files: ["src/web/routes/**/*.{ts,tsx}"],
+    rules: { "check-file/filename-naming-convention": "off" },
   },
   {
     files: ["src/**/*.d.ts"],

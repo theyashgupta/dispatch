@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { defineConfig, type PluginOption } from "vite";
 import react from "@vitejs/plugin-react";
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { visualizer } from "rollup-plugin-visualizer";
 
@@ -11,6 +12,14 @@ export default defineConfig({
     alias: { "@": resolve(import.meta.dirname, "src/web") },
   },
   plugins: [
+    tanstackRouter({
+      target: "react",
+      routesDirectory: resolve(import.meta.dirname, "src/web/routes"),
+      generatedRouteTree: resolve(
+        import.meta.dirname,
+        "src/web/routeTree.gen.ts",
+      ),
+    }),
     react(),
     tailwindcss(),
     ...(process.env.ANALYZE === "1"

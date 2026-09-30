@@ -21,7 +21,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { ItemSourceId } from "../../../shared/types.js";
-import type { Page } from "../../lib/route.js";
+import type { Page } from "../../../shared/route.js";
 
 export type NavGroup = "Home" | "Work" | "Sources" | "System";
 

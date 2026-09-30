@@ -2,7 +2,7 @@ import { isManualMoveAllowed } from "../../shared/column-transitions.js";
 import { COLUMNS, type Card } from "../../shared/types.js";
 import { CARD_ACTIONS, type CardActionContext } from "./actions.js";
 import { COLUMN_LABELS } from "./event-copy.js";
-import type { Page } from "./route.js";
+import type { Page } from "../../shared/route.js";
 
 export interface Command {
   id: string;

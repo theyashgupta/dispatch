@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PAGES, parseRoute } from "../../lib/route.js";
+import { PAGES, parseRoute } from "../../../shared/route.js";
 import { NAV_ITEMS, navGroups } from "./nav-items.js";
 
 test("every route page except settings has exactly one nav row", () => {
@@ -63,4 +63,15 @@ test("the Home group lists Today first, then Inbox, then Ask", () => {
     NAV_ITEMS.filter((item) => item.group === "Home").map((item) => item.page),
     ["today", "inbox", "ask"],
   );
+});
+
+test("NAV_ITEMS has exactly one Tickets row, in the Sources group", () => {
+  const rows = NAV_ITEMS.filter((item) => item.page === "tickets");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.group, "Sources");
+});
+
+test("navGroups orders Home, Work, Sources, System", () => {
+  const groups = navGroups(NAV_ITEMS).map((entry) => entry.group);
+  assert.deepEqual(groups, ["Home", "Work", "Sources", "System"]);
 });

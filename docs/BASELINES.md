@@ -569,7 +569,7 @@ true total of 500 via `doneCounts` (BOARD-08).
 
 **Reconnect latency — RESEARCH Assumption A1, answered:** measured directly (not extrapolated from
 the `## SSE fan-out` fan-out baseline) via a standalone script performing the actual
-close+reopen+resync cycle `useBoardStream.ts`'s `doneLimit`-as-effect-dependency triggers on
+close+reopen+resync cycle the pre-G11 `useBoardStream.ts`'s `doneLimit`-as-effect-dependency triggers on
 "Load more" — open one `/api/stream?doneLimit=50` connection, consume its resync frame, close it,
 then time from opening a fresh `/api/stream?doneLimit=100` connection to that connection's own
 resync frame arriving, against the same 500-Done-card isolated sandbox. 5 runs:

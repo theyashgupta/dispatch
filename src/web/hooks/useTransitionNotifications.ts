@@ -1,7 +1,10 @@
 import { useEffect, useRef } from "react";
-import type { BoardSnapshot, Column } from "../../shared/types.js";
+import type {
+  BoardSnapshot,
+  Column,
+  ConnectionStatus,
+} from "../../shared/types.js";
 import { playChime } from "../lib/chime.js";
-import type { ConnectionStatus } from "./useBoardStream.js";
 
 const LABEL: Partial<Record<Column, string>> = {
   needs_input: "Needs Input",
