@@ -107,6 +107,7 @@ One convention spans the whole tree. Every artifact kind has a fixed pattern and
 | React hook                    | `src/web/hooks`      | `useX.ts` (camelCase)       | `useBoardStream.ts`   |
 | Web util / client             | `src/web/lib`        | `kebab-case.ts`             | `card-badges.ts`      |
 | HTTP route module             | `src/server/routes`  | `<resource>.route.ts`       | `cards.route.ts`      |
+| Route zod schemas (over 3)    | `src/server/routes`  | `<resource>-schemas.ts`     | `cards-schemas.ts`    |
 | Store module                  | `src/server/store`   | `<domain>.store.ts`         | `board.store.ts`      |
 | Ticket source                 | `src/server/sources` | `<name>.source.ts`          | `linear.source.ts`    |
 | Service / adapter / bootstrap | `src/server/**`      | `kebab-case.ts` (no suffix) | `start-session.ts`    |
