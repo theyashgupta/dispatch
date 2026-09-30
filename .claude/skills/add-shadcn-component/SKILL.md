@@ -42,8 +42,11 @@ The rules are in `docs/standards/frontend-architecture.md`, in the sections "The
    - `focus-visible:border-ring`
    - `ring-offset-*`
    - `aria-invalid:ring-*` and `dark:aria-invalid:ring-*`
+
+   If the class string also has `outline-hidden` or `outline-none`, add `focus-visible:outline-solid`; focus-outline.test.ts enforces it.
+
 7. Keep `aria-invalid:border-destructive`.
-8. If an ancestor with `overflow: hidden` cuts the outline, use `focus-visible:outline-offset-0` at that element.
+8. If an ancestor with `overflow: hidden` cuts the outline, use `focus-visible:outline-offset-0` at that element. Menu and select items use the inset form `focus-visible:-outline-offset-2`.
 9. Run `grep -nE '(^|[^a-z-])ring-' <file>` on each generated file. The command must show no line.
 
 ## Colours
