@@ -67,7 +67,7 @@ function rowStyle(active: boolean): CSSProperties {
     cursor: "pointer",
     fontSize: "var(--font-body)",
     lineHeight: "var(--line-body)",
-    color: active ? "var(--accent)" : "var(--text)",
+    color: active ? "var(--accent-text)" : "var(--text)",
     background: active
       ? "color-mix(in srgb, var(--accent) 16%, var(--surface-column))"
       : "transparent",

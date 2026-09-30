@@ -34,7 +34,7 @@ const BUDGETS = [
   {
     label: "index.html",
     match: (f) => f === "index.html",
-    budgetGzipBytes: 635, // seed: 577 (re-seeded 2026-09-28 with the Errors page route, LOCAL-46)
+    budgetGzipBytes: 908, // seed: 825 (re-seeded 2026-09-29 with the pre-paint theme script, LOCAL-55)
   },
   {
     label: "assets/main-*.js",
@@ -128,9 +128,10 @@ const BUDGETS = [
     budgetGzipBytes: 3391, // seed: 3082 (the flow page with its toolbar and tokens, lazy; FlowStage rides main through the detail panel)
   },
   {
-    label: "assets/index-*.css",
-    match: (f) => f.startsWith(`assets${sep}index-`) && f.endsWith(".css"),
-    budgetGzipBytes: 898, // seed: 816
+    label: "assets/preload-helper-*.css",
+    match: (f) =>
+      f.startsWith(`assets${sep}preload-helper-`) && f.endsWith(".css"),
+    budgetGzipBytes: 2215, // seed: 2014 (the token stylesheet with the light block; the build names this chunk preload-helper)
   },
   {
     label: "assets/favicon-*.svg",

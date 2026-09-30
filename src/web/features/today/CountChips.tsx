@@ -34,7 +34,7 @@ export function CountChips({ chips, filter, onFilterChange }: CountChipsProps) {
             aria-pressed={active}
             onClick={() => onFilterChange(active ? null : source)}
           >
-            <SourceBadge source={source} />
+            <SourceBadge source={source} label />
             <span style={countStyle}>{count}</span>
           </Button>
         );

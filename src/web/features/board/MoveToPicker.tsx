@@ -131,7 +131,7 @@ export function MoveToPicker({
                 fontWeight: current
                   ? "var(--weight-semibold)"
                   : "var(--weight-regular)",
-                color: current ? "var(--accent)" : "var(--text)",
+                color: current ? "var(--accent-text)" : "var(--text)",
                 textAlign: "left",
               }}
             >

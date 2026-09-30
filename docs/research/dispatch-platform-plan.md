@@ -194,6 +194,8 @@ New primitives (presentational, props in): `PageHeader`, `SidebarNav` and `NavRo
 
 Theme: Dispatch stays dark. A light theme is not in this plan.
 
+Superseded 2026-09-29 (G9 Unit 1, LOCAL-55): Dispatch has a dark and a light theme and follows the system by default. The record is in `docs/standards/design-contract.md` under Color roles.
+
 ### 7.3 Motion and density
 
 Reuse the existing motion tokens. Add one capped stagger for list entrance (22 ms per row, cap 12) and the existing reduced-motion block covers it. Density: the board keeps its scan density (NEW-19). List pages use the reading rhythm only inside the detail panel.

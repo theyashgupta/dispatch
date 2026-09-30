@@ -5,6 +5,7 @@ import {
   GitPullRequestDraft,
 } from "lucide-react";
 import type { PrInfo } from "../../../shared/types.js";
+import { dataInk } from "../../primitives/data-ink.js";
 
 /**
  * Single source of PR state icon, colour, state label and CI dot colour.
@@ -35,7 +36,7 @@ export function prStyleFor(pr: PrInfo): {
       border: "none",
       background:
         "color-mix(in srgb, var(--col-in-review) 16%, var(--surface-card))",
-      color: "var(--col-in-review)",
+      color: dataInk("var(--col-in-review)"),
     };
   }
   if (pr.state === "closed") {
@@ -44,7 +45,7 @@ export function prStyleFor(pr: PrInfo): {
       border: "none",
       background:
         "color-mix(in srgb, var(--col-done) 16%, var(--surface-card))",
-      color: "var(--col-done)",
+      color: dataInk("var(--col-done)"),
     };
   }
   return {

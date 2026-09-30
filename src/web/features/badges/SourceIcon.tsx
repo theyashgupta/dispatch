@@ -1,7 +1,6 @@
-import { Tag } from "lucide-react";
-import type { CSSProperties } from "react";
-import { SOURCE_GLYPH } from "./SourceBadge.js";
+import { createElement, type CSSProperties } from "react";
 import { NEUTRAL_ACCENT, sourceAccent } from "./source-accent.js";
+import { sourceMark } from "./source-mark.js";
 
 const iconStyle: CSSProperties = {
   display: "inline-flex",
@@ -18,7 +17,6 @@ interface SourceIconProps {
 }
 
 export function SourceIcon({ source }: SourceIconProps) {
-  const Glyph = SOURCE_GLYPH[source] ?? Tag;
   const color = sourceAccent(source);
   return (
     <span
@@ -29,11 +27,11 @@ export function SourceIcon({ source }: SourceIconProps) {
         ...(color === NEUTRAL_ACCENT
           ? { border: "1px solid var(--border)" }
           : {
-              background: `color-mix(in srgb, ${color} 16%, var(--surface-card))`,
+              background: `color-mix(in srgb, ${color} 16%, transparent)`,
             }),
       }}
     >
-      <Glyph size={16} strokeWidth={2} />
+      {createElement(sourceMark(source), { size: 16 })}
     </span>
   );
 }

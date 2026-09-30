@@ -1,63 +1,62 @@
-import {
-  AlertTriangle,
-  Bot,
-  Calendar,
-  CircleDot,
-  FileText,
-  GitBranch,
-  Layers,
-  MessageSquare,
-  Mic,
-  Tag,
-  type LucideIcon,
-} from "lucide-react";
-import type { CSSProperties } from "react";
+import { createElement, type CSSProperties } from "react";
 import { NEUTRAL_ACCENT, sourceAccent } from "./source-accent.js";
+import { sourceMark } from "./source-mark.js";
+import { sourceName } from "./source-name.js";
 
-export const SOURCE_GLYPH: Record<string, LucideIcon> = {
-  github: GitBranch,
-  linear: CircleDot,
-  slack: MessageSquare,
-  sentry: AlertTriangle,
-  meeting: Mic,
-  calendar: Calendar,
-  agent: Bot,
-  local: FileText,
-  group: Layers,
+const tileStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flex: "0 0 auto",
+  width: "18px",
+  height: "18px",
+  borderRadius: "var(--radius-sm)",
 };
 
-const badgeStyle: CSSProperties = {
+const labelledStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   gap: "var(--space-xs)",
   flex: "0 0 auto",
-  height: "18px",
-  padding: "0 var(--space-xs)",
-  borderRadius: "var(--radius-sm)",
-  fontSize: "var(--font-label)",
-  fontWeight: "var(--weight-semibold)",
-  lineHeight: "var(--line-label)",
   whiteSpace: "nowrap",
 };
 
-export function SourceBadge({ source }: { source: string }) {
-  const label = source.charAt(0).toUpperCase() + source.slice(1);
-  const Glyph = SOURCE_GLYPH[source] ?? Tag;
+const nameStyle: CSSProperties = {
+  color: "var(--text-muted)",
+  fontSize: "var(--font-label)",
+  fontWeight: "var(--weight-semibold)",
+  lineHeight: "var(--line-label)",
+};
+
+interface SourceBadgeProps {
+  source: string;
+  label?: boolean;
+}
+
+export function SourceBadge({ source, label = false }: SourceBadgeProps) {
+  const name = sourceName(source);
   const color = sourceAccent(source);
-  return (
+  const tile = (
     <span
+      {...(label
+        ? { "aria-hidden": true }
+        : { role: "img", "aria-label": name, title: name })}
       style={{
-        ...badgeStyle,
+        ...tileStyle,
         color,
         ...(color === NEUTRAL_ACCENT
           ? { border: "1px solid var(--border)" }
-          : {
-              background: `color-mix(in srgb, ${color} 16%, var(--surface-card))`,
-            }),
+          : { background: `color-mix(in srgb, ${color} 16%, transparent)` }),
       }}
     >
-      <Glyph size={12} strokeWidth={2} aria-hidden="true" />
-      {label}
+      {createElement(sourceMark(source), { size: 12 })}
+    </span>
+  );
+  if (!label) return tile;
+  return (
+    <span style={labelledStyle}>
+      {tile}
+      <span style={nameStyle}>{name}</span>
     </span>
   );
 }

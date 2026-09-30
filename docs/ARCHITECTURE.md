@@ -3469,6 +3469,41 @@ route, the shape `pollNow()` already has for the Linear poller) and because the 
 the guard returns: the promise of the tick ALREADY in flight, not a fresh scan. A caller wanting
 guaranteed-fresh results has to wait for the in-flight tick to settle and then run another.
 
+### Theme Engine
+
+The web UI has a dark and a light theme. The html element always carries `data-theme` with the resolved value, `light` or `dark`. `src/web/styles/tokens.css` holds the dark palette in the top-level `:root` block and the light palette in one `:root[data-theme="light"]` block. There is no `prefers-color-scheme` copy of the light palette.
+
+**The preference.** The user's choice is `system`, `light` or `dark`, stored in `localStorage` under the key `dsp.theme`. An absent value and any value outside that closed set mean `system`. `parseThemePreference` and `resolveTheme` in `src/web/lib/theme.ts` are the single definition of both rules.
+
+**Before first paint.** `src/web/index.html` and `src/web/viewer.html` hold the same inline classic script as the first script of the head. It reads the stored value inside a try block, resolves `system` through `matchMedia("(prefers-color-scheme: light)")`, falls back to `dark`, and sets `data-theme` and the content of the `color-scheme` meta. It holds no comment and no colour literal. `src/web/lib/theme.test.ts` runs the script text of both shells in a sandbox for every stored value and both system values, and asserts that it paints what `resolveTheme` resolves and that the two texts are identical.
+
+**After load.** `useTheme` in `src/web/hooks/useTheme.ts` is called once in `App.tsx` and once in `viewer-main.tsx`. It keeps the attribute, the `color-scheme` meta and the `theme-color` meta current after a manual choice, a change of the system scheme, and a change of the stored value in another tab (the `storage` event, read through the same parser). The `theme-color` meta takes the computed value of `--bg`, so no html shell holds a colour.
+
+**A switch is instant.** While the attribute changes, the hook sets `data-theme-switching` on the html element for two animation frames, and one rule in `tokens.css` turns transitions off under that attribute.
+
+**Signal tokens.** Each status, column, priority and source token keeps one hex, in the `:root` block. The light block redefines a token by its own name as `color-mix(in srgb, <the same hex> P%, black)` with a share per token. `src/web/styles/tokens.test.ts` asserts that the hex inside each light mix equals the root hex and that no signal token has a second bare hex, so the palette parser of `NEW-24` still reads one hex per name.
+
+**The terminal is not themed.** `terminal.html` and `terminal-main.ts` do not change with the theme. A theme switch changes an attribute and token values only, never the element tree, so the terminal iframe is not remounted (`PANEL-03`).
+
+**The instrument.** `scripts/contrast-113.mjs` measures every text and graphic token pair once per theme, against that theme's own ladder order: dark rises bg, column, card, card-hover; light rises bg, column, card-hover, card. The light token map is the dark map overlaid with the light block. A colour role resolves from three value forms: a 6-digit hex, a `color-mix(in srgb, ...)` of one colour with `black` or `white`, and a `var()` of another token; a colour role in any other form is a violation, never a skip.
+
+### Brand Marks
+
+Since 2026-09-30 (G9 Unit 3) a source shows as the mark of its product. `src/web/features/badges/brands/` holds six mark components and one shared shell, `MarkSvg.tsx`, that renders the svg element: a 24 viewBox, `width` and `height` from the one prop `size` (each mark component sets the default 16), `fill="currentColor"`, `aria-hidden` and not focusable. A mark holds shapes only. It takes no colour prop and holds no colour literal: the colour comes from `sourceAccent()` through `currentColor`, so `SOURCE_ACCENT` stays the single definition of a source colour (`NEW-24`), and no file of the `brands` folder names a source token.
+
+`src/web/features/badges/source-mark.ts` maps a source id to its mark. The six product ids map to the marks; `agent`, `local` and `group` keep the lucide glyphs `Bot`, `FileText` and `Layers`. `sourceMark()` reads the map through an own-property check and answers the lucide `Tag` glyph for any other id, so an id from data that names a prototype key never reaches a component slot. `src/web/features/badges/source-mark.test.ts` asserts that the map and `SOURCE_ACCENT` hold the same keys. Brand marks reach the screen in two forms. On a tile: `SourceBadge.tsx` draws the 18px tile and carries the name of the source as its accessible name, and `SourceIcon.tsx` draws the 32px tile and is decorative. With no tile: the six Sources rows of the sidebar (`NavRow.tsx`) and the source nodes and rows of the Flow page (`FlowDiagram.tsx`, `FlowNarrow.tsx`) show the bare mark in the colour of the source.
+
+Each mark names an integration and nothing else, with one case to know: the Granola mark stands for the source id `meeting`, and a pasted meeting note carries the same id, so it shows the mark too; the name of that badge reads "Meeting". The table is the record of where every path comes from; a tsx file carries no comment, so the record lives here.
+
+| Mark           | Source of the path                                                                                                                       | Licence of the source | Taken on   | Note                                                                                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GitHubMark`   | simple-icons 16.33.0, `icons/github.svg`, the path copied byte for byte                                                                  | CC0 1.0               | 2026-09-30 |                                                                                                                                                                |
+| `LinearMark`   | simple-icons 16.33.0, `icons/linear.svg`, the path copied byte for byte                                                                  | CC0 1.0               | 2026-09-30 |                                                                                                                                                                |
+| `SentryMark`   | simple-icons 16.33.0, `icons/sentry.svg`, the path copied byte for byte                                                                  | CC0 1.0               | 2026-09-30 |                                                                                                                                                                |
+| `SlackMark`    | simple-icons 15.22.0, `icons/slack.svg`, the path copied byte for byte                                                                   | CC0 1.0               | 2026-09-30 | simple-icons holds the file through 15.22.0 and answers 404 for it from 16.0.0 on                                                                              |
+| `GranolaMark`  | drawn in-house: a spiral band of one and a half turns with a solid centre, a one colour redraw of the mark in the public Granola favicon | drawn for Dispatch    | 2026-09-30 | the favicon is a raster image, so no path was copied; the ink is 19.75 by 22.93 units on the 24 grid                                                           |
+| `CalendarMark` | drawn in-house: a rounded frame, a header band, two binding tabs and one date block                                                      | drawn for Dispatch    | 2026-09-30 | every feature is 2 units wide or more and every edge sits on an even unit of the 24 grid, so the mark lands on whole pixels at 12px; the ink is 20 by 20 units |
+
 ### Design System Invariants
 
 **Keyboard focus is an outline, never a box-shadow (`NEW-15`).** The rule, authored in `docs/standards/frontend-design-system.md`: "a keyboard focus ring must never look identical to selection."
@@ -3488,6 +3523,8 @@ listbox (`SearchBox.tsx:321`), the carousel search overlay (`SearchBox.tsx:400`)
 picker (`MoveToPicker.tsx:97`), the multi-select dropdown (`MultiSelect.tsx:248`), and the modal
 (`Modal.tsx:110`). Cards and columns carry no shadow at rest; a second, independently-defined
 shadow value is the regression the gate catches, not an additional consumer of the one token.
+
+Since 2026-09-29 (G9 Unit 1) the light block of `tokens.css` declares `--shadow-float` a second time, with a lighter value for the light theme (decision U1-07). The invariant does not change: the token keeps one name and one definition for each theme, and no file outside `tokens.css` holds a shadow literal.
 
 **One wordmark definition (`NEW-17`).** `wordmarkStyle` in `src/web/primitives/Glyph.tsx` is the
 only place the DISPATCH wordmark's type treatment (size, weight, letter-spacing) is written down.
@@ -3549,7 +3586,8 @@ definition of "which colour a column renders" is `COLUMN_ACCENT` in
 `StatusPillSwitcher.tsx`), and the single definition of "which colour a priority renders" is
 `PRIORITY_DOT` in `src/web/features/board/CardView.tsx`, and the single definition of "which colour
 a source renders" is `SOURCE_ACCENT` in `src/web/features/badges/source-accent.ts` (consumed by
-`SourceBadge.tsx`; `local` and `group` map to the neutral `--text-muted`; every `--src-*` entry must
+`SourceBadge.tsx`, `SourceIcon.tsx`, the sidebar, the Flow page and the setup map through
+`sourceAccent()`; `local` and `group` map to the neutral `--text-muted`; every `--src-*` entry must
 name a declared token, and no other file under `src/web` except `tokens.css` may reference a
 `--src-` token at all, so the map cannot be bypassed by an inline `var()`). All three must still exist
 and still hold only `var(--col-*)`/`var(--accent)`, `var(--prio-*)` or `var(--src-*)`/`var(--text-muted)`
@@ -3562,6 +3600,8 @@ confirmatory rather than a cleanup of a present violation; the same ledger recor
 trips proving the check can fail: a reintroduced literal at a real consuming site, a deleted
 palette declaration hitting the missing-subject sentinel, and a renamed `COLUMN_ACCENT` hitting
 the mechanism half.
+
+Since 2026-09-29 (G9 Unit 1) `tokens.css` holds a light block that names the same tokens again. The count above does not change: the check reads the twenty declarations whose value is a bare hex, all in the `:root` block, and it skips a declaration whose value starts with `color-mix`, which is the only form the light block uses for these names. `--col-parked` is a twenty-first signal token that the check does not fence; the light block treats it the same way. See [Theme Engine](#theme-engine).
 
 `scripts/check-invariants.mjs` mechanically covered all six through four separate checks, one of which has since retired: a
 global retired-pattern scan over `src/**/*.{ts,tsx}` catches the retired box-shadow focus

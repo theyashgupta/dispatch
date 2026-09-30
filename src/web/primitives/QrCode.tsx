@@ -10,7 +10,7 @@ const chipStyle: CSSProperties = {
   display: "inline-flex",
   width: "fit-content",
   padding: "var(--space-sm)",
-  background: "#ffffff",
+  background: "var(--qr-surface)",
   borderRadius: "var(--radius)",
 };
 
