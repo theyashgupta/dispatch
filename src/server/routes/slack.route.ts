@@ -1,5 +1,7 @@
-import { Router, type Response } from "express";
+import { Router } from "express";
+import { z } from "zod";
 import { isProviderCode } from "../../shared/credential.js";
+import type { SlackChannel } from "../../shared/types.js";
 import { pollNow } from "../adapters/poller.js";
 import {
   isSlackChannel,
@@ -17,6 +19,13 @@ import {
   getOrchestrationConfig,
   setSlackChannels,
 } from "../services/infra/config-holder.js";
+import {
+  HttpError,
+  InternalError,
+  UpstreamError,
+} from "../services/domain/errors.js";
+import { httpErrorHandler } from "./error-handler.js";
+import { parseOrThrow } from "./parse-input.js";
 
 /**
  * Slack routes: list the channels to pick, resolve a pasted link, save the picked list, load a thread.
@@ -45,46 +54,64 @@ const THREAD_STATUS: Record<SlackThreadRefusal["error"], number> = {
   unreachable: 502,
 };
 
-/** Answer a refusal from the Slack domain service with its status and error kind. */
-function sendRefusal<E extends string>(
-  res: Response,
+/** Build the typed error for a refusal from the Slack domain service, with its status and error kind. */
+function refusalError<E extends string>(
   refusal: { error: E; code?: string },
   statuses: Record<E, number>,
-): void {
-  res.status(statuses[refusal.error]).json({
-    error: refusal.error,
-    ...(isProviderCode(refusal.code) ? { providerError: refusal.code } : {}),
-  });
+): HttpError {
+  return new HttpError(
+    statuses[refusal.error],
+    refusal.error,
+    isProviderCode(refusal.code) ? { providerError: refusal.code } : undefined,
+  );
 }
 
-/** Run a Slack call, answering 502 unreachable for any transport failure or rate limit. */
-async function guarded(res: Response, run: () => Promise<void>): Promise<void> {
+/** Run a Slack call, turning any transport failure or rate limit into a 502 unreachable. */
+async function guarded<T>(run: () => Promise<T>): Promise<T> {
   try {
-    await run();
+    return await run();
   } catch {
-    res.status(502).json({ error: "unreachable" });
+    throw new UpstreamError("unreachable");
   }
 }
 
-slackRouter.get("/slack/channels", (_req, res) =>
-  guarded(res, async () => {
-    const result = await slackChannelOptions();
-    if ("error" in result) sendRefusal(res, result, REFUSAL_STATUS);
-    else res.status(200).json(result);
-  }),
+const resolveBodySchema = z.object(
+  {
+    input: z
+      .string("not-a-channel")
+      .refine((input) => input.length <= 500, "not-a-channel"),
+  },
+  "not-a-channel",
 );
 
-slackRouter.post("/slack/channels/resolve", (req, res) => {
-  const input = (req.body as { input?: unknown } | undefined)?.input;
-  if (typeof input !== "string" || input.length > 500) {
-    res.status(400).json({ error: "not-a-channel" });
-    return;
-  }
-  return guarded(res, async () => {
-    const result = await resolveSlackChannel(input);
-    if ("error" in result) sendRefusal(res, result, REFUSAL_STATUS);
-    else res.status(200).json(result);
-  });
+const saveBodySchema = z.object(
+  {
+    channels: z
+      .array(z.unknown(), "invalid-channels")
+      .refine(
+        (channels) => channels.length <= SLACK_CHANNEL_MAX,
+        "invalid-channels",
+      )
+      .refine(
+        (channels): channels is SlackChannel[] =>
+          channels.every(isSlackChannel),
+        "invalid-channels",
+      ),
+  },
+  "invalid-channels",
+);
+
+slackRouter.get("/slack/channels", async (_req, res) => {
+  const result = await guarded(slackChannelOptions);
+  if ("error" in result) throw refusalError(result, REFUSAL_STATUS);
+  res.status(200).json(result);
+});
+
+slackRouter.post("/slack/channels/resolve", async (req, res) => {
+  const { input } = parseOrThrow(resolveBodySchema, req.body);
+  const result = await guarded(() => resolveSlackChannel(input));
+  if ("error" in result) throw refusalError(result, REFUSAL_STATUS);
+  res.status(200).json(result);
 });
 
 slackRouter.get("/sources/slack/channels", (_req, res) => {
@@ -94,30 +121,21 @@ slackRouter.get("/sources/slack/channels", (_req, res) => {
 });
 
 slackRouter.put("/sources/slack/channels", (req, res) => {
-  const channels = (req.body as { channels?: unknown } | undefined)?.channels;
-  if (
-    !Array.isArray(channels) ||
-    channels.length > SLACK_CHANNEL_MAX ||
-    !channels.every(isSlackChannel)
-  ) {
-    res.status(400).json({ error: "invalid-channels" });
-    return;
-  }
+  const { channels } = parseOrThrow(saveBodySchema, req.body);
   const clean = normalizeSlackChannels(channels);
   try {
     setSlackChannels(clean);
   } catch {
-    res.status(500).json({ error: "save-failed" });
-    return;
+    throw new InternalError("save-failed");
   }
   pollNow("slack");
   res.status(200).json({ channels: clean });
 });
 
-slackRouter.get("/slack/thread/:itemId", (req, res) =>
-  guarded(res, async () => {
-    const result = await slackThread(req.params.itemId);
-    if ("error" in result) sendRefusal(res, result, THREAD_STATUS);
-    else res.status(200).json(result);
-  }),
-);
+slackRouter.get("/slack/thread/:itemId", async (req, res) => {
+  const result = await guarded(() => slackThread(req.params.itemId));
+  if ("error" in result) throw refusalError(result, THREAD_STATUS);
+  res.status(200).json(result);
+});
+
+slackRouter.use(httpErrorHandler);
