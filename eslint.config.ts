@@ -653,12 +653,12 @@ const radixBan = {
     "Import Radix only in components/ui. Compose the shadcn primitive (docs/standards/frontend-architecture.md, The only-shadcn rule).",
 };
 const apiBan = {
-  regex: "(^|/)lib/api(\\.ts)?$",
+  regex: "(^|/)lib/api(\\.[cm]?[jt]sx?)?$",
   message:
     "src/web/lib/api.ts is part of the legacy tree, and the new tree does not import the legacy tree. A query file calls src/web/lib/http.ts (docs/standards/frontend-architecture.md, Status and scope, Import matrix global ban 3).",
 };
 const httpBan = {
-  regex: "(^|/)lib/http(\\.ts)?$",
+  regex: "(^|/)lib/http(\\.[cm]?[jt]sx?)?$",
   message:
     "Only query files import src/web/lib/http.ts (docs/standards/frontend-architecture.md, Layer definitions).",
 };
@@ -738,7 +738,7 @@ export default tseslint.config(
       ".dependency-cruiser.cjs",
       "eslint-local/**",
       "scripts/**",
-      ".claude/**",
+      ".claude/worktrees/**",
       "src/web/public/**",
       ".planning/**",
     ],
@@ -753,6 +753,12 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+  },
+
+  {
+    files: [".claude/**/*.mjs"],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: { globals: globals.node },
   },
 
   {
