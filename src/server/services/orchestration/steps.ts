@@ -12,6 +12,7 @@ import { sleep } from "../../adapters/exec.js";
 import {
   branchExists,
   fetchBase,
+  gitCommonDir,
   revParseVerify,
   worktreeAddExistingBranch,
   worktreeAddNewBranch,
@@ -231,7 +232,10 @@ const prepareWorkspace: SagaStep = {
  * @remarks Runs the restart-idempotency check (`worktreeRegistered`) BEFORE the base-ref fetch, so
  * an existing-worktree restart never needs `baseRef` and an offline `git fetch` cannot fail a
  * repo that is skipped anyway (WR-03). Records only saga-created worktrees/branches, so undo never
- * removes a reused pre-existing branch (ORCH-01/03).
+ * removes a reused pre-existing branch (ORCH-01/03). Skips, with a warning, any repo whose git
+ * common dir an earlier entry already covered: cards saved before discovery de-duplicated worktrees
+ * still list a worktree beside its main checkout, and cutting the same branch twice in one repo
+ * fails with `branch-conflict`.
  *
  * An inherited start (`ctx.inheritBaseRef` set) skips `fetchBase` entirely and cuts from the
  * parent's local branch directly, with no warning: the parent's branch is local-only (dispatch
@@ -258,6 +262,7 @@ const createWorktrees: SagaStep = {
         "config",
       );
     }
+    const seenCommonDirs = new Set<string>();
     for (const { path: repoPath, base } of ctx.card.workspace?.repos ?? []) {
       if (base.startsWith("-")) {
         throw new StartStepError(
@@ -265,6 +270,16 @@ const createWorktrees: SagaStep = {
           "base branch must not start with '-'",
           "config",
         );
+      }
+      const commonDir = await gitCommonDir(repoPath);
+      if (commonDir != null) {
+        if (seenCommonDirs.has(commonDir)) {
+          ctx.warnings.push(
+            `${path.basename(repoPath)} shares its git repo with an earlier repo of this card, skipped`,
+          );
+          continue;
+        }
+        seenCommonDirs.add(commonDir);
       }
       await worktreePrune(repoPath);
 
