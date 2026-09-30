@@ -8,6 +8,7 @@ import { Card } from "./Card.js";
 import { isForceDimmed } from "./drag-selection.js";
 import { EmptyState } from "./EmptyState.js";
 import { COLUMN_ACCENT, COLUMN_LABELS } from "./column-meta.js";
+import { dataInk } from "../../primitives/data-ink.js";
 import {
   clearColumnWidth,
   setColumnWidth,
@@ -289,7 +290,7 @@ export function Column({
         borderRadius: "var(--radius)",
         padding: "0 var(--space-lg) var(--space-lg)",
         overflow: "hidden",
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.02)",
+        boxShadow: "inset 0 1px 0 var(--edge-highlight)",
       }}
     >
       {!isCarousel && (
@@ -359,7 +360,7 @@ export function Column({
           key={countPulse}
           style={{
             background: `color-mix(in srgb, ${COLUMN_ACCENT[column]} 16%, var(--surface-column))`,
-            color: COLUMN_ACCENT[column],
+            color: dataInk(COLUMN_ACCENT[column]),
             borderRadius: "var(--radius-sm)",
             padding: "0 var(--space-xs)",
             fontSize: "var(--font-micro)",

@@ -75,7 +75,7 @@ export function SessionSwitcher({ card }: SessionSwitcherProps) {
               style={{
                 ...segmentStyle,
                 color: active
-                  ? "var(--accent)"
+                  ? "var(--accent-text)"
                   : entry.lost
                     ? "var(--destructive-text)"
                     : "var(--text-muted)",

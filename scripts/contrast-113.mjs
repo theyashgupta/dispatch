@@ -10,6 +10,9 @@
  * elevation-ladder tiers strictly increase in relative luminance. It boots no server, spawns no
  * process, claims no port, and touches nothing under `src/` when run in check mode.
  *
+ * THEMES (G9, LOCAL-55). Every check runs once per theme, against that theme's own token map and
+ * ladder order. The rules are in docs/ARCHITECTURE.md, Theme Engine, "The instrument".
+ *
  * DEVIATION FROM PRECEDENT. Every `panel-*.mjs` break mutates the real artifact it checks, in
  * place, then restores the captured bytes in a `finally`. This script's break deliberately does
  * NOT do that: this phase's hard invariant is that no `src/` file is ever touched, at any point,
@@ -23,22 +26,28 @@
  * PORT CLAIMS. None. This script never listens on or dials a network port.
  *
  * Usage:
- *   node scripts/contrast-113.mjs                 every registered check, exits non-zero on any
- *                                                    violation. Refuses to exit 0 if CHECKS is
- *                                                    empty, so an accidentally emptied map can
- *                                                    never read as a vacuous pass.
+ *   node scripts/contrast-113.mjs                 every registered check on both themes, exits
+ *                                                    non-zero on any violation in either theme,
+ *                                                    and on a token file with no light block.
+ *                                                    Refuses to exit 0 if CHECKS is empty, so an
+ *                                                    accidentally emptied map can never read as a
+ *                                                    vacuous pass.
+ *   node scripts/contrast-113.mjs --theme <name>   one theme only: "dark" or "light".
  *   node scripts/contrast-113.mjs --check <name>   one named leg only: "pairs" or "ladder".
  *                                                    Unknown name exits non-zero and lists the
  *                                                    registered names.
- *   node scripts/contrast-113.mjs --break <name>   that leg's own break ("pairs", "ladder", or
- *                                                    "all" for both): mutates a COPY of the token
+ *   node scripts/contrast-113.mjs --break <name>   that leg's own break ("pairs", "ladder",
+ *                                                    "light", or "all"): mutates a COPY of the token
  *                                                    file under /tmp, confirms the SAME check
  *                                                    function used by the real run reports the
  *                                                    violation by name (TRIP leg), removes the
  *                                                    temporary directory in a `finally`, then
  *                                                    re-runs the full check against the real,
  *                                                    unmodified token file and asserts a clean pass
- *                                                    (RESTORE leg).
+ *                                                    (RESTORE leg). The "light" leg mutates a
+ *                                                    token inside the light block and asserts the
+ *                                                    light run trips while the dark run of the same
+ *                                                    copy still passes.
  *   node scripts/contrast-113.mjs --tokens <path>  parse a different token file instead of the
  *                                                    default `src/web/styles/tokens.css`.
  *   node scripts/contrast-113.mjs --extra-bg name=hex   repeatable. Appends an additional
@@ -59,12 +68,13 @@ import path from "node:path";
 
 const DEFAULT_TOKENS_PATH = "src/web/styles/tokens.css";
 const PREFIX = "-".repeat(2);
-const LADDER_NAMES = [
-  "--bg",
-  "--surface-column",
-  "--surface-card",
-  "--surface-card-hover",
-];
+const LIGHT_SELECTOR = ':root[data-theme="light"]';
+const THEMES = ["dark", "light"];
+const LADDER_ORDER = {
+  dark: ["--bg", "--surface-column", "--surface-card", "--surface-card-hover"],
+  light: ["--bg", "--surface-column", "--surface-card-hover", "--surface-card"],
+};
+const BACKGROUND_NAMES = [...LADDER_ORDER.dark, "--surface-inset"];
 
 /**
  * Known, named pre-existing contrast failures. A failing pair present here is reported as
@@ -80,6 +90,25 @@ const LADDER_NAMES = [
  * re-absorbed into a residual entry.
  */
 const RESIDUALS = [];
+const COLUMN_INK_NAMES = [
+  "col-todo",
+  "col-in-progress",
+  "col-needs-input",
+  "col-agent-done",
+  "col-in-review",
+  "col-parked",
+  "col-done",
+];
+const DATA_INK_SHARE = 0.35;
+const MARK_NAMES = [
+  "src-github",
+  "src-linear",
+  "src-slack",
+  "src-sentry",
+  "src-meeting",
+  "src-calendar",
+  "src-agent",
+];
 
 // ---------------------------------------------------------------------------
 // WCAG relative luminance and contrast ratio
@@ -116,31 +145,145 @@ function round2(x) {
 // Token parsing
 // ---------------------------------------------------------------------------
 
-function loadTokens(tokensPath) {
-  const text = fs
-    .readFileSync(tokensPath, "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "");
-  const re = new RegExp(
-    PREFIX + "([a-zA-Z0-9-]+):\\s*(#[0-9a-fA-F]{6})\\s*;",
-    "g",
-  );
-  const tokens = new Map();
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    tokens.set(PREFIX + m[1], m[2].toLowerCase());
-  }
-  return tokens;
+function readWithoutComments(tokensPath) {
+  return fs.readFileSync(tokensPath, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
 /**
- * Parses the token file and pushes a violation (rather than throwing) if fewer than 20 tokens
- * parse, so an emptied or renamed token file can never read as a vacuous pass.
+ * Returns the declarations of the first rule that starts with this selector, or null.
+ *
+ * @remarks A plain slice to the next closing brace, so the palette must stay the first `:root {`
+ * rule of the file and a token block must hold no nested rule.
  */
-function loadTokensOrViolate(tokensPath, violations) {
-  const tokens = loadTokens(tokensPath);
+function declarationsOf(text, selector) {
+  const at = text.indexOf(`${selector} {`);
+  if (at < 0) return null;
+  const declaration = new RegExp(
+    PREFIX + "([a-zA-Z0-9-]+)\\s*:\\s*([^;{}]+)(?:;|$)",
+    "g",
+  );
+  const found = new Map();
+  const body = text.slice(at, text.indexOf("}", at));
+  for (const m of body.matchAll(declaration)) {
+    found.set(PREFIX + m[1], m[2].trim());
+  }
+  return found;
+}
+
+/** Splits the token file into the dark palette and the light block, `light` null when absent. */
+function parseBlocks(tokensPath) {
+  const text = readWithoutComments(tokensPath);
+  return {
+    dark: declarationsOf(text, ":root") ?? new Map(),
+    light: declarationsOf(text, LIGHT_SELECTOR),
+  };
+}
+
+function parseMixPart(part, rawTokens, seen) {
+  const m =
+    /^(#[0-9a-fA-F]{6}|black|white|var\(\s*--[a-zA-Z0-9-]+\s*\))(?:\s+(\d+(?:\.\d+)?)%)?$/.exec(
+      part.trim(),
+    );
+  if (m == null) return null;
+  const named = { black: "#000000", white: "#ffffff" };
+  const isShade = Object.hasOwn(named, m[1]);
+  const hex = isShade ? named[m[1]] : resolveValue(m[1], rawTokens, seen);
+  if (hex == null) return null;
+  return { hex, isShade, pct: m[2] == null ? null : Number(m[2]) };
+}
+
+/**
+ * Resolves one raw declaration value to a hex, or null when the form is not supported.
+ *
+ * @remarks The forms are a hex, a var() of a token, and a mix of one color with `black` or `white`.
+ */
+function resolveValue(raw, rawTokens, seen = new Set()) {
+  const value = raw.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(value)) return value.toLowerCase();
+
+  const ref = /^var\(\s*(--[a-zA-Z0-9-]+)\s*\)$/.exec(value);
+  if (ref != null) {
+    if (seen.has(ref[1]) || !rawTokens.has(ref[1])) return null;
+    seen.add(ref[1]);
+    return resolveValue(rawTokens.get(ref[1]), rawTokens, seen);
+  }
+
+  const mix = /^color-mix\(\s*in srgb\s*,([^,]+),([^,]+)\)$/.exec(value);
+  if (mix != null) {
+    const a = parseMixPart(mix[1], rawTokens, seen);
+    const b = parseMixPart(mix[2], rawTokens, seen);
+    if (a == null || b == null || a.isShade === b.isShade) return null;
+    let pa = a.pct;
+    let pb = b.pct;
+    if (pa == null && pb == null) pa = pb = 50;
+    else if (pa == null) pa = 100 - pb;
+    else if (pb == null) pb = 100 - pa;
+    if (pa + pb <= 0) return null;
+    return srgbMix(a.hex, b.hex, pa / (pa + pb));
+  }
+  return null;
+}
+
+function isColorRole(name) {
+  return (
+    BACKGROUND_NAMES.includes(name) || isTextRole(name) || isNontextRole(name)
+  );
+}
+
+function isTextRole(name) {
+  return (
+    name.startsWith("--text") ||
+    name === "--destructive-text" ||
+    name === "--accent-text" ||
+    name === "--status-ok" ||
+    name === "--status-stale" ||
+    name.startsWith("--src-")
+  );
+}
+
+function isNontextRole(name) {
+  if (isTextRole(name)) return false;
+  return (
+    name === "--accent" ||
+    name === "--destructive" ||
+    name.startsWith("--prio-") ||
+    name.startsWith("--col-") ||
+    name.startsWith("--status-")
+  );
+}
+
+/**
+ * Builds the resolved token map of one theme.
+ *
+ * @remarks A missing light block, an unresolved color role and fewer than 20 tokens each push a
+ * violation, so an emptied or renamed token file can never read as a vacuous pass.
+ */
+function loadTokensOrViolate(tokensPath, theme, violations) {
+  const blocks = parseBlocks(tokensPath);
+  const tokens = new Map();
+  if (theme === "light" && blocks.light == null) {
+    violations.push(
+      `light: no ${LIGHT_SELECTOR} block in ${tokensPath}, the light theme cannot be measured`,
+    );
+    return tokens;
+  }
+  const rawTokens = new Map(blocks.dark);
+  if (theme === "light") {
+    for (const [name, raw] of blocks.light) rawTokens.set(name, raw);
+  }
+  for (const [name, raw] of rawTokens) {
+    const hex = resolveValue(raw, rawTokens);
+    if (hex != null) {
+      tokens.set(name, hex);
+    } else if (isColorRole(name)) {
+      violations.push(
+        `unresolved (${theme}): ${name} has the value "${raw}", which is not a hex, a color-mix of a hex with black or white, or a var() of a token`,
+      );
+    }
+  }
   if (tokens.size < 20) {
     violations.push(
-      `parse: only ${tokens.size} token(s) parsed from ${tokensPath}, expected at least 20 (empty or renamed token file?)`,
+      `parse (${theme}): only ${tokens.size} token(s) parsed from ${tokensPath}, expected at least 20 (empty or renamed token file?)`,
     );
   }
   return tokens;
@@ -151,14 +294,14 @@ function findResidual(fg, bg) {
 }
 
 /**
- * Builds the background set (four fixed ladder tiers plus any --extra-bg additions) and the two
- * foreground sets (text-role: --text*, --destructive-text; non-text-role: --accent, --destructive,
- * --prio-*, --col-*, --status-*), then generates every background x foreground pair, excluding
- * --border and any pair where the foreground and background name are identical.
+ * Generates every background x foreground pair of one theme.
+ *
+ * @remarks --status-ok and --status-stale sit in the text set because chips and pace badges render
+ * them as text. --border and a pair of one name with itself are left out.
  */
 function buildPairSet(tokens, extraBgs) {
   const backgrounds = new Map();
-  for (const name of LADDER_NAMES) {
+  for (const name of BACKGROUND_NAMES) {
     if (tokens.has(name)) backgrounds.set(name, tokens.get(name));
   }
   for (const [name, hex] of extraBgs) {
@@ -168,22 +311,8 @@ function buildPairSet(tokens, extraBgs) {
   const textFg = new Map();
   const nontextFg = new Map();
   for (const [name, hex] of tokens) {
-    if (name === "--border") continue;
-    if (
-      name.startsWith("--text") ||
-      name === "--destructive-text" ||
-      name.startsWith("--src-")
-    ) {
-      textFg.set(name, hex);
-    } else if (
-      name === "--accent" ||
-      name === "--destructive" ||
-      name.startsWith("--prio-") ||
-      name.startsWith("--col-") ||
-      name.startsWith("--status-")
-    ) {
-      nontextFg.set(name, hex);
-    }
+    if (isTextRole(name)) textFg.set(name, hex);
+    else if (isNontextRole(name)) nontextFg.set(name, hex);
   }
 
   const pairs = [];
@@ -213,11 +342,12 @@ function srgbMix(hexA, hexB, pctA) {
 }
 
 /**
- * Real rendered text pairs whose background (or foreground) is not itself a raw token, so the
+ * Real rendered pairs whose background (or foreground) is not itself a raw token, so the
  * generated ladder-tier cross-product can never produce them (115 review WR-01/WR-02):
  *
- * 1. The danger Button's white `#ffffff` label on `--destructive-button-fill`, at rest and on
- *    the `--hover-button-danger` 12% white lighten (Button.tsx danger variant).
+ * 1. The filled Button labels, `--on-accent` and `--on-danger`, on their fill at rest, on the
+ *    hover state token and on the pressed state token (Button.tsx primary and danger variants),
+ *    and `--accent-text` on the 16% accent tint over every background tier.
  * 2. `--destructive-text` on the Lost-chip tint, `color-mix(in srgb, var(--destructive) 16%,
  *    var(--surface-card))` (CardView.tsx:149). The chip's background is this one opaque computed
  *    color: it is deliberately pinned to the resting `--surface-card` tier and does NOT re-base
@@ -228,6 +358,11 @@ function srgbMix(hexA, hexB, pctA) {
  * 3. The account popover's pace badges (AccountPopover.tsx): `--status-ok` and `--status-stale`
  *    as text on their own 16% tint over `--surface-column`, and `--destructive-text` on the
  *    `--status-down` 16% tint, because `--status-down` itself is below the text floor there.
+ * 4. A column colour as text (`dataInk` in src/web/primitives/data-ink.ts): 35% of the `--col-*` token
+ *    mixed with `--text`, on the 16% tint of the same token over every background tier. The
+ *    column tokens themselves stay graphic tokens.
+ * 5. A source mark (SourceBadge.tsx, SourceIcon.tsx): the `--src-*` token as a graphic on the 16%
+ *    tint of the same token over every background tier, at the 3:1 floor.
  *
  * A referenced token missing from the parsed file is pushed as a violation, never silently
  * skipped, so deleting a token cannot retire its guard.
@@ -238,27 +373,49 @@ function buildDerivedTextPairs(tokens, violations) {
     const hex = tokens.get(PREFIX + name);
     if (hex == null) {
       violations.push(
-        `derived: token ${PREFIX + name} not found in the token file, its derived pair cannot be checked`,
+        `derived: token ${PREFIX + name} is missing or does not resolve, its derived pair cannot be checked`,
       );
     }
     return hex;
   };
-  const fill = need("destructive-button-fill");
-  if (fill != null) {
-    pairs.push({
-      fg: "danger-button-label(#ffffff)",
-      fgHex: "#ffffff",
-      bg: PREFIX + "destructive-button-fill",
-      bgHex: fill,
-      role: "text",
-    });
-    pairs.push({
-      fg: "danger-button-label(#ffffff)",
-      fgHex: "#ffffff",
-      bg: "hover-button-danger(computed)",
-      bgHex: srgbMix("#ffffff", fill, 0.12),
-      role: "text",
-    });
+  const label = (labelName, fills) => {
+    const labelHex = need(labelName);
+    for (const fillName of fills) {
+      const fillHex = need(fillName);
+      if (labelHex == null || fillHex == null) continue;
+      pairs.push({
+        fg: PREFIX + labelName,
+        fgHex: labelHex,
+        bg: PREFIX + fillName,
+        bgHex: fillHex,
+        role: "text",
+      });
+    }
+  };
+  label("on-accent", [
+    "accent",
+    "hover-button-primary",
+    "pressed-button-primary",
+  ]);
+  label("on-danger", [
+    "destructive-button-fill",
+    "hover-button-danger",
+    "pressed-button-danger",
+  ]);
+  const accent = need("accent");
+  const accentText = need("accent-text");
+  if (accent != null && accentText != null) {
+    for (const tier of BACKGROUND_NAMES) {
+      const tierHex = tokens.get(tier);
+      if (tierHex == null) continue;
+      pairs.push({
+        fg: PREFIX + "accent-text",
+        fgHex: accentText,
+        bg: `accent-tint-on-${tier.slice(2)}(computed)`,
+        bgHex: srgbMix(accent, tierHex, 0.16),
+        role: "text",
+      });
+    }
   }
   const destructive = need("destructive");
   const card = need("surface-card");
@@ -300,6 +457,37 @@ function buildDerivedTextPairs(tokens, violations) {
       statusDown,
     );
   }
+  const text = need("text");
+  for (const name of COLUMN_INK_NAMES) {
+    const col = need(name);
+    if (col == null || text == null) continue;
+    for (const tier of BACKGROUND_NAMES) {
+      const tierHex = tokens.get(tier);
+      if (tierHex == null) continue;
+      pairs.push({
+        fg: `${name}-ink(computed)`,
+        fgHex: srgbMix(col, text, DATA_INK_SHARE),
+        bg: `${name}-tint-on-${tier.slice(2)}(computed)`,
+        bgHex: srgbMix(col, tierHex, 0.16),
+        role: "text",
+      });
+    }
+  }
+  for (const name of MARK_NAMES) {
+    const mark = need(name);
+    if (mark == null) continue;
+    for (const tier of BACKGROUND_NAMES) {
+      const tierHex = tokens.get(tier);
+      if (tierHex == null) continue;
+      pairs.push({
+        fg: `${name}-mark(computed)`,
+        fgHex: mark,
+        bg: `${name}-tint-on-${tier.slice(2)}(computed)`,
+        bgHex: srgbMix(mark, tierHex, 0.16),
+        role: "nontext",
+      });
+    }
+  }
   return pairs;
 }
 
@@ -309,8 +497,8 @@ function buildDerivedTextPairs(tokens, violations) {
 
 const VERDICT_RANK = { FAIL: 0, RESIDUAL: 1, PASS: 2 };
 
-function checkPairs(tokensPath, extraBgs, violations) {
-  const tokens = loadTokensOrViolate(tokensPath, violations);
+function checkPairs(tokensPath, extraBgs, violations, theme = "dark") {
+  const tokens = loadTokensOrViolate(tokensPath, theme, violations);
   if (tokens.size < 20) {
     return { rows: [], pairCount: 0, failCount: 0, residualCount: 0 };
   }
@@ -330,13 +518,13 @@ function checkPairs(tokensPath, extraBgs, violations) {
     if (residual) {
       if (measured < residual.recordedRatio) {
         violations.push(
-          `residual regression: ${p.fg} on ${p.bg} measured ${measured.toFixed(2)}, below its recorded ${residual.recordedRatio.toFixed(2)}`,
+          `residual regression (${theme}): ${p.fg} on ${p.bg} measured ${measured.toFixed(2)}, below its recorded ${residual.recordedRatio.toFixed(2)}`,
         );
         verdict = "FAIL";
         failCount++;
       } else if (measured >= floor) {
         violations.push(
-          `stale residual: ${p.fg} on ${p.bg} now measures ${measured.toFixed(2)}, meets the ${floor.toFixed(1)} floor; retire this RESIDUALS entry`,
+          `stale residual (${theme}): ${p.fg} on ${p.bg} now measures ${measured.toFixed(2)}, meets the ${floor.toFixed(1)} floor; retire this RESIDUALS entry`,
         );
         verdict = "FAIL";
         failCount++;
@@ -348,7 +536,7 @@ function checkPairs(tokensPath, extraBgs, violations) {
       verdict = "PASS";
     } else {
       violations.push(
-        `FAIL: ${p.fg} on ${p.bg} (${p.role}) measured ${measured.toFixed(2)}, below the ${floor.toFixed(1)} floor`,
+        `FAIL (${theme}): ${p.fg} on ${p.bg} (${p.role}) measured ${measured.toFixed(2)}, below the ${floor.toFixed(1)} floor`,
       );
       verdict = "FAIL";
       failCount++;
@@ -376,8 +564,8 @@ function checkPairs(tokensPath, extraBgs, violations) {
   return { rows, pairCount: pairs.length, failCount, residualCount };
 }
 
-function checkLadder(tokensPath, violations) {
-  const tokens = loadTokensOrViolate(tokensPath, violations);
+function checkLadder(tokensPath, violations, theme = "dark") {
+  const tokens = loadTokensOrViolate(tokensPath, theme, violations);
   if (tokens.size < 20) {
     return { rows: [] };
   }
@@ -385,17 +573,19 @@ function checkLadder(tokensPath, violations) {
   const rows = [];
   let prevLum = null;
   let prevName = null;
-  for (const name of LADDER_NAMES) {
+  for (const name of LADDER_ORDER[theme]) {
     const hex = tokens.get(name);
     if (!hex) {
-      violations.push(`ladder: missing tier ${name} in ${tokensPath}`);
+      violations.push(
+        `ladder (${theme}): missing tier ${name} in ${tokensPath}`,
+      );
       continue;
     }
     const lum = relLum(hexToRgb(hex));
     rows.push({ tier: name, hex, luminance: lum.toFixed(5) });
     if (prevLum !== null && !(lum > prevLum)) {
       violations.push(
-        `ladder: ${name} (luminance ${lum.toFixed(5)}) is not strictly greater than ${prevName} (luminance ${prevLum.toFixed(5)})`,
+        `ladder (${theme}): ${name} (luminance ${lum.toFixed(5)}) is not strictly greater than ${prevName} (luminance ${prevLum.toFixed(5)})`,
       );
     }
     prevLum = lum;
@@ -440,8 +630,7 @@ function printLadderTable(rows) {
  * disk (the real file was never opened for writing) and always re-confirms the real file still
  * passes clean.
  */
-async function runBreakPairs() {
-  const realPath = path.resolve(process.cwd(), DEFAULT_TOKENS_PATH);
+async function runBreakPairs(realPath) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "contrast-113-break-"));
   try {
     const original = fs.readFileSync(realPath, "utf8");
@@ -466,8 +655,7 @@ async function runBreakPairs() {
       `\n--break pairs TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
     );
 
-    const restoreViolations = [];
-    checkPairs(realPath, [], restoreViolations);
+    const restoreViolations = runAllThemes(realPath);
     const restoreClean = restoreViolations.length === 0;
     console.log(
       `\n--break pairs RESTORE leg (real, unmodified tokens.css): ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
@@ -484,8 +672,7 @@ async function runBreakPairs() {
  * --surface-column, runs the same ladder check function against that copy, and asserts the trip
  * fires naming both tiers. Always re-confirms the real file still passes clean afterward.
  */
-async function runBreakLadder() {
-  const realPath = path.resolve(process.cwd(), DEFAULT_TOKENS_PATH);
+async function runBreakLadder(realPath) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "contrast-113-break-"));
   try {
     const original = fs.readFileSync(realPath, "utf8");
@@ -510,8 +697,7 @@ async function runBreakLadder() {
       `\n--break ladder TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
     );
 
-    const restoreViolations = [];
-    checkLadder(realPath, restoreViolations);
+    const restoreViolations = runAllThemes(realPath);
     const restoreClean = restoreViolations.length === 0;
     console.log(
       `\n--break ladder RESTORE leg (real, unmodified tokens.css): ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
@@ -523,24 +709,98 @@ async function runBreakLadder() {
   }
 }
 
-async function runBreakAll() {
-  const pairsResult = await runBreakPairs();
-  const ladderResult = await runBreakLadder();
+/**
+ * --break light: rewrites --text-muted inside the light block of a copy of the token file.
+ *
+ * @remarks The light run of the copy must name the pair while its dark run stays clean. The copy
+ * is comment-free, so a brace inside a comment cannot move the block boundary.
+ */
+async function runBreakLight(realPath) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "contrast-113-break-"));
+  try {
+    const original = readWithoutComments(realPath);
+    const blockAt = original.indexOf(`${LIGHT_SELECTOR} {`);
+    if (blockAt < 0) {
+      throw new Error(`break light: no ${LIGHT_SELECTOR} block in ${realPath}`);
+    }
+    const blockEnd = original.indexOf("}", blockAt);
+    const block = original.slice(blockAt, blockEnd);
+    const mutatedBlock = block.replace(
+      /--text-muted:\s*[^;]+;/,
+      "--text-muted: #c9ccd1;",
+    );
+    if (mutatedBlock === block) {
+      throw new Error(
+        "break light: --text-muted declaration not found in the light block",
+      );
+    }
+    const mutatedPath = path.join(tmpDir, "tokens-light.css");
+    fs.writeFileSync(
+      mutatedPath,
+      original.slice(0, blockAt) + mutatedBlock + original.slice(blockEnd),
+    );
+
+    const lightViolations = [];
+    checkPairs(mutatedPath, [], lightViolations, "light");
+    const darkViolations = [];
+    checkPairs(mutatedPath, [], darkViolations, "dark");
+    const tripFired =
+      lightViolations.some((v) =>
+        v.includes("--text-muted on --surface-card ("),
+      ) && darkViolations.length === 0;
+    console.log(
+      `\n--break light TRIP leg output (light):\n${lightViolations.join("\n") || "(no violations)"}\n--break light dark run of the same copy: ${darkViolations.length === 0 ? "PASS" : darkViolations.join("\n")}`,
+    );
+
+    const restoreViolations = runAllThemes(realPath);
+    const restoreClean = restoreViolations.length === 0;
+    console.log(
+      `\n--break light RESTORE leg (real, unmodified tokens.css): ${restoreClean ? "PASS" : `FAIL:\n${restoreViolations.join("\n")}`}`,
+    );
+
+    return { tripFired, restoreClean };
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+async function runBreakAll(realPath) {
+  const results = [
+    await runBreakPairs(realPath),
+    await runBreakLadder(realPath),
+    await runBreakLight(realPath),
+  ];
   return {
-    tripFired: pairsResult.tripFired && ladderResult.tripFired,
-    restoreClean: pairsResult.restoreClean && ladderResult.restoreClean,
+    tripFired: results.every((r) => r.tripFired),
+    restoreClean: results.every((r) => r.restoreClean),
   };
 }
 
+/**
+ * Runs every check on both themes and returns the violations.
+ *
+ * @remarks A break's restore leg uses it to prove the unmodified file on the terms of a real run.
+ */
+function runAllThemes(tokensPath) {
+  const violations = [];
+  for (const theme of THEMES) {
+    checkPairs(tokensPath, [], violations, theme);
+    checkLadder(tokensPath, violations, theme);
+  }
+  return [...new Set(violations)];
+}
+
 const CHECKS = {
-  pairs: (violations, tokensPath, extraBgs) =>
-    checkPairs(tokensPath, extraBgs, violations),
-  ladder: (violations, tokensPath) => checkLadder(tokensPath, violations),
+  pairs: (violations, tokensPath, extraBgs, theme) =>
+    checkPairs(tokensPath, extraBgs, violations, theme),
+  ladder: (violations, tokensPath, extraBgs, theme) =>
+    checkLadder(tokensPath, violations, theme),
 };
 
 const BREAKS = {
   pairs: runBreakPairs,
   ladder: runBreakLadder,
+  light: runBreakLight,
   all: runBreakAll,
 };
 
@@ -626,8 +886,14 @@ async function main() {
     process.exit(1);
   }
 
+  const themeName = readFlag(argv, "--theme");
+  if (themeName != null && !THEMES.includes(themeName)) {
+    console.error(`unknown theme "${themeName}", valid: ${THEMES.join(", ")}`);
+    process.exit(1);
+  }
+
   if (breakName != null) {
-    const result = await BREAKS[breakName]();
+    const result = await BREAKS[breakName](tokensPath);
     console.log(
       `\n--break ${breakName} summary: tripFired=${result.tripFired} restoreClean=${result.restoreClean}`,
     );
@@ -649,27 +915,26 @@ async function main() {
     process.exit(0);
   }
 
-  const violations = [];
+  const found = [];
   const legs = checkName != null ? [checkName] : Object.keys(CHECKS);
-  let pairsSummary = null;
+  const themes = themeName != null ? [themeName] : THEMES;
 
-  for (const leg of legs) {
-    if (leg === "pairs") {
-      pairsSummary = checkPairs(tokensPath, extraBgs, violations);
-      console.log("\n## Pair contrast");
-      printPairsTable(pairsSummary.rows);
-    } else if (leg === "ladder") {
-      const ladderResult = checkLadder(tokensPath, violations);
-      console.log("\n## Elevation ladder");
-      printLadderTable(ladderResult.rows);
+  for (const theme of themes) {
+    for (const leg of legs) {
+      const result = CHECKS[leg](found, tokensPath, extraBgs, theme);
+      if (leg === "pairs") {
+        console.log(`\n## Pair contrast (${theme})`);
+        printPairsTable(result.rows);
+        console.log(
+          `\nSummary (${theme}): ${result.pairCount} pair(s) checked, ${result.failCount} failing, ${result.residualCount} residual.`,
+        );
+      } else {
+        console.log(`\n## Elevation ladder (${theme})`);
+        printLadderTable(result.rows);
+      }
     }
   }
-
-  if (pairsSummary) {
-    console.log(
-      `\nSummary: ${pairsSummary.pairCount} pair(s) checked, ${pairsSummary.failCount} failing, ${pairsSummary.residualCount} residual.`,
-    );
-  }
+  const violations = [...new Set(found)];
 
   if (violations.length > 0) {
     console.log(`\nFAIL: ${violations.length} violation(s)`);

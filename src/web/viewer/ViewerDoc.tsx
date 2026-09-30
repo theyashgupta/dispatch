@@ -9,7 +9,6 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { rehypeHeadingIds, type HeadingEntry } from "./heading-ids.js";
-import "./viewer.css";
 
 export interface ViewerDocProps {
   source: string;
@@ -111,7 +110,7 @@ const liStyle: CSSProperties = {
 };
 
 const anchorStyle: CSSProperties = {
-  color: "var(--accent)",
+  color: "var(--accent-text)",
   textDecoration: "underline",
 };
 

@@ -59,7 +59,7 @@ const badgeStyle: CSSProperties = {
   padding: "0 var(--space-xs)",
   borderRadius: "var(--radius-sm)",
   background: "color-mix(in srgb, var(--accent) 16%, var(--surface-column))",
-  color: "var(--accent)",
+  color: "var(--accent-text)",
   fontSize: "var(--font-micro)",
   fontWeight: "var(--weight-semibold)",
 };

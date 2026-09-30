@@ -1,9 +1,11 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
 import { focusRing } from "../../primitives/focus-ring.js";
+import { markSlotStyle } from "../badges/index.js";
+import type { NavIcon } from "./nav-items.js";
 
 interface NavRowProps {
-  icon: LucideIcon;
+  icon: NavIcon;
+  iconColor?: string;
   iconSlot?: ReactNode;
   label: string;
   active: boolean;
@@ -44,6 +46,7 @@ const labelStyle: CSSProperties = {
 
 export function NavRow({
   icon: Icon,
+  iconColor,
   iconSlot,
   label,
   active,
@@ -71,13 +74,17 @@ export function NavRow({
         ...rowStyle,
         justifyContent: collapsed ? "center" : "flex-start",
         padding: collapsed ? 0 : rowStyle.padding,
-        color: active ? "var(--accent)" : "var(--text-muted)",
+        color: active ? "var(--accent-text)" : "var(--text-muted)",
         background:
           hovered && !active ? "var(--surface-card-hover)" : "transparent",
         ...focusRing(focused),
       }}
     >
-      {iconSlot ?? <Icon size={16} strokeWidth={2} aria-hidden="true" />}
+      {iconSlot ?? (
+        <span style={{ ...markSlotStyle, color: iconColor }}>
+          <Icon size={16} />
+        </span>
+      )}
       {collapsed ? null : <span style={labelStyle}>{label}</span>}
       {collapsed ? null : badge}
     </button>

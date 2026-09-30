@@ -1,3 +1,4 @@
+import { dataInk } from "../../primitives/data-ink.js";
 import type { WorkspaceSubgroup } from "./orca-selectors.js";
 import { OrcaNavRow } from "./OrcaNavRow.js";
 
@@ -37,7 +38,9 @@ export function OrcaSubgroupSection({
             background: subgroup.accent
               ? `color-mix(in srgb, ${subgroup.accent} 16%, var(--surface-column))`
               : "var(--surface-card)",
-            color: subgroup.accent ?? "var(--text-muted)",
+            color: subgroup.accent
+              ? dataInk(subgroup.accent)
+              : "var(--text-muted)",
             borderRadius: "var(--radius)",
             padding: "0 var(--space-xs)",
             fontSize: "var(--font-label)",
