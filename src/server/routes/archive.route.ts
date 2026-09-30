@@ -1,6 +1,13 @@
 import { Router } from "express";
 import { store, redactArchivedGroup } from "../store/board.store.js";
 import { deleteArchivedGroup } from "../services/orchestration/archive-delete.js";
+import {
+  ConflictError,
+  HttpError,
+  NotFoundError,
+} from "../services/domain/errors.js";
+import { httpErrorHandler } from "./error-handler.js";
+import { forceBodySchema } from "./schema-primitives.js";
 
 /**
  * The archive surface (LOCAL-17): list, restore and hard-delete unwound groups.
@@ -18,37 +25,30 @@ archiveRouter.get("/archive", (_req, res) => {
 
 archiveRouter.post("/archive/:id/restore", async (req, res) => {
   const result = await store.restoreGroup(req.params.id);
-  if (!result.ok) {
-    res.status(result.status).json({ error: result.reason });
-    return;
-  }
+  if (!result.ok) throw new HttpError(result.status, result.reason);
   res.status(200).json({ restored: result.card.id });
 });
 
 archiveRouter.delete("/archive/:id", async (req, res) => {
-  const force = (req.body as { force?: unknown } | undefined)?.force === true;
+  const { force } = forceBodySchema.parse(req.body);
   const outcome = await deleteArchivedGroup(req.params.id, force);
-  if (outcome === "missing") {
-    res.status(404).json({ error: "unknown archive id" });
-    return;
-  }
+  if (outcome === "missing") throw new NotFoundError("unknown archive id");
   if (outcome === "deleted") {
     res.status(200).json({ deleted: req.params.id });
     return;
   }
   if (outcome === "restored" || outcome === "busy") {
-    res.status(409).json({
-      error:
-        outcome === "restored"
-          ? "this group is back on the board"
-          : "a delete is already in flight for this group",
-      blocked: false,
-    });
-    return;
+    throw new ConflictError(
+      outcome === "restored"
+        ? "this group is back on the board"
+        : "a delete is already in flight for this group",
+      { blocked: false },
+    );
   }
   const row = store.getArchived(req.params.id);
-  res.status(409).json({
-    error: row?.deleteBlocked ?? "delete refused",
+  throw new ConflictError(row?.deleteBlocked ?? "delete refused", {
     blocked: outcome === "blocked",
   });
 });
+
+archiveRouter.use(httpErrorHandler);
