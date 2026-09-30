@@ -25,7 +25,7 @@ The new tree is this list of paths. None of them exists yet, so this list marks 
 The legacy tree has these parts:
 
 - `src/web/features/`, `src/web/primitives/` and `src/web/hooks/`
-- every other file in `src/web/lib/`, such as `api.ts`, `route.ts` and the `format-*.ts` helpers
+- every other file in `src/web/lib/`, such as `api.ts` and the `format-*.ts` helpers. `route.ts` moved to `src/shared/route.ts`
 - `src/web/viewer/` and the web root entry files: `main.tsx`, `App.tsx`, `AppShell.tsx`, `viewer-main.tsx` and the HTML entries
 
 The legacy tree stays until ticket 16. The section "Legacy tree during transition" gives its rules.
@@ -117,7 +117,7 @@ Global bans:
 - Every `.ts` file in the new tree is kebab-case. A file in a `hooks/` folder that exports a React hook is `use-<name>.ts`, for example `use-drag-reorder.ts` exports `useDragReorder`. A file that exports no React hook has no `use-` prefix. A `*-queries.ts` file keeps its name.
 - A view name ends in `View`, and no other name does. A container name ends in `Container`, and no other name does.
 - A module `queries/` folder holds `<feature>-api.ts` for the fetch glue and `<feature>-queries.ts` for the key factory, `queryOptions` and query hooks. `src/web/queries/` uses the same pattern with the data name, for example `board-api.ts` and `board-queries.ts`.
-- Routes use TanStack Router file-based routing. Route file names follow its conventions (`__root.tsx`, `index.tsx`, `$param.tsx`). The generated file `src/web/routeTree.gen.ts` is exempt from naming and lint rules.
+- Routes use TanStack Router file-based routing. Route file names follow its conventions (`__root.tsx`, `index.tsx`, `$param.tsx`). Under `src/web/routes/` the forms are `__root.tsx` and `<page>.{-$id}.lazy.tsx` (the optional segment plus a lazy split file). The R-14 exemption lets these names skip the filename case rule until ticket 16 (2026-09-30). The generated file `src/web/routeTree.gen.ts` is exempt from naming and lint rules.
 - The legacy rule for `src/web/hooks/useX.ts` stays until ticket 16.
 
 ## Tests
