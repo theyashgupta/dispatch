@@ -72,6 +72,10 @@ The v2 rules below add to the sections above. The sections above stay in force. 
 5. The handler sends every other error to the next handler. Routes that answer errors by hand keep their old responses.
 6. Throw a typed error outside any `try` block whose `catch` maps unexpected errors to `InternalError`.
 7. A converted route does not call `res.status` with a 4xx or 5xx code.
+8. Each route file that throws a typed error ends with `<name>Router.use(httpErrorHandler)`. The app-level mount stays as the backstop. A test that mounts one router then gets the same error responses as the app.
+9. Put the schemas of a route file in `routes/<resource>-schemas.ts` when the file has more than three schemas. Put a `<resource>-schemas.test.ts` file next to it.
+
+On 2026-09-30, ticket 17 converted all route files to this model. One site stays hand-written: the text/plain `Not found` 404 in `routes/viewer-page.route.ts`, because the error handler writes JSON only. The 403 and the one `typeof req.query.code` check in `routes/remote-auth-gate.ts` are middleware, not a route, and stay as they are. The six empty-body errors in `routes/terminal-proxy.route.ts` use a local handler that writes the status with no body.
 
 ## Import direction inside services
 

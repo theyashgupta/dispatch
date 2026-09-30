@@ -1,8 +1,25 @@
 import { Router, type Request, type Response } from "express";
+import { z } from "zod";
 import { resolveHookToken } from "../services/domain/hook-tokens.js";
 import { applyHookEvent } from "../services/domain/hook-events.js";
+import { HttpError } from "../services/domain/errors.js";
+import { httpErrorHandler } from "./error-handler.js";
+import { parseOrThrow } from "./parse-input.js";
+import { fieldsOf } from "./schema-primitives.js";
 
 export const hooksRouter = Router();
+
+/** The payload fields the hook handler reads; any other body reads as none, so it never fails. */
+const hookBodySchema = z.preprocess(
+  fieldsOf,
+  z.object({
+    hook_event_name: z.unknown().optional(),
+    last_assistant_message: z.unknown().optional(),
+    session_id: z.unknown().optional(),
+    tool_name: z.unknown().optional(),
+    tool_use_id: z.unknown().optional(),
+  }),
+);
 
 /**
  * Warn-once latch for a Stop payload whose last_assistant_message is missing or non-string —
@@ -28,14 +45,10 @@ async function handleHookEvent(req: Request, res: Response): Promise<void> {
     typeof token === "string" && token.length > 0
       ? resolveHookToken(token)
       : undefined;
-  if (!entry) {
-    res.status(401).json({ error: "invalid hook token" });
-    return;
-  }
-  const body = req.body as
-    { hook_event_name?: unknown; last_assistant_message?: unknown } | undefined;
+  if (!entry) throw new HttpError(401, "invalid hook token");
+  const body = parseOrThrow(hookBodySchema, req.body);
   if (
-    body?.hook_event_name === "Stop" &&
+    body.hook_event_name === "Stop" &&
     typeof body.last_assistant_message !== "string" &&
     !warnedStopShape
   ) {
@@ -49,3 +62,5 @@ async function handleHookEvent(req: Request, res: Response): Promise<void> {
 }
 
 hooksRouter.post("/hook/claude", handleHookEvent);
+
+hooksRouter.use(httpErrorHandler);

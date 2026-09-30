@@ -1,9 +1,11 @@
 import { Router } from "express";
+import { httpErrorHandler } from "./error-handler.js";
 import {
   checkForUpdate,
   detectInstallMode,
   runUpdate,
 } from "../services/orchestration/update.js";
+import { InternalError, ValidationError } from "../services/domain/errors.js";
 
 /**
  * Update-flow surface behind the shared `/api` loopback guard.
@@ -25,13 +27,14 @@ updateRouter.get("/update", async (_req, res) => {
 
 updateRouter.post("/update/run", async (_req, res) => {
   if (detectInstallMode() !== "global") {
-    res.status(400).json({ error: "not-global-install" });
-    return;
+    throw new ValidationError("not-global-install");
   }
   try {
     const result = await runUpdate({ interactive: false });
     res.status(200).json(result);
   } catch {
-    res.status(500).json({ error: "update-failed" });
+    throw new InternalError("update-failed");
   }
 });
+
+updateRouter.use(httpErrorHandler);

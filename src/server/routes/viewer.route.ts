@@ -1,12 +1,21 @@
 import { Router } from "express";
+import { z } from "zod";
+import { httpErrorHandler } from "./error-handler.js";
+import { parseOrThrow } from "./parse-input.js";
 import fsp, { constants as fsConstants } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
 import { store } from "../store/board.store.js";
+import { HttpError, NotFoundError } from "../services/domain/errors.js";
 
 const MD_EXT = /\.(md|markdown)$/i;
 const MAX_BYTES = 2 * 1024 * 1024;
+
+const querySchema = z.object(
+  { path: z.string("invalid-path").regex(MD_EXT, "invalid-path") },
+  "invalid-path",
+);
 
 /**
  * Realpath-containment-gated `.md` file reader behind the shared `/api` guard.
@@ -28,18 +37,13 @@ const MAX_BYTES = 2 * 1024 * 1024;
 export const viewerRouter = Router();
 
 viewerRouter.get("/viewer/file", async (req, res) => {
-  const p = req.query.path;
-  if (typeof p !== "string" || !MD_EXT.test(p)) {
-    res.status(400).json({ error: "invalid-path" });
-    return;
-  }
+  const { path: p } = parseOrThrow(querySchema, req.query);
 
   let resolved: string;
   try {
     resolved = await fsp.realpath(p);
   } catch {
-    res.status(404).json({ error: "not-found" });
-    return;
+    throw new NotFoundError("not-found");
   }
 
   const roots = new Set<string>();
@@ -62,15 +66,9 @@ viewerRouter.get("/viewer/file", async (req, res) => {
       break;
     }
   }
-  if (!contained) {
-    res.status(404).json({ error: "not-found" });
-    return;
-  }
+  if (!contained) throw new NotFoundError("not-found");
 
-  if (!MD_EXT.test(resolved)) {
-    res.status(404).json({ error: "not-found" });
-    return;
-  }
+  if (!MD_EXT.test(resolved)) throw new NotFoundError("not-found");
 
   let fh: FileHandle;
   try {
@@ -79,28 +77,26 @@ viewerRouter.get("/viewer/file", async (req, res) => {
       fsConstants.O_RDONLY | fsConstants.O_NONBLOCK,
     );
   } catch {
-    res.status(404).json({ error: "not-found" });
-    return;
+    throw new NotFoundError("not-found");
   }
   try {
     const st = await fh.stat();
-    if (!st.isFile()) {
-      res.status(404).json({ error: "not-found" });
-      return;
-    }
-    if (st.size > MAX_BYTES) {
-      res.status(413).json({ error: "too-large" });
-      return;
-    }
+    if (!st.isFile()) throw new NotFoundError("not-found");
+    if (st.size > MAX_BYTES) throw new HttpError(413, "too-large");
     const body = await fh.readFile("utf8");
     res
       .status(200)
       .set("Cache-Control", "no-store")
       .type("text/markdown; charset=utf-8")
       .send(body);
-  } catch {
-    if (!res.headersSent) res.status(404).json({ error: "not-found" });
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    if (!res.headersSent) throw new NotFoundError("not-found");
   } finally {
-    await fh.close();
+    await fh.close().catch((err: unknown) => {
+      if (res.headersSent) throw err;
+    });
   }
 });
+
+viewerRouter.use(httpErrorHandler);

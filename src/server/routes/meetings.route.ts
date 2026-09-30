@@ -1,12 +1,7 @@
 import { Router, type Request, type Response } from "express";
-import { hasDispatchMarker } from "../services/domain/playbooks.js";
 import {
-  MAX_ACTION_ITEMS,
   buildMeetingItems,
-  isActionKey,
-  isMeetingId,
   localDate,
-  type ActionDraft,
 } from "../services/domain/meeting-actions.js";
 import { generateMeetingDrafts } from "../services/orchestration/meeting-draft.js";
 import {
@@ -21,58 +16,24 @@ import {
   readTranscript,
   writeTranscript,
 } from "../services/orchestration/meeting-transcripts.js";
-import {
-  GRANOLA_WINDOW_HOURS,
-  type MeetingSourceConfig,
-} from "../../shared/types.js";
+import type { MeetingSourceConfig } from "../../shared/types.js";
 import { store } from "../store/board.store.js";
-import { ITEM_DESCRIPTION_MAX, ITEM_TITLE_MAX } from "../store/items.js";
+import {
+  ConflictError,
+  InternalError,
+  NotFoundError,
+  UpstreamError,
+} from "../services/domain/errors.js";
+import { firstLine, httpErrorHandler, orFail } from "./error-handler.js";
+import {
+  createItemsBodySchema,
+  draftManyBodySchema,
+  granolaBodySchema,
+  meetingIdSchema,
+} from "./meetings-schemas.js";
+import { parseOrThrow } from "./parse-input.js";
 
 export const meetingsRouter = Router();
-
-const MEETING_MAX = 200;
-const NOTES_MAX = 100_000;
-
-/** True for pasted notes the routes accept: non-blank text of at most NOTES_MAX characters. */
-function isNotes(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.trim() !== "" &&
-    value.length <= NOTES_MAX
-  );
-}
-const ME_MAX = 100;
-const MARKER_ERROR = "content contains the DISPATCH_STATUS marker";
-
-/**
- * The first line of an error message, which never carries request text, for a log line.
- */
-function firstLine(err: unknown): string {
-  return err instanceof Error ? err.message.split("\n")[0] : "unknown error";
-}
-
-/**
- * Trimmed text when `value` is a string whose trimmed length is 1 to `max`, else null.
- */
-function boundedText(value: unknown, max: number): string | null {
-  if (typeof value !== "string") return null;
-  const text = value.trim();
-  return text === "" || text.length > max ? null : text;
-}
-
-/**
- * A draft from the request body with every field bounded, or null when any field is out of range.
- */
-function toDraft(value: unknown): ActionDraft | null {
-  if (typeof value !== "object" || value === null) return null;
-  const raw = value as Record<string, unknown>;
-  const key = typeof raw.key === "string" ? raw.key : "";
-  if (!isActionKey(key)) return null;
-  const title = boundedText(raw.title, ITEM_TITLE_MAX);
-  const description = boundedText(raw.description, ITEM_DESCRIPTION_MAX);
-  if (title === null || description === null) return null;
-  return { key, title, description };
-}
 
 let draftManyInFlight = false;
 
@@ -82,27 +43,9 @@ let draftManyInFlight = false;
  * @remarks The abort listens on `res`, not `req`: `req` closes as soon as the body is read, which
  * would abort every run at once (the cards.route.ts draft precedent).
  */
-function draftManyHandler(req: Request, res: Response): void {
-  const body = (req.body ?? {}) as Record<string, unknown>;
-  const meeting = boundedText(body.meeting, MEETING_MAX);
-  if (meeting === null || hasDispatchMarker(meeting)) {
-    res.status(400).json({ error: "invalid-meeting" });
-    return;
-  }
-  const notes = body.notes;
-  if (!isNotes(notes)) {
-    res.status(400).json({ error: "invalid-notes" });
-    return;
-  }
-  const me = body.me;
-  if (me !== undefined && (typeof me !== "string" || me.length > ME_MAX)) {
-    res.status(400).json({ error: "invalid-me" });
-    return;
-  }
-  if (draftManyInFlight) {
-    res.status(409).json({ error: "generate-in-progress" });
-    return;
-  }
+async function draftManyHandler(req: Request, res: Response): Promise<void> {
+  const { meeting, notes, me } = parseOrThrow(draftManyBodySchema, req.body);
+  if (draftManyInFlight) throw new ConflictError("generate-in-progress");
 
   draftManyInFlight = true;
   const controller = new AbortController();
@@ -110,25 +53,26 @@ function draftManyHandler(req: Request, res: Response): void {
     if (!res.writableEnded) controller.abort();
   });
 
-  generateMeetingDrafts({ meeting, notes, me }, controller.signal)
-    .then((drafts) => {
-      if (controller.signal.aborted) return;
-      res.status(200).json({
-        drafts: drafts.map(({ key, title, description }) => ({
-          key,
-          title,
-          description,
-        })),
-      });
-    })
-    .catch((err: unknown) => {
-      if (controller.signal.aborted) return;
-      console.warn("[meetings/draft-many] generation failed:", firstLine(err));
-      res.status(502).json({ error: "generate-failed" });
-    })
-    .finally(() => {
-      draftManyInFlight = false;
+  try {
+    const drafts = await generateMeetingDrafts(
+      { meeting, notes, me },
+      controller.signal,
+    );
+    if (controller.signal.aborted) return;
+    res.status(200).json({
+      drafts: drafts.map(({ key, title, description }) => ({
+        key,
+        title,
+        description,
+      })),
     });
+  } catch (err) {
+    if (controller.signal.aborted) return;
+    console.warn("[meetings/draft-many] generation failed:", firstLine(err));
+    throw new UpstreamError("generate-failed");
+  } finally {
+    draftManyInFlight = false;
+  }
 }
 
 /**
@@ -139,56 +83,31 @@ function draftManyHandler(req: Request, res: Response): void {
  * a failed store leaves the items in place because they are useful without it.
  */
 async function createItemsHandler(req: Request, res: Response): Promise<void> {
-  const body = (req.body ?? {}) as Record<string, unknown>;
-  const meeting = boundedText(body.meeting, MEETING_MAX);
-  if (meeting === null) {
-    res.status(400).json({ error: "invalid-meeting" });
-    return;
-  }
-  const notes = body.notes;
-  if (notes !== undefined && !isNotes(notes)) {
-    res.status(400).json({ error: "invalid-notes" });
-    return;
-  }
-  const rawDrafts = body.drafts;
-  if (
-    !Array.isArray(rawDrafts) ||
-    rawDrafts.length === 0 ||
-    rawDrafts.length > MAX_ACTION_ITEMS
-  ) {
-    res.status(400).json({ error: "invalid-drafts" });
-    return;
-  }
-  const drafts = rawDrafts.map(toDraft);
-  if (drafts.some((d) => d === null)) {
-    res.status(400).json({ error: "invalid-drafts" });
-    return;
-  }
-  const valid = drafts as ActionDraft[];
-  if (
-    hasDispatchMarker(meeting) ||
-    valid.some(
-      (d) => hasDispatchMarker(d.title) || hasDispatchMarker(d.description),
-    )
-  ) {
-    res.status(400).json({ error: MARKER_ERROR });
-    return;
-  }
-  if (new Set(valid.map((d) => d.key)).size !== valid.length) {
-    res.status(400).json({ error: "duplicate-key" });
-    return;
-  }
-
-  const now = new Date();
-  const items = buildMeetingItems({
-    feed: "paste",
+  const {
     meeting,
-    meetingDate: localDate(now),
+    notes,
     drafts: valid,
-    now: now.toISOString(),
-    ...(notes !== undefined ? { transcript: "paste" as const } : {}),
-  });
-  const counts = await store.upsertItems("meeting", items, { kind: "append" });
+  } = parseOrThrow(createItemsBodySchema, req.body);
+
+  const { items, counts } = await orFail(
+    "create-failed",
+    async () => {
+      const now = new Date();
+      const items = buildMeetingItems({
+        feed: "paste",
+        meeting,
+        meetingDate: localDate(now),
+        drafts: valid,
+        now: now.toISOString(),
+        ...(notes !== undefined ? { transcript: "paste" as const } : {}),
+      });
+      const counts = await store.upsertItems("meeting", items, {
+        kind: "append",
+      });
+      return { items, counts };
+    },
+    "[meetings/items] create failed:",
+  );
   const result = {
     created: counts.inserted,
     updated: counts.updated,
@@ -199,44 +118,30 @@ async function createItemsHandler(req: Request, res: Response): Promise<void> {
       await writeTranscript(items[0].meta.meetingId, notes);
     } catch (err) {
       console.warn("[meetings/items] transcript write failed:", firstLine(err));
-      res.status(500).json({ error: "transcript-write-failed", ...result });
-      return;
+      throw new InternalError("transcript-write-failed", result);
     }
   }
   res.status(201).json(result);
 }
 
 meetingsRouter.post("/cards/draft-many", draftManyHandler);
-meetingsRouter.post("/meetings/items", (req, res) => {
-  void createItemsHandler(req, res).catch((err: unknown) => {
-    console.warn("[meetings/items] create failed:", firstLine(err));
-    if (!res.headersSent) res.status(500).json({ error: "create-failed" });
-  });
-});
+meetingsRouter.post("/meetings/items", createItemsHandler);
 
-/** Answer a meeting's stored notes after checking the id has the meetingId shape. */
 async function readTranscriptHandler(
   req: Request,
   res: Response,
 ): Promise<void> {
-  const id = req.query.meetingId;
-  if (!isMeetingId(id)) {
-    res.status(400).json({ error: "invalid-meeting-id" });
-    return;
-  }
-  const text = await readTranscript(id);
-  if (text === null) res.status(404).json({ error: "not-found" });
-  else res.json({ text });
+  const id = parseOrThrow(meetingIdSchema, req.query.meetingId);
+  const text = await orFail(
+    "transcript-read-failed",
+    () => readTranscript(id),
+    "[meetings/transcript] read failed:",
+  );
+  if (text === null) throw new NotFoundError("not-found");
+  res.json({ text });
 }
 
-meetingsRouter.get("/meetings/transcript", (req, res) => {
-  void readTranscriptHandler(req, res).catch((err: unknown) => {
-    console.warn("[meetings/transcript] read failed:", firstLine(err));
-    if (!res.headersSent) {
-      res.status(500).json({ error: "transcript-read-failed" });
-    }
-  });
-});
+meetingsRouter.get("/meetings/transcript", readTranscriptHandler);
 
 /**
  * Save the Granola settings and apply them to the round.
@@ -244,48 +149,39 @@ meetingsRouter.get("/meetings/transcript", (req, res) => {
  * @remarks Validated before the write, so a bad body never reaches config.json.
  */
 async function putGranolaHandler(req: Request, res: Response): Promise<void> {
-  const body = (req.body ?? {}) as Record<string, unknown>;
+  const { enabled, windowHours } = parseOrThrow(granolaBodySchema, req.body);
   const patch: MeetingSourceConfig = {};
-  if (body.enabled !== undefined) {
-    if (typeof body.enabled !== "boolean") {
-      res.status(400).json({ error: "invalid-enabled" });
-      return;
-    }
-    patch.enabled = body.enabled;
-  }
-  if (body.windowHours !== undefined) {
-    const hours = GRANOLA_WINDOW_HOURS.find((h) => h === body.windowHours);
-    if (hours === undefined) {
-      res.status(400).json({ error: "invalid-window" });
-      return;
-    }
-    patch.windowHours = hours;
-  }
-  const previous = granolaSettings();
-  patchSourceConfig("meeting", patch);
-  await applyGranolaSettings(previous);
-  res.json(granolaStatus());
+  if (enabled !== undefined) patch.enabled = enabled;
+  if (windowHours !== undefined) patch.windowHours = windowHours;
+  const status = await orFail(
+    "settings-failed",
+    async () => {
+      const previous = granolaSettings();
+      patchSourceConfig("meeting", patch);
+      await applyGranolaSettings(previous);
+      return granolaStatus();
+    },
+    "[meetings/granola] settings failed:",
+  );
+  res.json(status);
 }
 
 meetingsRouter.get("/meetings/granola", (_req, res) => {
   res.json(granolaStatus());
 });
-meetingsRouter.put("/meetings/granola", (req, res) => {
-  void putGranolaHandler(req, res).catch((err: unknown) => {
-    console.warn("[meetings/granola] settings failed:", firstLine(err));
-    if (!res.headersSent) res.status(500).json({ error: "settings-failed" });
-  });
-});
-meetingsRouter.post("/meetings/granola/check", (_req, res) => {
-  void checkGranolaConnection()
-    .then((check) => res.json(check))
-    .catch((err: unknown) => {
-      console.warn("[meetings/granola] check failed:", firstLine(err));
-      if (!res.headersSent) res.status(500).json({ error: "check-failed" });
-    });
+meetingsRouter.put("/meetings/granola", putGranolaHandler);
+meetingsRouter.post("/meetings/granola/check", async (_req, res) => {
+  const check = await orFail(
+    "check-failed",
+    checkGranolaConnection,
+    "[meetings/granola] check failed:",
+  );
+  res.json(check);
 });
 meetingsRouter.post("/meetings/granola/run", (_req, res) => {
   const result = runGranolaNow();
-  if (result === "started") res.status(202).json({ running: true });
-  else res.status(409).json({ error: result });
+  if (result !== "started") throw new ConflictError(result);
+  res.status(202).json({ running: true });
 });
+
+meetingsRouter.use(httpErrorHandler);
