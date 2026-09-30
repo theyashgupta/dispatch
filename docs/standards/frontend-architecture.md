@@ -186,7 +186,7 @@ The design contract values stay: the density scale, source colors, contrast floo
 2. Do not add a new feature to the legacy tree. Put new code in a module.
 3. Write a fix in a legacy file in the legacy style. Do not migrate part of a file.
 4. A migration ticket uses the layer definitions in this standard to map each legacy file to a layer.
-5. The lint rules and the agent hook rules for the new tree cover the new tree list in "Status and scope".
+5. The lint rules and the agent hook rules for the new tree cover the new tree list in "Status and scope". Two hook rules also cover the legacy tree: the Radix import rule and the new `.tsx` file rule.
 
 ## Agent rules block
 
@@ -208,6 +208,17 @@ The design contract values stay: the density scale, source colors, contrast floo
 16. Name `.tsx` files in PascalCase, except in `components/ui/` and route files. Name `.ts` files in kebab-case.
 17. Put a `<subject>.test.ts` file next to each non-test domain file and each `*-queries.ts` file.
 18. Do not add a new feature to the legacy tree. Do not migrate part of a legacy file.
+
+## Agent tooling
+
+1. Git tracks these agent files: `CLAUDE.md`, `.claude/settings.json`, and the files in `.claude/hooks/` and `.claude/skills/`.
+2. `.gitignore` ignores all other paths in `.claude/`, for example `.claude/settings.local.json`. It uses `.claude/*` and one negation for each tracked path, because git cannot include a file again when its parent folder is ignored.
+3. `CLAUDE.md` holds the "Agent rules block" of this standard and the "Agent rules block (backend)" of `backend-design.md`, with no changes. When you change a rule in one of these blocks, make the same change in `CLAUDE.md`.
+4. `.claude/settings.json` holds only hook entries. Put personal settings, for example `env` values, in `.claude/settings.local.json`.
+5. `.gitignore` also ignores a `.claude/` folder below the repo root, with the line `*/**/.claude/`.
+6. The `PreToolUse` hook `.claude/hooks/pretooluse-rules.mjs` denies an edit that breaks one of six rules: inline style, hex colour, Radix import, new `.tsx` file location, server data outside a query file, module folder shape. The deny reason names the fix and the section of this standard. `scripts/check-hooks.mjs` checks these decisions in `npm run check`.
+7. The `PostToolUse` hook `.claude/hooks/format-edited-file.mjs` runs prettier on each edited file. It skips config files and `.claude/`.
+8. The `Stop` hook `.claude/hooks/stop-static-check.mjs` runs `format:check`, `lint`, `typecheck` and `depcruise` when the working tree has changes. If a step fails, the session cannot stop. Set `DISPATCH_SKIP_STOP_CHECK=1` in `.claude/settings.local.json` to turn off this check.
 
 ## Supersede records index
 
