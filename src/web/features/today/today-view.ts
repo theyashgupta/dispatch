@@ -1,7 +1,7 @@
 import type { Item } from "../../../shared/types.js";
 import { isWebUrl } from "../../lib/actions.js";
 import { topPicks, type TodayEntry, type TodayWindow } from "../../lib/p0.js";
-import type { Page } from "../../lib/route.js";
+import type { Page } from "../../../shared/route.js";
 
 export interface Paged<T> {
   rows: T[];

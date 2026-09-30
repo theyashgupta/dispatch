@@ -7,7 +7,7 @@ import {
   type TodayEntry,
   type TodayWindow,
 } from "../../lib/p0.js";
-import type { Page } from "../../lib/route.js";
+import type { Page } from "../../../shared/route.js";
 import { PageBody } from "../../primitives/PageBody.js";
 import { Agenda } from "./Agenda.js";
 import { CountChips } from "./CountChips.js";
