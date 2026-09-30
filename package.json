@@ -39,13 +39,14 @@
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,magenta \"tsx watch src/server/bootstrap/index.ts\" \"vite\"",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/web/tsconfig.json",
-    "test": "node --import tsx --test 'src/server/**/*.test.ts' 'src/shared/**/*.test.ts' && TSX_TSCONFIG_PATH=src/web/tsconfig.json node --import tsx --test 'src/web/**/*.test.ts'",
+    "test": "node --import tsx --test 'src/server/**/*.test.ts' 'src/shared/**/*.test.ts' && TSX_TSCONFIG_PATH=src/web/tsconfig.json node --import tsx --test 'src/web/**/*.test.ts' && node --import tsx --test 'eslint-local/**/*.test.ts'",
     "terminal-e2e": "node scripts/terminal-appearance-e2e.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
+    "depcruise": "depcruise src",
     "lint:fix": "eslint . --fix",
-    "deadcode": "knip",
+    "deadcode": "knip && knip --production",
     "build:web": "vite build",
     "analyze": "ANALYZE=1 vite build",
     "build:server": "tsc -p tsconfig.build.json",
@@ -72,7 +73,7 @@
     "contrast-113": "node scripts/contrast-113.mjs",
     "panel-114": "node scripts/panel-114.mjs",
     "panel-115": "node scripts/panel-115.mjs",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants",
+    "check": "npm run format:check && npm run lint && npm run depcruise && npm run typecheck && npm run test && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants",
     "prepack": "npm run build"
   },
   "dependencies": {
@@ -98,6 +99,7 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "concurrently": "10.0.3",
+    "dependency-cruiser": "18.4.0",
     "eslint": "10.6.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-import-resolver-typescript": "4.4.5",
