@@ -150,4 +150,5 @@ void test("the contrast instrument passes on both themes", () => {
       new RegExp(`Summary \\(${theme}\\): \\d+ pair\\(s\\) checked, 0 failing`),
     );
   }
+  assert.equal((output.match(/-mark\(computed\) on /g) ?? []).length, 70);
 });

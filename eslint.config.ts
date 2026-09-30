@@ -895,8 +895,8 @@ export default tseslint.config(
 
   /**
    * File/folder naming enforcement (docs/standards/folder-structure.md):
-   * PascalCase .tsx everywhere (main.tsx and viewer-main.tsx exempt ONLY at
-   * src/web root via the root-scoped !(main|viewer-main) key: a nested
+   * PascalCase .tsx everywhere (main.tsx, viewer-main.tsx and gallery-main.tsx exempt ONLY at
+   * src/web root via the root-scoped !(main|viewer-main|gallery-main) key: a nested
    * main.tsx still fails PascalCase),
    * kebab-case .ts, kebab-case folders. Layered override blocks exist because
    * overlapping glob keys inside ONE check-file options object require ALL
@@ -915,7 +915,7 @@ export default tseslint.config(
       "check-file/filename-naming-convention": [
         "error",
         {
-          "src/web/!(main|viewer-main).tsx": "PASCAL_CASE",
+          "src/web/!(main|viewer-main|gallery-main).tsx": "PASCAL_CASE",
           "src/web/*/**/*.tsx": "PASCAL_CASE",
           "src/!(web)/**/*.tsx": "PASCAL_CASE",
           "src/**/*.ts": "KEBAB_CASE",
