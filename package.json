@@ -38,8 +38,8 @@
   },
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,magenta \"tsx watch src/server/bootstrap/index.ts\" \"vite\"",
-    "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test 'src/**/*.test.ts'",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p src/web/tsconfig.json",
+    "test": "node --import tsx --test 'src/server/**/*.test.ts' 'src/shared/**/*.test.ts' && TSX_TSCONFIG_PATH=src/web/tsconfig.json node --import tsx --test 'src/web/**/*.test.ts'",
     "terminal-e2e": "node scripts/terminal-appearance-e2e.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
