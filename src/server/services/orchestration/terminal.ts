@@ -1,6 +1,6 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 import { ensureTtyd, killTtyd } from "../../adapters/ttyd.js";
 import {
   captureHistory,

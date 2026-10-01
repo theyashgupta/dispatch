@@ -17,21 +17,23 @@ Scope: this doc exists for what layer 1 cannot express — a route file with zer
 - [ ] Fire-and-forgets anything slower than ~50ms (cold ttyd start, the saga) and carries state to the client over SSE rather than blocking the response.
 - [ ] Parses `params`, `query` and `body` with a zod schema and throws typed errors from `services/domain/errors.ts` (`docs/standards/backend-design.md`, Validation and Errors).
 - [ ] A converted route does not call `res.status` with a 4xx or 5xx code.
+- [ ] Calls the board store through `boardRepository` from `store/board-repository.ts`, never through `board.store.ts` (`docs/standards/backend-design.md`, Agent rules block rule 3).
 
 ## Backend: `services/orchestration/`
 
 - [ ] Composes adapters + store writes; steps are idempotent (`docs/standards/backend-design.md` rule on producer/orchestration shape).
 - [ ] Where a flow has genuine compensation (a do step with a matching undo/rollback), it is a saga proper: `start-session.ts`, `resume-session.ts`, `cleanup.ts`. Flows without compensation (`terminal.ts`, `uninstall.ts`, `update.ts`, `playbook-generate.ts`, the timer-driven `granola-round.ts`) still belong here because they compose adapters + store, not because they carry rollback, do not claim "saga" for these in new documentation or comments.
+- [ ] Reads and writes the board store through `boardRepository`; a new test replaces it with `fakeBoardRepository` (`docs/standards/backend-design.md`, Tests).
 - [ ] No new second write path to `board.json` or the in-memory snapshot — every mutation still goes through the store's single-writer queue.
 
 ## Backend: `services/domain/`
 
-- [ ] Pure business rules and builders only: no subprocess execution, no direct store mutation beyond the documented producer calls (`hook-events.ts` is the one producer-shaped domain file — every exported handler ends in a store mutation).
+- [ ] Pure business rules and builders only: no subprocess execution and no store access.
 - [ ] No new file in this tier reaches into `adapters-subprocess` (`exec`/`git`/`tmux`) — that stays an `orchestration`/`adapters` concern.
 
 ## Backend: `services/infra/`
 
-- [ ] Cross-cutting plumbing only (config holder, path constants, preflight) — no business rules, no saga steps.
+- [ ] Plumbing and file-backed stores only (config holder, path constants, preflight, vault, kickoff, playbooks, attachments). No saga steps.
 - [ ] Any subprocess call (e.g. a preflight binary check) routes through `adapters/exec.ts`'s `run()` or `runInherit()`, never a local `spawn`/`execFile` invocation.
 
 ## Backend: `adapters/`
@@ -52,6 +54,7 @@ Scope: this doc exists for what layer 1 cannot express — a route file with zer
 
 ## Backend: `bootstrap/`
 
+- [ ] Only `bootstrap/index.ts` calls `setBoardRepository` in source code.
 - [ ] Composition-root only: wiring, config holder, binary preflight, boot reconcile. No business logic lives here — if a bootstrap file grows business rules, that's a domain-layer extraction, not a bootstrap concern.
 - [ ] The named `bootstrap/` exec carve-out (`cli.ts`) keeps its direct `node:child_process` import narrowly scoped to the ruled behavior (a detached fire-and-forget browser opener) — do not widen it beyond its ruled shape.
 

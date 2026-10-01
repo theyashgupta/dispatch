@@ -7,6 +7,7 @@ export { previewBadgeTitle, previewEvidenceLine } from "./preview-evidence.js";
 export { SourceBadge } from "./SourceBadge.js";
 export { SourceIcon } from "./SourceIcon.js";
 export { sourceAccent } from "./source-accent.js";
+export { markSlotStyle, sourceMark } from "./source-mark.js";
 export { TeamCycleText } from "./TeamCycleText.js";
 export { UnknownProbeBadge } from "./UnknownProbeBadge.js";
 export { unknownProbeCopy } from "./unknown-probe-copy.js";

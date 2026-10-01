@@ -1,6 +1,6 @@
 import path from "node:path";
 import fsp from "node:fs/promises";
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 import { killTtyd } from "../../adapters/ttyd.js";
 import { killSession } from "../../adapters/tmux.js";
 import {

@@ -41,7 +41,7 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. New code 
 
 What this means in this codebase: focus is expressed as `outline: 2px solid var(--accent)` with `outline-offset: 2px`, defined once in `src/web/primitives/focus-ring.ts` and consumed everywhere by spreading its return value onto a style object. Selection and needs-attention are expressed separately, as a border plus a 1px ring on the card itself. The failure mode this rule prevents: writing the focus ring as an accent box-shadow ring makes it structurally identical to the selection ring, indistinguishable to a keyboard user — exactly what shipped before this rule was written.
 
-Where an `overflow: hidden` ancestor clips the outline, drop the offset to 0 at that site. Never revert to an accent box-shadow ring to work around clipping.
+Where an `overflow: hidden` ancestor clips the outline, drop the offset to 0 at that site. Never revert to an accent box-shadow ring to work around clipping. If the outline is still clipped at offset 0, draw it inside the element with a negative offset (`-outline-offset-2`) and keep the element inside the clipping ancestor. Menu and select items use this inset form, `focus-visible:-outline-offset-2`.
 
 The accent's job list lives in the accent row of `design-contract.md`'s `## Color roles` table (the checked source toggle is its newest job). That row is the source and wins on any conflict with this file; it is not copied here, so it cannot drift.
 
@@ -50,6 +50,8 @@ Inter is named first in `--font-ui` but is not loaded as a webfont — there is 
 ## Component architecture — hooks-first
 
 The app is already hooks-first: `useActivityFeed`, `useUnseenActivity`, and `useTransitionNotifications` own data and effects; components render. Keep it that way, and do **not** impose a container/presentational split (a dated post-Hooks pattern its own popularizer walked back). Keep data and effects in hooks, UI and local state in components, and keep the new primitives purely presentational: props in, no data fetching.
+
+Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. New code uses the container layer. Containers own data through TanStack Query. Components get data only through props. New code follows the Providers section of the new standard, not the no-Context rule. Until ticket 16, this section still applies to the legacy tree that the new standard names in "Status and scope".
 
 Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. New code uses the container layer. Containers own data through TanStack Query. Components get data only through props. New code follows the Providers section of the new standard, not the no-Context rule. Until ticket 16, this section still applies to the legacy tree that the new standard names in "Status and scope".
 

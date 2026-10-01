@@ -1,36 +1,34 @@
 import {
   Activity,
-  AlertTriangle,
   Archive,
-  GitPullRequest,
-  CalendarDays,
   ClipboardList,
   HardDrive,
   Inbox,
   Kanban,
   KeyRound,
-  MessageSquare,
-  Mic,
   MessageCircleQuestion,
   PanelLeft,
   SquareTerminal,
   Sun,
-  Ticket,
   Users,
   Workflow,
-  type LucideIcon,
 } from "lucide-react";
+import type { ComponentType } from "react";
 import type { ItemSourceId } from "../../../shared/types.js";
+import { sourceMark } from "../badges/index.js";
 import type { Page } from "../../../shared/route.js";
 
 export type NavGroup = "Home" | "Work" | "Sources" | "System";
 
+export type NavIcon = ComponentType<{ size?: number }>;
+
 export interface NavItem {
   page: Page;
   label: string;
-  icon: LucideIcon;
+  icon: NavIcon;
   group: NavGroup;
   source?: ItemSourceId;
+  brand?: string;
 }
 
 export const NAV_GROUPS: readonly NavGroup[] = [
@@ -48,7 +46,13 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { page: "sessions", label: "Sessions", icon: SquareTerminal, group: "Work" },
   { page: "workspace", label: "Workspace", icon: PanelLeft, group: "Work" },
   { page: "activity", label: "Activity", icon: Activity, group: "Work" },
-  { page: "tickets", label: "Tickets", icon: Ticket, group: "Sources" },
+  {
+    page: "tickets",
+    label: "Tickets",
+    icon: sourceMark("linear"),
+    group: "Sources",
+    brand: "linear",
+  },
   {
     page: "accounts",
     label: "Accounts and Usage",
@@ -66,23 +70,38 @@ export const NAV_ITEMS: readonly NavItem[] = [
   {
     page: "pull-requests",
     label: "Pull Requests",
-    icon: GitPullRequest,
+    icon: sourceMark("github"),
     group: "Sources",
+    brand: "github",
   },
-  { page: "errors", label: "Errors", icon: AlertTriangle, group: "Sources" },
-  { page: "meetings", label: "Meetings", icon: Mic, group: "Sources" },
+  {
+    page: "errors",
+    label: "Errors",
+    icon: sourceMark("sentry"),
+    group: "Sources",
+    brand: "sentry",
+  },
+  {
+    page: "meetings",
+    label: "Meetings",
+    icon: sourceMark("meeting"),
+    group: "Sources",
+    brand: "meeting",
+  },
   {
     page: "calendar",
     label: "Calendar",
-    icon: CalendarDays,
+    icon: sourceMark("calendar"),
     group: "Sources",
+    brand: "calendar",
   },
   {
     page: "slack",
     label: "Slack",
-    icon: MessageSquare,
+    icon: sourceMark("slack"),
     group: "Sources",
     source: "slack",
+    brand: "slack",
   },
   {
     page: "workspaces",

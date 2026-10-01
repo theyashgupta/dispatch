@@ -20,7 +20,7 @@ import {
   getOrchestrationConfig,
   patchSourceConfig,
 } from "../infra/config-holder.js";
-import { readCurrent } from "../domain/vault.js";
+import { readCurrent } from "../infra/vault.js";
 
 const CALENDAR_ICAL_KEY = "CALENDAR_ICAL_URL";
 

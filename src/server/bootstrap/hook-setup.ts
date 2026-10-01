@@ -2,8 +2,8 @@ import fsp from "node:fs/promises";
 import writeFileAtomic from "write-file-atomic";
 import { run } from "../adapters/exec.js";
 import { resolveBinaryPath } from "../adapters/resolve-binary.js";
-import { PAUSE_TOOL_NAMES } from "../services/domain/hook-events.js";
-import { ensureVaultScaffold } from "../services/domain/vault.js";
+import { PAUSE_TOOL_NAMES } from "../services/orchestration/hook-events.js";
+import { ensureVaultScaffold } from "../services/infra/vault.js";
 import {
   DISPATCH_DIR,
   HOOK_SCRIPT_PATH,
