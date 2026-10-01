@@ -713,7 +713,7 @@ async function selectCardViaOrcaNav(cdp, sessionId, identifier) {
 }
 
 /**
- * Click the sidebar row (`nav[aria-label="Primary"]`, `NavRow.tsx`) whose label is exactly `label`.
+ * Click the sidebar row (`nav[aria-label="Primary"]`, `AppSidebar.tsx`) whose label is exactly `label`.
  *
  * @remarks An in-app hash navigation, never a `Page.reload`: a reload destroys the document and the
  * expando with it, which is a harness artifact and not a remount.

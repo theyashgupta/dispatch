@@ -99,7 +99,7 @@ and roles only, it does not restate the layering policy.
 | Markers             | `adapters/markers/parse.ts`, `adapters/markers/scan-decision.ts`, `adapters/markers/pane-view.ts`, `adapters/markers/watcher.ts`                                                                                                                                                                                                                | Pure marker parser, the pure per-tick decision core, the pane-view helpers, and the I/O-shell pane watcher applying one card decision per tick.                                                                                                                                                                      |
 | Adapters            | `adapters/exec.ts`, `adapters/git.ts`, `adapters/tmux.ts`, `adapters/ttyd.ts`, `adapters/claude-trust.ts`, `adapters/editors.ts`, `adapters/resolve-binary.ts`                                                                                                                                                                                  | The argv-only subprocess chokepoint, the git / tmux / ttyd / claude-trust adapters over it, editor launch, and binary-path resolution.                                                                                                                                                                               |
 | Shared              | `shared/types.ts`                                                                                                                                                                                                                                                                                                                               | Pure cross-half contracts; `BoardSnapshot` is both the SSE payload and the on-disk board file.                                                                                                                                                                                                                       |
-| Frontend            | `web/App.tsx`, `web/features/board/Board.tsx`, `web/features/board/Card.tsx`, `web/features/detail/DetailPanel.tsx`, plus hooks, dialogs, and the sidebar (`web/features/nav/SidebarNav.tsx`)                                                                                                                                                   | React board: optimistic drag-and-drop, the detail slide-over with the terminal iframe, SSE hooks.                                                                                                                                                                                                                    |
+| Frontend            | `web/App.tsx`, `web/features/board/Board.tsx`, `web/features/board/Card.tsx`, `web/features/detail/DetailPanel.tsx`, plus hooks, dialogs, and the sidebar (`web/modules/shell/components/AppSidebar.tsx`)                                                                                                                                       | React board: optimistic drag-and-drop, the detail slide-over with the terminal iframe, SSE hooks.                                                                                                                                                                                                                    |
 
 ## Cross-Module Invariants
 
@@ -2303,7 +2303,7 @@ carve-out: a To Do card with a start saga IN FLIGHT (or already carrying provisi
 from one) is treated like a card past To Do — never removed, only flagged — because removing it
 mid-saga would orphan a live `claude` session and its worktrees with no card to reach them; an
 Inbox card is structurally never mid-saga (no session can start from Inbox), so the carve-out is a
-harmless no-op there. The muted "Gone from Linear" badge (`web/features/badges/GoneBadge.tsx`, shown
+harmless no-op there. The muted "Gone from Linear" badge (`web/components/badges/GoneBadge.tsx`, shown
 only on cards past To Do/Inbox) is INFORMATIONAL, not destructive: the issue disappearing from
 Linear on a card past that point is EXPECTED, so it uses muted text/border, never red.
 A card adopted from a local card on Sync to Linear (`mapping.ts#isAdopted`: its id differs from its
@@ -2311,7 +2311,7 @@ issue id) is the exception in To Do: its issue can sit outside the board filter,
 removes it. Like a card past To Do it joins the tracked query, is refreshed by id and is flagged
 gone only when that query requested it and did not get it back.
 
-**Sync-status precedence (`SYNC-04`).** The sidebar footer status (`web/features/nav/SyncStatus.tsx`) reports sync
+**Sync-status precedence (`SYNC-04`).** The sidebar footer status (`web/modules/shell/components/SyncStatus.tsx`, text and tone from `syncStatusView` in `web/modules/shell/domain/sync-status.ts`) reports sync
 freshness + connection health as TEXT only (no spinner — the board must feel instant), and its
 status copy follows a fixed precedence chain: `Disconnected` (red — a dropped SSE connection, the
 only destructive state) OUTRANKS the muted `stale` banner (last successful sync older than 2× the
@@ -2438,7 +2438,7 @@ gate, so an authenticated remote session can read and write the profile like a l
 
 **Status push (LOCAL-23).** A manual move (`POST /cards/:id/move`, including mirrored group members) and the start saga's To Do to In Progress push the matching Linear workflow state. The map lives in `sources.linear.stateMap` (team id to column to state id or `null` for "do not sync"), validated by `shared/linear-state-map.ts#parseStateMap` and served by `GET`/`PUT /api/config/linear-state-map`; `resolveTargetState` fills unmapped columns with type defaults (To Do the lowest unstarted state, In Progress and Needs Input the lowest started, Done the lowest completed, In Review and Parked do not sync). Settings edits it in the Sync filters tab (`features/settings/LinearStateMapSection.tsx`). `store.moveCardManual` returns the column changes it made, read inside its own mutation so two overlapping moves each record their own columns, and the route hands them to `services/orchestration/linear-outbound.ts#pushColumnChanges`, which queues the pushes off the request path, chained per card so two quick moves reach Linear in order; `start-session.ts#completeStartAndPush` snapshots the columns around `completeStart` (`snapshotColumns`, `columnChangesSince`). Agent-driven moves (`applyMarker`, `flipBack`) never push. A push is skipped when the target equals the card's `linearState` or `pendingState`. Success runs `issueUpdate` with the state (`LinearSource.updateState`), then `store.recordLinearPush` sets `linearState` and `pendingState { id, at }` and clears `linearError` in one mutation and a poll follows; `reconcile()` holds the pushed state against a different incoming one for 300000 ms or until Linear reports it, keeps a To Do card with a fresh hold or a queued push (`store.setPushing`), and `trackedIssueIds` tracks a held card. Failure leaves the column, `linearState` and `pendingState` as they were and sets `linearError` to "Linear state not updated. " plus the fixed outbound copy. Every attempt writes one `linear_state_pushed` activity event (reason: the state name or `failed: <copy>`).
 
-**Tickets page and Move to (LOCAL-42).** `#/tickets` (`features/tickets/TicketsPage.tsx`, a lazy chunk with its own bundle budget line) lists every Linear card on the wire (`lib/linear-state.ts#isTicketCard`: source linear and no group) ordered by priority then recency, grouped by status, priority, project, cycle, team or none (`features/tickets/ticket-rows.ts`, the choice kept in `localStorage` `dsp.tickets.groupBy`). Row actions and the j, k, Enter, e, o keys follow `ticket-actions.ts#ticketActionsFor`, which mirrors the move route guards (no Done for Inbox, grouped or starting cards). The detail panel's Move to select calls `POST /cards/:id/linear-state { stateId }`: `linear-outbound.ts#moveLinearState` refuses an unknown card (404), a non-Linear or teamless card (409) and a state outside the card's team (400) before any write, then `setLinearState` runs the same per-card push chain as a board move with the card's current column as both `fromCol` and `toCol`, so the column never changes; a failure answers 502 with the recorded card notice.
+**Tickets page and Move to (LOCAL-42).** `#/tickets` (`features/tickets/TicketsPage.tsx`, a lazy chunk with its own bundle budget line) lists every Linear card on the wire (`shared/linear-state.ts#isTicketCard`: source linear and no group) ordered by priority then recency, grouped by status, priority, project, cycle, team or none (`features/tickets/ticket-rows.ts`, the choice kept in `localStorage` `dsp.tickets.groupBy`). Row actions and the j, k, Enter, e, o keys follow `ticket-actions.ts#ticketActionsFor`, which mirrors the move route guards (no Done for Inbox, grouped or starting cards). The detail panel's Move to select calls `POST /cards/:id/linear-state { stateId }`: `linear-outbound.ts#moveLinearState` refuses an unknown card (404), a non-Linear or teamless card (409) and a state outside the card's team (400) before any write, then `setLinearState` runs the same per-card push chain as a board move with the card's current column as both `fromCol` and `toCol`, so the column never changes; a failure answers 502 with the recorded card notice.
 
 ### GitHub Source
 
@@ -3495,9 +3495,9 @@ The web UI has a dark and a light theme. The html element always carries `data-t
 
 ### Brand Marks
 
-Since 2026-09-30 (G9 Unit 3) a source shows as the mark of its product. `src/web/features/badges/brands/` holds six mark components and one shared shell, `MarkSvg.tsx`, that renders the svg element: a 24 viewBox, `width` and `height` from the one prop `size` (each mark component sets the default 16), `fill="currentColor"`, `aria-hidden` and not focusable. A mark holds shapes only. It takes no colour prop and holds no colour literal: the colour comes from `sourceAccent()` through `currentColor`, so `SOURCE_ACCENT` stays the single definition of a source colour (`NEW-24`), and no file of the `brands` folder names a source token.
+Since 2026-09-30 (G9 Unit 3) a source shows as the mark of its product. `src/web/components/icons/brands/` holds six mark components and one shared shell, `MarkSvg.tsx`, that renders the svg element: a 24 viewBox, `width` and `height` from the one prop `size` (each mark component sets the default 16), `fill="currentColor"`, `aria-hidden` and not focusable. A mark holds shapes only. It takes no colour prop and holds no colour literal: the colour comes from `sourceAccent()` through `currentColor`, so `SOURCE_ACCENT` stays the single definition of a source colour (`NEW-24`), and no file of the `brands` folder names a source token.
 
-`src/web/features/badges/source-mark.ts` maps a source id to its mark. The six product ids map to the marks; `agent`, `local` and `group` keep the lucide glyphs `Bot`, `FileText` and `Layers`. `sourceMark()` reads the map through an own-property check and answers the lucide `Tag` glyph for any other id, so an id from data that names a prototype key never reaches a component slot. `src/web/features/badges/source-mark.test.ts` asserts that the map and `SOURCE_ACCENT` hold the same keys. Brand marks reach the screen in two forms. On a tile: `SourceBadge.tsx` draws the 18px tile and carries the name of the source as its accessible name, and `SourceIcon.tsx` draws the 32px tile and is decorative. With no tile: the six Sources rows of the sidebar (`NavRow.tsx`) and the source nodes and rows of the Flow page (`FlowDiagram.tsx`, `FlowNarrow.tsx`) show the bare mark in the colour of the source.
+`src/web/components/badges/source-mark.ts` maps a source id to its mark. The six product ids map to the marks; `agent`, `local` and `group` keep the lucide glyphs `Bot`, `FileText` and `Layers`. `sourceMark()` reads the map through an own-property check and answers the lucide `Tag` glyph for any other id, so an id from data that names a prototype key never reaches a component slot. `src/web/components/badges/source-mark.test.ts` asserts that the map and `SOURCE_ACCENT` hold the same keys. Brand marks reach the screen in two forms. On a tile: `SourceBadge.tsx` draws the 18px tile and carries the name of the source as its accessible name, and `SourceIcon.tsx` draws the 32px tile and is decorative. With no tile: the six Sources rows of the sidebar (`NavIcon.tsx` in the shell module) and the source nodes and rows of the Flow page (`FlowDiagram.tsx`, `FlowNarrow.tsx`) show the bare mark in the colour of the source.
 
 Each mark names an integration and nothing else, with one case to know: the Granola mark stands for the source id `meeting`, and a pasted meeting note carries the same id, so it shows the mark too; the name of that badge reads "Meeting". The table is the record of where every path comes from; a tsx file carries no comment, so the record lives here.
 
@@ -3532,7 +3532,7 @@ shadow value is the regression the gate catches, not an additional consumer of t
 
 Since 2026-09-29 (G9 Unit 1) the light block of `tokens.css` declares `--shadow-float` a second time, with a lighter value for the light theme (decision U1-07). The invariant does not change: the token keeps one name and one definition for each theme, and no file outside `tokens.css` holds a shadow literal.
 
-**One wordmark definition (`NEW-17`).** `wordmarkStyle` in `src/web/primitives/Glyph.tsx` is the
+**One wordmark definition (`NEW-17`).** `wordmarkStyle` in `src/web/components/icons/Glyph.tsx` is the
 only place the DISPATCH wordmark's type treatment (size, weight, letter-spacing) is written down.
 Every site that renders the wordmark imports it rather than repeating the values inline.
 `src/web/**/*.tsx` carries zero comments by this repo's comment standard (`docs/standards/comments.md`
@@ -3591,7 +3591,7 @@ definition of "which colour a column renders" is `COLUMN_ACCENT` in
 `src/web/features/board/column-meta.ts` (consumed by `Column.tsx`, `SearchBox.tsx` and
 `StatusPillSwitcher.tsx`), and the single definition of "which colour a priority renders" is
 `PRIORITY_DOT` in `src/web/features/board/CardView.tsx`, and the single definition of "which colour
-a source renders" is `SOURCE_ACCENT` in `src/web/features/badges/source-accent.ts` (consumed by
+a source renders" is `SOURCE_ACCENT` in `src/web/components/badges/source-accent.ts` (consumed by
 `SourceBadge.tsx`, `SourceIcon.tsx`, the sidebar, the Flow page and the setup map through
 `sourceAccent()`; `local` and `group` map to the neutral `--text-muted`; every `--src-*` entry must
 name a declared token, and no other file under `src/web` except `tokens.css` may reference a
@@ -3652,16 +3652,16 @@ link and license come from `web/lib/about-meta.ts`, which a test pins to `packag
 ### App Shell Zones
 
 **The two-column shell (reversed decision, 2026-09-23).** This section once recorded a written
-non-goal, "no persistent left sidebar", enforced by `AppShell.tsx` mounting exactly one chrome
+non-goal, "no persistent left sidebar", enforced by the old app shell mounting exactly one chrome
 container above `content` and `detail`. That non-goal was correct for a single-board product.
 Dispatch is becoming a multi-page developer dispatcher (`docs/research/dispatch-platform-plan.md`,
 section 1), so the decision was reversed the same way it was made, and LOCAL-35 shipped the shell
-it describes. `AppShell.tsx` renders two columns: the `nav` slot (the sidebar,
-`src/web/features/nav/SidebarNav.tsx`) and a main column holding a measured chrome wrapper (the
-`banner` slot for `UpdateBanner` and the `header` slot for the page's `PageHeader`,
-`src/web/primitives/PageHeader.tsx`) above the `content` slot. `detail` and `children` render after
+it describes. The shell now lives in `src/web/modules/shell/`. `ShellView` mounts the shadcn `Sidebar`
+(`components/AppSidebar.tsx`) and a main column. The main column holds a measured chrome wrapper (the
+`banner` slot for the update banner (`components/UpdateBanner.tsx`), a phone top bar, and the page's `PageHeader` in
+`components/PageHeader.tsx`) above the `content` slot. `detail` and `children` render after
 the columns exactly as before, so the detail panel's PANEL-03 no-remount rule is untouched. The
-slot list is `nav`, `banner`, `header` per page, `content`, `detail`. The sync strip and its mode
+slot list is sidebar, `banner`, `header` per page, `content`, `detail`. The sync strip and its mode
 control are gone: pages are chosen by hash route, parsed by `parseRoute` in `src/shared/route.ts`
 and owned by TanStack Router on hash history (`src/web/routes/`); `src/web/main.tsx` remembers the last route under
 `dsp.route` and maps the legacy `dsp.view` value once on first load. The sidebar dimensions
@@ -3677,29 +3677,27 @@ seven `--src-*` source colors and the "active sidebar row" accent job are ratifi
 - The root `beforeLoad` starts the board snapshot GET before it waits for setup, and only when no board snapshot query has data, is fetching or has failed. It never refetches a failed setup: an error state short-circuits to `setup: null`.
 - A transitional `AppState` context (`src/web/components/AppState.tsx`) carries one prop object per page to the route files (R-15). Ticket 16 removes it.
 
-**Two custom properties carry the shell's geometry to the detail panel.** `AppShell.tsx` sets
-`--nav-current` (the live sidebar width: `var(--nav-width)`, `var(--nav-width-collapsed)`, or `0px`
-when the sidebar becomes a top bar) and `--chrome-top` (the measured height of the banner plus the
-page header, via `useChromeHeight`) inline on its root. The docked (Orca) `DetailPanel.tsx` reads
+**Two custom properties carry the shell's geometry to the detail panel.** `components/ShellFrame.tsx`
+sets `--nav-current` (the live sidebar width: `var(--nav-width)`, `var(--nav-width-collapsed)`, or `0px`
+when the sidebar becomes a phone sheet) with classes on its root element. The hook
+`hooks/use-chrome-top.ts` sets `--chrome-top` (the measured height of the top bar, banner and
+page header) on the same element with `style.setProperty`. The docked (Orca) `DetailPanel.tsx` reads
 both: `top: var(--chrome-top)`, `left: calc(var(--nav-current, 0px) + var(--orca-nav-width))` and
 `width: calc(100% - var(--nav-current, 0px) - var(--orca-nav-width))`, so collapsing the sidebar
 shifts the docked panel by style values alone and never remounts the terminal iframe. Measured at
 1280px with the sidebar expanded: left 520, top 52, width 760, right edge 1280.
 
-**The active row indicator is one element.** `SidebarNav.tsx` renders every row through a memoized
-`NavRow` (`src/web/features/nav/NavRow.tsx`) that never paints its own active background. One
-absolutely positioned element inside the rows container carries the tint
-(`color-mix(in srgb, var(--accent) 16%, var(--surface-column))`, the formula the inbox count badge
-and the session switcher already use) and is translated by the active row's `offsetTop`, read from
-a per-row ref map in a layout effect when the route, the collapsed state or the visible rows change. Switching pages
-moves one transform and re-renders no row; the active row only changes its text color to
-`var(--accent)`, the "active sidebar row" accent job. Rows are 32px tall, take keyboard focus
-through `focusRing()` only, and expose `aria-current="page"`. Groups with no rows are omitted.
+**The active row carries its own tint.** `AppSidebar.tsx` renders each row as a shadcn
+`SidebarMenuButton`. The active row (`data-active="true"`) takes the tint
+`color-mix(in srgb, var(--accent) 16%, var(--surface-column))`, the formula the inbox count badge
+and the session switcher already use, and its text color becomes `var(--accent-text)`, the "active
+sidebar row" accent job. The tint does not slide between rows. Rows are 32px tall, take keyboard focus
+through the outline of the primitive only, and expose `aria-current="page"`. Groups with no rows are omitted.
 Sources holds one row, Meetings, and stays present because the paste flow needs no connection.
 
 **A nav row tied to a source shows only while that source is enabled.** `NavItem` has an optional
-`source`; `visibleNavItems(NAV_ITEMS, board.enabledSources)` in `nav-items.ts` drops a row whose
-source is not enabled and keeps every row without one. `SidebarNav` derives its groups from that
+`source`; `visibleNavItems(NAV_ITEMS, board.enabledSources)` in `modules/shell/domain/nav-items.ts` drops a row whose
+source is not enabled and keeps every row without one. `AppSidebar` derives its groups from that
 list, and `App.tsx` passes the same list to `buildCommands`, so the palette's "Go to" command
 follows the same rule. Only the Slack row (last in Sources, with the unread non-done Slack count)
 carries a source today; every other row is always present.
@@ -3707,24 +3705,24 @@ carries a source today; every other row is always present.
 **The footer status truncation chain moved with the status.** The sync status is the sidebar's only
 elastic text and the one piece that can be arbitrarily long (the server-supplied `syncWarning` has
 no length bound), so it still yields by truncating to one ellipsized line rather than wrapping or
-unmounting: `src/web/features/nav/SyncStatus.tsx` keeps `minWidth: 0`, `whiteSpace: "nowrap"`,
-`overflow: "hidden"` and `textOverflow: "ellipsis"` on the `role="status" aria-live="polite"`
-region, the dot keeps `flex: "0 0 auto"`, and when the sidebar is collapsed the text stays in the
-DOM visually hidden (a 1px clip) so the live region's `textContent` is always the complete string.
+unmounting: `src/web/modules/shell/components/SyncStatus.tsx` keeps `min-w-0`, `whitespace-nowrap`
+and `truncate` on the `role="status" aria-live="polite"` region, the dot keeps `shrink-0`, and when
+the sidebar is collapsed the text stays in the DOM with the `sr-only` class so the live region's
+`textContent` is always the complete string.
 The status precedence itself is unchanged and homed by `SYNC-04` above. The footer, top to bottom:
-sync status, the account usage chip (always compact at this width), New ticket (a contained
-`<button>` composed locally, for the same resting-fill-plus-hover reason the strip once recorded:
-neither `Button.tsx` nor `IconButton.tsx` can express a resting `--surface-card` fill that also
-lifts on hover), the Activity drawer toggle (`id="activity-toggle"`, the drawer's focus-return
-target) beside the collapse toggle, and the Settings row.
+sync status, the account usage chip (always compact at this width), New ticket (an outline `Button`
+with a `--surface-card` resting fill that lifts to `--surface-card-hover`), the Activity drawer toggle
+(`id="activity-toggle"`, the drawer's focus-return target) beside the collapse toggle, and the
+Settings row.
 
-**Responsive rule.** At or below 1023px (`CAROUSEL_QUERY`, the breakpoint the board carousel and
+**Responsive rule.** At or below 1023px (the breakpoint the board carousel and
 the detail-panel takeover already share) the sidebar renders collapsed regardless of the
-remembered `dsp.nav` value. Below 768px the sidebar leaves the layout: the main column gains a 44px
-top bar (glyph, page title, menu button) and the same `SidebarNav` renders inside a left sheet
-with a scrim, closed by Escape or a row click, with focus returned to the menu button, following
-the `ActivityDrawer` pattern. `--nav-current` is `0px` in that mode so the docked panel spans the
-viewport. The pure decision is `effectiveNavState(stored, carousel, narrow)`. At the same breakpoint the Settings section nav changes from a vertical rail to a horizontal
+remembered `dsp.nav` value. The pure decision is `sidebarOpen(stored, carousel)` in
+`modules/shell/domain/nav-open.ts`. Below 768px the sidebar leaves the layout: the main column gains a 44px
+top bar (glyph, page title, menu button) and the same `AppSidebar` renders inside the left sheet of the
+shadcn `Sidebar`, closed by Escape, the scrim or a row click, with focus returned to the menu button
+by `hooks/use-menu-focus-return.ts`. `--nav-current` is `0px` in that mode so the docked panel spans the
+viewport. At the same breakpoint the Settings section nav changes from a vertical rail to a horizontal
 scrolling strip above the content (`SettingsScreen.tsx`, the "Settings section nav" row of
 `docs/standards/design-contract.md#chrome-dimensions`).
 
@@ -3750,9 +3748,9 @@ open; a meta binding fires only with Cmd or Ctrl and never with Shift. The globa
 inert while the Activity drawer or the nav sheet is open and before setup finishes, and the board
 keys are inert while the undocked detail panel is open. Closing the palette, the cheat sheet or
 New ticket returns focus to the element that had it, unless a palette command ran.
-The palette (`features/palette/CommandPalette.tsx`) is a Modal, so its Escape and focus trap sit in
-the modal stack; its commands come from `buildCommands` in `src/web/lib/commands.ts` over the
-card actions in `src/web/lib/actions.ts`. The cheat sheet renders the four tables, so a binding
+The palette (`modules/shell/components/CommandPalette.tsx`) is a shadcn `Dialog` over `cmdk`, so its
+Escape and focus trap come from Radix; its commands come from `buildCommands` in
+`src/web/modules/shell/domain/commands.ts`, which calls the handlers that `App.tsx` passes in. The cheat sheet renders the four tables, so a binding
 cannot ship without its row. The sidebar sits above the detail panel scrim, and a change to any
 page other than Workspace closes the undocked panel, so one sidebar click navigates.
 

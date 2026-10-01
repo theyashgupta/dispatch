@@ -185,7 +185,7 @@ Each source page is one list of items filtered by `source`, with a page-specific
 
 Additions to `tokens.css`, ratified in `design-contract.md` first:
 
-- per-source colors `--src-github`, `--src-linear`, `--src-slack`, `--src-sentry`, `--src-meeting`, `--src-calendar`, `--src-agent`, consumed only through one `SOURCE_ACCENT` map in `features/badges/` (extends the NEW-24 single-source rule to sources);
+- per-source colors `--src-github`, `--src-linear`, `--src-slack`, `--src-sentry`, `--src-meeting`, `--src-calendar`, `--src-agent`, consumed only through one `SOURCE_ACCENT` map in `components/badges/` (extends the NEW-24 single-source rule to sources);
 - `--nav-width`, `--nav-width-collapsed`, `--page-header-height`;
 - a fourth surface for pills and inputs, `--surface-inset`, if the contract agrees a fourth level is needed (fldsmdpr uses four);
 - one new accent job, "active sidebar row", added to the accent role list in `design-contract.md`. The contract reserves the accent for a fixed list of jobs, so the addition is ratified there before any component uses it.

@@ -26,7 +26,7 @@ The legacy tree has these parts:
 
 - `src/web/features/`, `src/web/primitives/` and `src/web/hooks/`
 - every other file in `src/web/lib/`, such as `api.ts` and the `format-*.ts` helpers. `route.ts` moved to `src/shared/route.ts`
-- `src/web/viewer/` and the web root entry files: `main.tsx`, `App.tsx`, `AppShell.tsx`, `viewer-main.tsx` and the HTML entries
+- `src/web/viewer/` and the web root entry files: `main.tsx`, `App.tsx`, `viewer-main.tsx` and the HTML entries
 
 The legacy tree stays until ticket 16. The section "Legacy tree during transition" gives its rules.
 
@@ -145,7 +145,7 @@ Theme facts:
 
 1. The shadcn name `accent` maps to the card hover surface. The shadcn name `ring` maps to the Dispatch accent token, the focus outline colour. The accent token in `tokens.css` keeps the jobs that `design-contract.md` lists for it.
 2. The Tailwind `dark` variant matches `[data-theme="dark"]`. One `:root` block maps each shadcn name to a token.
-3. The main app loads Tailwind without preflight until ticket 9 (the shadcn shell). The gallery page loads preflight for itself only.
+3. The main app loads Tailwind without preflight until ticket 16 (R-17). The gallery page loads preflight for itself only.
 4. Forms use the shadcn Field component. Do not use the registry Form component.
 
 ## Allowed custom families
