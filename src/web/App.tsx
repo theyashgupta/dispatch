@@ -10,16 +10,12 @@ import {
   type CSSProperties,
   useMemo,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
-  applyActivityEvent,
-  applyBoardSnapshot,
-  applyTunnelState,
+  boardSnapshotQueryOptions,
+  latestBoard,
+  useBoardLiveUpdates,
 } from "./queries/board-snapshot-queries.js";
-import {
-  useBoardStream,
-  type ConnectionStatus,
-} from "./hooks/useBoardStream.js";
 import { useActivityFeed } from "./hooks/useActivityFeed.js";
 import {
   isUnseen,
@@ -43,8 +39,20 @@ import {
   useMediaQuery,
 } from "./hooks/useMediaQuery.js";
 import { PageHeader } from "./primitives/PageHeader.js";
-import { pendingRestore, useRoute } from "./hooks/useRoute.js";
-import type { Page } from "./lib/route.js";
+import {
+  useLocation,
+  useRouteContext,
+  useRouter,
+  useRouterState,
+  Outlet,
+} from "@tanstack/react-router";
+import {
+  routeFromMatch,
+  routeHash,
+  type Page,
+  type Route,
+} from "../shared/route.js";
+import { AppStateProvider, type AppPages } from "./components/AppState.js";
 import { useNavState } from "./hooks/useNavState.js";
 import { useTheme } from "./hooks/useTheme.js";
 import { UsageChip } from "./features/accounts/index.js";
@@ -53,7 +61,6 @@ import { Glyph, wordmarkStyle } from "./primitives/Glyph.js";
 import {
   actionablePinnedCard,
   actionablePinnedMembers,
-  Board,
   inboxWaitingCount,
   membersOf,
   type PinnedCard,
@@ -62,7 +69,6 @@ import {
 import { DetailPanel } from "./features/detail/index.js";
 import {
   ActivityDrawer,
-  ActivityPage,
   type ActivityFilter,
 } from "./features/activity/index.js";
 import {
@@ -73,7 +79,6 @@ import {
   CreateTicketModal,
   MultiSelect,
 } from "./features/modals/index.js";
-import { settingsTabFrom } from "./lib/settings-tab.js";
 import { SetupWizard } from "./features/setup/index.js";
 import { Toast } from "./primitives/Toast.js";
 import { Spinner } from "./primitives/Spinner.js";
@@ -130,66 +135,18 @@ import type { StartRequest } from "./lib/start-request.js";
 import { meetingNotice } from "./lib/meetings.js";
 import { formatSize } from "./lib/format-size.js";
 import type { WorkspacesSummary } from "./features/workspaces/index.js";
-import type { SetupChecks, TunnelState, WorktreeRow } from "../shared/types.js";
+import type {
+  BoardSnapshot,
+  ConnectionStatus,
+  SetupChecks,
+  TunnelState,
+  WorktreeRow,
+} from "../shared/types.js";
 import type { CardSearchResult } from "../shared/search.js";
 import { DONE_PAGE_SIZE } from "../shared/done-limit.js";
 
 import { isTicketCard } from "./lib/linear-state.js";
 
-const InboxView = lazy(() =>
-  import("./features/inbox/index.js").then((m) => ({ default: m.InboxView })),
-);
-const TicketsPage = lazy(() =>
-  import("./features/tickets/index.js").then((m) => ({
-    default: m.TicketsPage,
-  })),
-);
-const OrcaView = lazy(() =>
-  import("./features/orca/index.js").then((m) => ({ default: m.OrcaView })),
-);
-const SettingsScreen = lazy(() =>
-  import("./features/settings/index.js").then((m) => ({
-    default: m.SettingsScreen,
-  })),
-);
-const AccountsPage = lazy(() =>
-  import("./features/accounts/index.js").then((m) => ({
-    default: m.AccountsPage,
-  })),
-);
-const PlaybooksPage = lazy(() =>
-  import("./features/playbooks/index.js").then((m) => ({
-    default: m.PlaybooksPage,
-  })),
-);
-const VaultPage = lazy(() =>
-  import("./features/vault/index.js").then((m) => ({
-    default: m.VaultPage,
-  })),
-);
-const PullRequestsPage = lazy(() =>
-  import("./features/pull-requests/index.js").then((m) => ({
-    default: m.PullRequestsPage,
-  })),
-);
-const ErrorsPage = lazy(() =>
-  import("./features/errors/index.js").then((m) => ({
-    default: m.ErrorsPage,
-  })),
-);
-const TodayPage = lazy(() =>
-  import("./features/today/index.js").then((m) => ({
-    default: m.TodayPage,
-  })),
-);
-const SlackPage = lazy(() =>
-  import("./features/slack/index.js").then((m) => m.loadSlackPage()),
-);
-const SessionsPage = lazy(() =>
-  import("./features/sessions/index.js").then((m) => ({
-    default: m.SessionsPage,
-  })),
-);
 const CommandPalette = lazy(() =>
   import("./features/palette/index.js").then((m) => ({
     default: m.CommandPalette,
@@ -200,36 +157,10 @@ const MeetingNotesModal = lazy(() =>
     default: m.MeetingNotesModal,
   })),
 );
-const MeetingsPage = lazy(() =>
-  import("./features/meetings/index.js").then((m) => ({
-    default: m.MeetingsPage,
-  })),
-);
-const CalendarPage = lazy(() =>
-  import("./features/calendar/index.js").then((m) => ({
-    default: m.CalendarPage,
-  })),
-);
 const CheatSheet = lazy(() =>
   import("./features/palette/index.js").then((m) => ({
     default: m.CheatSheet,
   })),
-);
-const ArchivePage = lazy(() =>
-  import("./features/archive/index.js").then((m) => ({
-    default: m.ArchivePage,
-  })),
-);
-const WorkspacesPage = lazy(() =>
-  import("./features/workspaces/index.js").then((m) => ({
-    default: m.WorkspacesPage,
-  })),
-);
-const AskPage = lazy(() =>
-  import("./features/ask/index.js").then((m) => ({ default: m.AskPage })),
-);
-const FlowPage = lazy(() =>
-  import("./features/flow/index.js").then((m) => ({ default: m.FlowPage })),
 );
 
 const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
@@ -294,7 +225,7 @@ class PageErrorBoundary extends Component<
   }
 }
 
-function PageFallback() {
+export function PageFallback() {
   return (
     <div
       role="status"
@@ -311,7 +242,7 @@ function PageFallback() {
   );
 }
 
-function BootScreen({ connection }: { connection: ConnectionStatus }) {
+export function BootScreen({ connection }: { connection: ConnectionStatus }) {
   const statusText =
     connection === "disconnected"
       ? "Disconnected, reconnecting…"
@@ -356,11 +287,29 @@ function BootScreen({ connection }: { connection: ConnectionStatus }) {
   );
 }
 
+function useCommittedRoute(): Route {
+  const leaf = useRouterState({ select: (s) => s.matches.at(-1) });
+  const pathname = useLocation({ select: (l) => l.pathname });
+  return routeFromMatch(leaf, pathname);
+}
+
 export function App() {
   const feed = useActivityFeed();
   const claudeAccounts = useClaudeAccounts();
   const ask = useAsk();
-  const { route, navigate } = useRoute();
+  const router = useRouter();
+  const route = useCommittedRoute();
+  const currentPage = route.page;
+  const { setup } = useRouteContext({ from: "__root__" });
+  const navigate = useCallback(
+    (page: Page, id?: string, options?: { replace?: boolean }) => {
+      void router.navigate({
+        href: routeHash({ page, id }).slice(1),
+        replace: options?.replace,
+      });
+    },
+    [router],
+  );
   const nav = useNavState();
   const { preference: themePreference, setPreference: setThemePreference } =
     useTheme();
@@ -389,13 +338,10 @@ export function App() {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [pinned, setPinned] = useState<PinnedCard | null>(null);
   const [pinnedHydrating, setPinnedHydrating] = useState(false);
-  const [panelRoute, setPanelRoute] = useState(() => ({
-    page: route.page,
-    restoring: pendingRestore(),
-  }));
-  if (panelRoute.page !== route.page) {
-    setPanelRoute({ page: route.page, restoring: false });
-    if (!panelRoute.restoring && route.page !== "workspace") {
+  const [panelPage, setPanelPage] = useState(route.page);
+  if (panelPage !== route.page) {
+    setPanelPage(route.page);
+    if (route.page !== "workspace") {
       setSelectedCardId(null);
       setPinned(null);
       setPinnedHydrating(false);
@@ -406,18 +352,14 @@ export function App() {
     kind: "not-found" | "network";
   } | null>(null);
   const pinFetchGenRef = useRef(0);
-  const queryClient = useQueryClient();
-  const { board, connection } = useBoardStream(doneLimit, {
+  const { connection } = useBoardLiveUpdates(doneLimit, {
     onActivity: (event) => {
       feed.append(event);
-      applyActivityEvent(queryClient, event);
     },
     onTunnelState: (state) => {
       setTunnelState(state);
-      applyTunnelState(queryClient, state);
     },
     onBoardUpdate: (snapshot) => {
-      applyBoardSnapshot(queryClient, doneLimit, snapshot);
       if (selectedCardId == null) return;
       const live = snapshot.cards.find((card) => card.id === selectedCardId);
       if (live != null)
@@ -428,6 +370,13 @@ export function App() {
         });
     },
   });
+  const boardQuery = useQuery({
+    ...boardSnapshotQueryOptions(doneLimit),
+    placeholderData: keepPreviousData,
+  });
+  const lastBoard = useRef<BoardSnapshot | null>(null);
+  const board = latestBoard(boardQuery.data, lastBoard.current);
+  lastBoard.current = board;
 
   const [activityOpen, setActivityOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -475,7 +424,7 @@ export function App() {
       window.location.pathname +
       (search ? `?${search}` : "") +
       window.location.hash;
-    window.history.replaceState(null, "", next);
+    window.history.replaceState(window.history.state, "", next);
   }, []);
 
   useEffect(() => {
@@ -495,8 +444,8 @@ export function App() {
 
   const lastOpened = useLastOpened();
   useEffect(() => {
-    if (route.page === "activity") stampLastOpened("__feed__");
-  }, [route.page, feed.events.length]);
+    if (currentPage === "activity") stampLastOpened("__feed__");
+  }, [currentPage, feed.events.length]);
   useEffect(() => {
     if (navMode !== "topbar") setSheetOpen(false);
   }, [navMode]);
@@ -826,9 +775,10 @@ export function App() {
       if (ran !== true && target?.isConnected === true) target.focus();
     };
 
-  const [setupWizardOpen, setSetupWizardOpen] = useState(false);
-  const [setupLoaded, setSetupLoaded] = useState(false);
-  const [setupChecks, setSetupChecks] = useState<SetupChecks | null>(null);
+  const [setupWizardOpen, setSetupWizardOpen] = useState(
+    () => setup != null && shouldOpenSetupWizard(setup),
+  );
+  const [setupChecks, setSetupChecks] = useState<SetupChecks | null>(setup);
   const [setupRuns, setSetupRuns] = useState(0);
   useShortcuts(
     bindShortcuts(GLOBAL_SHORTCUTS, {
@@ -837,38 +787,17 @@ export function App() {
       "?": openOverlay(setShortcutsOpen),
     }),
     {
-      menuOpen:
-        activityOpen ||
-        sheetOpen ||
-        board === null ||
-        !setupLoaded ||
-        setupWizardOpen,
+      menuOpen: activityOpen || sheetOpen || board === null || setupWizardOpen,
       scopeId: "root",
     },
   );
   useEffect(() => {
-    let active = true;
-    void getSetup()
-      .then((s) => {
-        if (!active) return;
-        setSetupChecks(s);
-        setSetupWizardOpen(shouldOpenSetupWizard(s));
-        if (shouldMarkOnboardingDone(s)) {
-          void markOnboardingDone().catch((err: unknown) => {
-            console.error("markOnboardingDone failed", err);
-          });
-        }
-      })
-      .catch((err: unknown) => {
-        console.error("getSetup failed", err);
-      })
-      .finally(() => {
-        if (active) setSetupLoaded(true);
+    if (setup != null && shouldMarkOnboardingDone(setup)) {
+      void markOnboardingDone().catch((err: unknown) => {
+        console.error("markOnboardingDone failed", err);
       });
-    return () => {
-      active = false;
-    };
-  }, []);
+    }
+  }, [setup]);
 
   const openSetupWizard = async (): Promise<boolean> => {
     try {
@@ -888,10 +817,6 @@ export function App() {
       console.error("markOnboardingDone failed", err);
     });
   };
-
-  if (!setupLoaded) {
-    return <BootScreen connection={connection} />;
-  }
 
   if (board === null) {
     return <BootScreen connection={connection} />;
@@ -950,6 +875,136 @@ export function App() {
   };
   const pageTitle = pageMeta[route.page].title;
 
+  const pages: AppPages = {
+    workspace: {
+      board,
+      selectedCardId: selectedCard ? selectedCardId : null,
+      onSelectCard: selectCard,
+    },
+    "pull-requests": {
+      board,
+      items,
+      onSelect: (key) =>
+        navigate("pull-requests", key ?? undefined, { replace: true }),
+      onMarkRead: (id) => void setItemState(id, "read"),
+      onNotice: showNotice,
+      onStartAgent: (row, prompt) =>
+        void startAgent({ itemId: row.itemId, cardId: row.cardId }, prompt),
+    },
+    errors: {
+      board,
+      items,
+      onSelect: (key) =>
+        navigate("errors", key ?? undefined, { replace: true }),
+      onMarkRead: (id) => void setItemState(id, "read"),
+      onNotice: showNotice,
+      onStartAgent: (row, prompt, context) =>
+        void startAgent(
+          { itemId: row.itemId, cardId: row.cardId },
+          prompt,
+          context,
+        ),
+    },
+    today: {
+      board,
+      items: inboxItems,
+      onSelectCard: selectCard,
+      onNavigate: navigate,
+    },
+    slack: {
+      board,
+      rows: slack,
+      onSelect: (id) => navigate("slack", id ?? undefined, { replace: true }),
+      onMarkRead: (id) =>
+        void setItemState(id, "read").catch(() =>
+          showNotice("Couldn't mark it read."),
+        ),
+      services: actionServices,
+    },
+    inbox: {
+      board,
+      items: inboxRows,
+      selectedCardId: selectedCard ? selectedCardId : null,
+      onSelectCard: selectCard,
+      services: actionServices,
+    },
+    tickets: {
+      board,
+      selectedCardId: selectedCard ? selectedCardId : null,
+      onSelectCard: selectCard,
+      onStartRequest: requestStart,
+      onMoveCard: moveCard,
+      onNotice: showNotice,
+    },
+    settings: {
+      onTabChange: (tab) => navigate("settings", tab, { replace: true }),
+      onOpenPage: (page) => navigate(page),
+      onSaved: () => notifyCleanupOutcome("Settings saved."),
+      tunnelState,
+      soundEnabled,
+      onToggleSound: setSoundEnabled,
+      themePreference,
+      onThemePreferenceChange: setThemePreference,
+      onRunSetup: openSetupWizard,
+      connectionKey: setupRuns,
+      errorsInFeeds,
+      onToggleErrorsInFeeds: setErrorsInFeeds,
+    },
+    activity: {
+      events: feed.events,
+      identifiers: cardIdentifiers,
+      filter: activityFilter,
+      onSelectCard: selectCard,
+    },
+    accounts: { claudeAccounts },
+    sessions: {
+      board,
+      selectedCardId: selectedCard ? selectedCardId : null,
+      onSelectCard: selectCard,
+      services: actionServices,
+    },
+    archive: { onCountChange: setArchiveCount },
+    playbooks: {
+      createRequest: playbookCreateRequest,
+      onCountChange: setPlaybookCount,
+    },
+    vault: { onCountChange: setVaultCount },
+    calendar: {
+      items,
+      cards: board.cards,
+      services: actionServices,
+      onStartPromoted: (cardId) => setStartRequest({ cardId }),
+      onOpenSettings: () => navigate("settings"),
+    },
+    meetings: {
+      items: meetingItems,
+      onSelect: (id) => navigate("meetings", id ?? undefined),
+      onOpenMeetingNotes: openOverlay(setMeetingNotesOpen),
+      services: actionServices,
+      onStartPromoted: (cardId) => setStartRequest({ cardId }),
+    },
+    workspaces: {
+      board,
+      onSummaryChange: setWorkspacesSummary,
+      onOpenCard: openWorktreeCard,
+      onCleanupRequest: requestWorktreeCleanup,
+    },
+    ask: { onPrefillConsumed: consumeAskPrefill },
+    flow: { board, onOpenList: () => navigate("inbox") },
+    board: {
+      board,
+      selectedCardId: selectedCard ? selectedCardId : null,
+      onSelectCard: selectCard,
+      onStartRequest: requestStart,
+      onEditPlaybooks: () => navigate("playbooks"),
+      onOpenInbox: () => navigate("inbox"),
+      doneTotal: board?.doneCounts?.total,
+      doneLimit,
+      onLoadMoreDone: () => setDoneLimit((n) => n + DONE_PAGE_SIZE),
+      onSelectSearchResult: selectSearchResult,
+    },
+  };
+
   const sidebar = (
     <SidebarNav
       route={route}
@@ -995,18 +1050,18 @@ export function App() {
       title={pageTitle}
       count={pageMeta[route.page].count}
       actions={
-        route.page === "playbooks" ? (
+        currentPage === "playbooks" ? (
           <Button
             variant="primary"
             onClick={() => setPlaybookCreateRequest((n) => n + 1)}
           >
             New playbook
           </Button>
-        ) : route.page === "meetings" ? (
+        ) : currentPage === "meetings" ? (
           <Button variant="primary" onClick={openOverlay(setMeetingNotesOpen)}>
             From meeting notes
           </Button>
-        ) : route.page === "activity" ? (
+        ) : currentPage === "activity" ? (
           <>
             <select
               aria-label="Filter by card"
@@ -1042,14 +1097,14 @@ export function App() {
               }
             />
           </>
-        ) : route.page === "workspaces" && workspacesSummary ? (
+        ) : currentPage === "workspaces" && workspacesSummary ? (
           <span style={headerNoteStyle}>
             {`${formatSize(workspacesSummary.totalKb)} on disk`}
             {workspacesSummary.unknownSizes > 0
               ? ` (${workspacesSummary.unknownSizes} unknown)`
               : ""}
           </span>
-        ) : route.page === "ask" ? (
+        ) : currentPage === "ask" ? (
           <Button
             disabled={ask.turns.length === 0 && ask.pending === null}
             onClick={ask.clear}
@@ -1062,362 +1117,195 @@ export function App() {
   );
 
   return (
-    <AppShell
-      navWidth={
-        navMode === "topbar"
-          ? "0px"
-          : navMode === "collapsed"
-            ? "var(--nav-width-collapsed)"
-            : "var(--nav-width)"
-      }
-      nav={navMode === "topbar" ? null : sidebar}
-      contentInert={navMode === "topbar" && sheetOpen}
-      topBar={
-        navMode === "topbar" ? (
-          <TopBar
-            title={pageTitle}
-            menuOpen={sheetOpen}
-            onOpenMenu={() => setSheetOpen(true)}
+    <AppStateProvider value={pages}>
+      <AppShell
+        navWidth={
+          navMode === "topbar"
+            ? "0px"
+            : navMode === "collapsed"
+              ? "var(--nav-width-collapsed)"
+              : "var(--nav-width)"
+        }
+        nav={navMode === "topbar" ? null : sidebar}
+        contentInert={navMode === "topbar" && sheetOpen}
+        topBar={
+          navMode === "topbar" ? (
+            <TopBar
+              title={pageTitle}
+              menuOpen={sheetOpen}
+              onOpenMenu={() => setSheetOpen(true)}
+            />
+          ) : null
+        }
+        banner={<UpdateBanner />}
+        header={pageHeader}
+        content={
+          <PageErrorBoundary key={route.page}>
+            <Outlet />
+          </PageErrorBoundary>
+        }
+        detail={
+          <DetailPanel
+            accounts={claudeAccounts.accounts}
+            card={selectedCard}
+            hydrating={pinnedHydrating && !selectedCardInWindow}
+            pinFetchError={pinFetchErrorKind}
+            onRetryPinFetch={() => {
+              if (selectedCardId != null) hydratePinned(selectedCardId);
+            }}
+            editors={board?.editors}
+            activityEvents={feed.events}
+            cardIdentifiers={cardIdentifiers}
+            members={selectedCardMembers}
+            membersActionable={membersActionable}
+            onClose={() => {
+              setSelectedCardId(null);
+              setPinned(null);
+              setPinnedHydrating(false);
+            }}
+            onStartRequest={requestStart}
+            onCleanupRequest={setCleanupCardId}
+            onUnwindRequest={requestUnwind}
+            onResetRequest={setResetCardId}
+            onSyncRequest={setSyncCardId}
+            onAskRequest={(card) =>
+              askAbout(
+                askAboutQuestion({
+                  kind: "card",
+                  identifier: card.identifier,
+                  title: card.title,
+                }),
+              )
+            }
+            docked={currentPage === "workspace"}
           />
-        ) : null
-      }
-      banner={<UpdateBanner />}
-      header={pageHeader}
-      content={
-        <PageErrorBoundary key={route.page}>
-          <Suspense fallback={<PageFallback />}>
-            {route.page === "workspace" ? (
-              <OrcaView
-                board={board}
-                selectedCardId={selectedCard ? selectedCardId : null}
-                onSelectCard={selectCard}
-              />
-            ) : route.page === "pull-requests" ? (
-              <PullRequestsPage
-                board={board}
-                items={items}
-                selectedKey={route.id ?? null}
-                onSelect={(key) =>
-                  navigate("pull-requests", key ?? undefined, { replace: true })
-                }
-                onMarkRead={(id) => void setItemState(id, "read")}
-                onNotice={showNotice}
-                onStartAgent={(row, prompt) =>
-                  void startAgent(
-                    { itemId: row.itemId, cardId: row.cardId },
-                    prompt,
-                  )
-                }
-              />
-            ) : route.page === "errors" ? (
-              <ErrorsPage
-                board={board}
-                items={items}
-                selectedKey={route.id ?? null}
-                onSelect={(key) =>
-                  navigate("errors", key ?? undefined, { replace: true })
-                }
-                onMarkRead={(id) => void setItemState(id, "read")}
-                onNotice={showNotice}
-                onStartAgent={(row, prompt, context) =>
-                  void startAgent(
-                    { itemId: row.itemId, cardId: row.cardId },
-                    prompt,
-                    context,
-                  )
-                }
-              />
-            ) : route.page === "today" ? (
-              <TodayPage
-                board={board}
-                items={inboxItems}
-                onSelectCard={selectCard}
-                onNavigate={navigate}
-              />
-            ) : route.page === "slack" ? (
-              <SlackPage
-                board={board}
-                rows={slack}
-                selectedId={route.id ?? null}
-                onSelect={(id) =>
-                  navigate("slack", id ?? undefined, { replace: true })
-                }
-                onMarkRead={(id) =>
-                  void setItemState(id, "read").catch(() =>
-                    showNotice("Couldn't mark it read."),
-                  )
-                }
-                services={actionServices}
-              />
-            ) : route.page === "inbox" ? (
-              <InboxView
-                board={board}
-                items={inboxRows}
-                selectedCardId={selectedCard ? selectedCardId : null}
-                onSelectCard={selectCard}
-                services={actionServices}
-              />
-            ) : route.page === "tickets" ? (
-              <TicketsPage
-                board={board}
-                selectedCardId={selectedCard ? selectedCardId : null}
-                onSelectCard={selectCard}
-                onStartRequest={requestStart}
-                onMoveCard={moveCard}
-                onNotice={showNotice}
-              />
-            ) : route.page === "settings" ? (
-              <SettingsScreen
-                tab={settingsTabFrom(route.id)}
-                onTabChange={(tab) =>
-                  navigate("settings", tab, { replace: true })
-                }
-                onOpenPage={(page) => navigate(page)}
-                onSaved={() => notifyCleanupOutcome("Settings saved.")}
-                tunnelState={tunnelState}
-                soundEnabled={soundEnabled}
-                onToggleSound={setSoundEnabled}
-                themePreference={themePreference}
-                onThemePreferenceChange={setThemePreference}
-                onRunSetup={openSetupWizard}
-                connectionKey={setupRuns}
-                errorsInFeeds={errorsInFeeds}
-                onToggleErrorsInFeeds={setErrorsInFeeds}
-              />
-            ) : route.page === "activity" ? (
-              <ActivityPage
-                events={feed.events}
-                identifiers={cardIdentifiers}
-                filter={activityFilter}
-                onSelectCard={selectCard}
-              />
-            ) : route.page === "accounts" ? (
-              <AccountsPage claudeAccounts={claudeAccounts} />
-            ) : route.page === "sessions" ? (
-              <SessionsPage
-                board={board}
-                selectedCardId={selectedCard ? selectedCardId : null}
-                onSelectCard={selectCard}
-                services={actionServices}
-              />
-            ) : route.page === "archive" ? (
-              <ArchivePage onCountChange={setArchiveCount} />
-            ) : route.page === "playbooks" ? (
-              <PlaybooksPage
-                createRequest={playbookCreateRequest}
-                onCountChange={setPlaybookCount}
-              />
-            ) : route.page === "vault" ? (
-              <VaultPage onCountChange={setVaultCount} />
-            ) : route.page === "calendar" ? (
-              <CalendarPage
-                items={items}
-                cards={board.cards}
-                services={actionServices}
-                onStartPromoted={(cardId) => setStartRequest({ cardId })}
-                onOpenSettings={() => navigate("settings")}
-              />
-            ) : route.page === "meetings" ? (
-              <MeetingsPage
-                items={meetingItems}
-                selectedId={route.id}
-                onSelect={(id) => navigate("meetings", id ?? undefined)}
-                onOpenMeetingNotes={openOverlay(setMeetingNotesOpen)}
-                services={actionServices}
-                onStartPromoted={(cardId) => setStartRequest({ cardId })}
-              />
-            ) : route.page === "workspaces" ? (
-              <WorkspacesPage
-                board={board}
-                onSummaryChange={setWorkspacesSummary}
-                onOpenCard={openWorktreeCard}
-                onCleanupRequest={requestWorktreeCleanup}
-              />
-            ) : route.page === "ask" ? (
-              <AskPage
-                prefill={route.id}
-                onPrefillConsumed={consumeAskPrefill}
-              />
-            ) : route.page === "flow" ? (
-              <FlowPage board={board} onOpenList={() => navigate("inbox")} />
-            ) : (
-              <Board
-                board={board}
-                selectedCardId={selectedCard ? selectedCardId : null}
-                onSelectCard={selectCard}
-                onStartRequest={requestStart}
-                onEditPlaybooks={() => navigate("playbooks")}
-                onOpenInbox={() => navigate("inbox")}
-                doneTotal={board?.doneCounts?.total}
-                doneLimit={doneLimit}
-                onLoadMoreDone={() => setDoneLimit((n) => n + DONE_PAGE_SIZE)}
-                onSelectSearchResult={selectSearchResult}
-              />
-            )}
-          </Suspense>
-        </PageErrorBoundary>
-      }
-      detail={
-        <DetailPanel
-          accounts={claudeAccounts.accounts}
-          card={selectedCard}
-          hydrating={pinnedHydrating && !selectedCardInWindow}
-          pinFetchError={pinFetchErrorKind}
-          onRetryPinFetch={() => {
-            if (selectedCardId != null) hydratePinned(selectedCardId);
-          }}
-          editors={board?.editors}
-          activityEvents={feed.events}
-          cardIdentifiers={cardIdentifiers}
-          members={selectedCardMembers}
-          membersActionable={membersActionable}
+        }
+      >
+        {navMode === "topbar" && (
+          <NavSheet open={sheetOpen} onClose={handleCloseSheet}>
+            {sidebar}
+          </NavSheet>
+        )}
+        <ActivityDrawer
+          open={activityOpen}
+          events={feed.events}
+          identifiers={cardIdentifiers}
           onClose={() => {
-            setSelectedCardId(null);
-            setPinned(null);
-            setPinnedHydrating(false);
+            setActivityOpen(false);
+            document.getElementById("activity-toggle")?.focus();
           }}
-          onStartRequest={requestStart}
-          onCleanupRequest={setCleanupCardId}
-          onUnwindRequest={requestUnwind}
-          onResetRequest={setResetCardId}
-          onSyncRequest={setSyncCardId}
-          onAskRequest={(card) =>
-            askAbout(
-              askAboutQuestion({
-                kind: "card",
-                identifier: card.identifier,
-                title: card.title,
-              }),
-            )
-          }
-          docked={route.page === "workspace"}
-        />
-      }
-    >
-      {navMode === "topbar" && (
-        <NavSheet open={sheetOpen} onClose={handleCloseSheet}>
-          {sidebar}
-        </NavSheet>
-      )}
-      <ActivityDrawer
-        open={activityOpen}
-        events={feed.events}
-        identifiers={cardIdentifiers}
-        onClose={() => {
-          setActivityOpen(false);
-          document.getElementById("activity-toggle")?.focus();
-        }}
-        onSelectCard={(id) => {
-          selectCard(id);
-          setActivityOpen(false);
-        }}
-      />
-      {startCard && startRequest && (
-        <StartModal
-          key={`${startRequest.cardId}:${startRequest.newSession === true ? "new" : "start"}`}
-          card={startCard}
-          newSession={startRequest.newSession === true}
-          extraDirection={startRequest.extraDirection}
-          onClose={() => setStartRequest(null)}
-          onEditPlaybooks={() => {
-            setStartRequest(null);
-            navigate("playbooks");
+          onSelectCard={(id) => {
+            selectCard(id);
+            setActivityOpen(false);
           }}
         />
-      )}
-      {cleanupCard && (
-        <CleanupModal
-          key={cleanupCardId}
-          card={cleanupCard}
-          onConfirm={requestCleanup}
-          onClose={() => setCleanupCardId(null)}
-        />
-      )}
-      {resetCard && (
-        <ResetModal
-          key={resetCardId}
-          card={resetCard}
-          onConfirm={requestReset}
-          onClose={() => setResetCardId(null)}
-        />
-      )}
-      {cardToSync && (
-        <SyncToLinearModal
-          key={syncCardId}
-          card={cardToSync}
-          cards={board?.cards ?? []}
-          onClose={() => setSyncCardId(null)}
-        />
-      )}
-      {createTicketOpen && (
-        <CreateTicketModal
-          onClose={closeOverlay(setCreateTicketOpen)}
-          onFromMeetingNotes={() => {
-            setCreateTicketOpen(false);
-            setMeetingNotesOpen(true);
-          }}
-        />
-      )}
-      {meetingNotesOpen && (
-        <Suspense fallback={null}>
-          <MeetingNotesModal
-            onClose={closeOverlay(setMeetingNotesOpen)}
-            onCreated={(result) => showNotice(meetingNotice(result))}
+        {startCard && startRequest && (
+          <StartModal
+            key={`${startRequest.cardId}:${startRequest.newSession === true ? "new" : "start"}`}
+            card={startCard}
+            newSession={startRequest.newSession === true}
+            extraDirection={startRequest.extraDirection}
+            onClose={() => setStartRequest(null)}
+            onEditPlaybooks={() => {
+              setStartRequest(null);
+              navigate("playbooks");
+            }}
           />
-        </Suspense>
-      )}
-      {shortcutsOpen && (
-        <Suspense fallback={null}>
-          <CheatSheet onClose={closeOverlay(setShortcutsOpen)} />
-        </Suspense>
-      )}
-      {paletteOpen && (
-        <Suspense fallback={null}>
-          <CommandPalette
-            commands={buildCommands(
-              {
-                api: {
-                  moveCard: (id, column) =>
-                    moveCard(id, column).catch(() =>
-                      showNotice(
-                        `Couldn't move ${board.cards.find((c) => c.id === id)?.identifier ?? id}.`,
+        )}
+        {cleanupCard && (
+          <CleanupModal
+            key={cleanupCardId}
+            card={cleanupCard}
+            onConfirm={requestCleanup}
+            onClose={() => setCleanupCardId(null)}
+          />
+        )}
+        {resetCard && (
+          <ResetModal
+            key={resetCardId}
+            card={resetCard}
+            onConfirm={requestReset}
+            onClose={() => setResetCardId(null)}
+          />
+        )}
+        {cardToSync && (
+          <SyncToLinearModal
+            key={syncCardId}
+            card={cardToSync}
+            cards={board?.cards ?? []}
+            onClose={() => setSyncCardId(null)}
+          />
+        )}
+        {createTicketOpen && (
+          <CreateTicketModal
+            onClose={closeOverlay(setCreateTicketOpen)}
+            onFromMeetingNotes={() => {
+              setCreateTicketOpen(false);
+              setMeetingNotesOpen(true);
+            }}
+          />
+        )}
+        {meetingNotesOpen && (
+          <Suspense fallback={null}>
+            <MeetingNotesModal
+              onClose={closeOverlay(setMeetingNotesOpen)}
+              onCreated={(result) => showNotice(meetingNotice(result))}
+            />
+          </Suspense>
+        )}
+        {shortcutsOpen && (
+          <Suspense fallback={null}>
+            <CheatSheet onClose={closeOverlay(setShortcutsOpen)} />
+          </Suspense>
+        )}
+        {paletteOpen && (
+          <Suspense fallback={null}>
+            <CommandPalette
+              commands={buildCommands(
+                {
+                  api: {
+                    moveCard: (id, column) =>
+                      moveCard(id, column).catch(() =>
+                        showNotice(
+                          `Couldn't move ${board.cards.find((c) => c.id === id)?.identifier ?? id}.`,
+                        ),
                       ),
+                  },
+                  requestStart,
+                  requestCleanup: setCleanupCardId,
+                  openCard: selectCard,
+                  navigate,
+                  newTicket: openOverlay(setCreateTicketOpen),
+                  meetingNotes: openOverlay(setMeetingNotesOpen),
+                  syncNow: () =>
+                    void syncSources(
+                      actionServices.api,
+                      board.enabledSources ?? [],
+                      showNotice,
                     ),
                 },
-                requestStart,
-                requestCleanup: setCleanupCardId,
-                openCard: selectCard,
-                navigate,
-                newTicket: openOverlay(setCreateTicketOpen),
-                meetingNotes: openOverlay(setMeetingNotesOpen),
-                syncNow: () =>
-                  void syncSources(
-                    actionServices.api,
-                    board.enabledSources ?? [],
-                    showNotice,
-                  ),
-              },
-              navItems,
-              selectedCard,
-            )}
-            onClose={closeOverlay(setPaletteOpen)}
-            onOpenCard={selectSearchResult}
+                navItems,
+                selectedCard,
+              )}
+              onClose={closeOverlay(setPaletteOpen)}
+              onOpenCard={selectSearchResult}
+            />
+          </Suspense>
+        )}
+        {setupWizardOpen && setupChecks && (
+          <SetupWizard {...setupChecks} onClose={closeSetupWizard} />
+        )}
+        {isToastVisible(undoToast.state) && (
+          <Toast
+            label={undoToast.state.toast?.label ?? undoToast.state.error}
+            detail={undoToast.state.toast ? undoToast.state.error : undefined}
+            actionLabel={undoToast.state.toast ? "Undo" : undefined}
+            actionPending={undoToast.state.undoing}
+            onAction={undoToast.undo}
+            onClose={undoToast.dismiss}
           />
-        </Suspense>
-      )}
-      {setupWizardOpen && setupChecks && (
-        <SetupWizard {...setupChecks} onClose={closeSetupWizard} />
-      )}
-      {isToastVisible(undoToast.state) && (
-        <Toast
-          label={undoToast.state.toast?.label ?? undoToast.state.error}
-          detail={undoToast.state.toast ? undoToast.state.error : undefined}
-          actionLabel={undoToast.state.toast ? "Undo" : undefined}
-          actionPending={undoToast.state.undoing}
-          onAction={undoToast.undo}
-          onClose={undoToast.dismiss}
-        />
-      )}
-    </AppShell>
+        )}
+      </AppShell>
+    </AppStateProvider>
   );
 }

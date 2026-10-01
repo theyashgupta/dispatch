@@ -1,5 +1,4 @@
 import {
-  MutationObserver,
   queryOptions,
   useMutation,
   useQuery,
@@ -94,20 +93,4 @@ export function moveCardMutationOptions(queryClient: QueryClient) {
 export function useMoveCardMutation() {
   const queryClient = useQueryClient();
   return useMutation(moveCardMutationOptions(queryClient));
-}
-
-/**
- * Expose the move mutation as `window.__dspMoveCard` for browser QA.
- *
- * @remarks
- * Registered only when `import.meta.env.DEV` is true, so production builds never expose it.
- */
-export function registerDevMoveCard(queryClient: QueryClient): void {
-  Object.assign(window, {
-    __dspMoveCard: (id: string, column: Column) =>
-      new MutationObserver(
-        queryClient,
-        moveCardMutationOptions(queryClient),
-      ).mutate({ id, column }),
-  });
 }

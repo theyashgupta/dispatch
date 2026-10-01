@@ -16,7 +16,7 @@ import {
 import type { ComponentType } from "react";
 import type { ItemSourceId } from "../../../shared/types.js";
 import { sourceMark } from "../badges/index.js";
-import type { Page } from "../../lib/route.js";
+import type { Page } from "../../../shared/route.js";
 
 export type NavGroup = "Home" | "Work" | "Sources" | "System";
 

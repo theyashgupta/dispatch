@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import type { ConnectionStatus } from "../../hooks/useBoardStream.js";
+import type { ConnectionStatus } from "../../../shared/types.js";
 
 interface SyncStatusProps {
   syncedAt: string | null;

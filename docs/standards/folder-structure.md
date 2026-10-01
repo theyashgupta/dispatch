@@ -48,7 +48,7 @@ src/web/
 │   ├── settings/   # SettingsScreen (full-screen, sidebar-nav), PlaybookEditorModal
 │   ├── slack/      # SlackPage, SlackList, SlackDetail, SlackThread (the Inbox row reuses SlackThread through the barrel)
 │   └── badges/     # GoneBadge, PlanReadyBadge, SourceBadge — shared leaf feature (see import direction)
-├── hooks/          # data/effect hooks: useBoardStream, useUnseenActivity, useTransitionNotifications, useResumeFeedback, useMediaQuery
+├── hooks/          # data/effect hooks: useActivityFeed, useUnseenActivity, useTransitionNotifications, useResumeFeedback, useMediaQuery
 ├── lib/            # non-UI helpers: api.ts, card-badges.ts, format-age.ts, resume-feedback.ts, start-request.ts, meetings.ts, calendar.ts
 └── styles/         # tokens.css — the design-token source of truth, survives unchanged
 ```
@@ -78,7 +78,7 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. The new t
 | `WorkspacesPage.tsx`, `WorktreeRow.tsx`, `WorkspaceFolders.tsx`, `WorkspaceAdd.tsx`, `FolderBrowserModal.tsx`                              | `features/workspaces/`           |
 | `AskPage.tsx`, `AskComposer.tsx`, `AskMessage.tsx`                                                                                         | `features/ask/`                  |
 | `FlowPage.tsx`, `FlowToolbar.tsx`, `FlowDiagram.tsx`, `FlowNarrow.tsx`, `flow-model.ts`                                                    | `features/flow/`                 |
-| `useBoardStream.ts`, `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts`                   | `hooks/`                         |
+| `useActivityFeed.ts`, `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts`                  | `hooks/`                         |
 | `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`, `meetings.ts`, `calendar.ts`                        | `lib/`                           |
 | `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Glyph` / `Markdown` / `SplitView` / `ListGroup` / `DetailPaneBody` / `FlowStage` | `primitives/`                    |
 | `tokens.css`                                                                                                                               | `styles/`                        |
@@ -106,7 +106,7 @@ One convention spans the whole tree. Every artifact kind has a fixed pattern and
 | Artifact kind                 | Location             | Pattern                     | Example               |
 | ----------------------------- | -------------------- | --------------------------- | --------------------- |
 | React component               | `src/web/**`         | `PascalCase.tsx`            | `SettingsScreen.tsx`  |
-| React hook                    | `src/web/hooks`      | `useX.ts` (camelCase)       | `useBoardStream.ts`   |
+| React hook                    | `src/web/hooks`      | `useX.ts` (camelCase)       | `useActivityFeed.ts`  |
 | Web util / client             | `src/web/lib`        | `kebab-case.ts`             | `card-badges.ts`      |
 | HTTP route module             | `src/server/routes`  | `<resource>.route.ts`       | `cards.route.ts`      |
 | Route zod schemas (over 3)    | `src/server/routes`  | `<resource>-schemas.ts`     | `cards-schemas.ts`    |

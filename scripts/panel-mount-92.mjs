@@ -3,7 +3,7 @@
  * test framework, no assertion library, lives outside src/ — the same category as panel-92.mjs,
  * density-91.mjs, session-liveness-v3.mjs. It re-proves `PANEL-03` (docs/ARCHITECTURE.md, "Panel
  * Iframe Identity") under the session-keyed terminal: opening/closing the panel, fullscreen,
- * resize, and the board/Orca view switch must never remount the terminal iframe — and CARD switch
+ * resize, and the Board -> Workspace page switch must never remount the terminal iframe, and CARD switch
  * while the panel stays open (the case `PANEL-03`'s own text was written to protect) must not
  * either. A SESSION switch legitimately re-points `src` on the SAME iframe element, which is the
  * corrected 92-CONTEXT.md decision this instrument exists to measure, not assume.
@@ -40,16 +40,29 @@
  *
  * SIX INTERACTION-SCRIPT STEPS, five forbidden (no expando change, no local-port drift) and one
  * legitimate (expando must survive, local port is EXPECTED to move): fullscreen on/off, panel
- * resize, board/Orca view switch and back, panel close+reopen, CARD switch while the panel stays
+ * resize, panel close+reopen, Board -> Workspace page switch, CARD switch while the panel stays
  * open (the newly-named case), and SESSION switch on the first card (this phase's central claim —
- * zero new mount events, `PANEL-03` preserved verbatim).
+ * zero new mount events, `PANEL-03` preserved verbatim), run in the order 1, 2, 4, 3, 5, 6. R-12
+ * closes the panel on Workspace -> Board, so that return leg is never measured. After the last step
+ * the script gates on the panel having closed (see `waitForPanelClosed`); a still-open panel is a violation.
+ *
+ * ROUTE LOOP (R-13), 10 SPA navigations, each its own row measured with the forbidden rule. Steps
+ * `7a-board-route-1..5` set `location.hash` on Board with card A's panel open (`#/board/loop-1`,
+ * `#/board`, `#/board/loop-2`, `#/board`, `#/board/loop-3`), which R-12 keeps because the page stays
+ * board. Step 3 is navigation 6. Steps `7b-workspace-route-1..4` do the same on the docked Workspace
+ * page (`#/workspace/loop-1`, `#/workspace`, `#/workspace/loop-2`, `#/workspace`).
+ *
+ * THEME SWITCH, rows `8-theme-light` and `8-theme-dark`. With the panel still open and the stored
+ * preference on `system`, CDP `Emulation.setEmulatedMedia` flips `prefers-color-scheme`, and the
+ * step waits for `<html data-theme>` (`useTheme.ts`) to follow and for the painted body background to
+ * differ between themes before each forbidden-rule reading, so it cannot pass without a real repaint.
  *
  * METHODOLOGY TRAP inherited from Phase 55/`92-06`: in Board (overlay) mode a full-viewport
  * click-outside backdrop intercepts a raw click at a card's coordinates and closes the panel before
  * the click reaches the card — but ONLY while the panel is already open. The very first card
  * selection and the close+reopen step both start from a CLOSED panel (backdrop `pointerEvents:
  * none`), so a direct Board-mode card click is safe there. Only the CARD-SWITCH step (panel already
- * open, selecting a DIFFERENT card) is driven through Orca/docked mode, where there is no backdrop
+ * open, selecting a DIFFERENT card) is driven through the Workspace page's docked panel, no backdrop
  * at all. Fullscreen and the resize handle are conversely `docked`-mode UNAVAILABLE (`DetailPanel`
  * forces `fullscreen` off and never renders the resize handle while `docked`), so those two steps
  * run in Board mode by construction — this file never fabricates a scenario the real UI cannot
@@ -84,14 +97,21 @@ import {
 } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { randomBytes, randomUUID } from "node:crypto";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 const execFileP = promisify(execFile);
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST_ENTRY = join(REPO_ROOT, "dist", "server", "bootstrap", "index.js");
+const DIST_FINGERPRINT = join(
+  REPO_ROOT,
+  "dist",
+  "server",
+  "adapters",
+  "ttyd-fingerprint.js",
+);
 const BUILD_SCRIPT = "build";
 
 /** Distinct from every other Phase 92 instrument's sandbox/CDP ports, per the plan's own PORTS note. */
@@ -102,11 +122,17 @@ const TMUX_PREFIX = `dsp92pm-${process.pid}-`;
 const DISPATCH_DIR_NAME = ".dispatch";
 
 /**
- * `spawnTtyd`'s (`ttyd.ts`) exact re-adoption fingerprint key at the CURRENT runtime revision — a
- * ttyd spawned with the wrong key is classified incompatible and swept, never adopted into `procs`,
- * which would leave `getLiveTtydPort` blind to every session this harness seeds.
+ * Build the per-instance ttyd adoption key (`ttyd-fingerprint.ts`) for the sandbox server's data dir.
+ *
+ * @remarks `compatible` demands this key too, so a ttyd without it is swept at boot, never adopted.
  */
-const TTYD_REVISION_RETAINED_KEY = "DISPATCH_TTYD_REVISION_6";
+function ttydInstanceRetainedKey(home) {
+  const id = createHash("sha256")
+    .update(join(home, DISPATCH_DIR_NAME))
+    .digest("hex")
+    .slice(0, 12);
+  return `DISPATCH_TTYD_INSTANCE_${id}`;
+}
 
 const FAKE_LINEAR_API_KEY = "panel-mount-92-harness-fake-key-never-real";
 
@@ -274,7 +300,12 @@ function assertBuilt() {
 function bootServer(home) {
   assertBuilt();
   const child = spawn("node", [DIST_ENTRY], {
-    env: { ...process.env, HOME: home, NODE_ENV: "production" },
+    env: {
+      ...process.env,
+      HOME: home,
+      DISPATCH_DIR: join(home, DISPATCH_DIR_NAME),
+      NODE_ENV: "production",
+    },
     stdio: ["ignore", "ignore", "ignore"],
   });
   return child;
@@ -402,7 +433,7 @@ async function pollForSingleEstablished(
  * with one id and persisting another leaves the record's proxy path pointing at a ttyd that never
  * used it.
  */
-function spawnTtyd(tmuxName, sessionId) {
+function spawnTtyd(tmuxName, sessionId, home, revisionKey) {
   return new Promise((resolve, reject) => {
     const child = spawn(
       "ttyd",
@@ -414,10 +445,14 @@ function spawnTtyd(tmuxName, sessionId) {
         "0",
         "-b",
         `/sessions/${sessionId}/terminal`,
+        "-T",
+        "tmux-256color",
         "-t",
         "disableLeaveAlert=true",
         "-t",
-        `${TTYD_REVISION_RETAINED_KEY}=1`,
+        `${revisionKey}=1`,
+        "-t",
+        `${ttydInstanceRetainedKey(home)}=1`,
         "tmux",
         "-u",
         "attach",
@@ -570,6 +605,17 @@ async function evalValue(cdp, sessionId, expression) {
   return result.value;
 }
 
+/** Poll `expression` until it is truthy and return that value, or throw naming `label` after `timeoutMs`. */
+async function pollEval(cdp, sessionId, expression, timeoutMs, label) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = await evalValue(cdp, sessionId, expression);
+    if (value) return value;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(`${label} within ${timeoutMs}ms`);
+}
+
 /** Poll `#root`'s text content until every fixture identifier has rendered somewhere. */
 async function waitForBoardRootLoaded(cdp, sessionId, identifiers) {
   const deadline = Date.now() + RENDER_TIMEOUT_MS;
@@ -635,6 +681,17 @@ async function waitForAsideShowing(cdp, sessionId, identifier) {
   );
 }
 
+/** Poll until the Workspace page's lazily loaded `OrcaView` has rendered its `nav[aria-label="Tickets"]`. */
+async function waitForTicketsNav(cdp, sessionId) {
+  await pollEval(
+    cdp,
+    sessionId,
+    `!!document.querySelector('nav[aria-label="Tickets"]')`,
+    RENDER_TIMEOUT_MS,
+    "Workspace Tickets nav never rendered",
+  );
+}
+
 /** Docked/Orca nav click — the Phase 55/`92-06` trap-free way to select a DIFFERENT card while the panel is already open. */
 async function selectCardViaOrcaNav(cdp, sessionId, identifier) {
   const clickExpr = `
@@ -655,21 +712,111 @@ async function selectCardViaOrcaNav(cdp, sessionId, identifier) {
   await waitForAsideShowing(cdp, sessionId, identifier);
 }
 
-/** Click the "View" segmented control's `aria-label="Board view"` / `"Orca view"` button (`SyncStrip.tsx`) — the real in-app SPA toggle (a `setViewMode` state change, never a `Page.reload`/`localStorage` injection), since a full navigation destroys the whole document — including this file's own expando tag — regardless of PANEL-03, which is a harness artifact, not a remount the fence is about. */
-async function clickViewModeButton(cdp, sessionId, label) {
+/**
+ * Click the sidebar row (`nav[aria-label="Primary"]`, `NavRow.tsx`) whose label is exactly `label`.
+ *
+ * @remarks An in-app hash navigation, never a `Page.reload`: a reload destroys the document and the
+ * expando with it, which is a harness artifact and not a remount.
+ */
+async function clickSidebarNav(cdp, sessionId, label) {
   const expr = `
     (function () {
-      var group = document.querySelector('[role="group"][aria-label="View"]');
-      if (!group) throw new Error("View mode group not found");
-      var btn = Array.prototype.find.call(group.querySelectorAll("button"), function (b) {
-        return b.getAttribute("aria-label") === ${JSON.stringify(label)};
+      var nav = document.querySelector('nav[aria-label="Primary"]');
+      if (!nav) throw new Error("Primary nav not found");
+      var btn = Array.prototype.find.call(nav.querySelectorAll("button"), function (b) {
+        return Array.prototype.some.call(b.querySelectorAll("span"), function (s) {
+          return s.textContent.trim() === ${JSON.stringify(label)};
+        });
       });
-      if (!btn) throw new Error("no View button with aria-label " + ${JSON.stringify(label)});
+      if (!btn) throw new Error("no Primary nav row labelled " + ${JSON.stringify(label)});
       btn.click();
       return true;
     })()
   `;
   await evalValue(cdp, sessionId, expr);
+}
+
+/**
+ * Poll until no panel shows `identifier` and no terminal iframe is mounted, resolving false on timeout.
+ *
+ * @remarks The caller gates on the result: a panel still open after Workspace -> Board is an R-12
+ * violation, and the close only lands after the 200ms deferred unmount.
+ */
+async function waitForPanelClosed(cdp, sessionId, identifier) {
+  const probe = `
+    (function () {
+      if (location.hash !== "#/board") return false;
+      var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+      if (!aside) return true;
+      return aside.textContent.indexOf("${identifier}") === -1 && !aside.querySelector("iframe");
+    })()
+  `;
+  return pollEval(
+    cdp,
+    sessionId,
+    probe,
+    RENDER_TIMEOUT_MS,
+    "panel never closed",
+  ).then(
+    () => true,
+    () => false,
+  );
+}
+
+/**
+ * Set `location.hash` as a router navigation, never a reload, and wait for the router to commit it.
+ *
+ * @remarks The router writes `dsp.route` when it resolves, so that key equalling `hash` proves the
+ * commit and the panel still showing `identifier` proves R-12 kept it, before any reading.
+ */
+async function navigateHash(cdp, sessionId, hash, identifier) {
+  await evalValue(
+    cdp,
+    sessionId,
+    `(location.hash = ${JSON.stringify(hash)}, true)`,
+  );
+  const probe = `
+    (function () {
+      if (location.hash !== ${JSON.stringify(hash)}) return false;
+      if (localStorage.getItem("dsp.route") !== ${JSON.stringify(hash)}) return false;
+      var aside = document.querySelector('aside[aria-label="Ticket detail"]');
+      return !!aside && aside.textContent.indexOf("${identifier}") !== -1;
+    })()
+  `;
+  await pollEval(
+    cdp,
+    sessionId,
+    probe,
+    RENDER_TIMEOUT_MS,
+    `navigation to ${hash} never settled with the panel showing ${identifier}`,
+  );
+}
+
+/**
+ * Flip the emulated system color scheme, wait for `<html data-theme>` to follow, and return the body background.
+ *
+ * @remarks The caller compares the returned color across schemes to prove the paint really moved.
+ */
+async function setSchemeAndWaitForTheme(cdp, sessionId, scheme) {
+  await cdp.send(
+    "Emulation.setEmulatedMedia",
+    { features: [{ name: "prefers-color-scheme", value: scheme }] },
+    sessionId,
+  );
+  const probe = `
+    (function () {
+      var root = document.documentElement;
+      if (root.getAttribute("data-theme") !== ${JSON.stringify(scheme)}) return null;
+      return getComputedStyle(document.body).backgroundColor;
+    })()
+  `;
+  return pollEval(
+    cdp,
+    sessionId,
+    probe,
+    RENDER_TIMEOUT_MS,
+    `data-theme never became ${scheme} after emulating prefers-color-scheme ${scheme}`,
+  );
 }
 
 async function waitForDocked(cdp, sessionId, expectDocked, identifier) {
@@ -872,6 +1019,14 @@ async function main() {
 
   await assertNoLiveService();
   assertBuilt();
+  const { TTYD_RUNTIME_REVISION_RETAINED_KEY: ttydRevisionKey } = await import(
+    pathToFileURL(DIST_FINGERPRINT).href
+  );
+  if (typeof ttydRevisionKey !== "string" || ttydRevisionKey === "") {
+    throw new Error(
+      `${DIST_FINGERPRINT} must export TTYD_RUNTIME_REVISION_RETAINED_KEY as a non-empty string, got ${JSON.stringify(ttydRevisionKey)}`,
+    );
+  }
 
   const preflightTmux = (await tmuxListSessionNames()).filter((n) =>
     n.startsWith(TMUX_PREFIX),
@@ -934,7 +1089,12 @@ async function main() {
 
     const sessionIds = { a1: randomUUID(), a2: randomUUID(), b1: randomUUID() };
     for (const key of Object.keys(tmuxNames)) {
-      ttyd[key] = await spawnTtyd(tmuxNames[key], sessionIds[key]);
+      ttyd[key] = await spawnTtyd(
+        tmuxNames[key],
+        sessionIds[key],
+        home,
+        ttydRevisionKey,
+      );
     }
     for (const key of Object.keys(tmuxNames)) {
       await waitForPortListening(ttyd[key].port);
@@ -1084,6 +1244,7 @@ async function main() {
       reading,
       expectExpandoIntact,
       expectIdentityUnchanged,
+      referenceIdentity = baseline.identity,
     ) => {
       const rowViolations = [];
       if (expectExpandoIntact && reading.expando !== EXPANDO_TAG) {
@@ -1093,10 +1254,10 @@ async function main() {
       }
       if (
         expectIdentityUnchanged === true &&
-        reading.identity !== baseline.identity
+        reading.identity !== referenceIdentity
       ) {
         rowViolations.push(
-          `${label}: identity expected UNCHANGED from baseline (${baseline.identity}), got ${reading.identity}`,
+          `${label}: identity expected UNCHANGED from baseline (${referenceIdentity}), got ${reading.identity}`,
         );
       }
       readings.push({ label, ...reading, rowViolations });
@@ -1124,49 +1285,6 @@ async function main() {
       true,
     );
 
-    // Step 3: Board/Orca view switch, and back.
-    await clickViewModeButton(cdp, sessionId, "Orca view");
-    await waitForDocked(cdp, sessionId, true, CARD_A_IDENTIFIER);
-    const atOrca = await takeReading(
-      cdp,
-      sessionId,
-      recA1.ttydPort,
-      serverPid,
-      demoMode,
-    );
-    await clickViewModeButton(cdp, sessionId, "Board view");
-    await waitForDocked(cdp, sessionId, false, CARD_A_IDENTIFIER);
-    const backAtBoard = await takeReading(
-      cdp,
-      sessionId,
-      recA1.ttydPort,
-      serverPid,
-      demoMode,
-    );
-    {
-      const rowViolations = [];
-      for (const [sub, r] of [
-        ["at-orca", atOrca],
-        ["back-at-board", backAtBoard],
-      ]) {
-        if (r.expando !== EXPANDO_TAG)
-          rowViolations.push(
-            `3-orca-view-switch(${sub}): expando expected intact, got ${JSON.stringify(r.expando)} — REMOUNTED`,
-          );
-        if (r.identity !== baseline.identity)
-          rowViolations.push(
-            `3-orca-view-switch(${sub}): identity expected UNCHANGED from baseline (${baseline.identity}), got ${r.identity}`,
-          );
-      }
-      readings.push({
-        label: "3-orca-view-switch",
-        ...backAtBoard,
-        rowViolations,
-      });
-      violations.push(...rowViolations);
-      for (const v of rowViolations) console.log(`VIOLATION ${v}`);
-    }
-
     // Step 4: panel close, then re-open on the SAME card, fast enough to stay inside the
     // ~200ms deferred-unmount window (DetailPanel.tsx / PANEL-03's ONE intentional-unmount case,
     // which only fires once the panel has genuinely left the viewport for a while — reopening
@@ -1181,18 +1299,33 @@ async function main() {
       true,
     );
 
-    // Step 5: card switch while the panel stays open — the case PANEL-03's own text protects,
-    // newly named by this phase. Driven through Orca/docked mode (Phase 55 trap): Board mode's
-    // click-outside backdrop would intercept a raw click at card B's coordinates while card A's
-    // panel is already open, closing the panel instead of switching cards.
-    // @remarks Reached via the real in-app "Orca view" button (the SAME SPA-internal toggle step
-    // 3 already exercised), never `switchToOrcaViaReload`'s `Page.reload` — a full navigation
-    // destroys the whole document (and the expando with it) regardless of PANEL-03, which is a
-    // harness artifact, not a remount this phase's fence is about. Confirmed by reproduction: an
-    // earlier version of this file used the reload helper here and reported a false "REMOUNTED"
-    // at both card-switch and session-switch even against the correct, unkeyed product code.
-    await clickViewModeButton(cdp, sessionId, "Orca view");
+    const boardHashes = [
+      "#/board/loop-1",
+      "#/board",
+      "#/board/loop-2",
+      "#/board",
+      "#/board/loop-3",
+    ];
+    for (const [i, hash] of boardHashes.entries()) {
+      await navigateHash(cdp, sessionId, hash, CARD_A_IDENTIFIER);
+      record(
+        `7a-board-route-${i + 1}`,
+        await takeReading(cdp, sessionId, recA1.ttydPort, serverPid, demoMode),
+        true,
+        true,
+      );
+    }
+
+    await clickSidebarNav(cdp, sessionId, "Workspace");
     await waitForDocked(cdp, sessionId, true, CARD_A_IDENTIFIER);
+    await waitForTicketsNav(cdp, sessionId);
+    record(
+      "3-workspace-switch",
+      await takeReading(cdp, sessionId, recA1.ttydPort, serverPid, demoMode),
+      true,
+      true,
+    );
+
     await selectCardViaOrcaNav(cdp, sessionId, CARD_B_IDENTIFIER);
     const atCardB = await takeReading(
       cdp,
@@ -1239,9 +1372,6 @@ async function main() {
       for (const v of rowViolations) console.log(`VIOLATION ${v}`);
     }
 
-    // Step 6: SESSION switch on the first card — the phase's central claim. Still in
-    // Orca/docked mode from step 5 (SessionSwitcher lives inside the panel's own DOM, above the
-    // backdrop, so it is never subject to the Phase 55 trap regardless of view mode).
     await clickSwitcherSegment(cdp, sessionId, "Session 2");
     const afterSessionSwitch = await takeReading(
       cdp,
@@ -1269,6 +1399,73 @@ async function main() {
       });
       violations.push(...rowViolations);
       for (const v of rowViolations) console.log(`VIOLATION ${v}`);
+    }
+
+    const workspaceHashes = [
+      "#/workspace/loop-1",
+      "#/workspace",
+      "#/workspace/loop-2",
+      "#/workspace",
+    ];
+    for (const [i, hash] of workspaceHashes.entries()) {
+      await navigateHash(cdp, sessionId, hash, CARD_A_IDENTIFIER);
+      record(
+        `7b-workspace-route-${i + 1}`,
+        await takeReading(cdp, sessionId, recA2.ttydPort, serverPid, demoMode),
+        true,
+        true,
+        afterSessionSwitch.identity,
+      );
+    }
+
+    const storedTheme = await evalValue(
+      cdp,
+      sessionId,
+      `localStorage.getItem("dsp.theme")`,
+    );
+    if (storedTheme !== null && storedTheme !== "system") {
+      throw new Error(
+        `precondition violated, dsp.theme is ${JSON.stringify(storedTheme)} but the theme step needs the system preference`,
+      );
+    }
+    const darkBg = await setSchemeAndWaitForTheme(cdp, sessionId, "dark");
+    const lightBg = await setSchemeAndWaitForTheme(cdp, sessionId, "light");
+    if (lightBg === darkBg) {
+      throw new Error(
+        `theme step proves nothing, the body background is ${lightBg} in both light and dark`,
+      );
+    }
+    record(
+      "8-theme-light",
+      await takeReading(cdp, sessionId, recA2.ttydPort, serverPid, demoMode),
+      true,
+      true,
+      afterSessionSwitch.identity,
+    );
+    await setSchemeAndWaitForTheme(cdp, sessionId, "dark");
+    record(
+      "8-theme-dark",
+      await takeReading(cdp, sessionId, recA2.ttydPort, serverPid, demoMode),
+      true,
+      true,
+      afterSessionSwitch.identity,
+    );
+
+    await clickSidebarNav(cdp, sessionId, "Board");
+    const closedOnReturn = await waitForPanelClosed(
+      cdp,
+      sessionId,
+      CARD_A_IDENTIFIER,
+    );
+    console.log(
+      closedOnReturn
+        ? "NOTE 3-board-return: panel closed on Workspace -> Board (R-12)"
+        : `NOTE 3-board-return: panel STILL OPEN on Workspace -> Board after ${RENDER_TIMEOUT_MS}ms, R-12 close NOT observed`,
+    );
+    if (!closedOnReturn) {
+      violations.push(
+        `3-board-return: panel still open ${RENDER_TIMEOUT_MS}ms after Workspace -> Board (R-12 close expected)`,
+      );
     }
 
     printTable(baseline, readings, demoMode);

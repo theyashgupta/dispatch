@@ -16,7 +16,7 @@ import { focusRing } from "../../primitives/focus-ring.js";
 import { settingsTabFrom, type SettingsTab } from "../../lib/settings-tab.js";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
 import { NAV_ITEMS, type NavIcon } from "../nav/index.js";
-import type { Page } from "../../lib/route.js";
+import type { Page } from "../../../shared/route.js";
 import type { ThemePreference } from "../../lib/theme.js";
 import { AboutTabSection } from "./AboutTab.js";
 import { AboutYouTabSection, useAboutYouTab } from "./AboutYouTab.js";

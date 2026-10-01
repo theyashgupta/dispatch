@@ -101,9 +101,11 @@ export function DetailPanel({
   const panelActive = open && takeover;
 
   useEffect(() => {
-    const entry = window.history.state as { dspPanel?: boolean } | null;
-    if (entry?.dspPanel === true) {
-      window.history.replaceState(null, "");
+    const { dspPanel, ...rest } = (window.history.state ?? {}) as {
+      dspPanel?: boolean;
+    };
+    if (dspPanel === true) {
+      window.history.replaceState(rest, "");
     }
     const onPop = () => {
       if (pendingBackRef.current > 0) {
@@ -120,7 +122,7 @@ export function DetailPanel({
 
   useEffect(() => {
     if (!panelActive) return;
-    window.history.pushState({ dspPanel: true }, "");
+    window.history.pushState({ ...window.history.state, dspPanel: true }, "");
     pushedHistoryRef.current = true;
     return () => {
       if (!pushedHistoryRef.current) return;

@@ -91,7 +91,7 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new co
 Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
 
 - [ ] Composes features through their `index.ts` barrel only — no reach-in past a feature's public entry point.
-- [ ] Zero `createContext`/`useContext` usage anywhere in `src/web` — plain props over Context is the standing decision (`docs/standards/frontend-design-system.md`).
+- [ ] Zero `createContext`/`useContext` usage anywhere in `src/web`, except the files `frontend-architecture.md` (Providers) names. Plain props over Context is the standing decision (`docs/standards/frontend-design-system.md`). One dated exception: `src/web/components/AppState.tsx` (R-15, transitional, ticket 16 removes it).
 
 ## Frontend module: route (`src/web/routes/`)
 
@@ -177,6 +177,7 @@ Every exception below is a named, narrow allow-rule that survives the error-leve
 - **Granola settings and check routes.** `PUT /api/meetings/granola` (LOCAL-31) waits for the settings apply, which can wait up to 5 s for an aborted claude child to exit, so the status it answers is true; `POST /api/meetings/granola/check` waits for one `claude mcp list` (up to 60 s) because the response body is the only channel for the check result. Both are named exceptions to the fire-and-forget rule.
 - **The `watcher -> ttyd -> store` edge.** Both `watcher` and `ttyd` classify as the general `adapters` element; `adapters -> store` is an already-allowed edge. This is a documented architecture invariant (`docs/ARCHITECTURE.md#preserved-import-edges`), not an unenforced gap — no allow-rule was needed to encode it, and none should be added.
 - **Exception R-05: the two lib barrels.** `src/web/lib/api.ts` and `src/web/lib/push.ts` re-export query files. One allow rule in `eslint.config.ts` allows only these two files to import a query file or a shared query file. No other lib file may import a query file. The rule starts on 2026-09-30. Ticket 16 removes both barrels and this rule. Do not flag these two imports.
+- **Exception R-14: router transitional imports.** Route files under `src/web/routes/` may import the legacy tree, to render legacy pages, and `__root.tsx` may import `src/web/styles/*`. `src/web/components/AppState.tsx` may type-import the legacy pages. Route file names under `src/web/routes/` are exempt from the filename case rule. No other file gets these allows: a module file still may not import the legacy tree. The rules start on 2026-09-30. Ticket 16 removes them. Do not flag these imports.
 
 ## Comments (all layers)
 

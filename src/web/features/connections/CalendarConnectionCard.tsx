@@ -4,7 +4,7 @@ import { SourceIcon } from "../badges/index.js";
 import { useCalendarConnection } from "../../hooks/useCalendarConnection.js";
 import { CALENDAR_CONNECTION } from "../../lib/connection-meta.js";
 import { calendarCardStatus } from "../../lib/connection-status.js";
-import { routeHash } from "../../lib/route.js";
+import { routeHash } from "../../../shared/route.js";
 import { Button } from "../../primitives/Button.js";
 import { Chip } from "../../primitives/Chip.js";
 import { ConnectionCard } from "../../primitives/ConnectionCard.js";

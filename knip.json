@@ -13,7 +13,7 @@
     "eslint-local/**/*.test.ts",
     "src/web/vite-env.d.ts",
     "src/web/lib/utils.ts",
-    "src/web/queries/*-queries.ts!",
+    "src/web/queries/{activity,search,update}-queries.ts!",
     "src/web/modules/*/queries/*-queries.ts!",
     "src/web/components/ui/**/*.{ts,tsx}"
   ],

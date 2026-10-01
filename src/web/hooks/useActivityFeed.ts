@@ -18,7 +18,7 @@ function merge(a: ActivityEvent[], b: ActivityEvent[]): ActivityEvent[] {
 
 /**
  * Rolling in-memory activity buffer: hydrated ONCE via `GET /api/events` on mount and appended live
- * from the single stream's `activity` frame (wire the returned `append` to `useBoardStream`'s
+ * from the single stream's `activity` frame (wire the returned `append` to `useBoardLiveUpdates`'s
  * `onActivity`). No second EventSource, no polling, no loading/error surface — on a failed hydrate
  * the buffer keeps whatever SSE already fed it (FEED-03).
  */

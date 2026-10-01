@@ -6,7 +6,7 @@ import {
   useMediaQuery,
 } from "../../hooks/useMediaQuery.js";
 import { useShortcuts } from "../../hooks/useShortcuts.js";
-import { routeHash } from "../../lib/route.js";
+import { routeHash } from "../../../shared/route.js";
 import { TICKETS_BINDINGS } from "../../lib/shortcuts.js";
 import { Button } from "../../primitives/Button.js";
 import { Chip } from "../../primitives/Chip.js";

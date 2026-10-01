@@ -5,3 +5,4 @@ dist/
 package-lock.json
 docs/superpowers/
 .claude/worktrees/**
+src/web/routeTree.gen.ts
