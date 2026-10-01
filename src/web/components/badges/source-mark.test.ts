@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Bot, Tag } from "lucide-react";
-import { CalendarMark } from "./brands/CalendarMark.js";
-import { GitHubMark } from "./brands/GitHubMark.js";
-import { GranolaMark } from "./brands/GranolaMark.js";
-import { LinearMark } from "./brands/LinearMark.js";
-import { SentryMark } from "./brands/SentryMark.js";
-import { SlackMark } from "./brands/SlackMark.js";
+import { CalendarMark } from "@/components/icons/brands/CalendarMark";
+import { GitHubMark } from "@/components/icons/brands/GitHubMark";
+import { GranolaMark } from "@/components/icons/brands/GranolaMark";
+import { LinearMark } from "@/components/icons/brands/LinearMark";
+import { SentryMark } from "@/components/icons/brands/SentryMark";
+import { SlackMark } from "@/components/icons/brands/SlackMark";
 import { SOURCE_ACCENT } from "./source-accent.js";
 import { SOURCE_MARK, sourceMark } from "./source-mark.js";
 

@@ -4,7 +4,7 @@ import { snippetBodyLine, type MeetingGroup } from "../../lib/meetings.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Collapsible } from "../../primitives/Collapsible.js";
 import { ListRow } from "../../primitives/ListRow.js";
-import { SourceBadge } from "../badges/index.js";
+import { SourceBadge } from "../../components/badges/index.js";
 
 interface MeetingListProps {
   groups: MeetingGroup[];

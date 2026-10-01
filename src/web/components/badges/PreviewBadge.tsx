@@ -1,46 +1,30 @@
 import { Globe } from "lucide-react";
-import { useState } from "react";
 import type { PreviewInfo } from "../../../shared/types.js";
+import { Badge } from "@/components/ui/badge";
 import { previewBadgeTitle } from "./preview-evidence.js";
 
 export function PreviewBadge({ preview }: { preview: PreviewInfo }) {
-  const [hovered, setHovered] = useState(false);
   const title = previewBadgeTitle(preview);
   const ariaLabel = `Open preview, localhost:${preview.port}`;
   return (
-    <button
-      type="button"
-      title={title}
-      aria-label={ariaLabel}
-      onPointerDown={(event) => event.stopPropagation()}
-      onClick={(event) => {
-        event.stopPropagation();
-        window.open(preview.url, "_blank", "noopener,noreferrer");
-      }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        flex: "0 0 auto",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "var(--space-xs)",
-        borderRadius: "var(--radius-sm)",
-        padding: "0 var(--space-xs)",
-        fontSize: "var(--font-label)",
-        fontWeight: "var(--weight-semibold)",
-        lineHeight: "var(--line-label)",
-        whiteSpace: "nowrap",
-        border: "none",
-        background:
-          "color-mix(in srgb, var(--status-ok) 16%, var(--surface-card))",
-        color: "var(--status-ok)",
-        cursor: "pointer",
-        fontFamily: "inherit",
-        opacity: hovered ? 0.85 : 1,
-      }}
+    <Badge
+      asChild
+      tone="success"
+      className="h-auto cursor-pointer border-0 text-sm hover:opacity-85"
     >
-      <Globe size={12} strokeWidth={2} aria-hidden="true" />
-      {`:${preview.port}`}
-    </button>
+      <button
+        type="button"
+        title={title}
+        aria-label={ariaLabel}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          window.open(preview.url, "_blank", "noopener,noreferrer");
+        }}
+      >
+        <Globe size={12} strokeWidth={2} aria-hidden="true" />
+        {`:${preview.port}`}
+      </button>
+    </Badge>
   );
 }

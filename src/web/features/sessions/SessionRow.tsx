@@ -13,7 +13,7 @@ import {
   PrBadge,
   PrOverflowChip,
   PreviewBadge,
-} from "../badges/index.js";
+} from "../../components/badges/index.js";
 
 interface SessionRowProps {
   row: SessionRowModel;

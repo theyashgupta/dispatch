@@ -29,7 +29,7 @@ import {
   SourceBadge,
   TeamCycleText,
   UnknownProbeBadge,
-} from "../badges/index.js";
+} from "../../components/badges/index.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";

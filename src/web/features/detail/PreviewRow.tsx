@@ -1,6 +1,6 @@
 import { ExternalLink, Globe } from "lucide-react";
 import type { PreviewInfo } from "../../../shared/types.js";
-import { previewEvidenceLine } from "../badges/index.js";
+import { previewEvidenceLine } from "../../components/badges/index.js";
 import { Field } from "../../primitives/Field.js";
 import { IconButton } from "../../primitives/IconButton.js";
 

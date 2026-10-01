@@ -12,7 +12,7 @@ import { admitToken } from "../../lib/flow-geometry.js";
 import { pollSource } from "../../lib/api.js";
 import { nowMs } from "../../lib/format-age.js";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
-import { sourceAccent } from "../badges/index.js";
+import { sourceAccent } from "../../components/badges/index.js";
 import {
   diffArrivals,
   flowRows,

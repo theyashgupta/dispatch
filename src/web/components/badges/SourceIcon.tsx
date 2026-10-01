@@ -1,16 +1,7 @@
-import { createElement, type CSSProperties } from "react";
+import { createElement } from "react";
+import { Badge } from "@/components/ui/badge";
 import { NEUTRAL_ACCENT, sourceAccent } from "./source-accent.js";
 import { sourceMark } from "./source-mark.js";
-
-const iconStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  flex: "0 0 auto",
-  width: "32px",
-  height: "32px",
-  borderRadius: "var(--radius)",
-};
 
 interface SourceIconProps {
   source: string;
@@ -19,19 +10,16 @@ interface SourceIconProps {
 export function SourceIcon({ source }: SourceIconProps) {
   const color = sourceAccent(source);
   return (
-    <span
+    <Badge
       aria-hidden="true"
-      style={{
-        ...iconStyle,
-        color,
-        ...(color === NEUTRAL_ACCENT
-          ? { border: "1px solid var(--border)" }
-          : {
-              background: `color-mix(in srgb, ${color} 16%, transparent)`,
-            }),
-      }}
+      stateColor={color}
+      className={
+        color === NEUTRAL_ACCENT
+          ? "size-8 justify-center rounded-md border-border bg-transparent p-0 text-(--badge-state) [&>svg]:size-4"
+          : "size-8 justify-center rounded-md border-0 bg-[color-mix(in_srgb,var(--badge-state)_16%,transparent)] p-0 text-(--badge-state) [&>svg]:size-4"
+      }
     >
       {createElement(sourceMark(source), { size: 16 })}
-    </span>
+    </Badge>
   );
 }

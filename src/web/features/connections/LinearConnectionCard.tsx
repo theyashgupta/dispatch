@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 import type { SourceConnection } from "../../../shared/types.js";
-import { SourceIcon } from "../badges/index.js";
+import { SourceIcon } from "../../components/badges/index.js";
 import { useLinearConnection } from "../../hooks/useLinearConnection.js";
 import { LINEAR_CONNECTION } from "../../lib/connection-meta.js";
 import { CONNECTION_ERROR_COPY } from "../../lib/connection-status.js";

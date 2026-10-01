@@ -1,4 +1,4 @@
-import type { Card, LinearState, LinearTeam } from "../../shared/types.js";
+import type { Card, LinearState, LinearTeam } from "./types.js";
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 

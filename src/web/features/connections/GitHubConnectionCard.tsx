@@ -1,4 +1,4 @@
-import { SourceIcon } from "../badges/index.js";
+import { SourceIcon } from "../../components/badges/index.js";
 import { useSourceConnection } from "../../hooks/useSourceConnection.js";
 import { GITHUB_CONNECTION } from "../../lib/connection-meta.js";
 import {

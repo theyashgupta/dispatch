@@ -2,7 +2,7 @@ import type { Card, FilterOption, Item } from "../../../shared/types.js";
 import type { InboxRowModel } from "../../lib/actions.js";
 import { capitalize, humanizeType, itemRow } from "../../lib/inbox-row.js";
 import { cardPriorityScore } from "../../lib/card-priority.js";
-import { stateTypeRank } from "../../lib/linear-state.js";
+import { stateTypeRank } from "../../../shared/linear-state.js";
 
 export { humanizeType };
 

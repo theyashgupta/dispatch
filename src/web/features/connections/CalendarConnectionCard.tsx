@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from "react";
 import type { CalendarMode } from "../../../shared/types.js";
-import { SourceIcon } from "../badges/index.js";
+import { SourceIcon } from "../../components/badges/index.js";
 import { useCalendarConnection } from "../../hooks/useCalendarConnection.js";
 import { CALENDAR_CONNECTION } from "../../lib/connection-meta.js";
 import { calendarCardStatus } from "../../lib/connection-status.js";

@@ -1,32 +1,8 @@
-import { createElement, type CSSProperties } from "react";
+import { createElement } from "react";
+import { Badge } from "@/components/ui/badge";
 import { NEUTRAL_ACCENT, sourceAccent } from "./source-accent.js";
 import { sourceMark } from "./source-mark.js";
 import { sourceName } from "./source-name.js";
-
-const tileStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  flex: "0 0 auto",
-  width: "18px",
-  height: "18px",
-  borderRadius: "var(--radius-sm)",
-};
-
-const labelledStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "var(--space-xs)",
-  flex: "0 0 auto",
-  whiteSpace: "nowrap",
-};
-
-const nameStyle: CSSProperties = {
-  color: "var(--text-muted)",
-  fontSize: "var(--font-label)",
-  fontWeight: "var(--weight-semibold)",
-  lineHeight: "var(--line-label)",
-};
 
 interface SourceBadgeProps {
   source: string;
@@ -37,26 +13,27 @@ export function SourceBadge({ source, label = false }: SourceBadgeProps) {
   const name = sourceName(source);
   const color = sourceAccent(source);
   const tile = (
-    <span
+    <Badge
+      stateColor={color}
+      className={
+        color === NEUTRAL_ACCENT
+          ? "size-4.5 justify-center border-border bg-transparent p-0 text-(--badge-state)"
+          : "size-4.5 justify-center border-0 bg-[color-mix(in_srgb,var(--badge-state)_16%,transparent)] p-0 text-(--badge-state)"
+      }
       {...(label
         ? { "aria-hidden": true }
         : { role: "img", "aria-label": name, title: name })}
-      style={{
-        ...tileStyle,
-        color,
-        ...(color === NEUTRAL_ACCENT
-          ? { border: "1px solid var(--border)" }
-          : { background: `color-mix(in srgb, ${color} 16%, transparent)` }),
-      }}
     >
       {createElement(sourceMark(source), { size: 12 })}
-    </span>
+    </Badge>
   );
   if (!label) return tile;
   return (
-    <span style={labelledStyle}>
+    <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
       {tile}
-      <span style={nameStyle}>{name}</span>
+      <span className="text-sm font-semibold text-muted-foreground">
+        {name}
+      </span>
     </span>
   );
 }

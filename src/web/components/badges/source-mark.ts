@@ -1,11 +1,11 @@
 import { Bot, FileText, Layers, Tag } from "lucide-react";
 import type { ComponentType, CSSProperties } from "react";
-import { CalendarMark } from "./brands/CalendarMark.js";
-import { GitHubMark } from "./brands/GitHubMark.js";
-import { GranolaMark } from "./brands/GranolaMark.js";
-import { LinearMark } from "./brands/LinearMark.js";
-import { SentryMark } from "./brands/SentryMark.js";
-import { SlackMark } from "./brands/SlackMark.js";
+import { CalendarMark } from "@/components/icons/brands/CalendarMark";
+import { GitHubMark } from "@/components/icons/brands/GitHubMark";
+import { GranolaMark } from "@/components/icons/brands/GranolaMark";
+import { LinearMark } from "@/components/icons/brands/LinearMark";
+import { SentryMark } from "@/components/icons/brands/SentryMark";
+import { SlackMark } from "@/components/icons/brands/SlackMark";
 
 export type SourceMark = ComponentType<{ size?: number }>;
 

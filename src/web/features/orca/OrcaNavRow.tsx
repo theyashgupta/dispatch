@@ -6,7 +6,7 @@ import { deriveShowDot } from "../../lib/card-badges.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";
-import { SourceBadge } from "../badges/index.js";
+import { SourceBadge } from "../../components/badges/index.js";
 import {
   COLUMN_ACCENT,
   attentionTitle,
