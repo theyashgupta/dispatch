@@ -1,6 +1,6 @@
 import { run } from "../../adapters/exec.js";
 import { claudeBinaryPath } from "../../adapters/claude-cli.js";
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 import type { AskRequest } from "../../../shared/types.js";
 import { DISPATCH_DIR } from "../infra/paths.js";
 import { buildAskContext } from "../domain/ask-context.js";

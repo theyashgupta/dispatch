@@ -77,7 +77,7 @@
  *     byte-identical restore.
  *   - `push-envelope-decrypts` proven able to fail (Plan 04): removing the `dsaEncoding:
  *     "ieee-p1363"` option from `signVapidJwt`'s `sign()` call inside
- *     `src/server/services/domain/push-send.ts`, rebuilding, and re-running the same check
+ *     `src/server/services/orchestration/push-send.ts`, rebuilding, and re-running the same check
  *     against a real booted sandbox server, a real detached tmux pane, and the real stub push
  *     service produced, verbatim:
  *     `push-envelope-decrypts: expected exactly 1 stub push request within 15000ms, observed 0`
@@ -1736,7 +1736,7 @@ const BOOTSTRAP_INDEX_TS_PATH = join(
 
 const PUSH_SEND_TS_PATH = join(
   REPO_ROOT,
-  "src/server/services/domain/push-send.ts",
+  "src/server/services/orchestration/push-send.ts",
 );
 const PUSH_SEND_BREAK_TARGET = '\n    dsaEncoding: "ieee-p1363",';
 

@@ -1,7 +1,7 @@
 import { run } from "../../adapters/exec.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { DISPATCH_DIR } from "../infra/paths.js";
-import { hasDispatchMarker } from "../domain/playbooks.js";
+import { hasDispatchMarker } from "../infra/playbooks.js";
 
 const PHRASE_HEADER = "## Phrase";
 const PHRASE_CAP = 48;

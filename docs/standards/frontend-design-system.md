@@ -53,6 +53,8 @@ The app is already hooks-first: `useUnseenActivity` and `useTransitionNotificati
 
 Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. New code uses the container layer. Containers own data through TanStack Query. Components get data only through props. New code follows the Providers section of the new standard, not the no-Context rule. Until ticket 16, this section still applies to the legacy tree that the new standard names in "Status and scope".
 
+Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. New code uses the container layer. Containers own data through TanStack Query. Components get data only through props. New code follows the Providers section of the new standard, not the no-Context rule. Until ticket 16, this section still applies to the legacy tree that the new standard names in "Status and scope".
+
 ## Depth
 
 Medium depth. Build the five primitives and the typed style-object module; do **not** build a variant/theme engine, a Storybook, or a component-doc site — all over-engineering for a young, one-user tool. Each primitive lands as a pure refactor, smoke-gated on sync → start → terminal → markers → cleanup, with pixel-identical rendering at every adopted call site.
