@@ -1,4 +1,4 @@
-import type { Card, Column, Item, SlackThread } from "../../shared/types.js";
+import type { Card, Item, SlackThread } from "../../shared/types.js";
 import type * as Api from "./api.js";
 import { draftReplyPrompt } from "./slack-prompt.js";
 import { askAboutQuestion, type AskAboutTarget } from "./ask.js";
@@ -326,21 +326,6 @@ export function bulkOutcomeCopy(verb: string, outcome: BulkOutcome): string {
   if (outcome.failed.length === 0) return head;
   return `${head}. Failed: ${outcome.failed.map((f) => `${f.identifier} (${f.error})`).join(", ")}`;
 }
-
-export interface CardActionContext {
-  api: Pick<ActionApi, "moveCard">;
-  requestStart: (cardId: string) => void;
-  requestCleanup: (cardId: string) => void;
-  openCard: (cardId: string) => void;
-}
-
-export const CARD_ACTIONS = {
-  start: (ctx: CardActionContext, card: Card) => ctx.requestStart(card.id),
-  openTerminal: (ctx: CardActionContext, card: Card) => ctx.openCard(card.id),
-  moveTo: (ctx: CardActionContext, card: Card, column: Column) =>
-    ctx.api.moveCard(card.id, column),
-  cleanup: (ctx: CardActionContext, card: Card) => ctx.requestCleanup(card.id),
-};
 
 /**
  * Poll every enabled source now and say which ones were asked.

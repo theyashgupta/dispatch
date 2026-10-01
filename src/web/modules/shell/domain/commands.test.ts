@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Card } from "../../shared/types.js";
+import type { Card } from "../../../../shared/types.js";
 import {
   buildCommands,
   filterCommands,
@@ -125,6 +125,18 @@ test("each command runs its action once", async () => {
     "start LOCAL-7",
     "move LOCAL-7 parked",
   ]);
+});
+
+test("the card commands Open terminal and Clean up each call their action once with the card id", async () => {
+  const { context, calls } = ctx();
+  const commands = buildCommands(
+    context,
+    nav,
+    card({ column: "done", tmuxSession: "dsp-LOCAL-7", workspacePath: "/ws" }),
+  );
+  await commands.find((c) => c.id === "open-terminal")?.run();
+  await commands.find((c) => c.id === "cleanup")?.run();
+  assert.deepEqual(calls, ["open LOCAL-7", "cleanup LOCAL-7"]);
 });
 
 test("filter is a case-insensitive substring over the label that keeps order", () => {

@@ -1,21 +1,8 @@
+import { COLUMN_LABELS } from "../../shared/column-labels.js";
 import { LINEAR_PUSH_FAILED_PREFIX } from "../../shared/linear-state-map.js";
 import type { ActivityEvent, Column } from "../../shared/types.js";
 
-/**
- * Title Case column labels for feed prose, kept local to this module so the copy layer never
- * reaches into the board feature for the uppercase labels (a forbidden cross-feature import) — the
- * feed reads Title Case names such as "In Progress", never the raw snake_case column keys.
- */
-export const COLUMN_LABELS: Record<Column, string> = {
-  todo: "To Do",
-  in_progress: "In Progress",
-  needs_input: "Needs Input",
-  agent_done: "Agent Done",
-  in_review: "In Review",
-  parked: "Parked",
-  done: "Done",
-  inbox: "Inbox",
-};
+export { COLUMN_LABELS };
 
 function moveClause(
   verb: string,

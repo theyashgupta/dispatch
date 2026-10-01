@@ -1,8 +1,7 @@
-import { isManualMoveAllowed } from "../../shared/column-transitions.js";
-import { COLUMNS, type Card } from "../../shared/types.js";
-import { CARD_ACTIONS, type CardActionContext } from "./actions.js";
-import { COLUMN_LABELS } from "./event-copy.js";
-import type { Page } from "../../shared/route.js";
+import { COLUMN_LABELS } from "../../../../shared/column-labels.js";
+import { isManualMoveAllowed } from "../../../../shared/column-transitions.js";
+import type { Page } from "../../../../shared/route.js";
+import { COLUMNS, type Card, type Column } from "../../../../shared/types.js";
 
 export interface Command {
   id: string;
@@ -11,7 +10,11 @@ export interface Command {
   run: () => void | Promise<void>;
 }
 
-export interface CommandContext extends CardActionContext {
+export interface CommandContext {
+  api: { moveCard: (cardId: string, column: Column) => void | Promise<void> };
+  requestStart: (cardId: string) => void;
+  requestCleanup: (cardId: string) => void;
+  openCard: (cardId: string) => void;
   navigate: (page: Page) => void;
   newTicket: () => void;
   meetingNotes: () => void;
@@ -55,14 +58,14 @@ export function buildCommands(
     commands.push({
       id: "start",
       label: "Start",
-      run: () => CARD_ACTIONS.start(ctx, card),
+      run: () => ctx.requestStart(card.id),
     });
   }
   if (hasLiveSession(card)) {
     commands.push({
       id: "open-terminal",
       label: "Open terminal",
-      run: () => CARD_ACTIONS.openTerminal(ctx, card),
+      run: () => ctx.openCard(card.id),
     });
   }
   for (const column of COLUMNS) {
@@ -76,7 +79,7 @@ export function buildCommands(
     commands.push({
       id: `move:${column}`,
       label: `Move to ${COLUMN_LABELS[column]}`,
-      run: () => CARD_ACTIONS.moveTo(ctx, card, column),
+      run: () => ctx.api.moveCard(card.id, column),
     });
   }
   if (
@@ -87,7 +90,7 @@ export function buildCommands(
     commands.push({
       id: "cleanup",
       label: "Clean up",
-      run: () => CARD_ACTIONS.cleanup(ctx, card),
+      run: () => ctx.requestCleanup(card.id),
     });
   }
   return [...commands, ...general];

@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, SVGProps } from "react";
 
 export const wordmarkStyle: CSSProperties = {
   fontSize: "var(--font-display)",
@@ -6,14 +6,12 @@ export const wordmarkStyle: CSSProperties = {
   letterSpacing: "0.18em",
 };
 
-interface GlyphProps {
+interface GlyphProps extends Omit<SVGProps<SVGSVGElement>, "title"> {
   size?: number;
   title?: string;
-  className?: string;
-  style?: CSSProperties;
 }
 
-export function Glyph({ size = 16, title, className, style }: GlyphProps) {
+export function Glyph({ size = 16, title, ...rest }: GlyphProps) {
   return (
     <svg
       width={size}
@@ -27,8 +25,7 @@ export function Glyph({ size = 16, title, className, style }: GlyphProps) {
       role={title ? "img" : "presentation"}
       aria-hidden={title ? undefined : true}
       aria-label={title}
-      className={className}
-      style={style}
+      {...rest}
     >
       {title ? <title>{title}</title> : null}
       <path d="M12 18 H40 C52 18 44 43 56 43" />

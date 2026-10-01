@@ -1,35 +1,17 @@
-import {
-  Activity,
-  Archive,
-  ClipboardList,
-  HardDrive,
-  Inbox,
-  Kanban,
-  KeyRound,
-  MessageCircleQuestion,
-  PanelLeft,
-  SquareTerminal,
-  Sun,
-  Users,
-  Workflow,
-} from "lucide-react";
-import type { ComponentType } from "react";
-import type { ItemSourceId } from "../../../shared/types.js";
-import { sourceMark } from "../badges/index.js";
-import type { Page } from "../../../shared/route.js";
+import type { ItemSourceId } from "../../../../shared/types.js";
+import type { Page } from "../../../../shared/route.js";
 
 export type NavGroup = "Home" | "Work" | "Sources" | "System";
-
-export type NavIcon = ComponentType<{ size?: number }>;
 
 export interface NavItem {
   page: Page;
   label: string;
-  icon: NavIcon;
   group: NavGroup;
   source?: ItemSourceId;
   brand?: string;
 }
+
+export type NavCounts = Partial<Record<Page, number>>;
 
 export const NAV_GROUPS: readonly NavGroup[] = [
   "Home",
@@ -39,66 +21,58 @@ export const NAV_GROUPS: readonly NavGroup[] = [
 ];
 
 export const NAV_ITEMS: readonly NavItem[] = [
-  { page: "today", label: "Today", icon: Sun, group: "Home" },
-  { page: "inbox", label: "Inbox", icon: Inbox, group: "Home" },
-  { page: "ask", label: "Ask", icon: MessageCircleQuestion, group: "Home" },
-  { page: "board", label: "Board", icon: Kanban, group: "Work" },
-  { page: "sessions", label: "Sessions", icon: SquareTerminal, group: "Work" },
-  { page: "workspace", label: "Workspace", icon: PanelLeft, group: "Work" },
-  { page: "activity", label: "Activity", icon: Activity, group: "Work" },
+  { page: "today", label: "Today", group: "Home" },
+  { page: "inbox", label: "Inbox", group: "Home" },
+  { page: "ask", label: "Ask", group: "Home" },
+  { page: "board", label: "Board", group: "Work" },
+  { page: "sessions", label: "Sessions", group: "Work" },
+  { page: "workspace", label: "Workspace", group: "Work" },
+  { page: "activity", label: "Activity", group: "Work" },
   {
     page: "tickets",
     label: "Tickets",
-    icon: sourceMark("linear"),
     group: "Sources",
     brand: "linear",
   },
   {
     page: "accounts",
     label: "Accounts and Usage",
-    icon: Users,
     group: "System",
   },
   {
     page: "playbooks",
     label: "Playbooks",
-    icon: ClipboardList,
     group: "System",
   },
-  { page: "vault", label: "Vault", icon: KeyRound, group: "System" },
-  { page: "archive", label: "Archive", icon: Archive, group: "System" },
+  { page: "vault", label: "Vault", group: "System" },
+  { page: "archive", label: "Archive", group: "System" },
   {
     page: "pull-requests",
     label: "Pull Requests",
-    icon: sourceMark("github"),
     group: "Sources",
     brand: "github",
   },
   {
     page: "errors",
     label: "Errors",
-    icon: sourceMark("sentry"),
     group: "Sources",
     brand: "sentry",
   },
   {
     page: "meetings",
     label: "Meetings",
-    icon: sourceMark("meeting"),
     group: "Sources",
     brand: "meeting",
   },
   {
     page: "calendar",
     label: "Calendar",
-    icon: sourceMark("calendar"),
     group: "Sources",
     brand: "calendar",
   },
   {
     page: "slack",
     label: "Slack",
-    icon: sourceMark("slack"),
     group: "Sources",
     source: "slack",
     brand: "slack",
@@ -106,10 +80,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
   {
     page: "workspaces",
     label: "Workspaces",
-    icon: HardDrive,
     group: "System",
   },
-  { page: "flow", label: "Flow", icon: Workflow, group: "System" },
+  { page: "flow", label: "Flow", group: "System" },
 ];
 
 /**
