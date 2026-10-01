@@ -7,8 +7,8 @@ import type {
   SourceCardStatus,
   SourceConnection,
   SourceKeyError,
-} from "../../shared/types.js";
-import { isProviderCode } from "../../shared/credential.js";
+} from "./types.js";
+import { isProviderCode } from "./credential.js";
 import { formatAge } from "./format-age.js";
 
 export const CONNECTION_ERROR_COPY: Record<SourceKeyError, string> = {

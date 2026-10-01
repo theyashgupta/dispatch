@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { useSlackThread } from "../../hooks/useSlackThread.js";
-import { formatAge, nowMs } from "../../lib/format-age.js";
+import { formatAge, nowMs } from "../../../shared/format-age.js";
 import { Button } from "../../primitives/Button.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Collapsible } from "../../primitives/Collapsible.js";

@@ -7,7 +7,7 @@ import {
   prStateLabel,
   prStyleFor,
 } from "../../components/badges/pr-style.js";
-import { formatAge, nowMs } from "../../lib/format-age.js";
+import { formatAge, nowMs } from "../../../shared/format-age.js";
 import { Field } from "../../primitives/Field.js";
 import { IconButton } from "../../primitives/IconButton.js";
 import { Notice } from "../../primitives/Notice.js";

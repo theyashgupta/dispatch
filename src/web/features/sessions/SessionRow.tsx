@@ -4,7 +4,7 @@ import {
   sessionStatusLabel,
   type SessionRow as SessionRowModel,
 } from "../../lib/sessions.js";
-import { formatAge } from "../../lib/format-age.js";
+import { formatAge } from "../../../shared/format-age.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Field } from "../../primitives/Field.js";
 import { ListRow } from "../../primitives/ListRow.js";

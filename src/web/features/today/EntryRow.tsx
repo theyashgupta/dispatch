@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from "react";
-import { formatAge } from "../../lib/format-age.js";
+import { formatAge } from "../../../shared/format-age.js";
 import type { TodayEntry } from "../../lib/p0.js";
 import { Chip } from "../../primitives/Chip.js";
 import { focusRing } from "../../primitives/focus-ring.js";

@@ -16,7 +16,7 @@ import {
   mergePullRequest,
   reviewPullRequest,
 } from "../../lib/api.js";
-import { withSsoUrl } from "../../lib/connection-status.js";
+import { withSsoUrl } from "../../../shared/connection-status.js";
 import type { PrRow } from "../../lib/pr-rows.js";
 import { Button } from "../../primitives/Button.js";
 import { Chip } from "../../primitives/Chip.js";

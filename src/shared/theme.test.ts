@@ -13,7 +13,7 @@ import {
   type ThemePreference,
 } from "./theme.js";
 
-const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "web");
 const SHELLS = ["index.html", "viewer.html"];
 const STORED_VALUES = ["system", "light", "dark", null, "garbage", "LIGHT", ""];
 

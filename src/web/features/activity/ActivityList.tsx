@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import type { ActivityEvent } from "../../../shared/types.js";
 import { describeEvent } from "../../lib/event-copy.js";
-import { formatAge } from "../../lib/format-age.js";
+import { formatAge } from "../../../shared/format-age.js";
 import { ActivityItem } from "../../primitives/ActivityItem.js";
 
 interface ActivityListProps {

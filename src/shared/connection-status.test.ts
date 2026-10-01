@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { CalendarStatus, GranolaStatus } from "../../shared/types.js";
+import type { CalendarStatus, GranolaStatus } from "./types.js";
 import {
   CALENDAR_ERROR_COPY,
   CALENDAR_LOAD_FAILED_COPY,

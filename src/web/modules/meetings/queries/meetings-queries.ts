@@ -1,27 +1,22 @@
-import { queryOptions, useQuery } from "@tanstack/react-query";
-import { getGranola, getMeetingTranscript } from "./meetings-api.js";
+import { queryOptions } from "@tanstack/react-query";
+import { granolaKeys } from "@/queries/granola-queries";
+import { getMeetingTranscript } from "./meetings-api.js";
+
+export {
+  granolaQueryOptions,
+  useGranolaQuery,
+} from "@/queries/granola-queries";
 
 export const meetingsKeys = {
   all: ["meetings"] as const,
-  granola: ["meetings", "granola"] as const,
+  granola: granolaKeys.status,
   transcript: (meetingId: string) =>
     ["meetings", "transcript", meetingId] as const,
 };
-
-export function granolaQueryOptions() {
-  return queryOptions({
-    queryKey: meetingsKeys.granola,
-    queryFn: getGranola,
-  });
-}
 
 export function meetingTranscriptQueryOptions(meetingId: string) {
   return queryOptions({
     queryKey: meetingsKeys.transcript(meetingId),
     queryFn: () => getMeetingTranscript(meetingId),
   });
-}
-
-export function useGranolaQuery() {
-  return useQuery(granolaQueryOptions());
 }

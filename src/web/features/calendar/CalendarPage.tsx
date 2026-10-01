@@ -12,7 +12,7 @@ import {
 import {
   CALENDAR_ERROR_COPY,
   CALENDAR_LOAD_FAILED_COPY,
-} from "../../lib/connection-status.js";
+} from "../../../shared/connection-status.js";
 import { Button } from "../../primitives/Button.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Notice } from "../../primitives/Notice.js";

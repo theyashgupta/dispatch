@@ -1,18 +1,11 @@
-import { queryOptions, useQuery } from "@tanstack/react-query";
-import { getCalendarStatus } from "./calendar-api.js";
+import { calendarStatusKeys } from "@/queries/calendar-status-queries";
+
+export {
+  calendarStatusQueryOptions,
+  useCalendarStatusQuery,
+} from "@/queries/calendar-status-queries";
 
 export const calendarKeys = {
   all: ["calendar"] as const,
-  status: ["calendar", "status"] as const,
+  status: calendarStatusKeys.status,
 };
-
-export function calendarStatusQueryOptions() {
-  return queryOptions({
-    queryKey: calendarKeys.status,
-    queryFn: getCalendarStatus,
-  });
-}
-
-export function useCalendarStatusQuery() {
-  return useQuery(calendarStatusQueryOptions());
-}

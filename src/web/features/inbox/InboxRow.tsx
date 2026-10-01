@@ -6,7 +6,7 @@ import {
   type InboxActionId,
   type InboxRowModel,
 } from "../../lib/actions.js";
-import { formatAge, nowMs } from "../../lib/format-age.js";
+import { formatAge, nowMs } from "../../../shared/format-age.js";
 import { Button } from "../../primitives/Button.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Field } from "../../primitives/Field.js";
