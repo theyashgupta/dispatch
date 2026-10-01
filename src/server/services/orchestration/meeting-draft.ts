@@ -5,7 +5,7 @@ import {
   buildPastePrompt,
   parseActionItems,
   type ActionDraft,
-} from "../domain/meeting-actions.js";
+} from "./meeting-actions.js";
 
 export interface MeetingDraftInput {
   meeting: string;

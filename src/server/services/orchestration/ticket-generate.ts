@@ -1,8 +1,8 @@
 import { run } from "../../adapters/exec.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { DISPATCH_DIR } from "../infra/paths.js";
-import { hasDispatchMarker } from "../domain/playbooks.js";
-import type { DecodedImage } from "../domain/attachments.js";
+import { hasDispatchMarker } from "../infra/playbooks.js";
+import type { DecodedImage } from "../infra/attachments.js";
 
 const TITLE_HEADER = "## Title";
 const DESCRIPTION_HEADER = "## Description";

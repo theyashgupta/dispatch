@@ -1,10 +1,26 @@
 import { Router, type Request, type Response } from "express";
-import { store } from "../store/board.store.js";
+import { httpErrorHandler } from "./error-handler.js";
+import { z } from "zod";
+import { parseOrThrow } from "./parse-input.js";
+import { boardRepository as store } from "../store/board-repository.js";
 
 export const eventsRouter = Router();
 
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 1000;
+
+const querySchema = z.object(
+  {
+    cardId: z.string("invalid cardId").optional(),
+    limit: z
+      .string("invalid limit")
+      .regex(/^\d+$/, "invalid limit")
+      .transform(Number)
+      .refine((n) => n >= 1 && n <= MAX_LIMIT, "limit out of range")
+      .optional(),
+  },
+  "invalid cardId",
+);
 
 /**
  * REST event log at GET /api/events, newest-first, `?cardId=` scoped, `?limit=` clamped to [1,1000].
@@ -13,27 +29,14 @@ const MAX_LIMIT = 1000;
  * query can never fall through to a raw node:sqlite error rendered as an HTML 500.
  */
 function listEventsHandler(req: Request, res: Response): void {
-  const rawCardId = req.query.cardId;
-  if (rawCardId !== undefined && typeof rawCardId !== "string") {
-    res.status(400).json({ error: "invalid cardId" });
-    return;
-  }
+  const { cardId, limit = DEFAULT_LIMIT } = parseOrThrow(
+    querySchema,
+    req.query,
+  );
 
-  let limit = DEFAULT_LIMIT;
-  const rawLimit = req.query.limit;
-  if (rawLimit !== undefined) {
-    if (typeof rawLimit !== "string" || !/^\d+$/.test(rawLimit)) {
-      res.status(400).json({ error: "invalid limit" });
-      return;
-    }
-    limit = Number(rawLimit);
-    if (limit < 1 || limit > MAX_LIMIT) {
-      res.status(400).json({ error: "limit out of range" });
-      return;
-    }
-  }
-
-  res.status(200).json({ events: store.listEvents(rawCardId ?? null, limit) });
+  res.status(200).json({ events: store.listEvents(cardId ?? null, limit) });
 }
 
 eventsRouter.get("/events", listEventsHandler);
+
+eventsRouter.use(httpErrorHandler);

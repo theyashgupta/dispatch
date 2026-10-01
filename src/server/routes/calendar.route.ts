@@ -1,104 +1,71 @@
-import { Router, type Request, type Response } from "express";
-import {
-  CALENDAR_TITLE_MAX,
-  CALENDARS_MAX,
-  type CalendarSettingsPatch,
-} from "../../shared/types.js";
+import { Router } from "express";
+import { z } from "zod";
+import { CALENDAR_TITLE_MAX, CALENDARS_MAX } from "../../shared/types.js";
+import { ConflictError, InternalError } from "../services/domain/errors.js";
 import {
   applyCalendarSettings,
   calendarStatus,
   listCalendars,
 } from "../services/orchestration/calendar.js";
+import { httpErrorHandler } from "./error-handler.js";
+import { parseOrThrow } from "./parse-input.js";
 
 export const calendarRouter = Router();
 
-/**
- * Validate a settings body into a patch, or name the first field that is wrong.
- */
-function parseSettings(
-  body: unknown,
-): { patch: CalendarSettingsPatch } | { error: string } {
-  if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    return { error: "invalid-body" };
-  }
-  const b = body as Record<string, unknown>;
-  const patch: CalendarSettingsPatch = {};
-  if (b.mode !== undefined) {
-    if (b.mode !== "macos" && b.mode !== "ical")
-      return { error: "invalid-mode" };
-    patch.mode = b.mode;
-  }
-  if (b.calendars !== undefined) {
-    const titles = b.calendars;
-    if (
-      !Array.isArray(titles) ||
-      titles.length > CALENDARS_MAX ||
-      !titles.every(
-        (t) =>
-          typeof t === "string" &&
-          t.trim() !== "" &&
-          t.length <= CALENDAR_TITLE_MAX,
-      )
-    ) {
-      return { error: "invalid-calendars" };
-    }
-    patch.calendars = titles as string[];
-  }
-  if (b.enabled !== undefined) {
-    if (typeof b.enabled !== "boolean") return { error: "invalid-enabled" };
-    patch.enabled = b.enabled;
-  }
-  return { patch };
-}
+const calendarTitleSchema = z
+  .string("invalid-calendars")
+  .refine(
+    (title) => title.trim() !== "" && title.length <= CALENDAR_TITLE_MAX,
+    "invalid-calendars",
+  );
 
-async function putSettingsHandler(req: Request, res: Response): Promise<void> {
-  const parsed = parseSettings(req.body);
-  if ("error" in parsed) {
-    res.status(400).json({ error: parsed.error });
-    return;
-  }
-  const result = await applyCalendarSettings(parsed.patch);
-  if (!result.ok) {
-    res.status(409).json({ error: result.error });
-    return;
-  }
-  res.json(result.status);
-}
-
-async function listCalendarsHandler(
-  _req: Request,
-  res: Response,
-): Promise<void> {
-  const result = await listCalendars();
-  if (result.ok) res.json({ calendars: result.calendars });
-  else res.status(409).json({ error: result.error });
-}
+/** The `PUT /calendar/settings` body; the first wrong field among mode, calendars and enabled names the error. */
+const settingsSchema = z.object(
+  {
+    mode: z.enum(["macos", "ical"], "invalid-mode").optional(),
+    calendars: z
+      .array(calendarTitleSchema, "invalid-calendars")
+      .refine((titles) => titles.length <= CALENDARS_MAX, "invalid-calendars")
+      .optional(),
+    enabled: z.boolean("invalid-enabled").optional(),
+  },
+  "invalid-body",
+);
 
 /**
- * Answer a failed calendar request with a fixed code and log only the error's first line.
+ * Log a failed calendar request's first error line and build the fixed-code 500 for it.
  */
-function fail(res: Response, route: string, code: string, err: unknown): void {
+function failure(route: string, code: string, err: unknown): InternalError {
   console.warn(
     `[calendar/${route}] failed:`,
     err instanceof Error ? err.message.split("\n")[0] : "unknown error",
   );
-  if (!res.headersSent) res.status(500).json({ error: code });
+  return new InternalError(code);
 }
 
-calendarRouter.get("/calendar/status", (_req, res) => {
-  void calendarStatus()
-    .then((status) => res.json(status))
-    .catch((err: unknown) => fail(res, "status", "status-failed", err));
+calendarRouter.get("/calendar/status", async (_req, res) => {
+  try {
+    res.json(await calendarStatus());
+  } catch (err) {
+    throw failure("status", "status-failed", err);
+  }
 });
 
-calendarRouter.post("/calendar/calendars", (req, res) => {
-  void listCalendarsHandler(req, res).catch((err: unknown) =>
-    fail(res, "calendars", "failed", err),
-  );
+calendarRouter.post("/calendar/calendars", async (_req, res) => {
+  const result = await listCalendars().catch((err: unknown) => {
+    throw failure("calendars", "failed", err);
+  });
+  if (!result.ok) throw new ConflictError(result.error);
+  res.json({ calendars: result.calendars });
 });
 
-calendarRouter.put("/calendar/settings", (req, res) => {
-  void putSettingsHandler(req, res).catch((err: unknown) =>
-    fail(res, "settings", "settings-failed", err),
-  );
+calendarRouter.put("/calendar/settings", async (req, res) => {
+  const patch = parseOrThrow(settingsSchema, req.body);
+  const result = await applyCalendarSettings(patch).catch((err: unknown) => {
+    throw failure("settings", "settings-failed", err);
+  });
+  if (!result.ok) throw new ConflictError(result.error);
+  res.json(result.status);
 });
+
+calendarRouter.use(httpErrorHandler);

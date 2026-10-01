@@ -12,7 +12,7 @@ const { slackRouter } = await import("./slack.route.js");
 const { setOrchestrationConfig } =
   await import("../services/infra/config-holder.js");
 const { createKey, listKeys, setValue, clearValue } =
-  await import("../services/domain/vault.js");
+  await import("../services/infra/vault.js");
 const { store } = await import("../store/board.store.js");
 await store.load();
 

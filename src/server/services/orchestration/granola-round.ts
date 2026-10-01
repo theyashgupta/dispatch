@@ -1,6 +1,6 @@
 import { run } from "../../adapters/exec.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 import {
   DEFAULT_GRANOLA_WINDOW_HOURS,
   type GranolaCheckResult,
@@ -16,12 +16,12 @@ import {
   parseMcpList,
   roundSince,
   type GranolaCheck,
-} from "../domain/granola-actions.js";
+} from "./granola-actions.js";
 import {
   buildMeetingItems,
   localDate,
   parseActionItems,
-} from "../domain/meeting-actions.js";
+} from "./meeting-actions.js";
 import { getOrchestrationConfig } from "../infra/config-holder.js";
 import { DISPATCH_DIR } from "../infra/paths.js";
 

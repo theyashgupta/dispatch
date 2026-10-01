@@ -16,7 +16,7 @@ import {
   removeConfigDir,
   upsertAccount,
   type ClaudeAccountRecord,
-} from "../domain/claude-accounts.js";
+} from "./claude-accounts.js";
 import { getUsage, refreshUsage } from "./claude-usage.js";
 
 const LOGIN_TIMEOUT_MS = 180_000;

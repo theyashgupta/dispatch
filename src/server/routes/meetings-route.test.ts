@@ -437,7 +437,7 @@ test("a valid window is saved while off, and Analyze now answers 409 disabled wi
 
 const { MEETINGS_DIR } = await import("../services/infra/paths.js");
 const { localDate, meetingId } =
-  await import("../services/domain/meeting-actions.js");
+  await import("../services/orchestration/meeting-actions.js");
 const { transcriptPath: transcriptFile } =
   await import("../services/orchestration/meeting-transcripts.js");
 

@@ -3,21 +3,17 @@ import {
   DEFAULT_CLAUDE_ARGS,
   DEFAULT_CLEANUP_DELAY_DAYS,
   DEFAULT_FILTERS,
-  type SourceFilters,
-  ARCHIVE_RETENTION_MAX_DAYS,
 } from "../../shared/types.js";
-import { DONE_PAGE_SIZE, parseDoneLimit } from "../../shared/done-limit.js";
+import { DONE_PAGE_SIZE } from "../../shared/done-limit.js";
+import { DEFAULT_TERMINAL_APPEARANCE } from "../../shared/terminal-appearance.js";
+import { SEARCH_RESULT_LIMIT } from "../../shared/search.js";
+import { boardRepository as store } from "../store/board-repository.js";
 import {
-  DEFAULT_TERMINAL_APPEARANCE,
-  validateTerminalAppearance,
-} from "../../shared/terminal-appearance.js";
-import {
-  SEARCH_QUERY_MAX,
-  SEARCH_QUERY_MIN,
-  SEARCH_RESULT_LIMIT,
-} from "../../shared/search.js";
-import { store } from "../store/board.store.js";
-import { hasControlByte } from "../services/domain/claude-launch.js";
+  ConflictError,
+  NotFoundError,
+  UpstreamError,
+  ValidationError,
+} from "../services/domain/errors.js";
 import {
   getOrchestrationConfig,
   updateClaudeArgs,
@@ -39,7 +35,21 @@ import {
   validateFolder,
   discoverRepos,
   browseDirectory,
-} from "../services/domain/workspaces.js";
+} from "../services/orchestration/workspaces.js";
+import {
+  archiveRetentionBodySchema,
+  boardQuerySchema,
+  claudeArgsBodySchema,
+  cleanupDelayBodySchema,
+  dirsQuerySchema,
+  filtersBodySchema,
+  optionsQuerySchema,
+  searchQuerySchema,
+  terminalBodySchema,
+  workspacePathSchema,
+} from "./board-schemas.js";
+import { httpErrorHandler } from "./error-handler.js";
+import { parseOrThrow } from "./parse-input.js";
 
 export const boardRouter = Router();
 
@@ -50,14 +60,10 @@ export const boardRouter = Router();
  * outright is safe here in a way it is not for SSE.
  */
 function getBoard(req: Request, res: Response): void {
-  const raw = req.query.doneLimit;
-  const doneLimit = raw === undefined ? DONE_PAGE_SIZE : parseDoneLimit(raw);
-  if (doneLimit == null) {
-    res.status(400).json({
-      error: "doneLimit must be a whole number between 1 and 5000",
-    });
-    return;
-  }
+  const { doneLimit = DONE_PAGE_SIZE } = parseOrThrow(
+    boardQuerySchema,
+    req.query,
+  );
   res.status(200).json(store.snapshot({ doneLimit }));
 }
 
@@ -73,18 +79,7 @@ boardRouter.get("/board", getBoard);
  * scan, not a network call.
  */
 function getSearch(req: Request, res: Response): void {
-  const raw = req.query.q;
-  if (typeof raw !== "string") {
-    res.status(400).json({ error: "q is required" });
-    return;
-  }
-  const q = raw.trim();
-  if (q.length < SEARCH_QUERY_MIN || q.length > SEARCH_QUERY_MAX) {
-    res.status(400).json({
-      error: `q must be between ${SEARCH_QUERY_MIN} and ${SEARCH_QUERY_MAX} characters`,
-    });
-    return;
-  }
+  const { q } = parseOrThrow(searchQuerySchema, req.query);
   res.status(200).json(store.searchCards(q, SEARCH_RESULT_LIMIT));
 }
 
@@ -96,27 +91,16 @@ boardRouter.get("/workspace-folders", (_req, res) => {
 });
 
 boardRouter.post("/workspace-folders", async (req, res) => {
-  const rawPath = (req.body as { path?: unknown } | undefined)?.path;
-  if (typeof rawPath !== "string" || rawPath.trim() === "") {
-    res.status(400).json({ error: "path is required" });
-    return;
-  }
+  const { path: rawPath } = parseOrThrow(workspacePathSchema, req.body);
 
   const abs = expandPath(rawPath);
   const status = await validateFolder(abs);
-  if (status === "missing") {
-    res.status(400).json({ error: "Folder doesn't exist" });
-    return;
-  }
-  if (status === "not-a-folder") {
-    res.status(400).json({ error: "Not a folder" });
-    return;
-  }
+  if (status === "missing") throw new ValidationError("Folder doesn't exist");
+  if (status === "not-a-folder") throw new ValidationError("Not a folder");
 
   const repos = await discoverRepos(abs);
   if (repos.length === 0) {
-    res.status(400).json({ error: "No git repositories found in this folder" });
-    return;
+    throw new ValidationError("No git repositories found in this folder");
   }
 
   await store.addWorkspaceFolder(abs);
@@ -124,67 +108,29 @@ boardRouter.post("/workspace-folders", async (req, res) => {
 });
 
 boardRouter.get("/workspace-folders/discover", async (req, res) => {
-  const rawPath = req.query.path;
-  if (typeof rawPath !== "string" || rawPath.trim() === "") {
-    res.status(400).json({ error: "path is required" });
-    return;
-  }
+  const { path: rawPath } = parseOrThrow(workspacePathSchema, req.query);
 
   const repos = await discoverRepos(expandPath(rawPath));
   res.status(200).json({ repos });
 });
 
 boardRouter.get("/fs/dirs", async (req, res) => {
-  const rawPath = req.query.path;
-  if (rawPath !== undefined && typeof rawPath !== "string") {
-    res.status(400).json({ error: "invalid path" });
-    return;
-  }
+  const { path: rawPath } = parseOrThrow(dirsQuerySchema, req.query);
   const result = await browseDirectory(rawPath);
-  if (!result.ok) {
-    res.status(400).json({ error: "Outside allowed directory" });
-    return;
-  }
+  if (!result.ok) throw new ValidationError("Outside allowed directory");
   res.status(200).json(result.listing);
 });
 
 boardRouter.delete("/workspace-folders", async (req, res) => {
-  const rawPath = (req.body as { path?: unknown } | undefined)?.path;
-  if (typeof rawPath !== "string" || rawPath.trim() === "") {
-    res.status(400).json({ error: "path is required" });
-    return;
-  }
+  const { path: rawPath } = parseOrThrow(workspacePathSchema, req.body);
 
   await store.removeWorkspaceFolder(expandPath(rawPath));
   res.status(200).json({ ok: true });
 });
 
-/**
- * Validate an untrusted PUT/POST filter body before it can reach the secret-adjacent config file or
- * an upstream query. It rejects any non-array/non-boolean shape AND any key beyond the declared
- * `SourceFilters` fields, so an unknown dimension can never be persisted or forwarded to Linear
- * (tampering guard).
- */
-function isValidFilters(x: unknown): x is SourceFilters {
-  if (typeof x !== "object" || x === null || Array.isArray(x)) return false;
-  const o = x as Record<string, unknown>;
-  const allowed = new Set([
-    "assignees",
-    "projects",
-    "teams",
-    "currentCycle",
-    "includeActive",
-  ]);
-  if (Object.keys(o).some((k) => !allowed.has(k))) return false;
-  const isStrArray = (v: unknown): boolean =>
-    Array.isArray(v) && v.every((s) => typeof s === "string");
-  return (
-    isStrArray(o.assignees) &&
-    isStrArray(o.projects) &&
-    isStrArray(o.teams) &&
-    typeof o.currentCycle === "boolean" &&
-    typeof o.includeActive === "boolean"
-  );
+/** Throw the 404 `unknown source` when `err` is the gateway's `SourceNotFound`. */
+function throwIfUnknownSource(err: unknown): void {
+  if (err instanceof SourceNotFound) throw new NotFoundError("unknown source");
 }
 
 boardRouter.get("/sources/:source/filters", (req, res) => {
@@ -195,71 +141,41 @@ boardRouter.get("/sources/:source/filters", (req, res) => {
       getOrchestrationConfig()?.sources?.linear?.filters ?? DEFAULT_FILTERS;
     res.status(200).json({ filters, capabilities });
   } catch (err) {
-    if (err instanceof SourceNotFound) {
-      res.status(404).json({ error: "unknown source" });
-      return;
-    }
+    throwIfUnknownSource(err);
     throw err;
   }
 });
 
 boardRouter.get("/sources/:source/options", async (req, res) => {
   const { source } = req.params;
-  const dimension = req.query.dimension;
-  if (
-    dimension !== "assignees" &&
-    dimension !== "projects" &&
-    dimension !== "teams"
-  ) {
-    res.status(400).json({ error: "invalid dimension" });
-    return;
-  }
+  const { dimension } = parseOrThrow(optionsQuerySchema, req.query);
   try {
     const { options, truncated } = await listSourceOptions(source, dimension);
     res.status(200).json({ options, truncated });
   } catch (err) {
-    if (err instanceof SourceNotFound) {
-      res.status(404).json({ error: "unknown source" });
-      return;
-    }
-    res.status(502).json({ error: "source options unavailable" });
+    throwIfUnknownSource(err);
+    throw new UpstreamError("source options unavailable");
   }
 });
 
 boardRouter.post("/sources/:source/preview", async (req, res) => {
   const { source } = req.params;
-  const filters = (req.body as { filters?: unknown } | undefined)?.filters;
-  if (!isValidFilters(filters)) {
-    res.status(400).json({ error: "invalid filters" });
-    return;
-  }
+  const { filters } = parseOrThrow(filtersBodySchema, req.body);
   try {
     const { count, more } = await countSourceMatches(source, filters);
     res.status(200).json({ count, more });
   } catch (err) {
-    if (err instanceof SourceNotFound) {
-      res.status(404).json({ error: "unknown source" });
-      return;
-    }
-    res.status(502).json({ error: "preview unavailable" });
+    throwIfUnknownSource(err);
+    throw new UpstreamError("preview unavailable");
   }
 });
 
 boardRouter.post("/sources/:source/poll", (req, res) => {
   const { source } = req.params;
   const state = sourceState(source);
-  if (state === "unknown") {
-    res.status(404).json({ error: "unknown source" });
-    return;
-  }
-  if (state === "disabled") {
-    res.status(409).json({ error: "source disabled" });
-    return;
-  }
-  if (!pollNow(source)) {
-    res.status(409).json({ error: "source not polling" });
-    return;
-  }
+  if (state === "unknown") throw new NotFoundError("unknown source");
+  if (state === "disabled") throw new ConflictError("source disabled");
+  if (!pollNow(source)) throw new ConflictError("source not polling");
   res.status(202).json({ polling: source });
 });
 
@@ -268,30 +184,14 @@ boardRouter.put("/sources/:source/filters", (req, res) => {
   try {
     getSourceCapabilities(source);
   } catch (err) {
-    if (err instanceof SourceNotFound) {
-      res.status(404).json({ error: "unknown source" });
-      return;
-    }
+    throwIfUnknownSource(err);
     throw err;
   }
-  const filters = (req.body as { filters?: unknown } | undefined)?.filters;
-  if (!isValidFilters(filters)) {
-    res.status(400).json({ error: "invalid filters" });
-    return;
-  }
+  const { filters } = parseOrThrow(filtersBodySchema, req.body);
   updateSourceFilters(source, filters);
   pollNow(source);
   res.status(200).json({ filters });
 });
-
-/**
- * Validate an untrusted whole-days write (`LIFE-04`) before it can reach the config file or the
- * live store: an integer in `[0, max]`. Deliberately a SIBLING of `isValidFilters`, not an
- * extension of it, since that guard is scoped to the `SourceFilters` shape alone.
- */
-function isWholeDays(x: unknown, max: number): x is number {
-  return typeof x === "number" && Number.isInteger(x) && x >= 0 && x <= max;
-}
 
 boardRouter.get("/config/cleanup-delay", (_req, res) => {
   res.status(200).json({
@@ -301,14 +201,10 @@ boardRouter.get("/config/cleanup-delay", (_req, res) => {
 });
 
 boardRouter.put("/config/cleanup-delay", (req, res) => {
-  const days = (req.body as { cleanupDelayDays?: unknown } | undefined)
-    ?.cleanupDelayDays;
-  if (!isWholeDays(days, 90)) {
-    res.status(400).json({
-      error: "cleanup delay must be a whole number of days between 0 and 90",
-    });
-    return;
-  }
+  const { cleanupDelayDays: days } = parseOrThrow(
+    cleanupDelayBodySchema,
+    req.body,
+  );
   updateCleanupDelayDays(days);
   store.setCleanupDelayDays(days);
   res.status(200).json({ cleanupDelayDays: days });
@@ -321,15 +217,10 @@ boardRouter.get("/config/archive-retention", (_req, res) => {
 });
 
 boardRouter.put("/config/archive-retention", (req, res) => {
-  const days = (req.body as { archiveRetentionDays?: unknown } | undefined)
-    ?.archiveRetentionDays;
-  if (!isWholeDays(days, ARCHIVE_RETENTION_MAX_DAYS)) {
-    res.status(400).json({
-      error:
-        "archive retention must be a whole number of days between 0 and 365",
-    });
-    return;
-  }
+  const { archiveRetentionDays: days } = parseOrThrow(
+    archiveRetentionBodySchema,
+    req.body,
+  );
   updateArchiveRetentionDays(days);
   store.setArchiveRetentionDays(days);
   res.status(200).json({ archiveRetentionDays: days });
@@ -342,22 +233,10 @@ boardRouter.get("/config/terminal", (_req, res) => {
 });
 
 boardRouter.put("/config/terminal", (req, res) => {
-  const result = validateTerminalAppearance(req.body);
-  if (!result.ok) {
-    res.status(400).json({ error: result.error });
-    return;
-  }
-  updateTerminalAppearance(result.value);
-  res.status(200).json(result.value);
+  const appearance = parseOrThrow(terminalBodySchema, req.body);
+  updateTerminalAppearance(appearance);
+  res.status(200).json(appearance);
 });
-
-/** Same body-shape guard as {@link isWholeDays}, but for the free-text argv string (Settings ▸ Models). Bounded length only — any string tokenizes into a valid argv (`parseClaudeArgs`), including empty. */
-const CLAUDE_ARGS_MAX = 4000;
-function isValidClaudeArgs(x: unknown): x is string {
-  return (
-    typeof x === "string" && x.length <= CLAUDE_ARGS_MAX && !hasControlByte(x)
-  );
-}
 
 boardRouter.get("/config/claude-args", (_req, res) => {
   res.status(200).json({
@@ -366,13 +245,9 @@ boardRouter.get("/config/claude-args", (_req, res) => {
 });
 
 boardRouter.put("/config/claude-args", (req, res) => {
-  const args = (req.body as { claudeArgs?: unknown } | undefined)?.claudeArgs;
-  if (!isValidClaudeArgs(args)) {
-    res.status(400).json({
-      error: `claude arguments must be a string of ${CLAUDE_ARGS_MAX} characters or fewer with no control characters`,
-    });
-    return;
-  }
+  const { claudeArgs: args } = parseOrThrow(claudeArgsBodySchema, req.body);
   updateClaudeArgs(args);
   res.status(200).json({ claudeArgs: args });
 });
+
+boardRouter.use(httpErrorHandler);

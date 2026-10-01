@@ -1,10 +1,10 @@
 import path from "node:path";
 import { DEFAULT_CLAUDE_ACCOUNT_ID } from "../../../shared/types.js";
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 import { hasSession, killSession } from "../../adapters/tmux.js";
-import { resolveLaunchAccount } from "../domain/claude-accounts.js";
+import { resolveLaunchAccount } from "./claude-accounts.js";
 import { launchClaude, RESUME_MISSING, StartStepError } from "./steps.js";
-import { registerHookToken } from "../domain/hook-tokens.js";
+import { registerHookToken } from "./hook-tokens.js";
 import { REATTACH_STATUS_CLEAR_MS } from "./start-session.js";
 import { ensureTerminal } from "./terminal.js";
 
