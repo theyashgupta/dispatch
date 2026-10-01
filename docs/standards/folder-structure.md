@@ -10,7 +10,7 @@ The layer names below are authoritative: backend `bootstrap / routes / services 
 src/server/
 ├── bootstrap/     # composition root + preflight: startup wiring, config holder, binary preflight, boot reconcile
 ├── routes/        # HTTP transport: route handlers (thin), SSE broadcaster, loopback/DNS-rebinding guard
-├── services/      # orchestration: the start/cleanup saga, kickoff, config validation, rollback
+├── services/      # orchestration: the start/cleanup saga, config validation, rollback
 ├── adapters/      # subprocess + external I/O: tmux, ttyd, git, the exec chokepoint, claude-trust, marker parse/watcher, Linear poller, editors, the macOS calendar reader (calendar-mac.ts)
 ├── sources/       # ticket and item sources: provider seams (linear.source.ts, github/github.source.ts, sentry/sentry.source.ts, slack/slack-api.ts), source registry, per-source filters, the calendar snapshot source (calendar/)
 └── store/         # single-writer state: board.store (never split) + Linear→Card mapping
@@ -52,6 +52,8 @@ src/web/
 ├── lib/            # non-UI helpers: api.ts, card-badges.ts, format-age.ts, resume-feedback.ts, start-request.ts, meetings.ts, calendar.ts
 └── styles/         # tokens.css — the design-token source of truth, survives unchanged
 ```
+
+`features/badges/brands/` (since 2026-09-30, G9 Unit 3) holds the six brand mark components (`GitHubMark.tsx`, `LinearMark.tsx`, `SlackMark.tsx`, `SentryMark.tsx`, `GranolaMark.tsx`, `CalendarMark.tsx`) and their shared svg shell `MarkSvg.tsx`. Only `features/badges/source-mark.ts` and its test import from the folder; every file outside `features/badges/` reads a mark through `sourceMark()` of the badges barrel, with one exception: `features/nav/nav-items.test.ts` reads the map `SOURCE_MARK` from `source-mark.ts` direct.
 
 Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. The new tree is `src/web/routes/`, `src/web/modules/<feature>/` with six layer folders, `src/web/components/ui/`, `src/web/components/`, `src/web/queries/`, the new files in `src/web/lib/` and `src/web/styles/globals.css`. Until ticket 16, this section still applies to the legacy tree that the new standard names in "Status and scope".
 
@@ -107,6 +109,7 @@ One convention spans the whole tree. Every artifact kind has a fixed pattern and
 | React hook                    | `src/web/hooks`      | `useX.ts` (camelCase)       | `useBoardStream.ts`   |
 | Web util / client             | `src/web/lib`        | `kebab-case.ts`             | `card-badges.ts`      |
 | HTTP route module             | `src/server/routes`  | `<resource>.route.ts`       | `cards.route.ts`      |
+| Route zod schemas (over 3)    | `src/server/routes`  | `<resource>-schemas.ts`     | `cards-schemas.ts`    |
 | Store module                  | `src/server/store`   | `<domain>.store.ts`         | `board.store.ts`      |
 | Ticket source                 | `src/server/sources` | `<name>.source.ts`          | `linear.source.ts`    |
 | Service / adapter / bootstrap | `src/server/**`      | `kebab-case.ts` (no suffix) | `start-session.ts`    |

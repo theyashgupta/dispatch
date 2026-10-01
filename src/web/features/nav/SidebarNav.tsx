@@ -19,6 +19,7 @@ import { Chip } from "../../primitives/Chip.js";
 import { Spinner } from "../../primitives/Spinner.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { Glyph, wordmarkStyle } from "../../primitives/Glyph.js";
+import { sourceAccent } from "../badges/index.js";
 import { IconButton } from "../../primitives/IconButton.js";
 import { navGroups, type NavItem } from "./nav-items.js";
 import { NavRow } from "./NavRow.js";
@@ -255,6 +256,11 @@ export function SidebarNav({
               <NavRow
                 key={item.page}
                 icon={item.icon}
+                iconColor={
+                  item.brand === undefined
+                    ? undefined
+                    : sourceAccent(item.brand)
+                }
                 label={item.label}
                 active={route.page === item.page}
                 collapsed={collapsed}

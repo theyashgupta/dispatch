@@ -6,6 +6,7 @@ import express from "express";
 import { StartupError } from "./binary-check.js";
 import { loadConfig } from "./config.js";
 import { store } from "../store/board.store.js";
+import { setBoardRepository } from "../store/board-repository.js";
 import { apiRouter } from "../routes/index.js";
 import {
   isRequestAllowed,
@@ -35,15 +36,15 @@ import {
   ensureHyperlinksTerminalFeature,
   ensureNoAltScreenOverride,
 } from "../adapters/tmux.js";
-import { unregisterHookToken } from "../services/domain/hook-tokens.js";
-import { reapActivityThrottle } from "../services/domain/hook-events.js";
-import { seedPlaybooks } from "../services/domain/playbooks.js";
+import { unregisterHookToken } from "../services/orchestration/hook-tokens.js";
+import { reapActivityThrottle } from "../services/orchestration/hook-events.js";
+import { seedPlaybooks } from "../services/infra/playbooks.js";
 import { startEnabledPollers } from "../adapters/poller.js";
 import {
   startGranolaRound,
   stopGranolaRound,
 } from "../services/orchestration/granola-round.js";
-import { sendPushForCard } from "../services/domain/push-send.js";
+import { sendPushForCard } from "../services/orchestration/push-send.js";
 import { startArtifactDetectionLoop } from "../adapters/artifact-detect.js";
 import {
   buildRegistry,
@@ -52,9 +53,9 @@ import {
 } from "../sources/registry.js";
 import { readMacEvents } from "../adapters/calendar-mac.js";
 import { resolveIcalCredential } from "../services/orchestration/calendar.js";
-import { resolveGithubToken } from "../services/domain/github-token.js";
-import { resolveSentryToken } from "../services/domain/sentry-token.js";
-import { resolveSlackToken } from "../services/domain/slack-token.js";
+import { resolveGithubToken } from "../services/orchestration/github-token.js";
+import { resolveSentryToken } from "../services/infra/sentry-token.js";
+import { resolveSlackToken } from "../services/infra/slack-token.js";
 import { startMarkerWatcher } from "../adapters/markers/watcher.js";
 import { reconcileSessions } from "./reconcile.js";
 import { resolveEditors } from "../adapters/editors.js";
@@ -314,6 +315,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   }
   const config = loadConfig();
   setOrchestrationConfig(config);
+  setBoardRepository(store);
   setCredentialResolver("github", resolveGithubToken);
   setCredentialResolver("sentry", resolveSentryToken);
   setCredentialResolver("slack", resolveSlackToken);

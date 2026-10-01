@@ -312,7 +312,7 @@ const DIST_KICKOFF = join(
   "dist",
   "server",
   "services",
-  "domain",
+  "infra",
   "kickoff.js",
 );
 const DIST_VAULT_PATHS = join(
@@ -1394,7 +1394,7 @@ async function loadWorkspacePathsAdapter() {
   return workspacePathsModule;
 }
 
-/** Memoized `dist/server/services/domain/kickoff.js` load, same discipline as {@link loadGitAdapter}. */
+/** Memoized `dist/server/services/infra/kickoff.js` load, same discipline as {@link loadGitAdapter}. */
 let kickoffModule = null;
 async function loadKickoffAdapter() {
   if (kickoffModule === null) {

@@ -1,7 +1,7 @@
 import { store } from "../store/board.store.js";
 import { listSessions } from "../adapters/tmux.js";
 import { adoptAndSweep } from "../adapters/ttyd.js";
-import { registerHookToken } from "../services/domain/hook-tokens.js";
+import { registerHookToken } from "../services/orchestration/hook-tokens.js";
 
 /**
  * Reconcile persisted card state against live tmux reality once at boot: mark every SESSION a

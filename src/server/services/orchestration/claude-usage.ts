@@ -13,7 +13,7 @@ import {
   accountDir,
   keychainServiceName,
   readRegistry,
-} from "../domain/claude-accounts.js";
+} from "./claude-accounts.js";
 
 const POLL_INTERVAL_MS = 15 * 60 * 1000;
 const MANUAL_MIN_GAP_MS = 30 * 1000;
