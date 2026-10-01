@@ -238,6 +238,7 @@ for (const rel of [
   "modules/fixture-a/domain/a-derived.ts",
   "modules/fixture-a/queries/a-queries.ts",
   "routes/BarrelRoute.tsx",
+  "routes/LegacyRoute.tsx",
   "components/ui/fixture-green.tsx",
   "modules/fixture-a/shared-tiers.ts",
   "modules/fixture-a/views/SharedTiers.tsx",
@@ -276,8 +277,6 @@ const red: Record<string, string> = {
     "Backend must not import frontend code.",
   "routes/StrayRoute.tsx":
     "A route imports a module only through its index.ts barrel (docs/standards/frontend-architecture.md, Import matrix).",
-  "routes/LegacyRoute.tsx":
-    "A route imports only module barrels, src/web/queries/, src/web/lib/, components/ui and shared components (docs/standards/frontend-architecture.md, Import matrix).",
   "modules/fixture-a/container-barrel.ts": `A module barrel imports only these layers of its own module: view, query ${doc}`,
   "modules/fixture-a/containers/ViewImport.tsx": `A module container file imports only these layers of its own module: container, component, hook, query, domain ${doc}`,
   "modules/fixture-a/queries/component-import.ts": `A module query file imports only these layers of its own module: query, domain ${doc}`,
