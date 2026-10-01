@@ -378,7 +378,7 @@ const boundariesConfig = {
  *
  * Exception R-14, dated 2026-09-30: route files (which include the `__root.tsx` import of
  * src/web/styles/*) can import the legacy tree, and src/web/components/AppState.tsx can
- * import the legacy pages. Ticket 16 removes both allows.
+ * import the legacy pages and module barrels (for the page prop types). Ticket 16 removes both allows.
  */
 const feWebBoundaryPolicies = {
   default: "allow",
@@ -561,7 +561,7 @@ const feWebBoundaryPolicies = {
       from: {
         element: { type: "shared-component", fileInternalPath: "AppState.tsx" },
       },
-      allow: { element: { type: legacyWebTypes } },
+      allow: { element: { type: [...legacyWebTypes, "module"] } },
     },
   ],
 };
