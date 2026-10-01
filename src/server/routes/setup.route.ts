@@ -1,4 +1,7 @@
 import { Router } from "express";
+import { httpErrorHandler } from "./error-handler.js";
+import { z } from "zod";
+import { parseOrThrow } from "./parse-input.js";
 import {
   getOrchestrationConfig,
   markOnboardingDone,
@@ -15,6 +18,12 @@ import {
 } from "../adapters/source-gateway.js";
 import { startEnabledPollers } from "../adapters/poller.js";
 import { invalidateWorkflow } from "../services/orchestration/linear-outbound.js";
+import {
+  ConflictError,
+  InternalError,
+  UpstreamError,
+  ValidationError,
+} from "../services/domain/errors.js";
 
 /**
  * First-run onboarding surface behind the shared `/api` loopback guard.
@@ -36,6 +45,22 @@ import { invalidateWorkflow } from "../services/orchestration/linear-outbound.js
  */
 export const setupRouter = Router();
 
+const installSchema = z.object(
+  {
+    target: z
+      .string("not-installable")
+      .refine((target) => installArgv(target) != null, "not-installable"),
+  },
+  "not-installable",
+);
+
+const apiKeySchema = z.object(
+  {
+    apiKey: z.string("apiKey is required").trim().min(1, "apiKey is required"),
+  },
+  "apiKey is required",
+);
+
 setupRouter.get("/setup", async (_req, res) => {
   const config = getOrchestrationConfig();
   const needsKey = !config?.linearApiKey;
@@ -55,45 +80,34 @@ setupRouter.post("/setup/onboarding-done", (_req, res) => {
 });
 
 setupRouter.post("/setup/install", async (req, res) => {
-  const target = (req.body as { target?: unknown } | undefined)?.target;
-  if (typeof target !== "string" || installArgv(target) == null) {
-    res.status(400).json({ error: "not-installable" });
-    return;
-  }
+  const { target } = parseOrThrow(installSchema, req.body);
   try {
     const { ok, command, status } = await runInstall(target, {
       interactive: false,
     });
     res.status(200).json({ ok, command, status });
   } catch {
-    res.status(500).json({ error: "install-failed" });
+    throw new InternalError("install-failed");
   }
 });
 
 setupRouter.post("/setup", async (req, res) => {
   if (getOrchestrationConfig()?.linearApiKey) {
-    res.status(409).json({ error: "already-configured" });
-    return;
+    throw new ConflictError("already-configured");
   }
-  const apiKey = (req.body as { apiKey?: unknown } | undefined)?.apiKey;
-  if (typeof apiKey !== "string" || apiKey.trim() === "") {
-    res.status(400).json({ error: "apiKey is required" });
-    return;
-  }
+  const { apiKey } = parseOrThrow(apiKeySchema, req.body);
   let ok: boolean;
   try {
-    ok = await testLinearConnection(apiKey.trim());
+    ok = await testLinearConnection(apiKey);
   } catch {
-    res.status(502).json({ error: "unreachable" });
-    return;
+    throw new UpstreamError("unreachable");
   }
-  if (!ok) {
-    res.status(400).json({ error: "rejected" });
-    return;
-  }
-  updateLinearApiKey(apiKey.trim());
+  if (!ok) throw new ValidationError("rejected");
+  updateLinearApiKey(apiKey);
   rebuildSources(getOrchestrationConfig()!);
   invalidateWorkflow();
   startEnabledPollers();
   res.status(200).json({ ok: true });
 });
+
+setupRouter.use(httpErrorHandler);

@@ -13,7 +13,7 @@ const { slackRouter } = await import("./slack.route.js");
 const { setOrchestrationConfig } =
   await import("../services/infra/config-holder.js");
 const { createKey, listKeys, setValue, clearValue } =
-  await import("../services/domain/vault.js");
+  await import("../services/infra/vault.js");
 const { startPollers, stopPollers } = await import("../adapters/poller.js");
 const { makeFakeSource } = await import("../test-support/fake-source.js");
 const { store } = await import("../store/board.store.js");

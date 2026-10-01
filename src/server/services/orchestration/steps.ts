@@ -38,17 +38,17 @@ import {
   getActiveAccountId,
   resolveLaunchAccount,
   type LaunchAccount,
-} from "../domain/claude-accounts.js";
+} from "./claude-accounts.js";
 import { buildClaudeLaunch, shellQuote } from "../domain/claude-launch.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
-import { store } from "../../store/board.store.js";
-import { buildKickoff } from "../domain/kickoff.js";
+import { boardRepository as store } from "../../store/board-repository.js";
+import { buildKickoff } from "../infra/kickoff.js";
 import { parseClaudeArgs } from "../domain/claude-args.js";
 import {
   getHooksRuntime,
   getOrchestrationConfig,
 } from "../infra/config-holder.js";
-import { newHookTokenValue, registerHookToken } from "../domain/hook-tokens.js";
+import { newHookTokenValue, registerHookToken } from "./hook-tokens.js";
 import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
 import { worktreePath as buildWorktreePath } from "../domain/workspace-paths.js";
 

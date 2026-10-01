@@ -10,7 +10,7 @@ The layer names below are authoritative: backend `bootstrap / routes / services 
 src/server/
 ├── bootstrap/     # composition root + preflight: startup wiring, config holder, binary preflight, boot reconcile
 ├── routes/        # HTTP transport: route handlers (thin), SSE broadcaster, loopback/DNS-rebinding guard
-├── services/      # orchestration: the start/cleanup saga, kickoff, config validation, rollback
+├── services/      # orchestration: the start/cleanup saga, config validation, rollback
 ├── adapters/      # subprocess + external I/O: tmux, ttyd, git, the exec chokepoint, claude-trust, marker parse/watcher, Linear poller, editors, the macOS calendar reader (calendar-mac.ts)
 ├── sources/       # ticket and item sources: provider seams (linear.source.ts, github/github.source.ts, sentry/sentry.source.ts, slack/slack-api.ts), source registry, per-source filters, the calendar snapshot source (calendar/)
 └── store/         # single-writer state: board.store (never split) + Linear→Card mapping
@@ -107,6 +107,7 @@ One convention spans the whole tree. Every artifact kind has a fixed pattern and
 | React hook                    | `src/web/hooks`      | `useX.ts` (camelCase)       | `useUnseenActivity.ts` |
 | Web util / client             | `src/web/lib`        | `kebab-case.ts`             | `card-badges.ts`       |
 | HTTP route module             | `src/server/routes`  | `<resource>.route.ts`       | `cards.route.ts`       |
+| Route zod schemas (over 3)    | `src/server/routes`  | `<resource>-schemas.ts`     | `cards-schemas.ts`     |
 | Store module                  | `src/server/store`   | `<domain>.store.ts`         | `board.store.ts`       |
 | Ticket source                 | `src/server/sources` | `<name>.source.ts`          | `linear.source.ts`     |
 | Service / adapter / bootstrap | `src/server/**`      | `kebab-case.ts` (no suffix) | `start-session.ts`     |

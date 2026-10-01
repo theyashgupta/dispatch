@@ -1,12 +1,12 @@
 import type { Card } from "../../../shared/types.js";
 import { DEFAULT_CLAUDE_ACCOUNT_ID } from "../../../shared/types.js";
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 import {
   hasSession,
   paneAtPrompt,
   sessionEnvHas,
 } from "../../adapters/tmux.js";
-import { resolveLaunchAccount } from "../domain/claude-accounts.js";
+import { resolveLaunchAccount } from "./claude-accounts.js";
 import {
   awaitReplReady,
   buildLaunch,

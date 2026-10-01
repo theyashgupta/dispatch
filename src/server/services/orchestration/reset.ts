@@ -1,5 +1,5 @@
 import path from "node:path";
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 import { isResetEligible } from "../../../shared/reset-eligibility.js";
 import { branchDelete, branchExists } from "../../adapters/git.js";
 import { killSessionProcesses, removeWorkspaceFiles } from "./cleanup.js";
