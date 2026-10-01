@@ -1,5 +1,10 @@
-import type { SlackChannel, SlackChannelOption } from "../../shared/types.js";
-import type { SlackSetupFailure } from "./api.js";
+import type {
+  SlackChannel,
+  SlackChannelOption,
+} from "../../../../shared/types.js";
+
+export type SlackSetupFailure =
+  "not-a-channel" | "disabled" | "rejected" | "restricted" | "unreachable";
 
 export interface SlackChannelRow extends SlackChannelOption {
   notListed: boolean;

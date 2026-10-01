@@ -68,7 +68,8 @@ import {
   CreateTicketModal,
   MultiSelect,
 } from "./features/modals/index.js";
-import { SetupWizard } from "./features/setup/index.js";
+import { SetupWizardView } from "./modules/setup/index.js";
+import { SetupConnectionsView } from "./modules/connections/index.js";
 import { Spinner } from "./primitives/Spinner.js";
 import { Button } from "./primitives/Button.js";
 import { undoToastCopy, useUndoToast } from "./hooks/useUndoToast.js";
@@ -99,7 +100,7 @@ import { useItems } from "./hooks/useItems.js";
 import { buildPrRows } from "./lib/pr-rows.js";
 import { feedItems, isListedError } from "./lib/feed-items.js";
 import { slackRows } from "./lib/slack-rows.js";
-import { nowMs } from "./lib/format-age.js";
+import { nowMs } from "../shared/format-age.js";
 import { flattenSessions } from "./lib/sessions.js";
 import { useAsk } from "./hooks/useAsk.js";
 import { askAboutQuestion } from "./lib/ask.js";
@@ -113,12 +114,13 @@ import {
 import {
   shouldMarkOnboardingDone,
   shouldOpenSetupWizard,
-} from "./lib/setup-wizard.js";
+} from "../shared/setup-wizard.js";
 import {
   cleanupAttemptEnded,
   cleanupOutcomeCopy,
   cleanupRequestFailedCopy,
 } from "./lib/cleanup-feedback.js";
+import { playChime } from "./lib/chime.js";
 import { refreshPushSubscription } from "./lib/push.js";
 import type { StartRequest } from "./lib/start-request.js";
 import { meetingNotice } from "./lib/meetings.js";
@@ -920,6 +922,7 @@ export function App() {
       connectionKey: setupRuns,
       errorsInFeeds,
       onToggleErrorsInFeeds: setErrorsInFeeds,
+      onPlayChime: playChime,
     },
     activity: {
       events: events,
@@ -1219,7 +1222,11 @@ export function App() {
           </Suspense>
         )}
         {setupWizardOpen && setupChecks && (
-          <SetupWizard {...setupChecks} onClose={closeSetupWizard} />
+          <SetupWizardView
+            {...setupChecks}
+            onClose={closeSetupWizard}
+            connections={<SetupConnectionsView />}
+          />
         )}
       </ShellView>
     </AppStateProvider>

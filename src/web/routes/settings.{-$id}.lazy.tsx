@@ -1,6 +1,6 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { settingsTabFrom } from "@/lib/settings-tab";
-import { SettingsScreen } from "@/features/settings";
+import { ConnectionsView } from "@/modules/connections";
+import { SettingsView } from "@/modules/settings";
 import { useAppState } from "@/components/AppState";
 
 export const Route = createLazyFileRoute("/settings/{-$id}")({
@@ -10,5 +10,19 @@ export const Route = createLazyFileRoute("/settings/{-$id}")({
 function SettingsRoute() {
   const props = useAppState().settings;
   const { id } = Route.useParams();
-  return <SettingsScreen {...props} tab={settingsTabFrom(id)} />;
+  return (
+    <SettingsView
+      {...props}
+      tabId={id}
+      connections={
+        <ConnectionsView
+          onRunSetup={props.onRunSetup}
+          connectionKey={props.connectionKey}
+          errorsInFeeds={props.errorsInFeeds}
+          onToggleErrorsInFeeds={props.onToggleErrorsInFeeds}
+          onSaved={props.onSaved}
+        />
+      }
+    />
+  );
 }

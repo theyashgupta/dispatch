@@ -1,9 +1,6 @@
-import { FONT_FAMILY } from "../../shared/nerd-font-mono.js";
+import { useState } from "react";
+import { FONT_FAMILY } from "../../../../shared/nerd-font-mono.js";
 
-/**
- * Names always treated as available: the bundled Nerd Font (self-hosted in the terminal iframe, so
- * it renders there even though the Settings page never loads its `@font-face`) and the CSS generic.
- */
 const ALWAYS_AVAILABLE = new Set<string>([FONT_FAMILY, "monospace"]);
 
 /**
@@ -36,15 +33,8 @@ export function detectInstalledFonts(
   return installed;
 }
 
-/**
- * Dropdown label for a font: the friendly name, with a "(not installed)" suffix when the family is
- * absent from this machine, so picking it never looks like a broken no-op that silently falls back.
- */
-export function fontOptionLabel(
-  name: string,
-  installed: Set<string>,
-  labels: Record<string, string>,
-): string {
-  const base = labels[name] ?? name;
-  return installed.has(name) ? base : `${base} (not installed)`;
+/** Probe the installed fonts once per mount, because the canvas measurement is not free. */
+export function useInstalledFonts(candidates: readonly string[]): Set<string> {
+  const [installed] = useState(() => detectInstalledFonts(candidates));
+  return installed;
 }
