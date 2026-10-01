@@ -1,5 +1,5 @@
 import type { Card } from "../../../shared/types.js";
-import { isTicketCard, stateTypeRank } from "../../lib/linear-state.js";
+import { isTicketCard, stateTypeRank } from "../../../shared/linear-state.js";
 
 export type TicketsGroupBy =
   "none" | "status" | "priority" | "project" | "cycle" | "team";

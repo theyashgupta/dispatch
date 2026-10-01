@@ -2,7 +2,7 @@ import { useRef, useState, type CSSProperties } from "react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { useLinearWorkflow } from "../../hooks/useLinearWorkflow.js";
 import { syncCardToLinear } from "../../lib/api.js";
-import { defaultTeamId } from "../../lib/linear-state.js";
+import { defaultTeamId } from "../../../shared/linear-state.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { Modal, type ModalControl } from "../../primitives/Modal.js";

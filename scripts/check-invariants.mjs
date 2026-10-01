@@ -93,7 +93,7 @@ const CARD_VIEW_PATH = join("src", "web", "features", "board", "CardView.tsx");
 const SOURCE_ACCENT_PATH = join(
   "src",
   "web",
-  "features",
+  "components",
   "badges",
   "source-accent.ts",
 );
@@ -284,7 +284,7 @@ const RETIRED_PATTERNS = [
   {
     id: "NEW-17",
     pattern: "fontWeight: 800",
-    replacement: "wordmarkStyle in src/web/primitives/Glyph.tsx",
+    replacement: "wordmarkStyle in src/web/components/icons/Glyph.tsx",
   },
 ];
 

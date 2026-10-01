@@ -20,7 +20,7 @@ import {
 } from "../../lib/sessions.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Collapsible } from "../../primitives/Collapsible.js";
-import { Glyph } from "../../primitives/Glyph.js";
+import { Glyph } from "../../components/icons/Glyph.js";
 import { BulkConfirmModal } from "./BulkConfirmModal.js";
 import { SessionRow } from "./SessionRow.js";
 import { SessionsBulkBar } from "./SessionsBulkBar.js";

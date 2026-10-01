@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { createElement, type CSSProperties } from "react";
 import {
   FlowBox,
   FlowChip,
@@ -6,7 +6,11 @@ import {
   type FlowToken,
 } from "../../primitives/FlowStage.js";
 import { edgePath } from "../../lib/flow-geometry.js";
-import { sourceAccent } from "../badges/index.js";
+import {
+  markSlotStyle,
+  sourceAccent,
+  sourceMark,
+} from "../../components/badges/index.js";
 import {
   POLLER_RECT,
   POLLER_TONE_COLOR,
@@ -47,6 +51,13 @@ const titleStyle: CSSProperties = {
   textOverflow: "ellipsis",
 };
 
+const markedTitleStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--space-xs)",
+  minWidth: 0,
+};
+
 const captionStyle: CSSProperties = {
   color: "var(--text-muted)",
   fontSize: "var(--font-micro)",
@@ -84,7 +95,12 @@ export function FlowDiagram({
           ariaLabel={`${s.label}, ${s.count} items`}
         >
           <span style={headRowStyle}>
-            <span style={titleStyle}>{s.label}</span>
+            <span style={markedTitleStyle}>
+              <span style={{ ...markSlotStyle, color: sourceAccent(s.id) }}>
+                {createElement(sourceMark(s.id), { size: 16 })}
+              </span>
+              <span style={titleStyle}>{s.label}</span>
+            </span>
             <FlowChip color={sourceAccent(s.id)}>{s.count}</FlowChip>
           </span>
           <span style={captionStyle}>{s.lit ? "Enabled" : "Off"}</span>

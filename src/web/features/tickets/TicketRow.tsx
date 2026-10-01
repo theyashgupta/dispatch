@@ -6,7 +6,7 @@ import { LinkButton } from "../../primitives/LinkButton.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Field } from "../../primitives/Field.js";
 import { ListRow } from "../../primitives/ListRow.js";
-import { LinearStateChip } from "../badges/index.js";
+import { LinearStateChip } from "../../components/badges/index.js";
 import { COLUMN_LABELS, PRIORITY_DOT } from "../board/index.js";
 import { ticketActionsFor } from "./ticket-actions.js";
 

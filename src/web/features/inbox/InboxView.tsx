@@ -27,7 +27,7 @@ import { SNOOZE_LABELS, SNOOZE_PRESETS } from "../../lib/snooze.js";
 import { Button } from "../../primitives/Button.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Collapsible } from "../../primitives/Collapsible.js";
-import { Glyph } from "../../primitives/Glyph.js";
+import { Glyph } from "../../components/icons/Glyph.js";
 import { Notice } from "../../primitives/Notice.js";
 import { isInboxWaiting } from "../board/index.js";
 import { InboxMenu, type InboxMenuItem } from "./InboxMenu.js";

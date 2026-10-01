@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from "react";
-import { SourceIcon } from "../badges/index.js";
+import { SourceIcon } from "../../components/badges/index.js";
 import { useSourceConnection } from "../../hooks/useSourceConnection.js";
 import {
   SLACK_CONNECTION,

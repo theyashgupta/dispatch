@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { Button } from "../../primitives/Button.js";
-import { SourceBadge } from "../badges/index.js";
+import { SourceBadge } from "../../components/badges/index.js";
 import type { SourceCount } from "./today-view.js";
 
 interface CountChipsProps {
@@ -34,7 +34,7 @@ export function CountChips({ chips, filter, onFilterChange }: CountChipsProps) {
             aria-pressed={active}
             onClick={() => onFilterChange(active ? null : source)}
           >
-            <SourceBadge source={source} />
+            <SourceBadge source={source} label />
             <span style={countStyle}>{count}</span>
           </Button>
         );

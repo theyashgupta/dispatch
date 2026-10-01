@@ -3,7 +3,7 @@ import {
   DEFAULT_GRANOLA_WINDOW_HOURS,
   type GRANOLA_WINDOW_HOURS,
 } from "../../../shared/types.js";
-import { SourceIcon } from "../badges/index.js";
+import { SourceIcon } from "../../components/badges/index.js";
 import { useGranolaRound } from "../../hooks/useGranolaRound.js";
 import { MEETING_CONNECTION } from "../../lib/connection-meta.js";
 import {

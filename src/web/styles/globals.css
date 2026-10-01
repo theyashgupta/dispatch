@@ -26,6 +26,43 @@
   --accent-foreground: var(--text);
   --input: var(--border-strong);
   --ring: var(--accent);
+  --destructive-fill: var(--destructive-button-fill);
+  --sidebar: var(--surface-column);
+  --sidebar-foreground: var(--text);
+  --sidebar-primary: var(--accent);
+  --sidebar-primary-foreground: var(--on-accent);
+  --sidebar-accent: var(--surface-card-hover);
+  --sidebar-accent-foreground: var(--text);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--accent);
+}
+
+@layer base {
+  [data-slot],
+  [data-slot]::before,
+  [data-slot]::after {
+    box-sizing: border-box;
+    border: 0 solid var(--border);
+    margin: 0;
+    padding: 0;
+  }
+  button[data-slot],
+  input[data-slot],
+  select[data-slot],
+  textarea[data-slot] {
+    font: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+    background-color: transparent;
+    border-radius: 0;
+  }
+  ul[data-slot],
+  ol[data-slot] {
+    list-style: none;
+  }
+  [data-slot="sidebar"][data-mobile="true"] {
+    --sidebar-width: var(--nav-width) !important;
+  }
 }
 
 @theme inline {
@@ -49,4 +86,35 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --radius-md: var(--radius);
+  --color-destructive-text: var(--destructive-text);
+  --color-destructive-fill: var(--destructive-fill);
+  --color-on-danger: var(--on-danger);
+  --color-scrim: var(--scrim);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-xs: var(--radius-sm);
+  --radius-xl: var(--radius-lg);
+  --font-sans: var(--font-ui);
+  --text-xs: var(--font-micro);
+  --text-xs--line-height: var(--line-label);
+  --text-sm: var(--font-label);
+  --text-sm--line-height: var(--line-label);
+  --text-base: var(--font-body);
+  --text-base--line-height: var(--line-body);
+  --text-lg: var(--font-heading);
+  --text-lg--line-height: var(--line-heading);
+  --font-weight-normal: var(--weight-regular);
+  --font-weight-medium: var(--weight-medium);
+  --font-weight-semibold: var(--weight-semibold);
+  --shadow-*: initial;
+  --shadow-md: var(--shadow-float);
+  --shadow-lg: var(--shadow-float);
+  --default-transition-duration: var(--motion-hover);
+  --default-transition-timing-function: var(--easing-enter);
 }

@@ -3,7 +3,7 @@ import { formatAge, nowMs } from "../../lib/format-age.js";
 import { Chip } from "../../primitives/Chip.js";
 import { ListGroup, RowTime } from "../../primitives/ListGroup.js";
 import { ListRow } from "../../primitives/ListRow.js";
-import { SourceBadge } from "../badges/index.js";
+import { SourceBadge } from "../../components/badges/index.js";
 import { levelTone, type ErrorGroup, type ErrorRow } from "./error-rows.js";
 
 interface ErrorListProps {

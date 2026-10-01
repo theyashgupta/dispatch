@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useState, type ComponentType, type CSSProperties } from "react";
 import {
   Bell,
   Columns3,
@@ -15,7 +15,8 @@ import type { TunnelState } from "../../../shared/types.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { settingsTabFrom, type SettingsTab } from "../../lib/settings-tab.js";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
-import { NAV_ITEMS } from "../nav/index.js";
+import { NAV_ITEMS } from "../../modules/shell/domain/nav-items.js";
+import { NAV_ICON } from "../../modules/shell/components/NavIcon.js";
 import type { Page } from "../../../shared/route.js";
 import type { ThemePreference } from "../../lib/theme.js";
 import { AboutTabSection } from "./AboutTab.js";
@@ -169,7 +170,7 @@ const navButtonBaseStyle: CSSProperties = {
 };
 
 interface SettingsNavItemProps {
-  icon: LucideIcon;
+  icon: ComponentType<{ size?: number }>;
   label: string;
   active: boolean;
   onClick: () => void;
@@ -203,7 +204,7 @@ function SettingsNavItem({
         ...focusRing(focused),
       }}
     >
-      <Icon size={14} strokeWidth={2} aria-hidden="true" />
+      <Icon size={14} />
       {label}
     </button>
   );
@@ -295,7 +296,7 @@ export function SettingsScreen({
             {SETTINGS_PAGE_LINKS.map((link) => (
               <SettingsNavItem
                 key={link.page}
-                icon={link.icon}
+                icon={NAV_ICON[link.page]}
                 label={link.label}
                 active={false}
                 onClick={() => onOpenPage(link.page)}

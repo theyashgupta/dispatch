@@ -26,7 +26,7 @@ The legacy tree has these parts:
 
 - `src/web/features/`, `src/web/primitives/` and `src/web/hooks/`
 - every other file in `src/web/lib/`, such as `api.ts` and the `format-*.ts` helpers. `route.ts` moved to `src/shared/route.ts`
-- `src/web/viewer/` and the web root entry files: `main.tsx`, `App.tsx`, `AppShell.tsx`, `viewer-main.tsx` and the HTML entries
+- `src/web/viewer/` and the web root entry files: `main.tsx`, `App.tsx`, `viewer-main.tsx` and the HTML entries
 
 The legacy tree stays until ticket 16. The section "Legacy tree during transition" gives its rules.
 
@@ -68,7 +68,7 @@ A module is one folder `src/web/modules/<feature>/`. A module has six layer fold
   - Use it when: two or more modules read the same server data. An example is the board snapshot and its SSE stream.
   - Never: put a query in this tier when only one module reads it.
 - **Configured clients.** The new files in `src/web/lib/`: `http.ts`, `query-client.ts` and `utils.ts`.
-  - Use it when: a third-party client needs one configured instance, or code needs `cn`. `utils.ts` holds `cn`.
+  - Use it when: a third-party client needs one configured instance, or code outside `components/ui` needs `cn`. `utils.ts` re-exports `cn` for that code.
   - Never: import a module or a component in a configured client file, or hold React state in it.
 - **Styles.** Files in `src/web/styles/`.
   - Use it when: a value is a design token or a global stylesheet rule. `globals.css` maps shadcn names to tokens through `var()`.
@@ -98,7 +98,7 @@ Import a file in another folder of `src/web/` with the `@/` alias. Import a file
 - A hook imports hooks and domain files of its module and `components/ui/hooks/`.
 - A query file imports domain files of its module, `src/web/lib/http.ts` and `src/web/queries/`.
 - A domain file imports other domain files of its module.
-- A `components/ui` file imports other `components/ui` files and `src/web/lib/utils.ts`. It does not import a hook from outside `components/ui/`.
+- A `components/ui` file imports other `components/ui` files and `cn` from the `cn` package. It does not import a hook from outside `components/ui/`.
 - A shared component imports `components/ui`, `src/web/lib/utils.ts` and other shared components.
 - A shared query imports `src/web/lib/http.ts` and other shared queries.
 - A configured client file imports `src/shared/` only.
@@ -135,16 +135,17 @@ The inline style ban: a file in the new tree does not use the JSX `style` prop. 
 
 Primitive conventions. These are the only edits to a generated file other than a `cva` variant:
 
-1. Replace each generated `ring-*` class with `focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring`. Invalid state keeps `aria-invalid:border-destructive`. A `components/ui` file has no `ring-*` class.
+1. Replace each generated `ring-*` class with `focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring`. Invalid state keeps `aria-invalid:border-destructive`. A `components/ui` file has no `ring-*` class. If the class string also has `outline-hidden` or `outline-none`, add `focus-visible:outline-solid`; focus-outline.test.ts enforces it. Menu and select items use the inset form `focus-visible:-outline-offset-2`.
 2. Replace each Tailwind default palette class with a token class, for example `text-white` with `text-on-accent` or `text-on-danger`.
 3. Replace a raw colour variable in a class, such as `hsl(var(...))`, with the plain `var(...)` form.
 4. Remove the `next-themes` import from the Sonner file. The Sonner toaster gets its theme as a prop from its consumer.
+5. Replace a token class that breaks design-contract.md (the contrast floor, the focus rule, or a radius, motion or pressed-state token) with the token class the contract names. Record the edit in the unit's decisions.
 
 Theme facts:
 
 1. The shadcn name `accent` maps to the card hover surface. The shadcn name `ring` maps to the Dispatch accent token, the focus outline colour. The accent token in `tokens.css` keeps the jobs that `design-contract.md` lists for it.
 2. The Tailwind `dark` variant matches `[data-theme="dark"]`. One `:root` block maps each shadcn name to a token.
-3. The main app loads Tailwind without preflight until ticket 9 (the shadcn shell). The gallery page loads preflight for itself only.
+3. The main app loads Tailwind without preflight until ticket 16 (R-17). The gallery page loads preflight for itself only.
 4. Forms use the shadcn Field component. Do not use the registry Form component.
 
 ## Allowed custom families
@@ -187,6 +188,7 @@ The design contract values stay: the density scale, source colors, contrast floo
 3. Write a fix in a legacy file in the legacy style. Do not migrate part of a file.
 4. A migration ticket uses the layer definitions in this standard to map each legacy file to a layer.
 5. The lint rules and the agent hook rules for the new tree cover the new tree list in "Status and scope". Two hook rules also cover the legacy tree: the Radix import rule and the new `.tsx` file rule.
+6. A migration maps `Notice tone="muted"` with a `label` to `Alert variant="muted"`, and `Notice tone="destructive"` to `Alert variant="destructive"`. A `Notice tone="muted"` with no `label` is a status line: map it to a text element with `text-sm text-muted-foreground truncate`, not to `Alert`, because `Alert` has `role="alert"`.
 
 ## Agent rules block
 

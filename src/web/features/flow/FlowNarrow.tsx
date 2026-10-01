@@ -1,6 +1,11 @@
-import type { CSSProperties } from "react";
+import { createElement, type CSSProperties } from "react";
 import { Notice } from "../../primitives/Notice.js";
 import { PageBody } from "../../primitives/PageBody.js";
+import {
+  markSlotStyle,
+  sourceAccent,
+  sourceMark,
+} from "../../components/badges/index.js";
 import { TRAYS, type SourceNode, type TrayId } from "./flow-model.js";
 
 interface FlowNarrowProps {
@@ -35,6 +40,12 @@ const rowStyle: CSSProperties = {
   color: "var(--text)",
 };
 
+const sourceLabelStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "var(--space-xs)",
+};
+
 const mutedStyle: CSSProperties = { color: "var(--text-muted)" };
 
 export function FlowNarrow({ sources, counts, lastSync }: FlowNarrowProps) {
@@ -45,7 +56,10 @@ export function FlowNarrow({ sources, counts, lastSync }: FlowNarrowProps) {
       <ul style={sectionStyle} aria-label="Sources">
         {sources.map((s) => (
           <li key={s.id} style={rowStyle}>
-            <span>
+            <span style={sourceLabelStyle}>
+              <span style={{ ...markSlotStyle, color: sourceAccent(s.id) }}>
+                {createElement(sourceMark(s.id), { size: 12 })}
+              </span>
               {s.label}{" "}
               <span style={mutedStyle}>{s.lit ? "Enabled" : "Off"}</span>
             </span>

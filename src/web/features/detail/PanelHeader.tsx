@@ -21,7 +21,10 @@ import type {
   UnwindDestination,
 } from "../../../shared/types.js";
 import { UnwindPicker } from "./UnwindPicker.js";
-import { LinearStateChip, TeamCycleText } from "../badges/index.js";
+import {
+  LinearStateChip,
+  TeamCycleText,
+} from "../../components/badges/index.js";
 import { moveCard, openEditor } from "../../lib/api.js";
 import { isDemoteEligible } from "../../../shared/demote-eligibility.js";
 import { isResetEligible } from "../../../shared/reset-eligibility.js";

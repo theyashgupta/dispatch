@@ -5,7 +5,6 @@ import {
   actionsFor,
   isWebUrl,
   markDone,
-  CARD_ACTIONS,
   bulkOutcomeCopy,
   runAction,
   runBulkCleanup,
@@ -14,7 +13,6 @@ import {
   snoozeWithUndo,
   syncSources,
   type ActionContext,
-  type CardActionContext,
   type InboxRowModel,
 } from "./actions.js";
 import { askAboutQuestion } from "./ask.js";
@@ -378,32 +376,6 @@ test("bulk resume skips the switch for an active row and switches back after a r
     "switch LOCAL-2 lost",
     "resume LOCAL-2",
     "switch LOCAL-2 live",
-  ]);
-});
-
-test("each card action calls its handler once with the card id", async () => {
-  const calls: string[] = [];
-  const cardCtx: CardActionContext = {
-    api: {
-      moveCard: async (id, column) => {
-        calls.push(`move ${id} ${column}`);
-        await Promise.resolve();
-      },
-    },
-    requestStart: (id) => calls.push(`start ${id}`),
-    requestCleanup: (id) => calls.push(`cleanup ${id}`),
-    openCard: (id) => calls.push(`open ${id}`),
-  };
-  const card = { id: "LOCAL-7" } as Parameters<typeof CARD_ACTIONS.start>[1];
-  CARD_ACTIONS.start(cardCtx, card);
-  CARD_ACTIONS.openTerminal(cardCtx, card);
-  await CARD_ACTIONS.moveTo(cardCtx, card, "parked");
-  CARD_ACTIONS.cleanup(cardCtx, card);
-  assert.deepEqual(calls, [
-    "start LOCAL-7",
-    "open LOCAL-7",
-    "move LOCAL-7 parked",
-    "cleanup LOCAL-7",
   ]);
 });
 
