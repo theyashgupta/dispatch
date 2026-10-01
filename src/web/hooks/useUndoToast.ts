@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
+import { toast } from "sonner";
 import type { ArchivedGroupSummary } from "../../shared/types.js";
 
 export const UNDO_TOAST_MS = 10_000;
+
+const SONNER_TOAST_ID = "undo-toast";
 
 export interface UndoToastEntry {
   id: number;
@@ -73,6 +76,28 @@ export function isToastVisible(state: UndoToastState): boolean {
   return state.toast != null || state.error != null;
 }
 
+export interface UndoToastView {
+  label: string;
+  description: string | undefined;
+  undoable: boolean;
+}
+
+/**
+ * Map an undo toast state to what Sonner shows, or null when nothing is visible.
+ *
+ * @remarks The description is the failure text and only appears next to a toast, so a notice
+ * shows its text as the label.
+ */
+export function undoToastView(state: UndoToastState): UndoToastView | null {
+  const label = state.toast?.label ?? state.error;
+  if (label == null) return null;
+  return {
+    label,
+    description: state.toast ? (state.error ?? undefined) : undefined,
+    undoable: state.toast != null,
+  };
+}
+
 /**
  * Drive the undo toast.
  *
@@ -81,11 +106,8 @@ export function isToastVisible(state: UndoToastState): boolean {
  * {@link UNDO_TOAST_MS} unless an undo is in flight.
  */
 export function useUndoToast(): {
-  state: UndoToastState;
   show: (label: string, undo: () => Promise<void>) => void;
   notice: (error: string) => void;
-  undo: () => void;
-  dismiss: () => void;
 } {
   const [state, dispatch] = useReducer(reduceUndoToast, IDLE_TOAST);
   const nextId = useRef(0);
@@ -99,14 +121,22 @@ export function useUndoToast(): {
     return () => clearTimeout(timer);
   }, [state]);
 
+  const mirrored = useRef(false);
+  const undoInFlight = useRef<number | null>(null);
+
   const undo = useCallback(() => {
-    const toast = state.toast;
-    if (!toast || state.undoing) return;
-    const id = toast.id;
+    const entry = state.toast;
+    if (!entry || state.undoing || undoInFlight.current === entry.id) return;
+    const id = entry.id;
+    undoInFlight.current = id;
     dispatch({ type: "undo", id });
-    toast.undo().then(
-      () => dispatch({ type: "undone", id }),
+    entry.undo().then(
+      () => {
+        undoInFlight.current = null;
+        dispatch({ type: "undone", id });
+      },
       (err: unknown) => {
+        undoInFlight.current = null;
         console.error("undo failed", err);
         dispatch({
           type: "failed",
@@ -117,8 +147,35 @@ export function useUndoToast(): {
     );
   }, [state.toast, state.undoing]);
 
+  useEffect(() => {
+    const view = undoToastView(state);
+    if (view === null) {
+      mirrored.current = false;
+      toast.dismiss(SONNER_TOAST_ID);
+      return;
+    }
+    mirrored.current = true;
+    toast(view.label, {
+      id: SONNER_TOAST_ID,
+      description: view.description,
+      duration: Infinity,
+      closeButton: true,
+      action: view.undoable
+        ? {
+            label: state.undoing ? "Undo…" : "Undo",
+            onClick: (event) => {
+              event.preventDefault();
+              undo();
+            },
+          }
+        : undefined,
+      onDismiss: () => {
+        if (mirrored.current) dispatch({ type: "dismiss" });
+      },
+    });
+  }, [state, undo]);
+
   return {
-    state,
     show: useCallback((label: string, undo: () => Promise<void>) => {
       nextId.current += 1;
       dispatch({ type: "show", toast: { id: nextId.current, label, undo } });
@@ -127,7 +184,5 @@ export function useUndoToast(): {
       (error: string) => dispatch({ type: "notice", error }),
       [],
     ),
-    undo,
-    dismiss: useCallback(() => dispatch({ type: "dismiss" }), []),
   };
 }

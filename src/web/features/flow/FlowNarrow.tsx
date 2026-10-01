@@ -1,7 +1,11 @@
 import { createElement, type CSSProperties } from "react";
 import { Notice } from "../../primitives/Notice.js";
 import { PageBody } from "../../primitives/PageBody.js";
-import { markSlotStyle, sourceAccent, sourceMark } from "../badges/index.js";
+import {
+  markSlotStyle,
+  sourceAccent,
+  sourceMark,
+} from "../../components/badges/index.js";
 import { TRAYS, type SourceNode, type TrayId } from "./flow-model.js";
 
 interface FlowNarrowProps {

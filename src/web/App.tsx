@@ -11,34 +11,24 @@ import {
   useMemo,
 } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { activityFeedQueryOptions } from "./queries/activity-queries.js";
 import {
   boardSnapshotQueryOptions,
   latestBoard,
   useBoardLiveUpdates,
 } from "./queries/board-snapshot-queries.js";
-import { useActivityFeed } from "./hooks/useActivityFeed.js";
 import {
   isUnseen,
   stampLastOpened,
   useLastOpened,
 } from "./hooks/useUnseenActivity.js";
 import { useTransitionNotifications } from "./hooks/useTransitionNotifications.js";
-import { AppShell } from "./AppShell.js";
+import { ShellView } from "./modules/shell/index.js";
 import {
   NAV_ITEMS,
-  NavSheet,
-  SidebarNav,
-  TopBar,
   visibleNavItems,
-} from "./features/nav/index.js";
-import { effectiveNavState } from "./lib/nav-state.js";
+} from "./modules/shell/domain/nav-items.js";
 import { hideDisabledSlack } from "./lib/hide-disabled-slack.js";
-import {
-  CAROUSEL_QUERY,
-  NARROW_QUERY,
-  useMediaQuery,
-} from "./hooks/useMediaQuery.js";
-import { PageHeader } from "./primitives/PageHeader.js";
 import {
   useLocation,
   useRouteContext,
@@ -53,11 +43,10 @@ import {
   type Route,
 } from "../shared/route.js";
 import { AppStateProvider, type AppPages } from "./components/AppState.js";
-import { useNavState } from "./hooks/useNavState.js";
 import { useTheme } from "./hooks/useTheme.js";
 import { UsageChip } from "./features/accounts/index.js";
 import { useClaudeAccounts } from "./hooks/useClaudeAccounts.js";
-import { Glyph, wordmarkStyle } from "./primitives/Glyph.js";
+import { Glyph, wordmarkStyle } from "./components/icons/Glyph.js";
 import {
   actionablePinnedCard,
   actionablePinnedMembers,
@@ -68,7 +57,7 @@ import {
 } from "./features/board/index.js";
 import { DetailPanel } from "./features/detail/index.js";
 import {
-  ActivityDrawer,
+  ActivityList,
   type ActivityFilter,
 } from "./features/activity/index.js";
 import {
@@ -80,14 +69,9 @@ import {
   MultiSelect,
 } from "./features/modals/index.js";
 import { SetupWizard } from "./features/setup/index.js";
-import { Toast } from "./primitives/Toast.js";
 import { Spinner } from "./primitives/Spinner.js";
 import { Button } from "./primitives/Button.js";
-import {
-  isToastVisible,
-  undoToastCopy,
-  useUndoToast,
-} from "./hooks/useUndoToast.js";
+import { undoToastCopy, useUndoToast } from "./hooks/useUndoToast.js";
 import {
   moveCard,
   getSlackThread,
@@ -102,8 +86,14 @@ import {
   unwindGroup as unwindGroupApi,
 } from "./lib/api.js";
 import { syncSources, type ActionServices } from "./lib/actions.js";
-import { buildCommands } from "./lib/commands.js";
-import { GLOBAL_SHORTCUTS, bindShortcuts } from "./lib/shortcuts.js";
+import { buildCommands } from "./modules/shell/domain/commands.js";
+import {
+  BOARD_SHORTCUTS,
+  GLOBAL_SHORTCUTS,
+  INBOX_SHORTCUTS,
+  SESSIONS_SHORTCUTS,
+  bindShortcuts,
+} from "./lib/shortcuts.js";
 import { useShortcuts } from "./hooks/useShortcuts.js";
 import { useItems } from "./hooks/useItems.js";
 import { buildPrRows } from "./lib/pr-rows.js";
@@ -114,7 +104,6 @@ import { flattenSessions } from "./lib/sessions.js";
 import { useAsk } from "./hooks/useAsk.js";
 import { askAboutQuestion } from "./lib/ask.js";
 import type { UnwindDestination } from "../shared/types.js";
-import { UpdateBanner } from "./features/update/index.js";
 import {
   cleanupCard as cleanupCardApi,
   getCard,
@@ -145,23 +134,20 @@ import type {
 import type { CardSearchResult } from "../shared/search.js";
 import { DONE_PAGE_SIZE } from "../shared/done-limit.js";
 
-import { isTicketCard } from "./lib/linear-state.js";
+import { isTicketCard } from "../shared/linear-state.js";
 
-const CommandPalette = lazy(() =>
-  import("./features/palette/index.js").then((m) => ({
-    default: m.CommandPalette,
-  })),
-);
 const MeetingNotesModal = lazy(() =>
   import("./features/meetings/index.js").then((m) => ({
     default: m.MeetingNotesModal,
   })),
 );
-const CheatSheet = lazy(() =>
-  import("./features/palette/index.js").then((m) => ({
-    default: m.CheatSheet,
-  })),
-);
+
+const SHORTCUT_GROUPS = [
+  { title: "Global", rows: GLOBAL_SHORTCUTS },
+  { title: "Board", rows: BOARD_SHORTCUTS },
+  { title: "Inbox", rows: INBOX_SHORTCUTS },
+  { title: "Sessions", rows: SESSIONS_SHORTCUTS },
+];
 
 const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
   "settings",
@@ -294,7 +280,8 @@ function useCommittedRoute(): Route {
 }
 
 export function App() {
-  const feed = useActivityFeed();
+  const { data: activityData } = useQuery(activityFeedQueryOptions());
+  const events = activityData ?? [];
   const claudeAccounts = useClaudeAccounts();
   const ask = useAsk();
   const router = useRouter();
@@ -310,11 +297,11 @@ export function App() {
     },
     [router],
   );
-  const nav = useNavState();
-  const { preference: themePreference, setPreference: setThemePreference } =
-    useTheme();
-  const carousel = useMediaQuery(CAROUSEL_QUERY);
-  const narrow = useMediaQuery(NARROW_QUERY);
+  const {
+    preference: themePreference,
+    theme,
+    setPreference: setThemePreference,
+  } = useTheme();
   const [archiveCount, setArchiveCount] = useState<number | undefined>();
   const [playbookCount, setPlaybookCount] = useState<number | undefined>();
   const [vaultCount, setVaultCount] = useState<number | undefined>();
@@ -326,11 +313,6 @@ export function App() {
     types: [],
   });
   const [playbookCreateRequest, setPlaybookCreateRequest] = useState(0);
-  const navMode = effectiveNavState(
-    nav.collapsed ? "collapsed" : "expanded",
-    carousel,
-    narrow,
-  );
   const [tunnelState, setTunnelState] = useState<TunnelState>({
     status: "off",
   });
@@ -353,9 +335,6 @@ export function App() {
   } | null>(null);
   const pinFetchGenRef = useRef(0);
   const { connection } = useBoardLiveUpdates(doneLimit, {
-    onActivity: (event) => {
-      feed.append(event);
-    },
     onTunnelState: (state) => {
       setTunnelState(state);
     },
@@ -445,10 +424,7 @@ export function App() {
   const lastOpened = useLastOpened();
   useEffect(() => {
     if (currentPage === "activity") stampLastOpened("__feed__");
-  }, [currentPage, feed.events.length]);
-  useEffect(() => {
-    if (navMode !== "topbar") setSheetOpen(false);
-  }, [navMode]);
+  }, [currentPage, events.length]);
   const firstRouteRef = useRef(true);
   useEffect(() => {
     if (route.page !== "playbooks") setPlaybookCreateRequest(0);
@@ -463,7 +439,7 @@ export function App() {
     }
     document.querySelector<HTMLElement>("header h1")?.focus();
   }, [route.page]);
-  const newestTs = feed.events[0]?.ts;
+  const newestTs = events[0]?.ts;
   const activityUnseen = isUnseen(newestTs, lastOpened["__feed__"]);
 
   const selectedCard =
@@ -565,7 +541,7 @@ export function App() {
     cardIdentifiers[card.id] = card.identifier;
   }
   const activityCardIds = new Set(
-    feed.events.map((e) => e.cardId).filter((id): id is string => id != null),
+    events.map((e) => e.cardId).filter((id): id is string => id != null),
   );
   if (activityFilter.cardId != null) activityCardIds.add(activityFilter.cardId);
   const activityCardOptions = [...activityCardIds].map((id) => ({
@@ -573,7 +549,7 @@ export function App() {
     label: cardIdentifiers[id] ?? id,
   }));
   const activityTypeOptions = [
-    ...new Set([...feed.events.map((e) => e.type), ...activityFilter.types]),
+    ...new Set([...events.map((e) => e.type), ...activityFilter.types]),
   ].map((type) => ({ id: type, label: type.replace(/_/g, " ") }));
 
   const undoToast = useUndoToast();
@@ -687,11 +663,6 @@ export function App() {
   const startCard =
     board?.cards.find((card) => card.id === startRequest?.cardId) ??
     actionablePinnedCard(startRequest?.cardId, pinned);
-
-  const handleCloseSheet = useCallback(() => {
-    setSheetOpen(false);
-    requestAnimationFrame(() => document.getElementById("nav-menu")?.focus());
-  }, []);
 
   const requestStart = (req: string | StartRequest) => {
     const id = typeof req === "string" ? req : req.cardId;
@@ -852,7 +823,7 @@ export function App() {
     tickets: { title: "Tickets", count: ticketsCount },
     workspace: { title: "Workspace" },
     settings: { title: "Settings" },
-    activity: { title: "Activity", count: feed.events.length },
+    activity: { title: "Activity", count: events.length },
     accounts: {
       title: "Accounts and Usage",
       count: claudeAccounts.loaded ? claudeAccounts.accounts.length : undefined,
@@ -951,7 +922,7 @@ export function App() {
       onToggleErrorsInFeeds: setErrorsInFeeds,
     },
     activity: {
-      events: feed.events,
+      events: events,
       identifiers: cardIdentifiers,
       filter: activityFilter,
       onSelectCard: selectCard,
@@ -1005,140 +976,152 @@ export function App() {
     },
   };
 
-  const sidebar = (
-    <SidebarNav
-      route={route}
-      onNavigate={(page) => {
-        navigate(page);
-        if (navMode === "topbar") handleCloseSheet();
-      }}
-      collapsed={navMode === "collapsed"}
-      onToggleCollapsed={nav.toggle}
-      inboxCount={inboxCount}
-      meetingCount={meetingItems.length}
-      liveSessionCount={liveSessionCount}
-      prCount={prCount}
-      ticketsCount={ticketsCount}
-      errorCount={errorCount}
-      slackCount={slackCount}
-      navItems={navItems}
-      syncedAt={board.syncedAt ?? null}
-      connection={connection}
-      pollIntervalMs={board.pollIntervalMs ?? null}
-      syncWarning={board.syncWarning ?? null}
-      syncUnreachable={board.syncUnreachable ?? false}
-      noSource={(board.enabledSources ?? []).length === 0}
-      accountSlot={accountSlot}
-      onOpenCreateTicket={() => {
-        openOverlay(setCreateTicketOpen)();
-        if (navMode === "topbar") setSheetOpen(false);
-      }}
-      onOpenActivity={() => {
-        setActivityOpen(true);
-        stampLastOpened("__feed__");
-        if (navMode === "topbar") setSheetOpen(false);
-      }}
-      activityUnseen={activityUnseen}
-      activityOpen={activityOpen}
-      sheet={navMode === "topbar"}
-      collapsible={!carousel}
-    />
-  );
+  const headerActions =
+    currentPage === "playbooks" ? (
+      <Button
+        variant="primary"
+        onClick={() => setPlaybookCreateRequest((n) => n + 1)}
+      >
+        New playbook
+      </Button>
+    ) : currentPage === "meetings" ? (
+      <Button variant="primary" onClick={openOverlay(setMeetingNotesOpen)}>
+        From meeting notes
+      </Button>
+    ) : currentPage === "activity" ? (
+      <>
+        <select
+          aria-label="Filter by card"
+          value={activityFilter.cardId ?? ""}
+          onChange={(event) =>
+            setActivityFilter((f) => ({
+              ...f,
+              cardId: event.target.value === "" ? null : event.target.value,
+            }))
+          }
+          style={activitySelectStyle}
+        >
+          <option value="">All cards</option>
+          {activityCardOptions.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <MultiSelect
+          label="Event types"
+          placeholder="All types"
+          options={activityTypeOptions}
+          selected={activityFilter.types}
+          loading={false}
+          loadError={false}
+          emptyText="No events yet"
+          onChange={(next) =>
+            setActivityFilter((f) => ({
+              ...f,
+              types: next as ActivityFilter["types"],
+            }))
+          }
+        />
+      </>
+    ) : currentPage === "workspaces" && workspacesSummary ? (
+      <span style={headerNoteStyle}>
+        {`${formatSize(workspacesSummary.totalKb)} on disk`}
+        {workspacesSummary.unknownSizes > 0
+          ? ` (${workspacesSummary.unknownSizes} unknown)`
+          : ""}
+      </span>
+    ) : currentPage === "ask" ? (
+      <Button
+        disabled={ask.turns.length === 0 && ask.pending === null}
+        onClick={ask.clear}
+      >
+        Clear
+      </Button>
+    ) : undefined;
 
-  const pageHeader = (
-    <PageHeader
-      title={pageTitle}
-      count={pageMeta[route.page].count}
-      actions={
-        currentPage === "playbooks" ? (
-          <Button
-            variant="primary"
-            onClick={() => setPlaybookCreateRequest((n) => n + 1)}
-          >
-            New playbook
-          </Button>
-        ) : currentPage === "meetings" ? (
-          <Button variant="primary" onClick={openOverlay(setMeetingNotesOpen)}>
-            From meeting notes
-          </Button>
-        ) : currentPage === "activity" ? (
-          <>
-            <select
-              aria-label="Filter by card"
-              value={activityFilter.cardId ?? ""}
-              onChange={(event) =>
-                setActivityFilter((f) => ({
-                  ...f,
-                  cardId: event.target.value === "" ? null : event.target.value,
-                }))
-              }
-              style={activitySelectStyle}
-            >
-              <option value="">All cards</option>
-              {activityCardOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <MultiSelect
-              label="Event types"
-              placeholder="All types"
-              options={activityTypeOptions}
-              selected={activityFilter.types}
-              loading={false}
-              loadError={false}
-              emptyText="No events yet"
-              onChange={(next) =>
-                setActivityFilter((f) => ({
-                  ...f,
-                  types: next as ActivityFilter["types"],
-                }))
-              }
-            />
-          </>
-        ) : currentPage === "workspaces" && workspacesSummary ? (
-          <span style={headerNoteStyle}>
-            {`${formatSize(workspacesSummary.totalKb)} on disk`}
-            {workspacesSummary.unknownSizes > 0
-              ? ` (${workspacesSummary.unknownSizes} unknown)`
-              : ""}
-          </span>
-        ) : currentPage === "ask" ? (
-          <Button
-            disabled={ask.turns.length === 0 && ask.pending === null}
-            onClick={ask.clear}
-          >
-            Clear
-          </Button>
-        ) : undefined
-      }
-    />
+  const paletteCommands = buildCommands(
+    {
+      api: {
+        moveCard: (id, column) =>
+          moveCard(id, column).catch(() =>
+            showNotice(
+              `Couldn't move ${board.cards.find((c) => c.id === id)?.identifier ?? id}.`,
+            ),
+          ),
+      },
+      requestStart,
+      requestCleanup: setCleanupCardId,
+      openCard: selectCard,
+      navigate,
+      newTicket: openOverlay(setCreateTicketOpen),
+      meetingNotes: openOverlay(setMeetingNotesOpen),
+      syncNow: () =>
+        void syncSources(
+          actionServices.api,
+          board.enabledSources ?? [],
+          showNotice,
+        ),
+    },
+    navItems,
+    selectedCard,
   );
 
   return (
     <AppStateProvider value={pages}>
-      <AppShell
-        navWidth={
-          navMode === "topbar"
-            ? "0px"
-            : navMode === "collapsed"
-              ? "var(--nav-width-collapsed)"
-              : "var(--nav-width)"
+      <ShellView
+        route={route}
+        onNavigate={navigate}
+        navItems={navItems}
+        counts={{
+          inbox: inboxCount,
+          meetings: meetingItems.length,
+          sessions: liveSessionCount,
+          "pull-requests": prCount,
+          tickets: ticketsCount,
+          errors: errorCount,
+          slack: slackCount,
+        }}
+        sync={{
+          syncedAt: board.syncedAt ?? null,
+          connection,
+          pollIntervalMs: board.pollIntervalMs ?? null,
+          syncWarning: board.syncWarning ?? null,
+          syncUnreachable: board.syncUnreachable ?? false,
+          noSource: (board.enabledSources ?? []).length === 0,
+        }}
+        accountSlot={accountSlot}
+        onOpenCreateTicket={openOverlay(setCreateTicketOpen)}
+        onOpenActivity={() => {
+          setActivityOpen(true);
+          stampLastOpened("__feed__");
+        }}
+        activityUnseen={activityUnseen}
+        activityOpen={activityOpen}
+        onCloseActivity={() => setActivityOpen(false)}
+        activityList={
+          <ActivityList
+            events={events}
+            identifiers={cardIdentifiers}
+            onSelectCard={(id) => {
+              selectCard(id);
+              setActivityOpen(false);
+            }}
+            ticking={activityOpen}
+          />
         }
-        nav={navMode === "topbar" ? null : sidebar}
-        contentInert={navMode === "topbar" && sheetOpen}
-        topBar={
-          navMode === "topbar" ? (
-            <TopBar
-              title={pageTitle}
-              menuOpen={sheetOpen}
-              onOpenMenu={() => setSheetOpen(true)}
-            />
-          ) : null
-        }
-        banner={<UpdateBanner />}
-        header={pageHeader}
+        paletteOpen={paletteOpen}
+        onClosePalette={closeOverlay(setPaletteOpen)}
+        commands={paletteCommands}
+        onOpenSearchResult={selectSearchResult}
+        shortcutsOpen={shortcutsOpen}
+        onCloseShortcuts={closeOverlay(setShortcutsOpen)}
+        shortcutGroups={SHORTCUT_GROUPS}
+        theme={theme}
+        pageTitle={pageTitle}
+        pageCount={pageMeta[route.page].count}
+        headerActions={headerActions}
+        onMobileOpenChange={setSheetOpen}
         content={
           <PageErrorBoundary key={route.page}>
             <Outlet />
@@ -1154,7 +1137,7 @@ export function App() {
               if (selectedCardId != null) hydratePinned(selectedCardId);
             }}
             editors={board?.editors}
-            activityEvents={feed.events}
+            activityEvents={events}
             cardIdentifiers={cardIdentifiers}
             members={selectedCardMembers}
             membersActionable={membersActionable}
@@ -1181,24 +1164,6 @@ export function App() {
           />
         }
       >
-        {navMode === "topbar" && (
-          <NavSheet open={sheetOpen} onClose={handleCloseSheet}>
-            {sidebar}
-          </NavSheet>
-        )}
-        <ActivityDrawer
-          open={activityOpen}
-          events={feed.events}
-          identifiers={cardIdentifiers}
-          onClose={() => {
-            setActivityOpen(false);
-            document.getElementById("activity-toggle")?.focus();
-          }}
-          onSelectCard={(id) => {
-            selectCard(id);
-            setActivityOpen(false);
-          }}
-        />
         {startCard && startRequest && (
           <StartModal
             key={`${startRequest.cardId}:${startRequest.newSession === true ? "new" : "start"}`}
@@ -1253,59 +1218,10 @@ export function App() {
             />
           </Suspense>
         )}
-        {shortcutsOpen && (
-          <Suspense fallback={null}>
-            <CheatSheet onClose={closeOverlay(setShortcutsOpen)} />
-          </Suspense>
-        )}
-        {paletteOpen && (
-          <Suspense fallback={null}>
-            <CommandPalette
-              commands={buildCommands(
-                {
-                  api: {
-                    moveCard: (id, column) =>
-                      moveCard(id, column).catch(() =>
-                        showNotice(
-                          `Couldn't move ${board.cards.find((c) => c.id === id)?.identifier ?? id}.`,
-                        ),
-                      ),
-                  },
-                  requestStart,
-                  requestCleanup: setCleanupCardId,
-                  openCard: selectCard,
-                  navigate,
-                  newTicket: openOverlay(setCreateTicketOpen),
-                  meetingNotes: openOverlay(setMeetingNotesOpen),
-                  syncNow: () =>
-                    void syncSources(
-                      actionServices.api,
-                      board.enabledSources ?? [],
-                      showNotice,
-                    ),
-                },
-                navItems,
-                selectedCard,
-              )}
-              onClose={closeOverlay(setPaletteOpen)}
-              onOpenCard={selectSearchResult}
-            />
-          </Suspense>
-        )}
         {setupWizardOpen && setupChecks && (
           <SetupWizard {...setupChecks} onClose={closeSetupWizard} />
         )}
-        {isToastVisible(undoToast.state) && (
-          <Toast
-            label={undoToast.state.toast?.label ?? undoToast.state.error}
-            detail={undoToast.state.toast ? undoToast.state.error : undefined}
-            actionLabel={undoToast.state.toast ? "Undo" : undefined}
-            actionPending={undoToast.state.undoing}
-            onAction={undoToast.undo}
-            onClose={undoToast.dismiss}
-          />
-        )}
-      </AppShell>
+      </ShellView>
     </AppStateProvider>
   );
 }

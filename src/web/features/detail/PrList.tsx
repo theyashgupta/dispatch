@@ -1,8 +1,12 @@
 import { ExternalLink } from "lucide-react";
 import type { Card, PrInfo } from "../../../shared/types.js";
 import { cardPrs } from "../board/index.js";
-import { unknownProbeCopy } from "../badges/index.js";
-import { prCiDotColor, prStateLabel, prStyleFor } from "../badges/pr-style.js";
+import { unknownProbeCopy } from "../../components/badges/index.js";
+import {
+  prCiDotColor,
+  prStateLabel,
+  prStyleFor,
+} from "../../components/badges/pr-style.js";
 import { formatAge, nowMs } from "../../lib/format-age.js";
 import { Field } from "../../primitives/Field.js";
 import { IconButton } from "../../primitives/IconButton.js";

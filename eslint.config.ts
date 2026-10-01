@@ -369,12 +369,9 @@ const boundariesConfig = {
  * omitting the policy here silently disables the frontend->backend import ban.
  *
  * Policy evaluation is last-write-wins: the trailing allow policies MUST stay
- * after the disallow policies or they stop overriding them. The badges allow
- * encodes folder-structure.md's sanctioned `features/* -> badges` shared-leaf
- * edge (CardView.tsx's two badge deep imports produce no findings by design);
- * the same-feature allow before it is a deliberate belt-and-braces guard
- * should policy 1's negated-capture template
- * (`!{{from.captured.feature}}`) ever regress.
+ * after the disallow policies or they stop overriding them. The same-feature
+ * allow is a deliberate belt-and-braces guard should policy 1's
+ * negated-capture template (`!{{from.captured.feature}}`) ever regress.
  *
  * Exception R-05, dated 2026-09-30: only src/web/lib/api.ts and src/web/lib/push.ts
  * can import a query or shared-query file. Ticket 16 removes both barrels and this allow.
@@ -553,12 +550,6 @@ const feWebBoundaryPolicies = {
       },
     },
     {
-      from: { element: { type: "feature" } },
-      allow: {
-        element: { type: "feature", captured: { feature: "badges" } },
-      },
-    },
-    {
       from: { element: { type: "lib", fileInternalPath: "{api,push}.ts" } },
       allow: { element: { type: ["query", "shared-query"] } },
     },
@@ -590,9 +581,8 @@ const feWebBoundaryPolicies = {
  * `adapters` element, `adapters -> store` is already allowed, and `store` has
  * no reverse edge back to `adapters` — this is a documented invariant, not an
  * unenforced gap (@see docs/ARCHITECTURE.md#preserved-import-edges). The
- * `adapters-config-consumer` (image-proxy) carve-out and the
- * `features/* -> badges` shared-leaf allow-rule above are pre-existing and
- * survive the flip unchanged.
+ * `adapters-config-consumer` (image-proxy) carve-out is pre-existing and
+ * survives the flip unchanged.
  */
 const feWebBoundariesConfig = {
   files: ["src/web/**/*.{ts,tsx}"],

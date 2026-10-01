@@ -5,7 +5,7 @@ import {
   ALL_CONNECTIONS,
   LINEAR_CONNECTION,
 } from "../../lib/connection-meta.js";
-import { SourceIcon, sourceAccent } from "../badges/index.js";
+import { SourceIcon, sourceAccent } from "../../components/badges/index.js";
 
 const mapStyle: CSSProperties = {
   display: "flex",

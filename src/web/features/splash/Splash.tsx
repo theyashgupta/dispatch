@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Glyph } from "../../primitives/Glyph.js";
+import { Glyph } from "../../components/icons/Glyph.js";
 
 type SplashPhase = "in" | "out" | "gone";
 

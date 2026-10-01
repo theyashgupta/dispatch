@@ -1,6 +1,6 @@
 import { SOON_CONNECTIONS } from "../../lib/connection-meta.js";
 import { ConnectionCard } from "../../primitives/ConnectionCard.js";
-import { SourceIcon } from "../badges/index.js";
+import { SourceIcon } from "../../components/badges/index.js";
 
 export function SoonConnectionCards() {
   return (

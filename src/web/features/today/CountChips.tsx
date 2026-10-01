@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { Button } from "../../primitives/Button.js";
-import { SourceBadge } from "../badges/index.js";
+import { SourceBadge } from "../../components/badges/index.js";
 import type { SourceCount } from "./today-view.js";
 
 interface CountChipsProps {

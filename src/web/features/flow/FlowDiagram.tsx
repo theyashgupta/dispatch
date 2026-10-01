@@ -6,7 +6,11 @@ import {
   type FlowToken,
 } from "../../primitives/FlowStage.js";
 import { edgePath } from "../../lib/flow-geometry.js";
-import { markSlotStyle, sourceAccent, sourceMark } from "../badges/index.js";
+import {
+  markSlotStyle,
+  sourceAccent,
+  sourceMark,
+} from "../../components/badges/index.js";
 import {
   POLLER_RECT,
   POLLER_TONE_COLOR,

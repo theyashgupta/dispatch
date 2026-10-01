@@ -37,6 +37,34 @@
   --sidebar-ring: var(--accent);
 }
 
+@layer base {
+  [data-slot],
+  [data-slot]::before,
+  [data-slot]::after {
+    box-sizing: border-box;
+    border: 0 solid var(--border);
+    margin: 0;
+    padding: 0;
+  }
+  button[data-slot],
+  input[data-slot],
+  select[data-slot],
+  textarea[data-slot] {
+    font: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+    background-color: transparent;
+    border-radius: 0;
+  }
+  ul[data-slot],
+  ol[data-slot] {
+    list-style: none;
+  }
+  [data-slot="sidebar"][data-mobile="true"] {
+    --sidebar-width: var(--nav-width) !important;
+  }
+}
+
 @theme inline {
   --color-*: initial;
   --color-background: var(--background);

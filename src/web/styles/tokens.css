@@ -106,7 +106,7 @@
   --status-down: #e5484d;
 
   /* Source signal palette (SourceBadge text and tint), consumed only through
-     SOURCE_ACCENT in src/web/features/badges/source-accent.ts (NEW-24); see
+     SOURCE_ACCENT in src/web/components/badges/source-accent.ts (NEW-24); see
      docs/standards/design-contract.md ## Source colors for the contrast record. */
   --src-github: #79c0ff;
   --src-linear: #8b93ff;

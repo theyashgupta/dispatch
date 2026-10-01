@@ -1,5 +1,9 @@
 import type { Card } from "../../../shared/types.js";
-import { PrBadge, PrOverflowChip, PR_CHIP_CAP } from "../badges/index.js";
+import {
+  PrBadge,
+  PrOverflowChip,
+  PR_CHIP_CAP,
+} from "../../components/badges/index.js";
 import { cardPrs } from "./card-prs.js";
 
 export function GroupPrRow({ card }: { card: Card }) {

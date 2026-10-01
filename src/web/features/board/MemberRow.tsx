@@ -8,7 +8,7 @@ import {
   PreviewBadge,
   SourceBadge,
   UnknownProbeBadge,
-} from "../badges/index.js";
+} from "../../components/badges/index.js";
 import { Field } from "../../primitives/Field.js";
 import { IconButton } from "../../primitives/IconButton.js";
 
