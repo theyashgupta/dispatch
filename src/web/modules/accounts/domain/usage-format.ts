@@ -1,7 +1,7 @@
 import type {
   ClaudeUsageSnapshot,
   ClaudeUsageWindow,
-} from "../../../shared/types.js";
+} from "../../../../shared/types.js";
 
 export type UsageTone = "ok" | "stale" | "down";
 
@@ -12,7 +12,7 @@ const KIND_ORDER: Record<string, number> = {
 };
 
 /**
- * The window closest to its limit: highest percent, session first on ties, so the chip always
+ * Pick the window closest to its limit: highest percent, session first on ties, so the chip always
  * names the number that will bite first.
  */
 export function tightestWindow(
@@ -33,7 +33,7 @@ export function tightestWindow(
 }
 
 /**
- * Colour tone for a percent: under 70 calm, 70 to 89 warning, 90 and above critical.
+ * Map a percent to a colour tone: under 70 calm, 70 to 89 warning, 90 and above critical.
  */
 export function toneFor(percent: number): UsageTone {
   if (percent >= 90) return "down";
@@ -42,15 +42,8 @@ export function toneFor(percent: number): UsageTone {
 }
 
 /**
- * The CSS token a tone maps to.
- */
-export function toneColor(tone: UsageTone): string {
-  return `var(--status-${tone})`;
-}
-
-/**
- * Human countdown to a reset instant: "2h 10m", "3d 4h", "45m", or "soon" once it has passed.
- * Returns null when the reset time is unknown.
+ * Format a human countdown to a reset instant: "2h 10m", "3d 4h", "45m", or "soon" once it has passed.
+ * Return null when the reset time is unknown.
  */
 export function formatReset(
   resetsAt: string | null,
@@ -69,28 +62,18 @@ export function formatReset(
   return `${Math.max(1, minutes)}m`;
 }
 
-export const PACE_ON_TRACK_MAX = 1;
-export const PACE_AHEAD_MAX = 1.25;
+const PACE_ON_TRACK_MAX = 1;
+const PACE_AHEAD_MAX = 1.25;
 const MIN_ELAPSED_PERCENT = 1;
 
 export type PaceState = "on-track" | "ahead" | "will-run-out";
 
-export const PACE_BADGE: Record<
-  PaceState,
-  { label: string; tone: UsageTone; text: string }
-> = {
-  "on-track": { label: "On track", tone: "ok", text: "var(--status-ok)" },
-  ahead: {
-    label: "Ahead of budget",
-    tone: "stale",
-    text: "var(--status-stale)",
-  },
-  "will-run-out": {
-    label: "Will run out",
-    tone: "down",
-    text: "var(--destructive-text)",
-  },
-};
+export const PACE_BADGE: Record<PaceState, { label: string; tone: UsageTone }> =
+  {
+    "on-track": { label: "On track", tone: "ok" },
+    ahead: { label: "Ahead of budget", tone: "stale" },
+    "will-run-out": { label: "Will run out", tone: "down" },
+  };
 
 export interface Pacing {
   percentElapsed: number;
@@ -104,7 +87,7 @@ const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
 /**
- * The instant a snapshot's percentages were measured, the only honest anchor for elapsed time.
+ * Return the instant a snapshot's percentages were measured, the only honest anchor for elapsed time.
  *
  * @remarks Null for any snapshot that is not `ok`, so stale windows never grow a pace that drifts
  * optimistic as the data ages.
@@ -169,7 +152,7 @@ export function pacingFor(
 }
 
 /**
- * The one projection line under a bar.
+ * Build the one projection line under a bar.
  *
  * @remarks A date for the spend budget, a countdown for rolling windows, the "lasts" variant
  * when the projection is capped at the period end, and a plain "reached" line at 100% used.
@@ -204,7 +187,7 @@ export function projectionCopy(
 }
 
 /**
- * The raw numbers behind a badge: used, elapsed, and burn rate per hour (session) or per day.
+ * Describe the raw numbers behind a badge: used, elapsed, and burn rate per hour (session) or per day.
  */
 export function paceTitle(
   usageWindow: ClaudeUsageWindow,
@@ -224,15 +207,7 @@ export function paceTitle(
 }
 
 /**
- * The part of an email before the at sign, the chip's short account name.
- */
-export function emailLocalPart(email: string): string {
-  const at = email.indexOf("@");
-  return at > 0 ? email.slice(0, at) : email;
-}
-
-/**
- * The one line of copy for a usage snapshot that is not plain numbers; null when it is `ok`.
+ * Return the one line of copy for a usage snapshot that is not plain numbers, or null when it is `ok`.
  */
 export function statusCopy(usage: ClaudeUsageSnapshot): string | null {
   switch (usage.status) {
@@ -247,4 +222,53 @@ export function statusCopy(usage: ClaudeUsageSnapshot): string | null {
     case "error":
       return "Usage could not be fetched";
   }
+}
+
+/**
+ * Build the Accounts page's one usage line: every window with its percent and reset, or the status copy.
+ */
+export function usageLine(
+  usage: ClaudeUsageSnapshot,
+  now: number = Date.now(),
+): string {
+  const copy = statusCopy(usage);
+  if (copy !== null || usage.windows.length === 0) {
+    return copy ?? "Usage unavailable, sign in to see it";
+  }
+  return usage.windows
+    .map((w) => {
+      const reset = formatReset(w.resetsAt, now);
+      return `${w.label} ${w.percent}%${reset ? ` (resets ${reset})` : ""}`;
+    })
+    .join(" · ");
+}
+
+export interface ChipState {
+  tone: UsageTone | "muted";
+  summary: string;
+  label: string;
+}
+
+/**
+ * Compute what the header chip shows for the active account: the tightest window's percent, or the status copy.
+ */
+export function chipState(
+  usage: ClaudeUsageSnapshot,
+  now: number = Date.now(),
+): ChipState {
+  const tightest = usage.status === "ok" ? tightestWindow(usage.windows) : null;
+  if (tightest === null) {
+    const summary = statusCopy(usage) ?? "usage stale";
+    return {
+      tone: usage.status === "unavailable" ? "muted" : "stale",
+      summary,
+      label: summary,
+    };
+  }
+  const reset = formatReset(tightest.resetsAt, now);
+  return {
+    tone: toneFor(tightest.percent),
+    summary: `${tightest.percent}% used${reset ? `, resets ${reset}` : ""}`,
+    label: `${tightest.percent}%`,
+  };
 }

@@ -1,10 +1,10 @@
 import {
   MAX_LOGIN_CODE_LEN,
   type ClaudeLoginView,
-} from "../../shared/types.js";
+} from "../../../../shared/types.js";
 
 /**
- * Whether a pasted code is submittable: non-empty after trimming, one line, within the server's
+ * Check that a pasted code is submittable: non-empty after trimming, one line, within the server's
  * length cap.
  */
 export function isSubmittableCode(raw: string): boolean {
@@ -15,22 +15,7 @@ export function isSubmittableCode(raw: string): boolean {
 }
 
 /**
- * Whether the server still has this login moving; `idle`, `done` and `error` are terminal for
- * polling purposes.
- *
- * @remarks Only its test imports it.
- * @internal
- */
-export function loginInFlight(state: ClaudeLoginView): boolean {
-  return (
-    state.state === "starting" ||
-    state.state === "awaiting-code" ||
-    state.state === "finishing"
-  );
-}
-
-/**
- * The account id a server login view is about, null for `idle` and `error`.
+ * Return the account id a server login view is about, or null for `idle` and `error`.
  */
 export function viewAccountId(state: ClaudeLoginView): string | null {
   if ("accountId" in state) return state.accountId;
@@ -53,12 +38,4 @@ export function isForeignLogin(
   if (seenId === null) return false;
   if (ownId !== null) return seenId !== ownId;
   return !startsPending;
-}
-
-/**
- * Whether two server views are the same for rendering purposes, so a poll that changes nothing
- * does not re-render or re-arm effects.
- */
-export function sameLoginView(a: ClaudeLoginView, b: ClaudeLoginView): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
 }

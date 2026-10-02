@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { ClaudeUsageSnapshot } from "../../../shared/types.js";
+import type { ClaudeUsageSnapshot } from "../../../../shared/types.js";
 import {
-  emailLocalPart,
+  chipState,
   formatReset,
   PACE_BADGE,
   pacedAtFor,
@@ -11,8 +11,8 @@ import {
   projectionCopy,
   statusCopy,
   tightestWindow,
-  toneColor,
   toneFor,
+  usageLine,
 } from "./usage-format.js";
 
 const w = (kind: string, percent: number) => ({
@@ -52,7 +52,6 @@ void test("toneFor thresholds at 70 and 90", () => {
   assert.equal(toneFor(89), "stale");
   assert.equal(toneFor(90), "down");
   assert.equal(toneFor(100), "down");
-  assert.equal(toneColor("down"), "var(--status-down)");
 });
 
 void test("formatReset renders days, hours, minutes, soon, and null", () => {
@@ -90,11 +89,6 @@ void test("statusCopy truth table: null for ok, one fixed line per other status"
   assert.equal(statusCopy(snapshot("error")), "Usage could not be fetched");
 });
 
-void test("emailLocalPart", () => {
-  assert.equal(emailLocalPart("yash@example.com"), "yash");
-  assert.equal(emailLocalPart("Not signed in"), "Not signed in");
-});
-
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 const T0 = Date.parse("2026-09-01T00:00:00Z");
@@ -123,9 +117,6 @@ void test("pacingFor: badge thresholds at exactly 1.0 and 1.25, unrounded", () =
   assert.equal(PACE_BADGE["on-track"].tone, "ok");
   assert.equal(PACE_BADGE.ahead.tone, "stale");
   assert.equal(PACE_BADGE["will-run-out"].tone, "down");
-  assert.equal(PACE_BADGE["will-run-out"].text, "var(--destructive-text)");
-  assert.equal(PACE_BADGE["on-track"].text, "var(--status-ok)");
-  assert.equal(PACE_BADGE.ahead.text, "var(--status-stale)");
 });
 
 void test("pacedAtFor: the fetch instant for ok snapshots, null otherwise", () => {
@@ -306,4 +297,62 @@ void test("pacingFor: missing, unparseable, inverted or ended periods yield null
   );
   assert.equal(pacingFor(win("session", 95, 5 * HOUR), T0 + 5 * HOUR), null);
   assert.equal(pacingFor(win("session", 95, 5 * HOUR), T0 + 8 * HOUR), null);
+});
+
+void test("usageLine joins each window with its reset, or falls back to the status copy", () => {
+  const now = Date.parse("2026-10-02T09:00:00Z");
+  const usage: ClaudeUsageSnapshot = {
+    status: "ok",
+    windows: [
+      {
+        ...w("session", 45),
+        label: "Session",
+        resetsAt: "2026-10-02T11:10:00Z",
+      },
+      { ...w("weekly_all", 75), label: "Week" },
+    ],
+    fetchedAt: "2026-10-02T09:00:00Z",
+  };
+  assert.equal(usageLine(usage, now), "Session 45% (resets 2h 10m) · Week 75%");
+  assert.equal(
+    usageLine({ ...usage, windows: [] }, now),
+    "Usage unavailable, sign in to see it",
+  );
+  assert.equal(
+    usageLine({ ...usage, status: "stale" }, now),
+    "Usage stale, refreshes on the next session",
+  );
+});
+
+void test("chipState names the tightest window, its tone and reset, or the status copy", () => {
+  const now = Date.parse("2026-10-02T09:00:00Z");
+  const usage: ClaudeUsageSnapshot = {
+    status: "ok",
+    windows: [
+      { ...w("session", 45), resetsAt: "2026-10-02T09:45:00Z" },
+      { ...w("weekly_all", 95), resetsAt: "2026-10-03T10:00:00Z" },
+      w("weekly_scoped", 75),
+    ],
+    fetchedAt: "2026-10-02T09:00:00Z",
+  };
+  assert.deepEqual(chipState(usage, now), {
+    tone: "down",
+    summary: "95% used, resets 1d 1h",
+    label: "95%",
+  });
+  assert.deepEqual(chipState({ ...usage, windows: [w("session", 70)] }, now), {
+    tone: "stale",
+    summary: "70% used",
+    label: "70%",
+  });
+  assert.deepEqual(chipState({ ...usage, status: "unavailable" }, now), {
+    tone: "muted",
+    summary: "Usage unavailable, sign in to see it",
+    label: "Usage unavailable, sign in to see it",
+  });
+  assert.deepEqual(chipState({ ...usage, windows: [] }, now), {
+    tone: "stale",
+    summary: "usage stale",
+    label: "usage stale",
+  });
 });

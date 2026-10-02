@@ -1,4 +1,10 @@
-import type { WorktreeRow } from "../../../shared/types.js";
+import type { WorktreeRow } from "../../../../shared/types.js";
+
+export interface WorkspacesSummary {
+  count: number;
+  totalKb: number;
+  unknownSizes: number;
+}
 
 export type WorktreeSortKey = "due" | "size" | "age";
 

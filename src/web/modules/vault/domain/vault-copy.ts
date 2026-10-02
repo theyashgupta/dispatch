@@ -1,4 +1,4 @@
-/** Maps an add-key error code to its inline copy, with one fallback for unknown codes. */
+/** Map an add-key error code to its inline copy, with one fallback for unknown codes. */
 export function vaultAddErrorCopy(error: string): string {
   switch (error) {
     case "invalid-name":
@@ -12,7 +12,7 @@ export function vaultAddErrorCopy(error: string): string {
   }
 }
 
-/** Maps a set-value error code to its inline copy, with one fallback for unknown codes. */
+/** Map a set-value error code to its inline copy, with one fallback for unknown codes. */
 export function vaultValueErrorCopy(error: string): string {
   switch (error) {
     case "missing-value":
@@ -26,7 +26,7 @@ export function vaultValueErrorCopy(error: string): string {
   }
 }
 
-/** Maps a purpose-edit error code to its inline copy, with one fallback for unknown codes. */
+/** Map a purpose-edit error code to its inline copy, with one fallback for unknown codes. */
 export function vaultPurposeErrorCopy(error: string): string {
   switch (error) {
     case "invalid-purpose":

@@ -1,5 +1,5 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { PlaybooksPage } from "@/features/playbooks";
+import { PlaybooksView } from "@/modules/playbooks";
 import { useAppState } from "@/components/AppState";
 
 export const Route = createLazyFileRoute("/playbooks/{-$id}")({
@@ -8,5 +8,5 @@ export const Route = createLazyFileRoute("/playbooks/{-$id}")({
 
 function PlaybooksRoute() {
   const props = useAppState().playbooks;
-  return <PlaybooksPage {...props} />;
+  return <PlaybooksView {...props} />;
 }

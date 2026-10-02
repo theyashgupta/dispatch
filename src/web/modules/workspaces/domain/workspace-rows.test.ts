@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { WorktreeRow } from "../../../shared/types.js";
+import type { WorktreeRow } from "../../../../shared/types.js";
 import { sortWorktreeRows, worktreeActions } from "./workspace-rows.js";
 
 function row(

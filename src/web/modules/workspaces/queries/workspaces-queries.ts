@@ -1,34 +1,87 @@
-import { queryOptions, useQuery } from "@tanstack/react-query";
-import { discoverFolder, getWorkspaces } from "./workspaces-api.js";
+import { useEffect, useRef, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import type { WorkspacesInventory } from "../../../../shared/types.js";
+import { createLatestLoader } from "../../../../shared/latest-loader.js";
+import { inventoryRefetchDelay } from "@/modules/workspaces/domain/inventory-refetch";
+import { getWorkspaces, openWorkspaceEditor } from "./workspaces-api.js";
 
-export const workspacesKeys = {
-  all: ["workspaces"] as const,
-  inventory: (fresh: boolean) => ["workspaces", "inventory", fresh] as const,
-  folders: ["workspaces", "folders"] as const,
-  discover: (path: string) => ["workspaces", "discover", path] as const,
-  browse: (path?: string) => ["workspaces", "browse", path ?? null] as const,
-};
+export function openWorkspaceEditorMutationOptions() {
+  return {
+    mutationFn: (vars: { cardId: string; editor: "code" | "cursor" }) =>
+      openWorkspaceEditor(vars.cardId, vars.editor),
+  };
+}
+
+export function useOpenWorkspaceEditorMutation() {
+  return useMutation(openWorkspaceEditorMutationOptions());
+}
 
 /**
- * Reads the inventory.
+ * Hold the Workspaces inventory: fetched on every mount, on `refresh()`, on `reload()` and after
+ * board changes.
  *
  * @remarks
- * `fresh` drops the server caches first and is part of the key.
+ * A board change schedules one fetch after `inventoryRefetchDelay`, and further changes add nothing
+ * until it runs. `refresh()` fetches with `fresh` at once, and a request made during a load is queued
+ * as one follow-up load. The inventory lives in state, so a remount never shows an earlier mount's data.
  */
-export function workspacesQueryOptions(fresh = false) {
-  return queryOptions({
-    queryKey: workspacesKeys.inventory(fresh),
-    queryFn: () => getWorkspaces(fresh),
+export function useWorkspaceInventory(boardVersion: unknown): {
+  inventory: WorkspacesInventory | null;
+  loading: boolean;
+  error: boolean;
+  refresh: () => void;
+  reload: () => void;
+} {
+  const [inventory, setInventory] = useState<WorkspacesInventory | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [loader] = useState(() => {
+    let startedAt = 0;
+    const latest = createLatestLoader(
+      (fresh) => {
+        startedAt = Date.now();
+        return getWorkspaces(fresh);
+      },
+      {
+        result: (next) => {
+          setInventory(next);
+          setError(false);
+        },
+        error: (err) => {
+          console.error("getWorkspaces failed", err);
+          setError(true);
+        },
+        busy: setLoading,
+      },
+    );
+    return {
+      request: latest.request,
+      sinceLast: () => Date.now() - startedAt,
+    };
   });
-}
 
-export function discoverFolderQueryOptions(path: string) {
-  return queryOptions({
-    queryKey: workspacesKeys.discover(path),
-    queryFn: () => discoverFolder(path),
-  });
-}
+  useEffect(() => {
+    if (timer.current !== null) return;
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      loader.request(false);
+    }, inventoryRefetchDelay(loader.sinceLast()));
+  }, [boardVersion, loader]);
 
-export function useWorkspacesQuery(fresh = false) {
-  return useQuery(workspacesQueryOptions(fresh));
+  useEffect(
+    () => () => {
+      if (timer.current !== null) clearTimeout(timer.current);
+      timer.current = null;
+    },
+    [],
+  );
+
+  return {
+    inventory,
+    loading,
+    error,
+    refresh: () => loader.request(true),
+    reload: () => loader.request(false),
+  };
 }

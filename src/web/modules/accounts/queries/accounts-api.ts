@@ -6,7 +6,7 @@ import type {
 import { http, httpError } from "@/lib/http";
 
 /**
- * Every Claude account with its usage snapshot plus the active pointer: GET /api/accounts.
+ * Fetch every Claude account with its usage snapshot plus the active pointer: GET /api/accounts.
  *
  * @remarks
  * Throws on any non-2xx.
@@ -109,7 +109,7 @@ export async function startLogin(
 }
 
 /**
- * The login state machine's current view: GET /api/accounts/login.
+ * Fetch the login state machine's current view: GET /api/accounts/login.
  */
 export async function getLoginState(): Promise<ClaudeLoginView> {
   const result = await http<ClaudeLoginView>("/api/accounts/login");
