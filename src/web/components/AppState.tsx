@@ -8,18 +8,17 @@ import type { SlackPage } from "@/features/slack/SlackPage";
 import type { InboxView } from "@/features/inbox";
 import type { TicketsPage } from "@/features/tickets";
 import type { ActivityPage } from "@/features/activity";
-import type { AccountsPage } from "@/features/accounts";
 import type { SessionsPage } from "@/features/sessions";
-import type { ArchivePage } from "@/features/archive";
-import type { PlaybooksPage } from "@/features/playbooks";
-import type { VaultPage } from "@/features/vault";
+import type { VaultView } from "@/modules/vault";
 import type { CalendarPage } from "@/features/calendar";
 import type { MeetingsPage } from "@/features/meetings";
-import type { WorkspacesPage } from "@/features/workspaces";
 import type { AskPage } from "@/features/ask";
 import type { FlowPage } from "@/features/flow";
 import type { SettingsView } from "@/modules/settings";
 import type { ConnectionsView } from "@/modules/connections";
+import type { ArchiveView } from "@/modules/archive";
+import type { PlaybooksView } from "@/modules/playbooks";
+import type { WorkspacesView } from "@/modules/workspaces";
 import type { Page } from "../../shared/route.js";
 
 export interface AppPages extends Record<Page, object> {
@@ -33,14 +32,13 @@ export interface AppPages extends Record<Page, object> {
   settings: Omit<ComponentProps<typeof SettingsView>, "tabId" | "connections"> &
     ComponentProps<typeof ConnectionsView>;
   activity: ComponentProps<typeof ActivityPage>;
-  accounts: ComponentProps<typeof AccountsPage>;
   sessions: ComponentProps<typeof SessionsPage>;
-  archive: ComponentProps<typeof ArchivePage>;
-  playbooks: ComponentProps<typeof PlaybooksPage>;
-  vault: ComponentProps<typeof VaultPage>;
+  archive: ComponentProps<typeof ArchiveView>;
+  playbooks: ComponentProps<typeof PlaybooksView>;
+  vault: ComponentProps<typeof VaultView>;
   calendar: ComponentProps<typeof CalendarPage>;
   meetings: Omit<ComponentProps<typeof MeetingsPage>, "selectedId">;
-  workspaces: ComponentProps<typeof WorkspacesPage>;
+  workspaces: ComponentProps<typeof WorkspacesView>;
   ask: Omit<ComponentProps<typeof AskPage>, "prefill">;
   flow: ComponentProps<typeof FlowPage>;
   board: ComponentProps<typeof Board>;

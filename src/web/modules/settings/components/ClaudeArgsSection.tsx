@@ -1,6 +1,6 @@
 import { Bot, RotateCcw } from "lucide-react";
 import { DEFAULT_CLAUDE_ARGS } from "../../../../shared/types.js";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription } from "@/components/ui/field";
@@ -77,11 +77,9 @@ export function ClaudeArgsSection({
             </FieldDescription>
           </Field>
           {saveError && (
-            <Alert variant="destructive">
-              <AlertDescription className="font-semibold">
-                Couldn't save Claude's arguments. Try again.
-              </AlertDescription>
-            </Alert>
+            <ErrorAlert>
+              Couldn't save Claude's arguments. Try again.
+            </ErrorAlert>
           )}
         </CardContent>
       </Card>

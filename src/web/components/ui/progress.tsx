@@ -1,14 +1,35 @@
 "use client";
 
 import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "cn";
 import { Progress as ProgressPrimitive } from "radix-ui";
+
+const progressIndicatorVariants = cva(
+  "h-full w-full flex-1 transition-transform",
+  {
+    variants: {
+      tone: {
+        default: "bg-foreground",
+        ok: "bg-(--status-ok)",
+        stale: "bg-(--status-stale)",
+        down: "bg-(--status-down)",
+        marker: "border-r-2 border-muted-foreground bg-transparent",
+      },
+    },
+    defaultVariants: {
+      tone: "default",
+    },
+  },
+);
 
 function Progress({
   className,
   value,
+  tone,
   ...props
-}: React.ComponentProps<typeof ProgressPrimitive.Root>) {
+}: React.ComponentProps<typeof ProgressPrimitive.Root> &
+  VariantProps<typeof progressIndicatorVariants>) {
   return (
     <ProgressPrimitive.Root
       data-slot="progress"
@@ -20,7 +41,8 @@ function Progress({
     >
       <ProgressPrimitive.Indicator
         data-slot="progress-indicator"
-        className="h-full w-full flex-1 bg-foreground transition-transform"
+        data-tone={tone ?? undefined}
+        className={progressIndicatorVariants({ tone })}
         style={{ transform: `translateX(-${100 - (value || 0)}%)` }}
       />
     </ProgressPrimitive.Root>

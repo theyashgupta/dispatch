@@ -6,7 +6,7 @@ import {
   type ProfileDraft,
 } from "@/modules/settings/domain/profile-draft";
 import { parseHandles } from "@/modules/settings/domain/profile-handles";
-import { shouldSeedDraft } from "@/modules/settings/domain/draft-seed";
+import { shouldSeedDraft } from "../../../../shared/draft-seed.js";
 import {
   useProfileQuery,
   useSaveProfileMutation,
