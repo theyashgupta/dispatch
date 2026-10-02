@@ -63,8 +63,8 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. The new t
 | `Board.tsx`, `Column.tsx`, `Card.tsx`, `CardView.tsx`, `EmptyState.tsx`                                                          | `features/board/`                  |
 | `DetailPanel.tsx`, `PanelHeader.tsx`, `ReferenceBlocks.tsx`, `SessionLostSection.tsx`, `TerminalRegion.tsx`                      | `features/detail/`                 |
 | `AppSidebar.tsx`, `NavIcon.tsx`, `SyncStatus.tsx`, `PageHeader.tsx`, `TopBar.tsx`                                                | `modules/shell/components/`        |
-| `StartModal.tsx`, `CleanupModal.tsx`, `MultiSelect.tsx`                                                                          | `features/modals/`                 |
-| `SettingsScreen.tsx`, `PlaybookEditorModal.tsx`                                                                                  | `features/settings/`               |
+| `StartModal.tsx`, `CleanupModal.tsx`, `MultiSelect.tsx`, `WorkspaceAdd.tsx`, `FolderBrowserModal.tsx`                            | `features/modals/`                 |
+| `SettingsView.tsx`, `PlaybookEditorDialog.tsx`                                                                                   | `modules/{settings,playbooks}/`    |
 | `GoneBadge.tsx`, `PlanReadyBadge.tsx`, `SourceBadge.tsx`                                                                         | `components/badges/` (shared tier) |
 | `SessionsPage.tsx`, `SessionRow.tsx`                                                                                             | `features/sessions/`               |
 | `PullRequestsPage.tsx`, `PrList.tsx`, `PrDetail.tsx`                                                                             | `features/pull-requests/`          |
@@ -73,7 +73,7 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. The new t
 | `SlackPage.tsx`, `SlackList.tsx`, `SlackDetail.tsx`, `SlackThread.tsx`                                                           | `features/slack/`                  |
 | `MeetingNotesModal.tsx`, `MeetingsPage.tsx`, `MeetingList.tsx`, `MeetingDetail.tsx`                                              | `features/meetings/`               |
 | `CalendarPage.tsx`                                                                                                               | `features/calendar/`               |
-| `WorkspacesPage.tsx`, `WorktreeRow.tsx`, `WorkspaceFolders.tsx`, `WorkspaceAdd.tsx`, `FolderBrowserModal.tsx`                    | `features/workspaces/`             |
+| `WorkspacesView.tsx`, `WorktreeRow.tsx`, `WorkspaceFolders.tsx`, `WorkspaceRepos.tsx`                                            | `modules/workspaces/`              |
 | `AskPage.tsx`, `AskComposer.tsx`, `AskMessage.tsx`                                                                               | `features/ask/`                    |
 | `FlowPage.tsx`, `FlowToolbar.tsx`, `FlowDiagram.tsx`, `FlowNarrow.tsx`, `flow-model.ts`                                          | `features/flow/`                   |
 | `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts`                              | `hooks/`                           |
