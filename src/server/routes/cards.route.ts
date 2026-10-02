@@ -1,13 +1,17 @@
 import path from "node:path";
-import { Router, type Request, type Response } from "express";
-import { COLUMNS, type Card, type Column } from "../../shared/types.js";
+import {
+  Router,
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
+import type { Card, Column } from "../../shared/types.js";
 import { isDemoteEligible } from "../../shared/demote-eligibility.js";
 import {
   redactArchivedGroup,
   redactCard,
-  store,
-} from "../store/board.store.js";
-import { ITEM_DESCRIPTION_MAX, ITEM_TITLE_MAX } from "../store/items.js";
+  boardRepository as store,
+} from "../store/board-repository.js";
 import {
   blocksAgentDoneManualEntry,
   blocksTodoToInProgressManualMove,
@@ -24,11 +28,19 @@ import { resetCard } from "../services/orchestration/reset.js";
 import { runClaude } from "../services/orchestration/run-claude.js";
 import { editorPath, launchEditor } from "../adapters/editors.js";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
-import { restatRepos } from "../services/domain/workspaces.js";
+import { restatRepos } from "../services/orchestration/workspaces.js";
 import {
   loadPlaybooks,
   hasDispatchMarker,
-} from "../services/domain/playbooks.js";
+} from "../services/infra/playbooks.js";
+import {
+  ConflictError,
+  HttpError,
+  InternalError,
+  NotFoundError,
+  UpstreamError,
+  ValidationError,
+} from "../services/domain/errors.js";
 import { generateTicketDraft } from "../services/orchestration/ticket-generate.js";
 import {
   generateGroupTitlePhrase,
@@ -44,29 +56,32 @@ import {
   postComment,
   pushColumnChanges,
 } from "../services/orchestration/linear-outbound.js";
-import { validateCommentBody } from "../../shared/comment-body.js";
 import {
-  ATTACHMENT_NAME_RE,
-  CARD_ID_RE,
-  decodeImages,
-  screenshotsSection,
   stageAttachments,
   commitAttachments,
-} from "../services/domain/attachments.js";
+} from "../services/infra/attachments.js";
 import { attachmentsDir } from "../services/infra/paths.js";
 import { enabledSource } from "../adapters/source-gateway.js";
+import {
+  attachmentParamsSchema,
+  commentBodySchema,
+  createCardBodySchema,
+  createGroupBodySchema,
+  draftBodySchema,
+  groupTitleBodySchema,
+  linearStateBodySchema,
+  moveBodySchema,
+  openEditorBodySchema,
+  sessionBodySchema,
+  startBodySchema,
+  syncBodySchema,
+  unwindBodySchema,
+} from "./cards-schemas.js";
+import { httpErrorHandler } from "./error-handler.js";
+import { parseOrThrow } from "./parse-input.js";
+import { forceBodySchema } from "./schema-primitives.js";
 
 export const cardsRouter = Router();
-
-const MAX_DIRECTION_LEN = 10000;
-const MAX_GROUP_TITLE_MEMBERS = 50;
-
-/**
- * `/move`'s own whitelist, distinct from `COLUMNS` (the board's render list). Inbox is a valid
- * move target (promote/demote) but must stay OUT of `COLUMNS` so it can never become a board
- * column or a drag-drop target — this is the first feature to split those two concerns.
- */
-const MOVABLE_COLUMNS: readonly Column[] = [...COLUMNS, "inbox"];
 
 /**
  * Server-side enforcement of the sanctioned inbox transitions, mirroring the client gates so one
@@ -123,9 +138,20 @@ function groupedMemberError(card: Card): string | null {
 }
 
 /**
+ * The card a single-card action targets, or a 400 for an unknown id and a 409 for a grouped member.
+ */
+function actionableCard(id: string): Card {
+  const card = store.getCard(id);
+  if (!card) throw new ValidationError(`unknown card id: ${id}`);
+  const groupError = groupedMemberError(card);
+  if (groupError != null) throw new ConflictError(groupError);
+  return card;
+}
+
+/**
  * `GET /api/cards/:id` — a single-card fetch for a search result outside the loaded window
  * (SCALE-03). Answers an unknown id exactly the way `/move`, `/start`, `/resume`, `/terminal`,
- * `/open-editor`, and `/cleanup` already do in THIS file — a plain `res.status(400)` — a
+ * `/open-editor`, and `/cleanup` already do in THIS file, a plain 400, a
  * DELIBERATE, VERIFIED choice that corrects RESEARCH and UI-SPEC, which each assumed the
  * REST-conventional not-found status for a GET; `sync-linear`'s use of that different status is
  * the sole documented deviation in this file and is not a precedent to extend here. Routes through
@@ -138,10 +164,7 @@ function groupedMemberError(card: Card): string | null {
 function getCardById(req: Request<{ id: string }>, res: Response): void {
   const { id } = req.params;
   const card = store.getCard(id);
-  if (!card) {
-    res.status(400).json({ error: `unknown card id: ${id}` });
-    return;
-  }
+  if (!card) throw new ValidationError(`unknown card id: ${id}`);
   const members =
     card.source === "group" ? store.membersOf(card.id).map(redactCard) : [];
   res.status(200).json({ card: redactCard(card), members });
@@ -151,90 +174,42 @@ cardsRouter.get("/cards/:id", getCardById);
 
 cardsRouter.get("/cards/:id/comments", (req, res) => {
   const card = store.getCard(req.params.id);
-  if (!card) {
-    res.status(404).json({ error: `unknown card id: ${req.params.id}` });
-    return;
-  }
+  if (!card) throw new NotFoundError(`unknown card id: ${req.params.id}`);
   res.status(200).json({ comments: card.comments ?? [] });
 });
 
 cardsRouter.post("/cards/:id/comment", async (req, res) => {
-  const body: unknown = (req.body as { body?: unknown } | undefined)?.body;
-  const invalid = validateCommentBody(body);
-  if (invalid != null) {
-    res.status(400).json({ error: invalid });
-    return;
-  }
-  const outcome = await postComment(req.params.id, body as string);
-  if (!outcome.ok) {
-    res.status(outcome.status).json({ error: outcome.error });
-    return;
-  }
+  const { body } = parseOrThrow(commentBodySchema, req.body);
+  const outcome = await postComment(req.params.id, body);
+  if (!outcome.ok) throw new HttpError(outcome.status, outcome.error);
   res.status(201).json({ ok: true });
 });
 
 cardsRouter.post("/cards/:id/assign-me", async (req, res) => {
   const outcome = await assignToMe(req.params.id);
-  if (!outcome.ok) {
-    res.status(outcome.status).json({ error: outcome.error });
-    return;
-  }
+  if (!outcome.ok) throw new HttpError(outcome.status, outcome.error);
   res.status(204).end();
 });
 
 cardsRouter.post("/cards/:id/linear-state", async (req, res) => {
-  const stateId = (req.body as { stateId?: unknown } | undefined)?.stateId;
-  if (typeof stateId !== "string" || stateId === "" || stateId.length > 200) {
-    res.status(400).json({
-      error: "stateId must be a string of 1 to 200 characters",
-    });
-    return;
-  }
+  const { stateId } = parseOrThrow(linearStateBodySchema, req.body);
   const outcome = await moveLinearState(req.params.id, stateId);
-  if (!outcome.ok) {
-    res.status(outcome.status).json({ error: outcome.error });
-    return;
-  }
+  if (!outcome.ok) throw new HttpError(outcome.status, outcome.error);
   res.status(204).end();
 });
 
 cardsRouter.post("/cards/:id/move", async (req, res) => {
   const { id } = req.params;
-  const column = (req.body as { column?: unknown } | undefined)?.column;
+  const { column } = parseOrThrow(moveBodySchema, req.body);
+  const card = actionableCard(id);
 
-  if (
-    typeof column !== "string" ||
-    !MOVABLE_COLUMNS.includes(column as Column)
-  ) {
-    res.status(400).json({
-      error: `invalid column; must be one of: ${MOVABLE_COLUMNS.join(", ")}`,
-    });
-    return;
-  }
-  const card = store.getCard(id);
-  if (!card) {
-    res.status(400).json({ error: `unknown card id: ${id}` });
-    return;
-  }
-  const groupError = groupedMemberError(card);
-  if (groupError != null) {
-    res.status(409).json({ error: groupError });
-    return;
-  }
+  const transitionError = inboxTransitionError(card, column);
+  if (transitionError != null) throw new ConflictError(transitionError);
 
-  const transitionError = inboxTransitionError(card, column as Column);
-  if (transitionError != null) {
-    res.status(409).json({ error: transitionError });
-    return;
-  }
+  const manualMoveError = manualMoveTransitionError(card, column);
+  if (manualMoveError != null) throw new ConflictError(manualMoveError);
 
-  const manualMoveError = manualMoveTransitionError(card, column as Column);
-  if (manualMoveError != null) {
-    res.status(409).json({ error: manualMoveError });
-    return;
-  }
-
-  void pushColumnChanges(await store.moveCardManual(id, column as Column));
+  void pushColumnChanges(await store.moveCardManual(id, column));
   res.status(204).end();
 });
 
@@ -260,128 +235,63 @@ function inheritFromError(
 
 cardsRouter.post("/cards/:id/start", async (req, res) => {
   const { id } = req.params;
+  const { extraDirection, playbook, newSession, inheritFrom, workspace } =
+    parseOrThrow(startBodySchema, req.body);
 
-  const card = store.getCard(id);
-  if (!card) {
-    res.status(400).json({ error: `unknown card id: ${id}` });
-    return;
-  }
-  const groupError = groupedMemberError(card);
-  if (groupError != null) {
-    res.status(409).json({ error: groupError });
-    return;
-  }
+  const card = actionableCard(id);
 
   if (card.column === "done") {
-    res.status(409).json({ error: "cannot start a session for a Done card" });
-    return;
+    throw new ConflictError("cannot start a session for a Done card");
   }
 
   if (card.column === "inbox") {
-    res.status(409).json({
-      error: "cannot start a session from the Inbox: promote to To Do first",
-    });
-    return;
+    throw new ConflictError(
+      "cannot start a session from the Inbox: promote to To Do first",
+    );
   }
 
   if (!/^[A-Za-z0-9]+-\d+$/.test(card.identifier)) {
-    res
-      .status(400)
-      .json({ error: `invalid ticket identifier: ${card.identifier}` });
-    return;
+    throw new ValidationError(`invalid ticket identifier: ${card.identifier}`);
   }
-
-  const body = req.body as
-    | {
-        extraDirection?: unknown;
-        folder?: unknown;
-        repos?: unknown;
-        playbook?: unknown;
-        newSession?: unknown;
-        inheritFrom?: unknown;
-      }
-    | undefined;
-  const newSession = body?.newSession === true;
-  const inheritFrom =
-    typeof body?.inheritFrom === "string" ? body.inheritFrom : undefined;
 
   if (
     newSession &&
     !card.sessions?.some((s) => s.id === card.activeSessionId)
   ) {
-    res
-      .status(409)
-      .json({ error: "no existing session to start another from" });
-    return;
+    throw new ConflictError("no existing session to start another from");
   }
 
   const inheritError = inheritFromError(card, newSession, inheritFrom);
-  if (inheritError != null) {
-    res.status(409).json({ error: inheritError });
-    return;
-  }
+  if (inheritError != null) throw new ConflictError(inheritError);
 
   const config = getOrchestrationConfig();
   if (!config) {
-    res
-      .status(400)
-      .json({ error: "orchestration config is not loaded", variant: "config" });
-    return;
+    throw new ValidationError("orchestration config is not loaded", {
+      variant: "config",
+    });
   }
-
-  const extraDirection =
-    typeof body?.extraDirection === "string" ? body.extraDirection : "";
-  const playbook =
-    typeof body?.playbook === "string" ? body.playbook : undefined;
 
   if (playbook !== undefined) {
     const known = (await loadPlaybooks()).some((p) => p.name === playbook);
     if (!known) {
-      res.status(400).json({ error: "unknown playbook", variant: "playbook" });
-      return;
+      throw new ValidationError("unknown playbook", { variant: "playbook" });
     }
   }
 
-  const folder = body?.folder;
-  const rawRepos = body?.repos;
-  const hasWorkspacePayload =
-    typeof folder === "string" &&
-    Array.isArray(rawRepos) &&
-    rawRepos.length > 0 &&
-    rawRepos.every(
-      (r) =>
-        r !== null &&
-        typeof r === "object" &&
-        typeof (r as { path?: unknown }).path === "string" &&
-        typeof (r as { base?: unknown }).base === "string",
-    );
-
-  if (hasWorkspacePayload) {
-    const repos = (rawRepos as { path: string; base: string }[]).map((r) => ({
-      path: r.path,
-      base: r.base,
-    }));
-    if (repos.some((r) => r.base.startsWith("-"))) {
-      res.status(400).json({
-        error: "invalid base branch",
+  if (workspace) {
+    if (workspace.repos.some((r) => r.base.startsWith("-"))) {
+      throw new ValidationError("invalid base branch", { variant: "config" });
+    }
+    if (!(await restatRepos(workspace.repos))) {
+      throw new ValidationError("Can't start: a selected repo is missing", {
         variant: "config",
       });
-      return;
     }
-    if (!(await restatRepos(repos))) {
-      res.status(400).json({
-        error: "Can't start: a selected repo is missing",
-        variant: "config",
-      });
-      return;
-    }
-    await store.setCardWorkspace(id, { folder, repos });
+    await store.setCardWorkspace(id, workspace);
   } else if (!card.workspace) {
-    res.status(400).json({
-      error: "No workspace selected for this ticket",
+    throw new ValidationError("No workspace selected for this ticket", {
       variant: "config",
     });
-    return;
   }
 
   void startSession(id, extraDirection, config, {
@@ -395,45 +305,27 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
 cardsRouter.post("/cards/:id/resume", (req, res) => {
   const { id } = req.params;
 
-  const card = store.getCard(id);
-  if (!card) {
-    res.status(400).json({ error: `unknown card id: ${id}` });
-    return;
-  }
-  const groupError = groupedMemberError(card);
-  if (groupError != null) {
-    res.status(409).json({ error: groupError });
-    return;
-  }
+  const card = actionableCard(id);
 
   if (!/^[A-Za-z0-9]+-\d+$/.test(card.identifier)) {
-    res
-      .status(400)
-      .json({ error: `invalid ticket identifier: ${card.identifier}` });
-    return;
+    throw new ValidationError(`invalid ticket identifier: ${card.identifier}`);
   }
 
   if (!card.workspacePath) {
-    res.status(400).json({ error: "card has no workspace to resume" });
-    return;
+    throw new ValidationError("card has no workspace to resume");
   }
 
-  if (card.tmuxSession) {
-    res.status(409).json({ error: "session is already live" });
-    return;
-  }
+  if (card.tmuxSession) throw new ConflictError("session is already live");
 
   const activeRecord = card.sessions?.some(
     (s) => s.id === card.activeSessionId,
   );
   if (card.sessionLost !== true && activeRecord !== true) {
-    res.status(409).json({ error: "card has no lost session to resume" });
-    return;
+    throw new ConflictError("card has no lost session to resume");
   }
 
   if (store.isStarting(id)) {
-    res.status(409).json({ error: "a start is in flight for this card" });
-    return;
+    throw new ConflictError("a start is in flight for this card");
   }
 
   void resumeSession(id);
@@ -443,27 +335,14 @@ cardsRouter.post("/cards/:id/resume", (req, res) => {
 cardsRouter.post("/cards/:id/terminal", (req, res) => {
   const { id } = req.params;
 
-  const card = store.getCard(id);
-  if (!card) {
-    res.status(400).json({ error: `unknown card id: ${id}` });
-    return;
-  }
-  const groupError = groupedMemberError(card);
-  if (groupError != null) {
-    res.status(409).json({ error: groupError });
-    return;
-  }
+  const card = actionableCard(id);
 
   if (!card.tmuxSession || !card.activeSessionId) {
-    res.status(400).json({ error: "card has no live session" });
-    return;
+    throw new ValidationError("card has no live session");
   }
 
   if (!/^[A-Za-z0-9]+-\d+$/.test(card.identifier)) {
-    res
-      .status(400)
-      .json({ error: `invalid ticket identifier: ${card.identifier}` });
-    return;
+    throw new ValidationError(`invalid ticket identifier: ${card.identifier}`);
   }
 
   void reconnectTerminal(card.id);
@@ -473,43 +352,28 @@ cardsRouter.post("/cards/:id/terminal", (req, res) => {
 cardsRouter.post("/cards/:id/run-claude", async (req, res) => {
   const { id } = req.params;
 
-  const card = store.getCard(id);
-  if (!card) {
-    res.status(400).json({ error: `unknown card id: ${id}` });
-    return;
-  }
-  const groupError = groupedMemberError(card);
-  if (groupError != null) {
-    res.status(409).json({ error: groupError });
-    return;
-  }
+  const card = actionableCard(id);
 
   if (!card.tmuxSession || !card.activeSessionId) {
-    res.status(400).json({ error: "card has no live session" });
-    return;
+    throw new ValidationError("card has no live session");
   }
 
   const outcome = await runClaude(card.id);
   if (outcome === "busy") {
-    res.status(409).json({ error: "the terminal is not at a shell prompt" });
-    return;
+    throw new ConflictError("the terminal is not at a shell prompt");
   }
   if (outcome === "legacy") {
-    res.status(409).json({
-      error:
-        "this session was started by an older Dispatch; it becomes a shell session after Claude exits and Resume runs",
-    });
-    return;
+    throw new ConflictError(
+      "this session was started by an older Dispatch; it becomes a shell session after Claude exits and Resume runs",
+    );
   }
   if (outcome === "account") {
-    res.status(409).json({
-      error: "the session's Claude account is no longer available",
-    });
-    return;
+    throw new ConflictError(
+      "the session's Claude account is no longer available",
+    );
   }
   if (outcome === "no-session") {
-    res.status(400).json({ error: "card has no live session" });
-    return;
+    throw new ValidationError("card has no live session");
   }
   res.status(202).json({ launched: true });
 });
@@ -517,29 +381,14 @@ cardsRouter.post("/cards/:id/run-claude", async (req, res) => {
 cardsRouter.post("/cards/:id/session", async (req, res) => {
   const { id } = req.params;
 
-  const card = store.getCard(id);
-  if (!card) {
-    res.status(400).json({ error: `unknown card id: ${id}` });
-    return;
-  }
-  const groupError = groupedMemberError(card);
-  if (groupError != null) {
-    res.status(409).json({ error: groupError });
-    return;
-  }
+  const card = actionableCard(id);
 
-  const sessionId = (req.body as { sessionId?: unknown } | undefined)
-    ?.sessionId;
-  if (typeof sessionId !== "string" || sessionId === "") {
-    res.status(400).json({ error: "invalid sessionId" });
-    return;
-  }
+  const { sessionId } = parseOrThrow(sessionBodySchema, req.body);
 
   if (!card.sessions?.some((s) => s.id === sessionId)) {
-    res
-      .status(400)
-      .json({ error: `session ${sessionId} does not resolve for this card` });
-    return;
+    throw new ValidationError(
+      `session ${sessionId} does not resolve for this card`,
+    );
   }
 
   await store.switchActiveSession(id, sessionId);
@@ -549,34 +398,15 @@ cardsRouter.post("/cards/:id/session", async (req, res) => {
 cardsRouter.post("/cards/:id/open-editor", (req, res) => {
   const { id } = req.params;
 
-  const editor = (req.body as { editor?: unknown } | undefined)?.editor;
-  if (editor !== "code" && editor !== "cursor") {
-    res
-      .status(400)
-      .json({ error: `invalid editor; must be one of: code, cursor` });
-    return;
-  }
+  const { editor } = parseOrThrow(openEditorBodySchema, req.body);
 
   if (editorPath(editor) == null) {
-    res.status(400).json({ error: `editor "${editor}" is not available` });
-    return;
+    throw new ValidationError(`editor "${editor}" is not available`);
   }
 
-  const card = store.getCard(id);
-  if (!card) {
-    res.status(400).json({ error: `unknown card id: ${id}` });
-    return;
-  }
-  const groupError = groupedMemberError(card);
-  if (groupError != null) {
-    res.status(409).json({ error: groupError });
-    return;
-  }
+  const card = actionableCard(id);
 
-  if (!card.workspacePath) {
-    res.status(400).json({ error: "card has no workspace" });
-    return;
-  }
+  if (!card.workspacePath) throw new ValidationError("card has no workspace");
 
   void launchEditor(editor, card.workspacePath).catch((err) => {
     console.error(`[open-editor] launch failed for card ${id}:`, err);
@@ -587,32 +417,18 @@ cardsRouter.post("/cards/:id/open-editor", (req, res) => {
 cardsRouter.post("/cards/:id/cleanup", (req, res) => {
   const { id } = req.params;
 
-  const card = store.getCard(id);
-  if (!card) {
-    res.status(400).json({ error: `unknown card id: ${id}` });
-    return;
-  }
-  const groupError = groupedMemberError(card);
-  if (groupError != null) {
-    res.status(409).json({ error: groupError });
-    return;
-  }
+  const card = actionableCard(id);
   if (card.column !== "done") {
-    res.status(409).json({ error: "cleanup is only available for Done cards" });
-    return;
+    throw new ConflictError("cleanup is only available for Done cards");
   }
   if (store.isStarting(id)) {
-    res.status(409).json({ error: "a start is in flight for this card" });
-    return;
+    throw new ConflictError("a start is in flight for this card");
   }
   if (store.isCleaningUp(id)) {
-    res
-      .status(409)
-      .json({ error: "cleanup is already in flight for this card" });
-    return;
+    throw new ConflictError("cleanup is already in flight for this card");
   }
 
-  const force = (req.body as { force?: unknown } | undefined)?.force === true;
+  const { force } = forceBodySchema.parse(req.body);
   store.beginCleanup(id);
   void runCleanupFanOut(id, force).finally(() => store.endCleanup(id));
   res.status(202).json({ cleaning: true });
@@ -686,122 +502,57 @@ function memberIneligibleReason(card: Card | undefined): string | null {
  * module, so every card-emitting route reaches the wire through the one redaction chokepoint.
  */
 async function createGroupHandler(req: Request, res: Response): Promise<void> {
-  const body = req.body as
-    | {
-        title?: unknown;
-        memberIds?: unknown;
-        folder?: unknown;
-        repos?: unknown;
-        playbook?: unknown;
-        extraDirection?: unknown;
-      }
-    | undefined;
-
-  const title = typeof body?.title === "string" ? body.title.trim() : "";
-  if (title === "" || title.length > ITEM_TITLE_MAX) {
-    res.status(400).json({ error: "invalid-title" });
-    return;
-  }
-  if (hasDispatchMarker(title)) {
-    res
-      .status(400)
-      .json({ error: "content contains the DISPATCH_STATUS marker" });
-    return;
-  }
-
-  const rawMemberIds = body?.memberIds;
-  if (
-    !Array.isArray(rawMemberIds) ||
-    rawMemberIds.length < 2 ||
-    !rawMemberIds.every((id) => typeof id === "string") ||
-    new Set(rawMemberIds).size !== rawMemberIds.length
-  ) {
-    res.status(400).json({
-      error: "memberIds must be an array of >=2 distinct card ids",
-    });
-    return;
-  }
-  const memberIds = rawMemberIds;
+  const { title, memberIds, playbook, extraDirection, workspace } =
+    parseOrThrow(createGroupBodySchema, req.body);
 
   const ineligibleIds = memberIds.filter(
     (id) => memberIneligibleReason(store.getCard(id)) != null,
   );
   if (ineligibleIds.length > 0) {
-    res.status(409).json({
-      error: "some selected cards are no longer eligible to be grouped",
-      ineligibleIds,
-    });
-    return;
+    throw new ConflictError(
+      "some selected cards are no longer eligible to be grouped",
+      { ineligibleIds },
+    );
   }
 
   const config = getOrchestrationConfig();
   if (!config) {
-    res
-      .status(400)
-      .json({ error: "orchestration config is not loaded", variant: "config" });
-    return;
+    throw new ValidationError("orchestration config is not loaded", {
+      variant: "config",
+    });
   }
 
-  const playbook =
-    typeof body?.playbook === "string" ? body.playbook : undefined;
   if (playbook !== undefined) {
     const known = (await loadPlaybooks()).some((p) => p.name === playbook);
     if (!known) {
-      res.status(400).json({ error: "unknown playbook", variant: "playbook" });
-      return;
+      throw new ValidationError("unknown playbook", { variant: "playbook" });
     }
   }
 
-  const folder = body?.folder;
-  const rawRepos = body?.repos;
-  const hasWorkspacePayload =
-    typeof folder === "string" &&
-    Array.isArray(rawRepos) &&
-    rawRepos.length > 0 &&
-    rawRepos.every(
-      (r) =>
-        r !== null &&
-        typeof r === "object" &&
-        typeof (r as { path?: unknown }).path === "string" &&
-        typeof (r as { base?: unknown }).base === "string",
-    );
-  if (!hasWorkspacePayload) {
-    res.status(400).json({
-      error: "No workspace selected for this group",
+  if (!workspace) {
+    throw new ValidationError("No workspace selected for this group", {
       variant: "config",
     });
-    return;
   }
 
-  const repos = (rawRepos as { path: string; base: string }[]).map((r) => ({
-    path: r.path,
-    base: r.base,
-  }));
-  if (repos.some((r) => r.base.startsWith("-"))) {
-    res.status(400).json({ error: "invalid base branch", variant: "config" });
-    return;
+  if (workspace.repos.some((r) => r.base.startsWith("-"))) {
+    throw new ValidationError("invalid base branch", { variant: "config" });
   }
-  if (!(await restatRepos(repos))) {
-    res.status(400).json({
-      error: "Can't start: a selected repo is missing",
+  if (!(await restatRepos(workspace.repos))) {
+    throw new ValidationError("Can't start: a selected repo is missing", {
       variant: "config",
     });
-    return;
   }
-
-  const extraDirection =
-    typeof body?.extraDirection === "string" ? body.extraDirection : "";
 
   const groupResult = await store.createGroupCard(title, memberIds);
   if (!groupResult.ok) {
-    res.status(409).json({
-      error: "some selected cards are no longer eligible to be grouped",
-      ineligibleIds: groupResult.ineligibleIds,
-    });
-    return;
+    throw new ConflictError(
+      "some selected cards are no longer eligible to be grouped",
+      { ineligibleIds: groupResult.ineligibleIds },
+    );
   }
   const groupCard = groupResult.card;
-  await store.setCardWorkspace(groupCard.id, { folder, repos });
+  await store.setCardWorkspace(groupCard.id, workspace);
   void startSession(groupCard.id, extraDirection, config, { playbook });
   res.status(202).json({ started: true, card: redactCard(groupCard) });
 }
@@ -814,17 +565,9 @@ async function createGroupHandler(req: Request, res: Response): Promise<void> {
  */
 async function unwindHandler(req: Request, res: Response): Promise<void> {
   const { id } = req.params as { id: string };
-  const rawTo = (req.body as { to?: unknown } | undefined)?.to;
-  const to = rawTo === undefined ? "todo" : rawTo;
-  if (to !== "todo" && to !== "inbox") {
-    res.status(400).json({ error: "to must be todo or inbox" });
-    return;
-  }
+  const { to } = parseOrThrow(unwindBodySchema, req.body);
   const outcome = await unwindGroup(id, to);
-  if (!outcome.ok) {
-    res.status(outcome.status).json({ error: outcome.error });
-    return;
-  }
+  if (!outcome.ok) throw new HttpError(outcome.status, outcome.error);
   res.status(200).json({ archived: redactArchivedGroup(outcome.row) });
 }
 
@@ -838,10 +581,7 @@ cardsRouter.post("/cards/:id/unwind", unwindHandler);
 async function resetHandler(req: Request, res: Response): Promise<void> {
   const { id } = req.params as { id: string };
   const outcome = await resetCard(id);
-  if (!outcome.ok) {
-    res.status(outcome.status).json({ error: outcome.error });
-    return;
-  }
+  if (!outcome.ok) throw new HttpError(outcome.status, outcome.error);
   res.status(200).json({ reset: true });
 }
 
@@ -861,34 +601,18 @@ cardsRouter.post("/cards/group", createGroupHandler);
  * consumed (i.e. once `express.json()` finishes reading the body) — well before any response is
  * sent — regardless of whether the client is still connected and waiting. That made every real
  * invocation abort itself within milliseconds of entering the handler, silently dropping the
- * response (the `.catch` branch returns early on an aborted signal without ever calling
- * `res.status(...)`), so the client hung until its own timeout. `res.on("close")` only fires when
+ * response (the catch block returns early on an aborted signal instead of throwing the
+ * `UpstreamError`), so the client hung until its own timeout. `res.on("close")` only fires when
  * the underlying connection ends WITHOUT the response having been fully written, which is what
  * "the client disconnected before generation finished" actually means; the existing
  * `!res.writableEnded` guard still excludes the normal-completion case.
  */
 let draftInFlight = false;
 
-cardsRouter.post("/cards/draft", (req, res) => {
-  const body = req.body as
-    { direction?: unknown; images?: unknown } | undefined;
-  const rawDirection = body?.direction;
-  const direction = typeof rawDirection === "string" ? rawDirection.trim() : "";
-  if (direction === "" || direction.length > MAX_DIRECTION_LEN) {
-    res.status(400).json({ error: "invalid-direction" });
-    return;
-  }
+cardsRouter.post("/cards/draft", async (req, res) => {
+  const { direction, images } = parseOrThrow(draftBodySchema, req.body);
 
-  const images = body?.images === undefined ? [] : decodeImages(body.images);
-  if (images === null) {
-    res.status(400).json({ error: "invalid-images" });
-    return;
-  }
-
-  if (draftInFlight) {
-    res.status(409).json({ error: "generate-in-progress" });
-    return;
-  }
+  if (draftInFlight) throw new ConflictError("generate-in-progress");
 
   draftInFlight = true;
   const controller = new AbortController();
@@ -896,19 +620,21 @@ cardsRouter.post("/cards/draft", (req, res) => {
     if (!res.writableEnded) controller.abort();
   });
 
-  generateTicketDraft(direction, controller.signal, images)
-    .then((draft) => {
-      if (controller.signal.aborted) return;
-      res.status(200).json(draft);
-    })
-    .catch((err) => {
-      if (controller.signal.aborted) return;
-      console.warn("[cards/draft] generation failed:", (err as Error).message);
-      res.status(502).json({ error: "generate-failed" });
-    })
-    .finally(() => {
-      draftInFlight = false;
-    });
+  try {
+    const draft = await generateTicketDraft(
+      direction,
+      controller.signal,
+      images,
+    );
+    if (controller.signal.aborted) return;
+    res.status(200).json(draft);
+  } catch (err) {
+    if (controller.signal.aborted) return;
+    console.warn("[cards/draft] generation failed:", (err as Error).message);
+    throw new UpstreamError("generate-failed");
+  } finally {
+    draftInFlight = false;
+  }
 });
 
 /**
@@ -957,21 +683,10 @@ interface GroupTitleRun {
  */
 let groupTitleRun: GroupTitleRun | null = null;
 
-cardsRouter.post("/cards/group-title", (req, res) => {
-  const rawMemberIds = (req.body as { memberIds?: unknown } | undefined)
-    ?.memberIds;
-  if (
-    !Array.isArray(rawMemberIds) ||
-    rawMemberIds.length < 2 ||
-    rawMemberIds.length > MAX_GROUP_TITLE_MEMBERS ||
-    !rawMemberIds.every((id) => typeof id === "string") ||
-    new Set(rawMemberIds).size !== rawMemberIds.length
-  ) {
-    res.status(400).json({ error: "invalid-member-ids" });
-    return;
-  }
+cardsRouter.post("/cards/group-title", async (req, res) => {
+  const { memberIds } = parseOrThrow(groupTitleBodySchema, req.body);
 
-  const members: GroupTitleMember[] = rawMemberIds
+  const members: GroupTitleMember[] = memberIds
     .map((id) => store.getCard(id))
     .filter((card): card is Card => card !== undefined)
     .map((card) => ({
@@ -979,15 +694,11 @@ cardsRouter.post("/cards/group-title", (req, res) => {
       title: card.title,
       project: card.project?.name ?? null,
     }));
-  if (members.length < 2) {
-    res.status(400).json({ error: "invalid-member-ids" });
-    return;
-  }
+  if (members.length < 2) throw new ValidationError("invalid-member-ids");
 
-  const key = [...rawMemberIds].sort().join(",");
+  const key = [...memberIds].sort().join(",");
   if (groupTitleRun !== null && groupTitleRun.key !== key) {
-    res.status(409).json({ error: "generate-in-progress" });
-    return;
+    throw new ConflictError("generate-in-progress");
   }
 
   if (groupTitleRun === null) {
@@ -1018,65 +729,32 @@ cardsRouter.post("/cards/group-title", (req, res) => {
     if (groupTitleRun === run) groupTitleRun = null;
   });
 
-  run.promise
-    .then((phrase) => {
-      if (disconnected) return;
-      res.status(200).json({ phrase });
-    })
-    .catch((err) => {
-      if (disconnected) return;
-      console.warn(
-        "[cards/group-title] generation failed:",
-        (err as Error).message,
-      );
-      res.status(502).json({ error: "generate-failed" });
-    });
+  try {
+    const phrase = await run.promise;
+    if (disconnected) return;
+    res.status(200).json({ phrase });
+  } catch (err) {
+    if (disconnected) return;
+    console.warn(
+      "[cards/group-title] generation failed:",
+      (err as Error).message,
+    );
+    throw new UpstreamError("generate-failed");
+  }
 });
 
 cardsRouter.post("/cards", async (req, res) => {
-  const body = req.body as
-    { title?: unknown; description?: unknown; images?: unknown } | undefined;
-
-  const title = typeof body?.title === "string" ? body.title.trim() : "";
-  if (title === "" || title.length > ITEM_TITLE_MAX) {
-    res.status(400).json({ error: "invalid-title" });
-    return;
-  }
-
-  const description =
-    typeof body?.description === "string" ? body.description.trim() : "";
-  if (description === "" || description.length > ITEM_DESCRIPTION_MAX) {
-    res.status(400).json({ error: "invalid-description" });
-    return;
-  }
-
-  if (hasDispatchMarker(title) || hasDispatchMarker(description)) {
-    res
-      .status(400)
-      .json({ error: "content contains the DISPATCH_STATUS marker" });
-    return;
-  }
-
-  const images = body?.images === undefined ? [] : decodeImages(body.images);
-  if (images === null) {
-    res.status(400).json({ error: "invalid-images" });
-    return;
-  }
-
-  const fullDescription =
-    description + screenshotsSection(images.map((i) => i.name));
-  if (fullDescription.length > ITEM_DESCRIPTION_MAX) {
-    res.status(400).json({ error: "invalid-description" });
-    return;
-  }
+  const { title, fullDescription, images } = parseOrThrow(
+    createCardBodySchema,
+    req.body,
+  );
 
   let staged: string | null;
   try {
     staged = await stageAttachments(images);
   } catch (err) {
     console.warn("[cards] attachment write failed:", (err as Error).message);
-    res.status(500).json({ error: "attachment-write-failed" });
-    return;
+    throw new InternalError("attachment-write-failed");
   }
   const card = await store.createLocalCard(title, fullDescription);
   if (staged !== null) {
@@ -1087,8 +765,7 @@ cardsRouter.post("/cards", async (req, res) => {
         `[cards] attachment commit failed for ${card.id}:`,
         (err as Error).message,
       );
-      res.status(500).json({ error: "attachment-write-failed" });
-      return;
+      throw new InternalError("attachment-write-failed");
     }
   }
   res.status(201).json(redactCard(card));
@@ -1102,17 +779,16 @@ cardsRouter.post("/cards", async (req, res) => {
  * `attachmentsDir(id)`.
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
-function serveAttachment(req: Request, res: Response): void {
-  const { id, name } = req.params as { id: string; name: string };
-  if (!CARD_ID_RE.test(id) || !ATTACHMENT_NAME_RE.test(name)) {
-    res.status(400).json({ error: "invalid-attachment" });
-    return;
-  }
+function serveAttachment(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  const { id, name } = parseOrThrow(attachmentParamsSchema, req.params);
   const dir = attachmentsDir(id);
   const file = path.resolve(dir, name);
   if (!file.startsWith(dir + path.sep)) {
-    res.status(400).json({ error: "invalid-attachment" });
-    return;
+    throw new ValidationError("invalid-attachment");
   }
   res.set({
     "X-Content-Type-Options": "nosniff",
@@ -1120,7 +796,7 @@ function serveAttachment(req: Request, res: Response): void {
     "Cache-Control": "private, max-age=31536000, immutable",
   });
   res.sendFile(path.basename(file), { root: dir, dotfiles: "deny" }, (err) => {
-    if (err && !res.headersSent) res.status(404).json({ error: "not-found" });
+    if (err && !res.headersSent) next(new NotFoundError("not-found"));
   });
 }
 
@@ -1183,51 +859,25 @@ async function syncLinearHandler(
   res: Response,
 ): Promise<void> {
   const { id } = req.params;
+  const target = parseOrThrow(syncBodySchema, req.body);
 
   const card = store.getCard(id);
-  if (!card) {
-    res.status(404).json({ error: `unknown card id: ${id}` });
-    return;
-  }
+  if (!card) throw new NotFoundError(`unknown card id: ${id}`);
   const groupError = groupedMemberError(card);
-  if (groupError != null) {
-    res.status(409).json({ error: groupError });
-    return;
-  }
+  if (groupError != null) throw new ConflictError(groupError);
 
   if ((card.source ?? "linear") !== "local") {
-    res
-      .status(409)
-      .json({ error: "only local tickets can be synced to Linear" });
-    return;
+    throw new ConflictError("only local tickets can be synced to Linear");
   }
 
   if (store.isSyncing(id)) {
-    res
-      .status(409)
-      .json({ error: "a sync is already in flight for this card" });
-    return;
+    throw new ConflictError("a sync is already in flight for this card");
   }
 
-  const { teamId, stateId } = (req.body ?? {}) as {
-    teamId?: unknown;
-    stateId?: unknown;
-  };
-  const target =
-    typeof teamId === "string" && teamId !== ""
-      ? {
-          teamId,
-          ...(typeof stateId === "string" && stateId !== "" ? { stateId } : {}),
-        }
-      : undefined;
   const viaClaude = syncViaClaude();
-  if (!target && !viaClaude) {
-    res.status(400).json({ error: "teamId is required" });
-    return;
-  }
+  if (!target && !viaClaude) throw new ValidationError("teamId is required");
   if (!viaClaude && !enabledSource("linear")?.createIssue) {
-    res.status(409).json({ error: "Linear is not connected" });
-    return;
+    throw new ConflictError("Linear is not connected");
   }
 
   store.beginSync(id);
@@ -1257,10 +907,12 @@ async function syncLinearHandler(
       id,
       "Sync to Linear failed. Retrying is safe, no duplicate will be created.",
     );
-    res.status(502).json({ error: "sync-failed" });
+    throw new UpstreamError("sync-failed");
   } finally {
     store.endSync(id);
   }
 }
 
 cardsRouter.post("/cards/:id/sync-linear", syncLinearHandler);
+
+cardsRouter.use(httpErrorHandler);

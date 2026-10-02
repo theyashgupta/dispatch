@@ -1,105 +1,52 @@
-import { Router, type Request, type Response } from "express";
-import type { ItemState, SettableItemState } from "../../shared/types.js";
-import { ITEM_STATES } from "../../shared/types.js";
-import { redactCard, store } from "../store/board.store.js";
+import { Router } from "express";
+import { ConflictError, NotFoundError } from "../services/domain/errors.js";
+import {
+  redactCard,
+  boardRepository as store,
+} from "../store/board-repository.js";
+import { httpErrorHandler } from "./error-handler.js";
+import {
+  listQuerySchema,
+  promoteBodySchema,
+  setStateBodySchema,
+  snoozeBodySchema,
+} from "./items-schemas.js";
+import { parseOrThrow } from "./parse-input.js";
 
 export const itemsRouter = Router();
 
-const PROMOTE_CONTEXT_MAX = 8000;
-
-const MAX_SNOOZE_MS = Date.UTC(9999, 11, 31, 23, 59, 59);
-
-function isItemState(value: unknown): value is ItemState {
-  return (
-    typeof value === "string" &&
-    (ITEM_STATES as readonly string[]).includes(value)
-  );
-}
-
-function isSettableState(value: unknown): value is SettableItemState {
-  return isItemState(value) && value !== "snoozed";
-}
-
-/** A future ISO time, normalized; undefined when malformed or not in the future. */
-function futureIso(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const ms = Date.parse(value);
-  if (!Number.isFinite(ms) || ms <= Date.now() || ms > MAX_SNOOZE_MS)
-    return undefined;
-  return new Date(ms).toISOString();
-}
-
-function listItemsHandler(req: Request, res: Response): void {
-  const rawState = req.query.state;
-  if (rawState !== undefined && !isItemState(rawState)) {
-    res.status(400).json({ error: "invalid state" });
-    return;
-  }
-  const rawSource = req.query.source;
-  if (rawSource !== undefined && typeof rawSource !== "string") {
-    res.status(400).json({ error: "invalid source" });
-    return;
-  }
+itemsRouter.get("/items", (req, res) => {
+  const { state, source } = parseOrThrow(listQuerySchema, req.query);
   const items = store
     .wireItems()
-    .filter((i) => rawState === undefined || i.state === rawState)
-    .filter((i) => rawSource === undefined || i.source === rawSource);
+    .filter((i) => state === undefined || i.state === state)
+    .filter((i) => source === undefined || i.source === source);
   res.status(200).json({ items });
-}
-
-itemsRouter.get("/items", listItemsHandler);
+});
 
 itemsRouter.post("/items/:id/state", async (req, res) => {
-  const state = (req.body as { state?: unknown } | undefined)?.state;
-  if (!isSettableState(state)) {
-    res.status(400).json({ error: "invalid state" });
-    return;
-  }
+  const { state } = parseOrThrow(setStateBodySchema, req.body);
   const outcome = await store.setItemState(req.params.id, state);
-  if (outcome === "unknown") {
-    res.status(404).json({ error: "unknown item" });
-    return;
-  }
-  if (outcome === "promoted") {
-    res.status(409).json({ error: "item is promoted" });
-    return;
-  }
+  if (outcome === "unknown") throw new NotFoundError("unknown item");
+  if (outcome === "promoted") throw new ConflictError("item is promoted");
   res.status(204).end();
 });
 
 itemsRouter.post("/items/:id/snooze", async (req, res) => {
-  const until = futureIso((req.body as { until?: unknown } | undefined)?.until);
-  if (until === undefined) {
-    res.status(400).json({ error: "until must be a future ISO time" });
-    return;
-  }
+  const { until } = parseOrThrow(snoozeBodySchema, req.body);
   const outcome = await store.snoozeItem(req.params.id, until);
-  if (outcome === "unknown") {
-    res.status(404).json({ error: "unknown item" });
-    return;
-  }
-  if (outcome === "promoted") {
-    res.status(409).json({ error: "item is promoted" });
-    return;
-  }
+  if (outcome === "unknown") throw new NotFoundError("unknown item");
+  if (outcome === "promoted") throw new ConflictError("item is promoted");
   res.status(204).end();
 });
 
 itemsRouter.post("/items/:id/promote", async (req, res) => {
-  const context = (req.body as { context?: unknown } | undefined)?.context;
-  if (
-    context !== undefined &&
-    (typeof context !== "string" || context.length > PROMOTE_CONTEXT_MAX)
-  ) {
-    res.status(400).json({ error: "invalid context" });
-    return;
-  }
+  const { context } = parseOrThrow(promoteBodySchema, req.body);
   const result = await store.promoteItem(req.params.id, context);
-  if (!result) {
-    res.status(404).json({ error: "unknown item" });
-    return;
-  }
+  if (!result) throw new NotFoundError("unknown item");
   res
     .status(result.created ? 201 : 200)
     .json({ card: redactCard(result.card) });
 });
+
+itemsRouter.use(httpErrorHandler);

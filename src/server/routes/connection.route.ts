@@ -1,4 +1,5 @@
-import { Router, type Response } from "express";
+import { Router } from "express";
+import { z } from "zod";
 import {
   clearLinearApiKey,
   getOrchestrationConfig,
@@ -17,7 +18,17 @@ import {
   TOKEN_SOURCES,
   type TokenFailure,
   type TokenSourceDef,
-} from "../services/domain/token-connection.js";
+} from "../services/orchestration/token-connection.js";
+import {
+  HttpError,
+  InternalError,
+  NotFoundError,
+  UpstreamError,
+  ValidationError,
+  ConflictError,
+} from "../services/domain/errors.js";
+import { httpErrorHandler } from "./error-handler.js";
+import { parseOrThrow } from "./parse-input.js";
 
 /**
  * Source connection surface: status with the account behind the stored key, replace key, disable, disconnect.
@@ -34,11 +45,11 @@ const keyGenerations = new Map<string, number>();
 const generationOf = (source: string): number =>
   keyGenerations.get(source) ?? 0;
 
-/** Answers 404 and returns true for any source that stores no credential. */
-function refuseUnknown(source: string, res: Response): boolean {
-  if (source === "linear" || tokenSource(source)) return false;
-  res.status(404).json({ error: "unknown source" });
-  return true;
+/** Throw 404 for any source that stores no credential; answers the token source, or undefined for Linear. */
+function requireSource(source: string): TokenSourceDef | undefined {
+  const def = tokenSource(source);
+  if (!def && source !== "linear") throw new NotFoundError("unknown source");
+  return def;
 }
 
 function tokenSource(source: string): TokenSourceDef | undefined {
@@ -47,22 +58,33 @@ function tokenSource(source: string): TokenSourceDef | undefined {
     : undefined;
 }
 
-/** Answer a token-source failure with its status and error kind, never the token. */
-function sendFailure(res: Response, failure: TokenFailure): void {
-  const status = {
-    rejected: 400,
-    "no-credential": 400,
-    unreachable: 502,
-    "sso-required": 403,
-    superseded: 409,
-    failed: 500,
-  }[failure.error];
-  if (failure.error === "failed") {
-    res.status(status).json({ error: "save-failed" });
-    return;
-  }
-  res.status(status).json(failure);
+const FAILURE_STATUS: Record<TokenFailure["error"], number> = {
+  rejected: 400,
+  "no-credential": 400,
+  unreachable: 502,
+  "sso-required": 403,
+  superseded: 409,
+  failed: 500,
+};
+
+/** Build the typed error for a token-source failure, with its status and error kind, never the token. */
+function failureError(failure: TokenFailure): HttpError {
+  if (failure.error === "failed") return new InternalError("save-failed");
+  const { error, ...details } = failure;
+  return new HttpError(FAILURE_STATUS[error], error, details);
 }
+
+/** The `PUT /sources/:source/key` body; the key comes out trimmed. */
+const keyBodySchema = z.object(
+  {
+    apiKey: z
+      .string("apiKey is required")
+      .transform((raw) => raw.trim())
+      .refine((key) => key !== "", "apiKey is required")
+      .refine((key) => TOKEN_SHAPE.test(key), "rejected"),
+  },
+  "apiKey is required",
+);
 
 function reloadSources(): void {
   const config = getOrchestrationConfig();
@@ -71,9 +93,7 @@ function reloadSources(): void {
 }
 
 connectionRouter.get("/sources/:source/connection", async (req, res) => {
-  const { source } = req.params;
-  if (refuseUnknown(source, res)) return;
-  const def = tokenSource(source);
+  const def = requireSource(req.params.source);
   if (def) {
     res.status(200).json(await tokenConnection(def));
     return;
@@ -82,7 +102,7 @@ connectionRouter.get("/sources/:source/connection", async (req, res) => {
   let body: SourceConnection = { configured: false, connected: false };
   if (key !== "") {
     try {
-      const viewer = await checkSourceKey(source, key);
+      const viewer = await checkSourceKey(req.params.source, key);
       body = viewer
         ? { configured: true, connected: true, ...viewer }
         : { configured: true, connected: false, error: "rejected" };
@@ -95,29 +115,16 @@ connectionRouter.get("/sources/:source/connection", async (req, res) => {
 
 connectionRouter.put("/sources/:source/key", async (req, res) => {
   const { source } = req.params;
-  if (refuseUnknown(source, res)) return;
-  const apiKey = (req.body as { apiKey?: unknown } | undefined)?.apiKey;
-  if (typeof apiKey !== "string" || apiKey.trim() === "") {
-    res.status(400).json({ error: "apiKey is required" });
-    return;
-  }
-  const key = apiKey.trim();
-  if (!TOKEN_SHAPE.test(key)) {
-    res.status(400).json({ error: "rejected" });
-    return;
-  }
+  const def = requireSource(source);
+  const { apiKey: key } = parseOrThrow(keyBodySchema, req.body);
   const generation = generationOf(source);
-  const def = tokenSource(source);
   if (def) {
     const saved = await saveTokenSourceKey(
       def,
       key,
       () => generation === generationOf(source),
     );
-    if (!saved.ok) {
-      sendFailure(res, saved.failure);
-      return;
-    }
+    if (!saved.ok) throw failureError(saved.failure);
     reloadSources();
     res
       .status(200)
@@ -132,22 +139,15 @@ connectionRouter.put("/sources/:source/key", async (req, res) => {
   try {
     viewer = await checkSourceKey(source, key);
   } catch {
-    res.status(502).json({ error: "unreachable" });
-    return;
+    throw new UpstreamError("unreachable");
   }
-  if (!viewer) {
-    res.status(400).json({ error: "rejected" });
-    return;
-  }
-  if (generation !== generationOf(source)) {
-    res.status(409).json({ error: "superseded" });
-    return;
-  }
+  if (!viewer) throw new ValidationError("rejected");
+  if (generation !== generationOf(source))
+    throw new ConflictError("superseded");
   try {
     updateLinearApiKey(key);
   } catch {
-    res.status(500).json({ error: "save-failed" });
-    return;
+    throw new InternalError("save-failed");
   }
   reloadSources();
   res.status(200).json(viewer);
@@ -155,20 +155,17 @@ connectionRouter.put("/sources/:source/key", async (req, res) => {
 
 connectionRouter.delete("/sources/:source/key", async (req, res) => {
   const { source } = req.params;
-  if (refuseUnknown(source, res)) return;
-  const def = tokenSource(source);
+  const def = requireSource(source);
   if (def) {
     keyGenerations.set(source, generationOf(source) + 1);
     if (!(await disconnectTokenSource(def))) {
-      res.status(500).json({ error: "save-failed" });
-      return;
+      throw new InternalError("save-failed");
     }
   } else {
     try {
       clearLinearApiKey();
     } catch {
-      res.status(500).json({ error: "save-failed" });
-      return;
+      throw new InternalError("save-failed");
     }
     keyGenerations.set(source, generationOf(source) + 1);
   }
@@ -178,19 +175,13 @@ connectionRouter.delete("/sources/:source/key", async (req, res) => {
 
 connectionRouter.post("/sources/:source/connect", async (req, res) => {
   const def = tokenSource(req.params.source);
-  if (!def) {
-    res.status(404).json({ error: "unknown source" });
-    return;
-  }
+  if (!def) throw new NotFoundError("unknown source");
   const generation = generationOf(req.params.source);
   const connected = await connectTokenSource(
     def,
     () => generation === generationOf(req.params.source),
   );
-  if (!connected.ok) {
-    sendFailure(res, connected.failure);
-    return;
-  }
+  if (!connected.ok) throw failureError(connected.failure);
   reloadSources();
   res
     .status(200)
@@ -204,15 +195,11 @@ connectionRouter.post("/sources/:source/connect", async (req, res) => {
 connectionRouter.post("/sources/:source/disable", (req, res) => {
   const { source } = req.params;
   const def = tokenSource(source);
-  if (!def) {
-    res.status(404).json({ error: "unknown source" });
-    return;
-  }
-  if (!disableTokenSource(def)) {
-    res.status(500).json({ error: "save-failed" });
-    return;
-  }
+  if (!def) throw new NotFoundError("unknown source");
+  if (!disableTokenSource(def)) throw new InternalError("save-failed");
   keyGenerations.set(source, generationOf(source) + 1);
   reloadSources();
   res.status(204).end();
 });
+
+connectionRouter.use(httpErrorHandler);

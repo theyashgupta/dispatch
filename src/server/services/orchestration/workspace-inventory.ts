@@ -4,10 +4,10 @@ import type {
 } from "../../../shared/types.js";
 import { diskUsageKb } from "../../adapters/disk-usage.js";
 import { lastCommitAt } from "../../adapters/git.js";
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 import { createTtlCache, type TtlCache } from "../infra/ttl-cache.js";
 import { buildWorktreeRows } from "../domain/workspace-inventory.js";
-import { discoverRepos } from "../domain/workspaces.js";
+import { discoverRepos } from "./workspaces.js";
 import { worktreePath } from "../domain/workspace-paths.js";
 
 const SIZE_TTL_MS = 5 * 60_000;

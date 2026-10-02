@@ -228,7 +228,7 @@ const boundaryFiles = [
  * (`webTypes`) so this error-level rule stays green for them (AUDIT-02). The
  * fine-grained frontend import direction is enforced separately by
  * `feWebBoundariesConfig` below. The three service elements share one allow
- * list here; their direction is a warning in `.dependency-cruiser.cjs`.
+ * list here; `.dependency-cruiser.cjs` enforces their direction at error.
  *
  * `adapters/image-proxy.ts` carries the `adapters-config-consumer` file
  * category (see `boundaryFiles`) and gets a trailing allow policy below to
