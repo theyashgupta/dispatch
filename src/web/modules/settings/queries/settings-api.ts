@@ -1,5 +1,4 @@
 import type {
-  LinearStateMap,
   TerminalAppearance,
   UserProfile,
 } from "../../../../shared/types.js";
@@ -124,42 +123,6 @@ export async function saveClaudeArgs(
 }
 
 /**
- * Read the saved column-to-state map: GET /api/config/linear-state-map.
- *
- * @remarks
- * Throws on any non-2xx.
- */
-export async function getLinearStateMap(): Promise<LinearStateMap> {
-  const result = await http<{ stateMap: LinearStateMap }>(
-    "/api/config/linear-state-map",
-  );
-  if (!result.ok) {
-    throw httpError("getLinearStateMap", result);
-  }
-  return result.data.stateMap;
-}
-
-/** Save the whole column-to-state map: PUT /api/config/linear-state-map. */
-export async function saveLinearStateMap(
-  stateMap: LinearStateMap,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    const result = await http("/api/config/linear-state-map", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stateMap }),
-    });
-    if (result.ok) return { ok: true };
-    return {
-      ok: false,
-      error: result.error ?? "Couldn't save the state map. Try again.",
-    };
-  } catch {
-    return { ok: false, error: "Could not reach Dispatch. Try again." };
-  }
-}
-
-/**
  * Read the About you profile: GET /api/config/profile.
  *
  * @remarks
@@ -195,43 +158,6 @@ export async function saveProfile(
     return { ok: false, error: result.error ?? "Invalid profile" };
   }
   throw httpError("saveProfile", result);
-}
-
-/**
- * Read the archive retention window: GET /api/config/archive-retention.
- *
- * @remarks
- * Throws on any non-2xx.
- */
-export async function getArchiveRetention(): Promise<{
-  archiveRetentionDays: number;
-}> {
-  const result = await http<{ archiveRetentionDays: number }>(
-    "/api/config/archive-retention",
-  );
-  if (!result.ok) {
-    throw httpError("getArchiveRetention", result);
-  }
-  return result.data;
-}
-
-/** Persist the archive retention window: PUT /api/config/archive-retention, `saveCleanupDelay`'s shape. */
-export async function saveArchiveRetention(
-  days: number,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const result = await http("/api/config/archive-retention", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ archiveRetentionDays: days }),
-  });
-  if (result.ok) return { ok: true };
-  if (result.status === 400) {
-    return {
-      ok: false,
-      error: result.error ?? "Couldn't save archive retention.",
-    };
-  }
-  throw httpError("saveArchiveRetention", result);
 }
 
 /**

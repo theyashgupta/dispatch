@@ -1,6 +1,6 @@
 import type { Card, Item } from "../../../shared/types.js";
 import { chainPath, type Rect } from "../../lib/flow-geometry.js";
-import { formatAge } from "../../lib/format-age.js";
+import { formatAge } from "../../../shared/format-age.js";
 
 export const FLOW_SOURCES = [
   { id: "github", label: "GitHub" },

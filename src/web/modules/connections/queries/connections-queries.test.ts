@@ -1,26 +1,37 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { QueryClient } from "@tanstack/react-query";
+import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import {
-  connectSource,
   getLinearFilters,
   getLinearOptions,
-  getSourceConnection,
+  getLinearStateMap,
+  listCalendars,
   listSlackChannels,
+  previewLinearFilters,
+  putCalendarSettings,
   resolveSlackChannel,
   saveLinearFilters,
+  saveLinearStateMap,
   saveSlackChannels,
-  saveSourceKey,
 } from "./connections-api.js";
 import {
   connectionsKeys,
   linearFiltersQueryOptions,
   linearOptionsQueryOptions,
+  linearPreviewQueryOptions,
+  listCalendarsMutationOptions,
+  refreshLinearFilters,
+  resolveSlackChannelMutationOptions,
+  saveCalendarSettingsMutationOptions,
+  saveLinearFiltersMutationOptions,
+  saveLinearStateMapMutationOptions,
+  saveSlackChannelsMutationOptions,
+  linearStateMapQueryOptions,
   linearWorkflowQueryOptions,
   savedSlackChannelsQueryOptions,
   slackChannelsQueryOptions,
-  sourceConnectionQueryOptions,
 } from "./connections-queries.js";
+import { calendarStatusKeys } from "@/queries/calendar-status-queries";
 
 const realFetch = globalThis.fetch;
 const calls: { url: string; init?: RequestInit }[] = [];
@@ -63,6 +74,10 @@ test("connectionsKeys has the documented shape", () => {
     "source",
     "linear",
   ]);
+  assert.deepEqual(connectionsKeys.linearStateMap, [
+    "settings",
+    "linear-state-map",
+  ]);
   assert.deepEqual(connectionsKeys.linearFilters, [
     "connections",
     "linear",
@@ -91,17 +106,10 @@ test("connectionsKeys has the documented shape", () => {
   ]);
 });
 
-test("sourceConnectionQueryOptions keys on the source and requests its connection", async () => {
-  const options = sourceConnectionQueryOptions("github");
-  assert.deepEqual(options.queryKey, ["connections", "source", "github"]);
-  reply(200, { connected: true });
-  await newClient().fetchQuery(options);
-  assert.equal(calls[0]?.url, "/api/sources/github/connection");
-});
-
 test("linearFiltersQueryOptions requests the Linear filters", async () => {
   const options = linearFiltersQueryOptions();
   assert.deepEqual(options.queryKey, ["connections", "linear", "filters"]);
+  assert.equal(options.refetchOnReconnect, false);
   reply(200, { filters, capabilities: {} });
   await newClient().fetchQuery(options);
   assert.equal(calls[0]?.url, "/api/sources/linear/filters");
@@ -120,13 +128,38 @@ test("linearOptionsQueryOptions keys on the dimension and requests its options",
   assert.equal(calls[0]?.url, "/api/sources/linear/options?dimension=projects");
 });
 
+test("linearStateMapQueryOptions keeps the settings key and requests the state map", async () => {
+  const options = linearStateMapQueryOptions();
+  assert.deepEqual(options.queryKey, ["settings", "linear-state-map"]);
+  reply(200, { stateMap: { todo: "s1" } });
+  assert.deepEqual(await newClient().fetchQuery(options), { todo: "s1" });
+  assert.equal(calls[0]?.url, "/api/config/linear-state-map");
+});
+
 test("linearWorkflowQueryOptions requests the Linear workflow", async () => {
   const options = linearWorkflowQueryOptions();
   assert.deepEqual(options.queryKey, ["connections", "linear", "workflow"]);
-  assert.equal(options.staleTime, 0);
   reply(200, { viewer: {}, teams: [] });
   await newClient().fetchQuery(options);
   assert.equal(calls[0]?.url, "/api/sources/linear/workflow");
+});
+
+test("a loaded Linear workflow is read once per page load", async () => {
+  const client = newClient();
+  reply(200, { viewer: {}, teams: [] });
+  await client.fetchQuery(linearWorkflowQueryOptions());
+  await client.fetchQuery(linearWorkflowQueryOptions());
+  assert.equal(calls.length, 1);
+});
+
+test("a failed Linear workflow read is retried on the next read", async () => {
+  const client = newClient();
+  reply(502, { error: "Linear is down" });
+  const first = await client.fetchQuery(linearWorkflowQueryOptions());
+  assert.equal(first.ok, false);
+  reply(200, { viewer: {}, teams: [] });
+  await client.fetchQuery(linearWorkflowQueryOptions());
+  assert.equal(calls.length, 2);
 });
 
 test("savedSlackChannelsQueryOptions requests the saved Slack channels", async () => {
@@ -137,6 +170,7 @@ test("savedSlackChannelsQueryOptions requests the saved Slack channels", async (
     "saved-channels",
   ]);
   assert.equal(options.staleTime, 0);
+  assert.equal(options.refetchOnReconnect, false);
   reply(200, { channels: [] });
   assert.deepEqual(await newClient().fetchQuery(options), []);
   assert.equal(calls[0]?.url, "/api/sources/slack/channels");
@@ -195,17 +229,46 @@ test("getLinearOptions throws on a 502", async () => {
   );
 });
 
-test("getSourceConnection resolves the body on a 200", async () => {
-  reply(200, { connected: true }, "OK");
-  assert.deepEqual(await getSourceConnection("linear"), { connected: true });
-});
+const stateMap = { team1: { todo: "s1" } };
 
-test("getSourceConnection throws with the status only on a failure", async () => {
+test("getLinearStateMap throws on a failure status", async () => {
   reply(500, {}, "Internal Server Error");
   await assert.rejects(
-    getSourceConnection("linear"),
-    new Error("getSourceConnection failed: 500"),
+    getLinearStateMap(),
+    new Error("getLinearStateMap failed: 500 Internal Server Error"),
   );
+});
+
+test("saveLinearStateMap resolves ok on a 200", async () => {
+  reply(200, {}, "OK");
+  assert.deepEqual(await saveLinearStateMap(stateMap), { ok: true });
+  assert.equal(calls[0]?.url, "/api/config/linear-state-map");
+  assert.equal(calls[0]?.init?.method, "PUT");
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ stateMap }));
+});
+
+test("saveLinearStateMap carries the server error on a 400", async () => {
+  reply(400, { error: "unknown state" }, "Bad Request");
+  assert.deepEqual(await saveLinearStateMap(stateMap), {
+    ok: false,
+    error: "unknown state",
+  });
+});
+
+test("saveLinearStateMap falls back to its copy on a 400 with no error", async () => {
+  reply(400, {}, "Bad Request");
+  assert.deepEqual(await saveLinearStateMap(stateMap), {
+    ok: false,
+    error: "Couldn't save the state map. Try again.",
+  });
+});
+
+test("saveLinearStateMap resolves unreachable on a network failure", async () => {
+  globalThis.fetch = () => Promise.reject(new TypeError("Failed to fetch"));
+  assert.deepEqual(await saveLinearStateMap(stateMap), {
+    ok: false,
+    error: "Could not reach Dispatch. Try again.",
+  });
 });
 
 test("saveLinearFilters resolves ok on a 200", async () => {
@@ -238,128 +301,6 @@ test("saveLinearFilters throws on any other failure status", async () => {
     saveLinearFilters(filters),
     new Error("saveLinearFilters failed: 500 Internal Server Error"),
   );
-});
-
-const keyCalls = [
-  [
-    "saveSourceKey",
-    () => saveSourceKey("git hub", "tok"),
-    "/api/sources/git%20hub/key",
-    "PUT",
-  ],
-  [
-    "connectSource",
-    () => connectSource("git hub"),
-    "/api/sources/git%20hub/connect",
-    "POST",
-  ],
-] as const;
-
-for (const [name, call, url, method] of keyCalls) {
-  test(`${name} requests ${method} ${url}`, async () => {
-    reply(200, {}, "OK");
-    await call();
-    assert.equal(calls[0]?.url, url);
-    assert.equal(calls[0]?.init?.method, method);
-  });
-
-  test(`${name} resolves ok with the account on a 200`, async () => {
-    reply(200, { account: "octocat" }, "OK");
-    assert.deepEqual(await call(), { ok: true, account: "octocat" });
-  });
-
-  test(`${name} resolves a bare ok on a 200 with no account`, async () => {
-    reply(200, {}, "OK");
-    assert.deepEqual(await call(), { ok: true });
-  });
-
-  test(`${name} resolves a bare ok on a 200 with an empty body`, async () => {
-    reply(200, "", "OK");
-    assert.deepEqual(await call(), { ok: true });
-  });
-
-  for (const kind of [
-    "rejected",
-    "unreachable",
-    "sso-required",
-    "superseded",
-    "no-credential",
-  ]) {
-    test(`${name} maps the ${kind} error kind from the body`, async () => {
-      reply(500, { error: kind }, "Internal Server Error");
-      assert.deepEqual(await call(), { ok: false, reason: kind });
-    });
-  }
-
-  for (const [status, statusText, reason] of [
-    [400, "Bad Request", "rejected"],
-    [502, "Bad Gateway", "unreachable"],
-    [409, "Conflict", "superseded"],
-    [500, "Internal Server Error", "failed"],
-    [401, "Unauthorized", "failed"],
-  ] as const) {
-    test(`${name} falls back to ${reason} on a ${status} with no error kind`, async () => {
-      reply(status, {}, statusText);
-      assert.deepEqual(await call(), { ok: false, reason });
-    });
-  }
-
-  test(`${name} falls back on the status when the error kind is unknown`, async () => {
-    reply(502, { error: "weird" }, "Bad Gateway");
-    assert.deepEqual(await call(), { ok: false, reason: "unreachable" });
-  });
-
-  test(`${name} falls back on the status when the error is not a string`, async () => {
-    reply(409, { error: 7 }, "Conflict");
-    assert.deepEqual(await call(), { ok: false, reason: "superseded" });
-  });
-
-  test(`${name} falls back on the status for a non-JSON failure body`, async () => {
-    reply(502, "<html>bad gateway</html>", "Bad Gateway");
-    assert.deepEqual(await call(), { ok: false, reason: "unreachable" });
-  });
-
-  test(`${name} reads a 200 with a non-JSON body as failed`, async () => {
-    reply(200, "<html>", "OK");
-    assert.deepEqual(await call(), { ok: false, reason: "failed" });
-  });
-
-  test(`${name} keeps a plain lowercase provider error`, async () => {
-    reply(400, { error: "rejected", providerError: "invalid_auth" }, "x");
-    assert.deepEqual(await call(), {
-      ok: false,
-      reason: "rejected",
-      providerError: "invalid_auth",
-    });
-  });
-
-  for (const providerError of ["Invalid Auth!", "INVALID", "", 7, null]) {
-    test(`${name} drops the provider error ${JSON.stringify(providerError)}`, async () => {
-      reply(400, { error: "rejected", providerError }, "Bad Request");
-      assert.deepEqual(await call(), { ok: false, reason: "rejected" });
-    });
-  }
-
-  test(`${name} rejects on a network failure`, async () => {
-    const failure = new TypeError("Failed to fetch");
-    globalThis.fetch = () => Promise.reject(failure);
-    await assert.rejects(call(), (err) => err === failure);
-  });
-}
-
-test("saveSourceKey sends the key once in a JSON body", async () => {
-  reply(200, {}, "OK");
-  await saveSourceKey("linear", "lin_key");
-  assert.equal(calls[0]?.init?.body, JSON.stringify({ apiKey: "lin_key" }));
-  assert.deepEqual(calls[0]?.init?.headers, {
-    "Content-Type": "application/json",
-  });
-});
-
-test("connectSource sends no body", async () => {
-  reply(200, {}, "OK");
-  await connectSource("github");
-  assert.equal(calls[0]?.init?.body, undefined);
 });
 
 const channels = [
@@ -553,4 +494,257 @@ test("saveSlackChannels resolves null on a 200 with an empty body", async () => 
 test("saveSlackChannels resolves null on a network failure", async () => {
   globalThis.fetch = () => Promise.reject(new TypeError("Failed to fetch"));
   assert.equal(await saveSlackChannels(channels), null);
+});
+
+test("connectionsKeys.linearPreview keys on the draft filters", () => {
+  assert.deepEqual(connectionsKeys.linearPreview(filters), [
+    "connections",
+    "linear",
+    "preview",
+    filters,
+  ]);
+});
+
+test("linearPreviewQueryOptions posts the draft and always re-reads", async () => {
+  const options = linearPreviewQueryOptions(filters);
+  assert.equal(options.staleTime, 0);
+  reply(200, { count: 4, more: false });
+  assert.deepEqual(await newClient().fetchQuery(options), {
+    count: 4,
+    more: false,
+  });
+  assert.equal(calls[0]?.url, "/api/sources/linear/preview");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ filters }));
+});
+
+test("previewLinearFilters resolves null on a failure status", async () => {
+  reply(502, {});
+  assert.equal(await previewLinearFilters(filters), null);
+});
+
+test("previewLinearFilters resolves null on a network failure", async () => {
+  globalThis.fetch = () => Promise.reject(new TypeError("network down"));
+  assert.equal(await previewLinearFilters(filters), null);
+});
+
+test("refreshLinearFilters marks the filters, every option list and the preview stale", async () => {
+  const client = newClient();
+  const keys = [
+    connectionsKeys.linearFilters,
+    connectionsKeys.linearOptions("assignees"),
+    connectionsKeys.linearOptions("teams"),
+    connectionsKeys.linearWorkflow,
+    connectionsKeys.linearPreview(filters),
+  ];
+  for (const key of keys) client.setQueryData(key, {});
+  await refreshLinearFilters(client);
+  assert.deepEqual(
+    keys.map((key) => client.getQueryState(key)?.isInvalidated),
+    [true, true, true, false, true],
+  );
+});
+
+test("an accepted filters save writes the draft into the cached filters", async () => {
+  const client = newClient();
+  client.setQueryData(connectionsKeys.linearFilters, {
+    filters,
+    capabilities: { dimensions: [] },
+  });
+  const draft = { ...filters, currentCycle: true };
+  reply(200, {});
+  await new MutationObserver(
+    client,
+    saveLinearFiltersMutationOptions(client),
+  ).mutate(draft);
+  assert.deepEqual(client.getQueryData(connectionsKeys.linearFilters), {
+    filters: draft,
+    capabilities: { dimensions: [] },
+  });
+});
+
+test("a refused filters save leaves the cached filters alone", async () => {
+  const client = newClient();
+  const cached = { filters, capabilities: { dimensions: [] } };
+  client.setQueryData(connectionsKeys.linearFilters, cached);
+  reply(400, { error: "Bad filters" });
+  const result = await new MutationObserver(
+    client,
+    saveLinearFiltersMutationOptions(client),
+  ).mutate({ ...filters, currentCycle: true });
+  assert.deepEqual(result, { ok: false, error: "Bad filters" });
+  assert.deepEqual(client.getQueryData(connectionsKeys.linearFilters), cached);
+});
+
+test("a failed filters save rejects and leaves the cache alone", async () => {
+  const client = newClient();
+  const cached = { filters, capabilities: { dimensions: [] } };
+  client.setQueryData(connectionsKeys.linearFilters, cached);
+  reply(500, {}, "Internal Server Error");
+  await assert.rejects(
+    new MutationObserver(
+      client,
+      saveLinearFiltersMutationOptions(client),
+    ).mutate(filters),
+  );
+  assert.deepEqual(client.getQueryData(connectionsKeys.linearFilters), cached);
+});
+
+test("an accepted state map save writes the map into the cache", async () => {
+  const client = newClient();
+  client.setQueryData(connectionsKeys.linearStateMap, {});
+  reply(200, {});
+  await new MutationObserver(
+    client,
+    saveLinearStateMapMutationOptions(client),
+  ).mutate({ t1: { todo: "s1" } });
+  assert.deepEqual(client.getQueryData(connectionsKeys.linearStateMap), {
+    t1: { todo: "s1" },
+  });
+});
+
+test("a refused state map save leaves the cached map alone", async () => {
+  const client = newClient();
+  client.setQueryData(connectionsKeys.linearStateMap, {});
+  reply(400, { error: "Bad map" });
+  const result = await new MutationObserver(
+    client,
+    saveLinearStateMapMutationOptions(client),
+  ).mutate({ t1: { todo: "s1" } });
+  assert.deepEqual(result, { ok: false, error: "Bad map" });
+  assert.deepEqual(client.getQueryData(connectionsKeys.linearStateMap), {});
+});
+
+test("a saved channel list is written into the cached saved channels", async () => {
+  const client = newClient();
+  client.setQueryData(connectionsKeys.savedSlackChannels, []);
+  reply(200, { channels: [{ id: "C1", name: "general" }] });
+  await new MutationObserver(
+    client,
+    saveSlackChannelsMutationOptions(client),
+  ).mutate([{ id: "C1", name: "general" }]);
+  assert.deepEqual(client.getQueryData(connectionsKeys.savedSlackChannels), [
+    { id: "C1", name: "general" },
+  ]);
+  assert.equal(
+    calls[0]?.init?.body,
+    JSON.stringify({ channels: [{ id: "C1", name: "general" }] }),
+  );
+});
+
+test("a failed channel save leaves the cached saved channels alone", async () => {
+  const client = newClient();
+  client.setQueryData(connectionsKeys.savedSlackChannels, []);
+  reply(500, {});
+  const result = await new MutationObserver(
+    client,
+    saveSlackChannelsMutationOptions(client),
+  ).mutate([{ id: "C1", name: "general" }]);
+  assert.equal(result, null);
+  assert.deepEqual(client.getQueryData(connectionsKeys.savedSlackChannels), []);
+});
+
+test("the resolve mutation resolves a pasted channel and a typed refusal", async () => {
+  reply(200, { id: "C1", name: "general" });
+  assert.deepEqual(await resolveSlackChannelMutationOptions.mutationFn("C1"), {
+    ok: true,
+    id: "C1",
+    name: "general",
+  });
+  reply(404, { error: "not-a-channel" });
+  assert.deepEqual(await resolveSlackChannelMutationOptions.mutationFn("x"), {
+    ok: false,
+    reason: "not-a-channel",
+  });
+});
+
+test("the list calendars mutation lists this Mac's calendars", async () => {
+  reply(200, { calendars: [{ title: "Work" }] });
+  assert.deepEqual(await listCalendarsMutationOptions.mutationFn(), {
+    ok: true,
+    value: [{ title: "Work" }],
+  });
+});
+
+test("an accepted calendar save writes the status into the shared calendar status", async () => {
+  const client = newClient();
+  client.setQueryData(calendarStatusKeys.status, { enabled: false });
+  reply(200, { enabled: true });
+  await new MutationObserver(
+    client,
+    saveCalendarSettingsMutationOptions(client),
+  ).mutate({ enabled: true });
+  assert.deepEqual(client.getQueryData(calendarStatusKeys.status), {
+    enabled: true,
+  });
+});
+
+test("a refused calendar save leaves the shared calendar status alone", async () => {
+  const client = newClient();
+  client.setQueryData(calendarStatusKeys.status, { enabled: false });
+  reply(409, { error: "denied" });
+  const result = await new MutationObserver(
+    client,
+    saveCalendarSettingsMutationOptions(client),
+  ).mutate({ enabled: true });
+  assert.deepEqual(result, { ok: false, error: "denied" });
+  assert.deepEqual(client.getQueryData(calendarStatusKeys.status), {
+    enabled: false,
+  });
+});
+
+test("listCalendars resolves the calendars on a 200", async () => {
+  reply(200, { calendars: [{ id: "c1" }] });
+  assert.deepEqual(await listCalendars(), {
+    ok: true,
+    value: [{ id: "c1" }],
+  });
+  assert.equal(calls[0]?.url, "/api/calendar/calendars");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.equal(calls[0]?.init?.body, undefined);
+});
+
+test("listCalendars carries the error code on a 409", async () => {
+  reply(409, { error: "denied" });
+  assert.deepEqual(await listCalendars(), { ok: false, error: "denied" });
+});
+
+test("listCalendars falls back to failed on a 409 with no code", async () => {
+  reply(409, "");
+  assert.deepEqual(await listCalendars(), { ok: false, error: "failed" });
+});
+
+test("listCalendars throws on any other failure status", async () => {
+  reply(500, {});
+  await assert.rejects(
+    listCalendars(),
+    new Error("calendar request failed: 500"),
+  );
+});
+
+test("putCalendarSettings resolves the saved status on a 200", async () => {
+  reply(200, { enabled: true });
+  assert.deepEqual(await putCalendarSettings({ enabled: true }), {
+    ok: true,
+    value: { enabled: true },
+  });
+  assert.equal(calls[0]?.url, "/api/calendar/settings");
+  assert.equal(calls[0]?.init?.method, "PUT");
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ enabled: true }));
+});
+
+test("putCalendarSettings carries the error code on a 409", async () => {
+  reply(409, { error: "denied" });
+  assert.deepEqual(await putCalendarSettings({ enabled: true }), {
+    ok: false,
+    error: "denied",
+  });
+});
+
+test("putCalendarSettings throws on any other failure status", async () => {
+  reply(400, {});
+  await assert.rejects(
+    putCalendarSettings({ enabled: true }),
+    new Error("calendar request failed: 400"),
+  );
 });

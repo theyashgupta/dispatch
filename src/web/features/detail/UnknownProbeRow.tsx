@@ -1,7 +1,7 @@
 import { HelpCircle } from "lucide-react";
 import type { ProbeFailureCategory } from "../../../shared/types.js";
 import { unknownProbeCopy } from "../../components/badges/index.js";
-import { formatAge, nowMs } from "../../lib/format-age.js";
+import { formatAge, nowMs } from "../../../shared/format-age.js";
 
 export function UnknownProbeRow({
   signal,

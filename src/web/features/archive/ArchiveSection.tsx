@@ -7,13 +7,13 @@ import {
   restoreArchived,
   saveArchiveRetention,
 } from "../../lib/api.js";
-import { formatAge, nowMs } from "../../lib/format-age.js";
+import { formatAge, nowMs } from "../../../shared/format-age.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { Notice } from "../../primitives/Notice.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { ARCHIVE_RETENTION_MAX_DAYS } from "../../../shared/types.js";
-import { parseArchiveRetention } from "./archive-retention.js";
+import { parseArchiveRetention } from "../../../shared/archive-retention.js";
 
 interface ArchiveSectionProps {
   onCountChange: (count: number | undefined) => void;

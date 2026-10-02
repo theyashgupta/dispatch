@@ -21,7 +21,7 @@ import {
   type InboxActionId,
   type InboxRowModel,
 } from "../../lib/actions.js";
-import { nowMs } from "../../lib/format-age.js";
+import { nowMs } from "../../../shared/format-age.js";
 import { INBOX_SHORTCUTS } from "../../lib/shortcuts.js";
 import { SNOOZE_LABELS, SNOOZE_PRESETS } from "../../lib/snooze.js";
 import { Button } from "../../primitives/Button.js";

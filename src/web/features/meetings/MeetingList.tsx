@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { formatAge, nowMs } from "../../lib/format-age.js";
+import { formatAge, nowMs } from "../../../shared/format-age.js";
 import { snippetBodyLine, type MeetingGroup } from "../../lib/meetings.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Collapsible } from "../../primitives/Collapsible.js";

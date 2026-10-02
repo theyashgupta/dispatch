@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { CAROUSEL_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
-import { formatAge, nowMs } from "../../lib/format-age.js";
+import { formatAge, nowMs } from "../../../shared/format-age.js";
 import {
   slackAuthor,
   slackPills,

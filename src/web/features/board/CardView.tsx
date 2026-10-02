@@ -16,7 +16,7 @@ import type {
 } from "../../../shared/types.js";
 import { startCard } from "../../lib/api.js";
 import { MoveToPicker } from "./MoveToPicker.js";
-import { formatAge, nowMs } from "../../lib/format-age.js";
+import { formatAge, nowMs } from "../../../shared/format-age.js";
 import { formatCleanupCountdown } from "../../lib/format-cleanup-countdown.js";
 import { useResumeFeedback } from "../../hooks/useResumeFeedback.js";
 import {
