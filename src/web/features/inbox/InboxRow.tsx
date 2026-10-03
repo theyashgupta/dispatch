@@ -13,7 +13,7 @@ import { Field } from "../../primitives/Field.js";
 import { ListRow } from "../../primitives/ListRow.js";
 import { SourceBadge } from "../../components/badges/index.js";
 import { PRIORITY_DOT } from "../board/index.js";
-import { SlackThread } from "../slack/index.js";
+import { SlackThreadView } from "@/modules/slack";
 import { priorityDotKey } from "./inbox-rows.js";
 
 interface InboxRowProps {
@@ -170,7 +170,7 @@ export function InboxRow({
             </div>
           ) : null}
           {row.item?.source === "slack" && meta.threadTs ? (
-            <SlackThread itemId={row.id} replyCount={meta.replyCount} />
+            <SlackThreadView itemId={row.id} replyCount={meta.replyCount} />
           ) : null}
           <div style={actionsStyle}>
             {actionsFor(row).map((action) => (

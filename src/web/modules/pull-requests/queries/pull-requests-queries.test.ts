@@ -7,8 +7,11 @@ import {
   reviewPullRequest,
 } from "./pull-requests-api.js";
 import {
+  mergeMutationOptions,
   pullRequestQueryOptions,
   pullRequestsKeys,
+  refreshPullRequestAfterMerge,
+  reviewMutationOptions,
 } from "./pull-requests-queries.js";
 
 const realFetch = globalThis.fetch;
@@ -41,8 +44,8 @@ function reject(): void {
   globalThis.fetch = () => Promise.reject(new TypeError("network down"));
 }
 
-test("pullRequestQueryOptions always refetches and never serves a stale success", () => {
-  assert.equal(pullRequestQueryOptions("o", "r", 7).staleTime, 0);
+test("pullRequestQueryOptions rereads on mount once the data is 2 s old", () => {
+  assert.equal(pullRequestQueryOptions("o", "r", 7).staleTime, 2_000);
 });
 
 test("pullRequestsKeys has the documented shape", () => {
@@ -165,4 +168,100 @@ test("mergePullRequest returns the unreachable failure shape when the network fa
     ok: false,
     error: "unreachable",
   });
+});
+
+test("reviewMutationOptions posts the review and resolves ok", async () => {
+  reply(200, {});
+  assert.deepEqual(
+    await reviewMutationOptions.mutationFn({
+      owner: "o",
+      repo: "r",
+      number: 7,
+      event: "COMMENT",
+      body: "note",
+    }),
+    { ok: true },
+  );
+  assert.equal(calls[0]?.url, "/api/github/pr/o/r/7/review");
+  assert.equal(
+    calls[0]?.init?.body,
+    JSON.stringify({ event: "COMMENT", body: "note" }),
+  );
+});
+
+test("reviewMutationOptions resolves a typed failure for a refused review", async () => {
+  reply(422, { error: "refused", message: "stale" });
+  assert.deepEqual(
+    await reviewMutationOptions.mutationFn({
+      owner: "o",
+      repo: "r",
+      number: 7,
+      event: "APPROVE",
+    }),
+    { ok: false, error: "refused", message: "stale" },
+  );
+});
+
+test("mergeMutationOptions posts the head sha and resolves ok", async () => {
+  reply(200, {});
+  assert.deepEqual(
+    await mergeMutationOptions.mutationFn({
+      owner: "o",
+      repo: "r",
+      number: 7,
+      sha: "abc",
+    }),
+    { ok: true },
+  );
+  assert.equal(calls[0]?.url, "/api/github/pr/o/r/7/merge");
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ sha: "abc" }));
+});
+
+test("mergeMutationOptions resolves a typed failure for an unmergeable pull request", async () => {
+  reply(405, { error: "not-mergeable", message: "conflicts" });
+  assert.deepEqual(
+    await mergeMutationOptions.mutationFn({
+      owner: "o",
+      repo: "r",
+      number: 7,
+      sha: "abc",
+    }),
+    { ok: false, error: "not-mergeable", message: "conflicts" },
+  );
+});
+
+test("refreshPullRequestAfterMerge refetches the detail with no observer mounted", async () => {
+  const client = newClient();
+  let runs = 0;
+  const queryKey = pullRequestsKeys.detail("o", "r", 7);
+  await client.fetchQuery({ queryKey, queryFn: () => ++runs });
+  assert.equal(runs, 1);
+  await refreshPullRequestAfterMerge(client, {
+    owner: "o",
+    repo: "r",
+    number: 7,
+  });
+  assert.equal(runs, 2);
+  assert.equal(client.getQueryData(queryKey), 2);
+});
+
+test("refreshPullRequestAfterMerge leaves another pull request detail alone", async () => {
+  const client = newClient();
+  let mergedRuns = 0;
+  let otherRuns = 0;
+  await client.fetchQuery({
+    queryKey: pullRequestsKeys.detail("o", "r", 7),
+    queryFn: () => ++mergedRuns,
+  });
+  await client.fetchQuery({
+    queryKey: pullRequestsKeys.detail("o", "r", 8),
+    queryFn: () => ++otherRuns,
+  });
+  await refreshPullRequestAfterMerge(client, {
+    owner: "o",
+    repo: "r",
+    number: 7,
+  });
+  assert.equal(mergedRuns, 2);
+  assert.equal(otherRuns, 1);
 });

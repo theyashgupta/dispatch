@@ -1,29 +1,10 @@
 import type {
   ArchivedGroupSummary,
   Card,
-  Column,
   LinearComment,
   UnwindDestination,
 } from "../../../../shared/types.js";
 import { http, httpError } from "@/lib/http";
-
-/**
- * Move a card to a column: POST /api/cards/:id/move.
- *
- * @remarks
- * The SSE snapshot reconciles the authoritative state, so callers treat it as fire-and-forget.
- * Rejects on non-2xx so callers can log or roll back.
- */
-export async function moveCard(id: string, column: Column): Promise<void> {
-  const result = await http(`/api/cards/${encodeURIComponent(id)}/move`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ column }),
-  });
-  if (!result.ok) {
-    throw httpError("moveCard", result);
-  }
-}
 
 export type StartResult =
   { ok: true } | { ok: false; error: string; variant?: string };
@@ -231,38 +212,6 @@ export async function generateGroupTitle(
     return { ok: false };
   }
   return { ok: true, phrase: result.data.phrase };
-}
-
-/**
- * Persist a reviewed ticket draft: POST /api/cards.
- *
- * @remarks
- * The server mints the `LOCAL-<n>` identifier and re-validates title and description including the
- * DISPATCH_STATUS footgun guard, so the client's draft is never trusted. A 201 resolves the
- * created `Card`, a validation 400 resolves the parsed `{ error }` code, and network failures and
- * every other status resolve `{ ok: false, error: null }`.
- */
-export async function createLocalTicket(
-  title: string,
-  description: string,
-  images: readonly string[] = [],
-): Promise<{ ok: true; card: Card } | { ok: false; error: string | null }> {
-  try {
-    const result = await http<Card>("/api/cards", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, description, images }),
-    });
-    if (!result.ok) {
-      if (result.status === 400) {
-        return { ok: false, error: result.error };
-      }
-      return { ok: false, error: null };
-    }
-    return { ok: true, card: result.data };
-  } catch {
-    return { ok: false, error: null };
-  }
 }
 
 /**
@@ -548,37 +497,4 @@ export async function resetCard(
   if (body?.error)
     return { ok: false, status: result.status, error: body.error };
   throw httpError("resetCard", result);
-}
-
-/**
- * Draft the user's action items from meeting notes: POST /api/cards/draft-many.
- *
- * @remarks
- * Non-OK statuses resolve `{ ok: false, error }` with the server's error code; an abort
- * or a network failure rejects, left for the caller's catch, like `generateTicketDraft`.
- */
-export async function draftMeetingItems(
-  meeting: string,
-  notes: string,
-  me: string,
-  signal: AbortSignal,
-): Promise<
-  | {
-      ok: true;
-      drafts: { key: string; title: string; description: string }[];
-    }
-  | { ok: false; error: string | null }
-> {
-  const result = await http<{
-    drafts: { key: string; title: string; description: string }[];
-  }>("/api/cards/draft-many", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ meeting, notes, me }),
-    signal,
-  });
-  if (!result.ok) {
-    return { ok: false, error: result.error };
-  }
-  return { ok: true, drafts: result.data.drafts };
 }

@@ -1,0 +1,125 @@
+import { useMemo, useState } from "react";
+import type { BoardSnapshot, Card, Column } from "../../../../shared/types.js";
+import { routeHash } from "../../../../shared/route.js";
+import {
+  CAROUSEL_QUERY,
+  NARROW_QUERY,
+  useMediaQuery,
+} from "@/components/ui/hooks/use-media-query";
+import { TicketRow } from "@/modules/tickets/components/TicketRow";
+import { TicketsList } from "@/modules/tickets/components/TicketsList";
+import { TicketsPane } from "@/modules/tickets/components/TicketsPane";
+import { TicketsToolbar } from "@/modules/tickets/components/TicketsToolbar";
+import {
+  filterTicketRows,
+  groupTicketRows,
+  ticketRows,
+} from "@/modules/tickets/domain/ticket-rows";
+import { useTicketShortcuts } from "@/modules/tickets/hooks/use-ticket-shortcuts";
+import { useTicketsGroupBy } from "@/modules/tickets/hooks/use-tickets-group-by";
+
+interface TicketsContainerProps {
+  board: BoardSnapshot;
+  selectedCardId: string | null;
+  onSelectCard: (id: string) => void;
+  onStartRequest: (cardId: string) => void;
+  onMoveCard: (id: string, column: Column) => Promise<void>;
+  onNotice: (message: string) => void;
+}
+
+const SCOPE_ID = "tickets-view";
+
+export function TicketsContainer({
+  board,
+  selectedCardId,
+  onSelectCard,
+  onStartRequest,
+  onMoveCard,
+  onNotice,
+}: TicketsContainerProps) {
+  const [search, setSearch] = useState("");
+  const [groupBy, setGroupBy] = useTicketsGroupBy();
+  const [cursorId, setCursorId] = useState<string | null>(null);
+  const iconOnly = useMediaQuery(CAROUSEL_QUERY);
+  const narrow = useMediaQuery(NARROW_QUERY);
+  const [lastCursorIndex, setLastCursorIndex] = useState(0);
+
+  const rows = useMemo(() => ticketRows(board.cards), [board.cards]);
+  const visibleRows = filterTicketRows(rows, search);
+  const groups = groupTicketRows(visibleRows, groupBy);
+  const orderedRows = groups.flatMap((g) => g.rows);
+  const foundIndex = orderedRows.findIndex((r) => r.id === cursorId);
+  const cursorIndex =
+    foundIndex >= 0
+      ? foundIndex
+      : Math.min(lastCursorIndex, orderedRows.length - 1);
+  const cursorRow = cursorIndex >= 0 ? orderedRows[cursorIndex] : undefined;
+  if (cursorIndex >= 0 && cursorIndex !== lastCursorIndex) {
+    setLastCursorIndex(cursorIndex);
+  }
+  const linearEnabled = (board.enabledSources ?? []).includes("linear");
+
+  function handleSelect(card: Card) {
+    setCursorId(card.id);
+    onSelectCard(card.id);
+  }
+
+  function handleDone(card: Card) {
+    onMoveCard(card.id, "done").catch((err: unknown) => {
+      console.warn("[tickets] done failed:", err);
+      onNotice("Could not mark the ticket done. Try again.");
+    });
+  }
+
+  useTicketShortcuts({
+    scopeId: SCOPE_ID,
+    rows: orderedRows,
+    cursor: cursorRow,
+    onCursorChange: setCursorId,
+    onSelect: handleSelect,
+    onDone: handleDone,
+  });
+
+  const renderRow = (card: Card) => (
+    <TicketRow
+      key={card.id}
+      card={card}
+      selected={card.id === cursorRow?.id || card.id === selectedCardId}
+      onSelect={() => handleSelect(card)}
+      onStart={() => onStartRequest(card.id)}
+      onDone={() => handleDone(card)}
+      iconOnly={iconOnly}
+      narrow={narrow}
+    />
+  );
+
+  return (
+    <TicketsPane
+      id={SCOPE_ID}
+      toolbar={
+        <TicketsToolbar
+          search={search}
+          onSearchChange={setSearch}
+          groupBy={groupBy}
+          onGroupByChange={setGroupBy}
+          visibleCount={visibleRows.length}
+          totalCount={rows.length}
+        />
+      }
+      listed={visibleRows.length > 0 && groupBy === "none"}
+    >
+      <TicketsList
+        totalCount={rows.length}
+        linearEnabled={linearEnabled}
+        groupBy={groupBy}
+        visibleRows={visibleRows}
+        groups={groups}
+        renderRow={renderRow}
+        onClearSearch={() => setSearch("")}
+        onOpenSettings={() => {
+          window.location.hash = routeHash({ page: "settings" });
+        }}
+      />
+    </TicketsPane>
+  );
+}

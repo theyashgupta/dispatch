@@ -1,17 +1,17 @@
 import { createContext, useContext, type ComponentProps } from "react";
 import type { Board } from "@/features/board";
 import type { OrcaView } from "@/features/orca";
-import type { PullRequestsPage } from "@/features/pull-requests";
-import type { ErrorsPage } from "@/features/errors";
 import type { TodayPage } from "@/features/today";
-import type { SlackPage } from "@/features/slack/SlackPage";
 import type { InboxView } from "@/features/inbox";
-import type { TicketsPage } from "@/features/tickets";
+import type { TicketsView } from "@/modules/tickets";
 import type { ActivityPage } from "@/features/activity";
 import type { SessionsPage } from "@/features/sessions";
 import type { VaultView } from "@/modules/vault";
-import type { CalendarPage } from "@/features/calendar";
-import type { MeetingsPage } from "@/features/meetings";
+import type { CalendarView } from "@/modules/calendar";
+import type { PullRequestsView } from "@/modules/pull-requests";
+import type { ErrorsView } from "@/modules/errors";
+import type { SlackView } from "@/modules/slack";
+import type { MeetingsView } from "@/modules/meetings";
 import type { AskPage } from "@/features/ask";
 import type { FlowPage } from "@/features/flow";
 import type { SettingsView } from "@/modules/settings";
@@ -23,12 +23,12 @@ import type { Page } from "../../shared/route.js";
 
 export interface AppPages extends Record<Page, object> {
   workspace: ComponentProps<typeof OrcaView>;
-  "pull-requests": Omit<ComponentProps<typeof PullRequestsPage>, "selectedKey">;
-  errors: Omit<ComponentProps<typeof ErrorsPage>, "selectedKey">;
+  "pull-requests": Omit<ComponentProps<typeof PullRequestsView>, "selectedKey">;
+  errors: Omit<ComponentProps<typeof ErrorsView>, "selectedKey">;
   today: ComponentProps<typeof TodayPage>;
-  slack: Omit<ComponentProps<typeof SlackPage>, "selectedId">;
+  slack: Omit<ComponentProps<typeof SlackView>, "selectedId">;
   inbox: ComponentProps<typeof InboxView>;
-  tickets: ComponentProps<typeof TicketsPage>;
+  tickets: ComponentProps<typeof TicketsView>;
   settings: Omit<ComponentProps<typeof SettingsView>, "tabId" | "connections"> &
     ComponentProps<typeof ConnectionsView>;
   activity: ComponentProps<typeof ActivityPage>;
@@ -36,8 +36,8 @@ export interface AppPages extends Record<Page, object> {
   archive: ComponentProps<typeof ArchiveView>;
   playbooks: ComponentProps<typeof PlaybooksView>;
   vault: ComponentProps<typeof VaultView>;
-  calendar: ComponentProps<typeof CalendarPage>;
-  meetings: Omit<ComponentProps<typeof MeetingsPage>, "selectedId">;
+  calendar: ComponentProps<typeof CalendarView>;
+  meetings: Omit<ComponentProps<typeof MeetingsView>, "selectedId">;
   workspaces: ComponentProps<typeof WorkspacesView>;
   ask: Omit<ComponentProps<typeof AskPage>, "prefill">;
   flow: ComponentProps<typeof FlowPage>;

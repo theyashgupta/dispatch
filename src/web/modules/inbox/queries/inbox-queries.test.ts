@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import type { Card } from "../../../../shared/types.js";
-import { promoteItem, setItemState, snoozeItem } from "./inbox-api.js";
+import {
+  promoteItem,
+  setItemState,
+  snoozeItem,
+} from "@/queries/item-actions-api";
 import { inboxKeys } from "./inbox-queries.js";
 
 const realFetch = globalThis.fetch;

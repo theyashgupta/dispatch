@@ -96,12 +96,12 @@ import {
   INBOX_SHORTCUTS,
   SESSIONS_SHORTCUTS,
   bindShortcuts,
-} from "./lib/shortcuts.js";
+} from "../shared/shortcuts.js";
 import { useShortcuts } from "./hooks/useShortcuts.js";
 import { useItems } from "./hooks/useItems.js";
-import { buildPrRows } from "./lib/pr-rows.js";
-import { feedItems, isListedError } from "./lib/feed-items.js";
-import { slackRows } from "./lib/slack-rows.js";
+import { buildPrRows } from "../shared/pr-rows.js";
+import { feedItems, isListedError } from "../shared/feed-items.js";
+import { slackRows } from "./modules/slack/domain/slack-rows.js";
 import { nowMs } from "../shared/format-age.js";
 import { flattenSessions } from "./lib/sessions.js";
 import { useAsk } from "./hooks/useAsk.js";
@@ -125,7 +125,7 @@ import {
 import { playChime } from "./lib/chime.js";
 import { refreshPushSubscription } from "./lib/push.js";
 import type { StartRequest } from "./lib/start-request.js";
-import { meetingNotice } from "./lib/meetings.js";
+import { meetingNotice } from "./modules/meetings/domain/meetings.js";
 import { formatSize } from "../shared/format-size.js";
 import type {
   BoardSnapshot,
@@ -139,9 +139,9 @@ import { DONE_PAGE_SIZE } from "../shared/done-limit.js";
 
 import { isTicketCard } from "../shared/linear-state.js";
 
-const MeetingNotesModal = lazy(() =>
-  import("./features/meetings/index.js").then((m) => ({
-    default: m.MeetingNotesModal,
+const MeetingNotesView = lazy(() =>
+  import("./modules/meetings/index.js").then((m) => ({
+    default: m.MeetingNotesView,
   })),
 );
 
@@ -890,7 +890,10 @@ export function App() {
         void setItemState(id, "read").catch(() =>
           showNotice("Couldn't mark it read."),
         ),
-      services: actionServices,
+      onNotice: showNotice,
+      onShowUndo: showUndo,
+      onCopyText: actionServices.copyText,
+      onStartAgent: (target, prompt) => startAgent(target, prompt),
     },
     inbox: {
       board,
@@ -952,7 +955,8 @@ export function App() {
       items: meetingItems,
       onSelect: (id) => navigate("meetings", id ?? undefined),
       onOpenMeetingNotes: openOverlay(setMeetingNotesOpen),
-      services: actionServices,
+      onNotice: showNotice,
+      onShowUndo: showUndo,
       onStartPromoted: (cardId) => setStartRequest({ cardId }),
     },
     workspaces: {
@@ -1206,6 +1210,7 @@ export function App() {
           <CreateTicketModal
             onClose={closeOverlay(setCreateTicketOpen)}
             onFromMeetingNotes={() => {
+              overlayReturnRef.current?.focus();
               setCreateTicketOpen(false);
               setMeetingNotesOpen(true);
             }}
@@ -1213,7 +1218,7 @@ export function App() {
         )}
         {meetingNotesOpen && (
           <Suspense fallback={null}>
-            <MeetingNotesModal
+            <MeetingNotesView
               onClose={closeOverlay(setMeetingNotesOpen)}
               onCreated={(result) => showNotice(meetingNotice(result))}
             />

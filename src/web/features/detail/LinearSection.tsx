@@ -8,7 +8,7 @@ import {
   postCardComment,
   setCardLinearState,
 } from "../../lib/api.js";
-import { isWebUrl } from "../../lib/actions.js";
+import { isWebUrl } from "../../../shared/web-url.js";
 import { moveErrorCopy } from "./move-error-copy.js";
 import { formatAge, nowMs } from "../../../shared/format-age.js";
 import { Button } from "../../primitives/Button.js";

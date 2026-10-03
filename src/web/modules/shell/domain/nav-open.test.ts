@@ -64,6 +64,18 @@ test("the carousel width matches the legacy CAROUSEL_QUERY media query text", ()
   );
 });
 
+test("the carousel width matches the CAROUSEL_QUERY the modules import", () => {
+  const source = readFileSync(
+    new URL("../../../components/ui/hooks/use-media-query.ts", import.meta.url),
+    "utf8",
+  );
+  assert.ok(
+    source.includes(
+      `export const CAROUSEL_QUERY = "(max-width: ${CAROUSEL_MAX_WIDTH}px)";`,
+    ),
+  );
+});
+
 test("the generated phone breakpoint and the legacy NARROW_QUERY switch at the same width", () => {
   const read = (path: string) =>
     readFileSync(new URL(path, import.meta.url), "utf8");

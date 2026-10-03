@@ -57,29 +57,29 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. The new t
 
 ### Component placement (frontend)
 
-| Artifact                                                                                                                         | Home                               |
-| -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `main.tsx`, `App.tsx`                                                                                                            | web root (entry + shell)           |
-| `Board.tsx`, `Column.tsx`, `Card.tsx`, `CardView.tsx`, `EmptyState.tsx`                                                          | `features/board/`                  |
-| `DetailPanel.tsx`, `PanelHeader.tsx`, `ReferenceBlocks.tsx`, `SessionLostSection.tsx`, `TerminalRegion.tsx`                      | `features/detail/`                 |
-| `AppSidebar.tsx`, `NavIcon.tsx`, `SyncStatus.tsx`, `PageHeader.tsx`, `TopBar.tsx`                                                | `modules/shell/components/`        |
-| `StartModal.tsx`, `CleanupModal.tsx`, `MultiSelect.tsx`, `WorkspaceAdd.tsx`, `FolderBrowserModal.tsx`                            | `features/modals/`                 |
-| `SettingsView.tsx`, `PlaybookEditorDialog.tsx`                                                                                   | `modules/{settings,playbooks}/`    |
-| `GoneBadge.tsx`, `PlanReadyBadge.tsx`, `SourceBadge.tsx`                                                                         | `components/badges/` (shared tier) |
-| `SessionsPage.tsx`, `SessionRow.tsx`                                                                                             | `features/sessions/`               |
-| `PullRequestsPage.tsx`, `PrList.tsx`, `PrDetail.tsx`                                                                             | `features/pull-requests/`          |
-| `ErrorsPage.tsx`, `ErrorList.tsx`, `ErrorDetail.tsx`, `error-rows.ts`                                                            | `features/errors/`                 |
-| `TodayPage.tsx`, `P0Card.tsx`, `CountChips.tsx`, `TodayList.tsx`, `Agenda.tsx`, `EntryRow.tsx`, `today-view.ts`                  | `features/today/`                  |
-| `SlackPage.tsx`, `SlackList.tsx`, `SlackDetail.tsx`, `SlackThread.tsx`                                                           | `features/slack/`                  |
-| `MeetingNotesModal.tsx`, `MeetingsPage.tsx`, `MeetingList.tsx`, `MeetingDetail.tsx`                                              | `features/meetings/`               |
-| `CalendarPage.tsx`                                                                                                               | `features/calendar/`               |
-| `WorkspacesView.tsx`, `WorktreeRow.tsx`, `WorkspaceFolders.tsx`, `WorkspaceRepos.tsx`                                            | `modules/workspaces/`              |
-| `AskPage.tsx`, `AskComposer.tsx`, `AskMessage.tsx`                                                                               | `features/ask/`                    |
-| `FlowPage.tsx`, `FlowToolbar.tsx`, `FlowDiagram.tsx`, `FlowNarrow.tsx`, `flow-model.ts`                                          | `features/flow/`                   |
-| `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts`                              | `hooks/`                           |
-| `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`, `meetings.ts`, `calendar.ts`              | `lib/`                             |
-| `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Markdown` / `SplitView` / `ListGroup` / `DetailPaneBody` / `FlowStage` | `primitives/`                      |
-| `tokens.css`                                                                                                                     | `styles/`                          |
+| Artifact                                                                                                                                      | Home                               |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `main.tsx`, `App.tsx`                                                                                                                         | web root (entry + shell)           |
+| `Board.tsx`, `Column.tsx`, `Card.tsx`, `CardView.tsx`, `EmptyState.tsx`                                                                       | `features/board/`                  |
+| `DetailPanel.tsx`, `PanelHeader.tsx`, `ReferenceBlocks.tsx`, `SessionLostSection.tsx`, `TerminalRegion.tsx`                                   | `features/detail/`                 |
+| `AppSidebar.tsx`, `NavIcon.tsx`, `SyncStatus.tsx`, `PageHeader.tsx`, `TopBar.tsx`                                                             | `modules/shell/components/`        |
+| `StartModal.tsx`, `CleanupModal.tsx`, `MultiSelect.tsx`, `WorkspaceAdd.tsx`, `FolderBrowserModal.tsx`                                         | `features/modals/`                 |
+| `SettingsView.tsx`, `PlaybookEditorDialog.tsx`                                                                                                | `modules/{settings,playbooks}/`    |
+| `GoneBadge.tsx`, `PlanReadyBadge.tsx`, `SourceBadge.tsx`                                                                                      | `components/badges/` (shared tier) |
+| `SessionsPage.tsx`, `SessionRow.tsx`                                                                                                          | `features/sessions/`               |
+| `PullRequestsView.tsx`, `PrList.tsx`, `PrDetail.tsx`                                                                                          | `modules/pull-requests/`           |
+| `ErrorsView.tsx`, `ErrorList.tsx`, `ErrorDetail.tsx`, `error-rows.ts`                                                                         | `modules/errors/`                  |
+| `TodayPage.tsx`, `P0Card.tsx`, `CountChips.tsx`, `TodayList.tsx`, `Agenda.tsx`, `EntryRow.tsx`, `today-view.ts`                               | `features/today/`                  |
+| `SlackView.tsx`, `SlackList.tsx`, `SlackDetail.tsx`, `SlackThread.tsx`                                                                        | `modules/slack/`                   |
+| `MeetingNotesView.tsx`, `MeetingsView.tsx`, `MeetingList.tsx`, `MeetingDetail.tsx`                                                            | `modules/meetings/`                |
+| `CalendarView.tsx`, `TicketsView.tsx`                                                                                                         | `modules/{calendar,tickets}/`      |
+| `WorkspacesView.tsx`, `WorktreeRow.tsx`, `WorkspaceFolders.tsx`, `WorkspaceRepos.tsx`                                                         | `modules/workspaces/`              |
+| `AskPage.tsx`, `AskComposer.tsx`, `AskMessage.tsx`                                                                                            | `features/ask/`                    |
+| `FlowPage.tsx`, `FlowToolbar.tsx`, `FlowDiagram.tsx`, `FlowNarrow.tsx`, `flow-model.ts`                                                       | `features/flow/`                   |
+| `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts`                                           | `hooks/`                           |
+| `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`, `meetings.ts`, `calendar.ts`                           | `lib/`                             |
+| `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Markdown` / `FlowStage` (`SplitPane`, `ListGroup`, `DetailPaneBody`: `components/`) | `primitives/`                      |
+| `tokens.css`                                                                                                                                  | `styles/`                          |
 
 A component lives in the folder of the feature that consumes it; a component consumed by exactly one feature is co-located with that consumer (`PlaybookEditorModal` sits in `settings/` because `SettingsScreen` is its only consumer). `MultiSelect` stays in `modals/` even though both `settings/` and `inbox/` now consume it: cross-feature reuse goes through the owning feature's `index.ts` barrel rather than forcing a move. `features/connections/` follows the same rule: `LinearConnectionCard` composes the connection primitives with the Linear hook, and Settings imports it through the `connections` barrel so the setup wizard can reuse the same card instead of forking it.
 
