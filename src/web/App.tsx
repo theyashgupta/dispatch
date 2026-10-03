@@ -44,8 +44,10 @@ import {
 } from "../shared/route.js";
 import { AppStateProvider, type AppPages } from "./components/AppState.js";
 import { useTheme } from "./hooks/useTheme.js";
-import { UsageChip } from "./features/accounts/index.js";
-import { useClaudeAccounts } from "./hooks/useClaudeAccounts.js";
+import {
+  AccountChipView,
+  accountsQueryOptions,
+} from "./modules/accounts/index.js";
 import { Glyph, wordmarkStyle } from "./components/icons/Glyph.js";
 import {
   actionablePinnedCard,
@@ -124,8 +126,7 @@ import { playChime } from "./lib/chime.js";
 import { refreshPushSubscription } from "./lib/push.js";
 import type { StartRequest } from "./lib/start-request.js";
 import { meetingNotice } from "./lib/meetings.js";
-import { formatSize } from "./lib/format-size.js";
-import type { WorkspacesSummary } from "./features/workspaces/index.js";
+import { formatSize } from "../shared/format-size.js";
 import type {
   BoardSnapshot,
   ConnectionStatus,
@@ -275,6 +276,10 @@ export function BootScreen({ connection }: { connection: ConnectionStatus }) {
   );
 }
 
+type WorkspacesSummary = Parameters<
+  AppPages["workspaces"]["onSummaryChange"]
+>[0];
+
 function useCommittedRoute(): Route {
   const leaf = useRouterState({ select: (s) => s.matches.at(-1) });
   const pathname = useLocation({ select: (l) => l.pathname });
@@ -284,7 +289,7 @@ function useCommittedRoute(): Route {
 export function App() {
   const { data: activityData } = useQuery(activityFeedQueryOptions());
   const events = activityData ?? [];
-  const claudeAccounts = useClaudeAccounts();
+  const { data: claudeAccounts } = useQuery(accountsQueryOptions());
   const ask = useAsk();
   const router = useRouter();
   const route = useCommittedRoute();
@@ -795,15 +800,8 @@ export function App() {
     return <BootScreen connection={connection} />;
   }
 
-  const accountSlot = claudeAccounts.loaded ? (
-    <UsageChip
-      accounts={claudeAccounts.accounts}
-      activeId={claudeAccounts.activeId}
-      compact
-      onSwitch={claudeAccounts.switchAccount}
-      onRefresh={claudeAccounts.refreshUsage}
-      onOpenSettings={() => navigate("accounts")}
-    />
+  const accountSlot = claudeAccounts ? (
+    <AccountChipView onOpenSettings={() => navigate("accounts")} />
   ) : null;
 
   const inboxCount = inboxWaitingCount(board.cards, inboxRows);
@@ -828,7 +826,7 @@ export function App() {
     activity: { title: "Activity", count: events.length },
     accounts: {
       title: "Accounts and Usage",
-      count: claudeAccounts.loaded ? claudeAccounts.accounts.length : undefined,
+      count: claudeAccounts?.accounts.length,
     },
     playbooks: { title: "Playbooks", count: playbookCount },
     vault: { title: "Vault", count: vaultCount },
@@ -930,7 +928,7 @@ export function App() {
       filter: activityFilter,
       onSelectCard: selectCard,
     },
-    accounts: { claudeAccounts },
+    accounts: {},
     sessions: {
       board,
       selectedCardId: selectedCard ? selectedCardId : null,
@@ -1132,7 +1130,7 @@ export function App() {
         }
         detail={
           <DetailPanel
-            accounts={claudeAccounts.accounts}
+            accounts={claudeAccounts?.accounts}
             card={selectedCard}
             hydrating={pinnedHydrating && !selectedCardInWindow}
             pinFetchError={pinFetchErrorKind}

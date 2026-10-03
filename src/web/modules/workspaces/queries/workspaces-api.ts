@@ -38,3 +38,27 @@ export async function discoverFolder(
   }
   return result.data;
 }
+
+/**
+ * Open a card's workspace in an editor: POST /api/cards/:id/open-editor { editor }.
+ *
+ * @remarks
+ * Sends only the `editor` discriminant, because the server reads the path from the card. Answers
+ * 204 and throws on any non-2xx.
+ */
+export async function openWorkspaceEditor(
+  cardId: string,
+  editor: "code" | "cursor",
+): Promise<void> {
+  const result = await http(
+    `/api/cards/${encodeURIComponent(cardId)}/open-editor`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ editor }),
+    },
+  );
+  if (!result.ok) {
+    throw httpError("openWorkspaceEditor", result);
+  }
+}

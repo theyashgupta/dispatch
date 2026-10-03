@@ -2,7 +2,7 @@ import {
   PROFILE_BRIEF_MAX,
   PROFILE_TEXT_MAX,
 } from "../../../../shared/profile.js";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -86,13 +86,7 @@ export function AboutYouSection({
           className="field-sizing-fixed min-h-30 resize-y text-base md:text-base"
         />
       </Field>
-      {saveError && (
-        <Alert variant="destructive">
-          <AlertDescription className="font-semibold">
-            {saveError}
-          </AlertDescription>
-        </Alert>
-      )}
+      {saveError && <ErrorAlert>{saveError}</ErrorAlert>}
       <div>
         <LoadingButton disabled={disabled} loading={saving} onClick={onSave}>
           {saving ? "Saving…" : "Save profile"}

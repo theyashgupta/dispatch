@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { useReturnFocus } from "@/components/ui/hooks/use-return-focus";
 
 const LAST_DIR_KEY = "dispatch:folder-browser-last-dir";
 
@@ -295,14 +296,23 @@ export function FolderBrowserDialog({
   onOpenChange,
   ...body
 }: FolderBrowserDialogProps) {
+  const returnFocus = useReturnFocus(open);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        onCloseAutoFocus={returnFocus}
         aria-label="Browse folders"
         aria-labelledby={undefined}
         aria-describedby={undefined}
         className="max-h-[70vh] sm:max-w-140"
-        onOpenAutoFocus={(event) => event.preventDefault()}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          if (event.currentTarget instanceof HTMLElement) {
+            event.currentTarget
+              .querySelector<HTMLElement>("[cmdk-root]")
+              ?.focus();
+          }
+        }}
       >
         <FolderBrowserBody {...body} />
       </DialogContent>

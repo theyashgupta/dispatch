@@ -49,6 +49,25 @@ export async function importFromEnvVault(): Promise<
 }
 
 /**
+ * Send a JSON body and map the response to a vault mutation result.
+ */
+async function send(
+  url: string,
+  method: "POST" | "PUT" | "PATCH",
+  body: unknown,
+): Promise<VaultMutationResult> {
+  const result = await http(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (result.ok) {
+    return { ok: true };
+  }
+  return { ok: false, error: result.error ?? "generic" };
+}
+
+/**
  * Create a vault key: POST /api/vault.
  *
  * @remarks
@@ -60,15 +79,7 @@ export async function addVaultKey(input: {
   name: string;
   purpose: string;
 }): Promise<VaultMutationResult> {
-  const result = await http("/api/vault", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (result.ok) {
-    return { ok: true };
-  }
-  return { ok: false, error: result.error ?? "generic" };
+  return send("/api/vault", "POST", input);
 }
 
 /**
@@ -84,15 +95,9 @@ export async function setVaultValue(
   name: string,
   value: string,
 ): Promise<VaultMutationResult> {
-  const result = await http(`/api/vault/${encodeURIComponent(name)}/value`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ value }),
+  return send(`/api/vault/${encodeURIComponent(name)}/value`, "PUT", {
+    value,
   });
-  if (result.ok) {
-    return { ok: true };
-  }
-  return { ok: false, error: result.error ?? "generic" };
 }
 
 type VaultValueRead =
@@ -135,15 +140,7 @@ export async function editVaultPurpose(
   name: string,
   purpose: string,
 ): Promise<VaultMutationResult> {
-  const result = await http(`/api/vault/${encodeURIComponent(name)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ purpose }),
-  });
-  if (result.ok) {
-    return { ok: true };
-  }
-  return { ok: false, error: result.error ?? "generic" };
+  return send(`/api/vault/${encodeURIComponent(name)}`, "PATCH", { purpose });
 }
 
 /**

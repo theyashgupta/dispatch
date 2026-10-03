@@ -20,7 +20,7 @@ import { focusRing } from "../../primitives/focus-ring.js";
 import { IconButton } from "../../primitives/IconButton.js";
 import { Modal, type ModalControl } from "../../primitives/Modal.js";
 import { Notice } from "../../primitives/Notice.js";
-import { WorkspaceAdd } from "../workspaces/index.js";
+import { WorkspaceAdd } from "./WorkspaceAdd.js";
 
 interface StartModalProps {
   card: CardModel;

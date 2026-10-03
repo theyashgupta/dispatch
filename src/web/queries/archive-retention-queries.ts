@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   queryOptions,
   useMutation,
@@ -5,10 +6,13 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
+import { parseArchiveRetention } from "../../shared/archive-retention.js";
+import { shouldSeedDraft } from "../../shared/draft-seed.js";
 import {
   getArchiveRetention,
   saveArchiveRetention,
 } from "./archive-retention-api.js";
+import { useSingleFlight } from "./single-flight.js";
 
 export const archiveRetentionKeys = {
   all: ["settings", "archive-retention"] as const,
@@ -44,7 +48,7 @@ export function useArchiveRetentionQuery() {
  */
 export function saveArchiveRetentionMutationOptions(queryClient: QueryClient) {
   return {
-    mutationFn: (days: number) => saveArchiveRetention(days),
+    mutationFn: saveArchiveRetention,
     onSuccess: (
       result: Awaited<ReturnType<typeof saveArchiveRetention>>,
       days: number,
@@ -61,4 +65,61 @@ export function saveArchiveRetentionMutationOptions(queryClient: QueryClient) {
 export function useSaveArchiveRetentionMutation() {
   const queryClient = useQueryClient();
   return useMutation(saveArchiveRetentionMutationOptions(queryClient));
+}
+
+/**
+ * Pick the retention form's save error: the server's message on a refusal, a fixed line on a failed request.
+ */
+export function retentionSaveErrorText(
+  result: Awaited<ReturnType<typeof saveArchiveRetention>> | undefined,
+  failed: boolean,
+): string | null {
+  if (result?.ok === false) return result.error;
+  return failed ? "Couldn't save archive retention. Try again." : null;
+}
+
+/**
+ * Hold the archive retention form: the draft, its parse, and the save with its error text.
+ *
+ * @remarks
+ * The draft follows the server read until the first edit.
+ */
+export function useArchiveRetentionDraft(onSaved?: () => void) {
+  const query = useArchiveRetentionQuery();
+  const save = useSaveArchiveRetentionMutation();
+  const saveOnce = useSingleFlight(save.mutate);
+  const [draft, setDraft] = useState("");
+  const [seeded, setSeeded] = useState<typeof query.data>();
+  const [edited, setEdited] = useState(false);
+  const [saved, setSaved] = useState(false);
+  if (query.data && shouldSeedDraft(query.data, seeded, edited)) {
+    setSeeded(query.data);
+    setDraft(String(query.data.archiveRetentionDays));
+  }
+  const days = parseArchiveRetention(draft);
+
+  return {
+    draft,
+    invalid: days === null,
+    loadError: query.isError,
+    saveErrorText: retentionSaveErrorText(save.data, save.isError),
+    saving: save.isPending,
+    saved,
+    change: (value: string) => {
+      setEdited(true);
+      setDraft(value);
+      setSaved(false);
+    },
+    save: () => {
+      if (days === null) return;
+      setSaved(false);
+      saveOnce(days, {
+        onSuccess: (result) => {
+          if (!result.ok) return;
+          setSaved(true);
+          onSaved?.();
+        },
+      });
+    },
+  };
 }

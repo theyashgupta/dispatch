@@ -6,7 +6,7 @@ import {
 } from "../../../../shared/terminal-appearance.js";
 import type { ThemePreference } from "../../../../shared/theme.js";
 import type { TerminalAppearance } from "../../../../shared/types.js";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import { Field, FieldDescription, FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -147,13 +147,7 @@ export function AppearanceSection({
           {validationError}
         </FieldError>
       )}
-      {saveError && (
-        <Alert variant="destructive">
-          <AlertDescription className="font-semibold">
-            {saveError}
-          </AlertDescription>
-        </Alert>
-      )}
+      {saveError && <ErrorAlert>{saveError}</ErrorAlert>}
     </>
   );
 }

@@ -1,12 +1,6 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { AccountsPage } from "@/features/accounts";
-import { useAppState } from "@/components/AppState";
+import { AccountsView } from "@/modules/accounts";
 
 export const Route = createLazyFileRoute("/accounts/{-$id}")({
-  component: AccountsRoute,
+  component: AccountsView,
 });
-
-function AccountsRoute() {
-  const props = useAppState().accounts;
-  return <AccountsPage {...props} />;
-}
