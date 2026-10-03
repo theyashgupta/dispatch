@@ -1,5 +1,7 @@
 import { Router } from "express";
-import type { Request, Response } from "express";
+import type { ErrorRequestHandler, Request, Response } from "express";
+import { z } from "zod";
+import { parseOrThrow } from "./parse-input.js";
 import {
   httpForward,
   resolveLiveTtydPort,
@@ -9,6 +11,11 @@ import {
   sessionScrollback,
 } from "../services/orchestration/terminal.js";
 import { WEB_DIST_DIR } from "../services/infra/paths.js";
+import {
+  HttpError,
+  NotFoundError,
+  UpstreamError,
+} from "../services/domain/errors.js";
 
 /**
  * Lines of tmux history one scrollback seed may carry, matching the web client's xterm
@@ -16,6 +23,11 @@ import { WEB_DIST_DIR } from "../services/infra/paths.js";
  * head.
  */
 const SCROLLBACK_SEED_LINES = 10000;
+
+const markdownQuerySchema = z.object(
+  { path: z.string("invalid-path") },
+  "invalid-path",
+);
 
 /**
  * Serve the pane's tmux HISTORY (everything above the visible screen) as raw ANSI text.
@@ -28,23 +40,22 @@ const SCROLLBACK_SEED_LINES = 10000;
  * capture failure is 502 like any other upstream fault, and it WARNS before answering: this is the
  * one endpoint whose client ignores failures by design, so an unlogged 502 here is invisible.
  */
-function scrollbackHandler(req: Request<{ id: string }>, res: Response): void {
-  sessionScrollback(req.params.id, SCROLLBACK_SEED_LINES).then(
-    (history) => {
-      if (history == null) {
-        res.status(404).end();
-        return;
-      }
-      res.set("Cache-Control", "no-cache");
-      res.type("text/plain").send(history);
-    },
-    (err: unknown) => {
-      console.warn(
-        `[terminal] scrollback capture failed for session ${req.params.id}, the client seeds nothing: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      res.status(502).end();
-    },
-  );
+async function scrollbackHandler(
+  req: Request<{ id: string }>,
+  res: Response,
+): Promise<void> {
+  let history: string | null;
+  try {
+    history = await sessionScrollback(req.params.id, SCROLLBACK_SEED_LINES);
+  } catch (err) {
+    console.warn(
+      `[terminal] scrollback capture failed for session ${req.params.id}, the client seeds nothing: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    throw new UpstreamError("scrollback-failed");
+  }
+  if (history == null) throw new NotFoundError("not-found");
+  res.set("Cache-Control", "no-cache");
+  res.type("text/plain").send(history);
 }
 
 /**
@@ -55,22 +66,19 @@ function scrollbackHandler(req: Request<{ id: string }>, res: Response): void {
  * name, and a file that exists in none of the workspace candidates alike, so the status is never
  * an existence oracle for paths outside the workspace.
  */
-function markdownHandler(req: Request<{ id: string }>, res: Response): void {
-  const rel = req.query.path;
-  if (typeof rel !== "string") {
-    res.status(400).end();
-    return;
+async function markdownHandler(
+  req: Request<{ id: string }>,
+  res: Response,
+): Promise<void> {
+  const { path: rel } = parseOrThrow(markdownQuerySchema, req.query);
+  let resolved: string | null;
+  try {
+    resolved = await sessionMarkdownPath(req.params.id, rel);
+  } catch {
+    throw new NotFoundError("not-found");
   }
-  sessionMarkdownPath(req.params.id, rel).then(
-    (resolved) => {
-      if (resolved == null) {
-        res.status(404).end();
-        return;
-      }
-      res.set("Cache-Control", "no-store").json({ path: resolved });
-    },
-    () => res.status(404).end(),
-  );
+  if (resolved == null) throw new NotFoundError("not-found");
+  res.set("Cache-Control", "no-store").json({ path: resolved });
 }
 
 /**
@@ -105,10 +113,7 @@ terminalProxyRouter.get("/:id/terminal/markdown", markdownHandler);
 
 terminalProxyRouter.all("/:id/terminal{/*rest}", (req, res) => {
   const port = resolveLiveTtydPort(req.params.id);
-  if (port == null) {
-    res.status(404).end();
-    return;
-  }
+  if (port == null) throw new NotFoundError("not-found");
   if (req.method === "GET") {
     const rest = req.params.rest as string | string[] | undefined;
     const relPath = Array.isArray(rest) ? rest.join("/") : (rest ?? "");
@@ -120,3 +125,20 @@ terminalProxyRouter.all("/:id/terminal{/*rest}", (req, res) => {
   }
   httpForward(req, res, port);
 });
+
+/**
+ * End a typed error with its status and an empty body.
+ *
+ * @remarks Every response of this router is bodyless on failure, so `httpErrorHandler`'s JSON body
+ * would change the bytes. An untyped error, or one after headers went out, goes to the default
+ * handler.
+ */
+const bodylessErrorHandler: ErrorRequestHandler = (err, _req, res, next) => {
+  if (!(err instanceof HttpError) || res.headersSent) {
+    next(err);
+    return;
+  }
+  res.status(err.status).end();
+};
+
+terminalProxyRouter.use(bodylessErrorHandler);

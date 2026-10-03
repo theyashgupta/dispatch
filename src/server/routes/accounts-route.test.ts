@@ -7,7 +7,7 @@ import { isolateEnv } from "../test-support/fixtures.js";
 
 const env = isolateEnv();
 const configHolder = await import("../services/infra/config-holder.js");
-const accounts = await import("../services/domain/claude-accounts.js");
+const accounts = await import("../services/orchestration/claude-accounts.js");
 const { accountsRouter } = await import("./accounts.route.js");
 
 configHolder.setOrchestrationConfig({ linearApiKey: "", port: 4700 });

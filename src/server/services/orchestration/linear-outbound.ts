@@ -12,7 +12,7 @@ import {
   enabledSource,
   type TicketSource,
 } from "../../adapters/source-gateway.js";
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 import { getOrchestrationConfig } from "../infra/config-holder.js";
 import { outboundErrorCopy } from "./outbound-error.js";
 
