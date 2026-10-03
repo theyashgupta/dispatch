@@ -230,8 +230,8 @@ saved. The file store is `services/orchestration/meeting-transcripts.ts`. `GET
 on a bad id, 404 when no transcript is stored, or 500 `transcript-read-failed`. The notes never
 appear in a log, the SSE frame or an error body.
 
-The Meetings page (`features/meetings/MeetingsPage.tsx`) lives under a "Sources" nav group with one
-"Meetings" row. `src/web/lib/meetings.ts` groups the meeting items by `meta.meetingId`, newest
+The Meetings page (`modules/meetings/views/MeetingsView.tsx`) lives under a "Sources" nav group with one
+"Meetings" row. `src/web/modules/meetings/domain/meetings.ts` groups the meeting items by `meta.meetingId`, newest
 `meetingDate` first, and parses `meta.siblings`. The detail pane (`MeetingDetail.tsx`) shows the
 selected item, the sibling action items from the same meeting with the current one highlighted, an
 "Open in Granola" link when the item has a web url, a "Load transcript" button when the item has a
@@ -341,8 +341,8 @@ never appears in a log, a status, a response or an error body.
 
 The Inbox excludes calendar events: `App.tsx` feeds the Inbox and its count with items whose
 source is not `calendar`, and passes the calendar items to the Calendar page. The page
-(`src/web/features/calendar/CalendarPage.tsx`) is the "Calendar" row of the "Sources" nav group.
-`src/web/lib/calendar.ts#agendaDays` keeps the `calendar` `event` items that overlap the window,
+(`src/web/modules/calendar/views/CalendarView.tsx`) is the "Calendar" row of the "Sources" nav group.
+`src/web/modules/calendar/domain/calendar-agenda.ts#agendaDays` keeps the `calendar` `event` items that overlap the window,
 sorts them by start then title, and groups them by local day labelled "Today", "Tomorrow" or the
 weekday and date; `soonLabel` gives "Now" while a timed event runs and "In <n> min" when it starts
 within 15 minutes. Each row shows the time range or "All day", the title, the location and
@@ -2438,7 +2438,7 @@ gate, so an authenticated remote session can read and write the profile like a l
 
 **Status push (LOCAL-23).** A manual move (`POST /cards/:id/move`, including mirrored group members) and the start saga's To Do to In Progress push the matching Linear workflow state. The map lives in `sources.linear.stateMap` (team id to column to state id or `null` for "do not sync"), validated by `shared/linear-state-map.ts#parseStateMap` and served by `GET`/`PUT /api/config/linear-state-map`; `resolveTargetState` fills unmapped columns with type defaults (To Do the lowest unstarted state, In Progress and Needs Input the lowest started, Done the lowest completed, In Review and Parked do not sync). Settings edits it in the Sync filters tab (`modules/connections/components/LinearStateMapRows.tsx`). `store.moveCardManual` returns the column changes it made, read inside its own mutation so two overlapping moves each record their own columns, and the route hands them to `services/orchestration/linear-outbound.ts#pushColumnChanges`, which queues the pushes off the request path, chained per card so two quick moves reach Linear in order; `start-session.ts#completeStartAndPush` snapshots the columns around `completeStart` (`snapshotColumns`, `columnChangesSince`). Agent-driven moves (`applyMarker`, `flipBack`) never push. A push is skipped when the target equals the card's `linearState` or `pendingState`. Success runs `issueUpdate` with the state (`LinearSource.updateState`), then `store.recordLinearPush` sets `linearState` and `pendingState { id, at }` and clears `linearError` in one mutation and a poll follows; `reconcile()` holds the pushed state against a different incoming one for 300000 ms or until Linear reports it, keeps a To Do card with a fresh hold or a queued push (`store.setPushing`), and `trackedIssueIds` tracks a held card. Failure leaves the column, `linearState` and `pendingState` as they were and sets `linearError` to "Linear state not updated. " plus the fixed outbound copy. Every attempt writes one `linear_state_pushed` activity event (reason: the state name or `failed: <copy>`).
 
-**Tickets page and Move to (LOCAL-42).** `#/tickets` (`features/tickets/TicketsPage.tsx`, a lazy chunk with its own bundle budget line) lists every Linear card on the wire (`shared/linear-state.ts#isTicketCard`: source linear and no group) ordered by priority then recency, grouped by status, priority, project, cycle, team or none (`features/tickets/ticket-rows.ts`, the choice kept in `localStorage` `dsp.tickets.groupBy`). Row actions and the j, k, Enter, e, o keys follow `ticket-actions.ts#ticketActionsFor`, which mirrors the move route guards (no Done for Inbox, grouped or starting cards). The detail panel's Move to select calls `POST /cards/:id/linear-state { stateId }`: `linear-outbound.ts#moveLinearState` refuses an unknown card (404), a non-Linear or teamless card (409) and a state outside the card's team (400) before any write, then `setLinearState` runs the same per-card push chain as a board move with the card's current column as both `fromCol` and `toCol`, so the column never changes; a failure answers 502 with the recorded card notice.
+**Tickets page and Move to (LOCAL-42).** `#/tickets` (`modules/tickets/views/TicketsView.tsx`, a lazy chunk with its own bundle budget line) lists every Linear card on the wire (`shared/linear-state.ts#isTicketCard`: source linear and no group) ordered by priority then recency, grouped by status, priority, project, cycle, team or none (`modules/tickets/domain/ticket-rows.ts`, the choice kept in `localStorage` `dsp.tickets.groupBy`). Row actions and the j, k, Enter, e, o keys follow `ticket-actions.ts#ticketActionsFor`, which mirrors the move route guards (no Done for Inbox, grouped or starting cards). The detail panel's Move to select calls `POST /cards/:id/linear-state { stateId }`: `linear-outbound.ts#moveLinearState` refuses an unknown card (404), a non-Linear or teamless card (409) and a state outside the card's team (400) before any write, then `setLinearState` runs the same per-card push chain as a board move with the card's current column as both `fromCol` and `toCol`, so the column never changes; a failure answers 502 with the recorded card notice.
 
 ### GitHub Source
 
@@ -2582,17 +2582,17 @@ anything else 502 `unreachable`. Loaded threads are cached in memory for 10 minu
 the name cache is also per token hash, so nothing crosses Slack accounts); errors are
 never cached.
 
-In the Inbox, an expanded Slack item with `meta.threadTs` shows `features/slack/SlackThread`: a
+In the Inbox, an expanded Slack item with `meta.threadTs` shows `modules/slack/views/SlackThreadView`: a
 collapsed "Thread" section whose "Load thread" button fetches the route through
-`hooks/useSlackThread` (never on mount or a timer) and lists the messages as plain text. Every
+`useLoadSlackThread` (never on a timer, and never from a `#/slack/<id>` deep link) and lists the messages as plain text. Every
 expanded Slack item, and the Slack page detail below, also offers "Draft reply" (`lib/actions.ts`, no key): it loads the thread when
-there is one, builds the kickoff with `lib/slack-prompt.ts#draftReplyPrompt` (the message and the
+there is one, builds the kickoff with `shared/slack-prompt.ts#draftReplyPrompt` (the message and the
 thread fenced by `fenceUntrusted`, the channel named, posting forbidden) and calls App's
 `startAgent`, which promotes the item, moves the card to To Do and opens StartModal prefilled. The
 reply is printed in the session; Dispatch still calls no Slack write method.
 
 The Slack page (`#/slack` and `#/slack/<id>`, LOCAL-47) lists the same Slack items.
-`lib/slack-rows.ts` builds its rows (`slackRows`: Slack items not done, newest first, as Inbox row
+`modules/slack/domain/slack-rows.ts` builds its rows (`slackRows`: Slack items not done, newest first, as Inbox row
 models), pills (`slackPills`: From, DM or Mention, Thread) and conversation groups
 (`groupSlackRows`); it sits in `lib/` so App counts the rows for the nav chip and the page title
 without loading the page chunk. App lazy-loads the page through the slack barrel's
@@ -3736,7 +3736,7 @@ in `docs/standards/design-contract.md`'s Deferred decisions rows 2 and 5.
 
 **Keyboard.** Every key binding goes through one hook, `useShortcuts(bindings, { menuOpen,
 scopeId })` in `src/web/hooks/useShortcuts.ts`, over the pure `resolveShortcut` and the binding
-tables in `src/web/lib/shortcuts.ts`: `GLOBAL_SHORTCUTS` (Cmd or Ctrl+K opens the command
+tables in `src/shared/shortcuts.ts`: `GLOBAL_SHORTCUTS` (Cmd or Ctrl+K opens the command
 palette, n opens New ticket, ? opens the cheat sheet), mounted once in App; `BOARD_SHORTCUTS`
 (j, k, h, l move the focused card, 1 to 7 move it to a column through the board's own move path;
 Enter stays with the focused card, a role button that opens itself, as the resolver leaves Enter
