@@ -14,10 +14,14 @@ export function updateStatusQueryOptions() {
 }
 
 /**
- * Read the update status.
+ * Read the update status, re-reading it on every mount.
+ *
+ * @remarks
+ * Settings checks again each time it opens, so a cached read from an earlier visit never stands in
+ * for the server's answer.
  */
 export function useUpdateStatusQuery() {
-  return useQuery(updateStatusQueryOptions());
+  return useQuery({ ...updateStatusQueryOptions(), refetchOnMount: "always" });
 }
 
 export const runUpdateMutationOptions = {

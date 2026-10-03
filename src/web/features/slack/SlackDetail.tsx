@@ -8,7 +8,7 @@ import {
   type ActionServices,
   type InboxActionId,
 } from "../../lib/actions.js";
-import { formatAge, nowMs } from "../../lib/format-age.js";
+import { formatAge, nowMs } from "../../../shared/format-age.js";
 import {
   slackAuthor,
   slackPills,

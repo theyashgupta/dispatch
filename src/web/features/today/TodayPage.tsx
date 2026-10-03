@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import type { BoardSnapshot, Item } from "../../../shared/types.js";
-import { nowMs } from "../../lib/format-age.js";
+import { nowMs } from "../../../shared/format-age.js";
 import {
   clampCount,
   rankToday,

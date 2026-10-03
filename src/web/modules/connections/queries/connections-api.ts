@@ -1,15 +1,19 @@
 import type {
+  CalendarChoice,
+  CalendarErrorCode,
+  CalendarSettingsPatch,
+  CalendarStatus,
   FilterCapabilities,
   FilterOption,
+  LinearStateMap,
   LinearWorkflow,
   SlackChannel,
   SlackChannelOption,
-  SourceConnection,
   SourceFilters,
-  SourceKeyError,
 } from "../../../../shared/types.js";
-import { isProviderCode } from "../../../../shared/credential.js";
 import { http, type ApiResult, httpError, payload } from "@/lib/http";
+import type { SlackSetupFailure } from "@/modules/connections/domain/slack-channels";
+import { slackSavePayload } from "@/modules/connections/domain/slack-save-payload";
 
 export type LinearOptionDimension = "assignees" | "projects" | "teams";
 
@@ -148,131 +152,6 @@ export async function getLinearWorkflow(): Promise<
 }
 
 /**
- * Read a source's connection status: GET /api/sources/:source/connection.
- *
- * @remarks
- * Throws on any non-2xx.
- */
-export async function getSourceConnection(
-  source: string,
-): Promise<SourceConnection> {
-  const result = await http<SourceConnection>(
-    `/api/sources/${encodeURIComponent(source)}/connection`,
-  );
-  if (!result.ok) {
-    throw new Error(`getSourceConnection failed: ${result.status}`);
-  }
-  return result.data;
-}
-
-const SOURCE_KEY_ERRORS = new Set<string>([
-  "rejected",
-  "unreachable",
-  "sso-required",
-  "superseded",
-  "no-credential",
-]);
-
-/**
- * Read the error kind a failed key save or connect answered, plus the provider's own error code.
- *
- * @remarks
- * The server names the kind in the body; the status fallback covers a body that is not
- * JSON, such as a proxy error page. Only a plain lowercase provider code is kept.
- */
-function sourceKeyFailure(result: Extract<ApiResult<unknown>, { ok: false }>): {
-  ok: false;
-  reason: SourceKeyError;
-  providerError?: string;
-} {
-  const body = (result.body ?? {}) as {
-    error?: unknown;
-    providerError?: unknown;
-  };
-  const reason: SourceKeyError =
-    typeof body.error === "string" && SOURCE_KEY_ERRORS.has(body.error)
-      ? (body.error as SourceKeyError)
-      : result.status === 400
-        ? "rejected"
-        : result.status === 502
-          ? "unreachable"
-          : result.status === 409
-            ? "superseded"
-            : "failed";
-  return isProviderCode(body.providerError)
-    ? { ok: false, reason, providerError: body.providerError }
-    : { ok: false, reason };
-}
-
-/**
- * Store a new key for a source: PUT /api/sources/:source/key.
- *
- * @remarks
- * The server checks the key with the provider before saving it, so a 400 (rejected) and a
- * 502 (unreachable) both mean nothing was written; a 409 means a disconnect won the race. The key
- * is sent once and never echoed back.
- */
-export async function saveSourceKey(
-  source: string,
-  apiKey: string,
-): Promise<
-  | { ok: true; account?: string }
-  | { ok: false; reason: SourceKeyError; providerError?: string }
-> {
-  const result = await http<{ account?: string }>(
-    `/api/sources/${encodeURIComponent(source)}/key`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apiKey }),
-    },
-  );
-  if (result.ok) {
-    return { ok: true, ...result.data };
-  }
-  return sourceKeyFailure(result);
-}
-
-/**
- * Turn a token source on with the credential it already has: POST /api/sources/:source/connect.
- *
- * @remarks
- * Used when the Vault already holds the token or the gh CLI is logged in, so nothing is
- * pasted and no secret crosses the wire.
- */
-export async function connectSource(
-  source: string,
-): Promise<
-  | { ok: true; account?: string }
-  | { ok: false; reason: SourceKeyError; providerError?: string }
-> {
-  const result = await http<{ account?: string }>(
-    `/api/sources/${encodeURIComponent(source)}/connect`,
-    { method: "POST" },
-  );
-  if (result.ok) {
-    return { ok: true, ...result.data };
-  }
-  return sourceKeyFailure(result);
-}
-
-/**
- * Pause a token source and keep its token: POST /api/sources/:source/disable.
- *
- * @remarks
- * Throws on any non-2xx.
- */
-export async function disableSource(source: string): Promise<void> {
-  const result = await http(
-    `/api/sources/${encodeURIComponent(source)}/disable`,
-    { method: "POST" },
-  );
-  if (!result.ok) {
-    throw new Error(`disableSource failed: ${result.status}`);
-  }
-}
-
-/**
  * Read the saved Slack channels: GET /api/sources/slack/channels.
  *
  * @remarks
@@ -287,9 +166,6 @@ export async function getSavedSlackChannels(): Promise<SlackChannel[]> {
   }
   return result.data.channels;
 }
-
-export type SlackSetupFailure =
-  "not-a-channel" | "disabled" | "rejected" | "restricted" | "unreachable";
 
 /**
  * Map a Slack setup route's error kind to the line the picker shows.
@@ -373,7 +249,7 @@ export async function saveSlackChannels(
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channels }),
+        body: JSON.stringify(slackSavePayload(channels)),
       },
     );
     if (!result.ok) return null;
@@ -384,16 +260,92 @@ export async function saveSlackChannels(
 }
 
 /**
- * Remove a source's stored key: DELETE /api/sources/:source/key.
+ * Read the saved column-to-state map: GET /api/config/linear-state-map.
  *
  * @remarks
  * Throws on any non-2xx.
  */
-export async function deleteSourceKey(source: string): Promise<void> {
-  const result = await http(`/api/sources/${encodeURIComponent(source)}/key`, {
-    method: "DELETE",
-  });
+export async function getLinearStateMap(): Promise<LinearStateMap> {
+  const result = await http<{ stateMap: LinearStateMap }>(
+    "/api/config/linear-state-map",
+  );
   if (!result.ok) {
-    throw new Error(`deleteSourceKey failed: ${result.status}`);
+    throw httpError("getLinearStateMap", result);
   }
+  return result.data.stateMap;
+}
+
+/** Save the whole column-to-state map: PUT /api/config/linear-state-map. */
+export async function saveLinearStateMap(
+  stateMap: LinearStateMap,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const result = await http("/api/config/linear-state-map", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stateMap }),
+    });
+    if (result.ok) return { ok: true };
+    return {
+      ok: false,
+      error: result.error ?? "Couldn't save the state map. Try again.",
+    };
+  } catch {
+    return { ok: false, error: "Could not reach Dispatch. Try again." };
+  }
+}
+
+type CalendarResult<T> =
+  { ok: true; value: T } | { ok: false; error: CalendarErrorCode };
+
+function calendarResult<T>(
+  result: ApiResult<unknown>,
+  read: (body: unknown) => T,
+): CalendarResult<T> {
+  if (!result.ok) {
+    if (result.status === 409) {
+      return {
+        ok: false,
+        error: (result.error ?? "failed") as CalendarErrorCode,
+      };
+    }
+    throw new Error(`calendar request failed: ${result.status}`);
+  }
+  return { ok: true, value: read(result.data) };
+}
+
+/**
+ * List this Mac's calendars: POST /api/calendar/calendars with no body.
+ *
+ * @remarks
+ * A POST, so a cross-site page cannot trigger the macOS Calendars prompt. A 409 carries the read's
+ * error code, which the card shows, and other failures throw.
+ */
+export async function listCalendars(): Promise<
+  CalendarResult<CalendarChoice[]>
+> {
+  return calendarResult(
+    await http("/api/calendar/calendars", { method: "POST" }),
+    (body) => (body as { calendars: CalendarChoice[] }).calendars,
+  );
+}
+
+/**
+ * Save Calendar settings: PUT /api/calendar/settings.
+ *
+ * @remarks
+ * Enabling runs one test read on the server, so a 409 carries its error code and nothing was
+ * saved.
+ */
+export async function putCalendarSettings(
+  patch: CalendarSettingsPatch,
+): Promise<CalendarResult<CalendarStatus>> {
+  return calendarResult(
+    await http("/api/calendar/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }),
+    (body) => body as CalendarStatus,
+  );
 }

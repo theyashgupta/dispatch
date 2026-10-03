@@ -2,7 +2,7 @@ import type { CSSProperties, MouseEvent } from "react";
 import { Code2, Trash2 } from "lucide-react";
 import type { WorktreeRow as WorktreeRowModel } from "../../../shared/types.js";
 import { COLUMN_LABELS } from "../../lib/event-copy.js";
-import { formatAge } from "../../lib/format-age.js";
+import { formatAge } from "../../../shared/format-age.js";
 import { formatCleanupCountdown } from "../../lib/format-cleanup-countdown.js";
 import { formatSize } from "../../lib/format-size.js";
 import type { WorktreeActions } from "./workspace-rows.js";

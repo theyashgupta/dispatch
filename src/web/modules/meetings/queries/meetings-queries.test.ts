@@ -1,14 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { QueryClient } from "@tanstack/react-query";
-import {
-  checkGranola,
-  createMeetingItems,
-  getGranola,
-  getMeetingTranscript,
-  putGranola,
-  runGranola,
-} from "./meetings-api.js";
+import { createMeetingItems, getMeetingTranscript } from "./meetings-api.js";
 import {
   granolaQueryOptions,
   meetingTranscriptQueryOptions,
@@ -133,51 +126,4 @@ test("getMeetingTranscript throws with the status only on a failure", async () =
     getMeetingTranscript("m1"),
     new Error("getMeetingTranscript failed: 404"),
   );
-});
-
-test("getGranola resolves the status on a 200", async () => {
-  reply(200, { state: "idle" });
-  assert.deepEqual(await getGranola(), { state: "idle" });
-});
-
-test("getGranola throws with the status only on a failure", async () => {
-  reply(500, {}, "Internal Server Error");
-  await assert.rejects(getGranola(), new Error("getGranola failed: 500"));
-});
-
-test("putGranola resolves the status after the change on a 200", async () => {
-  reply(200, { state: "idle" });
-  assert.deepEqual(await putGranola({ enabled: true }), {
-    state: "idle",
-  });
-  assert.equal(calls[0]?.url, "/api/meetings/granola");
-  assert.equal(calls[0]?.init?.method, "PUT");
-  assert.equal(calls[0]?.init?.body, JSON.stringify({ enabled: true }));
-});
-
-test("putGranola throws with the status only on a failure", async () => {
-  reply(400, {}, "Bad Request");
-  await assert.rejects(
-    putGranola({ enabled: true }),
-    new Error("putGranola failed: 400"),
-  );
-});
-
-test("checkGranola resolves the check result on a 200", async () => {
-  reply(200, { ok: true });
-  assert.deepEqual(await checkGranola(), { ok: true });
-  assert.equal(calls[0]?.url, "/api/meetings/granola/check");
-  assert.equal(calls[0]?.init?.method, "POST");
-});
-
-test("checkGranola throws with the status only on a failure", async () => {
-  reply(500, {}, "Internal Server Error");
-  await assert.rejects(checkGranola(), new Error("checkGranola failed: 500"));
-});
-
-test("runGranola posts and resolves nothing, even on a 409", async () => {
-  reply(409, {});
-  assert.equal(await runGranola(), undefined);
-  assert.equal(calls[0]?.url, "/api/meetings/granola/run");
-  assert.equal(calls[0]?.init?.method, "POST");
 });

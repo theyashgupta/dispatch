@@ -6,7 +6,7 @@ import {
   resolveTheme,
   type Theme,
   type ThemePreference,
-} from "../lib/theme.js";
+} from "../../shared/theme.js";
 import { useMediaQuery } from "./useMediaQuery.js";
 
 const SWITCHING_ATTRIBUTE = "data-theme-switching";

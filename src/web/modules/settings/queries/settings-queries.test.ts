@@ -1,22 +1,29 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { QueryClient } from "@tanstack/react-query";
+import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import {
   disablePush,
   isPushSupported,
   refreshPushSubscription,
-  saveArchiveRetention,
   saveClaudeArgs,
   saveCleanupDelay,
   saveProfile,
   saveTerminalAppearance,
 } from "./settings-api.js";
 import {
-  archiveRetentionQueryOptions,
   claudeArgsQueryOptions,
   cleanupDelayQueryOptions,
-  linearStateMapQueryOptions,
+  disablePushMutationOptions,
+  disableRemoteMutationOptions,
+  enablePushMutationOptions,
+  enableRemoteMutationOptions,
   profileQueryOptions,
+  pushSubscriptionQueryOptions,
+  readPushEnvironment,
+  saveClaudeArgsMutationOptions,
+  saveCleanupDelayMutationOptions,
+  saveProfileMutationOptions,
+  saveTerminalAppearanceMutationOptions,
   settingsKeys,
   terminalAppearanceQueryOptions,
 } from "./settings-queries.js";
@@ -69,6 +76,10 @@ test("settingsKeys has the documented shape", () => {
     "settings",
     "archive-retention",
   ]);
+  assert.deepEqual(settingsKeys.pushSubscription, [
+    "settings",
+    "push-subscription",
+  ]);
 });
 
 const reads = [
@@ -100,15 +111,6 @@ const reads = [
     data: { claudeArgs: "claude-arg" },
   },
   {
-    name: "linearStateMapQueryOptions",
-    key: linearStateMapQueryOptions().queryKey,
-    run: () => newClient().fetchQuery(linearStateMapQueryOptions()),
-    expectedKey: ["settings", "linear-state-map"],
-    url: "/api/config/linear-state-map",
-    body: { stateMap: { todo: "s1" } },
-    data: { todo: "s1" },
-  },
-  {
     name: "profileQueryOptions",
     key: profileQueryOptions().queryKey,
     run: () => newClient().fetchQuery(profileQueryOptions()),
@@ -116,15 +118,6 @@ const reads = [
     url: "/api/config/profile",
     body: { name: "Ada" },
     data: { name: "Ada" },
-  },
-  {
-    name: "archiveRetentionQueryOptions",
-    key: archiveRetentionQueryOptions().queryKey,
-    run: () => newClient().fetchQuery(archiveRetentionQueryOptions()),
-    expectedKey: ["settings", "archive-retention"],
-    url: "/api/config/archive-retention",
-    body: { archiveRetentionDays: 30 },
-    data: { archiveRetentionDays: 30 },
   },
 ];
 
@@ -158,13 +151,6 @@ const savers = [
     url: "/api/config/claude-args",
     body: { claudeArgs: "claude-arg" },
     fallback: "Couldn't save Claude arguments.",
-  },
-  {
-    name: "saveArchiveRetention",
-    call: () => saveArchiveRetention(30),
-    url: "/api/config/archive-retention",
-    body: { archiveRetentionDays: 30 },
-    fallback: "Couldn't save archive retention.",
   },
   {
     name: "saveProfile",
@@ -307,4 +293,218 @@ test("refreshPushSubscription does nothing when the marker is off", async () => 
   await refreshPushSubscription();
   assert.equal(registered, false);
   assert.equal(calls.length, 0);
+});
+
+const writes = [
+  {
+    name: "cleanup delay",
+    key: settingsKeys.cleanupDelay,
+    before: { cleanupDelayDays: 3 },
+    after: { cleanupDelayDays: 7 },
+    run: (client: QueryClient) =>
+      new MutationObserver(
+        client,
+        saveCleanupDelayMutationOptions(client),
+      ).mutate(7),
+  },
+  {
+    name: "Claude arguments",
+    key: settingsKeys.claudeArgs,
+    before: { claudeArgs: "old-arg" },
+    after: { claudeArgs: "new-arg" },
+    run: (client: QueryClient) =>
+      new MutationObserver(
+        client,
+        saveClaudeArgsMutationOptions(client),
+      ).mutate("new-arg"),
+  },
+  {
+    name: "terminal appearance",
+    key: settingsKeys.terminal,
+    before: { ...appearance, fontSize: 11 },
+    after: appearance,
+    run: (client: QueryClient) =>
+      new MutationObserver(
+        client,
+        saveTerminalAppearanceMutationOptions(client),
+      ).mutate(appearance),
+  },
+];
+
+for (const write of writes) {
+  test(`an accepted ${write.name} save writes the saved value into the cache`, async () => {
+    const client = newClient();
+    client.setQueryData(write.key, write.before);
+    reply(200, {});
+    assert.deepEqual(await write.run(client), { ok: true });
+    assert.deepEqual(client.getQueryData(write.key), write.after);
+  });
+
+  test(`a refused ${write.name} save resolves the message and leaves the cache alone`, async () => {
+    const client = newClient();
+    client.setQueryData(write.key, write.before);
+    reply(400, { error: "field x is bad" }, "Bad Request");
+    assert.deepEqual(await write.run(client), {
+      ok: false,
+      error: "field x is bad",
+    });
+    assert.deepEqual(client.getQueryData(write.key), write.before);
+  });
+
+  test(`a failed ${write.name} save rejects and leaves the cache alone`, async () => {
+    const client = newClient();
+    client.setQueryData(write.key, write.before);
+    reply(500, {}, "Internal Server Error");
+    await assert.rejects(write.run(client));
+    assert.deepEqual(client.getQueryData(write.key), write.before);
+  });
+}
+
+test("an accepted profile save writes the stored profile into the cache", async () => {
+  const client = newClient();
+  client.setQueryData(settingsKeys.profile, { name: "Old" });
+  reply(200, { name: "Ada", handles: ["ada"] });
+  const result = await new MutationObserver(
+    client,
+    saveProfileMutationOptions(client),
+  ).mutate({ name: " Ada " });
+  assert.deepEqual(result, {
+    ok: true,
+    profile: { name: "Ada", handles: ["ada"] },
+  });
+  assert.deepEqual(client.getQueryData(settingsKeys.profile), {
+    name: "Ada",
+    handles: ["ada"],
+  });
+});
+
+test("a refused profile save resolves the message and leaves the cache alone", async () => {
+  const client = newClient();
+  client.setQueryData(settingsKeys.profile, { name: "Old" });
+  reply(400, { error: "name is too long" }, "Bad Request");
+  const result = await new MutationObserver(
+    client,
+    saveProfileMutationOptions(client),
+  ).mutate({ name: "x" });
+  assert.deepEqual(result, { ok: false, error: "name is too long" });
+  assert.deepEqual(client.getQueryData(settingsKeys.profile), { name: "Old" });
+});
+
+test("a failed profile save rejects and leaves the cache alone", async () => {
+  const client = newClient();
+  client.setQueryData(settingsKeys.profile, { name: "Old" });
+  reply(500, {}, "Internal Server Error");
+  await assert.rejects(
+    new MutationObserver(client, saveProfileMutationOptions(client)).mutate({
+      name: "x",
+    }),
+    new Error("saveProfile failed: 500 Internal Server Error"),
+  );
+  assert.deepEqual(client.getQueryData(settingsKeys.profile), { name: "Old" });
+});
+
+test("the remote mutations post to the enable and disable routes", async () => {
+  const client = newClient();
+  reply(200, {});
+  await new MutationObserver(client, enableRemoteMutationOptions).mutate();
+  await new MutationObserver(client, disableRemoteMutationOptions).mutate();
+  assert.deepEqual(
+    calls.map((call) => [call.url, call.init?.method]),
+    [
+      ["/api/remote/enable", "POST"],
+      ["/api/remote/disable", "POST"],
+    ],
+  );
+});
+
+test("a failed remote enable rejects with the status", async () => {
+  reply(500, {}, "Internal Server Error");
+  await assert.rejects(
+    new MutationObserver(newClient(), enableRemoteMutationOptions).mutate(),
+    new Error("enableRemote failed: 500 Internal Server Error"),
+  );
+});
+
+function stubPushBrowser(subscribed: boolean): void {
+  stubGlobals({
+    window: { Notification: {}, PushManager: {} },
+    navigator: {
+      userAgent: "Mozilla/5.0",
+      serviceWorker: {
+        getRegistration: () =>
+          Promise.resolve({
+            pushManager: {
+              getSubscription: () =>
+                Promise.resolve(
+                  subscribed
+                    ? {
+                        endpoint: "https://push.example/e1",
+                        unsubscribe: () => Promise.resolve(true),
+                      }
+                    : null,
+                ),
+            },
+          }),
+      },
+    },
+    localStorage: { removeItem: () => undefined },
+  });
+}
+
+test("pushSubscriptionQueryOptions answers whether a subscription exists", async () => {
+  const options = pushSubscriptionQueryOptions();
+  assert.deepEqual(options.queryKey, ["settings", "push-subscription"]);
+  stubPushBrowser(true);
+  assert.equal(await newClient().fetchQuery(options), true);
+  stubPushBrowser(false);
+  assert.equal(await newClient().fetchQuery(options), false);
+});
+
+test("pushSubscriptionQueryOptions answers false when push is unsupported", async () => {
+  stubGlobals({ window: {}, navigator: {} });
+  assert.equal(
+    await newClient().fetchQuery(pushSubscriptionQueryOptions()),
+    false,
+  );
+});
+
+test("a disable unsubscribes, posts the endpoint and re-reads the subscription", async () => {
+  const client = newClient();
+  stubPushBrowser(true);
+  await client.fetchQuery(pushSubscriptionQueryOptions());
+  reply(200, {});
+  assert.equal(
+    await new MutationObserver(
+      client,
+      disablePushMutationOptions(client),
+    ).mutate(),
+    true,
+  );
+  assert.equal(calls[0]?.url, "/api/push/unsubscribe");
+  assert.equal(client.getQueryData(settingsKeys.pushSubscription), true);
+});
+
+test("an enable that fails resolves a typed failure and still re-reads the subscription", async () => {
+  const client = newClient();
+  stubPushBrowser(true);
+  await client.fetchQuery(pushSubscriptionQueryOptions());
+  assert.equal(client.getQueryData(settingsKeys.pushSubscription), true);
+  stubPushBrowser(false);
+  const result = await new MutationObserver(
+    client,
+    enablePushMutationOptions(client),
+  ).mutate();
+  assert.deepEqual(result, { ok: false, error: "generic" });
+  assert.equal(client.getQueryData(settingsKeys.pushSubscription), false);
+});
+
+test("readPushEnvironment reports support and the iOS check", () => {
+  stubGlobals({
+    window: { Notification: {}, PushManager: {} },
+    navigator: {
+      userAgent: "Mozilla/5.0 (iPhone)",
+      serviceWorker: {},
+    },
+  });
+  assert.deepEqual(readPushEnvironment(), { supported: true, ios: true });
 });

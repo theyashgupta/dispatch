@@ -6,7 +6,7 @@ import {
   runBulkResume,
   type ActionServices,
 } from "../../lib/actions.js";
-import { nowMs } from "../../lib/format-age.js";
+import { nowMs } from "../../../shared/format-age.js";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
 import { SESSIONS_SHORTCUTS } from "../../lib/shortcuts.js";
 import { useShortcuts } from "../../hooks/useShortcuts.js";

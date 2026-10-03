@@ -7,7 +7,6 @@ import type { TodayPage } from "@/features/today";
 import type { SlackPage } from "@/features/slack/SlackPage";
 import type { InboxView } from "@/features/inbox";
 import type { TicketsPage } from "@/features/tickets";
-import type { SettingsScreen } from "@/features/settings";
 import type { ActivityPage } from "@/features/activity";
 import type { AccountsPage } from "@/features/accounts";
 import type { SessionsPage } from "@/features/sessions";
@@ -19,6 +18,8 @@ import type { MeetingsPage } from "@/features/meetings";
 import type { WorkspacesPage } from "@/features/workspaces";
 import type { AskPage } from "@/features/ask";
 import type { FlowPage } from "@/features/flow";
+import type { SettingsView } from "@/modules/settings";
+import type { ConnectionsView } from "@/modules/connections";
 import type { Page } from "../../shared/route.js";
 
 export interface AppPages extends Record<Page, object> {
@@ -29,7 +30,8 @@ export interface AppPages extends Record<Page, object> {
   slack: Omit<ComponentProps<typeof SlackPage>, "selectedId">;
   inbox: ComponentProps<typeof InboxView>;
   tickets: ComponentProps<typeof TicketsPage>;
-  settings: Omit<ComponentProps<typeof SettingsScreen>, "tab">;
+  settings: Omit<ComponentProps<typeof SettingsView>, "tabId" | "connections"> &
+    ComponentProps<typeof ConnectionsView>;
   activity: ComponentProps<typeof ActivityPage>;
   accounts: ComponentProps<typeof AccountsPage>;
   sessions: ComponentProps<typeof SessionsPage>;

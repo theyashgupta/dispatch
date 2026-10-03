@@ -1,10 +1,5 @@
 import { queryOptions, useQuery } from "@tanstack/react-query";
-import {
-  browseDirectory,
-  discoverFolder,
-  getWorkspaceFolders,
-  getWorkspaces,
-} from "./workspaces-api.js";
+import { discoverFolder, getWorkspaces } from "./workspaces-api.js";
 
 export const workspacesKeys = {
   all: ["workspaces"] as const,
@@ -27,24 +22,10 @@ export function workspacesQueryOptions(fresh = false) {
   });
 }
 
-export function workspaceFoldersQueryOptions() {
-  return queryOptions({
-    queryKey: workspacesKeys.folders,
-    queryFn: getWorkspaceFolders,
-  });
-}
-
 export function discoverFolderQueryOptions(path: string) {
   return queryOptions({
     queryKey: workspacesKeys.discover(path),
     queryFn: () => discoverFolder(path),
-  });
-}
-
-export function browseDirectoryQueryOptions(path?: string) {
-  return queryOptions({
-    queryKey: workspacesKeys.browse(path),
-    queryFn: () => browseDirectory(path),
   });
 }
 

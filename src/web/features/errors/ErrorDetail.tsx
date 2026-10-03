@@ -7,7 +7,7 @@ import {
   resolveSentryIssue,
   snoozeItem,
 } from "../../lib/api.js";
-import { formatAge, nowMs } from "../../lib/format-age.js";
+import { formatAge, nowMs } from "../../../shared/format-age.js";
 import {
   exceptionLine,
   frameLabel,

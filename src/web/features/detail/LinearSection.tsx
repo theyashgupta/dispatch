@@ -10,7 +10,7 @@ import {
 } from "../../lib/api.js";
 import { isWebUrl } from "../../lib/actions.js";
 import { moveErrorCopy } from "./move-error-copy.js";
-import { formatAge, nowMs } from "../../lib/format-age.js";
+import { formatAge, nowMs } from "../../../shared/format-age.js";
 import { Button } from "../../primitives/Button.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Collapsible } from "../../primitives/Collapsible.js";

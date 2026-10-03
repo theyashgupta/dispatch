@@ -3,7 +3,7 @@ import { ChevronDown } from "lucide-react";
 import type { ActivityEvent } from "../../../shared/types.js";
 import { fetchEvents } from "../../lib/api.js";
 import { describeEvent } from "../../lib/event-copy.js";
-import { formatAge } from "../../lib/format-age.js";
+import { formatAge } from "../../../shared/format-age.js";
 import { ActivityItem } from "../../primitives/ActivityItem.js";
 import { IconButton } from "../../primitives/IconButton.js";
 

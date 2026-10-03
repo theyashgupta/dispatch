@@ -10,7 +10,7 @@ import {
   openEditor,
   removeWorkspaceFolder,
 } from "../../lib/api.js";
-import { nowMs } from "../../lib/format-age.js";
+import { nowMs } from "../../../shared/format-age.js";
 import { Button } from "../../primitives/Button.js";
 import { Collapsible } from "../../primitives/Collapsible.js";
 import { Notice } from "../../primitives/Notice.js";

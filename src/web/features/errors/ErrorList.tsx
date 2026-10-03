@@ -1,5 +1,5 @@
 import { CAROUSEL_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
-import { formatAge, nowMs } from "../../lib/format-age.js";
+import { formatAge, nowMs } from "../../../shared/format-age.js";
 import { Chip } from "../../primitives/Chip.js";
 import { ListGroup, RowTime } from "../../primitives/ListGroup.js";
 import { ListRow } from "../../primitives/ListRow.js";
