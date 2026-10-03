@@ -1,5 +1,5 @@
 import type { ErrorRequestHandler } from "express";
-import { HttpError } from "../services/domain/errors.js";
+import { HttpError, InternalError } from "../services/domain/errors.js";
 
 /**
  * Turn a typed `HttpError` into its status and the `{ error: code, ...details }` body.
@@ -18,3 +18,28 @@ export const httpErrorHandler: ErrorRequestHandler = (err, _req, res, next) => {
   body.error = err.code;
   res.status(err.status).json(body);
 };
+
+/** The first line of an error message, which never carries request text, for a log line. */
+export function firstLine(err: unknown): string {
+  return err instanceof Error ? err.message.split("\n")[0] : "unknown error";
+}
+
+/**
+ * Run a service call, turning an unexpected throw into `InternalError(code)`.
+ *
+ * @remarks A typed `HttpError` passes through untouched. When `label` is given, the failure's first
+ * line is logged under it before the 500.
+ */
+export async function orFail<T>(
+  code: string,
+  run: () => Promise<T> | T,
+  label?: string,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    if (label !== undefined) console.warn(label, firstLine(err));
+    throw new InternalError(code);
+  }
+}

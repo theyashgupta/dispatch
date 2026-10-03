@@ -43,7 +43,7 @@ const { readMacEvents } = await import("../adapters/calendar-mac.js");
 const { stopPollers } = await import("../adapters/poller.js");
 const { resolveIcalCredential } =
   await import("../services/orchestration/calendar.js");
-const { createKey, setValue } = await import("../services/domain/vault.js");
+const { createKey, setValue } = await import("../services/infra/vault.js");
 const { calendarRouter } = await import("./calendar.route.js");
 
 const config: import("../../shared/types.js").Config = {

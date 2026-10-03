@@ -17,7 +17,7 @@ const { setOrchestrationConfig, getOrchestrationConfig } =
 const { rebuildSources } = await import("../adapters/source-gateway.js");
 const { stopPollers } = await import("../adapters/poller.js");
 const { createKey, listKeys, readCurrent, clearValue } =
-  await import("../services/domain/vault.js");
+  await import("../services/infra/vault.js");
 
 const app = express();
 app.use("/api", express.json(), connectionRouter);

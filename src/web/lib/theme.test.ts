@@ -14,7 +14,7 @@ import {
 } from "./theme.js";
 
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const SHELLS = ["index.html", "viewer.html"];
+const SHELLS = ["index.html", "viewer.html", "gallery.html"];
 const STORED_VALUES = ["system", "light", "dark", null, "garbage", "LIGHT", ""];
 
 /** Returns the text of the pre-paint script of an html shell, one trimmed line per line. */

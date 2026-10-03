@@ -1,4 +1,6 @@
 import { Router } from "express";
+import { HttpError } from "../services/domain/errors.js";
+import { httpErrorHandler } from "./error-handler.js";
 import { getHooksRuntime } from "../services/infra/config-holder.js";
 import {
   disableTunnel,
@@ -17,10 +19,7 @@ export const remoteRouter = Router();
 
 remoteRouter.post("/remote/enable", (_req, res) => {
   const port = getHooksRuntime()?.port;
-  if (port == null) {
-    res.status(503).json({ error: "server not ready" });
-    return;
-  }
+  if (port == null) throw new HttpError(503, "server not ready");
   void enableTunnel(port);
   res.status(202).json(getTunnelState());
 });
@@ -33,3 +32,5 @@ remoteRouter.post("/remote/disable", (_req, res) => {
 remoteRouter.get("/remote", (_req, res) => {
   res.status(200).json(getTunnelState());
 });
+
+remoteRouter.use(httpErrorHandler);

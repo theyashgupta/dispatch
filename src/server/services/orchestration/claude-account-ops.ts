@@ -9,7 +9,7 @@ import {
   listAccounts,
   readRegistry,
   removeAccount,
-} from "../domain/claude-accounts.js";
+} from "./claude-accounts.js";
 import { forgetUsage, getUsage } from "./claude-usage.js";
 
 const IDENTITY_TTL_MS = 5 * 60 * 1000;

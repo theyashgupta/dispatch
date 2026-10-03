@@ -5,7 +5,7 @@ import path from "node:path";
 import { isolateEnv } from "../../test-support/fixtures.js";
 
 const env = isolateEnv();
-const accounts = await import("../domain/claude-accounts.js");
+const accounts = await import("./claude-accounts.js");
 const login = await import("./claude-login.js");
 
 const registryPath = path.join(

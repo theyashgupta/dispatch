@@ -1,4 +1,7 @@
 import { Router } from "express";
+import { httpErrorHandler } from "./error-handler.js";
+import { parseOrThrow } from "./parse-input.js";
+import { fromResult } from "./schema-primitives.js";
 import {
   getOrchestrationConfig,
   updateProfile,
@@ -13,16 +16,17 @@ import { parseProfile } from "../../shared/profile.js";
  */
 export const profileRouter = Router();
 
+/** Run the shared `parseProfile` as a schema so its messages stay the client error codes. */
+const profileSchema = fromResult(parseProfile);
+
 profileRouter.get("/config/profile", (_req, res) => {
   res.status(200).json(getOrchestrationConfig()?.profile ?? {});
 });
 
 profileRouter.put("/config/profile", (req, res) => {
-  const result = parseProfile(req.body);
-  if (!result.ok) {
-    res.status(400).json({ error: result.error });
-    return;
-  }
-  updateProfile(result.value);
-  res.status(200).json(result.value);
+  const profile = parseOrThrow(profileSchema, req.body);
+  updateProfile(profile);
+  res.status(200).json(profile);
 });
+
+profileRouter.use(httpErrorHandler);

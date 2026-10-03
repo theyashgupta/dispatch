@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { store } from "../store/board.store.js";
+import { boardRepository as store } from "../store/board-repository.js";
 import type {
   ActivityEvent,
   BoardSnapshot,

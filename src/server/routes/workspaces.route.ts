@@ -1,18 +1,26 @@
 import { Router } from "express";
+import { httpErrorHandler } from "./error-handler.js";
+import { z } from "zod";
+import { parseOrThrow } from "./parse-input.js";
 import { buildInventory } from "../services/orchestration/workspace-inventory.js";
+import { InternalError } from "../services/domain/errors.js";
 
 export const workspacesRouter = Router();
 
-workspacesRouter.get("/workspaces", (req, res) => {
-  const fresh = req.query.fresh;
-  if (fresh !== undefined && fresh !== "1") {
-    res.status(400).json({ error: "fresh must be 1" });
-    return;
-  }
-  buildInventory({ fresh: fresh === "1" })
-    .then((inventory) => res.status(200).json(inventory))
-    .catch((err: unknown) => {
+const querySchema = z.object(
+  { fresh: z.literal("1", "fresh must be 1").optional() },
+  "fresh must be 1",
+);
+
+workspacesRouter.get("/workspaces", async (req, res) => {
+  const { fresh } = parseOrThrow(querySchema, req.query);
+  const inventory = await buildInventory({ fresh: fresh === "1" }).catch(
+    (err: unknown) => {
       console.error("[workspaces] inventory failed:", err);
-      res.status(500).json({ error: "inventory failed" });
-    });
+      throw new InternalError("inventory failed");
+    },
+  );
+  res.status(200).json(inventory);
 });
+
+workspacesRouter.use(httpErrorHandler);

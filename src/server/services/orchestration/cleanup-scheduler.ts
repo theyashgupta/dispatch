@@ -1,4 +1,4 @@
-import { store } from "../../store/board.store.js";
+import { boardRepository as store } from "../../store/board-repository.js";
 import { cleanupWorkspace } from "./cleanup.js";
 import { deleteArchivedGroup } from "./archive-delete.js";
 
