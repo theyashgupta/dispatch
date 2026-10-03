@@ -1,5 +1,5 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { ErrorsPage } from "@/features/errors";
+import { ErrorsView } from "@/modules/errors";
 import { useAppState } from "@/components/AppState";
 
 export const Route = createLazyFileRoute("/errors/{-$id}")({
@@ -9,5 +9,5 @@ export const Route = createLazyFileRoute("/errors/{-$id}")({
 function ErrorsRoute() {
   const props = useAppState().errors;
   const { id } = Route.useParams();
-  return <ErrorsPage {...props} selectedKey={id ?? null} />;
+  return <ErrorsView {...props} selectedKey={id ?? null} />;
 }

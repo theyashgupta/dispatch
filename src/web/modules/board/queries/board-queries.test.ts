@@ -7,7 +7,6 @@ import {
   tunnelKeys,
 } from "@/queries/board-snapshot-queries";
 import {
-  createLocalTicket,
   generateTicketDraft,
   getCard,
   getCardComments,
@@ -16,6 +15,7 @@ import {
   syncCardToLinear,
   unwindGroup,
 } from "./board-api.js";
+import { createLocalTicket } from "@/queries/cards-api";
 import {
   boardKeys,
   cardCommentsQueryOptions,

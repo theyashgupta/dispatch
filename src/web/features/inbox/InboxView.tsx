@@ -22,8 +22,8 @@ import {
   type InboxRowModel,
 } from "../../lib/actions.js";
 import { nowMs } from "../../../shared/format-age.js";
-import { INBOX_SHORTCUTS } from "../../lib/shortcuts.js";
-import { SNOOZE_LABELS, SNOOZE_PRESETS } from "../../lib/snooze.js";
+import { INBOX_SHORTCUTS } from "../../../shared/shortcuts.js";
+import { SNOOZE_LABELS, SNOOZE_PRESETS } from "../../../shared/snooze.js";
 import { Button } from "../../primitives/Button.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Collapsible } from "../../primitives/Collapsible.js";
