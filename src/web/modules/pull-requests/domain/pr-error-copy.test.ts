@@ -40,7 +40,8 @@ test("a GitHub message is appended to the sentence", () => {
 });
 
 test("a single sign-on link replaces the GitHub message", () => {
-  const text = prFailureText("sso-required", "ignored", "https://sso.example");
-  assert.ok(text.includes("https://sso.example"));
-  assert.ok(!text.includes("ignored"));
+  assert.equal(
+    prFailureText("sso-required", "ignored", "https://sso.example"),
+    "GitHub needs you to authorize the token for this organization's SAML single sign-on. Authorize it at https://sso.example",
+  );
 });
