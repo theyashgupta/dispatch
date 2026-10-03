@@ -1,5 +1,5 @@
-import type { Item, SlackThread } from "../../shared/types.js";
-import { fenceUntrusted, inlineUntrusted } from "../../shared/untrusted.js";
+import type { Item, SlackThread } from "./types.js";
+import { fenceUntrusted, inlineUntrusted } from "./untrusted.js";
 
 const MESSAGE_MAX = 3000;
 

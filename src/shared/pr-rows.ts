@@ -1,4 +1,4 @@
-import type { Card, Item } from "../../shared/types.js";
+import type { Card, Item } from "./types.js";
 
 export type PrCategory = "review" | "mention" | "assigned" | "yours";
 
@@ -39,17 +39,39 @@ const PR_URL = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/;
 
 const CATEGORIES = new Set<string>(["review", "mention", "assigned"]);
 
-/** Parse a GitHub pull request URL into owner, name and number, or null. */
+/**
+ * Parse a GitHub pull request URL into owner, name and number, or null.
+ *
+ * @remarks A `.` or `..` owner or name is refused, so the URL cannot change an API path.
+ */
 export function parsePrUrl(
   url: string,
 ): { owner: string; name: string; number: number } | null {
   const m = PR_URL.exec(url);
-  return m ? { owner: m[1], name: m[2], number: Number(m[3]) } : null;
+  if (!m || [m[1], m[2]].some((part) => part === "." || part === "..")) {
+    return null;
+  }
+  return { owner: m[1], name: m[2], number: Number(m[3]) };
 }
 
 /** The row key a pull request has on this page and in the route. */
 export function prKey(owner: string, name: string, number: number): string {
   return `github:${owner}/${name}#${number}`;
+}
+
+/**
+ * Parse a row key from `prKey` back into owner, name and number, or null.
+ *
+ * @remarks A `.` or `..` owner or name is refused, so the key cannot change an API path.
+ */
+export function parsePrKey(
+  key: string,
+): { owner: string; name: string; number: number } | null {
+  const m = /^github:([^/]+)\/([^#]+)#(\d+)$/.exec(key);
+  if (!m || [m[1], m[2]].some((part) => part === "." || part === "..")) {
+    return null;
+  }
+  return { owner: m[1], name: m[2], number: Number(m[3]) };
 }
 
 /**

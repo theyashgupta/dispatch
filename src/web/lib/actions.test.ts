@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { isWebUrl } from "../../shared/web-url.js";
 import {
   INBOX_ACTIONS,
   actionsFor,
-  isWebUrl,
   markDone,
   bulkOutcomeCopy,
   runAction,

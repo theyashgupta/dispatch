@@ -1,5 +1,5 @@
-import type { PrDetail, SentryIssueDetail } from "../../shared/types.js";
-import { fenceUntrusted } from "../../shared/untrusted.js";
+import type { PrDetail, SentryIssueDetail } from "./types.js";
+import { fenceUntrusted } from "./untrusted.js";
 
 const MARKER = /DISPATCH_STATUS:/gi;
 

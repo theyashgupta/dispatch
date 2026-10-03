@@ -1,5 +1,8 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { resolveShortcut, type ShortcutBinding } from "../lib/shortcuts.js";
+import {
+  resolveShortcut,
+  type ShortcutBinding,
+} from "../../shared/shortcuts.js";
 import { modalDepth } from "../primitives/Modal.js";
 
 /**

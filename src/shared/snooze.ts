@@ -1,4 +1,4 @@
-import type { Item } from "../../shared/types.js";
+import type { Item } from "./types.js";
 
 export const SNOOZE_PRESETS = ["1h", "4h", "tomorrow", "monday"] as const;
 export type SnoozePreset = (typeof SNOOZE_PRESETS)[number];

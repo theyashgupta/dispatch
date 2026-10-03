@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Card, Item, PrInfo } from "../../shared/types.js";
-import { buildPrRows, groupPrRows, parsePrUrl } from "./pr-rows.js";
+import type { Card, Item, PrInfo } from "./types.js";
+import { buildPrRows, groupPrRows, parsePrKey, parsePrUrl } from "./pr-rows.js";
 
 function item(
   number: number,
@@ -181,4 +181,23 @@ test("parsePrUrl reads github.com pull URLs only", () => {
   });
   assert.equal(parsePrUrl("https://github.com/acme/api/pull/12/files"), null);
   assert.equal(parsePrUrl("http://github.com/acme/api/pull/12"), null);
+});
+
+test("parsePrUrl refuses dot segments as owner or name", () => {
+  assert.equal(parsePrUrl("https://github.com/../api/pull/12"), null);
+  assert.equal(parsePrUrl("https://github.com/acme/../pull/12"), null);
+  assert.equal(parsePrUrl("https://github.com/./././pull/12"), null);
+  assert.equal(parsePrUrl("https://github.com/./api/pull/12"), null);
+});
+
+test("parsePrKey reads a row key and refuses dot segments", () => {
+  assert.deepEqual(parsePrKey("github:acme/api#7"), {
+    owner: "acme",
+    name: "api",
+    number: 7,
+  });
+  assert.equal(parsePrKey("github:../api#7"), null);
+  assert.equal(parsePrKey("github:acme/..#7"), null);
+  assert.equal(parsePrKey("github:./.#7"), null);
+  assert.equal(parsePrKey("acme/api#7"), null);
 });

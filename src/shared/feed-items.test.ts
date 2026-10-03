@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Item } from "../../shared/types.js";
-import { feedItems, isListedError } from "./feed-items.js";
+import type { Item } from "./types.js";
+import { feedItems, isListedError, isSentryIssueId } from "./feed-items.js";
 
 function item(id: string, source: string): Item {
   return {
@@ -57,4 +57,11 @@ test("only a Sentry item that is neither done nor snoozed is a listed error", ()
   assert.equal(isListedError({ ...base, state: "done" }), false);
   assert.equal(isListedError({ ...base, state: "snoozed" }), false);
   assert.equal(isListedError({ ...base, source: "github" }), false);
+});
+
+test("a Sentry issue id is digits only", () => {
+  assert.equal(isSentryIssueId("99999"), true);
+  for (const id of ["", "..", ".", "1/2", "1a", "-1"]) {
+    assert.equal(isSentryIssueId(id), false);
+  }
 });

@@ -1,4 +1,4 @@
-import type { Card, SettableItemState } from "../../../../shared/types.js";
+import type { Card, SettableItemState } from "../../shared/types.js";
 import { http } from "@/lib/http";
 
 async function postItem<T = unknown>(

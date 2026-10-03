@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Card, Column, Item } from "../../shared/types.js";
-import { feedItems } from "./feed-items.js";
+import { feedItems } from "../../shared/feed-items.js";
 import { clampCount, rankToday, topPicks } from "./p0.js";
 
 const NOW = new Date(2026, 8, 25, 10, 0, 0).getTime();
