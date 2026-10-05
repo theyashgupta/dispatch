@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Board switcher sketch</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="sketch.css" />
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var theme = new URLSearchParams(location.search).get("theme");
+        if (theme === "light") root.setAttribute("data-theme", "light");
+        else if (theme === "dark") root.removeAttribute("data-theme");
+        document.addEventListener("DOMContentLoaded", function () {
+          var button = document.getElementById("theme-toggle");
+          function sync() {
+            button.textContent =
+              root.getAttribute("data-theme") === "light"
+                ? "Dark theme"
+                : "Light theme";
+          }
+          sync();
+          button.addEventListener("click", function () {
+            if (root.getAttribute("data-theme") === "light")
+              root.removeAttribute("data-theme");
+            else root.setAttribute("data-theme", "light");
+            sync();
+          });
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="sketch-bar">
+      <p>Board switcher, populated state</p>
+      <button type="button" id="theme-toggle" class="btn btn-outline">
+        Light theme
+      </button>
+    </div>
+
+    <section class="frame" aria-labelledby="f1">
+      <h2 class="frame-title" id="f1">
+        Frame 1: Switcher menu open in the sidebar header
+      </h2>
+      <div class="frame-box">
+        <div class="shell shell-sheet">
+          <aside class="sidebar" aria-label="Sidebar">
+            <div class="sidebar-head">
+              <div class="brand">
+                <span class="brand-glyph" aria-hidden="true">◆</span>
+                <span class="brand-word">DISPATCH</span>
+              </div>
+              <div class="switcher">
+                <button
+                  type="button"
+                  class="switch-trigger"
+                  aria-haspopup="menu"
+                  aria-expanded="true"
+                  aria-label="Switch board, current board Dispatch"
+                >
+                  <span>Dispatch</span>
+                  <span aria-hidden="true">▾</span>
+                </button>
+                <div class="tip">
+                  <span class="tooltip" role="tooltip">Switch board (B)</span>
+                  <kbd class="kbd">B</kbd>
+                </div>
+                <div class="menu menu-pop" role="menu">
+                  <div
+                    class="menu-item"
+                    role="menuitemradio"
+                    aria-checked="true"
+                  >
+                    <span class="menu-check" aria-hidden="true">✓</span>
+                    <span class="menu-item-label">Dispatch</span>
+                    <span class="mono muted">LOCAL</span>
+                    <span class="badge" aria-label="2 items need attention"
+                      >2</span
+                    >
+                  </div>
+                  <div
+                    class="menu-item"
+                    role="menuitemradio"
+                    aria-checked="false"
+                  >
+                    <span class="menu-check" aria-hidden="true"></span>
+                    <span class="menu-item-label">Platform</span>
+                    <span class="mono muted">PLAT</span>
+                  </div>
+                  <div class="menu-sep" role="separator"></div>
+                  <a class="menu-item" role="menuitem" href="#"
+                    >Manage boards</a
+                  >
+                </div>
+              </div>
+            </div>
+            <nav class="nav" aria-label="Main">
+              <div class="nav-label">Home</div>
+              <a class="nav-row" href="#">Today</a>
+              <a class="nav-row" href="#">Inbox</a>
+              <a class="nav-row" href="#">Ask</a>
+              <div class="nav-label">Work</div>
+              <a class="nav-row" href="#" aria-current="page">Board</a>
+              <a class="nav-row" href="#">Dashboard</a>
+              <a class="nav-row" href="#">Sessions</a>
+              <a class="nav-row" href="#">Workspace</a>
+              <a class="nav-row" href="#">Activity</a>
+            </nav>
+          </aside>
+
+          <div class="main">
+            <header class="page-header">
+              <div class="page-title">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-icon menu-btn"
+                  aria-label="Open menu"
+                >
+                  ☰
+                </button>
+                <h1>Board · Dispatch</h1>
+              </div>
+            </header>
+            <div class="toolbar">
+              <input
+                class="input"
+                placeholder="Search tickets…"
+                aria-label="Search tickets"
+              />
+            </div>
+            <div class="cols">
+              <section class="col" aria-label="To Do">
+                <div class="col-head">
+                  <span>To Do</span><span class="badge">1</span>
+                </div>
+                <article class="tcard">
+                  <span class="mono muted">LOCAL-76</span>
+                  <span class="tcard-title">
+                    Detail panel, Sessions and Workspace modules with the
+                    terminal invariant
+                  </span>
+                </article>
+              </section>
+              <section class="col" aria-label="In Progress">
+                <div class="col-head col-progress">
+                  <span>In Progress</span><span class="badge">1</span>
+                </div>
+                <article class="tcard">
+                  <span class="mono muted">LOCAL-75</span>
+                  <span class="tcard-title">
+                    Board module on dnd-kit with shadcn Card and Badge
+                  </span>
+                </article>
+              </section>
+              <section class="col" aria-label="Needs Input">
+                <div class="col-head col-input">
+                  <span>Needs Input</span><span class="badge">0</span>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="frame" aria-labelledby="f2">
+      <h2 class="frame-title" id="f2">Frame 2: Command palette open</h2>
+      <div class="frame-box">
+        <div class="scrim">
+          <div class="cmd" role="dialog" aria-label="Command palette">
+            <input
+              class="input"
+              placeholder="Type a command"
+              aria-label="Type a command"
+            />
+            <div class="cmd-group" role="listbox" aria-labelledby="cmd-boards">
+              <div class="cmd-heading" id="cmd-boards">Boards</div>
+              <div class="cmd-item" role="option" aria-selected="true">
+                Switch to board Platform
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </body>
+</html>
