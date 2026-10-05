@@ -23,6 +23,25 @@ export type RunClaudeOutcome =
 const inFlight = new Set<string>();
 
 /**
+ * Run `fn` under the card lock, or return `busy` while a start, relaunch or move holds it.
+ *
+ * @remarks Run Claude and the account move share it because two overlapping `send-keys -l`
+ * interleave on one shell line.
+ */
+export async function withCardLock<T>(
+  cardId: string,
+  fn: () => Promise<T>,
+): Promise<T | "busy"> {
+  if (inFlight.has(cardId) || store.isStarting(cardId)) return "busy";
+  inFlight.add(cardId);
+  try {
+    return await fn();
+  } finally {
+    inFlight.delete(cardId);
+  }
+}
+
+/**
  * Relaunch claude inside a card's live shell session: the Run Claude button, and the same
  * command the person could type by hand with the right flags.
  *
@@ -39,14 +58,9 @@ const inFlight = new Set<string>();
  */
 export async function runClaude(cardId: string): Promise<RunClaudeOutcome> {
   const card = store.getCard(cardId);
-  if (!card?.tmuxSession || !card.activeSessionId) return "no-session";
-  if (inFlight.has(cardId) || store.isStarting(cardId)) return "busy";
-  inFlight.add(cardId);
-  try {
-    return await relaunch(card, card.tmuxSession);
-  } finally {
-    inFlight.delete(cardId);
-  }
+  const tmuxSession = card?.tmuxSession;
+  if (!card || !tmuxSession || !card.activeSessionId) return "no-session";
+  return withCardLock(cardId, () => relaunch(card, tmuxSession));
 }
 
 async function relaunch(

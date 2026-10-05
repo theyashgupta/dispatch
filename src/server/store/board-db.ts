@@ -3,6 +3,7 @@ import path from "node:path";
 import { DISPATCH_DATA_DIR } from "./data-dir.js";
 import { DatabaseSync } from "node:sqlite";
 import type {
+  AccountActivityEvent,
   ActivityEvent,
   BoardSnapshot,
   Card,
@@ -105,7 +106,7 @@ export interface BoardDb {
   persist(
     cards: Card[],
     meta: BoardMeta,
-    events: Omit<ActivityEvent, "id">[],
+    events: Omit<ActivityEvent | AccountActivityEvent, "id">[],
     itemWrites?: ItemWrites,
   ): number[];
   importParsed(parsed: Partial<BoardSnapshot>): void;
@@ -579,7 +580,7 @@ export function openBoardDb(): BoardDb {
   function persistTxn(
     cards: Card[],
     meta: BoardMeta,
-    events: Omit<ActivityEvent, "id">[],
+    events: Omit<ActivityEvent | AccountActivityEvent, "id">[],
     itemWrites?: ItemWrites,
   ): number[] {
     return withTxn(db, () => {

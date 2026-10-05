@@ -6,6 +6,9 @@ export const REAL_LOGIN_OUTPUT = `Opening browser to sign in…\nIf the browser 
 export const REAL_INVALID_CODE_OUTPUT =
   "Paste code here if prompted > Invalid code. Please make sure the full code was copied.\n";
 
+export const REAL_REFUSED_CODE_OUTPUT =
+  "Login failed: Request failed with status code 400\n";
+
 export const REAL_AUTH_STATUS_JSON = `{
   "loggedIn": true,
   "authMethod": "claude.ai",

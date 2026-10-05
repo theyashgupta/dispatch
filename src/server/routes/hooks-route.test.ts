@@ -73,3 +73,18 @@ test("unknown token answers 401 invalid hook token", async () => {
   assert.equal(res.status, 401);
   assert.equal(await res.text(), '{"error":"invalid hook token"}');
 });
+
+test("UserPromptSubmit, Stop and StopFailure posts reach the turn state with the error field", async () => {
+  const { recordedTurnState } =
+    await import("../services/orchestration/session-turn.js");
+  await post(TOKEN, { hook_event_name: "UserPromptSubmit" });
+  assert.equal(recordedTurnState(card.id, sessionId), "busy");
+  await post(TOKEN, { hook_event_name: "Stop", last_assistant_message: "ok" });
+  assert.equal(recordedTurnState(card.id, sessionId), "idle");
+  const res = await post(TOKEN, {
+    hook_event_name: "StopFailure",
+    error: "rate_limit",
+  });
+  assert.equal(res.status, 204);
+  assert.equal(recordedTurnState(card.id, sessionId), "limit");
+});

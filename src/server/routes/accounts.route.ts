@@ -1,14 +1,19 @@
 import { Router } from "express";
-import { DEFAULT_CLAUDE_ACCOUNT_ID } from "../../shared/types.js";
+import {
+  DEFAULT_CLAUDE_ACCOUNT_ID,
+  type AccountSwitchResponse,
+} from "../../shared/types.js";
 import {
   getActiveAccountId,
   readRegistry,
   setActiveAccount,
 } from "../services/orchestration/claude-accounts.js";
 import {
+  listAccountSessions,
   listAccountSummaries,
   removeAccountAndLogout,
 } from "../services/orchestration/claude-account-ops.js";
+import { applyAccountChoice } from "../services/orchestration/session-account-apply.js";
 import {
   cancelLogin,
   getLoginView,
@@ -43,18 +48,26 @@ accountsRouter.get("/accounts", async (_req, res) => {
   const body = await orFail("accounts-read-failed", async () => ({
     activeId: getActiveAccountId(),
     accounts: await listAccountSummaries(),
+    sessions: await listAccountSessions(),
   }));
   res.status(200).json(body);
 });
 
 accountsRouter.put("/accounts/active", async (req, res) => {
-  const { id } = parseOrThrow(activeBodySchema, req.body);
+  const { id, applyToRunning } = parseOrThrow(activeBodySchema, req.body);
   const result = await orFail("accounts-write-failed", () =>
     setActiveAccount(id),
   );
   if (!result.ok) throw new NotFoundError(result.error);
   void refreshUsageManually(id).catch(() => undefined);
-  res.status(200).json({ activeId: getActiveAccountId() });
+  const applied = await orFail("accounts-apply-failed", () =>
+    applyAccountChoice(applyToRunning, id),
+  );
+  const body: AccountSwitchResponse = {
+    activeId: getActiveAccountId(),
+    ...applied,
+  };
+  res.status(200).json(body);
 });
 
 accountsRouter.get("/accounts/login", (_req, res) => {
