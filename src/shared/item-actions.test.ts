@@ -1,0 +1,511 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import {
+  INBOX_ACTIONS,
+  actionsFor,
+  isWebUrl,
+  markDone,
+  bulkOutcomeCopy,
+  runAction,
+  runBulkCleanup,
+  runBulkResume,
+  snoozeRow,
+  snoozeWithUndo,
+  syncSources,
+  type ActionContext,
+  type InboxRowModel,
+} from "./item-actions.js";
+import { askAboutQuestion } from "./ask.js";
+
+function row(extra: Partial<InboxRowModel> = {}): InboxRowModel {
+  return {
+    kind: "item",
+    id: "fake:a",
+    source: "fake",
+    title: "Review PR 42",
+    snippet: "",
+    priority: 80,
+    time: "2026-09-24T10:00:00.000Z",
+    unread: true,
+    url: "https://example.test/pr/42",
+    ...extra,
+  };
+}
+
+function ctx() {
+  const calls: string[] = [];
+  const prompts: string[] = [];
+  let undo: (() => Promise<void>) | null = null;
+  const context: ActionContext = {
+    api: {
+      promoteItem: async (id) => {
+        calls.push(`promote ${id}`);
+        return await Promise.resolve({ card: {} as never });
+      },
+      setItemState: async (id, state) => {
+        calls.push(`state ${id} ${state}`);
+        await Promise.resolve();
+      },
+      snoozeItem: async (id, until) => {
+        calls.push(`snooze ${id} ${until}`);
+        await Promise.resolve();
+      },
+      moveCard: async (id, column) => {
+        calls.push(`move ${id} ${column}`);
+        await Promise.resolve();
+      },
+      cleanupCard: async (id) => {
+        calls.push(`cleanup ${id}`);
+        await Promise.resolve();
+      },
+      switchSession: async (id, sessionId) => {
+        calls.push(`switch ${id} ${sessionId}`);
+        await Promise.resolve();
+      },
+      resumeCard: async (id) => {
+        calls.push(`resume ${id}`);
+        return await Promise.resolve({ ok: true as const });
+      },
+      pollSource: async (id) => {
+        calls.push(`poll ${id}`);
+        if (id === "bad") throw new Error("409");
+        await Promise.resolve();
+      },
+      getSlackThread: async (id) => {
+        calls.push(`thread ${id}`);
+        await Promise.resolve();
+        return id.endsWith(":fail")
+          ? { ok: false as const, reason: "unreachable" as const }
+          : {
+              ok: true as const,
+              thread: {
+                messages: [
+                  {
+                    author: "ben",
+                    time: "2026-09-28T10:00:00.000Z",
+                    text: "ship it?",
+                  },
+                  {
+                    author: "ana",
+                    time: "2026-09-28T10:01:00.000Z",
+                    text: "not yet",
+                  },
+                ],
+                truncated: false,
+              },
+            };
+      },
+    },
+    showUndo: (label, u) => {
+      calls.push(`undo-toast ${label}`);
+      undo = u;
+    },
+    notice: (text) => calls.push(`notice ${text}`),
+    openSnooze: (r) => calls.push(`snooze-picker ${r.id}`),
+    openUrl: (url) => calls.push(`open ${url}`),
+    askAbout: (question) => calls.push(`ask ${question}`),
+    copyText: async (text) => {
+      calls.push(`copy ${text}`);
+      await Promise.resolve();
+    },
+    startAgent: async (target, extraDirection) => {
+      calls.push(`start ${target.itemId}`);
+      prompts.push(extraDirection);
+      await Promise.resolve();
+    },
+  };
+  return { context, calls, prompts, undo: () => undo };
+}
+
+const action = (id: string) => {
+  const a = INBOX_ACTIONS.find((x) => x.id === id);
+  assert.ok(a, id);
+  return a;
+};
+
+test("appliesTo: promote applies to both kinds; snooze, done and toggleRead refuse cards; open and copy need a url", () => {
+  const item = row();
+  const card = row({ kind: "card", id: "LIN-1" });
+  const bare = row({ url: undefined });
+  assert.deepEqual(
+    actionsFor(item).map((a) => a.id),
+    ["promote", "snooze", "done", "toggleRead", "open", "copyLink", "ask"],
+  );
+  assert.deepEqual(
+    actionsFor(card).map((a) => a.id),
+    ["promote", "open", "copyLink", "ask"],
+  );
+  assert.deepEqual(
+    actionsFor(bare).map((a) => a.id),
+    ["promote", "snooze", "done", "toggleRead", "ask"],
+  );
+});
+
+test("promote on an item calls the promote api once; on a card it moves the card to todo", async () => {
+  const c = ctx();
+  await runAction(action("promote"), c.context, row());
+  await runAction(
+    action("promote"),
+    c.context,
+    row({ kind: "card", id: "LIN-1" }),
+  );
+  assert.deepEqual(c.calls, ["promote fake:a", "move LIN-1 todo"]);
+});
+
+test("done sets state done, offers undo, and undo restores unread", async () => {
+  const c = ctx();
+  await runAction(action("done"), c.context, row());
+  assert.deepEqual(c.calls, [
+    "state fake:a done",
+    "undo-toast Review PR 42 marked done",
+  ]);
+  await c.undo()?.();
+  assert.equal(c.calls.at(-1), "state fake:a unread");
+});
+
+test("toggleRead toggles, snooze opens the picker, open and copy use the url", async () => {
+  const c = ctx();
+  await runAction(action("toggleRead"), c.context, row());
+  await runAction(action("toggleRead"), c.context, row({ unread: false }));
+  await runAction(action("snooze"), c.context, row());
+  await runAction(action("open"), c.context, row());
+  await runAction(action("copyLink"), c.context, row());
+  assert.deepEqual(c.calls, [
+    "state fake:a read",
+    "state fake:a unread",
+    "snooze-picker fake:a",
+    "open https://example.test/pr/42",
+    "copy https://example.test/pr/42",
+    "notice Link copied",
+  ]);
+});
+
+test("snooze never runs on a card, and a refused api call becomes a notice", async () => {
+  const c = ctx();
+  await runAction(
+    action("snooze"),
+    c.context,
+    row({ kind: "card", id: "LIN-1" }),
+  );
+  assert.deepEqual(c.calls, []);
+  c.context.api.setItemState = () =>
+    Promise.reject(new Error("item is promoted"));
+  assert.equal(await runAction(action("toggleRead"), c.context, row()), false);
+  assert.deepEqual(c.calls, ["notice item is promoted"]);
+});
+
+test("runAction and snoozeRow resolve true only when the action succeeded", async () => {
+  const c = ctx();
+  assert.equal(await runAction(action("done"), c.context, row()), true);
+  assert.equal(
+    await snoozeRow(c.context, row(), "1h", new Date(2026, 8, 22, 14, 30)),
+    true,
+  );
+  assert.equal(
+    await snoozeRow(
+      c.context,
+      row({ kind: "card", id: "LIN-1" }),
+      "1h",
+      new Date(),
+    ),
+    false,
+  );
+  c.context.api.snoozeItem = () => Promise.reject(new Error("item is gone"));
+  assert.equal(await snoozeRow(c.context, row(), "1h", new Date()), false);
+});
+
+test("snoozeRow snoozes an item to the preset time, offers undo, and skips a card", async () => {
+  const c = ctx();
+  const now = new Date(2026, 8, 22, 14, 30);
+  await snoozeRow(c.context, row(), "1h", now);
+  const until = new Date(now.getTime() + 3_600_000).toISOString();
+  assert.deepEqual(c.calls, [
+    `snooze fake:a ${until}`,
+    "undo-toast Review PR 42 snoozed for 1 hour",
+  ]);
+  await c.undo()?.();
+  assert.equal(c.calls.at(-1), "state fake:a unread");
+  await snoozeRow(c.context, row({ kind: "card", id: "LIN-1" }), "1h", now);
+  assert.equal(c.calls.length, 3);
+});
+
+test("markDone and snoozeWithUndo reject on a refused call and offer no undo", async () => {
+  const c = ctx();
+  c.context.api.setItemState = () => Promise.reject(new Error("refused"));
+  c.context.api.snoozeItem = () => Promise.reject(new Error("refused"));
+  await assert.rejects(markDone(c.context, row()), /refused/);
+  await assert.rejects(
+    snoozeWithUndo(c.context, row(), "1h", new Date()),
+    /refused/,
+  );
+  assert.deepEqual(c.calls, []);
+});
+
+test("undo after done restores the state the row had, read stays read", async () => {
+  const c = ctx();
+  await runAction(action("done"), c.context, row({ unread: false }));
+  await c.undo()?.();
+  assert.equal(c.calls.at(-1), "state fake:a read");
+});
+
+test("only http and https urls qualify for Open link and Copy link", async () => {
+  assert.equal(isWebUrl("https://example.test/pr/1"), true);
+  assert.equal(isWebUrl("http://example.test"), true);
+  for (const bad of [
+    "javascript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "file:///etc/passwd",
+    "not a url",
+    undefined,
+  ]) {
+    assert.equal(isWebUrl(bad), false, String(bad));
+  }
+  const c = ctx();
+  const hostile = row({ url: "javascript:alert(1)" });
+  assert.deepEqual(
+    actionsFor(hostile).map((a) => a.id),
+    ["promote", "snooze", "done", "toggleRead", "ask"],
+  );
+  await runAction(action("open"), c.context, hostile);
+  await runAction(action("copyLink"), c.context, hostile);
+  assert.deepEqual(c.calls, []);
+});
+
+test("isWebUrl accepts a Granola meeting url and refuses javascript, data, file and empty urls", () => {
+  assert.equal(isWebUrl("https://notes.granola.ai/d/plan-1"), true);
+  for (const bad of [
+    "javascript:alert(1)",
+    "data:text/html,x",
+    "file:///etc/passwd",
+    "",
+    undefined,
+  ]) {
+    assert.equal(isWebUrl(bad), false, String(bad));
+  }
+});
+
+test("a preset that resolves to the past becomes a notice, never an unhandled throw", async () => {
+  const c = ctx();
+  await snoozeRow(c.context, row(), "bogus" as never, new Date());
+  assert.equal(c.calls.length, 1);
+  assert.match(c.calls[0] ?? "", /^notice /);
+});
+
+const target = (cardId: string, sessionId: string) => ({
+  cardId,
+  identifier: cardId,
+  sessionId,
+});
+
+test("bulk cleanup calls each distinct card once, in order, and keeps going past a failure", async () => {
+  const c = ctx();
+  const outcome = await runBulkCleanup(c.context.api, [
+    target("LOCAL-1", "a"),
+    target("LOCAL-1", "b"),
+    target("LOCAL-2", "c"),
+  ]);
+  assert.deepEqual(c.calls, ["cleanup LOCAL-1", "cleanup LOCAL-2"]);
+  assert.deepEqual(outcome, { done: ["LOCAL-1", "LOCAL-2"], failed: [] });
+  const failing = ctx();
+  failing.context.api.cleanupCard = async (id) => {
+    failing.calls.push(`cleanup ${id}`);
+    if (id === "LOCAL-1") throw new Error("cleanupCard failed: 409");
+    await Promise.resolve();
+  };
+  const mixed = await runBulkCleanup(failing.context.api, [
+    target("LOCAL-1", "a"),
+    target("LOCAL-2", "c"),
+  ]);
+  assert.deepEqual(failing.calls, ["cleanup LOCAL-1", "cleanup LOCAL-2"]);
+  assert.deepEqual(mixed, {
+    done: ["LOCAL-2"],
+    failed: [{ identifier: "LOCAL-1", error: "cleanupCard failed: 409" }],
+  });
+  assert.equal(
+    bulkOutcomeCopy("Cleaned up", mixed),
+    "Cleaned up 1 of 2. Failed: LOCAL-1 (cleanupCard failed: 409)",
+  );
+});
+
+test("bulk resume switches then resumes per card and reports a refused resume by identifier", async () => {
+  const c = ctx();
+  c.context.api.resumeCard = async (id) => {
+    c.calls.push(`resume ${id}`);
+    return await Promise.resolve(
+      id === "LOCAL-2"
+        ? { ok: false as const, status: 400 }
+        : { ok: true as const },
+    );
+  };
+  const outcome = await runBulkResume(c.context.api, [
+    target("LOCAL-1", "s1"),
+    target("LOCAL-2", "s2"),
+  ]);
+  assert.deepEqual(c.calls, [
+    "switch LOCAL-1 s1",
+    "resume LOCAL-1",
+    "switch LOCAL-2 s2",
+    "resume LOCAL-2",
+  ]);
+  assert.deepEqual(outcome, {
+    done: ["LOCAL-1"],
+    failed: [{ identifier: "LOCAL-2", error: "resume refused (400)" }],
+  });
+  assert.equal(
+    bulkOutcomeCopy("Resumed", { done: ["a"], failed: [] }),
+    "Resumed 1 of 1",
+  );
+});
+
+test("bulk resume skips the switch for an active row and switches back after a refused resume", async () => {
+  const c = ctx();
+  c.context.api.resumeCard = async (id) => {
+    c.calls.push(`resume ${id}`);
+    return await Promise.resolve(
+      id === "LOCAL-2"
+        ? { ok: false as const, status: 409 }
+        : { ok: true as const },
+    );
+  };
+  await runBulkResume(c.context.api, [
+    { ...target("LOCAL-1", "s1"), active: true },
+    { ...target("LOCAL-2", "lost"), active: false, restoreSessionId: "live" },
+  ]);
+  assert.deepEqual(c.calls, [
+    "resume LOCAL-1",
+    "switch LOCAL-2 lost",
+    "resume LOCAL-2",
+    "switch LOCAL-2 live",
+  ]);
+});
+
+test("Sync now posts nothing with no enabled source and names a refused source", async () => {
+  const none = ctx();
+  await syncSources(none.context.api, [], none.context.notice);
+  assert.deepEqual(none.calls, ["notice No source is enabled"]);
+  const some = ctx();
+  await syncSources(some.context.api, ["linear", "bad"], some.context.notice);
+  assert.deepEqual(some.calls, [
+    "notice Syncing linear, bad",
+    "poll linear",
+    "poll bad",
+    "notice Sync refused: bad",
+  ]);
+});
+
+function slackRow(id: string, meta: Record<string, string>): InboxRowModel {
+  return row({
+    id,
+    source: "slack",
+    item: {
+      id,
+      source: "slack",
+      type: "mention",
+      title: "ben in #eng-platform: ship it?",
+      snippet: "@g6-tester ship it?",
+      url: "https://acme.slack.com/archives/C1/p1700000000000100",
+      createdAt: "2026-09-28T10:00:00.000Z",
+      priority: 75,
+      state: "unread",
+      meta: {
+        channel: "C1",
+        channelName: "eng-platform",
+        author: "ben",
+        conversation: "channel",
+        ...meta,
+      },
+    },
+  });
+}
+
+test("Draft reply applies only to Slack item rows", () => {
+  const draft = action("draftReply");
+  assert.equal(draft.label, "Draft reply");
+  assert.equal(draft.key, undefined);
+  assert.equal(draft.appliesTo(slackRow("slack:C1:1", {})), true);
+  assert.equal(draft.appliesTo(row()), false);
+  assert.equal(
+    draft.appliesTo(row({ kind: "card", id: "LOCAL-1", source: "slack" })),
+    false,
+  );
+  assert.ok(
+    actionsFor(slackRow("slack:C1:1", {})).some((a) => a.id === "draftReply"),
+  );
+});
+
+test("Draft reply loads the thread, then starts the agent with the prompt holding it", async () => {
+  const { context, calls, prompts } = ctx();
+  await runAction(
+    action("draftReply"),
+    context,
+    slackRow("slack:C1:1", { threadTs: "1700000000.000100" }),
+  );
+  assert.deepEqual(calls, ["thread slack:C1:1", "start slack:C1:1"]);
+  assert.match(prompts[0], /Thread \(oldest first\):/);
+  assert.match(prompts[0], /ana \(2026-09-28T10:01:00.000Z\): not yet/);
+});
+
+test("Draft reply still drafts when the thread load fails, and skips the load without a thread", async () => {
+  const failed = ctx();
+  await runAction(
+    action("draftReply"),
+    failed.context,
+    slackRow("slack:C1:fail", { threadTs: "1700000000.000100" }),
+  );
+  assert.deepEqual(failed.calls, [
+    "thread slack:C1:fail",
+    "start slack:C1:fail",
+  ]);
+  assert.match(failed.prompts[0], /The thread could not be loaded\./);
+  const plain = ctx();
+  await runAction(
+    action("draftReply"),
+    plain.context,
+    slackRow("slack:C1:2", {}),
+  );
+  assert.deepEqual(plain.calls, ["start slack:C1:2"]);
+  assert.doesNotMatch(plain.prompts[0], /Thread|could not be loaded/);
+});
+
+test("ask applies to item rows and card rows with key a", () => {
+  const ask = action("ask");
+  assert.equal(ask.key, "a");
+  assert.equal(ask.label, "Ask about this");
+  assert.ok(actionsFor(row({ typeLabel: "Issue assigned" })).includes(ask));
+  assert.ok(actionsFor(row({ kind: "card", id: "LOCAL-926" })).includes(ask));
+});
+
+test("running ask on an item row calls askAbout with the item question", async () => {
+  const c = ctx();
+  await runAction(
+    action("ask"),
+    c.context,
+    row({
+      source: "linear",
+      typeLabel: "Issue assigned",
+      title: "Review the importer",
+    }),
+  );
+  assert.deepEqual(c.calls, [
+    `ask ${askAboutQuestion({ kind: "item", source: "linear", typeLabel: "Issue assigned", title: "Review the importer" })}`,
+  ]);
+});
+
+test("running ask on a card row calls askAbout with the card question", async () => {
+  const c = ctx();
+  await runAction(
+    action("ask"),
+    c.context,
+    row({
+      kind: "card",
+      id: "LOCAL-926",
+      title: "Triage the flaky build report",
+      card: { id: "LOCAL-926", identifier: "LOCAL-926" } as NonNullable<
+        InboxRowModel["card"]
+      >,
+    }),
+  );
+  assert.deepEqual(c.calls, [
+    `ask ${askAboutQuestion({ kind: "card", identifier: "LOCAL-926", title: "Triage the flaky build report" })}`,
+  ]);
+});

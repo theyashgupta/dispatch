@@ -1,5 +1,5 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { ActivityPage } from "@/features/activity";
+import { ActivityView } from "@/modules/activity";
 import { useAppState } from "@/components/AppState";
 
 export const Route = createLazyFileRoute("/activity/{-$id}")({
@@ -8,5 +8,5 @@ export const Route = createLazyFileRoute("/activity/{-$id}")({
 
 function ActivityRoute() {
   const props = useAppState().activity;
-  return <ActivityPage {...props} />;
+  return <ActivityView {...props} />;
 }

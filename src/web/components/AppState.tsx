@@ -3,11 +3,11 @@ import type { Board } from "@/features/board";
 import type { OrcaView } from "@/features/orca";
 import type { PullRequestsPage } from "@/features/pull-requests";
 import type { ErrorsPage } from "@/features/errors";
-import type { TodayPage } from "@/features/today";
+import type { TodayView } from "@/modules/today";
 import type { SlackPage } from "@/features/slack/SlackPage";
-import type { InboxView } from "@/features/inbox";
+import type { InboxView } from "@/modules/inbox";
 import type { TicketsPage } from "@/features/tickets";
-import type { ActivityPage } from "@/features/activity";
+import type { ActivityView } from "@/modules/activity";
 import type { AccountsPage } from "@/features/accounts";
 import type { SessionsPage } from "@/features/sessions";
 import type { ArchivePage } from "@/features/archive";
@@ -16,23 +16,23 @@ import type { VaultPage } from "@/features/vault";
 import type { CalendarPage } from "@/features/calendar";
 import type { MeetingsPage } from "@/features/meetings";
 import type { WorkspacesPage } from "@/features/workspaces";
-import type { AskPage } from "@/features/ask";
-import type { FlowPage } from "@/features/flow";
 import type { SettingsView } from "@/modules/settings";
 import type { ConnectionsView } from "@/modules/connections";
+import type { AskView } from "@/modules/ask";
+import type { FlowView } from "@/modules/flow";
 import type { Page } from "../../shared/route.js";
 
 export interface AppPages extends Record<Page, object> {
   workspace: ComponentProps<typeof OrcaView>;
   "pull-requests": Omit<ComponentProps<typeof PullRequestsPage>, "selectedKey">;
   errors: Omit<ComponentProps<typeof ErrorsPage>, "selectedKey">;
-  today: ComponentProps<typeof TodayPage>;
+  today: ComponentProps<typeof TodayView>;
   slack: Omit<ComponentProps<typeof SlackPage>, "selectedId">;
-  inbox: ComponentProps<typeof InboxView>;
+  inbox: Omit<ComponentProps<typeof InboxView>, "renderSlackThread">;
   tickets: ComponentProps<typeof TicketsPage>;
   settings: Omit<ComponentProps<typeof SettingsView>, "tabId" | "connections"> &
     ComponentProps<typeof ConnectionsView>;
-  activity: ComponentProps<typeof ActivityPage>;
+  activity: ComponentProps<typeof ActivityView>;
   accounts: ComponentProps<typeof AccountsPage>;
   sessions: ComponentProps<typeof SessionsPage>;
   archive: ComponentProps<typeof ArchivePage>;
@@ -41,8 +41,8 @@ export interface AppPages extends Record<Page, object> {
   calendar: ComponentProps<typeof CalendarPage>;
   meetings: Omit<ComponentProps<typeof MeetingsPage>, "selectedId">;
   workspaces: ComponentProps<typeof WorkspacesPage>;
-  ask: Omit<ComponentProps<typeof AskPage>, "prefill">;
-  flow: ComponentProps<typeof FlowPage>;
+  ask: Omit<ComponentProps<typeof AskView>, "prefill">;
+  flow: ComponentProps<typeof FlowView>;
   board: ComponentProps<typeof Board>;
 }
 
