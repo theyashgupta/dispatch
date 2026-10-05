@@ -53,6 +53,8 @@ Term rule: in this codebase, "orchestration" also names the session start saga (
 
 **Evidence:** research section 2 (no board id exists; Inbox rows are items plus Inbox-column cards, `web/features/inbox/InboxView.tsx:110`; the snapshot is a "Do Not Change" contract); the group payload at H25:96-104.
 
+**Amendment, 2026-10-06 (LOCAL-84):** the `Config` fields `repoPaths` and `baseBranches` are retired today: the config loader drops them and logs that they are no longer used (`server/bootstrap/config.ts:360`, `:472-476`). So the default board reads `workspaceRoot` from `Config`, and its repositories from the workspace folders in the store (`workspaceFolders`, Settings, Workspaces), as today. The default board has no stored base branch: the start picks it, as today. Its check command is `npm run check`. An edit of the default board writes `workspaceRoot` to `Config` and the folder list to `workspaceFolders`. A new board stores these values on its own row, as above.
+
 ### D-2: Card identifiers
 
 **Date:** 2026-10-05
@@ -304,6 +306,8 @@ Confirmed. Inputs from these records: the states of D-3, the policy fields of D-
 
 Change: inbox items get no board key (D-1). The counters stay in the global prefix map; there is no counter row per board (D-2). The board key is the board id. The board row holds the workspace root, the repositories, `linearTeamKeys` and the last used folder. The snapshot gains the board key, and the "Do Not Change" contract item 1 text changes in the same PR (D-1). Key validation includes known Linear team keys (D-2). The store keeps writing the legacy `localTicketCounter` and `groupTicketCounter` fields next to `identifierCounters` for the `LOCAL` and `GROUP` prefixes. `Config` keeps `workspaceRoot`, `repoPaths` and `baseBranches` as the source of the default board (D-1). The new fields follow contract item 1 (D-5).
 
+Amendment, 2026-10-06 (LOCAL-84): `repoPaths` and `baseBranches` are retired. The default board reads `workspaceRoot` from `Config` and its repositories from the store `workspaceFolders` (D-1 amendment).
+
 ### LOCAL-86
 
 Change: the board scope is an optional `board` query parameter on collection routes; card routes look up the board key that is stored on the card; no parameter means the default board (D-4). The "Do Not Change" contract item 3 text gains the parameter. The Linear poller places cards by `linearTeamKeys` (D-1).
@@ -311,6 +315,8 @@ Change: the board scope is an optional `board` query parameter on collection rou
 ### LOCAL-87
 
 Change: the Inbox page shows the global items plus the Inbox-column cards of the selected board (D-1). The board create and edit form has the `linearTeamKeys` field (D-1). The board shows a warning when a Linear team key equals its key (D-2). The edit form shows the key read-only (D-1). The edit form of the default board writes the `Config` fields through the config holder (D-1).
+
+Amendment, 2026-10-06 (LOCAL-84): the edit form of the default board writes `workspaceRoot` to `Config` and its repositories to the store `workspaceFolders` (D-1 amendment).
 
 ### LOCAL-88
 
