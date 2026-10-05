@@ -6,7 +6,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import type { ClaudeLoginView } from "../../../../shared/types.js";
+import type { ApplyChoice, ClaudeLoginView } from "../../../../shared/types.js";
 import {
   cancelLogin,
   getAccounts,
@@ -99,11 +99,13 @@ function invalidateLogin(queryClient: QueryClient) {
  *
  * @remarks
  * The list is marked stale after the call whether it was accepted or refused, as the header
- * popover always reloaded. A refusal resolves `{ ok: false, error }`.
+ * popover always reloaded. A refusal resolves `{ ok: false, error }`. `applyToRunning` rides in the
+ * body and a success resolves the moved, queued and skipped counts.
  */
 export function setActiveAccountMutationOptions(queryClient: QueryClient) {
   return {
-    mutationFn: (id: string) => setActiveAccount(id),
+    mutationFn: (vars: { id: string; applyToRunning: ApplyChoice }) =>
+      setActiveAccount(vars.id, vars.applyToRunning),
     onSuccess: () => invalidateAccounts(queryClient),
   };
 }
