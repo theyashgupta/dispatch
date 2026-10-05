@@ -1,5 +1,5 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { TicketsPage } from "@/features/tickets";
+import { TicketsView } from "@/modules/tickets";
 import { useAppState } from "@/components/AppState";
 
 export const Route = createLazyFileRoute("/tickets/{-$id}")({
@@ -8,5 +8,5 @@ export const Route = createLazyFileRoute("/tickets/{-$id}")({
 
 function TicketsRoute() {
   const props = useAppState().tickets;
-  return <TicketsPage {...props} />;
+  return <TicketsView {...props} />;
 }

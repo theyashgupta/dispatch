@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { QueryClient } from "@tanstack/react-query";
 import { getSentryIssue, resolveSentryIssue } from "./errors-api.js";
-import { errorsKeys, sentryIssueQueryOptions } from "./errors-queries.js";
+import {
+  errorsKeys,
+  resolveMutationOptions,
+  sentryIssueQueryOptions,
+} from "./errors-queries.js";
 
 const realFetch = globalThis.fetch;
 const calls: { url: string; init?: RequestInit }[] = [];
@@ -30,8 +34,8 @@ afterEach(() => {
   calls.length = 0;
 });
 
-test("sentryIssueQueryOptions always refetches and never serves a stale failure", () => {
-  assert.equal(sentryIssueQueryOptions("i1").staleTime, 0);
+test("sentryIssueQueryOptions rereads on mount once the data is 2 s old", () => {
+  assert.equal(sentryIssueQueryOptions("i1").staleTime, 2_000);
 });
 
 test("errorsKeys has the documented shape", () => {
@@ -80,5 +84,21 @@ test("resolveSentryIssue reads a failure with no error code as unreachable", asy
   assert.deepEqual(await resolveSentryIssue("i1"), {
     ok: false,
     error: "unreachable",
+  });
+});
+
+test("resolveMutationOptions posts the resolve and resolves ok", async () => {
+  reply(200, {});
+  assert.deepEqual(await resolveMutationOptions.mutationFn({ issueId: "i1" }), {
+    ok: true,
+  });
+  assert.equal(calls[0]?.url, "/api/sentry/issue/i1/resolve");
+});
+
+test("resolveMutationOptions resolves a typed failure for a forbidden resolve", async () => {
+  reply(403, { error: "forbidden" });
+  assert.deepEqual(await resolveMutationOptions.mutationFn({ issueId: "i1" }), {
+    ok: false,
+    error: "forbidden",
   });
 });

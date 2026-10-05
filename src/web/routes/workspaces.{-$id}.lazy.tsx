@@ -1,5 +1,5 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { WorkspacesPage } from "@/features/workspaces";
+import { WorkspacesView } from "@/modules/workspaces";
 import { useAppState } from "@/components/AppState";
 
 export const Route = createLazyFileRoute("/workspaces/{-$id}")({
@@ -8,5 +8,5 @@ export const Route = createLazyFileRoute("/workspaces/{-$id}")({
 
 function WorkspacesRoute() {
   const props = useAppState().workspaces;
-  return <WorkspacesPage {...props} />;
+  return <WorkspacesView {...props} />;
 }

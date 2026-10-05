@@ -1,8 +1,5 @@
-import type {
-  Playbook,
-  PlaybookPickerResponse,
-} from "../../../../shared/types.js";
-import { http, httpError } from "@/lib/http";
+import type { Playbook } from "../../../../shared/types.js";
+import { http, httpError, type ApiResult } from "@/lib/http";
 
 /**
  * List playbooks: GET /api/playbooks.
@@ -19,21 +16,6 @@ export async function getPlaybooks(): Promise<Playbook[]> {
   return result.data.playbooks;
 }
 
-/**
- * The StartModal picker's data source: GET /api/playbooks/picker.
- *
- * @remarks
- * Read fresh on every modal open so malformed rows and the remembered default reflect the current
- * on-disk state. Throws on any non-2xx.
- */
-export async function getPickerPlaybooks(): Promise<PlaybookPickerResponse> {
-  const result = await http<PlaybookPickerResponse>("/api/playbooks/picker");
-  if (!result.ok) {
-    throw httpError("getPickerPlaybooks", result);
-  }
-  return result.data;
-}
-
 export type PlaybookWriteResult =
   | { ok: true; playbook: Playbook }
   | { ok: false; error: "name-exists" | "footgun" | "generic" };
@@ -41,6 +23,28 @@ export type PlaybookWriteResult =
 export interface PlaybookWriteInput {
   name: string;
   body: string;
+}
+
+/**
+ * Map a create or update response to a write result.
+ *
+ * @remarks
+ * A 409 becomes `name-exists` and a `{error:"footgun"}` body becomes `footgun`. Every other
+ * failure collapses to `generic`.
+ */
+function toWriteResult(
+  result: ApiResult<{ playbook: Playbook }>,
+): PlaybookWriteResult {
+  if (result.ok) {
+    return { ok: true, playbook: result.data.playbook };
+  }
+  if (result.status === 409) {
+    return { ok: false, error: "name-exists" };
+  }
+  return {
+    ok: false,
+    error: result.error === "footgun" ? "footgun" : "generic",
+  };
 }
 
 /**
@@ -53,21 +57,13 @@ export interface PlaybookWriteInput {
 export async function createPlaybook(
   input: PlaybookWriteInput,
 ): Promise<PlaybookWriteResult> {
-  const result = await http<{ playbook: Playbook }>("/api/playbooks", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (result.ok) {
-    return { ok: true, playbook: result.data.playbook };
-  }
-  if (result.status === 409) {
-    return { ok: false, error: "name-exists" };
-  }
-  return {
-    ok: false,
-    error: result.error === "footgun" ? "footgun" : "generic",
-  };
+  return toWriteResult(
+    await http<{ playbook: Playbook }>("/api/playbooks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
 }
 
 /**
@@ -82,24 +78,16 @@ export async function updatePlaybook(
   slug: string,
   input: PlaybookWriteInput,
 ): Promise<PlaybookWriteResult> {
-  const result = await http<{ playbook: Playbook }>(
-    `/api/playbooks/${encodeURIComponent(slug)}`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    },
+  return toWriteResult(
+    await http<{ playbook: Playbook }>(
+      `/api/playbooks/${encodeURIComponent(slug)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      },
+    ),
   );
-  if (result.ok) {
-    return { ok: true, playbook: result.data.playbook };
-  }
-  if (result.status === 409) {
-    return { ok: false, error: "name-exists" };
-  }
-  return {
-    ok: false,
-    error: result.error === "footgun" ? "footgun" : "generic",
-  };
 }
 
 /**

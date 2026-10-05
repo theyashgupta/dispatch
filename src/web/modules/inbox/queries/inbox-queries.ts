@@ -1,6 +1,10 @@
 import { useMutation } from "@tanstack/react-query";
 import type { SettableItemState } from "../../../../shared/types.js";
-import { promoteItem, setItemState, snoozeItem } from "./inbox-api.js";
+import {
+  promoteItem,
+  setItemState,
+  snoozeItem,
+} from "@/queries/item-actions-api";
 
 export const inboxKeys = {
   all: ["inbox"] as const,

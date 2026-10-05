@@ -1,16 +1,20 @@
 import { useCallback, useSyncExternalStore } from "react";
 
+export const CAROUSEL_QUERY = "(max-width: 1023px)";
+export const NARROW_QUERY = "(max-width: 767px)";
+
 /**
- * Subscribe to a CSS media query and return its current match state.
+ * Subscribe to a CSS media query and return whether it matches now.
  *
- * @remarks Some layout choices, such as the icon-only row buttons below 1024 px, change markup and cannot be done in CSS alone. The state starts from the live match, so the first paint already has the right layout.
+ * @remarks
+ * The first render reads the live match, so the first paint already has the right layout.
  */
 export function useMediaQuery(query: string): boolean {
   const subscribe = useCallback(
-    (onChange: () => void) => {
+    (notify: () => void) => {
       const mql = window.matchMedia(query);
-      mql.addEventListener("change", onChange);
-      return () => mql.removeEventListener("change", onChange);
+      mql.addEventListener("change", notify);
+      return () => mql.removeEventListener("change", notify);
     },
     [query],
   );

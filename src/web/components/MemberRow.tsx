@@ -1,5 +1,5 @@
 import { ExternalLink } from "lucide-react";
-import { isWebUrl } from "../../shared/item-actions.js";
+import { isWebUrl } from "../../shared/web-url.js";
 import type { Card, PreviewInfo, ProbeUnknown } from "../../shared/types.js";
 import { PreviewBadge } from "@/components/badges/PreviewBadge";
 import { SourceBadge } from "@/components/badges/SourceBadge";

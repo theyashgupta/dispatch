@@ -3,9 +3,11 @@ import { afterEach, test } from "node:test";
 import { QueryClient } from "@tanstack/react-query";
 import { createMeetingItems, getMeetingTranscript } from "./meetings-api.js";
 import {
-  granolaQueryOptions,
+  createMeetingMutationOptions,
+  draftMeetingMutationOptions,
   meetingTranscriptQueryOptions,
   meetingsKeys,
+  runAgentMutationOptions,
 } from "./meetings-queries.js";
 
 const realFetch = globalThis.fetch;
@@ -38,20 +40,11 @@ const drafts = [{ key: "k", title: "T", description: "D" }];
 
 test("meetingsKeys has the documented shape", () => {
   assert.deepEqual(meetingsKeys.all, ["meetings"]);
-  assert.deepEqual(meetingsKeys.granola, ["meetings", "granola"]);
   assert.deepEqual(meetingsKeys.transcript("m1"), [
     "meetings",
     "transcript",
     "m1",
   ]);
-});
-
-test("granolaQueryOptions requests the Granola status", async () => {
-  const options = granolaQueryOptions();
-  assert.deepEqual(options.queryKey, ["meetings", "granola"]);
-  reply(200, { state: "off" });
-  assert.deepEqual(await newClient().fetchQuery(options), { state: "off" });
-  assert.equal(calls[0]?.url, "/api/meetings/granola");
 });
 
 test("meetingTranscriptQueryOptions keys on the meeting and requests its transcript", async () => {
@@ -126,4 +119,126 @@ test("getMeetingTranscript throws with the status only on a failure", async () =
     getMeetingTranscript("m1"),
     new Error("getMeetingTranscript failed: 404"),
   );
+});
+
+test("meetingTranscriptQueryOptions always refetches", () => {
+  assert.equal(meetingTranscriptQueryOptions("m1").staleTime, 0);
+});
+
+test("draftMeetingMutationOptions posts the notes and resolves the drafts", async () => {
+  reply(200, { drafts });
+  const signal = new AbortController().signal;
+  assert.deepEqual(
+    await draftMeetingMutationOptions.mutationFn({
+      meeting: "m1",
+      notes: "n",
+      me: "ana",
+      signal,
+    }),
+    { ok: true, drafts },
+  );
+  assert.equal(calls[0]?.url, "/api/cards/draft-many");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.equal(
+    calls[0]?.init?.body,
+    JSON.stringify({ meeting: "m1", notes: "n", me: "ana" }),
+  );
+  assert.equal(calls[0]?.init?.signal, signal);
+});
+
+test("draftMeetingMutationOptions resolves the server error code on a refusal", async () => {
+  reply(409, { error: "generate-in-progress" });
+  assert.deepEqual(
+    await draftMeetingMutationOptions.mutationFn({
+      meeting: "m1",
+      notes: "n",
+      me: "",
+      signal: new AbortController().signal,
+    }),
+    { ok: false, error: "generate-in-progress" },
+  );
+});
+
+test("draftMeetingMutationOptions rejects when the request is aborted", async () => {
+  const controller = new AbortController();
+  globalThis.fetch = (_url, init) =>
+    new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () =>
+        reject(new DOMException("aborted", "AbortError")),
+      );
+    });
+  const pending = draftMeetingMutationOptions.mutationFn({
+    meeting: "m1",
+    notes: "n",
+    me: "",
+    signal: controller.signal,
+  });
+  controller.abort();
+  await assert.rejects(pending, { name: "AbortError" });
+});
+
+test("createMeetingMutationOptions sends only the drafts it is given and resolves the counts", async () => {
+  reply(200, { created: 1, updated: 0 });
+  assert.deepEqual(
+    await createMeetingMutationOptions.mutationFn({
+      meeting: "m1",
+      drafts,
+      notes: "notes",
+    }),
+    { ok: true, created: 1, updated: 0, notesSaved: true },
+  );
+  assert.equal(
+    calls[0]?.init?.body,
+    JSON.stringify({ meeting: "m1", drafts, notes: "notes" }),
+  );
+});
+
+test("createMeetingMutationOptions resolves a typed failure for a refused create", async () => {
+  reply(400, { error: "invalid-meeting" });
+  assert.deepEqual(
+    await createMeetingMutationOptions.mutationFn({
+      meeting: "",
+      drafts,
+      notes: "",
+    }),
+    { ok: false, error: "invalid-meeting" },
+  );
+});
+
+test("runAgentMutationOptions promotes the item and moves its card to To Do", async () => {
+  reply(200, { card: { id: "c1", identifier: "DSP-1" } });
+  const result = await runAgentMutationOptions.mutationFn({ itemId: "i1" });
+  assert.deepEqual(result, {
+    card: { id: "c1", identifier: "DSP-1" },
+    moved: true,
+  });
+  assert.equal(calls[0]?.url, "/api/items/i1/promote");
+  assert.equal(calls[1]?.url, "/api/cards/c1/move");
+  assert.equal(calls[1]?.init?.body, JSON.stringify({ column: "todo" }));
+});
+
+test("runAgentMutationOptions resolves moved false when the move is refused", async () => {
+  let n = 0;
+  globalThis.fetch = (url: string | URL | Request) => {
+    calls.push({ url: typeof url === "string" ? url : "" });
+    n += 1;
+    return Promise.resolve(
+      n === 1
+        ? new Response(JSON.stringify({ card: { id: "c1", identifier: "D" } }))
+        : new Response("{}", { status: 500 }),
+    );
+  };
+  assert.deepEqual(await runAgentMutationOptions.mutationFn({ itemId: "i1" }), {
+    card: { id: "c1", identifier: "D" },
+    moved: false,
+  });
+});
+
+test("runAgentMutationOptions rejects with the server reason when the promote is refused", async () => {
+  reply(409, { error: "promoted" });
+  await assert.rejects(
+    runAgentMutationOptions.mutationFn({ itemId: "i1" }),
+    new Error("promoted"),
+  );
+  assert.equal(calls.length, 1);
 });

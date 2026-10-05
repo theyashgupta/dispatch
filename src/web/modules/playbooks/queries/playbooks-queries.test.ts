@@ -1,18 +1,21 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { QueryClient } from "@tanstack/react-query";
+import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import {
   createPlaybook,
   deletePlaybook,
   generatePlaybookDraft,
-  getPickerPlaybooks,
   getPlaybooks,
   updatePlaybook,
 } from "./playbooks-api.js";
+import { getPickerPlaybooks } from "@/queries/playbook-picker-api";
 import {
-  pickerPlaybooksQueryOptions,
+  createPlaybookMutationOptions,
+  deletePlaybookMutationOptions,
+  generatePlaybookDraftMutationOptions,
   playbooksKeys,
   playbooksQueryOptions,
+  updatePlaybookMutationOptions,
 } from "./playbooks-queries.js";
 
 const realFetch = globalThis.fetch;
@@ -47,7 +50,6 @@ const playbook = { slug: "ship-it", name: "Ship it" };
 test("playbooksKeys has the documented shape", () => {
   assert.deepEqual(playbooksKeys.all, ["playbooks"]);
   assert.deepEqual(playbooksKeys.list, ["playbooks", "list"]);
-  assert.deepEqual(playbooksKeys.picker, ["playbooks", "picker"]);
 });
 
 test("playbooksQueryOptions requests the playbook list", async () => {
@@ -56,18 +58,6 @@ test("playbooksQueryOptions requests the playbook list", async () => {
   reply(200, { playbooks: [playbook] });
   assert.deepEqual(await newClient().fetchQuery(options), [playbook]);
   assert.equal(calls[0]?.url, "/api/playbooks");
-});
-
-test("pickerPlaybooksQueryOptions requests the picker data", async () => {
-  const options = pickerPlaybooksQueryOptions();
-  assert.deepEqual(options.queryKey, ["playbooks", "picker"]);
-  reply(200, { valid: [], invalid: [], lastUsed: null });
-  assert.deepEqual(await newClient().fetchQuery(options), {
-    valid: [],
-    invalid: [],
-    lastUsed: null,
-  });
-  assert.equal(calls[0]?.url, "/api/playbooks/picker");
 });
 
 test("getPlaybooks throws on a failure status", async () => {
@@ -208,4 +198,111 @@ test("generatePlaybookDraft resolves ok false on a network failure", async () =>
     await generatePlaybookDraft({ direction: "go", sourcePaths: [] }),
     { ok: false },
   );
+});
+
+function listIsStale(client: QueryClient): boolean {
+  return client.getQueryState(playbooksKeys.list)?.isInvalidated === true;
+}
+
+function seededClient(): QueryClient {
+  const client = newClient();
+  client.setQueryData(playbooksKeys.list, [playbook]);
+  return client;
+}
+
+test("a created playbook marks the list stale", async () => {
+  const client = seededClient();
+  reply(200, { playbook });
+  const result = await new MutationObserver(
+    client,
+    createPlaybookMutationOptions(client),
+  ).mutate(input);
+  assert.deepEqual(result, { ok: true, playbook });
+  assert.equal(calls[0]?.url, "/api/playbooks");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.equal(listIsStale(client), true);
+});
+
+test("a refused create resolves the typed error and leaves the list alone", async () => {
+  const client = seededClient();
+  reply(409, {}, "Conflict");
+  const result = await new MutationObserver(
+    client,
+    createPlaybookMutationOptions(client),
+  ).mutate(input);
+  assert.deepEqual(result, { ok: false, error: "name-exists" });
+  assert.equal(listIsStale(client), false);
+});
+
+test("a saved playbook edit marks the list stale", async () => {
+  const client = seededClient();
+  reply(200, { playbook });
+  const result = await new MutationObserver(
+    client,
+    updatePlaybookMutationOptions(client),
+  ).mutate({ slug: "ship-it", input });
+  assert.deepEqual(result, { ok: true, playbook });
+  assert.equal(calls[0]?.url, "/api/playbooks/ship-it");
+  assert.equal(calls[0]?.init?.method, "PUT");
+  assert.equal(listIsStale(client), true);
+});
+
+test("a refused edit resolves the typed error and leaves the list alone", async () => {
+  const client = seededClient();
+  reply(400, { error: "footgun" }, "Bad Request");
+  const result = await new MutationObserver(
+    client,
+    updatePlaybookMutationOptions(client),
+  ).mutate({ slug: "ship-it", input });
+  assert.deepEqual(result, { ok: false, error: "footgun" });
+  assert.equal(listIsStale(client), false);
+});
+
+test("a deleted playbook marks the list stale", async () => {
+  const client = seededClient();
+  reply(200, {});
+  const result = await new MutationObserver(
+    client,
+    deletePlaybookMutationOptions(client),
+  ).mutate("ship-it");
+  assert.deepEqual(result, { ok: true });
+  assert.equal(calls[0]?.url, "/api/playbooks/ship-it");
+  assert.equal(calls[0]?.init?.method, "DELETE");
+  assert.equal(listIsStale(client), true);
+});
+
+test("a refused delete resolves ok false and leaves the list alone", async () => {
+  const client = seededClient();
+  reply(404, {}, "Not Found");
+  const result = await new MutationObserver(
+    client,
+    deletePlaybookMutationOptions(client),
+  ).mutate("ship-it");
+  assert.deepEqual(result, { ok: false });
+  assert.equal(listIsStale(client), false);
+});
+
+test("a generated draft resolves the text and never touches the cache", async () => {
+  const client = seededClient();
+  reply(200, { draft: "# Draft" });
+  const result = await new MutationObserver(
+    client,
+    generatePlaybookDraftMutationOptions,
+  ).mutate({ direction: "go", sourcePaths: [] });
+  assert.deepEqual(result, { ok: true, draft: "# Draft" });
+  assert.equal(calls[0]?.url, "/api/playbooks/generate");
+  assert.equal(listIsStale(client), false);
+});
+
+test("a failed draft resolves ok false", async () => {
+  reply(500, {}, "Internal Server Error");
+  const result = await new MutationObserver(
+    newClient(),
+    generatePlaybookDraftMutationOptions,
+  ).mutate({ direction: "go", sourcePaths: [] });
+  assert.deepEqual(result, { ok: false });
+});
+
+test("the playbooks list is dropped once the page closes, so every open reads it fresh", () => {
+  assert.equal(playbooksQueryOptions().gcTime, 0);
 });

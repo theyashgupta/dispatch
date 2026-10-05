@@ -8,7 +8,7 @@ import {
 } from "../../lib/actions.js";
 import { nowMs } from "../../../shared/format-age.js";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
-import { SESSIONS_SHORTCUTS } from "../../lib/shortcuts.js";
+import { SESSIONS_SHORTCUTS } from "../../../shared/shortcuts.js";
 import { useShortcuts } from "../../hooks/useShortcuts.js";
 import {
   SESSION_SECTIONS,

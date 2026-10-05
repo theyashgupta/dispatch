@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { BoardSnapshot, Item } from "../../shared/types.js";
-import { wakeItems } from "../lib/snooze.js";
+import { wakeItems } from "../../shared/snooze.js";
 
 const ITEM_WAKE_TICK_MS = 60_000;
 

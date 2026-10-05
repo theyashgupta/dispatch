@@ -11,14 +11,13 @@ export function ImageWithFallback({ src, alt }: ImageWithFallbackProps) {
 
   if (broken) {
     return (
-      <span className="m-0 mb-(--space-sm)! flex w-fit max-w-full items-center gap-(--space-xs) rounded-md border border-border bg-card px-(--space-lg) py-(--space-sm)">
+      <span className="mb-2 flex w-fit max-w-full items-center gap-1 rounded-md border border-border bg-card px-4 py-2">
         <ImageOff
-          size={14}
-          strokeWidth={2}
           aria-hidden
-          className="flex-none text-muted-foreground"
+          strokeWidth={2}
+          className="size-3.5 shrink-0 text-muted-foreground"
         />
-        <span className="overflow-hidden text-(length:--font-label) leading-(--line-label) text-ellipsis whitespace-nowrap text-muted-foreground">
+        <span className="overflow-hidden text-sm leading-snug text-ellipsis whitespace-nowrap text-muted-foreground">
           {alt ? `Image unavailable: ${alt}` : "Image unavailable"}
         </span>
       </span>
@@ -31,7 +30,7 @@ export function ImageWithFallback({ src, alt }: ImageWithFallbackProps) {
       target="_blank"
       rel="noopener noreferrer"
       aria-label={alt != null && alt !== "" ? alt : "Open full image"}
-      className="m-0 mb-(--space-sm)! block w-fit max-w-full"
+      className="mb-2 block w-fit max-w-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     >
       <img
         src={src}

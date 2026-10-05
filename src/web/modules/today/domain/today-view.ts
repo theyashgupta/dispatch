@@ -1,5 +1,5 @@
 import type { Item } from "../../../../shared/types.js";
-import { isWebUrl } from "../../../../shared/item-actions.js";
+import { isWebUrl } from "../../../../shared/web-url.js";
 import { topPicks, type TodayEntry, type TodayWindow } from "./p0.js";
 import type { Page } from "../../../../shared/route.js";
 

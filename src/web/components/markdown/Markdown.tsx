@@ -1,61 +1,41 @@
 import { useMemo, type CSSProperties } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { isLinearUploadUrl } from "../../../shared/linear-asset-url.js";
-import { ImageWithFallback } from "@/components/icons/ImageWithFallback";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ImageWithFallback } from "@/components/icons/ImageWithFallback";
 import { cn } from "@/lib/utils";
 import { isHttpSrc } from "@/components/markdown/web-src";
+import { markdownImageSource } from "../../../shared/markdown-image-source.js";
+import { isWebUrl } from "../../../shared/web-url.js";
 
 interface MarkdownProps {
   source: string;
   attachmentBase?: string;
 }
 
-const block = "m-0 mb-(--space-sm)!";
-const heading = "mx-0 mt-(--space-lg)! mb-(--space-sm)! font-semibold";
-const minorHeading = cn(
-  heading,
-  "text-sm leading-(--line-label) text-muted-foreground",
-);
-const text = "text-base text-foreground";
-const link = "text-(--accent-text) underline";
-const cell = "border border-border px-2 py-1 text-(length:--font-label)";
+const BLOCK = "m-0 mb-2";
+const HEADING = "m-0 mt-4 mb-2 font-semibold leading-tight";
+const ANCHOR =
+  "text-(--accent-text) underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+const CELL = "border border-border px-2 py-1 text-sm";
 
-const ALIGN: Record<string, string> = {
-  left: "text-left",
-  center: "text-center",
-  right: "text-right",
-};
+const ALIGN: Partial<Record<NonNullable<CSSProperties["textAlign"]>, string>> =
+  { left: "text-left", center: "text-center", right: "text-right" };
 
-function alignOf(style: CSSProperties | undefined): string {
-  return ALIGN[style?.textAlign ?? "left"] ?? "text-left";
+function cellAlign(style: CSSProperties | undefined): string {
+  return (style?.textAlign && ALIGN[style.textAlign]) || "text-left";
 }
 
 function renderImage(src: unknown, alt: string | undefined, base?: string) {
   if (typeof src !== "string" || src === "") return <>{alt}</>;
   const label = alt != null && alt !== "" ? alt : undefined;
-  if (base !== undefined && src.startsWith("attachments/")) {
-    return (
-      <ImageWithFallback
-        key={src}
-        src={`${base}/${src.slice("attachments/".length)}`}
-        alt={label}
-      />
-    );
+  const imageSrc = markdownImageSource(src, base);
+  if (imageSrc !== null) {
+    return <ImageWithFallback key={src} src={imageSrc} alt={label} />;
   }
-  if (isLinearUploadUrl(src)) {
-    return (
-      <ImageWithFallback
-        key={src}
-        src={`/api/images?url=${encodeURIComponent(src)}`}
-        alt={label}
-      />
-    );
-  }
-  if (!isHttpSrc(src)) return <>{label ?? src}</>;
+  if (!isWebUrl(src)) return <span>{label ?? src}</span>;
   return (
-    <a href={src} target="_blank" rel="noopener noreferrer" className={link}>
+    <a href={src} target="_blank" rel="noopener noreferrer" className={ANCHOR}>
       {label ?? src}
     </a>
   );
@@ -63,42 +43,41 @@ function renderImage(src: unknown, alt: string | undefined, base?: string) {
 
 const components: Components = {
   h1: ({ children }) => (
-    <h1
-      className={cn(
-        heading,
-        "text-(length:--font-md-h1) leading-(--line-heading) text-foreground",
-      )}
-    >
+    <h1 className={cn(HEADING, "text-(length:--font-md-h1) text-foreground")}>
       {children}
     </h1>
   ),
   h2: ({ children }) => (
-    <h2 className={cn(heading, text, "leading-(--line-heading)")}>
-      {children}
-    </h2>
+    <h2 className={cn(HEADING, "text-base text-foreground")}>{children}</h2>
   ),
   h3: ({ children }) => (
-    <h3
-      className={cn(
-        heading,
-        "text-base leading-(--line-label) text-muted-foreground",
-      )}
-    >
+    <h3 className={cn(HEADING, "text-base text-muted-foreground")}>
       {children}
     </h3>
   ),
-  h4: ({ children }) => <h4 className={minorHeading}>{children}</h4>,
-  h5: ({ children }) => <h5 className={minorHeading}>{children}</h5>,
-  h6: ({ children }) => <h6 className={minorHeading}>{children}</h6>,
+  h4: ({ children }) => (
+    <h4 className={cn(HEADING, "text-sm text-muted-foreground")}>{children}</h4>
+  ),
+  h5: ({ children }) => (
+    <h5 className={cn(HEADING, "text-sm text-muted-foreground")}>{children}</h5>
+  ),
+  h6: ({ children }) => (
+    <h6 className={cn(HEADING, "text-sm text-muted-foreground")}>{children}</h6>
+  ),
   p: ({ children }) => (
-    <p className={cn(block, text, "wrap-anywhere [word-break:break-word]")}>
+    <p
+      className={cn(
+        BLOCK,
+        "text-base break-words wrap-anywhere text-foreground",
+      )}
+    >
       {children}
     </p>
   ),
   ul: ({ children, className }) => (
     <ul
       className={cn(
-        block,
+        BLOCK,
         className?.includes("contains-task-list")
           ? "list-none pl-1"
           : "list-disc pl-5",
@@ -108,20 +87,25 @@ const components: Components = {
     </ul>
   ),
   ol: ({ children, start }) => (
-    <ol start={start} className={cn(block, "list-decimal pl-5")}>
+    <ol start={start} className={cn(BLOCK, "list-decimal pl-5")}>
       {children}
     </ol>
   ),
   li: ({ children }) => (
-    <li className={cn(text, "mb-(--space-xs)")}>{children}</li>
+    <li className="mb-1 text-base text-foreground">{children}</li>
   ),
   a: ({ href, children }) =>
     href != null && /^mailto:/i.test(href) ? (
-      <a href={href} className={link}>
+      <a href={href} className={ANCHOR}>
         {children}
       </a>
     ) : href != null && isHttpSrc(href) ? (
-      <a href={href} target="_blank" rel="noopener noreferrer" className={link}>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={ANCHOR}
+      >
         {children}
       </a>
     ) : (
@@ -132,13 +116,13 @@ const components: Components = {
     <Checkbox
       checked={checked === true}
       disabled
-      className="mt-0.75 mr-1.5 mb-0.75 ml-1 size-3.25 align-middle disabled:cursor-default [&_svg]:size-2.5"
+      className="mr-1.5 align-middle"
     />
   ),
   pre: ({ children }) => (
     <pre
       className={cn(
-        block,
+        BLOCK,
         "overflow-x-auto rounded-md border border-border bg-card px-3 py-2 font-mono",
       )}
     >
@@ -147,42 +131,39 @@ const components: Components = {
   ),
   code: ({ children }) => (
     <code
-      className={cn(
-        "font-mono text-(length:--font-label)",
+      className={
         typeof children === "string" && children.includes("\n")
-          ? "border-none bg-transparent p-0"
-          : "rounded-(--radius-sm) border border-border bg-card px-1 py-0.5 text-foreground",
-      )}
+          ? "border-0 bg-transparent p-0 font-mono text-sm"
+          : "rounded-sm border border-border bg-card px-1 py-0.5 font-mono text-sm text-foreground"
+      }
     >
       {children}
     </code>
   ),
   table: ({ children }) => (
-    <div className={cn(block, "overflow-x-auto")}>
+    <div className={cn(BLOCK, "overflow-x-auto")}>
       <table className="m-0 w-max min-w-full border-collapse">{children}</table>
     </div>
   ),
   th: ({ children, style }) => (
-    <th className={cn(cell, "bg-card font-semibold", alignOf(style))}>
+    <th className={cn(CELL, "bg-card font-semibold", cellAlign(style))}>
       {children}
     </th>
   ),
   td: ({ children, style }) => (
-    <td className={cn(cell, alignOf(style))}>{children}</td>
+    <td className={cn(CELL, cellAlign(style))}>{children}</td>
   ),
   blockquote: ({ children }) => (
     <blockquote
       className={cn(
-        block,
+        BLOCK,
         "border-l-2 border-border pl-3 text-muted-foreground",
       )}
     >
       {children}
     </blockquote>
   ),
-  hr: () => (
-    <hr className="mx-0 my-(--space-lg)! h-0 border-0 border-t border-border" />
-  ),
+  hr: () => <hr className="mx-0 my-4 h-0 border-0 border-t border-border" />,
 };
 
 function attachmentAware(base: string): Components {

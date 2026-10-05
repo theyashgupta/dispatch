@@ -5,6 +5,7 @@ import type {
   SettableItemState,
   SlackThread,
 } from "./types.js";
+import { isWebUrl } from "./web-url.js";
 import { draftReplyPrompt } from "./slack-prompt.js";
 import { askAboutQuestion, type AskAboutTarget } from "./ask.js";
 import { SNOOZE_LABELS, snoozeUntil, type SnoozePreset } from "./snooze.js";
@@ -82,22 +83,6 @@ export interface InboxAction {
 
 const isItem = (row: InboxRowModel) => row.kind === "item";
 const priorState = (row: RowRef) => (row.unread ? "unread" : "read");
-
-/**
- * True for an http or https url; anything else never reaches window.open or the clipboard.
- *
- * @remarks Connector urls are third-party input, so a javascript: or data: scheme would run in
- * the app's origin through the Open link action; the allow-list closes that at the action gate.
- */
-export function isWebUrl(url: string | undefined): url is string {
-  if (url == null) return false;
-  try {
-    const { protocol } = new URL(url);
-    return protocol === "http:" || protocol === "https:";
-  } catch {
-    return false;
-  }
-}
 
 const hasUrl = (row: InboxRowModel) => isWebUrl(row.url);
 

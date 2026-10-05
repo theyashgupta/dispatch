@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { NumberSettingSection } from "@/modules/settings/components/NumberSettingSection";
+import { NumberSettingSection } from "@/components/NumberSettingSection";
 import {
   CLEANUP_DELAY_MAX_DAYS,
   parseCleanupDelay,
 } from "@/modules/settings/domain/cleanup-delay";
-import { shouldSeedDraft } from "@/modules/settings/domain/draft-seed";
+import { shouldSeedDraft } from "../../../../shared/draft-seed.js";
 import {
   useCleanupDelayQuery,
   useSaveCleanupDelayMutation,
@@ -45,8 +45,11 @@ export function CleanupDelayContainer({ onSaved }: CleanupDelayContainerProps) {
       value={draft}
       invalid={days === null}
       invalidText="Enter a whole number between 0 and 90."
-      loadError={query.isError}
-      loadErrorText="Couldn't load the cleanup delay. Reopen settings to retry."
+      loadErrorText={
+        query.isError
+          ? "Couldn't load the cleanup delay. Reopen settings to retry."
+          : undefined
+      }
       saveErrorText={
         save.isError || save.data?.ok === false
           ? "Couldn't save cleanup delay. Try again."
