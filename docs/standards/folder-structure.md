@@ -43,11 +43,10 @@ src/web/
 ├── features/       # feature folders: kebab-case directories, PascalCase components inside
 │   ├── board/      # Board, Column, Card, CardView, EmptyState
 │   ├── detail/     # DetailPanel, PanelHeader, ReferenceBlocks, SessionLostSection, TerminalRegion
-│   ├── modals/     # StartModal, CleanupModal, MultiSelect
 │   ├── settings/   # SettingsScreen (full-screen, sidebar-nav), PlaybookEditorModal
 │   ├── slack/      # SlackPage, SlackList, SlackDetail, SlackThread (the Inbox row reuses SlackThread through the barrel)
 ├── hooks/          # data/effect hooks: useUnseenActivity, useTransitionNotifications, useResumeFeedback, useMediaQuery
-├── lib/            # non-UI helpers: api.ts, card-badges.ts, format-age.ts, resume-feedback.ts, start-request.ts, meetings.ts, calendar.ts
+├── lib/            # non-UI helpers: api.ts, card-badges.ts, resume-feedback.ts, start-request.ts, meetings.ts, calendar.ts
 └── styles/         # tokens.css — the design-token source of truth, survives unchanged
 ```
 
@@ -63,7 +62,8 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. The new t
 | `Board.tsx`, `Column.tsx`, `Card.tsx`, `CardView.tsx`, `EmptyState.tsx`                                                          | `features/board/`                  |
 | `DetailPanel.tsx`, `PanelHeader.tsx`, `ReferenceBlocks.tsx`, `SessionLostSection.tsx`, `TerminalRegion.tsx`                      | `features/detail/`                 |
 | `AppSidebar.tsx`, `NavIcon.tsx`, `SyncStatus.tsx`, `PageHeader.tsx`, `TopBar.tsx`                                                | `modules/shell/components/`        |
-| `StartModal.tsx`, `CleanupModal.tsx`, `MultiSelect.tsx`                                                                          | `features/modals/`                 |
+| `StartDialog.tsx`, `GroupStartDialog.tsx`, `CleanupDialog.tsx`                                                                   | `modules/card-actions/components/` |
+| `MultiSelect.tsx`, `MemberRow.tsx`, `WorkspaceAdd.tsx`                                                                           | `components/` (shared tier)        |
 | `SettingsScreen.tsx`, `PlaybookEditorModal.tsx`                                                                                  | `features/settings/`               |
 | `GoneBadge.tsx`, `PlanReadyBadge.tsx`, `SourceBadge.tsx`                                                                         | `components/badges/` (shared tier) |
 | `SessionsPage.tsx`, `SessionRow.tsx`                                                                                             | `features/sessions/`               |
@@ -77,11 +77,11 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. The new t
 | `AskPage.tsx`, `AskComposer.tsx`, `AskMessage.tsx`                                                                               | `features/ask/`                    |
 | `FlowPage.tsx`, `FlowToolbar.tsx`, `FlowDiagram.tsx`, `FlowNarrow.tsx`, `flow-model.ts`                                          | `features/flow/`                   |
 | `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts`                              | `hooks/`                           |
-| `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`, `meetings.ts`, `calendar.ts`              | `lib/`                             |
+| `api.ts`, `card-badges.ts`, `resume-feedback.ts`, `start-request.ts`, `meetings.ts`, `calendar.ts`                               | `lib/`                             |
 | `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Markdown` / `SplitView` / `ListGroup` / `DetailPaneBody` / `FlowStage` | `primitives/`                      |
 | `tokens.css`                                                                                                                     | `styles/`                          |
 
-A component lives in the folder of the feature that consumes it; a component consumed by exactly one feature is co-located with that consumer (`PlaybookEditorModal` sits in `settings/` because `SettingsScreen` is its only consumer). `MultiSelect` stays in `modals/` even though both `settings/` and `inbox/` now consume it: cross-feature reuse goes through the owning feature's `index.ts` barrel rather than forcing a move. `features/connections/` follows the same rule: `LinearConnectionCard` composes the connection primitives with the Linear hook, and Settings imports it through the `connections` barrel so the setup wizard can reuse the same card instead of forking it.
+A component lives in the folder of the feature that consumes it; a component consumed by exactly one feature is co-located with that consumer (`PlaybookEditorModal` sits in `settings/` because `SettingsScreen` is its only consumer). `MultiSelect` lives in the shared `components/` tier because both `settings/` and `inbox/` consume it: a component with several consumers moves to a shared tier, and a feature's own components stay reachable only through its `index.ts` barrel. `features/connections/` follows the same rule: `LinearConnectionCard` composes the connection primitives with the Linear hook, and Settings imports it through the `connections` barrel so the setup wizard can reuse the same card instead of forking it.
 
 Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. Place a new file in a layer that the new standard defines. Until ticket 16, this section still applies to the legacy tree that the new standard names in "Status and scope".
 
@@ -91,7 +91,7 @@ Imports flow one way; the lower a layer sits, the fewer things it may import. Th
 
 **Backend:** `shared` → (`store`, `adapters`) → `services` → `routes`, with `bootstrap` as the composition root that wires them at startup. Routes never call `exec`/`tmux`/`git` directly — only through `services`/`adapters`. `shared` is a sink (imported by everyone, imports nothing app-specific). `store` is a single-writer island: nothing outside `store/` mutates board state.
 
-**Frontend:** `primitives` → `hooks`/`lib` → `features` → `App`. Primitives are purely presentational (props in, no data fetching); hooks own data and effects; features compose them. Within the `hooks`/`lib` tier the rule is asymmetric: `hooks` may import `lib` (data hooks legitimately sit on `lib/api`), but `lib` never imports `hooks` — `lib` is the pure-helper floor of the tier. Two files carry a temporary `warn`-severity exception to this rule rather than `error`: `lib/card-badges.ts` (imports `hooks/useUnseenActivity`) and `primitives/ActivityItem.tsx` (imports `lib/event-copy` and `lib/format-age`). The exception is recorded as a named, trailing file-glob carve-out block (`feWebBoundariesWarnCarveout`) in `eslint.config.ts`, and tracked as open debt in `docs/standards/architecture.md`'s "Triage-derived layering-violation fixes" gap-list entry — Phase 57 work, not a silent gap.
+**Frontend:** `primitives` → `hooks`/`lib` → `features` → `App`. Primitives are purely presentational (props in, no data fetching); hooks own data and effects; features compose them. Within the `hooks`/`lib` tier the rule is asymmetric: `hooks` may import `lib` (data hooks legitimately sit on `lib/api`), but `lib` never imports `hooks`, `lib` is the pure-helper floor of the tier. Two files carry a temporary `warn`-severity exception to this rule rather than `error`: `lib/card-badges.ts` (imports `hooks/useUnseenActivity`) and `primitives/ActivityItem.tsx` (imports `src/shared/event-copy` and `src/shared/format-age`). The exception is recorded as a named, trailing file-glob carve-out block (`feWebBoundariesWarnCarveout`) in `eslint.config.ts`, and tracked as open debt in `docs/standards/architecture.md`'s "Triage-derived layering-violation fixes" gap-list entry, Phase 57 work, not a silent gap.
 
 Feature folders never import from sibling feature folders; cross-feature sharing goes through `primitives/`, `hooks/`, `lib/`, or `shared/`. The badges live in the shared tier `src/web/components/badges/` (moved from `features/badges/` in G11 Unit 3), so features import them like any other shared component and no allow policy is needed.
 
