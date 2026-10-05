@@ -160,3 +160,178 @@ New server code goes in the existing layers: supervisor files in `services/orche
 **Governs:** LOCAL-88, LOCAL-92
 
 **Evidence:** research section 2 (loop file layout; the hook token variables at `server/services/domain/claude-launch.ts:32-34`); research A8, A15, F4, F15.
+
+### D-6: Policy per board
+
+**Date:** 2026-10-05
+
+**Status:** accepted
+
+**Decision:** Each board has one policy. Only the user changes it, in the UI. No tool changes it.
+
+| Field                | Values                                                                                                                                                                          | Default                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `roadmapApproval`    | `ask` (ask the user for each roadmap), `rules` (approve when the roadmap passes the rules of the playbook, else ask), `all` (approve each roadmap with no question to the user) | `ask`                                           |
+| `concurrencyCap`     | number of loops that run at once on this board                                                                                                                                  | 3                                               |
+| `loopModel`          | the model and effort for group sessions                                                                                                                                         | the session settings of today                   |
+| `orchestratorModel`  | the model for the orchestrator session                                                                                                                                          | Opus                                            |
+| `handoffPercent`     | context percent on the status line that starts a handoff                                                                                                                        | 50                                              |
+| `handoffHardPercent` | context percent at which the supervisor sends a hard handoff request (D-3)                                                                                                      | 80                                              |
+| `usageLimit`         | `wait` (wait for the reset, then continue) or `stop` (mark needs input)                                                                                                         | `wait`                                          |
+| `shipRights`         | `none`, `open_prs`, `merge`                                                                                                                                                     | `none`                                          |
+| `budgetPerGroup`     | a cost limit per group, or none                                                                                                                                                 | none                                            |
+| `supervisor`         | `on` or `off`                                                                                                                                                                   | `off` on the default board, `on` on a new board |
+
+Usage credits are not a value of any field. With `supervisor` off, the board behaves as today, and it cannot start an orchestrator (D-3).
+
+**Reason:** the manual run changed four of these values by a user rule (model, cap, handoff and the usage rule, research A20), and a board with no policy change must behave as today.
+
+**Rejected:**
+
+- One global policy: projects differ in risk and in repository count.
+- A policy per group: it multiplies the settings, and the manual run set each rule for all loops at once (A20).
+- A cap of 2: three loops on the 8 GB machine gave load 9 to 10 and test timeouts, and the user set the cap of 2 on 2026-09-30 (research F23, FLS:8). The user raised it to 3 on 2026-10-05 (H05:42), and three loops run now. The default follows the latest user rule. The user can set 2 on a small machine.
+- A usage credits option: the user rule forbids it (H05:44, RR:2).
+
+**Governs:** LOCAL-89, LOCAL-90, LOCAL-91, LOCAL-92
+
+**Evidence:** research A20 (H30:23, H30:24, H05:42, H05:43), F10, F23, research section 6 (Operator cap, Devin and Agent SDK budgets).
+
+### D-7: More than one orchestrator on a board
+
+**Date:** 2026-10-05
+
+**Status:** accepted
+
+**Decision:** A board has at most one main orchestrator. The user can add extra orchestrators. An extra orchestrator needs a main orchestrator on the same board. The board row holds `orchestrators`: for each, an id, a main flag, a scope, a policy override and its session name. A group card holds `ownerOrchestrator`. Each extra has an explicit scope: a list of group ids or ticket ids. Each group has exactly one owner orchestrator. The main orchestrator owns each group that no extra owns. Only the user moves ownership. A tool call on a card outside the scope of the caller returns 403. Only the main orchestrator ships. The concurrency cap counts all loops on the board, from all orchestrators. An extra can have a policy override that only narrows the board policy. Narrow means a lower `concurrencyCap`, `budgetPerGroup` or `shipRights`, `ask` in place of `rules` or `all`, `rules` in place of `all`, and `stop` in place of `wait`. The model fields have no override. A decision item goes to the owner of its group and shows in the board attention queue. The user answers it, and the answer reaches the owner orchestrator as an event.
+
+**Reason:** one owner per group means two orchestrators never send input to the same loop or ship the same branch.
+
+**Rejected:**
+
+- Peer orchestrators with no main: no owner for the ship order and for the shared cap.
+- A lock per tool call: it serialises calls but still lets two orchestrators steer one loop between calls.
+- One orchestrator per board only: a large board fills one context; LOCAL-91 asks for extras.
+
+**Governs:** LOCAL-91, LOCAL-92
+
+**Evidence:** research section 6 (agent teams have one fixed lead; Claude Code Projects have one coordinator); research A16 (ship order needs one owner).
+
+### D-8: Stacked branch ship flow
+
+**Date:** 2026-10-05
+
+**Status:** accepted
+
+**Decision:** Shipping is server behaviour. The main orchestrator starts it with `start_ship`, which gives the branches of one group in stack order (unit branches first, then the specs branch if one exists) and the PR title and What/Why/How body for each. The flow needs `shipRights` of `open_prs` or `merge`. Preconditions: the loop is finished (each unit is `built, awaiting /ship`), the supervisor has closed its engine file (F21), and each earlier group in the order is merged. For each branch, in order:
+
+1. Check out the branch in the group worktree and merge origin/main against the old stack tip, so git takes the side of main for the units that are already squashed. Never rebase.
+2. Check that the diff against origin/main holds only this branch. For the Dispatch repository, check that no added prose line in docs, src, scripts, `.claude` and `CLAUDE.md` has an em dash or a double hyphen. Code spans and table delimiter rows are exempt.
+3. Run the check command of the repository entry (D-1).
+4. Push and open the PR with the given title and body.
+5. Wait for the checks.
+6. With `merge` rights: squash merge with the subject `<title> (#<n>)` and an empty body. If the signature rule blocks, merge again with `--admin` and record it. With `open_prs` rights: wait for the user to merge.
+7. Fetch, then check that the author of the new main tip is the identity that the repository `user.name` and `user.email` gave at ship start, and that the commit has no Co-Authored-By line.
+
+Each branch has a ship state: `queued`, `merging_main`, `checking`, `pushing`, `waiting_checks`, `waiting_merge` (with `open_prs` rights), `merging`, `verifying`, `merged` or `failed`. The flow state is `running`, `stopped` or `done`. `get_ship_state` returns, for each branch, the name, the ship state, the PR number, the check state and the identity result, plus the failed step and reason when the flow stopped. The flow stops at the first failure and creates a decision item. The flow never edits code. With `merge` rights, after the last branch merges, the flow moves the group card to Done (A18). With `open_prs` rights, the user moves it. With `open_prs` or `merge` rights, this flow replaces the user rule that only `/ship` pushes (SI:19, H05:44). With `none`, the default, that rule stands. To fix a failed check, the orchestrator sends an instruction to the group session with `send_input` and then resumes the flow. Every git and gh call goes through the exec adapter.
+
+**Reason:** the manual ship flow was the same steps for each group that shipped from a ship file, from G10 on (research section 3.3, A16), and an identity check that a model can forget belongs in code.
+
+**Rejected:**
+
+- The orchestrator runs `/ship` in a session: the model does deterministic work and can skip the identity check.
+- One PR for the whole group: each unit is one reviewable squash PR, the way G1 shipped.
+- A rebase of the stack onto main: the rule is never rebase, and later branches share the unsquashed commits.
+- Automatic known fixes inside the flow: a fix is a code edit, and the flow never edits code.
+
+**Governs:** LOCAL-90, LOCAL-92, LOCAL-93
+
+**Evidence:** research section 3.3 (SI:12 to SI:32), A16, A17, F17, F21; research section 5 (no surveyed tool has this flow).
+
+### D-9: What an orchestrator must never do
+
+**Date:** 2026-10-05
+
+**Status:** accepted
+
+**Decision:** An orchestrator never:
+
+1. Writes or edits product code or any file in a repository.
+2. Commits, pushes, merges or rebases outside the ship flow of D-8.
+3. Selects usage credits.
+4. Reads the vault or an env file.
+5. Changes a policy, its own or another one.
+6. Kills a process or a port holder.
+7. Starts a loop above the concurrency cap.
+8. Acts on another board, or on a card outside its scope (D-7).
+9. Answers its own decision item, or approves a permission prompt.
+10. Deletes a branch, a worktree or a card that it did not create.
+
+The server enforces items 1 to 9 and the Done part of item 10: no tool exists for 1, 3, 4 and 6 (`stop_session` interrupts the turn and leaves the process alive, D-4, and the send route rejects input at a permission prompt, a usage limit dialog or a shell prompt, D-4); the routes reject 2, 5, 7, 8 and 9. `move_card` rejects a move to Done for a card that the orchestrator did not create, because a Done card gets a worktree cleanup after the cleanup delay. The playbook states all ten. The tool list of D-4 has no tool that allows an item of this list.
+
+**Reason:** the lead of agent teams "may finish early or start implementing tasks itself" (research section 4, Claude Code agent teams), so the limits must be in the server, not only in the prompt.
+
+**Rejected:**
+
+- Limits in the playbook text only: a model can ignore text.
+- A full shell for the orchestrator with a deny list: a deny list misses new commands.
+
+**Governs:** LOCAL-90, LOCAL-91
+
+**Evidence:** research section 6 (pitfalls), F9, F18, H05:44.
+
+## Tool reference
+
+LOCAL-90 adds the zod schema and the strict description of each tool here. Each tool calls one route under `/api/orchestrator/`. Each write is checked against the board scope, the owner scope (D-7) and the policy (D-6), and is recorded as an activity event.
+
+| Family    | Tools                                                                                                          | Notes                                                                                |
+| --------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Read      | `list_cards`, `get_card`, `list_sessions`, `get_group_progress`, `read_pane_tail`, `list_events`, `get_policy` | `list_events` takes a `since` cursor                                                 |
+| Tickets   | `create_ticket`, `update_ticket`, `move_card`, `add_comment`                                                   | `update_ticket` closes F25                                                           |
+| Groups    | `create_base_branch`, `create_group`, `start_group`                                                            | `create_group` takes members, base, playbook, direction and `dependsOn`              |
+| Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`                              | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules |
+| Ship      | `start_ship`, `get_ship_state`                                                                                 | D-8                                                                                  |
+| Decisions | `create_decision_item`                                                                                         | the user answers; the answer returns as an event                                     |
+| Wait      | `wait_for_event`                                                                                               | blocks until an event matches a filter or a time limit passes                        |
+
+## Scope changes
+
+### LOCAL-84
+
+Confirmed. Inputs from these records: the states of D-3, the policy fields of D-6, the decision items of D-3 and D-7, and the ship states of D-8.
+
+### LOCAL-85
+
+Change: inbox items get no board key (D-1). The counters stay in the global prefix map; there is no counter row per board (D-2). The board key is the board id. The board row holds the workspace root, the repositories, `linearTeamKeys` and the last used folder. The snapshot gains the board key, and the "Do Not Change" contract item 1 text changes in the same PR (D-1). Key validation includes known Linear team keys (D-2). The store keeps writing the legacy `localTicketCounter` and `groupTicketCounter` fields next to `identifierCounters` for the `LOCAL` and `GROUP` prefixes. `Config` keeps `workspaceRoot`, `repoPaths` and `baseBranches` as the source of the default board (D-1). The new fields follow contract item 1 (D-5).
+
+### LOCAL-86
+
+Change: the board scope is an optional `board` query parameter on collection routes; card routes look up the board key that is stored on the card; no parameter means the default board (D-4). The "Do Not Change" contract item 3 text gains the parameter. The Linear poller places cards by `linearTeamKeys` (D-1).
+
+### LOCAL-87
+
+Change: the Inbox page shows the global items plus the Inbox-column cards of the selected board (D-1). The board create and edit form has the `linearTeamKeys` field (D-1). The board shows a warning when a Linear team key equals its key (D-2). The edit form shows the key read-only (D-1). The edit form of the default board writes the `Config` fields through the config holder (D-1).
+
+### LOCAL-88
+
+Change: the report route only records a gate event and starts a new read; the reader is the one source of progress (D-5). The route uses the `x-dispatch-token` header of the session. The reader also reads each unit PRD for the phase count and names. One status-line parser on the marker watcher tick stores the meters on every session, whatever the `supervisor` value (D-5).
+
+### LOCAL-89
+
+Change: the code goes in the existing layers with the `supervisor-` prefix (D-3). The supervisor detects 12 states, not 10: the added states are `lost` (tmux gone) and `shell_prompt` (Claude exited) (D-3). It restarts a stopped loop: one continue prompt, then `needs_input`, and the resume saga for `lost` and `shell_prompt` (D-3). It holds a group until its dependencies merge, and it stops a group at its budget (D-3). It adds `crossSessionInbound: refuse` to the generated hook settings (A27, F9). It extends the ARCHITECTURE section "Tmux Invocations" and the SHELL-01 entry of `code-review-rules.md` for the new typed surface. It watches PR and merge events, and it closes a finished loop (D-3). The send function writes text longer than 500 characters to a file and sends a one-line pointer (D-3). Fixed values, not policy fields: idle after the pane is unchanged for two polls in a row, 60 s apart (120 s), stale after 15 minutes with no transcript growth, one continue prompt after an API error (D-3). At a usage limit with `handoff-pending`, the supervisor cancels the automatic continue and resumes a fresh session (D-3). At the usage limit dialog the supervisor always selects the wait option. The `stop` policy then marks the session `needs_input` (D-3, D-6). Prompts other than the dangerous delete and the peer message go to the user (D-3). The send function keeps the tmux argv of "Do Not Change" contract item 5. The default board starts with the supervisor off (D-6).
+
+### LOCAL-90
+
+Change: the tool reference lives in this document (Tool reference). The PR title and body come from the orchestrator (D-8). The events route gains a `since` cursor for `list_events` and `wait_for_event` (D-4). The MCP server is the `dispatch mcp` subcommand (D-4). With `open_prs` rights, the ship flow waits for the user to merge each PR before the next branch (D-8). `create_decision_item` is a tool (D-3). `stop_session` interrupts the turn and leaves the process alive (D-4). `move_card` rejects a move to Done for a card that the orchestrator did not create (D-9).
+
+### LOCAL-91
+
+Change: the concurrency cap default is 3 (D-6). The policy has the `supervisor` field (an orchestrator needs it on), the `usageLimit` value `stop` and the `handoffHardPercent` field (D-6). An extra orchestrator override can only narrow the policy (D-7). Only the user answers a decision item, and the orchestrator never approves a permission prompt (D-9).
+
+### LOCAL-92
+
+Change: the attention queue also lists `permission_prompt`, and a `lost` or `shell_prompt` session whose resume failed (D-3). The dashboard reads the states of D-3, the progress of D-5 and the ship state of D-8.
+
+### LOCAL-93
+
+Confirmed. The removal note names `watch-loops.zsh`, `resume-loop.zsh`, `resume-after-reset.zsh`, `handoff-request.md` and the `keepawake` tmux session.
