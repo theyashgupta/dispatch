@@ -2,14 +2,13 @@ import {
   COLUMNS,
   type Card as CardModel,
   type Column,
-} from "../../../shared/types.js";
+} from "../../../../shared/types.js";
 import {
   COLUMN_ACCENT,
   COLUMN_LABELS,
-} from "../../components/badges/column-accent.js";
-import type { LastOpenedMap } from "../../hooks/useUnseenActivity.js";
+} from "../../../../shared/column-accent.js";
+import type { LastOpenedMap } from "../../../../shared/unseen-activity.js";
 
-/** Side-nav section order: Inbox first, then the board's exact column order — exactly 7 sections. */
 export const ORCA_SECTIONS: readonly Column[] = ["inbox", ...COLUMNS];
 
 export type GroupDimension = "status" | "workspace";
@@ -122,16 +121,11 @@ function buildSubgroups(
 }
 
 /**
- * Build the Workspace view's nav sections: grouped by `group`, optionally nested by `subgroup`
- * (collapsed to "none" when it equals `group` — nesting a dimension under itself is meaningless),
- * cards within each leaf sorted by `sort`.
- * @remarks Group members are excluded — same member-exclusion convention as
- * `isInboxWaiting` (`shared/inbox-count.ts`) and the board pill counts,
- * so only top-level cards (including `source: "group"` pseudo-cards) appear. STATUS as the
- * top-level `group` always yields exactly the 7 {@link ORCA_SECTIONS}, even empty ones, matching
- * the board's fixed-column familiarity (`group.subgrouped` stays consistent — an empty group has
- * zero subgroups regardless); every other bucket — a WORKSPACE group, or any subgroup — is present
- * only when it holds at least one card.
+ * Build the Workspace nav sections: grouped by `group`, nested by `subgroup`, leaves sorted by `sort`.
+ *
+ * @remarks
+ * A STATUS group always yields the 7 {@link ORCA_SECTIONS}, even empty ones, to match the board's
+ * fixed columns; every other bucket shows only when it holds a card.
  */
 export function buildWorkspaceGroups(
   cards: CardModel[],
@@ -158,9 +152,10 @@ export function buildWorkspaceGroups(
 }
 
 /**
- * The most recently opened card still present on the board, excluding the `"__feed__"` sentinel
- * key stamped by the activity-feed dot (not a card id). Used to auto-select on empty Workspace
- * view selection.
+ * The most recently opened card still on the board, used to auto-select an empty Workspace view.
+ *
+ * @remarks
+ * The `"__feed__"` key is skipped: the activity feed dot stamps it, and it is not a card id.
  */
 export function mostRecentCardId(
   lastOpened: LastOpenedMap,

@@ -122,6 +122,10 @@
   --src-calendar: #efb14a;
   --src-agent: #4fd1c5;
 
+  /* Editor brand mark (the VS Code button in the detail panel header), the
+     same value in both themes. */
+  --editor-vscode: #007acc;
+
   /* Motion (v3.4), CSS-only transition/animation durations and easings, so the
      prefers-reduced-motion kill-switch above reaches every motion this phase
      ships - see docs/standards/design-contract.md ## Motion. */
@@ -204,6 +208,7 @@
   --src-meeting: color-mix(in srgb, #c792ea 52%, black);
   --src-calendar: color-mix(in srgb, #efb14a 46%, black);
   --src-agent: color-mix(in srgb, #4fd1c5 46%, black);
+  --editor-vscode: #007acc;
   --scrim: rgba(15, 17, 21, 0.4);
   --edge-highlight: rgba(255, 255, 255, 0.7);
   --shadow-float: 0 6px 16px rgba(15, 17, 21, 0.16);

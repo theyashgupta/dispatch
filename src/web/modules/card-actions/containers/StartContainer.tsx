@@ -4,7 +4,7 @@ import { StartDialog } from "@/modules/card-actions/components/StartDialog";
 import { useStartFlow } from "./use-start-flow";
 import { startFailure } from "@/modules/card-actions/domain/start-copy";
 import { buildStartCardRequest } from "@/modules/card-actions/domain/start-request";
-import { useDialogClose } from "@/modules/card-actions/hooks/use-dialog-close";
+import { useDialogClose } from "@/components/ui/hooks/use-dialog-close";
 import { useStartCardMutation } from "@/queries/cards-queries";
 
 export interface StartContainerProps {

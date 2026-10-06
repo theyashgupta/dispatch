@@ -1,82 +1,61 @@
-import { useEffect, useState, type CSSProperties } from "react";
-import type { BoardSnapshot } from "../../../shared/types.js";
+import { useEffect, useState } from "react";
 import {
   bulkOutcomeCopy,
   runBulkCleanup,
   runBulkResume,
   type ActionServices,
-} from "../../lib/actions.js";
-import { nowMs } from "../../../shared/format-age.js";
-import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
-import { SESSIONS_SHORTCUTS } from "../../../shared/shortcuts.js";
-import { useShortcuts } from "../../hooks/useShortcuts.js";
+} from "../../../../shared/item-actions.js";
+import { nowMs } from "../../../../shared/format-age.js";
+import { NARROW_QUERY } from "../../../../shared/media-queries.js";
 import {
   SESSION_SECTIONS,
-  flattenSessions,
   accountOptions,
+  flattenSessions,
   sessionSection,
   type SessionFilter,
   type SessionRow as SessionRowModel,
-} from "../../lib/sessions.js";
-import { Chip } from "../../primitives/Chip.js";
-import { Collapsible } from "../../primitives/Collapsible.js";
-import { Glyph } from "../../components/icons/Glyph.js";
-import { BulkConfirmModal } from "./BulkConfirmModal.js";
-import { SessionRow } from "./SessionRow.js";
-import { SessionsBulkBar } from "./SessionsBulkBar.js";
-import { SessionsToolbar } from "./SessionsToolbar.js";
-import { bulkEligibility, filterSessionRows } from "./sessions-filters.js";
+} from "../../../../shared/sessions.js";
+import {
+  SESSIONS_SHORTCUTS,
+  bindShortcuts,
+} from "../../../../shared/shortcuts.js";
+import type { BoardSnapshot } from "../../../../shared/types.js";
+import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
+import { useShortcuts } from "@/components/ui/hooks/use-shortcuts";
+import { BulkConfirmModal } from "@/modules/sessions/components/BulkConfirmModal";
+import { SessionRow } from "@/modules/sessions/components/SessionRow";
+import { SessionsBulkBar } from "@/modules/sessions/components/SessionsBulkBar";
+import {
+  SessionsNoMatch,
+  SessionsNoRows,
+  SessionsScroll,
+  SessionsSection,
+} from "@/modules/sessions/components/SessionsList";
+import { SessionsToolbar } from "@/modules/sessions/components/SessionsToolbar";
+import {
+  applyFilterEdit,
+  bulkEligibility,
+  filterSessionRows,
+  ticketLabels,
+} from "@/modules/sessions/domain/sessions-filters";
 
-interface SessionsPageProps {
+export interface SessionsContainerProps {
   board: BoardSnapshot;
   selectedCardId: string | null;
   onSelectCard: (id: string) => void;
   services: ActionServices;
+  scopeId: string;
 }
 
 const ELAPSED_TICK_MS = 1000;
 
-const emptyBlockStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "var(--space-sm)",
-  padding: "var(--space-3xl) var(--space-lg)",
-  textAlign: "center",
-  alignItems: "center",
-};
-
-const emptyHeadingStyle: CSSProperties = {
-  fontSize: "var(--font-body)",
-  fontWeight: "var(--weight-semibold)",
-  lineHeight: "var(--line-body)",
-  color: "var(--text)",
-};
-
-const emptyBodyStyle: CSSProperties = {
-  fontSize: "var(--font-label)",
-  lineHeight: "var(--line-label)",
-  color: "var(--text-muted)",
-};
-
-function ticketLabels(
-  targets: readonly SessionRowModel[],
-  verb: "Clean up" | "Resume",
-): string[] {
-  const seen = new Map<string, number>();
-  for (const row of targets) seen.set(row.identifier, row.siblings);
-  return [...seen].map(([identifier, siblings]) =>
-    verb === "Clean up" && siblings > 1
-      ? `${identifier} (all ${siblings} sessions)`
-      : identifier,
-  );
-}
-
-export function SessionsPage({
+export function SessionsContainer({
   board,
   selectedCardId,
   onSelectCard,
   services,
-}: SessionsPageProps) {
+  scopeId,
+}: SessionsContainerProps) {
   const narrow = useMediaQuery(NARROW_QUERY);
   const [now, setNow] = useState(nowMs);
   const [filter, setFilter] = useState<SessionFilter>({
@@ -99,10 +78,10 @@ export function SessionsPage({
 
   const rows = flattenSessions(board.cards, now);
   const accounts = accountOptions(rows);
-  const visible = filterSessionRows(
-    rows,
-    accounts.includes(filter.account) ? filter : { ...filter, account: "" },
-  );
+  const effectiveFilter = accounts.includes(filter.account)
+    ? filter
+    : { ...filter, account: "" };
+  const visible = filterSessionRows(rows, effectiveFilter);
   const checkedRows = visible.filter((row) => checked.has(row.key));
   const checkedTickets = [...new Set(checkedRows.map((row) => row.identifier))];
   const eligibility = bulkEligibility(checkedRows);
@@ -161,13 +140,10 @@ export function SessionsPage({
       if (cursorRow) handleSelect(cursorRow);
     },
   };
-  useShortcuts(
-    SESSIONS_SHORTCUTS.map((entry) => ({
-      ...entry,
-      run: runs[entry.key] ?? (() => {}),
-    })),
-    { menuOpen: confirm != null, scopeId: "sessions-page" },
-  );
+  useShortcuts(bindShortcuts(SESSIONS_SHORTCUTS, runs), {
+    menuOpen: confirm != null,
+    scopeId,
+  });
 
   const handleToggleChecked = (row: SessionRowModel) => {
     setChecked((current) => {
@@ -192,74 +168,45 @@ export function SessionsPage({
   };
 
   return (
-    <div
-      id="sessions-page"
-      style={{
-        flex: "1 1 auto",
-        minHeight: 0,
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
+    <>
       <SessionsToolbar
-        filter={filter}
+        filter={effectiveFilter}
         accounts={accounts}
-        onChange={setFilter}
+        onChange={(next) =>
+          setFilter(applyFilterEdit(next, effectiveFilter, filter))
+        }
       />
-      <div
-        className="scroll-stable-y"
-        style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}
-      >
+      <SessionsScroll>
         {rows.length === 0 ? (
-          <div style={emptyBlockStyle}>
-            <Glyph size={48} style={{ opacity: 0.08 }} />
-            <div style={emptyHeadingStyle}>No sessions yet</div>
-            <div style={emptyBodyStyle}>
-              Start a ticket from the Board and its session shows up here.
-            </div>
-          </div>
+          <SessionsNoRows />
         ) : visible.length === 0 ? (
-          <div style={emptyBlockStyle}>
-            <div style={emptyHeadingStyle}>No matching sessions</div>
-            <div style={emptyBodyStyle}>Try a different filter.</div>
-          </div>
+          <SessionsNoMatch />
         ) : (
           sections.map((entry) => (
-            <div
+            <SessionsSection
               key={entry.section}
-              style={{ padding: "0 var(--space-lg)" }}
-              data-testid="sessions-section"
+              label={entry.section}
+              count={entry.rows.length}
             >
-              <Collapsible
-                title={entry.section}
-                badge={<Chip>{entry.rows.length}</Chip>}
-                defaultOpen
-              >
-                <div
-                  role="list"
-                  style={{ margin: "0 calc(-1 * var(--space-lg))" }}
-                >
-                  {entry.rows.map((row) => (
-                    <SessionRow
-                      key={row.key}
-                      row={row}
-                      now={now}
-                      selected={
-                        row.key === cursorRow?.key ||
-                        (row.active && row.cardId === selectedCardId)
-                      }
-                      checked={checked.has(row.key)}
-                      narrow={narrow}
-                      onSelect={handleSelect}
-                      onToggleChecked={handleToggleChecked}
-                    />
-                  ))}
-                </div>
-              </Collapsible>
-            </div>
+              {entry.rows.map((row) => (
+                <SessionRow
+                  key={row.key}
+                  row={row}
+                  now={now}
+                  selected={
+                    row.key === cursorRow?.key ||
+                    (row.active && row.cardId === selectedCardId)
+                  }
+                  checked={checked.has(row.key)}
+                  narrow={narrow}
+                  onSelect={handleSelect}
+                  onToggleChecked={handleToggleChecked}
+                />
+              ))}
+            </SessionsSection>
           ))
         )}
-      </div>
+      </SessionsScroll>
       <SessionsBulkBar
         count={checkedRows.length}
         tickets={checkedTickets.length}
@@ -277,6 +224,6 @@ export function SessionsPage({
           onClose={() => setConfirm(null)}
         />
       ) : null}
-    </div>
+    </>
   );
 }

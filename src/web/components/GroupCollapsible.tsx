@@ -11,15 +11,17 @@ import {
 interface GroupCollapsibleProps {
   label: string;
   count: number;
+  defaultOpen?: boolean;
   children: ReactNode;
 }
 
 export function GroupCollapsible({
   label,
   count,
+  defaultOpen = true,
   children,
 }: GroupCollapsibleProps) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger asChild>
@@ -42,7 +44,7 @@ export function GroupCollapsible({
         forceMount
         className="grid transition-[grid-template-rows] duration-(--motion-panel-open) ease-(--easing-enter) data-[state=closed]:grid-rows-[0fr] data-[state=open]:grid-rows-[1fr]"
       >
-        <div inert={!open} className="min-h-0 overflow-y-clip">
+        <div inert={!open} className="min-h-0 min-w-0 overflow-y-clip">
           {children}
         </div>
       </CollapsibleContent>

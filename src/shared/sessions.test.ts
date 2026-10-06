@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Card, SessionSummary } from "../../shared/types.js";
+import type { Card, SessionSummary } from "./types.js";
 import {
   flattenSessions,
   formatElapsed,

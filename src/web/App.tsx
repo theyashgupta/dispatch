@@ -62,7 +62,7 @@ import {
   type PinnedCard,
 } from "../shared/pinned-card.js";
 import { stubToCard } from "../shared/search-stub.js";
-import { DetailPanel } from "./features/detail/index.js";
+import { DetailPanelView } from "./modules/detail/index.js";
 import {
   ActivityFilterView,
   ActivityListView,
@@ -1088,7 +1088,7 @@ export function App() {
           </PageErrorBoundary>
         }
         detail={
-          <DetailPanel
+          <DetailPanelView
             accounts={claudeAccounts?.accounts}
             card={selectedCard}
             hydrating={pinnedHydrating && !selectedCardInWindow}

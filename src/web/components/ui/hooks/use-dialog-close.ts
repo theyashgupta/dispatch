@@ -3,10 +3,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const EXIT_MS = 150;
 
 /**
- * Own the open state of a dialog that App mounts, and report the close once the exit animation ended.
+ * Own the open state of a dialog its caller mounts, and report the close once the exit animation ended.
  *
  * @remarks
- * App unmounts the view when `onClose` runs, so the call waits for the Radix exit animation (the panel-close motion token, 150 ms). With `closeOnOverlayClick`, a click on the overlay closes too, because Radix AlertDialog ignores outside clicks.
+ * The caller unmounts the dialog when `onClose` runs, so the call waits for the Radix exit animation (the panel-close motion token, 150 ms). With `closeOnOverlayClick`, a click on the overlay closes too, because Radix AlertDialog ignores outside clicks.
  */
 export function useDialogClose(
   onClose: () => void,

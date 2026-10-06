@@ -1,15 +1,12 @@
-import type { Card } from "../../../shared/types.js";
-import {
-  FlowBox,
-  FlowStage,
-  type FlowToken,
-} from "../../primitives/FlowStage.js";
-import { edgePath, type Rect } from "../../lib/flow-geometry.js";
+import type { Card } from "../../../../shared/types.js";
+import { edgePath, type Rect } from "../../../../shared/flow-geometry.js";
+import { FlowBox, FlowStage, type FlowToken } from "@/components/FlowStage";
+import { cn } from "@/lib/utils";
 import {
   sessionFlowStage,
   type SessionFlowStageId,
   type SessionFlowState,
-} from "../../lib/session-flow.js";
+} from "@/modules/detail/domain/session-flow";
 
 const STAGES: { id: SessionFlowStageId; label: string }[] = [
   { id: "item", label: "Item" },
@@ -38,18 +35,11 @@ const RECTS: Rect[] = STAGES.map((_, i) => ({
 }));
 const EDGE_PATHS = RECTS.slice(1).map((rect, i) => edgePath(RECTS[i], rect));
 
-interface SessionFlowRowProps {
-  card: Card;
-}
-
-export function SessionFlowRow({ card }: SessionFlowRowProps) {
+export function SessionFlowRow({ card }: { card: Card }) {
   const { stage, state } = sessionFlowStage(card);
   const active = STAGES.findIndex((s) => s.id === stage);
   const color = STATE_COLOR[state];
-  const labelColor =
-    state === "lost" || state === "failed"
-      ? "var(--destructive-text)"
-      : "var(--text-muted)";
+  const failed = state === "lost" || state === "failed";
 
   const nodes = STAGES.map((s, i) => ({
     id: s.id,
@@ -60,13 +50,13 @@ export function SessionFlowRow({ card }: SessionFlowRowProps) {
         dim={i > active}
         tone={i === active ? color : undefined}
       >
-        <span style={{ fontWeight: "var(--weight-semibold)" }}>{s.label}</span>
+        <span className="font-semibold">{s.label}</span>
         {i === active && (
           <span
-            style={{
-              color: labelColor,
-              textTransform: "capitalize",
-            }}
+            className={cn(
+              "capitalize",
+              failed ? "text-destructive-text" : "text-muted-foreground",
+            )}
           >
             {state}
           </span>
@@ -96,13 +86,7 @@ export function SessionFlowRow({ card }: SessionFlowRowProps) {
       : [];
 
   return (
-    <div
-      style={{
-        padding: "var(--space-sm) var(--space-lg)",
-        paddingLeft: "var(--space-xl)",
-        borderBottom: "1px solid var(--border)",
-      }}
-    >
+    <div className="border-b border-border py-(--space-sm) pr-(--space-lg) pl-(--space-xl)">
       <FlowStage
         width={WIDTH}
         height={HEIGHT}

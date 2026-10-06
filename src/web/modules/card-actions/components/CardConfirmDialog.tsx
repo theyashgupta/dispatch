@@ -10,7 +10,7 @@ import {
 import { ModalActions } from "./ModalActions";
 import { ModalBody } from "./ModalBody";
 import { ModalHeader } from "./ModalHeader";
-import { useDialogClose } from "@/modules/card-actions/hooks/use-dialog-close";
+import { useDialogClose } from "@/components/ui/hooks/use-dialog-close";
 
 interface CardConfirmDialogProps {
   ariaLabel: string;

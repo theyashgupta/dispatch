@@ -4,7 +4,7 @@ import {
   type TicketPhase,
 } from "@/modules/card-actions/components/CreateTicketDialog";
 import { acceptErrorCopy } from "@/modules/card-actions/domain/ticket-copy";
-import { useDialogClose } from "@/modules/card-actions/hooks/use-dialog-close";
+import { useDialogClose } from "@/components/ui/hooks/use-dialog-close";
 import { usePastedImages } from "@/modules/card-actions/hooks/use-pasted-images";
 import {
   useCreateLocalTicketMutation,

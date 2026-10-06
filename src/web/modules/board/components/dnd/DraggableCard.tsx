@@ -18,7 +18,7 @@ import {
 import {
   useResumeFeedback,
   type ResumeOutcome,
-} from "@/modules/board/hooks/use-resume-feedback";
+} from "@/components/ui/hooks/use-resume-feedback";
 import { CardView } from "../CardView";
 
 interface DraggableCardProps {

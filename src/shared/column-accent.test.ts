@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { COLUMNS } from "../../../shared/types.js";
+import { COLUMNS } from "./types.js";
 import { COLUMN_ACCENT, COLUMN_LABELS } from "./column-accent.js";
 
 test("every rendered column has a board label and an accent token", () => {

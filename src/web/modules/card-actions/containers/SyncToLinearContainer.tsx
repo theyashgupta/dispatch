@@ -7,7 +7,7 @@ import {
   TEAM_DEFAULT_STATE,
   stateIdOf,
 } from "@/modules/card-actions/domain/sync-target";
-import { useDialogClose } from "@/modules/card-actions/hooks/use-dialog-close";
+import { useDialogClose } from "@/components/ui/hooks/use-dialog-close";
 import { useSyncCardToLinearMutation } from "@/queries/cards-queries";
 import { useLinearWorkflowQuery } from "@/queries/linear-workflow-queries";
 

@@ -824,7 +824,7 @@ async function waitForDocked(cdp, sessionId, expectDocked, identifier) {
     (function () {
       var aside = document.querySelector('aside[aria-label="Ticket detail"]');
       if (!aside) return false;
-      var docked = aside.style.transform === "none";
+      var docked = aside.getAttribute("data-docked") === "true";
       return docked === ${expectDocked ? "true" : "false"} && aside.textContent.indexOf("${identifier}") !== -1;
     })()
   `;

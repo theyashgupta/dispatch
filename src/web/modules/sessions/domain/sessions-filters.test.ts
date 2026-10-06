@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { accountOptions, type SessionRow } from "../../lib/sessions.js";
+import {
+  accountOptions,
+  type SessionRow,
+} from "../../../../shared/sessions.js";
 import { bulkEligibility, filterSessionRows } from "./sessions-filters.js";
 
 const row = (key: string, extra: Partial<SessionRow> = {}): SessionRow => ({

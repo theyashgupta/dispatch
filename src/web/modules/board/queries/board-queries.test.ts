@@ -6,10 +6,9 @@ import {
   boardSnapshotKeys,
   tunnelKeys,
 } from "@/queries/board-snapshot-queries";
-import { getCard, getCardComments, unwindGroup } from "./board-api.js";
+import { getCard, unwindGroup } from "./board-api.js";
 import {
   boardKeys,
-  cardCommentsQueryOptions,
   cardQueryOptions,
   moveCardMutationOptions,
 } from "./board-queries.js";
@@ -45,12 +44,6 @@ const card = { id: "c1", title: "A card" };
 test("boardKeys has the documented shape", () => {
   assert.deepEqual(boardKeys.all, ["board"]);
   assert.deepEqual(boardKeys.detail("c1"), ["board", "card", "c1"]);
-  assert.deepEqual(boardKeys.comments("c1"), [
-    "board",
-    "card",
-    "c1",
-    "comments",
-  ]);
 });
 
 test("cardQueryOptions keys on the card id and requests /api/cards/:id", async () => {
@@ -62,14 +55,6 @@ test("cardQueryOptions keys on the card id and requests /api/cards/:id", async (
     members: [],
   });
   assert.equal(calls[0]?.url, "/api/cards/a%2Fb");
-});
-
-test("cardCommentsQueryOptions keys on the card id and requests the comments route", async () => {
-  const options = cardCommentsQueryOptions("c1");
-  assert.deepEqual(options.queryKey, ["board", "card", "c1", "comments"]);
-  reply(200, { comments: [] });
-  assert.deepEqual(await newClient().fetchQuery(options), []);
-  assert.equal(calls[0]?.url, "/api/cards/c1/comments");
 });
 
 test("getCard resolves the card and members on a 200", async () => {
@@ -87,19 +72,6 @@ test("getCard throws on any other failure status", async () => {
   await assert.rejects(
     getCard("c1"),
     new Error("getCard failed: 500 Internal Server Error"),
-  );
-});
-
-test("getCardComments resolves the comments array on a 200", async () => {
-  reply(200, { comments: [{ id: "k1" }] }, "OK");
-  assert.deepEqual(await getCardComments("c1"), [{ id: "k1" }]);
-});
-
-test("getCardComments throws on a failure status", async () => {
-  reply(404, {}, "Not Found");
-  await assert.rejects(
-    getCardComments("c1"),
-    new Error("getCardComments failed: 404 Not Found"),
   );
 });
 

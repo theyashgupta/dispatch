@@ -1,4 +1,4 @@
-import type { Card } from "../../shared/types.js";
+import type { Card } from "../../../../shared/types.js";
 
 export type SessionFlowStageId = "item" | "agent" | "terminal" | "result";
 export type SessionFlowState =

@@ -1,4 +1,5 @@
 export * from "../modules/board/queries/board-api.js";
+export * from "../modules/detail/queries/detail-api.js";
 export * from "../queries/cards-api.js";
 export * from "../queries/item-actions-api.js";
 export * from "../modules/workspaces/queries/workspaces-api.js";

@@ -1,5 +1,5 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { SessionsPage } from "@/features/sessions";
+import { SessionsView } from "@/modules/sessions";
 import { useAppState } from "@/components/AppState";
 
 export const Route = createLazyFileRoute("/sessions/{-$id}")({
@@ -8,5 +8,5 @@ export const Route = createLazyFileRoute("/sessions/{-$id}")({
 
 function SessionsRoute() {
   const props = useAppState().sessions;
-  return <SessionsPage {...props} />;
+  return <SessionsView {...props} />;
 }

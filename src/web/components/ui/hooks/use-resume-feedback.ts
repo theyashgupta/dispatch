@@ -16,7 +16,7 @@ interface ResumeFeedback {
 }
 
 /**
- * Drive the Resume affordance state machine of a board card.
+ * Drive the Resume affordance state machine of a board card and the panel's session-lost section.
  *
  * @remarks
  * An optimistic `resuming` flips off through a server `resumeError`, a watchdog surfaces a
