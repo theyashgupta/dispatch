@@ -1,6 +1,7 @@
 import { boardRepository as store } from "../../store/board-repository.js";
 import { cleanupWorkspace } from "./cleanup.js";
 import { deleteArchivedGroup } from "./archive-delete.js";
+import { ALL_BOARDS } from "../../../shared/board-key.js";
 
 /**
  * Tick cadence for the automatic due-cleanup sweep. One minute: the UI's finest countdown
@@ -48,7 +49,7 @@ const CLEANUP_TICK_MS =
  */
 async function runDueCleanups(): Promise<void> {
   const now = Date.now();
-  for (const due of store.sessionsDueForCleanup(now)) {
+  for (const due of store.sessionsDueForCleanup(ALL_BOARDS, now)) {
     if (store.isCleaningUp(due.card.id)) continue;
     store.beginCleanup(due.card.id);
     try {
@@ -80,6 +81,7 @@ async function runDueCleanups(): Promise<void> {
  */
 export async function runArchiveSweep(): Promise<void> {
   const due = store.archiveDueForDelete(
+    ALL_BOARDS,
     Date.now(),
     store.getArchiveRetentionDays(),
   );

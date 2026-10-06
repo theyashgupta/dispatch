@@ -50,6 +50,7 @@ import {
 } from "./board-schemas.js";
 import { httpErrorHandler } from "./error-handler.js";
 import { parseOrThrow } from "./parse-input.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 export const boardRouter = Router();
 
@@ -64,7 +65,7 @@ function getBoard(req: Request, res: Response): void {
     boardQuerySchema,
     req.query,
   );
-  res.status(200).json(store.snapshot({ doneLimit }));
+  res.status(200).json(store.snapshot(DEFAULT_BOARD_KEY, { doneLimit }));
 }
 
 boardRouter.get("/board", getBoard);
@@ -80,13 +81,15 @@ boardRouter.get("/board", getBoard);
  */
 function getSearch(req: Request, res: Response): void {
   const { q } = parseOrThrow(searchQuerySchema, req.query);
-  res.status(200).json(store.searchCards(q, SEARCH_RESULT_LIMIT));
+  res
+    .status(200)
+    .json(store.searchCards(DEFAULT_BOARD_KEY, q, SEARCH_RESULT_LIMIT));
 }
 
 boardRouter.get("/search", getSearch);
 
 boardRouter.get("/workspace-folders", (_req, res) => {
-  const { folders, lastUsed } = store.getWorkspaceFolders();
+  const { folders, lastUsed } = store.getWorkspaceFolders(DEFAULT_BOARD_KEY);
   res.status(200).json({ folders, lastUsed });
 });
 
@@ -103,7 +106,7 @@ boardRouter.post("/workspace-folders", async (req, res) => {
     throw new ValidationError("No git repositories found in this folder");
   }
 
-  await store.addWorkspaceFolder(abs);
+  await store.addWorkspaceFolder(DEFAULT_BOARD_KEY, abs);
   res.status(200).json({ repos });
 });
 
@@ -124,7 +127,7 @@ boardRouter.get("/fs/dirs", async (req, res) => {
 boardRouter.delete("/workspace-folders", async (req, res) => {
   const { path: rawPath } = parseOrThrow(workspacePathSchema, req.body);
 
-  await store.removeWorkspaceFolder(expandPath(rawPath));
+  await store.removeWorkspaceFolder(DEFAULT_BOARD_KEY, expandPath(rawPath));
   res.status(200).json({ ok: true });
 });
 

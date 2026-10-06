@@ -5,6 +5,7 @@ import type { TicketSource } from "../../adapters/source-gateway.js";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { issue } from "../../test-support/fake-source.js";
 import { restoreFetch } from "../../test-support/linear-fetch.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../../store/board.store.js");
@@ -78,7 +79,9 @@ function move(id: string, column: "todo" | "in_review" | "parked" | "done") {
 }
 
 const pushedEvents = (id: string) =>
-  store.listEvents(id, 20).filter((e) => e.type === "linear_state_pushed");
+  store
+    .listEvents(DEFAULT_BOARD_KEY, id, 20)
+    .filter((e) => e.type === "linear_state_pushed");
 
 after(restoreFetch);
 
@@ -164,7 +167,7 @@ test("a card without a team or from another source is never pushed", async () =>
     new Date().toISOString(),
   );
   await store.moveCardManual("p7", "todo");
-  const local = await store.createLocalCard("Local", "Body");
+  const local = await store.createLocalCard(DEFAULT_BOARD_KEY, "Local", "Body");
   const fake = fakeLinear();
   await outbound.pushColumnChanges(
     [...(await move("p7", "done")), ...(await move(local.id, "done"))],

@@ -15,7 +15,8 @@
     "src/web/lib/utils.ts",
     "src/web/queries/*-queries.ts!",
     "src/web/modules/*/queries/*-queries.ts!",
-    "src/web/components/ui/**/*.{ts,tsx}"
+    "src/web/components/ui/**/*.{ts,tsx}",
+    "src/server/services/domain/board-workspace.ts!"
   ],
   "project": ["src/**/*.{ts,tsx}!", "!src/server/test-support/**!"],
   "ignoreExportsUsedInFile": true,

@@ -19,6 +19,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
 - [Module Map](#module-map)
 - Cross-Module Invariants
   - [Single Writer Store](#single-writer-store)
+  - [Boards](#boards)
   - [Session Projection Chokepoint](#session-projection-chokepoint)
   - [Marker Protocol](#marker-protocol)
   - [Column Transition Specification](#column-transition-specification)
@@ -159,6 +160,52 @@ own tracked and in-flight sessions when reconciling (`WR-02`), so a ttyd spawn r
 `adapters/ttyd.ts` + `adapters/markers/watcher.ts` and referenced here only so the single-writer
 picture is complete. Finally, the store is content-free in its logging: a failed persist or a
 failed mutation logs only the error, never card fields, marker reasons, or pane text.
+
+### Boards
+
+A board groups cards under one key. The default board has the key `LOCAL`. The boards migration
+puts each existing card, event and archive row on `LOCAL`.
+
+**Tables.** The `boards` table holds one row for each board: `key` (the primary key), `name`,
+`workspace_root`, `repositories`, `linear_team_keys`, `last_used_folder`, `policy`, `created_at` and
+`archived`. The `cards`, `events` and `archive` tables each have a `board_key` column with the
+default `LOCAL` and an index. The JSON blobs of cards and archive rows also hold `boardKey`. The
+`items` table has no board key. Items stay global and each snapshot holds all items, because an
+inbox item has no board until the user promotes it.
+
+**The `LOCAL` row.** The `LOCAL` row keeps `workspace_root` null and `repositories` empty. The
+sessions folder of `LOCAL` stays in `Config.workspaceRoot`, and its folders stay in
+`meta.workspaceFolders` and `meta.lastUsed`. `services/domain/board-workspace.ts` gives the sessions
+folder and the repositories that a session of a board uses.
+
+**Scoped reads and creates.** These store methods take a `BoardKey` as the first parameter:
+`snapshot`, `searchCards`, `listEvents`, `listArchive`, `getWorkspaceFolders`, `addWorkspaceFolder`,
+`removeWorkspaceFolder`, `setLastUsedFolder`, `createLocalCard`, `createGroupCard` and
+`promoteItem`. Each method reads or writes only the cards, events, archive rows and folders of that board. Items stay global. `snapshot(board)` sets
+`BoardSnapshot.boardKey`. Each route passes `DEFAULT_BOARD_KEY`, so each route returns the same body
+as before, plus the `boardKey` fields.
+
+**Sweeps.** These store methods take a `BoardScope`: `listCards`, `sessionsWithTmux`,
+`sessionsDueForCleanup`, `archiveDueForDelete` and `trackedIssueIds`. The marker watcher, the
+poller, the cleanup scheduler, the archive retention sweep and the boot reconcile pass `ALL_BOARDS`,
+so each sweep sees each card of each board. Do not give a sweep one board key.
+
+**Board catalog.** `listBoards`, `getBoard`, `createBoard`, `updateBoard` and `setBoardArchived` read
+and write the `boards` table. The three writes run inside the write queue. The store does not archive
+`LOCAL`.
+
+**Refused creates.** A create on an unknown or archived board throws `BoardUnavailableError`. The
+check runs inside the write queue, and the store mints no id. The store refuses a group with a
+member of another board, with the existing refusal shape. `mirrorMemberColumn` moves only the
+members on the board of the group.
+
+**Ids.** A ticket gets its id from the board key: `LOCAL-n` on `LOCAL`, `ACME-n` on `ACME`. A group
+gets `GROUP-n` on `LOCAL` and the board key on each other board, so the tickets and the groups of a
+new board use one counter. The counters stay in `identifierCounters`, one counter for each prefix.
+
+**Events and archive.** An event gets the `boardKey` of its card. An event with no card gets
+`LOCAL`. `unwindGroup` writes the board key of the group to the archive row. `restoreGroup` puts the
+group back on the stored board, also when that board is archived.
 
 ### Items
 
@@ -613,11 +660,26 @@ one `~/.dispatch/board.db`. The store therefore guards BOTH directions of a vers
 
 **Newer board, older build → refuse.** `assertSchemaOpenable` throws before anything is read,
 migrated, or written when the persisted `meta.schemaVersion` exceeds the build's own
-`SESSION_SCHEMA_VERSION`. A build cannot know what a later migration moved, so continuing would let
+`STORE_SCHEMA_VERSION`. A build cannot know what a later migration moved, so continuing would let
 it write a shape it never learned to read and repairing would reconcile toward a projection that may
 no longer be the newer schema's truth. The refusal is total and damage-free — no snapshot, no
 rotation, no quarantine — which is what lets its message promise the board is untouched and name the
-one-command remedy (update, or restore `board.db.pre-v3` to stay behind deliberately).
+one-command remedy (update, or restore `board.db.pre-boards` to stay behind deliberately).
+
+**Boards migration, schema version 3.** The boards migration sets `meta.schemaVersion` to 3.
+`STORE_SCHEMA_VERSION` in `board-db.ts` is the version of the persisted counter and of
+`assertSchemaOpenable`. Before the migration changes the file, it copies the board to
+`board.db.pre-boards` with `VACUUM INTO`. The migration writes a new copy over an old one, except when the `boards` table and an old copy both exist: then an older build ran the migration again, and the old copy is the true board before the migration. A data folder with no cards, events or archive rows
+gets no copy. If the copy or the migration transaction fails, the server does not start, and the
+error names the copy path. A 4.2 build refuses a version 3 board through its own guard. To go back
+to a 4.2 build:
+
+1. Stop Dispatch.
+2. Delete `~/.dispatch/board.db-wal` and `~/.dispatch/board.db-shm` if they exist.
+3. Copy `~/.dispatch/board.db.pre-boards` over `~/.dispatch/board.db`.
+4. Start the 4.2 build.
+
+The copy does not hold the changes made after the migration. The refusal message of the 4.2 build names `board.db.pre-v3`. Each time the migration writes a new copy, it also writes it to `board.db.pre-v3` and moves an older `board.db.pre-v3` to `board.db.pre-v3.before-boards`, so both names restore the same board. A failure of that second write is logged and does not stop the migration.
 
 **Older build already wrote, newer build opens → repair.** `BoardStore#repairDowngradeDrift` runs on
 every boot, before `hydrateFromParsed`, and reconciles any card whose flat projection disagrees with
@@ -3817,7 +3879,8 @@ is a behavior change, not a refactor.
    `cards` slice bounded by `doneLimit`; only the persisted file is complete). This break is
    deliberate and UNVERSIONED — single user, localhost, client and server ship in one package, so
    there are no external consumers to keep compatible; a future reader must not "fix" a missing
-   version field. Keep the file location and every field name.
+   version field. Keep the file location and every field name. `Card.boardKey` and
+   `BoardSnapshot.boardKey` name the board of the card and of the snapshot.
 2. **SSE frame format.** `data: ${JSON.stringify(BoardSnapshot)}\n\n`; named heartbeat
    `event: ping\ndata: 1\n\n`; headers incl. `X-Accel-Buffering: no`; **server `KEEPALIVE_MS` (15s)
    must stay in lockstep with client `HEARTBEAT_MS`** (watchdog trips at 3×). No compression on

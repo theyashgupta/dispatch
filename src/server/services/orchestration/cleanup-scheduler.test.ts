@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { startedGroup } from "../../test-support/group-fixtures.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 process.env.DISPATCH_CLEANUP_TICK_MS = "300";
 isolateEnv();
@@ -45,7 +46,7 @@ void test("runArchiveSweep deletes only rows past the retention window and skips
   assert.ok(store.getArchived(young.id), "young row kept");
   assert.ok(store.getArchived(blocked.id), "blocked row never retried");
   assert.deepEqual(
-    store.listEvents(old.id, 5).map((e) => e.type)[0],
+    store.listEvents(DEFAULT_BOARD_KEY, old.id, 5).map((e) => e.type)[0],
     "archive_deleted",
   );
 });

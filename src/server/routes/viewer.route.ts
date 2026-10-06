@@ -8,6 +8,7 @@ import path from "node:path";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
 import { boardRepository as store } from "../store/board-repository.js";
 import { HttpError, NotFoundError } from "../services/domain/errors.js";
+import { ALL_BOARDS } from "../../shared/board-key.js";
 
 const MD_EXT = /\.(md|markdown)$/i;
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -49,7 +50,7 @@ viewerRouter.get("/viewer/file", async (req, res) => {
   const roots = new Set<string>();
   const ws = getOrchestrationConfig()?.workspaceRoot;
   if (ws) roots.add(ws);
-  for (const { session } of store.sessionsWithTmux()) {
+  for (const { session } of store.sessionsWithTmux(ALL_BOARDS)) {
     if (session.workspacePath) roots.add(session.workspacePath);
   }
 

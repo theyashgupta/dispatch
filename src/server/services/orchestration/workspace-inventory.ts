@@ -9,6 +9,7 @@ import { createTtlCache, type TtlCache } from "../infra/ttl-cache.js";
 import { buildWorktreeRows } from "../domain/workspace-inventory.js";
 import { discoverRepos } from "./workspaces.js";
 import { worktreePath } from "../domain/workspace-paths.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 const SIZE_TTL_MS = 5 * 60_000;
 const COMMIT_TTL_MS = 60_000;
@@ -102,8 +103,8 @@ export async function buildInventory(
     commits.clear();
     discoveries.clear();
   }
-  const cards = store.listCards();
-  const { folders } = store.getWorkspaceFolders();
+  const cards = store.listCards(DEFAULT_BOARD_KEY);
+  const { folders } = store.getWorkspaceFolders(DEFAULT_BOARD_KEY);
   const rows = buildWorktreeRows(cards);
   const limit = createLimiter(MAX_IN_FLIGHT);
 

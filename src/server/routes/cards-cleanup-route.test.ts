@@ -4,6 +4,7 @@ import express from "express";
 import fs from "node:fs";
 import type { Server } from "node:http";
 import { isolateEnv, waitFor } from "../test-support/fixtures.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 const env = isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -23,7 +24,7 @@ void test("POST /cards/:id/cleanup answers 202 while teardown is still running, 
   assert.ok(addr && typeof addr === "object");
   const { root, repo, ws } = await tempRepoWithWorkspace();
   try {
-    const card = await store.createLocalCard("clean me", "");
+    const card = await store.createLocalCard(DEFAULT_BOARD_KEY, "clean me", "");
     await store.setCardWorkspace(card.id, {
       folder: ws,
       repos: [{ path: repo, base: "main" }],
@@ -40,7 +41,9 @@ void test("POST /cards/:id/cleanup answers 202 while teardown is still running, 
     const frames: { cleaningUp?: true; workspacePath?: string; at: number }[] =
       [];
     const onChange = () => {
-      const wire = store.snapshot().cards.find((c) => c.id === card.id)!;
+      const wire = store
+        .snapshot(DEFAULT_BOARD_KEY)
+        .cards.find((c) => c.id === card.id)!;
       frames.push({
         cleaningUp: wire.cleaningUp,
         workspacePath: wire.workspacePath,

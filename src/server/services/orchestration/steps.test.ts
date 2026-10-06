@@ -8,6 +8,7 @@ import {
   waitFor,
   writeFakeRepl,
 } from "../../test-support/fixtures.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 const env = await isolateTmuxEnv();
 fs.writeFileSync(
@@ -33,7 +34,11 @@ void test(
     const argvFile = path.join(env.root, "claude-argv.txt");
     writeFakeRepl(env, argvFile);
     await store.load();
-    const card = await store.createLocalCard("shell session", "");
+    const card = await store.createLocalCard(
+      DEFAULT_BOARD_KEY,
+      "shell session",
+      "",
+    );
     const tmuxSession = `dsp-launchtest-${process.pid}`;
     const target = `=${tmuxSession}:`;
     const cwd = path.join(env.root, "worktree");
@@ -133,7 +138,11 @@ void test(
     const argvFile = path.join(env.root, "claude-argv-restart.txt");
     writeFakeRepl(env, argvFile);
     await store.load();
-    const card = await store.createLocalCard("restart keeps nodes", "");
+    const card = await store.createLocalCard(
+      DEFAULT_BOARD_KEY,
+      "restart keeps nodes",
+      "",
+    );
     const tmuxSession = `dsp-restarttest-${process.pid}`;
     const cwd = path.join(env.root, "worktree-restart");
     fs.mkdirSync(cwd, { recursive: true });

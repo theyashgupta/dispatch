@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isolateEnv } from "../test-support/fixtures.js";
 import { fakeItem as item } from "../test-support/fake-source.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("./board.store.js");
@@ -74,7 +75,7 @@ test("every item mutation emits exactly one change event", async () => {
     "fake:c",
     new Date(Date.now() + 3_600_000).toISOString(),
   );
-  await store.promoteItem("fake:d");
+  await store.promoteItem(DEFAULT_BOARD_KEY, "fake:d");
   store.off("change", onChange);
   assert.equal(changes, 4);
   assert.equal(
@@ -102,8 +103,8 @@ test("promote creates a local Inbox card once, marks the item done with its card
     if (e.type === "item_promoted") events.push(e);
   };
   store.on("activity", onActivity);
-  const first = await store.promoteItem("fake:p");
-  const second = await store.promoteItem("fake:p");
+  const first = await store.promoteItem(DEFAULT_BOARD_KEY, "fake:p");
+  const second = await store.promoteItem(DEFAULT_BOARD_KEY, "fake:p");
   store.off("activity", onActivity);
   assert.ok(first && first.created);
   assert.equal(first.card.column, "inbox");
@@ -117,7 +118,9 @@ test("promote creates a local Inbox card once, marks the item done with its card
   assert.equal(promoted?.state, "done");
   assert.equal(promoted?.cardId, first.card.id);
   assert.equal(
-    store.snapshot().cards.filter((c) => c.issueId === "fake:p").length,
+    store
+      .snapshot(DEFAULT_BOARD_KEY)
+      .cards.filter((c) => c.issueId === "fake:p").length,
     1,
   );
   assert.equal(events.length, 1);
@@ -125,12 +128,15 @@ test("promote creates a local Inbox card once, marks the item done with its card
     [events[0]?.cardId, events[0]?.source, events[0]?.toCol],
     [first.card.id, "fake", "inbox"],
   );
-  assert.equal(await store.promoteItem("fake:missing"), undefined);
+  assert.equal(
+    await store.promoteItem(DEFAULT_BOARD_KEY, "fake:missing"),
+    undefined,
+  );
 });
 
 test("a promoted item cannot be reopened, only kept done", async () => {
   await store.upsertItems("fake", [item("keep")], { kind: "append" });
-  await store.promoteItem("fake:keep");
+  await store.promoteItem(DEFAULT_BOARD_KEY, "fake:keep");
   assert.equal(await store.setItemState("fake:keep", "unread"), "promoted");
   assert.equal(await store.setItemState("fake:keep", "read"), "promoted");
   assert.equal(
@@ -147,11 +153,11 @@ test("a promoted item cannot be reopened, only kept done", async () => {
 
 test("promote advances the LOCAL counter exactly once across two calls", async () => {
   await store.upsertItems("fake", [item("q")], { kind: "append" });
-  const before = await store.createLocalCard("marker", "d");
+  const before = await store.createLocalCard(DEFAULT_BOARD_KEY, "marker", "d");
   const n = Number(before.identifier.split("-")[1]);
-  const first = await store.promoteItem("fake:q");
-  await store.promoteItem("fake:q");
-  const after = await store.createLocalCard("marker2", "d");
+  const first = await store.promoteItem(DEFAULT_BOARD_KEY, "fake:q");
+  await store.promoteItem(DEFAULT_BOARD_KEY, "fake:q");
+  const after = await store.createLocalCard(DEFAULT_BOARD_KEY, "marker2", "d");
   assert.equal(first?.card.identifier, `LOCAL-${n + 1}`);
   assert.equal(after.identifier, `LOCAL-${n + 2}`);
 });
@@ -195,7 +201,7 @@ test("snapshot items exclude done rows, present expired snoozes as unread and ca
     "ok",
   );
   await new Promise((r) => setTimeout(r, 40));
-  const items = (store.snapshot().items ?? []).filter(
+  const items = (store.snapshot(DEFAULT_BOARD_KEY).items ?? []).filter(
     (i) => i.source === "wire",
   );
   assert.deepEqual(
@@ -307,12 +313,12 @@ test("duplicate ids in one batch collapse to the last copy and a new row never c
 
 test("a re-promote after the card was removed mints a new card", async () => {
   await store.upsertItems("fake", [item("gone")], { kind: "append" });
-  const first = await store.promoteItem("fake:gone");
+  const first = await store.promoteItem(DEFAULT_BOARD_KEY, "fake:gone");
   assert.ok(first?.created);
   (store as unknown as { cards: Map<string, unknown> }).cards.delete(
     first.card.id,
   );
-  const second = await store.promoteItem("fake:gone");
+  const second = await store.promoteItem(DEFAULT_BOARD_KEY, "fake:gone");
   assert.ok(second?.created);
   assert.notEqual(second.card.id, first.card.id);
   assert.equal(store.getItem("fake:gone")?.cardId, second.card.id);
@@ -324,7 +330,9 @@ test("a redacted snoozed row carries its snooze time on the wire", async () => {
   });
   const until = new Date(Date.now() + 3_600_000).toISOString();
   assert.equal(await store.snoozeItem("wire2:z", until), "ok");
-  const row = (store.snapshot().items ?? []).find((i) => i.id === "wire2:z");
+  const row = (store.snapshot(DEFAULT_BOARD_KEY).items ?? []).find(
+    (i) => i.id === "wire2:z",
+  );
   assert.equal(row?.state, "snoozed");
   assert.equal(row?.snoozedUntil, until);
 });
@@ -354,9 +362,12 @@ test("persisted item rows carry only Item fields and never a card secret", () =>
 });
 
 test("the snapshot reports the enabled sources, empty until set", () => {
-  assert.deepEqual(store.snapshot().enabledSources, []);
+  assert.deepEqual(store.snapshot(DEFAULT_BOARD_KEY).enabledSources, []);
   store.setEnabledSources(["fake", "linear"]);
-  assert.deepEqual(store.snapshot().enabledSources, ["fake", "linear"]);
+  assert.deepEqual(store.snapshot(DEFAULT_BOARD_KEY).enabledSources, [
+    "fake",
+    "linear",
+  ]);
   store.setEnabledSources([]);
 });
 

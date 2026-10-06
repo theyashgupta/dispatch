@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { startedGroup } from "../../test-support/group-fixtures.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../../store/board.store.js");
@@ -26,7 +27,7 @@ void test("unwindGroup refuses an unknown card, a plain ticket, and a group with
     status: 404,
     error: "unknown card id: LOCAL-none",
   });
-  const plain = await store.createLocalCard("plain", "");
+  const plain = await store.createLocalCard(DEFAULT_BOARD_KEY, "plain", "");
   assert.deepEqual(await unwindGroup(plain.id, "todo"), {
     ok: false,
     status: 409,
