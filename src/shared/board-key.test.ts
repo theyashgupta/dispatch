@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_BOARD_KEY,
   defaultBoardPolicy,
+  identifierPrefix,
   isReservedBoardKey,
   parseBoardKey,
 } from "./board-key.js";
@@ -20,6 +21,21 @@ void test("LOCAL and GROUP are reserved, other keys are not", () => {
   assert.equal(isReservedBoardKey("LOCAL"), true);
   assert.equal(isReservedBoardKey("GROUP"), true);
   assert.equal(isReservedBoardKey("ACME"), false);
+});
+
+void test("identifierPrefix drops one numeric suffix and returns any other id whole", () => {
+  const cases: [string, string][] = [
+    ["ENG-12", "ENG"],
+    ["A-B-12", "A-B"],
+    ["NODASH", "NODASH"],
+    ["ENG-", "ENG-"],
+    ["ENG-12a", "ENG-12a"],
+    ["ENG-1-2", "ENG-1"],
+    ["", ""],
+  ];
+  for (const [id, prefix] of cases) {
+    assert.equal(identifierPrefix(id), prefix, id);
+  }
 });
 
 void test("the default policy has the D-6 values and the supervisor off only on LOCAL", () => {
