@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { startedGroup } from "../../test-support/group-fixtures.js";
-import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import { DEFAULT_BOARD_KEY, parseBoardKey } from "../../../shared/board-key.js";
 
 process.env.DISPATCH_CLEANUP_TICK_MS = "300";
 isolateEnv();
@@ -49,6 +49,30 @@ void test("runArchiveSweep deletes only rows past the retention window and skips
     store.listEvents(DEFAULT_BOARD_KEY, old.id, 5).map((e) => e.type)[0],
     "archive_deleted",
   );
+});
+
+void test("runArchiveSweep reaches a past-due group on a board other than the default", async () => {
+  const acme = parseBoardKey("ACME");
+  assert.ok(acme);
+  await store.load();
+  await store.createBoard({
+    key: acme,
+    name: "Acme",
+    workspaceRoot: "/acme/sessions",
+    repositories: [],
+    linearTeamKeys: [],
+  });
+  const { g: acmeGroup } = await startedGroup(store, { board: acme });
+  const { g: localGroup } = await startedGroup(store);
+  for (const g of [acmeGroup, localGroup]) {
+    assert.equal((await unwindGroup(g.id, "todo")).ok, true);
+  }
+  assert.equal(store.getArchived(acmeGroup.id)?.boardKey, "ACME");
+  backdate(acmeGroup.id, 40);
+  store.setArchiveRetentionDays(30);
+  await runArchiveSweep();
+  assert.equal(store.getArchived(acmeGroup.id), undefined, "ACME row swept");
+  assert.ok(store.getArchived(localGroup.id), "young LOCAL row kept");
 });
 
 void test("the sweep never forces: a past-due dirty worktree is blocked with its reason and its files survive", async () => {
