@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { isolateEnv } from "../test-support/fixtures.js";
 import { startedGroup } from "../test-support/group-fixtures.js";
 import type { ArchivedGroup, Card } from "../../shared/types.js";
+import { ALL_BOARDS, DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store, restoreBlocker, redactArchivedGroup } =
@@ -10,7 +11,7 @@ const { store, restoreBlocker, redactArchivedGroup } =
 const { openBoardDb } = await import("./board-db.js");
 
 const eventTypes = (cardId: string) =>
-  store.listEvents(cardId, 50).map((e) => e.type);
+  store.listEvents(DEFAULT_BOARD_KEY, cardId, 50).map((e) => e.type);
 
 void test("unwindGroup archives the snapshot with every session lost and sends members to todo", async () => {
   const { g, a, b } = await startedGroup(store);
@@ -111,7 +112,10 @@ void test("restoreGroup refuses when a member moved, joined another group, or st
   assert.ok(store.getArchived(g.id), "row kept");
 
   await store.moveCardManual(b.id, "todo");
-  const other = await store.createGroupCard("other", [a.id, b.id]);
+  const other = await store.createGroupCard(DEFAULT_BOARD_KEY, "other", [
+    a.id,
+    b.id,
+  ]);
   assert.equal(other.ok, true);
   res = await store.restoreGroup(g.id);
   assert.deepEqual(res, {
@@ -198,17 +202,17 @@ void test("listArchive is newest first, deleteArchived drops a row once, and the
   old.archivedAt = new Date(Date.now() - 31 * 86_400_000).toISOString();
   db.upsertArchive(old);
 
-  const ids = store.listArchive().map((r) => r.id);
+  const ids = store.listArchive(DEFAULT_BOARD_KEY).map((r) => r.id);
   assert.equal(ids[0], g.id, "newest first");
   assert.equal(ids[ids.length - 1], "GROUP-old");
 
-  assert.deepEqual(store.archiveDueForDelete(Date.now(), 0), []);
+  assert.deepEqual(store.archiveDueForDelete(ALL_BOARDS, Date.now(), 0), []);
   assert.deepEqual(
-    store.archiveDueForDelete(Date.now(), 30).map((r) => r.id),
+    store.archiveDueForDelete(ALL_BOARDS, Date.now(), 30).map((r) => r.id),
     ["GROUP-old"],
   );
   assert.deepEqual(
-    store.archiveDueForDelete(Date.now(), 60).map((r) => r.id),
+    store.archiveDueForDelete(ALL_BOARDS, Date.now(), 60).map((r) => r.id),
     [],
   );
   const liveDuplicate = structuredClone(old);
@@ -217,7 +221,7 @@ void test("listArchive is newest first, deleteArchived drops a row once, and the
   await store.restoreGroup(g.id);
   db.upsertArchive(liveDuplicate);
   assert.deepEqual(
-    store.archiveDueForDelete(Date.now(), 30).map((r) => r.id),
+    store.archiveDueForDelete(ALL_BOARDS, Date.now(), 30).map((r) => r.id),
     ["GROUP-old"],
     "a row whose group is live again is never due",
   );
@@ -228,7 +232,7 @@ void test("listArchive is newest first, deleteArchived drops a row once, and the
     "repo: 2 uncommitted",
   );
   assert.deepEqual(
-    store.archiveDueForDelete(Date.now(), 30),
+    store.archiveDueForDelete(ALL_BOARDS, Date.now(), 30),
     [],
     "blocked rows are never due",
   );
@@ -260,13 +264,13 @@ void test("restoring a row whose group is already live drops the stale row witho
   assert.equal(first.ok, true);
   openBoardDb().upsertArchive(zombie);
   assert.ok(store.getArchived(g.id), "zombie row present beside the live card");
-  const before = store.listEvents(g.id, 5).length;
+  const before = store.listEvents(DEFAULT_BOARD_KEY, g.id, 5).length;
   const again = await store.restoreGroup(g.id);
   assert.equal(again.ok, true);
   assert.equal(store.getArchived(g.id), undefined, "stale row dropped");
   assert.equal(store.getCard(g.id)?.column, "in_progress");
   assert.equal(
-    store.listEvents(g.id, 5).length,
+    store.listEvents(DEFAULT_BOARD_KEY, g.id, 5).length,
     before,
     "no event for a no-op restore",
   );
@@ -290,9 +294,12 @@ void test("the store refuses to unwind while a start is in flight, even when the
 
 void test("a group that never started unwinds with no session records and restores whole", async () => {
   await store.load();
-  const a = await store.createLocalCard("cold a", "");
-  const b = await store.createLocalCard("cold b", "");
-  const minted = await store.createGroupCard("cold group", [a.id, b.id]);
+  const a = await store.createLocalCard(DEFAULT_BOARD_KEY, "cold a", "");
+  const b = await store.createLocalCard(DEFAULT_BOARD_KEY, "cold b", "");
+  const minted = await store.createGroupCard(DEFAULT_BOARD_KEY, "cold group", [
+    a.id,
+    b.id,
+  ]);
   assert.equal(minted.ok, true);
   if (!minted.ok) return;
   const res = await store.unwindGroup(minted.card.id, "inbox");

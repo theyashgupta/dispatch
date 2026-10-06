@@ -6,6 +6,7 @@ import path from "node:path";
 import type { Server } from "node:http";
 import type { WorkspacesInventory } from "../../shared/types.js";
 import { isolateEnv } from "../test-support/fixtures.js";
+import { ALL_BOARDS, DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -30,7 +31,7 @@ after(() => {
 });
 
 async function seedWorkspaceCard(title: string, withWorkspace: boolean) {
-  const card = await store.createLocalCard(title, "");
+  const card = await store.createLocalCard(DEFAULT_BOARD_KEY, title, "");
   const ws = path.join(root, card.id);
   if (!withWorkspace) return { id: card.id, ws };
   await store.setCardWorkspace(card.id, {
@@ -119,13 +120,13 @@ void test("the inventory never runs more than 4 probes at once", async () => {
 });
 
 void test("building the inventory changes no card", async () => {
-  const before = JSON.stringify(store.listCards());
+  const before = JSON.stringify(store.listCards(ALL_BOARDS));
   await buildInventory({ fresh: true });
-  assert.equal(JSON.stringify(store.listCards()), before);
+  assert.equal(JSON.stringify(store.listCards(ALL_BOARDS)), before);
 });
 
 void test("a folder whose discovery throws reads as no repos and never fails the inventory", async () => {
-  await store.addWorkspaceFolder(root);
+  await store.addWorkspaceFolder(DEFAULT_BOARD_KEY, root);
   const inv = await buildInventory(
     { fresh: true },
     {
@@ -160,7 +161,7 @@ function countingProbes(overrides: Partial<InventoryProbes> = {}) {
 }
 
 void test("fresh=1 drops the size, commit and discovery caches; a plain build reuses all three", async () => {
-  await store.addWorkspaceFolder(root);
+  await store.addWorkspaceFolder(DEFAULT_BOARD_KEY, root);
   const { calls, probes } = countingProbes();
   await buildInventory({ fresh: true }, probes);
   const first = { ...calls };
@@ -187,7 +188,7 @@ void test("an unknown size is not cached, so the next build probes it again", as
 });
 
 void test("a rejected discovery is not cached, so the next build tries the folder again", async () => {
-  await store.addWorkspaceFolder(root);
+  await store.addWorkspaceFolder(DEFAULT_BOARD_KEY, root);
   let attempts = 0;
   const { probes } = countingProbes({
     discoverRepos: () => {
@@ -207,7 +208,7 @@ void test("a rejected discovery is not cached, so the next build tries the folde
 });
 
 void test("the newest commit across a session's repos wins, and all-unknown reads null", async () => {
-  const card = await store.createLocalCard("two repos", "");
+  const card = await store.createLocalCard(DEFAULT_BOARD_KEY, "two repos", "");
   const ws = path.join(root, `${card.id}-multi`);
   await store.setCardWorkspace(card.id, {
     folder: root,
@@ -244,7 +245,7 @@ void test("the newest commit across a session's repos wins, and all-unknown read
 void test("two sessions sharing a workspace path keep separate cache entries", async () => {
   const shared = path.join(root, "shared-ws");
   for (const title of ["share one", "share two"]) {
-    const card = await store.createLocalCard(title, "");
+    const card = await store.createLocalCard(DEFAULT_BOARD_KEY, title, "");
     await store.setCardWorkspace(card.id, {
       folder: root,
       repos: [{ path: path.join(root, "repo"), base: "main" }],

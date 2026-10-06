@@ -19,6 +19,7 @@ import {
 import { forgetUsage, getUsage } from "./claude-usage.js";
 import { liveTurnState } from "./session-turn.js";
 import { boardRepository as store } from "../../store/board-repository.js";
+import { ALL_BOARDS } from "../../../shared/board-key.js";
 
 const IDENTITY_TTL_MS = 5 * 60 * 1000;
 
@@ -65,7 +66,7 @@ export async function listAccountSummaries(): Promise<ClaudeAccountSummary[]> {
 export async function listAccountSessions(): Promise<AccountSessionEntry[]> {
   const activeId = getActiveAccountId();
   return Promise.all(
-    store.sessionsWithTmux().map(async ({ card, session }) => {
+    store.sessionsWithTmux(ALL_BOARDS).map(async ({ card, session }) => {
       const accountId = session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID;
       const turn = await liveTurnState(
         card.id,

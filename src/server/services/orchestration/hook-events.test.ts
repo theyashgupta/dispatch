@@ -1,6 +1,7 @@
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import { isolateEnv } from "../../test-support/fixtures.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../../store/board.store.js");
@@ -10,7 +11,7 @@ setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
 
 async function cardWithSession(title: string) {
   await store.load();
-  const created = await store.createLocalCard(title, "");
+  const created = await store.createLocalCard(DEFAULT_BOARD_KEY, title, "");
   await store.completeStart(created.id, undefined, {
     workspacePath: `/tmp/ws-${title}`,
     tmuxSession: `dsp-${title}`,
@@ -157,7 +158,9 @@ void test("a Stop hook with a DONE marker leaves a parked card parked and record
   assert.equal(card.column, "parked");
   assert.ok(card.lastMarker, "marker consumed, key recorded");
   assert.ok(
-    store.listEvents(cardId, 50).every((e) => e.type !== "status_agent_done"),
+    store
+      .listEvents(DEFAULT_BOARD_KEY, cardId, 50)
+      .every((e) => e.type !== "status_agent_done"),
     "no status event while parked",
   );
 });

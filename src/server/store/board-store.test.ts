@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { isolateEnv } from "../test-support/fixtures.js";
 import type { Card } from "../../shared/types.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { redactCard } = await import("./board.store.js");
@@ -88,7 +89,11 @@ void test("redactCard leaves the field absent when no session carries an account
 void test("recordResumeFailure carries an account reason into resumeError, else the fixed copy", async () => {
   const { store } = await import("./board.store.js");
   await store.load();
-  const created = await store.createLocalCard("resume reason", "");
+  const created = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    "resume reason",
+    "",
+  );
   await store.recordResumeFailure(
     created.id,
     undefined,
@@ -108,7 +113,11 @@ void test("recordResumeFailure carries an account reason into resumeError, else 
 void test("setClaudeSessionId appends a node per new conversation id and mirrors the latest one", async () => {
   const { store } = await import("./board.store.js");
   await store.load();
-  const created = await store.createLocalCard("node history", "");
+  const created = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    "node history",
+    "",
+  );
   await store.completeStart(created.id, undefined, {
     workspacePath: "/tmp/ws-nodes",
     tmuxSession: "dsp-nodes",
@@ -147,7 +156,11 @@ void test("setClaudeSessionId appends a node per new conversation id and mirrors
 void test("setClaudeSessionId drops a throttled bump on the latest node without persisting or broadcasting", async () => {
   const { store } = await import("./board.store.js");
   await store.load();
-  const created = await store.createLocalCard("throttle", "");
+  const created = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    "throttle",
+    "",
+  );
   await store.completeStart(created.id, undefined, {
     workspacePath: "/tmp/ws-throttle",
     tmuxSession: "dsp-throttle",
@@ -175,7 +188,11 @@ void test("setClaudeSessionId drops a throttled bump on the latest node without 
 void test("setClaudeSessionId is a no-op for an unknown card or an unresolvable session", async () => {
   const { store } = await import("./board.store.js");
   await store.load();
-  const created = await store.createLocalCard("no session yet", "");
+  const created = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    "no session yet",
+    "",
+  );
   await store.setClaudeSessionId("nope", undefined, "conv-x");
   await store.setClaudeSessionId(created.id, "ghost", "conv-x");
   await store.setClaudeSessionId(created.id, undefined, "conv-x");
@@ -186,7 +203,7 @@ void test("setClaudeSessionId is a no-op for an unknown card or an unresolvable 
 void test("markClaudeSessionMissing keeps the node, moves the mirror to the previous node, then to absent", async () => {
   const { store } = await import("./board.store.js");
   await store.load();
-  const created = await store.createLocalCard("missing", "");
+  const created = await store.createLocalCard(DEFAULT_BOARD_KEY, "missing", "");
   await store.completeStart(created.id, undefined, {
     workspacePath: "/tmp/ws-missing",
     tmuxSession: "dsp-missing",
@@ -289,7 +306,7 @@ void test("boot migration to schema version 2 gives each recorded conversation i
   assert.equal(migrated.claudeSessionId, "conv-legacy");
   const { openBoardDb } = await import("./board-db.js");
   const afterFirst = openBoardDb().readAll();
-  assert.equal(afterFirst.meta.schemaVersion, 2);
+  assert.equal(afterFirst.meta.schemaVersion, 3);
   const firstJson = JSON.stringify(
     afterFirst.cards.find((c) => c.id === "legacy-1"),
   );
@@ -301,6 +318,28 @@ void test("boot migration to schema version 2 gives each recorded conversation i
     firstJson,
     "second boot changes nothing",
   );
+});
+
+void test("a boot that converts a pre-session card saves the converted card", async () => {
+  const { store } = await import("./board.store.js");
+  const flat: Card = {
+    ...card(undefined),
+    id: "flat-1",
+    issueId: "flat-1",
+    identifier: "LOCAL-78",
+    tmuxSession: "dsp-flat-1",
+    workspacePath: "/tmp/ws-flat",
+  };
+  delete (flat as Partial<Card>).sessions;
+  await seedPersistedCard(flat, 1);
+
+  await store.load();
+  const { openBoardDb } = await import("./board-db.js");
+  const persisted = openBoardDb()
+    .readAll()
+    .cards.find((c) => c.id === "flat-1");
+  assert.equal(persisted?.sessions?.length, 1);
+  assert.equal(persisted?.sessions?.[0].tmuxSession, "dsp-flat-1");
 });
 
 void test("downgrade repair copies an older build's flat conversation id into the record and gives it a node", async () => {
@@ -338,7 +377,7 @@ void test("downgrade repair copies an older build's flat conversation id into th
 async function parkedCardWithSession(title: string) {
   const { store } = await import("./board.store.js");
   await store.load();
-  const created = await store.createLocalCard(title, "");
+  const created = await store.createLocalCard(DEFAULT_BOARD_KEY, title, "");
   await store.completeStart(created.id, undefined, {
     workspacePath: `/tmp/ws-${title}`,
     tmuxSession: `dsp-${title}`,
@@ -353,7 +392,7 @@ async function parkedCardWithSession(title: string) {
 void test("applyMarker while parked records the key, keeps the column and emits no event", async () => {
   const { store, cardId, sessionId } =
     await parkedCardWithSession("parked-consume");
-  const before = store.listEvents(cardId, 50).length;
+  const before = store.listEvents(DEFAULT_BOARD_KEY, cardId, 50).length;
   await store.applyMarker(
     cardId,
     sessionId,
@@ -370,7 +409,11 @@ void test("applyMarker while parked records the key, keeps the column and emits 
     card.sessions?.find((s) => s.id === sessionId)?.lastMarker,
     "DONE|shipped",
   );
-  assert.equal(store.listEvents(cardId, 50).length, before, "no event");
+  assert.equal(
+    store.listEvents(DEFAULT_BOARD_KEY, cardId, 50).length,
+    before,
+    "no event",
+  );
 
   await store.applyMarker(
     cardId,

@@ -61,6 +61,7 @@ export interface ActivityEvent {
   reason: string | null;
   source: string | null;
   ts: string;
+  boardKey?: BoardKey;
 }
 
 /**
@@ -200,6 +201,7 @@ export interface Item {
 export interface Card {
   /** Internal card id (can equal issueId in Phase 1). */
   id: string;
+  boardKey?: BoardKey;
   /** Linear issue id — the upsert key for the poller. */
   issueId: string;
   /** Human-readable Linear identifier, e.g. "PROP-123". */
@@ -785,6 +787,7 @@ export interface SessionFields {
  */
 export interface BoardSnapshot {
   cards: Card[];
+  boardKey?: BoardKey;
   syncedAt: string | null;
   /** Non-fatal sync problem from the last poll cycle (e.g. truncated pull); null when healthy. */
   syncWarning?: string | null;
@@ -1550,6 +1553,7 @@ export interface ArchivedGroup {
   card: Card;
   members: { id: string; identifier: string }[];
   deleteBlocked?: string;
+  boardKey?: BoardKey;
 }
 
 /** The wire shape of an archived group: no card snapshot, no session records, no secrets. */
@@ -1601,6 +1605,60 @@ export interface SentryIssueDetail {
   logger: string | null;
   platform: string | null;
 }
+
+export type BoardKey = string & { readonly __brand: "BoardKey" };
+
+export type BoardScope = BoardKey | "*";
+
+export interface BoardWorkspaceRepo {
+  path: string;
+  baseBranch: string | null;
+  checkCommand: string;
+}
+
+export interface BoardPolicy {
+  roadmapApproval: "ask" | "rules" | "all";
+  concurrencyCap: number;
+  loopModel: string | null;
+  orchestratorModel: string;
+  handoffPercent: number;
+  handoffHardPercent: number;
+  usageLimit: "wait" | "stop";
+  shipRights: "none" | "open_prs" | "merge";
+  budgetPerGroup: number | null;
+  supervisor: "on" | "off";
+}
+
+export interface Board {
+  key: BoardKey;
+  name: string;
+  workspaceRoot: string | null;
+  repositories: BoardWorkspaceRepo[];
+  linearTeamKeys: string[];
+  lastUsedFolder: string | null;
+  policy: BoardPolicy;
+  createdAt: string;
+  archived: boolean;
+}
+
+export type NewBoard = Pick<
+  Board,
+  "key" | "name" | "workspaceRoot" | "repositories" | "linearTeamKeys"
+>;
+
+export type BoardPatch = Partial<
+  Pick<Board, "name" | "workspaceRoot" | "repositories" | "linearTeamKeys">
+>;
+
+export type CreateBoardResult =
+  | { ok: true; board: Board }
+  | { ok: false; reason: "invalid-key" | "reserved-key" }
+  | { ok: false; reason: "duplicate-key"; boardName: string }
+  | { ok: false; reason: "key-in-use"; source: string };
+
+export type ArchiveBoardResult =
+  | { ok: true; board: Board }
+  | { ok: false; reason: "default-board" | "unknown-board" };
 
 export type AccountEventType =
   "account_moved" | "account_login_changed" | "account_login_failed";

@@ -5,6 +5,7 @@ import type { Server } from "node:http";
 import { isolateEnv } from "../test-support/fixtures.js";
 import { issue } from "../test-support/fake-source.js";
 import { linearFixture, restoreFetch } from "../test-support/linear-fetch.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -99,7 +100,10 @@ test("the move route answers before Linear does and pushes only the changed Line
   for (const id of ["m1", "m2", "m3", "still"]) {
     await store.moveCardManual(id, "todo");
   }
-  const group = await store.createGroupCard("Group", ["m1", "m2"]);
+  const group = await store.createGroupCard(DEFAULT_BOARD_KEY, "Group", [
+    "m1",
+    "m2",
+  ]);
   assert.ok(group.ok);
 
   assert.equal((await moveTo("m3", "in_review")).status, 204);

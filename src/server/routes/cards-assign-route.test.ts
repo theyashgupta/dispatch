@@ -9,6 +9,7 @@ import {
   queueLinearFetch,
   restoreFetch,
 } from "../test-support/linear-fetch.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -57,7 +58,7 @@ test("204 assigns the issue to the viewer through issueUpdate", async () => {
 test("404 for an unknown card and 409 for a local card, with no Linear call", async () => {
   const sent = queueLinearFetch([]);
   assert.equal((await assign("nope")).status, 404);
-  const local = await store.createLocalCard("local", "");
+  const local = await store.createLocalCard(DEFAULT_BOARD_KEY, "local", "");
   const res = await assign(local.id);
   assert.equal(res.status, 409);
   assert.deepEqual(await res.json(), { error: "source cannot assign" });

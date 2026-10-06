@@ -8,6 +8,7 @@ import {
   waitFor,
   writeFakeRepl,
 } from "../../test-support/fixtures.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 const env = await isolateTmuxEnv();
 const tmux = await import("../../adapters/tmux.js");
@@ -24,7 +25,11 @@ void test(
     const argvFile = path.join(env.root, "claude-argv.txt");
     writeFakeRepl(env, argvFile);
     await store.load();
-    const card = await store.createLocalCard("run claude", "");
+    const card = await store.createLocalCard(
+      DEFAULT_BOARD_KEY,
+      "run claude",
+      "",
+    );
     const tmuxSession = `dsp-runtest-${process.pid}`;
     const target = `=${tmuxSession}:`;
     const cwd = path.join(env.root, "worktree");
@@ -153,12 +158,20 @@ void test(
         store.endStart(card.id);
       }
 
-      const orphan = await store.createLocalCard("no session", "");
+      const orphan = await store.createLocalCard(
+        DEFAULT_BOARD_KEY,
+        "no session",
+        "",
+      );
       assert.equal(await runClaude(orphan.id), "no-session");
       assert.equal(await runClaude("no-such-card"), "no-session");
       assert.equal(await tmux.hasSession(`=dsp-${orphan.identifier}`), false);
 
-      const dead = await store.createLocalCard("dead session", "");
+      const dead = await store.createLocalCard(
+        DEFAULT_BOARD_KEY,
+        "dead session",
+        "",
+      );
       await store.completeStart(dead.id, undefined, {
         workspacePath: cwd,
         tmuxSession: "dsp-no-such-session",
@@ -168,7 +181,11 @@ void test(
 
       const legacyName = `dsp-legacy-${process.pid}`;
       await tmux.newSession(legacyName, cwd, ["sleep", "300"]);
-      const legacy = await store.createLocalCard("pre-upgrade session", "");
+      const legacy = await store.createLocalCard(
+        DEFAULT_BOARD_KEY,
+        "pre-upgrade session",
+        "",
+      );
       await store.completeStart(legacy.id, undefined, {
         workspacePath: cwd,
         tmuxSession: legacyName,
@@ -184,7 +201,11 @@ void test(
         await tmux.killSession(`=${legacyName}`);
       }
 
-      const stale = await store.createLocalCard("stale account", "");
+      const stale = await store.createLocalCard(
+        DEFAULT_BOARD_KEY,
+        "stale account",
+        "",
+      );
       await store.completeStart(stale.id, undefined, {
         workspacePath: cwd,
         tmuxSession,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isolateEnv } from "../test-support/fixtures.js";
 import { issue } from "../test-support/fake-source.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("./board.store.js");
@@ -25,9 +26,9 @@ test("snapshot cards carry commentCount and never the comment bodies", async () 
   );
   await store.moveCardManual("with", "todo");
   await store.moveCardManual("with", "in_review");
-  const local = await store.createLocalCard("local", "");
+  const local = await store.createLocalCard(DEFAULT_BOARD_KEY, "local", "");
 
-  const cards = store.snapshot().cards;
+  const cards = store.snapshot(DEFAULT_BOARD_KEY).cards;
   const byId = new Map(cards.map((c) => [c.id, c]));
   assert.equal(byId.get("with")?.commentCount, 2);
   assert.equal(byId.get("with")?.lastCommentId, "c2");
@@ -35,6 +36,8 @@ test("snapshot cards carry commentCount and never the comment bodies", async () 
   assert.equal(byId.get("none")?.commentCount, 0);
   assert.equal(byId.get(local.id)?.commentCount, undefined);
   for (const c of cards) assert.equal("comments" in c, false);
-  assert.ok(!JSON.stringify(store.snapshot()).includes(COMMENT.body));
+  assert.ok(
+    !JSON.stringify(store.snapshot(DEFAULT_BOARD_KEY)).includes(COMMENT.body),
+  );
   assert.equal(store.getCard("with")?.comments?.length, 2);
 });

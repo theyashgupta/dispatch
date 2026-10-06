@@ -1,0 +1,845 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Orchestrator panel sketch</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="sketch.css" />
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var theme = new URLSearchParams(location.search).get("theme");
+        if (theme === "light") root.setAttribute("data-theme", "light");
+        else if (theme === "dark") root.removeAttribute("data-theme");
+        document.addEventListener("DOMContentLoaded", function () {
+          var button = document.getElementById("theme-toggle");
+          function sync() {
+            button.textContent =
+              root.getAttribute("data-theme") === "light"
+                ? "Dark theme"
+                : "Light theme";
+          }
+          sync();
+          button.addEventListener("click", function () {
+            if (root.getAttribute("data-theme") === "light")
+              root.removeAttribute("data-theme");
+            else root.setAttribute("data-theme", "light");
+            sync();
+          });
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="sketch-bar">
+      <p>Orchestrator panel, populated state</p>
+      <button type="button" id="theme-toggle" class="btn btn-outline">
+        Light theme
+      </button>
+    </div>
+
+    <section class="frame for-wide" aria-labelledby="f1">
+      <h2 class="frame-title" id="f1">
+        Frame 1: Board with the orchestrator panel open (1440 px)
+      </h2>
+      <div class="frame-box">
+        <div class="shell">
+          <aside class="sidebar" aria-label="Sidebar">
+            <div class="sidebar-head">
+              <div class="brand">
+                <span class="brand-glyph" aria-hidden="true">◆</span>
+                <span class="brand-word">DISPATCH</span>
+              </div>
+              <div class="switcher">
+                <button
+                  type="button"
+                  class="switch-trigger"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                  aria-label="Switch board, current board Dispatch"
+                >
+                  <span>Dispatch</span>
+                  <span aria-hidden="true">▾</span>
+                </button>
+              </div>
+            </div>
+            <nav class="nav" aria-label="Main">
+              <div class="nav-label">Home</div>
+              <a class="nav-row" href="#">Today</a>
+              <a class="nav-row" href="#">Inbox</a>
+              <a class="nav-row" href="#">Ask</a>
+              <div class="nav-label">Work</div>
+              <a class="nav-row" href="#" aria-current="page">Board</a>
+              <a class="nav-row" href="#">Dashboard</a>
+              <a class="nav-row" href="#">Sessions</a>
+              <a class="nav-row" href="#">Workspace</a>
+              <a class="nav-row" href="#">Activity</a>
+            </nav>
+          </aside>
+
+          <div class="main">
+            <header class="page-header">
+              <div class="page-title">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-icon menu-btn"
+                  aria-label="Open menu"
+                >
+                  ☰
+                </button>
+                <h1>Board · Dispatch</h1>
+                <span class="muted" aria-label="9 cards">9</span>
+              </div>
+              <div class="page-actions">
+                <button
+                  type="button"
+                  class="btn btn-outline"
+                  aria-pressed="true"
+                >
+                  Orchestrator
+                </button>
+              </div>
+            </header>
+            <div class="split">
+              <div class="split-board">
+                <div class="toolbar">
+                  <input
+                    class="input"
+                    placeholder="Search tickets…"
+                    aria-label="Search tickets"
+                  />
+                </div>
+                <div class="board-scroll">
+                  <div class="board-cols">
+                    <section class="col col-off" aria-label="To Do">
+                      <div class="col-head">
+                        <span class="col-label"><span>To Do</span></span
+                        ><span class="badge">2</span>
+                      </div>
+                      <article class="tcard">
+                        <div class="tcard-top">
+                          <span
+                            class="prio prio-medium"
+                            title="Medium priority"
+                          ></span>
+                          <span class="sr-only">Medium priority</span>
+                          <span class="mono muted">LOCAL-76</span>
+                        </div>
+                        <span class="tcard-title"
+                          >Detail panel, Sessions and Workspace modules with the
+                          terminal invariant</span
+                        >
+                      </article>
+                      <article class="tcard">
+                        <div class="tcard-top">
+                          <span
+                            class="prio prio-low"
+                            title="Low priority"
+                          ></span>
+                          <span class="sr-only">Low priority</span>
+                          <span class="mono muted">LOCAL-77</span>
+                        </div>
+                        <span class="tcard-title"
+                          >Cutover, legacy deletion, global lint scope and
+                          screenshot suite</span
+                        >
+                      </article>
+                    </section>
+                    <section class="col col-off" aria-label="In Progress">
+                      <div class="col-head col-progress">
+                        <span class="col-label"><span>In Progress</span></span
+                        ><span class="badge">2</span>
+                      </div>
+                      <article class="tcard">
+                        <div class="tcard-top">
+                          <span
+                            class="prio prio-high"
+                            title="High priority"
+                          ></span>
+                          <span class="sr-only">High priority</span>
+                          <span class="mono muted">LOCAL-75</span>
+                        </div>
+                        <span class="tcard-title"
+                          >Board module on dnd-kit with shadcn Card and
+                          Badge</span
+                        >
+                        <span class="badge chip-live">● Live</span>
+                      </article>
+                      <article class="tcard">
+                        <div class="tcard-top">
+                          <span
+                            class="prio prio-high"
+                            title="High priority"
+                          ></span>
+                          <span class="sr-only">High priority</span>
+                          <span class="mono muted">LOCAL-74</span>
+                        </div>
+                        <span class="tcard-title"
+                          >Inbox, Today, Ask, Activity, Flow and card action
+                          dialogs modules</span
+                        >
+                        <span class="badge chip-live">● Live</span>
+                      </article>
+                    </section>
+                    <section class="col col-off" aria-label="Needs Input">
+                      <div class="col-head col-input">
+                        <span class="col-label"><span>Needs Input</span></span
+                        ><span class="badge">1</span>
+                      </div>
+                      <article class="tcard">
+                        <div class="tcard-top">
+                          <span
+                            class="prio prio-urgent"
+                            title="Urgent priority"
+                          ></span>
+                          <span class="sr-only">Urgent priority</span>
+                          <span class="mono muted">LOCAL-73</span>
+                        </div>
+                        <span class="tcard-title"
+                          >Tickets, Pull Requests, Errors, Slack, Meetings and
+                          Calendar modules</span
+                        >
+                      </article>
+                    </section>
+                    <section class="col col-off" aria-label="Agent Done">
+                      <div class="col-head col-agent-done">
+                        <span class="col-label"
+                          ><span>Agent Done</span
+                          ><span class="col-note">Automatic only</span></span
+                        ><span class="badge">1</span>
+                      </div>
+                      <article class="tcard">
+                        <div class="tcard-top">
+                          <span
+                            class="prio prio-medium"
+                            title="Medium priority"
+                          ></span>
+                          <span class="sr-only">Medium priority</span>
+                          <span class="mono muted">LOCAL-72</span>
+                        </div>
+                        <span class="tcard-title"
+                          >Playbooks, Vault, Archive, Accounts and Workspaces
+                          modules</span
+                        >
+                      </article>
+                    </section>
+                    <section class="col col-off" aria-label="In Review">
+                      <div class="col-head col-in-review">
+                        <span class="col-label"><span>In Review</span></span
+                        ><span class="badge">1</span>
+                      </div>
+                      <article class="tcard">
+                        <div class="tcard-top">
+                          <span
+                            class="prio prio-medium"
+                            title="Medium priority"
+                          ></span>
+                          <span class="sr-only">Medium priority</span>
+                          <span class="mono muted">LOCAL-71</span>
+                        </div>
+                        <span class="tcard-title"
+                          >Settings, Connections and Setup modules</span
+                        >
+                      </article>
+                    </section>
+                    <section class="col col-off" aria-label="Parked">
+                      <div class="col-head col-parked">
+                        <span class="col-label"><span>Parked</span></span
+                        ><span class="badge">0</span>
+                      </div>
+                      <p class="col-empty">Nothing set aside.</p>
+                    </section>
+                    <section class="col col-off" aria-label="Done">
+                      <div class="col-head col-done">
+                        <span class="col-label"><span>Done</span></span
+                        ><span class="badge">2</span>
+                      </div>
+                      <article class="tcard">
+                        <div class="tcard-top">
+                          <span
+                            class="prio prio-low"
+                            title="Low priority"
+                          ></span>
+                          <span class="sr-only">Low priority</span>
+                          <span class="mono muted">LOCAL-70</span>
+                        </div>
+                        <span class="tcard-title"
+                          >Shell on shadcn Sidebar, Command, Dialog, Sheet,
+                          Sonner, Alert</span
+                        >
+                      </article>
+                      <article class="tcard">
+                        <div class="tcard-top">
+                          <span
+                            class="prio prio-low"
+                            title="Low priority"
+                          ></span>
+                          <span class="sr-only">Low priority</span>
+                          <span class="mono muted">LOCAL-69</span>
+                        </div>
+                        <span class="tcard-title"
+                          >TanStack Router on hash history, detail panel in root
+                          layout</span
+                        >
+                      </article>
+                    </section>
+                  </div>
+                </div>
+              </div>
+              <div
+                class="handle"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize orchestrator panel"
+                tabindex="0"
+              >
+                <span class="handle-grip" aria-hidden="true"></span>
+              </div>
+              <aside class="split-panel" aria-label="Orchestrator panel">
+                <div class="oph">
+                  <div class="oph-row">
+                    <h2 class="oph-title">Orchestrator</h2>
+                    <span class="badge">Dispatch</span>
+                    <span class="badge">▶ Working</span>
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-icon oph-close"
+                      aria-label="Close orchestrator panel"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div class="oph-row oph-tip-room">
+                    <span class="stop-wrap">
+                      <button
+                        type="button"
+                        class="btn btn-outline"
+                        title="Interrupt the current turn. The session stays open."
+                      >
+                        <span aria-hidden="true">■</span> Stop
+                      </button>
+                      <span class="tooltip" role="tooltip"
+                        >Interrupt the current turn. The session stays
+                        open.</span
+                      >
+                    </span>
+                  </div>
+                </div>
+                <section class="loops" aria-label="Stopped loops">
+                  <h3 class="loops-title">Stopped loops</h3>
+                  <div class="item">
+                    <p>GROUP-14 stopped at 21:05: usage limit (policy Stop)</p>
+                    <button type="button" class="btn btn-outline">
+                      Resume loop
+                    </button>
+                  </div>
+                </section>
+                <div
+                  class="tabs panel-tabs"
+                  role="tablist"
+                  aria-label="Orchestrator sections"
+                >
+                  <button
+                    type="button"
+                    class="tab"
+                    role="tab"
+                    aria-selected="true"
+                  >
+                    Terminal
+                  </button>
+                  <button
+                    type="button"
+                    class="tab"
+                    role="tab"
+                    aria-selected="false"
+                  >
+                    Decisions (1)
+                  </button>
+                  <button
+                    type="button"
+                    class="tab"
+                    role="tab"
+                    aria-selected="false"
+                  >
+                    Policy
+                  </button>
+                  <button
+                    type="button"
+                    class="tab"
+                    role="tab"
+                    aria-selected="false"
+                  >
+                    Orchestrators (2)
+                  </button>
+                </div>
+                <p class="panel-note">
+                  Terminal tab selected. Frames A to D below show each tab.
+                </p>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="frame for-narrow" aria-labelledby="f2">
+      <h2 class="frame-title" id="f2">
+        Frame 2: Orchestrator sheet from the right edge (390 px)
+      </h2>
+      <div class="frame-box">
+        <div class="sheet-scrim">
+          <aside class="sheet" aria-label="Orchestrator">
+            <div class="sheet-head">
+              <h2 class="oph-title">Orchestrator</h2>
+              <button
+                type="button"
+                class="btn btn-ghost btn-icon"
+                aria-label="Close orchestrator panel"
+              >
+                ✕
+              </button>
+            </div>
+            <div class="oph">
+              <div class="oph-row">
+                <span class="badge">Dispatch</span>
+                <span class="badge">▶ Working</span>
+              </div>
+              <div class="oph-row">
+                <span class="stop-wrap">
+                  <button
+                    type="button"
+                    class="btn btn-outline"
+                    title="Interrupt the current turn. The session stays open."
+                  >
+                    <span aria-hidden="true">■</span> Stop
+                  </button>
+                </span>
+              </div>
+            </div>
+            <section class="loops" aria-label="Stopped loops">
+              <h3 class="loops-title">Stopped loops</h3>
+              <div class="item">
+                <p>GROUP-14 stopped at 21:05: usage limit (policy Stop)</p>
+                <button type="button" class="btn btn-outline">
+                  Resume loop
+                </button>
+              </div>
+            </section>
+            <div
+              class="tabs panel-tabs"
+              role="tablist"
+              aria-label="Orchestrator sections"
+            >
+              <button type="button" class="tab" role="tab" aria-selected="true">
+                Terminal
+              </button>
+              <button
+                type="button"
+                class="tab"
+                role="tab"
+                aria-selected="false"
+              >
+                Decisions (1)
+              </button>
+              <button
+                type="button"
+                class="tab"
+                role="tab"
+                aria-selected="false"
+              >
+                Policy
+              </button>
+              <button
+                type="button"
+                class="tab"
+                role="tab"
+                aria-selected="false"
+              >
+                Orchestrators (2)
+              </button>
+            </div>
+            <div class="panel-body">
+              <div
+                class="term"
+                role="region"
+                aria-label="Orchestrator terminal"
+              >
+                <div class="term-bar">Orchestrator terminal</div>
+                <div class="term-lines">
+                  <p>
+                    <span class="term-prompt">&gt;</span> wait_for_event:
+                    GROUP-13 gate event, phase 4 passed
+                  </p>
+                  <p>
+                    <span class="term-prompt">&gt;</span> send_input to
+                    GROUP-13: confirmed
+                  </p>
+                  <p>
+                    <span class="term-prompt">&gt;</span> wait_for_event:
+                    GROUP-13 gate event, phase 5 failed
+                  </p>
+                  <p>
+                    <span class="term-prompt">&gt;</span> wait_for_event:
+                    GROUP-13 gate event, phase 5 failed again
+                  </p>
+                  <p>
+                    <span class="term-prompt">&gt;</span> create_decision_item:
+                    GROUP-13 Unit 2 Phase 5 failed its gate twice
+                  </p>
+                  <p>
+                    <span class="term-prompt">&gt;</span> wait_for_event:
+                    waiting for the answer ▌
+                  </p>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="frame" aria-labelledby="fa">
+      <h2 class="frame-title" id="fa">Frame A: Terminal tab</h2>
+      <div class="panel-col">
+        <div
+          class="tabs panel-tabs"
+          role="tablist"
+          aria-label="Orchestrator sections"
+        >
+          <button type="button" class="tab" role="tab" aria-selected="true">
+            Terminal
+          </button>
+          <button type="button" class="tab" role="tab" aria-selected="false">
+            Decisions (1)
+          </button>
+          <button type="button" class="tab" role="tab" aria-selected="false">
+            Policy
+          </button>
+          <button type="button" class="tab" role="tab" aria-selected="false">
+            Orchestrators (2)
+          </button>
+        </div>
+        <div class="panel-body">
+          <div class="term" role="region" aria-label="Orchestrator terminal">
+            <div class="term-bar">Orchestrator terminal</div>
+            <div class="term-lines">
+              <p>
+                <span class="term-prompt">&gt;</span> wait_for_event: GROUP-13
+                gate event, phase 4 passed
+              </p>
+              <p>
+                <span class="term-prompt">&gt;</span> send_input to GROUP-13:
+                confirmed
+              </p>
+              <p>
+                <span class="term-prompt">&gt;</span> wait_for_event: GROUP-13
+                gate event, phase 5 failed
+              </p>
+              <p>
+                <span class="term-prompt">&gt;</span> wait_for_event: GROUP-13
+                gate event, phase 5 failed again
+              </p>
+              <p>
+                <span class="term-prompt">&gt;</span> create_decision_item:
+                GROUP-13 Unit 2 Phase 5 failed its gate twice
+              </p>
+              <p>
+                <span class="term-prompt">&gt;</span> wait_for_event: waiting
+                for the answer ▌
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="frame" aria-labelledby="fb">
+      <h2 class="frame-title" id="fb">Frame B: Decisions tab</h2>
+      <div class="panel-col">
+        <div
+          class="tabs panel-tabs"
+          role="tablist"
+          aria-label="Orchestrator sections"
+        >
+          <button type="button" class="tab" role="tab" aria-selected="false">
+            Terminal
+          </button>
+          <button type="button" class="tab" role="tab" aria-selected="true">
+            Decisions (1)
+          </button>
+          <button type="button" class="tab" role="tab" aria-selected="false">
+            Policy
+          </button>
+          <button type="button" class="tab" role="tab" aria-selected="false">
+            Orchestrators (2)
+          </button>
+        </div>
+        <div class="panel-body">
+          <article class="decision" aria-label="Decision item">
+            <div class="item-main">
+              <h3 class="decision-q">
+                GROUP-13 Unit 2 Phase 5 failed its gate twice. How should the
+                loop continue?
+              </h3>
+              <p class="help">GROUP-13, asked by Main orchestrator 6 min ago</p>
+            </div>
+            <div class="opt-list">
+              <button type="button" class="btn btn-outline opt-btn">
+                <span>Give the loop 2 more fix rounds</span>
+                <span class="badge">Recommended</span>
+              </button>
+              <button type="button" class="btn btn-outline opt-btn">
+                <span>Stop the loop and ask me</span>
+              </button>
+              <button type="button" class="btn btn-outline opt-btn">
+                <span>Skip the phase and record a deviation</span>
+              </button>
+            </div>
+            <div class="field">
+              <label for="other-answer" class="sr-only"
+                >Your answer to GROUP-13 Unit 2 Phase 5 failed its gate twice.
+                How should the loop continue?</label
+              >
+              <textarea
+                id="other-answer"
+                class="textarea"
+                placeholder="Or type an answer"
+              ></textarea>
+            </div>
+            <div>
+              <button type="button" class="btn btn-outline">Send answer</button>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="frame" aria-labelledby="fc">
+      <h2 class="frame-title" id="fc">Frame C: Policy tab</h2>
+      <div class="panel-col">
+        <div
+          class="tabs panel-tabs"
+          role="tablist"
+          aria-label="Orchestrator sections"
+        >
+          <button type="button" class="tab" role="tab" aria-selected="false">
+            Terminal
+          </button>
+          <button type="button" class="tab" role="tab" aria-selected="false">
+            Decisions (1)
+          </button>
+          <button type="button" class="tab" role="tab" aria-selected="true">
+            Policy
+          </button>
+          <button type="button" class="tab" role="tab" aria-selected="false">
+            Orchestrators (2)
+          </button>
+        </div>
+        <div class="panel-body">
+          <h3 class="oph-title">Policy for Dispatch</h3>
+          <p class="help">
+            Only you can change this policy. The orchestrator reads it. No tool
+            can change it.
+          </p>
+          <div class="field">
+            <label for="p-roadmap">Roadmap approval</label>
+            <select id="p-roadmap" class="input">
+              <option selected>Ask me for each roadmap</option>
+              <option>Approve when the rules pass, else ask</option>
+              <option>Approve each roadmap</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="p-cap">Loops at once</label>
+            <input
+              id="p-cap"
+              class="input"
+              type="number"
+              value="3"
+              min="1"
+              max="10"
+            />
+          </div>
+          <div class="field">
+            <label for="p-loop">Loop model</label>
+            <select id="p-loop" class="input">
+              <option selected>Session settings</option>
+              <option>Opus</option>
+              <option>Sonnet</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="p-orch">Orchestrator model</label>
+            <select id="p-orch" class="input">
+              <option selected>Opus</option>
+              <option>Sonnet</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="p-handoff">Handoff at context percent</label>
+            <input
+              id="p-handoff"
+              class="input"
+              type="number"
+              value="50"
+              min="10"
+              max="95"
+            />
+          </div>
+          <div class="field">
+            <label for="p-hard">Hard handoff at context percent</label>
+            <input id="p-hard" class="input" type="number" value="80" />
+          </div>
+          <div class="field">
+            <span class="field-label" id="p-usage-label">At a usage limit</span>
+            <div
+              class="toggle-group"
+              role="group"
+              aria-labelledby="p-usage-label"
+            >
+              <button type="button" class="btn btn-ghost" aria-pressed="true">
+                Wait for the reset
+              </button>
+              <button type="button" class="btn btn-ghost" aria-pressed="false">
+                Stop and ask me
+              </button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="p-ship">Ship rights</label>
+            <select id="p-ship" class="input">
+              <option selected>None, I ship</option>
+              <option>Open PRs</option>
+              <option>Open and merge PRs</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="p-budget">Budget per group (USD)</label>
+            <input
+              id="p-budget"
+              class="input"
+              type="number"
+              placeholder="No limit"
+            />
+          </div>
+          <div class="field">
+            <span class="field-label" id="p-sup-label">Supervisor</span>
+            <div class="switch-row">
+              <button
+                type="button"
+                class="switch"
+                role="switch"
+                aria-checked="true"
+                aria-labelledby="p-sup-label"
+              ></button>
+              <span>On</span>
+            </div>
+            <p class="help">
+              The supervisor watches the loops of this board. An orchestrator
+              needs it.
+            </p>
+          </div>
+          <div>
+            <button type="button" class="btn btn-primary" disabled>
+              Save policy
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="frame" aria-labelledby="fd">
+      <h2 class="frame-title" id="fd">Frame D: Orchestrators tab</h2>
+      <div class="panel-col">
+        <div
+          class="tabs panel-tabs"
+          role="tablist"
+          aria-label="Orchestrator sections"
+        >
+          <button type="button" class="tab" role="tab" aria-selected="false">
+            Terminal
+          </button>
+          <button type="button" class="tab" role="tab" aria-selected="false">
+            Decisions (1)
+          </button>
+          <button type="button" class="tab" role="tab" aria-selected="false">
+            Policy
+          </button>
+          <button type="button" class="tab" role="tab" aria-selected="true">
+            Orchestrators (2)
+          </button>
+        </div>
+        <div class="panel-body">
+          <div class="panel">
+            <table class="table-stack table">
+              <thead>
+                <tr>
+                  <th scope="col">Orchestrator</th>
+                  <th scope="col">Role</th>
+                  <th scope="col">Scope</th>
+                  <th scope="col">Owns</th>
+                  <th scope="col">Policy</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td data-label="Orchestrator">Main orchestrator</td>
+                  <td data-label="Role">
+                    <span class="badge">Main</span>
+                  </td>
+                  <td data-label="Scope">Each group that no extra owns</td>
+                  <td data-label="Owns">GROUP-12, GROUP-13</td>
+                  <td data-label="Policy">Board policy</td>
+                </tr>
+                <tr>
+                  <td data-label="Orchestrator">Extra orchestrator 1</td>
+                  <td data-label="Role"><span class="badge">Extra</span></td>
+                  <td data-label="Scope">GROUP-14</td>
+                  <td data-label="Owns">GROUP-14</td>
+                  <td data-label="Policy">Loops at once: 1</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <button type="button" class="btn btn-outline">
+              Add extra orchestrator
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="frame frame-e" aria-labelledby="fe">
+      <h2 class="frame-title" id="fe">
+        Frame E: Start and resume in the panel header
+      </h2>
+      <div class="panel-col">
+        <div class="panel-body">
+          <div class="panel">
+            <p><strong>No orchestrator, supervisor off</strong></p>
+            <button type="button" class="btn btn-primary" disabled>
+              Start orchestrator
+            </button>
+            <p class="help">
+              Turn on the supervisor in Policy to start an orchestrator.
+            </p>
+          </div>
+          <div class="panel">
+            <p><strong>No orchestrator, supervisor on</strong></p>
+            <button type="button" class="btn btn-primary">
+              Start orchestrator
+            </button>
+          </div>
+          <div class="panel">
+            <p><span class="badge badge-danger">⏻ Session lost</span></p>
+            <button type="button" class="btn btn-outline">
+              Resume orchestrator
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </body>
+</html>

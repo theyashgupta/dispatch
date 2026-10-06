@@ -9,6 +9,7 @@ import {
   queueLinearFetch,
   restoreFetch,
 } from "../test-support/linear-fetch.js";
+import { ALL_BOARDS, DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -44,7 +45,11 @@ const sync = (id: string, body: unknown) =>
   });
 
 test("200 creates the issue and the card adopts its identifier, url and issue id", async () => {
-  const card = await store.createLocalCard("Local sync card", "Body line");
+  const card = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    "Local sync card",
+    "Body line",
+  );
   const created = linearFixture("issue-create.json") as {
     data: { issueCreate: { issue: { description: string } } };
   };
@@ -68,7 +73,11 @@ test("200 creates the issue and the card adopts its identifier, url and issue id
 });
 
 test("a synced card survives a poll that does not return its issue", async () => {
-  const card = await store.createLocalCard("Outside the filter", "Body");
+  const card = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    "Outside the filter",
+    "Body",
+  );
   const created = linearFixture("issue-create.json") as {
     data: { issueCreate: { issue: { id: string; identifier: string } } };
   };
@@ -87,7 +96,9 @@ test("a synced card survives a poll that does not return its issue", async () =>
     (sent[1]?.variables.input as { stateId?: string }).stateId,
     "st-progress",
   );
-  assert.ok(store.trackedIssueIds("linear", new Set()).includes("issue-11"));
+  assert.ok(
+    store.trackedIssueIds(ALL_BOARDS, "linear", new Set()).includes("issue-11"),
+  );
   await store.applyIssues([], new Date().toISOString(), {
     source: "linear",
     tracked: {
@@ -99,13 +110,13 @@ test("a synced card survives a poll that does not return its issue", async () =>
   assert.equal(kept?.issueId, "issue-11");
   assert.equal(kept?.goneFromLinear, false);
   assert.deepEqual(
-    store.listEvents(card.id, 10).map((e) => e.type),
+    store.listEvents(DEFAULT_BOARD_KEY, card.id, 10).map((e) => e.type),
     ["sync_out", "local_created"],
   );
 });
 
 test("400 without a teamId and no Linear call", async () => {
-  const card = await store.createLocalCard("No team", "");
+  const card = await store.createLocalCard(DEFAULT_BOARD_KEY, "No team", "");
   const sent = queueLinearFetch([]);
   for (const body of [{}, { teamId: 7 }, { teamId: "" }]) {
     const res = await sync(card.id, body);
@@ -117,7 +128,7 @@ test("400 without a teamId and no Linear call", async () => {
 });
 
 test("a Linear failure answers 502 and leaves the card local and unchanged", async () => {
-  const card = await store.createLocalCard("Fails", "Body");
+  const card = await store.createLocalCard(DEFAULT_BOARD_KEY, "Fails", "Body");
   queueLinearFetch([
     [401, { errors: [{ extensions: { code: "AUTHENTICATION_ERROR" } }] }],
   ]);
@@ -132,7 +143,11 @@ test("a Linear failure answers 502 and leaves the card local and unchanged", asy
 });
 
 test("a token hit whose title and description carry the Dispatch marker keeps the local fields", async () => {
-  const card = await store.createLocalCard("Marker card", "Local body");
+  const card = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    "Marker card",
+    "Local body",
+  );
   queueLinearFetch([
     [
       200,
@@ -162,7 +177,11 @@ test("a token hit whose title and description carry the Dispatch marker keeps th
 });
 
 test("409 when Linear is not connected, with no Linear call and no sync started", async () => {
-  const card = await store.createLocalCard("Linear off", "Body");
+  const card = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    "Linear off",
+    "Body",
+  );
   rebuildSources({
     linearApiKey: "k",
     sources: { linear: { apiKey: "k", enabled: false } },
@@ -181,7 +200,11 @@ test("409 when Linear is not connected, with no Linear call and no sync started"
 });
 
 test("the fallback flag skips the teamId check and never runs the direct search", async () => {
-  const card = await store.createLocalCard("Flag card", "Body");
+  const card = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    "Flag card",
+    "Body",
+  );
   setOrchestrationConfig({ linearApiKey: "", linearSyncViaClaude: true });
   const sent = queueLinearFetch([]);
   try {
@@ -195,8 +218,13 @@ test("the fallback flag skips the teamId check and never runs the direct search"
 });
 
 test("a token line pasted into another card neither travels to Linear nor lets that issue be adopted", async () => {
-  const victim = await store.createLocalCard("Victim", "Body");
+  const victim = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    "Victim",
+    "Body",
+  );
   const spoof = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
     "Spoof",
     `Spoof body\ndispatch-sync:${victim.id}`,
   );
