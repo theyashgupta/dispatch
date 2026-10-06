@@ -20,6 +20,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
 - Cross-Module Invariants
   - [Single Writer Store](#single-writer-store)
   - [Boards](#boards)
+  - [Board API](#board-api)
   - [Session Projection Chokepoint](#session-projection-chokepoint)
   - [Marker Protocol](#marker-protocol)
   - [Column Transition Specification](#column-transition-specification)
@@ -206,6 +207,71 @@ new board use one counter. The counters stay in `identifierCounters`, one counte
 **Events and archive.** An event gets the `boardKey` of its card. An event with no card gets
 `LOCAL`. `unwindGroup` writes the board key of the group to the archive row. `restoreGroup` puts the
 group back on the stored board, also when that board is archived.
+
+### Board API
+
+The board routes live in `routes/boards.route.ts`, with the checks in
+`services/orchestration/boards.ts`. The router is case sensitive, so a board with the key `COUNTS`
+does not clash with `/api/boards/counts`.
+
+**Board routes.** `GET /api/boards` returns `{ boards, knownLinearTeamKeys }`.
+`knownLinearTeamKeys` holds the identifier prefixes of the Linear cards in the store, plus the
+Linear team keys when Linear is on. The server logs a failed Linear read once and does not read again for 60
+seconds. `POST /api/boards` creates a board and returns `201` with
+`{ board }`. `GET /api/boards/:key` and `PATCH /api/boards/:key` return `{ board }`. A patch accepts
+only `name`, `workspaceRoot`, `repositories` and `linearTeamKeys`, and the key never changes. A
+patch of `LOCAL` writes `workspaceRoot` to `config.json` and the repository paths to the workspace
+folders. `POST /api/boards/:key/archive` and `POST /api/boards/:key/restore` set and clear the
+archive flag. Archive refuses a board that has a live or a starting session.
+
+**Repository folders.** One rule applies on every write path: board create, `PATCH /api/boards/:key`
+and `POST /api/workspace-folders?board=`. A `LOCAL` folder must exist. It can be a parent folder of
+repositories. A folder of any other board must hold a `.git` entry. A patch of `LOCAL` does not check
+a `workspaceRoot` that equals the current one. `DELETE /api/workspace-folders?board=` refuses to
+remove the last repository of a board other than `LOCAL`.
+
+**Counts route.** `GET /api/boards/counts` returns
+`{ counts: [{ key, running, openGroups, attention }], at }` for each board, archived boards
+included. `running` counts the cards that show the Live session chip. `openGroups` counts the group
+cards that are not in Done. `attention` counts the cards in Needs input.
+
+**List routes.** `GET /api/cards?board=&column=&source=&hasSession=` returns `{ cards, total }`
+with the snapshot redaction. `GET /api/sessions?board=&live=` returns `{ sessions }`, and each
+session holds its card id.
+
+**The `board` parameter.** Each collection route takes an optional `board` query parameter. No
+`board` means `LOCAL`, so each request of today returns the same body. A malformed key returns `400`
+`invalid-board`. An unknown key returns `404` `unknown-board`. An archived board serves reads, and a
+create on it returns `409` `board-archived`. A card route (`/api/cards/:id/...`) reads the board
+that is stored on the card and ignores `board`. The stream never rejects: a malformed, unknown or
+archived board gets the `LOCAL` stream. Each stream client gets the snapshot of its board, and an
+activity frame goes only to the clients of the board of the event.
+
+**Typed errors.** A board error body is `{ error, code }`. The `error` string is the UI copy:
+
+- `400` `invalid-key`: "Use 2 to 6 capital letters or digits, starting with a letter."
+- `400` `reserved-key`: "LOCAL and GROUP are reserved."
+- `400` `duplicate-key`: "Board <name> uses this key."
+- `400` `linear-team-key`: "Linear team <KEY> uses this key."
+- `400` `team-key-taken`: "Board <name> lists Linear team <KEY>." Create and patch return it when
+  another board lists the same team key. `LOCAL` and `GROUP` as a team key return `reserved-key`.
+- `400` `missing-name`: "Enter a name."
+- `400` `folder-missing`: "This folder does not exist."
+- `400` `no-repositories`: "Add at least one repository."
+- `409` `sessions-running`: "Stop the <n> running sessions first."
+- `409` `default-board`, `409` `board-archived`, `404` `unknown-board`, `400` `invalid-board`: the
+  `error` string is the code.
+
+`sessions-running` also holds `running`. A repository `folder-missing` from the existence check also holds
+`field` and `path`. A sessions folder `folder-missing` holds only `field`. A path that the schema
+refuses returns `folder-missing` without them. A
+body that fails its schema (an unknown patch field, a bad base branch, check command, repository or
+team key) returns `400` with only `error`, as the other routes do.
+
+**Sessions per board.** A session starts in the sessions folder of the board of its card
+(`cardSessionsRoot` in `services/orchestration/steps.ts`). A `LOCAL` card keeps
+`Config.workspaceRoot`. The escape check compares the session path with the board folder. The
+viewer allows the folder of each board and the path of each live session.
 
 ### Items
 
@@ -3902,7 +3968,9 @@ is a behavior change, not a refactor.
    group members, `members` always an array (`[]` for a non-group card) — and, like every other
    handler in `cards.route.ts` — **`400`, not `404`**, for an unknown id (`T-82-03`); `sync-linear`'s
    `404` stays the sole documented deviation. See `## GET /api/cards/:id answers a group parent's
-real membership directly, independent of windowing` below for the full envelope contract.
+real membership directly, independent of windowing` below for the full envelope contract. Each
+   collection route takes the optional `board` query parameter, and the board routes live under
+   `/api/boards` (see Board API).
 4. **Persistence format + location.** `~/.dispatch/{board.json,config.json}`; `board.json` ===
    `BoardSnapshot` JSON; atomic writes via `write-file-atomic`; config at mode `0600`; the `"//"`-keyed
    config template. Pasted ticket images live under `~/.dispatch/attachments/<cardId>/<sha256-16>.<ext>`
