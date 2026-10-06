@@ -33,6 +33,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Tmux Invocations](#tmux-invocations)
   - [Claude Accounts](#claude-accounts)
   - [Session Account Move](#session-account-move)
+  - [Account Chain](#account-chain)
   - [Orchestration Saga](#orchestration-saga)
   - [Exec Chokepoint](#exec-chokepoint)
   - [Repo Discovery](#repo-discovery)
@@ -2067,7 +2068,10 @@ the continue action all call it. The service holds the Run Claude card lock
    that does not resolve (`account`).
 3. If Claude runs, type `/exit` only when the turn state is idle and the last lines of the pane show
    the input footer, then
-   wait up to 15 s for the shell prompt. Else return `busy` and change no account state.
+   wait up to 15 s for the shell prompt. Else return `busy` and change no account state. When the
+   CLI instead shows its "Background work is running" exit menu (a background subagent or task
+   outlived the turn), press Escape to stay, so no work stops; the pending move runs at the next
+   turn end.
 4. Set or unset `CLAUDE_CONFIG_DIR` in the tmux session environment, and type the same export or
    unset line into the shell.
 5. Seed the workspace trust for the new config dir.
@@ -2077,7 +2081,8 @@ the continue action all call it. The service holds the Run Claude card lock
    starts a new conversation when no id is recorded, as Run Claude does. `steps.ts#typeLaunchLine`
    first clears the screen and waits up to 3 s until no old input footer or resume refusal shows, so
    the readiness check reads only the new REPL.
-8. Wait for the new REPL.
+8. Wait for the new REPL. A trust dialog that focuses "No, exit" (CLI 2.1.291 lists it first) gets
+   Down before Enter.
 
 **The safe point.** `session-turn.ts` keeps the turn state of each session in memory.
 `UserPromptSubmit` sets busy, `Stop` sets idle, and a `StopFailure` with a rate limit sets limit. A
@@ -2110,6 +2115,138 @@ session.
 login email and organization id after each Default usage refresh and on a 5 minute timer. On a
 change it marks each live session on Default stale. The restart of a stale session is a move to the
 same account through the same service.
+
+### Account Chain
+
+**Record (2026-10-06, LOCAL-94).** The accounts form an ordered chain. When the account in use
+reaches its limit, the server moves the sessions to the next account that has allowance. After the
+reset of a higher account, the server moves the sessions back to it. Automatic moves are off by
+default. Anthropic's terms do not address automatic moves between the accounts of one person, so
+the user must turn them on.
+
+**Storage.** `accounts.json` is version 2. Each added account has a `position`, and Default has
+`defaultPosition`. The migration from version 1 puts Default first and the added accounts after it
+by creation time. The runtime state is in `chain-state.json` next to it
+(`account-chain-state.ts`): the state, buckets and `limitedUntil` of each account, `inUseSince`, the
+exhausted record and the last 50 moves. A corrupt file reads as empty and does not stop the boot.
+The settings are in `config.json` under `claudeAccounts`: `autoMove` (default false),
+`thresholdPercent` (default 100, range 50 to 100) and `minDwellMinutes` (default 15, range 0 to 240).
+
+**States.** `account-state.ts#deriveAccountState` gives each account one state. The first
+rule that applies sets the state:
+
+- `login-expired`: the token read failed (401, 403 or no token) and the folder is logged out.
+- `limited`: a bucket is at or above the threshold, or a limit signal arrived. `limitedUntil` is the
+  latest reset of the full buckets, so a full 7 day bucket holds the account until the 7 day reset.
+- `unknown`: no good read exists, a 401 or 403 read comes from a logged in folder, or a good read
+  has no buckets.
+- `near-limit`: a bucket is at 80 percent or more.
+- `available`: all other cases.
+
+**The selection rule.** `account-selection.ts#selectAccount` takes the chain in position order and
+selects the first account whose state is `available`, `near-limit` or `unknown` and whose
+`limitedUntil` is not in the future. When no account qualifies, the chain is exhausted and the
+result is the earliest `limitedUntil`. The selection never takes a `login-expired` account.
+
+**Triggers.** `account-chain.ts` is the controller. It runs one task at a time in a queue. A manual
+switch through `PUT /accounts/active` runs in the same queue, so it never overlaps a chain move. A
+failover starts on these signals for the account in use:
+
+1. A usage read at or above the threshold.
+2. A limit surface on the screen of a session of the account in use. A pane scan each 30 s finds
+   the surface also when no hooks run. The signal fires once, when the session enters the limit
+   state. A pane check does not signal from a hook `limit` when the screen shows no surface. A session marked stale does
+   not signal. The controller then reads the usage of the account. It fails over only when that
+   read is at the threshold or is not a good read. A reset time read from the screen is capped at
+   5 hours from now.
+3. A `StopFailure` hook with a rate limit. This trigger needs no usage read.
+
+A limit surface whose printed time passed in the last 5 hours is a stale surface when a later good
+read shows every bucket below the threshold. The controller ignores it
+(`account-state.ts#isStaleSurface`).
+
+**Cadence.** `claude-usage.ts` reads each account at boot and each 15 minutes. While a bucket of the
+account in use is above 80 percent, it reads that account each 2 minutes. A 429 response uses the
+`Retry-After` backoff.
+
+**Stability.** After a chain move, a usage trigger does not move the sessions again for
+`minDwellMinutes`. Triggers 2 and 3 are hard signals and override the dwell. A limited account stays
+limited until its `limitedUntil`, also when a read before that time is below the threshold. A manual switch through `PUT /accounts/active` ends a running dwell and does not start a new one.
+
+**Failover.** With `autoMove` true, the controller sets the pointer, records the move and starts a
+new dwell. Then `session-account-apply.ts#applyAutomaticMove` changes the pending moves. Each
+pending move to the old account now goes to the new account. A pending move on a pinned session
+does not change. A pending move that the chain queued stays a chain move. The function does not
+change other pending moves, so a manual pending move to a different account still runs. Only a
+manual switch through `PUT /accounts/active` removes the pending moves to other accounts. Then the
+function moves the sessions of the old account through the session move service (see Session
+Account Move): idle and limit sessions now, busy sessions as pending moves. It skips pinned
+sessions and sessions that have a pending move to a different account. A session whose move fails
+goes into the skipped list, and the other sessions still move. The controller records the move
+also when a session fails. A moved session gets the prompt `Continue.` only when the move left a
+limit surface that was on the screen (`session-account-apply.ts#continueAfterMove`). The server
+types the prompt only when the pane shows the ready input footer, is not busy and shows no limit
+surface. With `autoMove` false, the controller moves nothing and sends one offer. It does not send
+the same offer again until an offer of a different kind or for a different pair of accounts goes
+out, a move runs, an account leaves `limited` or the server restarts. When `autoMove` changes from
+true to false, the controller removes each pending move that it queued.
+
+**Return.** Each limited account has a timer at `limitedUntil` plus 2 minutes, or 15 minutes from
+now when the time is unknown or past. The timer reads the usage again. The controller accepts only
+a good read that it took after the timer fired. If the read is not good, or the account is
+`unknown` or `login-expired`, the timer is set again 15 minutes on. If the account is no longer limited and ranks
+above the account in use, the sessions return to it with the failover policy. If it is still
+limited, the timer is set again. A usage read that clears the account does not cancel the timer,
+so a usage read never starts a return.
+
+**Timers.** A timer task that fails runs again 15 minutes later. The 30 s scan also runs each timer
+whose time is past, because a timer does not count the time while the computer sleeps. A delay is
+at most 24 days. At boot, the controller sets each timer again from `chain-state.json`, and a timer
+whose time is already past fires at once. At boot it also checks a return at once for the account
+that the last chain move left, when the work is still on that move's target and the account is no
+longer limited. The last chain move counts only while no manual switch or Switch now came after it, so a manual pick is never undone at boot. Removing an account removes its chain
+entry and its timer.
+
+**Exhausted chain.** When no account qualifies, the controller moves nothing, records the earliest
+reset and sends one notification. A timer at that reset plus 2 minutes reads every account again.
+The controller accepts only good reads that it took after the timer fired. Then it runs the
+selection again. If the selected account has no such read, the timer is set again 15 minutes on. If
+it selects another account, the sessions move to it when `autoMove` is true, and the controller
+sends an offer when `autoMove` is false. If it selects the account in use, each of its sessions that
+still shows a limit surface continues: on the automatic continue line the server sends Escape and
+then `Continue.`; on the options menu it selects the stop option, or the wait option when no stop
+option shows, and then sends `Continue.`. A session with no limit surface on the screen gets no
+key. No key path selects a credits option.
+
+**Pin.** `accountPinned` on a session keeps it on its account. Automatic moves and "Switch now" skip
+it. A manual move still moves it: `POST /cards/:id/session/account`, and `PUT /accounts/active`
+with `applyToRunning`. `PUT /cards/:id/session/account-pin` sets the pin. Setting the pin removes
+the pending move of the session, and a pending move that the chain queued checks the pin again
+before it runs.
+
+**Routes.** `GET /accounts` returns each account in chain order with `position`, `state`,
+`buckets`, `limitedUntil` and `inUse`, the sessions with `pinned`, and `chain` with the settings, the
+exhausted record, the history (newest first) and `inUseSince`. `PUT /accounts/chain/order` takes
+every account id once and returns 400 `invalid-order` otherwise. `PUT /accounts/chain/settings`
+returns 400 `invalid-settings` for a value out of range. `POST /accounts/chain/switch-now` returns
+200 with `to` and `moves`, or 409 `no-eligible-account` when no other account qualifies.
+
+**Failover function for LOCAL-89.** `account-chain.ts#requestFailover` moves the sessions of the
+account in use now to the first qualifying account in chain order, other than the account in use. It ignores `autoMove` and the dwell, starts
+a new dwell and skips pinned sessions. It returns `{ ok: false, error: "no-eligible-account" }`
+when no other account qualifies. "Switch now" calls it.
+
+**Records.** `account-chain-records.ts#recordChainEvent` writes one activity row and sends one push
+notification for each failover, return and exhausted chain. The kinds are `account_failover`,
+`account_return` and `account_chain_exhausted`. For a failover or a return, the row `reason` is the
+JSON text of `src/shared/account-chain.ts#buildChainReason`. It holds the trigger, the labels of the
+two accounts and the number of sessions. The trigger is `usage`, `surface`, `rate-limit`, `reset`,
+`switch-now` or `held`. A `held` row is an offer that `autoMove` false holds back, and its number
+is 0. For a move, the number is the sessions moved plus the sessions queued. It is null when the
+move step failed. `parseChainReason` reads the row. It also reads an older row in the form
+`<from> to <to>`, which has no number. `describeChainMove` writes the text of the activity feed
+and of the push body, so the two are the same. `push-send.ts#sendPush` sends a push with or
+without a card. A chain push has no card, and the notification opens the Accounts page.
 
 ### Orchestration Saga
 
