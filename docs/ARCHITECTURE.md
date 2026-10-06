@@ -2104,9 +2104,10 @@ pending move stays after a server restart. It clears when any move of that sessi
 outcome except `busy` and `limit-unknown`), when its target account is removed, and when a later
 switch selects a different account.
 
-**The apply choice.** `PUT /accounts/active` takes `applyToRunning`. `none` (the default) writes the
-pointer only. `idle` moves the idle and limit sessions now and leaves busy sessions alone. `all`
-moves the idle and limit sessions now and queues each busy session.
+**The apply choice.** `PUT /accounts/active` takes `applyToRunning`. An absent value means `all`, so
+a switch reaches every running session. `none` writes the pointer only. `idle` moves the idle and
+limit sessions now and leaves busy sessions alone. `all` moves the idle and limit sessions now and
+queues each busy session. The switch dialog preselects `all` and shows the running session count.
 `session-account-plan.ts#planApply` skips sessions already on the target, lost sessions and legacy
 sessions. `POST /cards/:id/session/account` moves one session and returns 202 `queued` for a busy
 session.
