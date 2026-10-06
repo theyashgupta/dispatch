@@ -24,8 +24,8 @@ self.addEventListener("push", (event) => {
   if (
     data == null ||
     typeof data.title !== "string" ||
-    typeof data.cardId !== "string" ||
-    data.cardId === ""
+    ((typeof data.cardId !== "string" || data.cardId === "") &&
+      typeof data.url !== "string")
   ) {
     /**
      * The subscription is userVisibleOnly, so a push that shows nothing spends the browser's
@@ -52,9 +52,9 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
-      tag: data.cardId,
+      tag: data.cardId || "dsp-accounts",
       renotify: true,
-      data: { url: data.url, cardId: data.cardId },
+      data: { url: data.url, cardId: data.cardId ?? "" },
       icon: "/icon-192.png",
     }),
   );

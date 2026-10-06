@@ -1,3 +1,7 @@
+import {
+  describeChainMove,
+  parseChainReason,
+} from "../../shared/account-chain.js";
 import { COLUMN_LABELS } from "../../shared/column-labels.js";
 import { LINEAR_PUSH_FAILED_PREFIX } from "../../shared/linear-state-map.js";
 import type {
@@ -98,6 +102,22 @@ export function describeEvent(
       return event.reason
         ? `Claude login failed: ${event.reason}`
         : "Claude login failed";
+    case "account_failover": {
+      const facts = parseChainReason(event.reason);
+      return facts
+        ? describeChainMove("failover", facts)
+        : "Claude account at its usage limit";
+    }
+    case "account_return": {
+      const facts = parseChainReason(event.reason);
+      return facts
+        ? describeChainMove("return", facts)
+        : "Claude account reset";
+    }
+    case "account_chain_exhausted":
+      return event.reason
+        ? `Every account is at its limit; the earliest reset is ${new Date(event.reason).toLocaleString()}`
+        : "Every account is at its limit; the earliest reset is unknown";
     default:
       return describeUnknownEvent(event.type);
   }

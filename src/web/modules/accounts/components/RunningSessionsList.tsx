@@ -7,6 +7,8 @@ import { StaleBadge } from "@/components/badges/StaleBadge";
 import { SessionContinueButton } from "@/components/SessionContinueButton";
 import { SessionRestartButton } from "@/components/SessionRestartButton";
 import { Item } from "@/components/ui/item";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   accountName,
   pendingNote,
@@ -25,6 +27,7 @@ interface RunningSessionsListProps {
   pendingSessionId: string | null;
   onRestart: (session: AccountSessionEntry) => void;
   onContinue: (session: AccountSessionEntry) => void;
+  onPinChange: (session: AccountSessionEntry, pinned: boolean) => void;
 }
 
 export function RunningSessionsList({
@@ -34,6 +37,7 @@ export function RunningSessionsList({
   pendingSessionId,
   onRestart,
   onContinue,
+  onPinChange,
 }: RunningSessionsListProps) {
   return (
     <section
@@ -109,25 +113,38 @@ export function RunningSessionsList({
                     </span>
                   )}
                 </div>
-                {(session.stale || session.continueAction !== undefined) && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    {session.stale && (
-                      <SessionRestartButton
-                        pending={pendingSessionId === session.sessionId}
-                        disabled={busy}
-                        onRestart={() => onRestart(session)}
-                      />
-                    )}
-                    {session.continueAction !== undefined && (
-                      <SessionContinueButton
-                        action={session.continueAction}
-                        pending={pendingSessionId === session.sessionId}
-                        disabled={busy}
-                        onContinue={() => onContinue(session)}
-                      />
-                    )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id={`pin-${session.sessionId}`}
+                      checked={session.pinned}
+                      disabled={busy}
+                      onCheckedChange={(pinned) => onPinChange(session, pinned)}
+                      data-testid="session-pin"
+                    />
+                    <Label
+                      htmlFor={`pin-${session.sessionId}`}
+                      className="text-xs text-muted-foreground"
+                    >
+                      Pin to account
+                    </Label>
                   </div>
-                )}
+                  {session.stale && (
+                    <SessionRestartButton
+                      pending={pendingSessionId === session.sessionId}
+                      disabled={busy}
+                      onRestart={() => onRestart(session)}
+                    />
+                  )}
+                  {session.continueAction !== undefined && (
+                    <SessionContinueButton
+                      action={session.continueAction}
+                      pending={pendingSessionId === session.sessionId}
+                      disabled={busy}
+                      onContinue={() => onContinue(session)}
+                    />
+                  )}
+                </div>
               </Item>
             </li>
           );
