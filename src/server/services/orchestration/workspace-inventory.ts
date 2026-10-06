@@ -1,4 +1,5 @@
 import type {
+  BoardKey,
   DiscoveredRepo,
   WorkspacesInventory,
 } from "../../../shared/types.js";
@@ -95,7 +96,7 @@ async function newestCommit(
  * @see docs/ARCHITECTURE.md#workspaces-inventory
  */
 export async function buildInventory(
-  opts: { fresh: boolean },
+  opts: { fresh: boolean; board?: BoardKey },
   probes: InventoryProbes = REAL_PROBES,
 ): Promise<WorkspacesInventory> {
   if (opts.fresh) {
@@ -103,8 +104,9 @@ export async function buildInventory(
     commits.clear();
     discoveries.clear();
   }
-  const cards = store.listCards(DEFAULT_BOARD_KEY);
-  const { folders } = store.getWorkspaceFolders(DEFAULT_BOARD_KEY);
+  const board = opts.board ?? DEFAULT_BOARD_KEY;
+  const cards = store.listCards(board);
+  const { folders } = store.getWorkspaceFolders(board);
   const rows = buildWorktreeRows(cards);
   const limit = createLimiter(MAX_IN_FLIGHT);
 

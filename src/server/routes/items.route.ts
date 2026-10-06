@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 import { ConflictError, NotFoundError } from "../services/domain/errors.js";
 import {
   redactCard,
@@ -12,7 +13,11 @@ import {
   snoozeBodySchema,
 } from "./items-schemas.js";
 import { parseOrThrow } from "./parse-input.js";
-import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
+import {
+  mapBoardUnavailable,
+  resolveBoardForCreate,
+} from "../services/orchestration/boards.js";
+import { parseBoardParam } from "./boards-schemas.js";
 
 export const itemsRouter = Router();
 
@@ -43,12 +48,16 @@ itemsRouter.post("/items/:id/snooze", async (req, res) => {
 
 itemsRouter.post("/items/:id/promote", async (req, res) => {
   const { context } = parseOrThrow(promoteBodySchema, req.body);
-  const result = await store.promoteItem(
-    DEFAULT_BOARD_KEY,
-    req.params.id,
-    context,
-  );
+  const { key } = resolveBoardForCreate(parseBoardParam(req.query));
+  const result = await store
+    .promoteItem(key, req.params.id, context)
+    .catch((err: unknown) => {
+      throw mapBoardUnavailable(err);
+    });
   if (!result) throw new NotFoundError("unknown item");
+  if (!result.created && (result.card.boardKey ?? DEFAULT_BOARD_KEY) !== key) {
+    throw new ConflictError("item is promoted");
+  }
   res
     .status(result.created ? 201 : 200)
     .json({ card: redactCard(result.card) });

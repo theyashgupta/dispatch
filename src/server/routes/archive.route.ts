@@ -11,7 +11,8 @@ import {
 } from "../services/domain/errors.js";
 import { httpErrorHandler } from "./error-handler.js";
 import { forceBodySchema } from "./schema-primitives.js";
-import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
+import { resolveBoard } from "../services/orchestration/boards.js";
+import { parseBoardParam } from "./boards-schemas.js";
 
 /**
  * The archive surface (LOCAL-17): list, restore and hard-delete unwound groups.
@@ -21,9 +22,10 @@ import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
  */
 export const archiveRouter = Router();
 
-archiveRouter.get("/archive", (_req, res) => {
+archiveRouter.get("/archive", (req, res) => {
+  const { key } = resolveBoard(parseBoardParam(req.query));
   res.status(200).json({
-    archived: store.listArchive(DEFAULT_BOARD_KEY).map(redactArchivedGroup),
+    archived: store.listArchive(key).map(redactArchivedGroup),
   });
 });
 

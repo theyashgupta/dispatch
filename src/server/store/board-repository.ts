@@ -35,6 +35,7 @@ import type { PushSubscriptionRow } from "./board-db.js";
 import { store, type ReservedSession } from "./board.store.js";
 
 export {
+  BoardUnavailableError,
   redactArchivedGroup,
   redactCard,
   type ReservedSession,

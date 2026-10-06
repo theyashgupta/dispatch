@@ -3,7 +3,8 @@ import { httpErrorHandler } from "./error-handler.js";
 import { z } from "zod";
 import { parseOrThrow } from "./parse-input.js";
 import { boardRepository as store } from "../store/board-repository.js";
-import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
+import { resolveBoard } from "../services/orchestration/boards.js";
+import { parseBoardParam } from "./boards-schemas.js";
 
 export const eventsRouter = Router();
 
@@ -34,9 +35,10 @@ function listEventsHandler(req: Request, res: Response): void {
     querySchema,
     req.query,
   );
+  const { key } = resolveBoard(parseBoardParam(req.query));
 
   res.status(200).json({
-    events: store.listEvents(DEFAULT_BOARD_KEY, cardId ?? null, limit),
+    events: store.listEvents(key, cardId ?? null, limit),
   });
 }
 

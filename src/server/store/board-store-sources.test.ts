@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import type { Card } from "../../shared/types.js";
+import { test, type TestContext } from "node:test";
+import type { BoardKey, Card } from "../../shared/types.js";
 import { isolateEnv } from "../test-support/fixtures.js";
 import { issue } from "../test-support/fake-source.js";
-import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
+import {
+  ALL_BOARDS,
+  DEFAULT_BOARD_KEY,
+  parseBoardKey,
+} from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("./board.store.js");
@@ -260,4 +264,149 @@ test("invalid counter entries are ignored and an unseen prefix starts at 1", asy
   const persisted = openBoardDb().readAll().meta;
   assert.equal(persisted.identifierCounters?.GROUP, undefined);
   assert.equal(persisted.groupTicketCounter, 0);
+});
+
+const ACME = parseBoardKey("ACME") as BoardKey;
+
+async function ensureAcme(): Promise<void> {
+  if (store.getBoard(ACME)) return;
+  await store.createBoard({
+    key: ACME,
+    name: "Acme",
+    workspaceRoot: "/acme/sessions",
+    repositories: [],
+    linearTeamKeys: ["ENG"],
+  });
+}
+
+function linearIssue(id: string, identifier: string) {
+  return issue(id, { identifier });
+}
+
+async function pullLinear(
+  issues: ReturnType<typeof linearIssue>[],
+  opts: { partial?: boolean } = {},
+): Promise<void> {
+  await store.applyIssues(issues, SYNCED, { source: "linear", ...opts });
+}
+
+test("a new Linear card goes to the board that lists its team key, else to LOCAL", async () => {
+  await ensureAcme();
+  await pullLinear([
+    linearIssue("uuid-eng", "ENG-7"),
+    linearIssue("uuid-ops", "OPS-3"),
+    linearIssue("uuid-bad", "NODASH"),
+  ]);
+  assert.equal(store.getCard("uuid-eng")?.boardKey, "ACME");
+  assert.equal(store.getCard("uuid-ops")?.boardKey, "LOCAL");
+  assert.equal(store.getCard("uuid-bad")?.boardKey, "LOCAL");
+  assert.deepEqual(
+    store
+      .snapshot(ACME)
+      .cards.filter((c) => c.source === "linear")
+      .map((c) => c.id),
+    ["uuid-eng"],
+  );
+});
+
+test("an existing Linear card keeps its board when the keys of the boards change", async () => {
+  await ensureAcme();
+  await store.updateBoard(ACME, { linearTeamKeys: ["ENG", "OPS"] });
+  await pullLinear([
+    linearIssue("uuid-eng", "ENG-7"),
+    linearIssue("uuid-ops", "OPS-3"),
+    linearIssue("uuid-ops2", "OPS-4"),
+  ]);
+  assert.equal(store.getCard("uuid-eng")?.boardKey, "ACME");
+  assert.equal(store.getCard("uuid-ops")?.boardKey, "LOCAL");
+  assert.equal(store.getCard("uuid-ops2")?.boardKey, "ACME");
+  await store.updateBoard(ACME, { linearTeamKeys: ["ENG"] });
+});
+
+test("a card of another ticket source goes to LOCAL even when a board lists its prefix", async () => {
+  await ensureAcme();
+  await store.applyIssues([linearIssue("gh-1", "ENG-90")], SYNCED, {
+    source: "github",
+    kind: "snapshot",
+  });
+  assert.equal(store.getCard("gh-1")?.source, "github");
+  assert.equal(store.getCard("gh-1")?.boardKey, "LOCAL");
+});
+
+test("a Linear issue whose identifier is the id of another source's card is skipped and logged", async (t: TestContext) => {
+  await ensureAcme();
+  const mine = await store.createLocalCard(ACME, "mine", "");
+  const warn = t.mock.method(console, "warn", () => undefined);
+  const before = JSON.stringify(store.getCard(mine.id));
+  const cards = store.listCards(ALL_BOARDS).length;
+  await pullLinear([linearIssue("uuid-clash", mine.id)], { partial: true });
+  assert.equal(store.getCard("uuid-clash"), undefined);
+  assert.equal(JSON.stringify(store.getCard(mine.id)), before);
+  assert.equal(store.listCards(ALL_BOARDS).length, cards);
+  assert.match(
+    warn.mock.calls.map((c) => String(c.arguments[0])).join("\n"),
+    new RegExp(`skipped upsert of uuid-clash from source linear.*${mine.id}`),
+  );
+});
+
+test("a removal pass takes a vanished Linear card on its own board and no card of another source", async () => {
+  await ensureAcme();
+  const acmeLocal = await store.createLocalCard(ACME, "stays", "");
+  await pullLinear([
+    linearIssue("uuid-gone", "ENG-50"),
+    linearIssue("uuid-kept", "ENG-51"),
+  ]);
+  assert.equal(store.getCard("uuid-gone")?.boardKey, "ACME");
+  await pullLinear([linearIssue("uuid-kept", "ENG-51")]);
+  assert.equal(store.getCard("uuid-gone"), undefined);
+  assert.equal(store.getCard("uuid-kept")?.boardKey, "ACME");
+  assert.ok(
+    store.getCard(acmeLocal.id),
+    "an ACME local card is not a Linear card",
+  );
+  assert.equal(
+    store.getCard("gh-1")?.source,
+    "github",
+    "another source is untouched",
+  );
+});
+
+test("an archived board that lists a team key still receives that team's new cards", async () => {
+  const ARCH = parseBoardKey("ARCH") as BoardKey;
+  await store.createBoard({
+    key: ARCH,
+    name: "Arch",
+    workspaceRoot: "/arch/sessions",
+    repositories: [],
+    linearTeamKeys: ["ARC"],
+  });
+  await store.setBoardArchived(ARCH, true);
+  await pullLinear([linearIssue("uuid-arc", "ARC-1")]);
+  assert.equal(store.getCard("uuid-arc")?.boardKey, "ARCH");
+  assert.deepEqual(
+    store
+      .snapshot(ARCH)
+      .cards.filter((c) => c.source === "linear")
+      .map((c) => c.id),
+    ["uuid-arc"],
+  );
+  assert.equal(
+    store.snapshot(DEFAULT_BOARD_KEY).cards.some((c) => c.id === "uuid-arc"),
+    false,
+  );
+});
+
+test("a team key listed by the default board places its cards on the default board", async () => {
+  await store.updateBoard(DEFAULT_BOARD_KEY, { linearTeamKeys: ["LCL"] });
+  assert.deepEqual(store.getBoard(DEFAULT_BOARD_KEY)?.linearTeamKeys, ["LCL"]);
+  await pullLinear([linearIssue("uuid-lcl", "LCL-4")]);
+  assert.equal(store.getCard("uuid-lcl")?.boardKey, "LOCAL");
+  assert.equal(
+    store.snapshot(DEFAULT_BOARD_KEY).cards.some((c) => c.id === "uuid-lcl"),
+    true,
+  );
+  assert.equal(
+    store.snapshot(ACME).cards.some((c) => c.id === "uuid-lcl"),
+    false,
+  );
 });

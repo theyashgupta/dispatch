@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { boardRepository as store } from "../store/board-repository.js";
 import type {
   ActivityEvent,
+  BoardKey,
   BoardSnapshot,
   TunnelState,
 } from "../../shared/types.js";
@@ -11,13 +12,13 @@ import {
   tunnelEmitter,
 } from "../services/orchestration/tunnel.js";
 import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
+import { boardParamSchema } from "./boards-schemas.js";
 
-/** A connected SSE client's current Done-page window (`BOARD-08`). */
 interface ClientWindow {
+  board: BoardKey;
   doneLimit: number;
 }
 
-/** Active SSE clients, each carrying its own window; broadcast writes to each and drops them on disconnect. */
 const clients = new Map<Response, ClientWindow>();
 
 const KEEPALIVE_MS = 15_000;
@@ -58,6 +59,20 @@ function safeWrite(res: Response, payload: string): boolean {
 }
 
 /**
+ * Pick the board a stream client follows from its `board` query parameter.
+ *
+ * @remarks Never throws: an absent, malformed, unknown or archived key falls back to the default
+ * board, because an `EventSource` retries a rejected connect forever.
+ */
+function streamBoard(query: unknown): BoardKey {
+  const parsed = boardParamSchema.safeParse(query);
+  const key = parsed.success ? parsed.data.board : undefined;
+  if (key == null) return DEFAULT_BOARD_KEY;
+  const board = store.getBoard(key);
+  return board && !board.archived ? key : DEFAULT_BOARD_KEY;
+}
+
+/**
  * Express handler for GET /api/stream.
  * @remarks `BOARD-08` / `T-82-01`: `doneLimit` is parsed ONCE at connect and never re-derived from
  * an un-windowed read of the store — an invalid or absent value falls back to
@@ -78,9 +93,10 @@ export function sseHandler(req: Request, res: Response): void {
   res.flushHeaders();
 
   const doneLimit = parseDoneLimit(req.query.doneLimit) ?? DONE_PAGE_SIZE;
-  safeWrite(res, frame(store.snapshot(DEFAULT_BOARD_KEY, { doneLimit })));
+  const board = streamBoard(req.query);
+  safeWrite(res, frame(store.snapshot(board, { doneLimit })));
   safeWrite(res, tunnelFrame(getTunnelState()));
-  clients.set(res, { doneLimit });
+  clients.set(res, { board, doneLimit });
 
   const keepAlive = setInterval(() => {
     if (!safeWrite(res, "event: ping\ndata: 1\n\n")) {
@@ -97,21 +113,22 @@ export function sseHandler(req: Request, res: Response): void {
 
 /**
  * Board-change broadcast (`BOARD-08`). Unlike `activity`/`tunnel`, this listener receives NO
- * snapshot argument (see `board.store.ts#enqueue`) — it must build one PER DISTINCT `doneLimit`
- * among connected clients (a `byLimit` memo so N tabs at the same window still serialize once,
- * preserving the `## SSE fan-out` baseline's serialize-once-per-frame win in the common
- * single-window case) rather than trusting a single shared frame, which would silently prune
+ * snapshot argument (see `board.store.ts#enqueue`), so it must build one PER DISTINCT board and
+ * `doneLimit` among connected clients (a memo keyed by both, so N tabs on one board at the same
+ * window still serialize once, preserving the `## SSE fan-out` baseline's serialize-once-per-frame
+ * win in the common case) rather than trusting a single shared frame, which would silently prune
  * every client back to the default window the moment their limits diverge (load-more amnesia).
  */
 function broadcastChange(): void {
-  const byLimit = new Map<number, string>();
+  const byWindow = new Map<string, string>();
   for (const [client, window] of clients) {
-    let payload = byLimit.get(window.doneLimit);
+    const memoKey = `${window.board}:${window.doneLimit}`;
+    let payload = byWindow.get(memoKey);
     if (payload == null) {
       payload = frame(
-        store.snapshot(DEFAULT_BOARD_KEY, { doneLimit: window.doneLimit }),
+        store.snapshot(window.board, { doneLimit: window.doneLimit }),
       );
-      byLimit.set(window.doneLimit, payload);
+      byWindow.set(memoKey, payload);
     }
     if (!safeWrite(client, payload)) clients.delete(client);
   }
@@ -121,7 +138,9 @@ store.on("change", broadcastChange);
 
 store.on("activity", (event: ActivityEvent) => {
   const payload = activityFrame(event);
-  for (const client of clients.keys()) {
+  const board = event.boardKey ?? DEFAULT_BOARD_KEY;
+  for (const [client, window] of clients) {
+    if (window.board !== board) continue;
     if (!safeWrite(client, payload)) clients.delete(client);
   }
 });

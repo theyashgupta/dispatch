@@ -20,6 +20,11 @@ export function isReservedBoardKey(value: string): boolean {
   return RESERVED_BOARD_KEYS.has(value);
 }
 
+/** The team key of an identifier such as `ENG-12`; an id with no numeric suffix comes back whole. */
+export function identifierPrefix(id: string): string {
+  return id.replace(/-\d+$/, "");
+}
+
 /**
  * The D-6 policy defaults for a board.
  *

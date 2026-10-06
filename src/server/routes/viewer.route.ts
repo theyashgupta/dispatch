@@ -8,6 +8,7 @@ import path from "node:path";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
 import { boardRepository as store } from "../store/board-repository.js";
 import { HttpError, NotFoundError } from "../services/domain/errors.js";
+import { boardWorkspace } from "../services/domain/board-workspace.js";
 import { ALL_BOARDS } from "../../shared/board-key.js";
 
 const MD_EXT = /\.(md|markdown)$/i;
@@ -21,8 +22,8 @@ const querySchema = z.object(
 /**
  * Realpath-containment-gated `.md` file reader behind the shared `/api` guard.
  *
- * @remarks The allowed roots (`workspaceRoot` plus every live session's workspace path) are
- * derived fresh per request, never cached, and both the requested path and each root are
+ * @remarks The allowed roots (the sessions folder of each board plus every live session's
+ * workspace path) are derived fresh per request, never cached, and both the requested path and each root are
  * realpath'd before comparison so a symlink or `../` segment cannot escape the boundary, this
  * route is the trust boundary Phase 112's client-side link handler will rely on. Every
  * filesystem-derived rejection returns a uniform 404, so a response status can never be used as
@@ -48,8 +49,16 @@ viewerRouter.get("/viewer/file", async (req, res) => {
   }
 
   const roots = new Set<string>();
-  const ws = getOrchestrationConfig()?.workspaceRoot;
-  if (ws) roots.add(ws);
+  const configRoot = getOrchestrationConfig()?.workspaceRoot;
+  if (configRoot) roots.add(configRoot);
+  for (const board of store.listBoards()) {
+    const { workspaceRoot } = boardWorkspace(
+      board,
+      configRoot,
+      store.getWorkspaceFolders(board.key).folders,
+    );
+    if (workspaceRoot) roots.add(workspaceRoot);
+  }
   for (const { session } of store.sessionsWithTmux(ALL_BOARDS)) {
     if (session.workspacePath) roots.add(session.workspacePath);
   }

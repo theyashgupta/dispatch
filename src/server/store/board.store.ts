@@ -8,6 +8,7 @@ import {
   DEFAULT_BOARD_KEY,
   DEFAULT_CHECK_COMMAND,
   defaultBoardPolicy,
+  identifierPrefix,
   isReservedBoardKey,
   parseBoardKey,
 } from "../../shared/board-key.js";
@@ -3889,6 +3890,22 @@ class BoardStore extends EventEmitter {
     return this.boards.get(key);
   }
 
+  /**
+   * The board a new card of `source` lands on (R-15).
+   *
+   * @remarks A Linear card goes to the first board whose `linearTeamKeys` holds the team key, which
+   * is the identifier prefix; every other case goes to the default board. An archived board still
+   * receives its team's cards, so a restore shows them.
+   */
+  private boardForNewCard(source: string, identifier: string): BoardKey {
+    if (source !== "linear") return DEFAULT_BOARD_KEY;
+    const teamKey = identifierPrefix(identifier);
+    const board = [...this.boards.values()].find((b) =>
+      b.linearTeamKeys.includes(teamKey),
+    );
+    return board?.key ?? DEFAULT_BOARD_KEY;
+  }
+
   private isOpenBoard(key: BoardKey): boolean {
     const board = this.boards.get(key);
     return board != null && !board.archived;
@@ -3934,9 +3951,11 @@ class BoardStore extends EventEmitter {
     if (existing) {
       return { ok: false, reason: "duplicate-key", boardName: existing.name };
     }
-    const prefix = (id: string): string => id.replace(/-\d+$/, "");
     for (const card of this.cards.values()) {
-      if (prefix(card.id) === key || prefix(card.identifier) === key) {
+      if (
+        identifierPrefix(card.id) === key ||
+        identifierPrefix(card.identifier) === key
+      ) {
         return {
           ok: false,
           reason: "key-in-use",
@@ -3944,7 +3963,7 @@ class BoardStore extends EventEmitter {
         };
       }
     }
-    if (this.db.listArchive().some((row) => prefix(row.id) === key)) {
+    if (this.db.listArchive().some((row) => identifierPrefix(row.id) === key)) {
       return { ok: false, reason: "key-in-use", source: "archive" };
     }
     return null;
@@ -4458,7 +4477,12 @@ class BoardStore extends EventEmitter {
    * The cards Map stays keyed by raw upstream id, so the per-source reconcile filter
    * alone cannot stop a cross-source id collision: an upsert whose id already belongs
    * to a DIFFERENT source's card is skipped with a warning rather than clobbering that
-   * card (which could carry a live session's tmux/workspace state).
+   * card (which could carry a live session's tmux/workspace state). An upsert whose identifier is
+   * the id of another source's card is skipped the same way, because both would share one tmux name.
+   *
+   * @remarks A new Linear card goes to the board that lists its team key (R-15). A pull covers every
+   * team, so `current` spans all boards of the syncing source and a vanished card is removed on its
+   * own board; a card of another source is never in `current`, so no removal reaches it.
    */
   applyIssues(
     issues: SourceIssue[],
@@ -4496,7 +4520,19 @@ class BoardStore extends EventEmitter {
           );
           continue;
         }
-        card.boardKey = existing?.boardKey ?? DEFAULT_BOARD_KEY;
+        const sameIdentifier = this.cards.get(card.identifier);
+        if (
+          sameIdentifier &&
+          sameIdentifier.id !== card.id &&
+          (sameIdentifier.source ?? "linear") !== src
+        ) {
+          console.warn(
+            `[store] skipped upsert of ${card.id} from source ${src}, identifier ${card.identifier} is the id of a ${sameIdentifier.source ?? "linear"} card.`,
+          );
+          continue;
+        }
+        card.boardKey =
+          existing?.boardKey ?? this.boardForNewCard(src, card.identifier);
         const displayOnly =
           existing != null && existing.groupId == null && isPastTodo(existing);
         if (
