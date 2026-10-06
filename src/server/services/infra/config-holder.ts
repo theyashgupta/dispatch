@@ -288,6 +288,16 @@ export function updateLastUsedPlaybook(name: string): void {
 }
 
 /**
+ * Persist the sessions folder of the default board to `~/.dispatch/config.json` and make it live.
+ *
+ * @remarks The `PATCH /api/boards/LOCAL` service calls this only after it checked that the folder
+ * exists. The next session start reads the held config, so no restart is needed.
+ */
+export function updateWorkspaceRoot(workspaceRoot: string): void {
+  patchConfig({ workspaceRoot });
+}
+
+/**
  * Persist the cleanup delay (`LIFE-04`) to `~/.dispatch/config.json` and make it live immediately.
  *
  * @remarks Called only from the validated `PUT /config/cleanup-delay` route, which has already

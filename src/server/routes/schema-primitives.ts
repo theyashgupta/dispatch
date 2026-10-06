@@ -54,3 +54,7 @@ export function fromResult<T>(
       return result.value;
     });
 }
+
+/** A `true` or `false` query value as a boolean, with `code` as the issue for anything else. */
+export const booleanFilter = (code: string) =>
+  z.enum(["true", "false"], code).transform((flag) => flag === "true");

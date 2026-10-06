@@ -11,6 +11,7 @@ import {
 import { ITEM_DESCRIPTION_MAX, ITEM_TITLE_MAX } from "../store/items.js";
 import {
   MARKER_ERROR,
+  booleanFilter,
   boundedText,
   fieldsOf,
   fromResult,
@@ -245,3 +246,18 @@ export const syncBodySchema = z
       ? undefined
       : { teamId, ...(stateId === undefined ? {} : { stateId }) },
   );
+
+/**
+ * The `GET /cards` filters, each optional; a repeated or unknown value fails with its own code.
+ *
+ * @remarks The `board` parameter is parsed apart by `parseBoardParam`. A `source` is any text, so
+ * an unknown source returns an empty list rather than an error.
+ */
+export const cardListQuerySchema = z.object(
+  {
+    column: z.enum(MOVABLE_COLUMNS, COLUMN_CODE).optional(),
+    source: z.string("invalid source").min(1, "invalid source").optional(),
+    hasSession: booleanFilter("invalid hasSession").optional(),
+  },
+  COLUMN_CODE,
+);
