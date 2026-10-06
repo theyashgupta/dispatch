@@ -1,5 +1,6 @@
 import {
   DEFAULT_CLAUDE_ACCOUNT_ID,
+  type ChainBucket,
   type ClaudeUsageSnapshot,
 } from "../../../shared/types.js";
 import {
@@ -8,14 +9,17 @@ import {
   readAccessToken,
   type UsageFetchResult,
 } from "../../adapters/claude-usage.js";
+import { NEAR_LIMIT_PERCENT } from "../domain/account-state.js";
 import { CLAUDE_HOME_DIR } from "../infra/paths.js";
 import {
   accountDir,
+  getActiveAccountId,
   keychainServiceName,
   readRegistry,
 } from "./claude-accounts.js";
 
 const POLL_INTERVAL_MS = 15 * 60 * 1000;
+const NEAR_POLL_INTERVAL_MS = 2 * 60 * 1000;
 const MANUAL_MIN_GAP_MS = 30 * 1000;
 const RETRY_AFTER_CAP_MS = 24 * 60 * 60 * 1000;
 const RETRY_AFTER_DEFAULT_MS = 5 * 60 * 1000;
@@ -38,6 +42,17 @@ export function getUsage(id: string): ClaudeUsageSnapshot {
   return cache.get(id) ?? EMPTY;
 }
 
+/**
+ * Return the usage windows of a snapshot as chain buckets, keeping only kind, percent and reset.
+ */
+export function usageBuckets(usage: ClaudeUsageSnapshot): ChainBucket[] {
+  return usage.windows.map(({ kind, percent, resetsAt }) => ({
+    kind,
+    percent,
+    resetsAt,
+  }));
+}
+
 function mergeSnapshot(
   id: string,
   patch: Partial<ClaudeUsageSnapshot>,
@@ -53,7 +68,18 @@ function mergeSnapshot(
   return next;
 }
 
-const defaultRefreshListeners: (() => void)[] = [];
+type UsageListener = (id: string, snapshot: ClaudeUsageSnapshot) => void;
+
+const refreshListeners: UsageListener[] = [];
+
+/**
+ * Register a listener that runs after every usage refresh of any account, whatever its result.
+ *
+ * @remarks A listener must not throw; it is called outside any try block.
+ */
+export function onUsageRefreshed(listener: UsageListener): void {
+  refreshListeners.push(listener);
+}
 
 /**
  * Register a listener that runs after every refresh of the Default account, whatever its result.
@@ -61,7 +87,9 @@ const defaultRefreshListeners: (() => void)[] = [];
  * @remarks A listener must not throw; it is called outside any try block.
  */
 export function onDefaultUsageRefreshed(listener: () => void): void {
-  defaultRefreshListeners.push(listener);
+  onUsageRefreshed((id) => {
+    if (id === DEFAULT_CLAUDE_ACCOUNT_ID) listener();
+  });
 }
 
 /**
@@ -71,9 +99,7 @@ export function onDefaultUsageRefreshed(listener: () => void): void {
  */
 export async function refreshUsage(id: string): Promise<ClaudeUsageSnapshot> {
   const snapshot = await fetchAccountUsage(id);
-  if (id === DEFAULT_CLAUDE_ACCOUNT_ID) {
-    for (const listener of defaultRefreshListeners) listener();
-  }
+  for (const listener of refreshListeners) listener(id, snapshot);
   return snapshot;
 }
 
@@ -157,8 +183,25 @@ export async function refreshAllUsage(): Promise<void> {
 }
 
 /**
- * Poll usage for every account at boot and every 15 minutes after, matching the reference
- * implementation's cadence because the endpoint rate-limits tighter polling.
+ * Refresh the account in use when it is near its limit; return whether it read.
+ *
+ * @remarks Near means a bucket above 80 percent and no `Retry-After` window holding it.
+ */
+export async function refreshInUseIfNearLimit(): Promise<boolean> {
+  const id = getActiveAccountId();
+  if ((retryAt.get(id) ?? 0) > Date.now()) return false;
+  if (!getUsage(id).windows.some((w) => w.percent > NEAR_LIMIT_PERCENT)) {
+    return false;
+  }
+  await refreshUsage(id).catch(() => undefined);
+  return true;
+}
+
+/**
+ * Poll usage for every account at boot and every 15 minutes after.
+ *
+ * @remarks The endpoint rate-limits tight polling, so only the account in use polls faster, every 2
+ * minutes and only while it is near its limit.
  */
 export function startUsagePollLoop(): () => void {
   void refreshAllUsage();
@@ -168,8 +211,18 @@ export function startUsagePollLoop(): () => void {
     },
     Number(process.env.DISPATCH_USAGE_POLL_MS) || POLL_INTERVAL_MS,
   );
+  const nearTimer = setInterval(
+    () => {
+      void refreshInUseIfNearLimit();
+    },
+    Number(process.env.DISPATCH_USAGE_NEAR_POLL_MS) || NEAR_POLL_INTERVAL_MS,
+  );
   timer.unref();
-  return () => clearInterval(timer);
+  nearTimer.unref();
+  return () => {
+    clearInterval(timer);
+    clearInterval(nearTimer);
+  };
 }
 
 /**

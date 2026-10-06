@@ -1,6 +1,7 @@
 import {
   DEFAULT_CLAUDE_ACCOUNT_ID,
   type AccountSessionEntry,
+  type ChainView,
   type ClaudeAccountSummary,
 } from "../../../shared/types.js";
 import {
@@ -8,15 +9,20 @@ import {
   readClaudeIdentity,
   type ClaudeIdentity,
 } from "../../adapters/claude-cli.js";
+import { getClaudeAccountsSettings } from "../infra/config-holder.js";
 import { continueActionFor } from "../domain/limit-surface.js";
 import {
   accountDir,
+  isExternalAccountDir,
   getActiveAccountId,
   listAccounts,
+  readChainOrder,
   readRegistry,
   removeAccount,
 } from "./claude-accounts.js";
-import { forgetUsage, getUsage } from "./claude-usage.js";
+import { readChainState } from "./account-chain-state.js";
+import { forgetChainAccount } from "./account-chain.js";
+import { forgetUsage, getUsage, usageBuckets } from "./claude-usage.js";
 import { liveTurnState } from "./session-turn.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 
@@ -47,11 +53,46 @@ export function cacheHomeIdentity(identity: ClaudeIdentity): void {
 }
 
 /**
- * Every account with its cached usage snapshot, the shape `GET /api/accounts` returns.
+ * List every account in chain order with its usage snapshot and chain fields for `GET /accounts`.
+ *
+ * @remarks `state`, `buckets` and `limitedUntil` come from the chain state file; an account the
+ * controller has not read yet is `unknown` with the buckets of its usage snapshot.
  */
 export async function listAccountSummaries(): Promise<ClaudeAccountSummary[]> {
-  const accounts = await listAccounts(await homeIdentity());
-  return accounts.map((a) => ({ ...a, usage: getUsage(a.id) }));
+  const [accounts, order, chain] = await Promise.all([
+    homeIdentity().then(listAccounts),
+    readChainOrder(),
+    readChainState(),
+  ]);
+  const activeId = getActiveAccountId();
+  return accounts
+    .map((a) => {
+      const usage = getUsage(a.id);
+      const entry = chain.accounts[a.id];
+      return {
+        ...a,
+        usage,
+        position: order.indexOf(a.id),
+        state: entry?.state ?? "unknown",
+        buckets: entry?.buckets ?? usageBuckets(usage),
+        limitedUntil: entry?.limitedUntil ?? null,
+        inUse: a.id === activeId,
+      } satisfies ClaudeAccountSummary;
+    })
+    .sort((a, b) => a.position - b.position);
+}
+
+/**
+ * Return the chain settings, exhausted record and history for `GET /api/accounts`, newest move first.
+ */
+export async function readChainView(): Promise<ChainView> {
+  const chain = await readChainState();
+  return {
+    settings: getClaudeAccountsSettings(),
+    exhausted: chain.exhausted,
+    history: [...chain.moves].reverse(),
+    inUseSince: chain.inUseSince,
+  };
 }
 
 /**
@@ -83,6 +124,7 @@ export async function listAccountSessions(): Promise<AccountSessionEntry[]> {
         accountId,
         turn,
         stale: session.claudeAccountStale === true,
+        pinned: session.accountPinned === true,
         ...(session.pendingClaudeAccountId !== undefined
           ? { pendingAccountId: session.pendingClaudeAccountId }
           : {}),
@@ -93,7 +135,7 @@ export async function listAccountSessions(): Promise<AccountSessionEntry[]> {
 }
 
 /**
- * Remove an added account along with its dir, registry record, cached usage and queued moves.
+ * Remove an added account with its dir, registry record, cached usage, queued moves and chain entry.
  *
  * @remarks The dir is signed out first so Claude Code deletes its own keychain item.
  */
@@ -101,12 +143,14 @@ export async function removeAccountAndLogout(
   id: string,
 ): Promise<{ ok: true } | { ok: false; error: "not-found" }> {
   const known = (await readRegistry()).some((a) => a.id === id);
-  if (!known) return { ok: false, error: "not-found" };
+  if (!known || isExternalAccountDir(id))
+    return { ok: false, error: "not-found" };
   await logoutClaudeConfigDir(accountDir(id));
   const result = await removeAccount(id);
   if (result.ok) {
     forgetUsage(id);
     await store.clearPendingAccountsFor(id);
+    await forgetChainAccount(id);
   }
   return result;
 }

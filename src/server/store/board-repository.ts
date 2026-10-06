@@ -122,6 +122,11 @@ export interface BoardRepository {
     sessionId: string,
     accountId: string | undefined,
   ): Promise<void>;
+  setAccountPinned(
+    id: string,
+    sessionId: string,
+    pinned: boolean,
+  ): Promise<void>;
   clearPendingAccountsFor(accountId: string): Promise<void>;
   clearPendingAccountsExcept(accountId: string): Promise<void>;
   setOutputChanged(id: string, iso: string): Promise<void>;

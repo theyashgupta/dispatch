@@ -154,14 +154,19 @@ function schemeFor(host: string): "http" | "https" {
  * Returns null for a stored value that is not a bare host[:port] (for example one smuggling
  * userinfo through a poisoned Host header), so it can never become an open redirect.
  */
-function deepLinkUrl(origin: string, cardId: string): string | null {
+function deepLinkUrl(
+  origin: string,
+  target: { cardId?: string; url?: string },
+): string | null {
   const scheme = schemeFor(origin);
   try {
-    const url = new URL(`${scheme}://${origin}/`);
+    const url = new URL(target.url ?? "/", `${scheme}://${origin}/`);
     if (url.host !== origin || url.username !== "" || url.password !== "") {
       return null;
     }
-    url.searchParams.set("card", cardId);
+    if (target.cardId !== undefined) {
+      url.searchParams.set("card", target.cardId);
+    }
     return url.href;
   } catch {
     return null;
@@ -197,22 +202,21 @@ async function postOnce(
 }
 
 /**
- * Sign, encrypt and send one push notification per stored subscription for a needs-input
- * transition, pruning any subscription the push service reports as gone.
+ * Send one push to each stored subscription and prune the ones the push service reports gone.
+ *
  * @remarks Sends to EVERY row regardless of its stored origin, with no suppression based on
  * connected SSE clients. Every per-row send settles independently inside its own try/catch, so
  * one malformed row or dead endpoint can never abort the others.
  */
-export async function sendPushForCard(
-  card: Card,
-  reason: string | undefined,
-): Promise<void> {
+export async function sendPush(message: {
+  title: string;
+  body: string;
+  url?: string;
+  cardId?: string;
+}): Promise<void> {
   const vapid = loadOrCreateVapidKeys();
   const subs = store.listPushSubscriptions();
-  const title = `${card.identifier} - Needs Input`;
-  const raw = reason?.trim() || NOTIFICATION_FALLBACK_BODY;
-  const body =
-    raw.length > MAX_BODY_CHARS ? `${raw.slice(0, MAX_BODY_CHARS - 1)}…` : raw;
+  const { title, body, cardId } = message;
 
   await Promise.allSettled(
     subs.map(async (sub) => {
@@ -221,10 +225,10 @@ export async function sendPushForCard(
         const jwt = signVapidJwt(sub.endpoint, vapid.privateKeyJwk);
         const payload = Buffer.from(
           JSON.stringify({
-            cardId: card.id,
+            cardId,
             title,
             body,
-            url: deepLinkUrl(sub.origin, card.id) ?? undefined,
+            url: deepLinkUrl(sub.origin, message) ?? undefined,
           }),
         );
         const encrypted = encryptPayload(sub, payload);
@@ -257,4 +261,24 @@ export async function sendPushForCard(
       }
     }),
   );
+}
+
+/**
+ * Send the needs-input notification of one card to every stored subscription.
+ *
+ * @remarks The title is the card identifier and the body is the trimmed reason, capped in length.
+ */
+export async function sendPushForCard(
+  card: Card,
+  reason: string | undefined,
+): Promise<void> {
+  const raw = reason?.trim() || NOTIFICATION_FALLBACK_BODY;
+  await sendPush({
+    title: `${card.identifier} - Needs Input`,
+    body:
+      raw.length > MAX_BODY_CHARS
+        ? `${raw.slice(0, MAX_BODY_CHARS - 1)}…`
+        : raw,
+    cardId: card.id,
+  });
 }

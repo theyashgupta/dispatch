@@ -536,6 +536,7 @@ export interface Session {
   claudeAccountId?: string;
   pendingClaudeAccountId?: string;
   claudeAccountStale?: boolean;
+  accountPinned?: boolean;
   /**
    * Per-session hook-auth secret. NEVER serialized to the wire — the store's
    * `redactCard`/`snapshot()` chokepoint strips it from the card AND from every session copy,
@@ -1266,6 +1267,7 @@ export interface Config {
    * login. Added accounts are registry ids under `claude-accounts/`.
    */
   activeClaudeAccountId?: string;
+  claudeAccounts?: Partial<ClaudeAccountsSettings>;
   /** Terminal appearance chosen in Settings; absent or invalid resolves to the shipped default. */
   terminal?: TerminalAppearance;
   profile?: UserProfile;
@@ -1320,6 +1322,11 @@ export interface ClaudeAccountSummary {
   isDefault: boolean;
   lastLoginAt?: string;
   usage: ClaudeUsageSnapshot;
+  position: number;
+  state: ChainAccountState;
+  buckets: ChainBucket[];
+  limitedUntil: string | null;
+  inUse: boolean;
 }
 
 export type SessionTurnState = "idle" | "busy" | "limit" | "unknown";
@@ -1338,6 +1345,7 @@ export interface AccountSessionEntry extends SessionRef {
   stale: boolean;
   pendingAccountId?: string;
   continueAction?: "available" | "usage-unknown";
+  pinned: boolean;
 }
 
 export interface AccountApplyResult {
@@ -1357,6 +1365,64 @@ export type ClaudeLoginView =
   | { state: "finishing"; accountId: string }
   | { state: "done"; account: ClaudeAccountSummary }
   | { state: "error"; message: string };
+
+export interface ClaudeAccountsSettings {
+  autoMove: boolean;
+  thresholdPercent: number;
+  minDwellMinutes: number;
+}
+
+export const DEFAULT_CLAUDE_ACCOUNTS_SETTINGS: ClaudeAccountsSettings = {
+  autoMove: false,
+  thresholdPercent: 100,
+  minDwellMinutes: 15,
+};
+
+export const CLAUDE_ACCOUNTS_BOUNDS = {
+  thresholdPercent: { min: 50, max: 100 },
+  minDwellMinutes: { min: 0, max: 240 },
+} as const;
+
+export type ChainAccountState =
+  "available" | "near-limit" | "limited" | "login-expired" | "unknown";
+
+export interface ChainBucket {
+  kind: string;
+  percent: number;
+  resetsAt: string | null;
+}
+
+export interface ChainAccountEntry {
+  state: ChainAccountState;
+  buckets: ChainBucket[];
+  limitedUntil: string | null;
+}
+
+export interface ChainExhaustedRecord {
+  since: string;
+  earliestResetAt: string | null;
+}
+
+export interface ChainMove {
+  at: string;
+  from: string;
+  to: string;
+  reason: string;
+}
+
+export interface ChainView {
+  settings: ClaudeAccountsSettings;
+  exhausted: ChainExhaustedRecord | null;
+  history: ChainMove[];
+  inUseSince: string | null;
+}
+
+export interface ChainStateFile {
+  accounts: Record<string, ChainAccountEntry>;
+  inUseSince: string | null;
+  exhausted: ChainExhaustedRecord | null;
+  moves: ChainMove[];
+}
 
 /**
  * The runtime-mutable filter selection for a source. An empty array (or `currentCycle: false`) means
@@ -1603,7 +1669,12 @@ export interface SentryIssueDetail {
 }
 
 export type AccountEventType =
-  "account_moved" | "account_login_changed" | "account_login_failed";
+  | "account_moved"
+  | "account_login_changed"
+  | "account_login_failed"
+  | "account_failover"
+  | "account_return"
+  | "account_chain_exhausted";
 
 export type AccountActivityEvent = Omit<ActivityEvent, "type"> & {
   type: AccountEventType;

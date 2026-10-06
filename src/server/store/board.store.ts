@@ -922,7 +922,10 @@ class BoardStore extends EventEmitter {
             itemUpserts.length > 0 ? { upserts: itemUpserts } : undefined,
           );
           if (ids.length === events.length) {
-            broadcast = events.map((e, i) => ({ ...e, id: ids[i] }));
+            broadcast = events.map(
+              (e, i) =>
+                ({ ...e, id: ids[i] }) as ActivityEvent | AccountActivityEvent,
+            );
           }
         } catch (err) {
           const requeued = new Map(
@@ -1869,6 +1872,32 @@ class BoardStore extends EventEmitter {
         this.setActiveSession(
           card,
           { pendingClaudeAccountId: accountId },
+          sessionId,
+        );
+      }
+      return [];
+    });
+  }
+
+  /**
+   * Pin or unpin a session so automatic account moves leave it on its account.
+   *
+   * @remarks A pin also drops the session's queued move, so a move queued before the pin never
+   * runs.
+   */
+  setAccountPinned(
+    id: string,
+    sessionId: string,
+    pinned: boolean,
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card?.sessions?.some((s) => s.id === sessionId)) {
+        this.setActiveSession(
+          card,
+          pinned
+            ? { accountPinned: true, pendingClaudeAccountId: undefined }
+            : { accountPinned: undefined },
           sessionId,
         );
       }

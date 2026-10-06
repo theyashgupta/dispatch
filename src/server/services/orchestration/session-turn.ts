@@ -6,9 +6,36 @@ import { getHooksRuntime } from "../infra/config-holder.js";
 const BUSY_PANE = /esc to interrupt/;
 
 const recorded = new Map<string, SessionTurnState>();
+const paneLimited = new Set<string>();
 
 const keyOf = (cardId: string, sessionId: string): string =>
   `${cardId}:${sessionId}`;
+
+type LimitListener = (
+  cardId: string,
+  sessionId: string,
+  pane: string | null,
+) => void;
+
+const limitListeners: LimitListener[] = [];
+
+/**
+ * Register a listener for each limit signal.
+ *
+ * @remarks A signal is a rate limit `StopFailure` (pane `null`) or a pane check that first shows a
+ * limit surface for a session. A listener must not throw; it runs inside the turn state read.
+ */
+export function onLimitSignal(listener: LimitListener): void {
+  limitListeners.push(listener);
+}
+
+function signalLimit(
+  cardId: string,
+  sessionId: string,
+  pane: string | null,
+): void {
+  for (const listener of limitListeners) listener(cardId, sessionId, pane);
+}
 
 /**
  * Record the turn state one hook event implies for a session; other events change nothing.
@@ -28,6 +55,7 @@ export function recordTurnEvent(
   else if (event === "StopFailure")
     next = error === "rate_limit" ? "limit" : "idle";
   if (next !== undefined) recorded.set(keyOf(cardId, sessionId), next);
+  if (next === "limit") signalLimit(cardId, sessionId, null);
 }
 
 /**
@@ -47,7 +75,9 @@ export function forgetTurnState(
   cardId: string,
   sessionId: string | undefined,
 ): void {
-  if (sessionId !== undefined) recorded.delete(keyOf(cardId, sessionId));
+  if (sessionId === undefined) return;
+  recorded.delete(keyOf(cardId, sessionId));
+  paneLimited.delete(keyOf(cardId, sessionId));
 }
 
 /** Read the turn state a Claude pane shows. */
@@ -70,12 +100,21 @@ export function resolveTurnState(
 
 /**
  * Resolve the turn state of a session whose pane runs Claude, given the pane text just captured.
+ *
+ * @remarks A limit signal goes out only when the pane itself enters a limit surface, so a hook
+ * `limit` on an idle pane or a surface left on screen never signals again.
  */
 export function turnStateOf(
   cardId: string,
   sessionId: string,
   pane: string,
 ): SessionTurnState {
+  const key = keyOf(cardId, sessionId);
+  if (paneTurnState(pane) !== "limit") paneLimited.delete(key);
+  else if (!paneLimited.has(key)) {
+    paneLimited.add(key);
+    signalLimit(cardId, sessionId, pane);
+  }
   return resolveTurnState(
     recordedTurnState(cardId, sessionId),
     pane,

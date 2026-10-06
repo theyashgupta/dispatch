@@ -148,6 +148,10 @@ export const sessionAccountBodySchema = z.object(
   "invalid-id",
 );
 
+export const sessionPinBodySchema = sessionBodySchema.extend({
+  pinned: z.boolean("invalid-pinned"),
+});
+
 export const openEditorBodySchema = z.object(
   { editor: z.enum(["code", "cursor"], EDITOR_CODE) },
   EDITOR_CODE,

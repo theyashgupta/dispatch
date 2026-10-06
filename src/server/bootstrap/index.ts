@@ -72,6 +72,7 @@ import {
 } from "../services/orchestration/update.js";
 import { startCleanupScheduler } from "../services/orchestration/cleanup-scheduler.js";
 import { startPendingMoveSweep } from "../services/orchestration/session-account-apply.js";
+import { startAccountChain } from "../services/orchestration/account-chain.js";
 import { healServicePlist } from "../services/orchestration/service.js";
 import type { ActivityEvent } from "../../shared/types.js";
 import {
@@ -449,6 +450,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   if (config.updateCheck !== false) startUpdateCheckLoop(config);
   onDefaultUsageRefreshed(() => void checkDefaultIdentity());
   startDefaultIdentityWatch();
+  await startAccountChain();
   startUsagePollLoop();
   return { port };
 }
