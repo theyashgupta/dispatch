@@ -54,6 +54,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
 - [Security Threat Model](#security-threat-model)
 - [Known Residuals](#known-residuals)
 - [Verification Gates](#verification-gates)
+- [Orchestration Initiative](#orchestration-initiative)
 
 ## System Overview
 
@@ -4549,3 +4550,12 @@ permanently fails)`, which runs the same scenario in the configuration where bot
 - **`phase-smoke-tester`** - the only BEHAVIORAL verification this project runs: an agent derives
   and executes smoke cases against the running app after each phase's implementation lands. This
   is the one gate above that cannot be reduced to a grep.
+
+## Orchestration Initiative
+
+The orchestration initiative (LOCAL-83 to LOCAL-93) adds one board per project, an optional orchestrator per board and a dashboard. LOCAL-83 wrote two documents, and their records govern LOCAL-84 to LOCAL-93:
+
+- `docs/research/orchestration-research.md`: Dispatch today, the manual orchestration run of 2026-09-25 to 2026-10-05, and a survey of 17 products.
+- `docs/standards/orchestration-design.md`: the glossary and the decision records D-1 to D-9 (board model, card identifiers, supervisor and orchestrator duties, control surface, progress protocol, policy, more than one orchestrator, ship flow, never list), with the scope change for each later ticket.
+
+Term rule: "orchestrator" is a Claude session that belongs to one board, and "supervisor" is the server code that watches sessions. The [Orchestration Saga](#orchestration-saga) is the session start saga and keeps its name.
