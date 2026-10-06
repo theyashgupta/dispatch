@@ -337,6 +337,10 @@ export interface Card {
    * from the session record so the detail panel can name the account. Never stored on the card.
    */
   claudeAccountId?: string;
+  contextPercent?: number | null;
+  model?: string | null;
+  cost?: number | null;
+  usage?: SessionMeters["usage"];
   /**
    * The id of this card's ACTIVE session within `sessions` — the one the six flat fields mirror.
    * Paired 1:1 with `sessions` being present; absent on a card that has never carried session
@@ -377,6 +381,7 @@ export interface Card {
    * @see docs/ARCHITECTURE.md#session-projection-chokepoint
    */
   sessionSummaries?: SessionSummary[];
+  loopProgress?: LoopProgress;
   /**
    * Set when the card's `dsp-<identifier>` tmux session is gone — by boot reconcile (session
    * absent from the live `list-sessions` set after a reboot) AND by the Plan-02 watcher's
@@ -657,6 +662,11 @@ export interface Session {
    * @see docs/ARCHITECTURE.md#session-inheritance
    */
   builtFrom?: string;
+  contextPercent?: number | null;
+  model?: string | null;
+  cost?: number | null;
+  usage?: SessionMeters["usage"];
+  metersAt?: string;
 }
 
 export interface ClaudeSession {
@@ -726,6 +736,10 @@ export interface SessionSummary {
    * @see docs/ARCHITECTURE.md#session-inheritance
    */
   parentOrdinal?: number;
+  contextPercent?: number | null;
+  model?: string | null;
+  cost?: number | null;
+  usage?: SessionMeters["usage"];
 }
 
 /**
@@ -1628,3 +1642,86 @@ export type CreateBoardResult =
 export type ArchiveBoardResult =
   | { ok: true; board: Board }
   | { ok: false; reason: "default-board" | "unknown-board" };
+
+export type LoopUnitStatus =
+  | "not started"
+  | "in progress"
+  | "built, awaiting /ship"
+  | "shipped"
+  | "blocked"
+  | "unknown";
+
+export interface LoopPhase {
+  number: number;
+  name: string;
+  gate: "pass" | "fail" | "pending";
+  attempts: number;
+  passedAt: string | null;
+}
+
+export interface LoopUnit {
+  number: number;
+  ticket: string | null;
+  title: string;
+  status: LoopUnitStatus;
+  statusText: string;
+  branch: string | null;
+  commit: string | null;
+  prdPath: string | null;
+  phaseTotal: number | null;
+  phases: LoopPhase[];
+}
+
+export interface LoopEngine {
+  active: boolean;
+  iteration: number | null;
+  sessionId: string | null;
+  handoffPending: boolean;
+  startedAt: string | null;
+  closed: boolean;
+}
+
+export interface LoopGate {
+  unit: number;
+  phase: number;
+  result: "pass" | "fail";
+  at: string;
+}
+
+export interface LoopSummary {
+  unitsDone: number;
+  unitsTotal: number;
+  currentUnit: number | null;
+  currentPhase: { number: number; name: string } | null;
+  lastGate: LoopGate | null;
+}
+
+export interface LoopProgress {
+  slug: string;
+  roadmapFile: string;
+  units: LoopUnit[];
+  engine: LoopEngine | null;
+  completion: "not_started" | "running" | "complete";
+  summary: LoopSummary;
+  warnings: string[];
+  readAt: string;
+}
+
+export type OrchestrationEventKind = "loop_gate";
+
+export interface OrchestrationEvent {
+  id: number;
+  boardKey: BoardKey;
+  cardId: string | null;
+  sessionId: string | null;
+  kind: OrchestrationEventKind;
+  data: Record<string, unknown>;
+  ts: string;
+}
+
+export interface SessionMeters {
+  contextPercent: number | null;
+  model: string | null;
+  cost: number | null;
+  usage: { fiveHourPercent: number | null; sevenDayPercent: number | null };
+}
