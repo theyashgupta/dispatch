@@ -2,16 +2,16 @@ import { AlertTriangle, Users } from "lucide-react";
 import { useState } from "react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { useLastOpened } from "../../hooks/useUnseenActivity.js";
-import { deriveShowDot } from "../../lib/card-badges.js";
+import { deriveShowDot } from "../../../shared/card-badges.js";
 import { Chip } from "../../primitives/Chip.js";
 import { Field } from "../../primitives/Field.js";
 import { focusRing } from "../../primitives/focus-ring.js";
 import { SourceBadge } from "../../components/badges/index.js";
+import { COLUMN_ACCENT } from "../../components/badges/column-accent.js";
 import {
-  COLUMN_ACCENT,
   attentionTitle,
   needsAttention,
-} from "../board/index.js";
+} from "../../../shared/card-attention.js";
 
 interface OrcaNavRowProps {
   card: CardModel;

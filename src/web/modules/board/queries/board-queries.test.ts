@@ -297,14 +297,14 @@ test("a failed move with no snapshot entries cached rejects and creates no entry
 });
 
 for (const status of [200, 409] as const) {
-  test(`a ${status} move marks the snapshot queries invalidated`, async () => {
+  test(`a ${status} move leaves the snapshot queries not invalidated`, async () => {
     const client = seededClient();
     reply(status, {}, "x");
     await moveWith(client).catch(() => undefined);
     for (const limit of [20, 40]) {
       assert.equal(
         client.getQueryState(boardSnapshotKeys.detail(limit))?.isInvalidated,
-        true,
+        false,
       );
     }
     assert.equal(client.getQueryState(tunnelKeys.state)?.isInvalidated, false);

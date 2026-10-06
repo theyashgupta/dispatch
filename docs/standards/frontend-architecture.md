@@ -169,7 +169,7 @@ The only-shadcn rule does not apply to these families. All other visual code com
 These invariants stay unchanged:
 
 - NEW-20: `terminal.html` and `terminal-main.ts` are the only `terminal*` files directly in `src/web/`.
-- NEW-22: the attention predicate has one definition, in `card-attention.ts`. If that file moves, update its path in `scripts/check-invariants.mjs` in the same change.
+- NEW-22: the attention predicate has one definition, in `src/shared/card-attention.ts`. If that file moves, update its path in `scripts/check-invariants.mjs` in the same change.
 - NEW-24: the palette hex values are only in `tokens.css`. Each accent map has one source.
 - PANEL-03: the ttyd iframe is one always-rendered element. Never give it a `key`.
 

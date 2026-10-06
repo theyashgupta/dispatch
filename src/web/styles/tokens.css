@@ -82,8 +82,14 @@
   --radius-sm: 4px; /* chips and badges, up to ~19-27px tall */
   --radius: 8px;
   --radius-lg: 12px; /* modal dialog, ~200px tall and above */
-  --radius-pill: 999px; /* pill shape; no consumer yet, a chip keeps --radius-sm */
-  --shadow-float: 0 6px 16px rgba(0, 0, 0, 0.45); /* the only shadow token; see docs/ARCHITECTURE.md#design-system-invariants for the consumer list */
+  --radius-pill: 999px; /* pill shape (the drag count badge); a chip keeps --radius-sm */
+  --shadow-float: 0 6px 16px rgba(0, 0, 0, 0.45); /* the only float shadow value; the ring tokens below compose it; see docs/ARCHITECTURE.md#design-system-invariants for the consumer list */
+  --shadow-ring-attention: 0 0 0 1px var(--accent);
+  --shadow-ring-multi: 0 0 0 1px var(--text);
+  --shadow-ring-attention-float:
+    var(--shadow-ring-attention), var(--shadow-float);
+  --shadow-ring-multi-float: var(--shadow-ring-multi), var(--shadow-float);
+  --shadow-column-edge: inset 0 1px 0 var(--edge-highlight);
 
   /* Priority signal palette (card stripe) */
   --prio-urgent: #e5484d;

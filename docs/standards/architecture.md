@@ -124,7 +124,7 @@ Phase 53 Plan 01 extended `eslint.config.ts` with a `warn`-severity `boundaries/
 
 **Total: 22 boundaries rows = 53-LINT-BASELINE.txt's `TOTAL boundaries/dependencies warnings: 22` line exactly.** (19 "restructure will fix": 12 App-shell reach-ins + 7 cross-feature deep imports; 3 "genuine violation": the `primitives`/`lib` layering violations.)
 
-The badges moved to the shared tier `src/web/components/badges/` in G11 Unit 3, so the former `features/* → badges` allow policy is gone and `features/board/CardView.tsx` imports `GoneBadge` and `SourceBadge` like any other shared component.
+The badges moved to the shared tier `src/web/components/badges/` in G11 Unit 3, so the former `features/* → badges` allow policy is gone and `modules/board/components/CardView.tsx` imports `GoneBadge` and `SourceBadge` like any other shared component.
 
 ### Exec-import triage (required by the two-bucket decision, not itself a boundaries-rule warning)
 

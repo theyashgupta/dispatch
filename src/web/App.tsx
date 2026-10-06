@@ -11,12 +11,12 @@ import {
   type CSSProperties,
   useMemo,
 } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { activityFeedQueryOptions } from "./queries/activity-queries.js";
 import {
-  boardSnapshotQueryOptions,
   latestBoard,
   useBoardLiveUpdates,
+  useBoardSnapshotQuery,
 } from "./queries/board-snapshot-queries.js";
 import {
   isUnseen,
@@ -54,14 +54,14 @@ import {
   accountsQueryOptions,
 } from "./modules/accounts/index.js";
 import { Glyph, wordmarkStyle } from "./components/icons/Glyph.js";
+import { inboxWaitingCount } from "../shared/inbox-count.js";
+import { membersOf } from "../shared/group-members.js";
 import {
   actionablePinnedCard,
   actionablePinnedMembers,
-  inboxWaitingCount,
-  membersOf,
   type PinnedCard,
-  stubToCard,
-} from "./features/board/index.js";
+} from "../shared/pinned-card.js";
+import { stubToCard } from "../shared/search-stub.js";
 import { DetailPanel } from "./features/detail/index.js";
 import {
   ActivityFilterView,
@@ -70,6 +70,7 @@ import {
 import {
   CleanupView,
   CreateTicketView,
+  GroupStartView,
   ResetView,
   StartView,
   SyncToLinearView,
@@ -127,11 +128,12 @@ import {
 } from "./lib/cleanup-feedback.js";
 import { playChime } from "./lib/chime.js";
 import { refreshPushSubscription } from "./lib/push.js";
-import type { StartRequest } from "./lib/start-request.js";
+import type { StartRequest } from "../shared/start-request.js";
 import { meetingNotice } from "./modules/meetings/domain/meetings.js";
 import { formatSize } from "../shared/format-size.js";
 import type {
   BoardSnapshot,
+  Card,
   ConnectionStatus,
   SetupChecks,
   TunnelState,
@@ -350,10 +352,7 @@ export function App() {
         });
     },
   });
-  const boardQuery = useQuery({
-    ...boardSnapshotQueryOptions(doneLimit),
-    placeholderData: keepPreviousData,
-  });
+  const boardQuery = useBoardSnapshotQuery(doneLimit);
   const lastBoard = useRef<BoardSnapshot | null>(null);
   const board = latestBoard(boardQuery.data, lastBoard.current);
   lastBoard.current = board;
@@ -564,6 +563,12 @@ export function App() {
   );
   const { show: showUndo, notice: showNotice } = undoToast;
   const [startRequest, setStartRequest] = useState<StartRequest | null>(null);
+  const [groupStartMembers, setGroupStartMembers] = useState<Card[] | null>(
+    null,
+  );
+  const [selectionResetToken, setSelectionResetToken] = useState(0);
+  if (currentPage !== "board" && groupStartMembers != null)
+    setGroupStartMembers(null);
   const startAgent = useCallback(
     async (
       target: { itemId?: string; cardId?: string },
@@ -951,16 +956,17 @@ export function App() {
     ask: { onPrefillConsumed: consumeAskPrefill },
     flow: { board, onOpenList: () => navigate("inbox") },
     board: {
-      board,
       selectedCardId: selectedCard ? selectedCardId : null,
       onSelectCard: selectCard,
       onStartRequest: requestStart,
-      onEditPlaybooks: () => navigate("playbooks"),
       onOpenInbox: () => navigate("inbox"),
       doneTotal: board?.doneCounts?.total,
       doneLimit,
       onLoadMoreDone: () => setDoneLimit((n) => n + DONE_PAGE_SIZE),
       onSelectSearchResult: selectSearchResult,
+      onGroupStartRequest: setGroupStartMembers,
+      groupStartOpen: groupStartMembers != null,
+      selectionResetToken,
     },
   };
 
@@ -1129,6 +1135,14 @@ export function App() {
               setStartRequest(null);
               navigate("playbooks");
             }}
+          />
+        )}
+        {groupStartMembers != null && (
+          <GroupStartView
+            members={groupStartMembers}
+            onClose={() => setGroupStartMembers(null)}
+            onStarted={() => setSelectionResetToken((n) => n + 1)}
+            onEditPlaybooks={() => navigate("playbooks")}
           />
         )}
         {cleanupCard && (

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  keepPreviousData,
   queryOptions,
+  useQuery,
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
@@ -39,6 +41,14 @@ export function boardSnapshotQueryOptions(doneLimit: number) {
         ? state.data
         : snapshot;
     },
+  });
+}
+
+/** Read the board snapshot at a done limit, keeping the previous snapshot while a new limit loads. */
+export function useBoardSnapshotQuery(doneLimit: number) {
+  return useQuery({
+    ...boardSnapshotQueryOptions(doneLimit),
+    placeholderData: keepPreviousData,
   });
 }
 
