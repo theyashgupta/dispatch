@@ -10,6 +10,7 @@ import {
   restoreFetch,
   type SentGraphQL,
 } from "../test-support/linear-fetch.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -120,7 +121,7 @@ test("400 for a state of another team or a bad body, with no Linear write", asyn
 test("404 for an unknown card and 409 for a local or teamless card, with no Linear call", async () => {
   const sent = queueLinearFetch([]);
   assert.equal((await choose("nope", { stateId: "st-todo" })).status, 404);
-  const local = await store.createLocalCard("local", "");
+  const local = await store.createLocalCard(DEFAULT_BOARD_KEY, "local", "");
   assert.equal((await choose(local.id, { stateId: "st-todo" })).status, 409);
   const teamed = store.getCard(local.id);
   assert.ok(teamed);

@@ -14,6 +14,7 @@ import {
   type DiscoveredPort,
 } from "./dev-server.js";
 import { store } from "../store/board.store.js";
+import { ALL_BOARDS } from "../../shared/board-key.js";
 
 /**
  * Detection tick cadence. Replaces the 60s Linear-poll piggyback (F-01/F-02) with a dedicated
@@ -118,7 +119,9 @@ function probedSessions(): {
   card: Card;
   session: Session & { tmuxSession: string };
 }[] {
-  return store.sessionsWithTmux().filter(({ card }) => card.column !== "done");
+  return store
+    .sessionsWithTmux(ALL_BOARDS)
+    .filter(({ card }) => card.column !== "done");
 }
 
 function connectOnce(
@@ -433,7 +436,7 @@ async function runArtifactDetection(backendPort: number): Promise<void> {
   }
 
   const excludedPorts = new Set<number>([backendPort]);
-  for (const { session: rec } of store.sessionsWithTmux()) {
+  for (const { session: rec } of store.sessionsWithTmux(ALL_BOARDS)) {
     if (rec.ttydPort != null) excludedPorts.add(rec.ttydPort);
   }
 

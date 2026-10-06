@@ -30,12 +30,14 @@ export interface OutboundDeps {
 const LIVE: OutboundDeps = {
   source: enabledSource,
   poll: pollNow,
-  now: Date.now,
+  now: () => Date.now(),
 };
 
 const WORKFLOW_TTL_MS = 300_000;
 
 let workflowCache: { at: number; value: LinearWorkflow } | undefined;
+const WORKFLOW_FAILURE_MEMORY_MS = 60_000;
+let workflowFailedAt: number | undefined;
 
 /**
  * Run one Linear write for a card and record its outcome on the card.
@@ -123,9 +125,28 @@ export async function getWorkflow(
   }
 }
 
-/** Drop the cached workflow so the next read fetches it again. */
+/** Remember that a workflow read just failed, so a caller can skip the next reads for 60 s. */
+export function noteWorkflowFailure(deps: OutboundDeps = LIVE): void {
+  workflowFailedAt = deps.now();
+}
+
+/**
+ * True inside 60 s of a noted failure, unless a fresh workflow is cached.
+ *
+ * @remarks A cached workflow wins, so a Linear that recovered is used at once.
+ */
+export function workflowFailedRecently(deps: OutboundDeps = LIVE): boolean {
+  if (workflowFailedAt === undefined) return false;
+  if (workflowCache && deps.now() - workflowCache.at < WORKFLOW_TTL_MS) {
+    return false;
+  }
+  return deps.now() - workflowFailedAt < WORKFLOW_FAILURE_MEMORY_MS;
+}
+
+/** Drop the cached workflow and the failure memory so the next read fetches it again. */
 export function invalidateWorkflow(): void {
   workflowCache = undefined;
+  workflowFailedAt = undefined;
 }
 
 export interface ColumnSnapshot {

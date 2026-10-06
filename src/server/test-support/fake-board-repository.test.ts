@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Card } from "../../shared/types.js";
 import { fakeBoardRepository } from "./fake-board-repository.js";
+import { ALL_BOARDS } from "../../shared/board-key.js";
 
 test("an overridden member is used", () => {
   const card = { id: "c1" } as Card;
@@ -14,7 +15,7 @@ test("an overridden member is used", () => {
 
 test("a member that is not faked throws with its name when called", () => {
   const repo = fakeBoardRepository({ getCard: () => undefined });
-  assert.throws(() => repo.listCards(), {
+  assert.throws(() => repo.listCards(ALL_BOARDS), {
     message: "fakeBoardRepository: listCards is not faked",
   });
   assert.throws(() => repo.setSyncing("c1", true), {

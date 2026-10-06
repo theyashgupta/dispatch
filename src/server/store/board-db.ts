@@ -2,8 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { DISPATCH_DATA_DIR } from "./data-dir.js";
 import { DatabaseSync } from "node:sqlite";
+import {
+  DEFAULT_BOARD_KEY,
+  defaultBoardPolicy,
+} from "../../shared/board-key.js";
 import type {
+  AccountActivityEvent,
   ActivityEvent,
+  Board,
+  BoardKey,
   BoardSnapshot,
   Card,
   Column,
@@ -14,6 +21,8 @@ import type {
 } from "../../shared/types.js";
 
 export const BOARD_DB_PATH = path.join(DISPATCH_DATA_DIR, "board.db");
+
+export const STORE_SCHEMA_VERSION = 3;
 
 /** Hardcoded snapshot-backup slot count (`.bak.1` .. `.bak.5`); no config surface (BAK-01). */
 export const BACKUP_SLOTS = 5;
@@ -102,14 +111,20 @@ export interface BoardDb {
   cardCount(): number;
   readAll(): { cards: Card[]; meta: Partial<BoardMeta> };
   readAllItems(): Item[];
+  readBoards(): Board[];
   persist(
     cards: Card[],
     meta: BoardMeta,
-    events: Omit<ActivityEvent, "id">[],
+    events: Omit<ActivityEvent | AccountActivityEvent, "id">[],
     itemWrites?: ItemWrites,
+    boards?: Board[],
   ): number[];
   importParsed(parsed: Partial<BoardSnapshot>): void;
-  listEvents(cardId: string | null, limit: number): ActivityEvent[];
+  listEvents(
+    board: BoardKey,
+    cardId: string | null,
+    limit: number,
+  ): ActivityEvent[];
   /** Write or replace one archived group row (LOCAL-17); the row id is the group card id. */
   upsertArchive(row: ArchivedGroup): void;
   /** Drop one archived group row; false when no row had that id. */
@@ -192,6 +207,19 @@ interface EventRow {
   reason: string | null;
   source: string | null;
   ts: string;
+  board_key: string;
+}
+
+interface BoardRow {
+  key: string;
+  name: string;
+  workspace_root: string | null;
+  repositories: string;
+  linear_team_keys: string;
+  last_used_folder: string | null;
+  policy: string;
+  created_at: string;
+  archived: number;
 }
 
 /** A `push_subscriptions` row, keyed by endpoint (PUSH-09). */
@@ -437,6 +465,220 @@ function toMeta(parsed: Partial<BoardSnapshot>): BoardMeta {
 }
 
 /**
+ * Refuse to open a board whose persisted schema is newer than this build understands (`SESS-05`).
+ *
+ * @remarks A newer build may have moved data this build cannot read, so refusing is the only
+ * option that is not a guess. It runs in `openBoardDb` before the boards migration and before any
+ * statement is prepared, so the refusing boot changes nothing on disk.
+ * @see docs/ARCHITECTURE.md#downgrade-safety
+ */
+export function assertSchemaOpenable(persistedSchemaVersion: number): void {
+  if (persistedSchemaVersion <= STORE_SCHEMA_VERSION) return;
+  throw new Error(
+    `[store] ${BOARD_DB_PATH} was written by a NEWER version of dispatch than this one ` +
+      `(board schema version ${persistedSchemaVersion}, this build understands ${STORE_SCHEMA_VERSION}). ` +
+      `Opening it with this build would let it write a shape it cannot read back, silently ` +
+      `desyncing your sessions, so it refused. Nothing was changed. board.db and every backup ` +
+      `were left exactly as they were. Fix it by updating dispatch: run ` +
+      `\`npx @theyashgupta/dispatch@latest\` (or restart the machine's dispatch service after ` +
+      `updating) and start again. If you instead mean to stay on this older build, restore the ` +
+      `pre-upgrade copy at ${BOARD_DB_PATH}.pre-boards over ${BOARD_DB_PATH} first, after you ` +
+      `delete ${BOARD_DB_PATH}-wal and ${BOARD_DB_PATH}-shm. That file is ` +
+      `your board as of before the newer version migrated it.`,
+  );
+}
+
+const BOARD_KEY_TABLES = ["cards", "events", "archive"] as const;
+
+function hasTable(db: DatabaseSync, name: string): boolean {
+  return (
+    db
+      .prepare(
+        "SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = ?",
+      )
+      .get(name) !== undefined
+  );
+}
+
+function hasBoardKeyColumn(db: DatabaseSync, table: string): boolean {
+  return (
+    db
+      .prepare(
+        `SELECT 1 AS ok FROM pragma_table_info(?) WHERE name = 'board_key'`,
+      )
+      .get(table) !== undefined
+  );
+}
+
+function persistedSchemaVersion(db: DatabaseSync): number | null {
+  const row = db
+    .prepare(
+      "SELECT json_extract(data, '$.schemaVersion') AS v FROM meta WHERE id = 0",
+    )
+    .get() as { v: number | null } | undefined;
+  return row === undefined ? null : (row.v ?? 0);
+}
+
+function hasBlobWithoutBoardKey(db: DatabaseSync, table: string): boolean {
+  return (
+    db
+      .prepare(
+        `SELECT 1 AS ok FROM ${table} WHERE json_extract(data, '$.boardKey') IS NULL LIMIT 1`,
+      )
+      .get() !== undefined
+  );
+}
+
+function hasAnyRow(db: DatabaseSync): boolean {
+  return BOARD_KEY_TABLES.some(
+    (table) =>
+      db.prepare(`SELECT 1 AS ok FROM ${table} LIMIT 1`).get() !== undefined,
+  );
+}
+
+/**
+ * Decide whether the boards migration has work to do, from the data and not only the counter.
+ *
+ * @remarks A board above {@link STORE_SCHEMA_VERSION} is never migrated, so the store's forward
+ * guard can refuse it with nothing changed on disk.
+ */
+function boardsMigrationDue(db: DatabaseSync): boolean {
+  const version = persistedSchemaVersion(db);
+  if (version !== null && version > STORE_SCHEMA_VERSION) return false;
+  return (
+    !hasTable(db, "boards") ||
+    BOARD_KEY_TABLES.some((table) => !hasBoardKeyColumn(db, table)) ||
+    (version !== null && version < STORE_SCHEMA_VERSION) ||
+    hasBlobWithoutBoardKey(db, "cards") ||
+    hasBlobWithoutBoardKey(db, "archive")
+  );
+}
+
+/**
+ * Make `board.db.pre-v3` hold the same board as the fresh pre-boards copy.
+ *
+ * @remarks The 4.2 refusal message tells the user to restore `pre-v3`, and an older `pre-v3` from
+ * the session-entity migration would roll the board back by months. The first older file is moved
+ * aside, never deleted; a later one is this function's own earlier copy. Best effort like
+ * `snapshotPreV3`: a failure is logged and the migration goes on, because the real rollback copy
+ * is already on disk.
+ */
+function pointLegacyRestoreAtCopy(copyPath: string): void {
+  const legacy = copyPath.replace(/\.pre-boards$/, ".pre-v3");
+  if (legacy === copyPath) return;
+  const aside = `${legacy}.before-boards`;
+  const partial = `${legacy}.tmp`;
+  try {
+    if (fs.existsSync(legacy) && !fs.existsSync(aside))
+      fs.renameSync(legacy, aside);
+    fs.copyFileSync(copyPath, partial);
+    fs.chmodSync(partial, 0o600);
+    fs.renameSync(partial, legacy);
+  } catch (err) {
+    fs.rmSync(partial, { force: true });
+    console.error(
+      `[store] could not write ${legacy} (${(err as Error).message}). The rollback copy is ${copyPath}.`,
+    );
+  }
+}
+
+/**
+ * Move a version 2 board onto the boards schema: every card, event and archive row goes to the
+ * default board `LOCAL` (LOCAL-85, U1-06, U1-07).
+ *
+ * @remarks The copy at `copyPath` is written first. An existing copy is kept only when the
+ * `boards` table exists, because then a pre-guard build re-ran the migration and the old copy is
+ * the true pre-migration board. A failed copy or a failed transaction throws, so the server does
+ * not start on a half-known state; the rollback leaves every table as it was.
+ * @returns Whether the migration ran.
+ */
+export function migrateToBoards(
+  db: DatabaseSync,
+  copyPath: string,
+  opts: { failInTransaction?: boolean } = {},
+): boolean {
+  if (!boardsMigrationDue(db)) return false;
+  const keepCopy = hasTable(db, "boards") && fs.existsSync(copyPath);
+  if (hasAnyRow(db) && !keepCopy) {
+    const partial = `${copyPath}.tmp`;
+    try {
+      fs.rmSync(partial, { force: true });
+      db.prepare("VACUUM INTO ?").run(partial);
+      fs.chmodSync(partial, 0o600);
+      fs.renameSync(partial, copyPath);
+    } catch (err) {
+      fs.rmSync(partial, { force: true });
+      throw new Error(
+        `[store] the boards migration could not write its pre-migration copy at ${copyPath} ` +
+          `(${(err as Error).message}). The migration did not run and board.db is unchanged. ` +
+          `Free disk space or fix the permissions of the data folder, then start again.`,
+        { cause: err },
+      );
+    }
+    pointLegacyRestoreAtCopy(copyPath);
+  }
+  try {
+    withTxn(db, () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS boards (
+          key              TEXT PRIMARY KEY,
+          name             TEXT NOT NULL,
+          workspace_root   TEXT,
+          repositories     TEXT NOT NULL,
+          linear_team_keys TEXT NOT NULL,
+          last_used_folder TEXT,
+          policy           TEXT NOT NULL,
+          created_at       TEXT NOT NULL,
+          archived         INTEGER NOT NULL DEFAULT 0
+        );
+      `);
+      for (const table of BOARD_KEY_TABLES) {
+        if (!hasBoardKeyColumn(db, table)) {
+          db.exec(
+            `ALTER TABLE ${table} ADD COLUMN board_key TEXT NOT NULL DEFAULT '${DEFAULT_BOARD_KEY}'`,
+          );
+        }
+      }
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_cards_board_key ON cards(board_key);
+        CREATE INDEX IF NOT EXISTS idx_events_board_key_id ON events(board_key, id);
+        CREATE INDEX IF NOT EXISTS idx_archive_board_key ON archive(board_key);
+      `);
+      db.prepare(
+        `INSERT OR IGNORE INTO boards
+           (key, name, workspace_root, repositories, linear_team_keys, last_used_folder, policy, created_at, archived)
+         VALUES (?, 'Local', NULL, '[]', '[]', NULL, ?, ?, 0)`,
+      ).run(
+        DEFAULT_BOARD_KEY,
+        JSON.stringify(defaultBoardPolicy(DEFAULT_BOARD_KEY)),
+        new Date().toISOString(),
+      );
+      for (const table of ["cards", "archive"]) {
+        db.prepare(
+          `UPDATE ${table} SET data = json_set(data, '$.boardKey', board_key)
+           WHERE json_extract(data, '$.boardKey') IS NULL`,
+        ).run();
+      }
+      db.prepare(
+        `UPDATE meta SET data = json_set(data, '$.schemaVersion', ?)
+         WHERE id = 0 AND coalesce(json_extract(data, '$.schemaVersion'), 0) < ?`,
+      ).run(STORE_SCHEMA_VERSION, STORE_SCHEMA_VERSION);
+      if (opts.failInTransaction) throw new Error("forced migration failure");
+    });
+  } catch (err) {
+    throw new Error(
+      `[store] the boards migration failed and was rolled back (${(err as Error).message}). ` +
+        `board.db is unchanged.` +
+        (fs.existsSync(copyPath)
+          ? ` The pre-migration copy is at ${copyPath}.`
+          : ""),
+      { cause: err },
+    );
+  }
+  return true;
+}
+
+/**
  * Open (creating if absent) the board database at ~/.dispatch/board.db, set the WAL
  * durability pragmas, ensure the two-table schema, and return the typed store surface.
  * The DB is created inside the mode-700 ~/.dispatch dir (SECURITY: same at-rest
@@ -449,6 +691,8 @@ function toMeta(parsed: Partial<BoardSnapshot>): BoardMeta {
  * @remarks On first open any pre-existing WAL (e.g. from the previous native engine) is folded in via
  * `wal_checkpoint(TRUNCATE)` before any rotation, and `busy_timeout` is set explicitly
  * (node:sqlite defaults to 0) so an hourly snapshot read-lock retries instead of throwing.
+ * The boards migration runs before any statement is prepared, and the open throws when that
+ * migration cannot write its copy or commit.
  * @see docs/ARCHITECTURE.md#single-writer-store
  */
 export function openBoardDb(): BoardDb {
@@ -511,10 +755,19 @@ export function openBoardDb(): BoardDb {
     );
     CREATE INDEX IF NOT EXISTS idx_items_source_state ON items(source, state);
   `);
+  try {
+    assertSchemaOpenable(persistedSchemaVersion(db) ?? 0);
+    migrateToBoards(db, `${BOARD_DB_PATH}.pre-boards`);
+  } catch (err) {
+    try {
+      db.close();
+    } catch {}
+    throw err;
+  }
 
   const upsertCard = db.prepare(
-    `INSERT INTO cards (id, data) VALUES (@id, @data)
-     ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
+    `INSERT INTO cards (id, data, board_key) VALUES (@id, @data, @boardKey)
+     ON CONFLICT(id) DO UPDATE SET data = excluded.data, board_key = excluded.board_key`,
   );
   const deleteGone = db.prepare(
     `DELETE FROM cards WHERE id NOT IN (SELECT value FROM json_each(?))`,
@@ -527,16 +780,16 @@ export function openBoardDb(): BoardDb {
   const selectMeta = db.prepare(`SELECT data FROM meta WHERE id = 0`);
   const countCards = db.prepare(`SELECT COUNT(*) AS n FROM cards`);
   const insertEvent = db.prepare(
-    `INSERT INTO events (card_id, type, from_col, to_col, reason, source, ts)
-     VALUES (@cardId, @type, @fromCol, @toCol, @reason, @source, @ts)`,
+    `INSERT INTO events (card_id, type, from_col, to_col, reason, source, ts, board_key)
+     VALUES (@cardId, @type, @fromCol, @toCol, @reason, @source, @ts, @boardKey)`,
   );
   const selectEvents = db.prepare(
-    `SELECT id, card_id, type, from_col, to_col, reason, source, ts
-       FROM events ORDER BY id DESC LIMIT ?`,
+    `SELECT id, card_id, type, from_col, to_col, reason, source, ts, board_key
+       FROM events WHERE board_key = ? ORDER BY id DESC LIMIT ?`,
   );
   const selectEventsByCard = db.prepare(
-    `SELECT id, card_id, type, from_col, to_col, reason, source, ts
-       FROM events WHERE card_id = ? ORDER BY id DESC LIMIT ?`,
+    `SELECT id, card_id, type, from_col, to_col, reason, source, ts, board_key
+       FROM events WHERE board_key = ? AND card_id = ? ORDER BY id DESC LIMIT ?`,
   );
   const evictExcessPushSubscriptions = db.prepare(
     `DELETE FROM push_subscriptions
@@ -559,8 +812,8 @@ export function openBoardDb(): BoardDb {
     `DELETE FROM push_subscriptions WHERE endpoint = ?`,
   );
   const upsertArchive = db.prepare(
-    `INSERT INTO archive (id, data, archived_at) VALUES (@id, @data, @archivedAt)
-     ON CONFLICT(id) DO UPDATE SET data = excluded.data, archived_at = excluded.archived_at`,
+    `INSERT INTO archive (id, data, archived_at, board_key) VALUES (@id, @data, @archivedAt, @boardKey)
+     ON CONFLICT(id) DO UPDATE SET data = excluded.data, archived_at = excluded.archived_at, board_key = excluded.board_key`,
   );
   const deleteArchive = db.prepare(`DELETE FROM archive WHERE id = ?`);
   const selectArchiveById = db.prepare(`SELECT data FROM archive WHERE id = ?`);
@@ -575,17 +828,46 @@ export function openBoardDb(): BoardDb {
      ON CONFLICT(id) DO UPDATE SET source = excluded.source, state = excluded.state, data = excluded.data`,
   );
   const selectItems = db.prepare(`SELECT id, data FROM items`);
+  const selectBoards = db.prepare(
+    `SELECT * FROM boards ORDER BY created_at, key`,
+  );
+  const upsertBoard = db.prepare(
+    `INSERT INTO boards (key, name, workspace_root, repositories, linear_team_keys, last_used_folder, policy, created_at, archived)
+     VALUES (@key, @name, @workspaceRoot, @repositories, @linearTeamKeys, @lastUsedFolder, @policy, @createdAt, @archived)
+     ON CONFLICT(key) DO UPDATE SET name = excluded.name, workspace_root = excluded.workspace_root,
+       repositories = excluded.repositories, linear_team_keys = excluded.linear_team_keys,
+       last_used_folder = excluded.last_used_folder, policy = excluded.policy, archived = excluded.archived`,
+  );
 
   function persistTxn(
     cards: Card[],
     meta: BoardMeta,
-    events: Omit<ActivityEvent, "id">[],
+    events: Omit<ActivityEvent | AccountActivityEvent, "id">[],
     itemWrites?: ItemWrites,
+    boards: Board[] = [],
   ): number[] {
     return withTxn(db, () => {
+      for (const board of boards) {
+        upsertBoard.run({
+          key: board.key,
+          name: board.name,
+          workspaceRoot: board.workspaceRoot,
+          repositories: JSON.stringify(board.repositories),
+          linearTeamKeys: JSON.stringify(board.linearTeamKeys),
+          lastUsedFolder: board.lastUsedFolder,
+          policy: JSON.stringify(board.policy),
+          createdAt: board.createdAt,
+          archived: board.archived ? 1 : 0,
+        });
+      }
       const ids: string[] = [];
       for (const card of cards) {
-        upsertCard.run({ id: card.id, data: JSON.stringify(card) });
+        const boardKey = card.boardKey ?? DEFAULT_BOARD_KEY;
+        upsertCard.run({
+          id: card.id,
+          data: JSON.stringify({ ...card, boardKey }),
+          boardKey,
+        });
         ids.push(card.id);
       }
       deleteGone.run(JSON.stringify(ids));
@@ -608,6 +890,7 @@ export function openBoardDb(): BoardDb {
           reason: e.reason ?? null,
           source: e.source ?? null,
           ts: e.ts,
+          boardKey: e.boardKey ?? DEFAULT_BOARD_KEY,
         });
         eventIds.push(Number(info.lastInsertRowid));
       }
@@ -642,17 +925,34 @@ export function openBoardDb(): BoardDb {
         : {};
       return { cards, meta };
     },
-    persist(cards, meta, events, itemWrites) {
-      return persistTxn(cards, meta, events, itemWrites);
+    readBoards() {
+      return (selectBoards.all() as unknown as BoardRow[]).map((row) => ({
+        key: row.key as BoardKey,
+        name: row.name,
+        workspaceRoot: row.workspace_root,
+        repositories: JSON.parse(row.repositories) as Board["repositories"],
+        linearTeamKeys: JSON.parse(row.linear_team_keys) as string[],
+        lastUsedFolder: row.last_used_folder,
+        policy: JSON.parse(row.policy) as Board["policy"],
+        createdAt: row.created_at,
+        archived: row.archived === 1,
+      }));
+    },
+    persist(cards, meta, events, itemWrites, boards) {
+      return persistTxn(cards, meta, events, itemWrites, boards);
     },
     importParsed(parsed) {
       const cards = Array.isArray(parsed.cards) ? parsed.cards : [];
       persistTxn(cards, toMeta(parsed), []);
     },
-    listEvents(cardId, limit) {
+    listEvents(board, cardId, limit) {
       const rows = (cardId == null
-        ? selectEvents.all(limit)
-        : selectEventsByCard.all(cardId, limit)) as unknown as EventRow[];
+        ? selectEvents.all(board, limit)
+        : selectEventsByCard.all(
+            board,
+            cardId,
+            limit,
+          )) as unknown as EventRow[];
       return rows.map((r) => ({
         id: r.id,
         cardId: r.card_id,
@@ -662,6 +962,7 @@ export function openBoardDb(): BoardDb {
         reason: r.reason,
         source: r.source,
         ts: r.ts,
+        boardKey: r.board_key as BoardKey,
       }));
     },
     backupTick(force?: boolean): Promise<void> {
@@ -709,10 +1010,12 @@ export function openBoardDb(): BoardDb {
       }
     },
     upsertArchive(row) {
+      const boardKey = row.boardKey ?? row.card.boardKey ?? DEFAULT_BOARD_KEY;
       upsertArchive.run({
         id: row.id,
-        data: JSON.stringify(row),
+        data: JSON.stringify({ ...row, boardKey }),
         archivedAt: row.archivedAt,
+        boardKey,
       });
     },
     deleteArchive(id) {

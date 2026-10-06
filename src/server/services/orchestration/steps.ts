@@ -51,6 +51,8 @@ import {
 import { newHookTokenValue, registerHookToken } from "./hook-tokens.js";
 import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
 import { worktreePath as buildWorktreePath } from "../domain/workspace-paths.js";
+import { boardWorkspace } from "../domain/board-workspace.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 /** Linear identifier shape (defense-in-depth; the route also validates before we reach here). */
 const IDENTIFIER_RE = /^[A-Za-z0-9]+-\d+$/;
@@ -83,7 +85,8 @@ const RESUME_DIALOG = /Resume from summary|Resume full session as-is/;
  * are footer chrome that the trust dialog never renders, preserving the "not matched until past
  * the trust prompt" property.
  */
-const READY = /\? for shortcuts|bypass permissions on|shift\+tab to cycle/;
+export const READY =
+  /\? for shortcuts|bypass permissions on|shift\+tab to cycle/;
 
 /**
  * Claude's refusal when `--resume <id>` or `--continue` names a conversation whose transcript
@@ -95,6 +98,8 @@ export const RESUME_MISSING = /No conversation found/;
 
 const READINESS_TIMEOUT_MS = 30_000;
 const POLL_INTERVAL_MS = 500;
+const LAUNCH_CLEAR_MS = 3_000;
+const LAUNCH_CLEAR_POLL_MS = 150;
 const PASTE_SETTLE_MS = 500;
 
 /**
@@ -185,6 +190,22 @@ function stderrOf(err: unknown): string {
   return e.stderr && e.stderr.length > 0 ? e.stderr : e.message;
 }
 
+/**
+ * The sessions folder of the card's board, or null when the board has none.
+ *
+ * @remarks The default board keeps `Config.workspaceRoot`; any other board uses its own row.
+ */
+export function cardSessionsRoot(card: Card, config: Config): string | null {
+  const key = card.boardKey ?? DEFAULT_BOARD_KEY;
+  const board = store.getBoard(key);
+  if (!board) return null;
+  return boardWorkspace(
+    board,
+    config.workspaceRoot,
+    store.getWorkspaceFolders(key).folders,
+  ).workspaceRoot;
+}
+
 const prepareWorkspace: SagaStep = {
   name: "preparing workspace",
   statusText: "Preparing workspace…",
@@ -196,7 +217,7 @@ const prepareWorkspace: SagaStep = {
         "generic",
       );
     }
-    const workspaceRoot = ctx.config.workspaceRoot;
+    const workspaceRoot = cardSessionsRoot(ctx.card, ctx.config);
     if (!workspaceRoot) {
       throw new StartStepError(
         "preparing workspace",
@@ -209,7 +230,7 @@ const prepareWorkspace: SagaStep = {
     if (!path.resolve(workspacePath).startsWith(resolvedRoot + path.sep)) {
       throw new StartStepError(
         "preparing workspace",
-        `workspace path escapes workspaceRoot: ${workspacePath}`,
+        `workspace path escapes the board folder: ${workspacePath}`,
         "generic",
       );
     }
@@ -422,9 +443,12 @@ export async function awaitReplReady(session: string): Promise<void> {
  * polls are required because a fresh pane reads idle for a few tens of milliseconds before the
  * rc's first child takes the tty (measured 35ms to 72ms after `new-session`).
  */
-async function awaitShellPrompt(session: string): Promise<void> {
+export async function awaitShellPrompt(
+  session: string,
+  timeoutMs = READINESS_TIMEOUT_MS,
+): Promise<void> {
   const paneTarget = `=${session}:`;
-  const deadline = Date.now() + READINESS_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   let idlePolls = 0;
   while (Date.now() < deadline) {
     idlePolls = (await paneAtPrompt(paneTarget)) ? idlePolls + 1 : 0;
@@ -554,12 +578,12 @@ export async function buildLaunch(
 }
 
 /**
- * Type a claude argv into a session's shell as one pty-shimmed, fully quoted line and submit it
- * with a separate `Enter`.
+ * Type a claude argv into a session's shell as one pty-shimmed, quoted line, then press `Enter`.
  *
  * @remarks `C-u` discards anything the person had half-typed at the prompt and `C-l` clears the
- * screen so `awaitReplReady` cannot match a READY footer left over from the previous run; both
- * are line-editor keys, never history entries. The caller decides that the pane is at its prompt.
+ * screen; both are line-editor keys, never history entries. The line waits up to 3 s for the old
+ * READY or RESUME_MISSING text to leave the pane, so `awaitReplReady` cannot match it, and goes
+ * out regardless when the wait runs out or a capture fails.
  */
 export async function typeLaunchLine(
   session: string,
@@ -568,6 +592,28 @@ export async function typeLaunchLine(
   const paneTarget = `=${session}:`;
   const line = shellQuote(wrapWithPtyShim(argv));
   await sendKeys(paneTarget, ["C-u", "C-l"]);
+  const deadline = Date.now() + LAUNCH_CLEAR_MS;
+  while (Date.now() < deadline) {
+    const pane = await capturePane(paneTarget).catch(() => null);
+    if (pane === null || !(READY.test(pane) || RESUME_MISSING.test(pane)))
+      break;
+    await sleep(LAUNCH_CLEAR_POLL_MS);
+  }
+  await sendLiteral(paneTarget, line);
+  await sendKeys(paneTarget, ["Enter"]);
+}
+
+/**
+ * Type the export or unset line for `CLAUDE_CONFIG_DIR` into a session's shell and submit it.
+ *
+ * @remarks Same shape as {@link typeLaunchLine}: the caller decides that the pane is at its prompt.
+ */
+export async function typeAccountEnvLine(
+  session: string,
+  line: string,
+): Promise<void> {
+  const paneTarget = `=${session}:`;
+  await sendKeys(paneTarget, ["C-u"]);
   await sendLiteral(paneTarget, line);
   await sendKeys(paneTarget, ["Enter"]);
 }

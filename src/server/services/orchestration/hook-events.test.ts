@@ -1,6 +1,7 @@
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import { isolateEnv } from "../../test-support/fixtures.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../../store/board.store.js");
@@ -10,7 +11,7 @@ setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
 
 async function cardWithSession(title: string) {
   await store.load();
-  const created = await store.createLocalCard(title, "");
+  const created = await store.createLocalCard(DEFAULT_BOARD_KEY, title, "");
   await store.completeStart(created.id, undefined, {
     workspacePath: `/tmp/ws-${title}`,
     tmuxSession: `dsp-${title}`,
@@ -103,6 +104,22 @@ void test("applyHookEvent ignores a malformed session_id and an unresolvable ses
   );
 });
 
+void test("a session_id that starts with a dash is not stored, so it cannot become a CLI flag", async () => {
+  const { cardId, sessionId } = await cardWithSession("hook-dash");
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "Unknown",
+    session_id: "conv-safe",
+  });
+  for (const bad of ["--dangerously-skip-permissions", "-x", "-"]) {
+    await applyHookEvent(cardId, sessionId, {
+      hook_event_name: "Unknown",
+      session_id: bad,
+    });
+  }
+  assert.equal(store.getCard(cardId)?.claudeSessionId, "conv-safe");
+  assert.equal(nodesOf(cardId, sessionId)?.length, 1);
+});
+
 void test("applyHookEvent on one session never touches a sibling session's nodes", async () => {
   const { cardId, sessionId } = await cardWithSession("hook-sibling");
   await applyHookEvent(cardId, sessionId, {
@@ -141,7 +158,9 @@ void test("a Stop hook with a DONE marker leaves a parked card parked and record
   assert.equal(card.column, "parked");
   assert.ok(card.lastMarker, "marker consumed, key recorded");
   assert.ok(
-    store.listEvents(cardId, 50).every((e) => e.type !== "status_agent_done"),
+    store
+      .listEvents(DEFAULT_BOARD_KEY, cardId, 50)
+      .every((e) => e.type !== "status_agent_done"),
     "no status event while parked",
   );
 });
@@ -154,4 +173,34 @@ void test("a UserPromptSubmit hook moves a parked card to in_progress", async ()
     session_id: "conv-parked-prompt",
   });
   assert.equal(store.getCard(cardId)?.column, "in_progress");
+});
+
+void test("UserPromptSubmit, Stop and StopFailure set the turn state; the pane channel records none", async () => {
+  const { recordedTurnState } = await import("./session-turn.js");
+  const { cardId, sessionId } = await cardWithSession("hook-turn");
+  try {
+    assert.equal(recordedTurnState(cardId, sessionId), "unknown");
+    await applyHookEvent(cardId, sessionId, {
+      hook_event_name: "UserPromptSubmit",
+    });
+    assert.equal(recordedTurnState(cardId, sessionId), "busy");
+    await applyHookEvent(cardId, sessionId, {
+      hook_event_name: "Stop",
+      last_assistant_message: "done",
+    });
+    assert.equal(recordedTurnState(cardId, sessionId), "idle");
+    await applyHookEvent(cardId, sessionId, {
+      hook_event_name: "StopFailure",
+      error: "rate_limit",
+    });
+    assert.equal(recordedTurnState(cardId, sessionId), "limit");
+
+    setHooksRuntime({ capable: true, port: 1, statusChannel: "pane" });
+    await applyHookEvent(cardId, sessionId, {
+      hook_event_name: "UserPromptSubmit",
+    });
+    assert.equal(recordedTurnState(cardId, sessionId), "limit");
+  } finally {
+    setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
+  }
 });
