@@ -38,10 +38,13 @@ import type {
   ProbeUnknown,
   Session,
   SessionFields,
+  SessionMeters,
   SourceIssue,
   SourceKind,
   TrackedRefresh,
   Item,
+  LoopProgress,
+  OrchestrationEvent,
   SettableItemState,
   StartError,
   TerminalError,
@@ -208,10 +211,16 @@ export function redactCard(card: Card): Card {
     wireCard.lastCommentId = card.comments.at(-1)?.id;
   }
   delete wireCard.comments;
-  const activeAccount = card.sessions?.find(
+  const activeSession = card.sessions?.find(
     (s) => s.id === card.activeSessionId,
-  )?.claudeAccountId;
+  );
+  const activeAccount = activeSession?.claudeAccountId;
   if (activeAccount !== undefined) wireCard.claudeAccountId = activeAccount;
+  if (activeSession?.contextPercent !== undefined)
+    wireCard.contextPercent = activeSession.contextPercent;
+  if (activeSession?.model !== undefined) wireCard.model = activeSession.model;
+  if (activeSession?.cost !== undefined) wireCard.cost = activeSession.cost;
+  if (activeSession?.usage !== undefined) wireCard.usage = activeSession.usage;
   const hasMultipleSessions = (card.sessions?.length ?? 0) >= 2;
   wireCard.sessionCount = hasMultipleSessions
     ? card.sessions!.length
@@ -244,6 +253,10 @@ export function redactCard(card: Card): Card {
       prsUnknown: s.prsUnknown,
       previews: s.previews,
       previewsUnknown: s.previewsUnknown,
+      contextPercent: s.contextPercent,
+      model: s.model,
+      cost: s.cost,
+      usage: s.usage,
       ...(resolvedParentOrdinal != null
         ? { parentOrdinal: resolvedParentOrdinal }
         : {}),
@@ -1501,6 +1514,57 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Store a group card's loop progress, writing only when it differs from the stored value.
+   *
+   * @remarks The compare runs before the queue because every `enqueue` persists all cards and emits
+   * `change`, so a poll that re-reads identical progress must not enter it. An unknown card id is a
+   * no-op.
+   */
+  setLoopProgress(cardId: string, progress: LoopProgress): Promise<void> {
+    const card = this.cards.get(cardId);
+    if (card === undefined) return Promise.resolve();
+    const stable = (p: LoopProgress | undefined) =>
+      JSON.stringify(p === undefined ? null : { ...p, readAt: "" });
+    if (stable(card.loopProgress) === stable(progress))
+      return Promise.resolve();
+    return this.enqueue(() => {
+      const current = this.cards.get(cardId);
+      if (current) current.loopProgress = progress;
+      return [];
+    });
+  }
+
+  /**
+   * Append one orchestration event and broadcast it on the `orchestration` channel.
+   *
+   * @remarks The write is synchronous and bypasses the queue because the log is append-only and
+   * touches no card.
+   */
+  appendOrchestrationEvent(
+    e: Omit<OrchestrationEvent, "id">,
+  ): OrchestrationEvent {
+    let id: number;
+    try {
+      id = this.db.appendOrchestrationEvent(e);
+    } catch (err) {
+      console.error("[store] orchestration event append failed:", err);
+      throw err;
+    }
+    const event: OrchestrationEvent = { ...e, id };
+    this.emit("orchestration", event);
+    return event;
+  }
+
+  /** Orchestration events of one board after `sinceId`, oldest first. */
+  listOrchestrationEvents(
+    board: BoardKey,
+    sinceId: number,
+    limit: number,
+  ): OrchestrationEvent[] {
+    return this.db.listOrchestrationEvents(board, sinceId, limit);
+  }
+
+  /**
    * Upsert a push subscription row. A pure synchronous write delegated to the BoardDb surface
    * (listEvents precedent) so the route never imports node:sqlite; not enqueued.
    * @returns Whether the row was stored; `false` means the subscription cap refused a new
@@ -1926,6 +1990,33 @@ class BoardStore extends EventEmitter {
       }
       return [];
     });
+  }
+
+  /**
+   * Write the status-line meters onto the session record that owns `tmuxSession`.
+   *
+   * @remarks An unknown card or a session the card does not own resolves false before the queue, because every enqueue saves all cards and emits `change`. The same guard repeats inside the queue like `setPrsIfSession`.
+   */
+  setSessionMetersIfSession(
+    id: string,
+    tmuxSession: string,
+    meters: SessionMeters,
+  ): Promise<boolean> {
+    const owns = () =>
+      this.cards.get(id)?.sessions?.find((s) => s.tmuxSession === tmuxSession);
+    if (!owns()) return Promise.resolve(false);
+    let written = false;
+    return this.enqueue(() => {
+      const target = owns();
+      if (!target) return [];
+      target.contextPercent = meters.contextPercent;
+      target.model = meters.model;
+      target.cost = meters.cost;
+      target.usage = meters.usage;
+      target.metersAt = new Date().toISOString();
+      written = true;
+      return [];
+    }).then(() => written);
   }
 
   /**

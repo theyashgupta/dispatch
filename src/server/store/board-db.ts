@@ -16,6 +16,7 @@ import type {
   EventType,
   ArchivedGroup,
   Item,
+  OrchestrationEvent,
   SourceCursor,
 } from "../../shared/types.js";
 
@@ -124,6 +125,12 @@ export interface BoardDb {
     cardId: string | null,
     limit: number,
   ): ActivityEvent[];
+  appendOrchestrationEvent(e: Omit<OrchestrationEvent, "id">): number;
+  listOrchestrationEvents(
+    board: BoardKey,
+    sinceId: number,
+    limit: number,
+  ): OrchestrationEvent[];
   /** Write or replace one archived group row (LOCAL-17); the row id is the group card id. */
   upsertArchive(row: ArchivedGroup): void;
   /** Drop one archived group row; false when no row had that id. */
@@ -207,6 +214,34 @@ interface EventRow {
   source: string | null;
   ts: string;
   board_key: string;
+}
+
+interface OrchestrationEventRow {
+  id: number;
+  board_key: string;
+  card_id: string | null;
+  session_id: string | null;
+  kind: string;
+  data: string;
+  ts: string;
+}
+
+/**
+ * Parse an orchestration event data cell, falling back to an empty object.
+ *
+ * @remarks A cell edited by hand or truncated must not break a whole event listing.
+ */
+function parseEventData(raw: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 interface BoardRow {
@@ -753,6 +788,16 @@ export function openBoardDb(): BoardDb {
       data   TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_items_source_state ON items(source, state);
+    CREATE TABLE IF NOT EXISTS orchestration_events (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      board_key  TEXT NOT NULL,
+      card_id    TEXT,
+      session_id TEXT,
+      kind       TEXT NOT NULL,
+      data       TEXT NOT NULL,
+      ts         TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_orchestration_events_board_id ON orchestration_events(board_key, id);
   `);
   try {
     assertSchemaOpenable(persistedSchemaVersion(db) ?? 0);
@@ -789,6 +834,14 @@ export function openBoardDb(): BoardDb {
   const selectEventsByCard = db.prepare(
     `SELECT id, card_id, type, from_col, to_col, reason, source, ts, board_key
        FROM events WHERE board_key = ? AND card_id = ? ORDER BY id DESC LIMIT ?`,
+  );
+  const insertOrchestrationEvent = db.prepare(
+    `INSERT INTO orchestration_events (board_key, card_id, session_id, kind, data, ts)
+     VALUES (@boardKey, @cardId, @sessionId, @kind, @data, @ts)`,
+  );
+  const selectOrchestrationEvents = db.prepare(
+    `SELECT id, board_key, card_id, session_id, kind, data, ts
+       FROM orchestration_events WHERE board_key = ? AND id > ? ORDER BY id ASC LIMIT ?`,
   );
   const evictExcessPushSubscriptions = db.prepare(
     `DELETE FROM push_subscriptions
@@ -962,6 +1015,33 @@ export function openBoardDb(): BoardDb {
         source: r.source,
         ts: r.ts,
         boardKey: r.board_key as BoardKey,
+      }));
+    },
+    appendOrchestrationEvent(e) {
+      const info = insertOrchestrationEvent.run({
+        boardKey: e.boardKey,
+        cardId: e.cardId,
+        sessionId: e.sessionId,
+        kind: e.kind,
+        data: JSON.stringify(e.data),
+        ts: e.ts,
+      });
+      return Number(info.lastInsertRowid);
+    },
+    listOrchestrationEvents(board, sinceId, limit) {
+      const rows = selectOrchestrationEvents.all(
+        board,
+        sinceId,
+        limit,
+      ) as unknown as OrchestrationEventRow[];
+      return rows.map((r) => ({
+        id: r.id,
+        boardKey: r.board_key as BoardKey,
+        cardId: r.card_id,
+        sessionId: r.session_id,
+        kind: r.kind as OrchestrationEvent["kind"],
+        data: parseEventData(r.data),
+        ts: r.ts,
       }));
     },
     backupTick(force?: boolean): Promise<void> {

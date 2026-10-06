@@ -16,11 +16,14 @@ import type {
   EventType,
   Item,
   NewBoard,
+  LoopProgress,
+  OrchestrationEvent,
   PreviewInfo,
   PrInfo,
   ProbeUnknown,
   Session,
   SessionFields,
+  SessionMeters,
   SettableItemState,
   SourceCursor,
   SourceIssue,
@@ -87,6 +90,15 @@ export interface BoardRepository {
     cardId: string | null,
     limit: number,
   ): ActivityEvent[];
+  setLoopProgress(cardId: string, progress: LoopProgress): Promise<void>;
+  appendOrchestrationEvent(
+    e: Omit<OrchestrationEvent, "id">,
+  ): OrchestrationEvent;
+  listOrchestrationEvents(
+    board: BoardKey,
+    sinceId: number,
+    limit: number,
+  ): OrchestrationEvent[];
   addPushSubscription(sub: PushSubscriptionRow): boolean;
   removePushSubscription(endpoint: string): boolean;
   listPushSubscriptions(): PushSubscriptionRow[];
@@ -129,6 +141,11 @@ export interface BoardRepository {
   ): Promise<void>;
   setOutputChanged(id: string, iso: string): Promise<void>;
   setPrsIfSession(id: string, session: string, prs: PrInfo[]): Promise<void>;
+  setSessionMetersIfSession(
+    id: string,
+    session: string,
+    meters: SessionMeters,
+  ): Promise<boolean>;
   setPreviewsIfSession(
     id: string,
     session: string,
