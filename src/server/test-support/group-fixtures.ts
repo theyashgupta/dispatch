@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type { Card } from "../../shared/types.js";
 import type { store as StoreType } from "../store/board.store.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 let n = 0;
 
@@ -18,9 +19,12 @@ export async function startedGroup(
 ): Promise<{ g: Card; a: Card; b: Card }> {
   await store.load();
   n += 1;
-  const a = await store.createLocalCard(`member a ${n}`, "");
-  const b = await store.createLocalCard(`member b ${n}`, "");
-  const minted = await store.createGroupCard(`group ${n}`, [a.id, b.id]);
+  const a = await store.createLocalCard(DEFAULT_BOARD_KEY, `member a ${n}`, "");
+  const b = await store.createLocalCard(DEFAULT_BOARD_KEY, `member b ${n}`, "");
+  const minted = await store.createGroupCard(DEFAULT_BOARD_KEY, `group ${n}`, [
+    a.id,
+    b.id,
+  ]);
   assert.equal(minted.ok, true);
   if (!minted.ok) throw new Error("unreachable");
   const g = minted.card;

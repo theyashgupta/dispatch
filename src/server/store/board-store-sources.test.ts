@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { Card } from "../../shared/types.js";
 import { isolateEnv } from "../test-support/fixtures.js";
 import { issue } from "../test-support/fake-source.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("./board.store.js");
@@ -13,7 +14,7 @@ const SYNCED = "2026-09-24T10:00:00.000Z";
 
 function bySource(source: string): Card[] {
   return store
-    .snapshot()
+    .snapshot(DEFAULT_BOARD_KEY)
     .cards.filter((c) => c.source === source)
     .sort((a, b) => a.id.localeCompare(b.id));
 }
@@ -47,7 +48,10 @@ test("a partial snapshot pull deletes nothing and names the source in the warnin
   });
   assert.equal(bySource("part").length, 1);
   assert.equal(bySource("part")[0]?.goneFromLinear, false);
-  assert.match(store.snapshot().syncWarning ?? "", /^part pull was truncated/);
+  assert.match(
+    store.snapshot(DEFAULT_BOARD_KEY).syncWarning ?? "",
+    /^part pull was truncated/,
+  );
 });
 
 test("an append pull never removes and never flags, but still upserts and clears gone", async () => {
@@ -109,8 +113,8 @@ test("identifier counters seed from the legacy fields and persist both shapes", 
     [],
   );
   await store.load();
-  const first = await store.createLocalCard("one", "d");
-  const second = await store.createLocalCard("two", "d");
+  const first = await store.createLocalCard(DEFAULT_BOARD_KEY, "one", "d");
+  const second = await store.createLocalCard(DEFAULT_BOARD_KEY, "two", "d");
   assert.equal(first.identifier, "LOCAL-54");
   assert.equal(second.identifier, "LOCAL-55");
   const persisted = openBoardDb().readAll().meta;
@@ -136,7 +140,7 @@ test("the counter map wins over a smaller legacy field", async () => {
     [],
   );
   await store.load();
-  const created = await store.createLocalCard("x", "d");
+  const created = await store.createLocalCard(DEFAULT_BOARD_KEY, "x", "d");
   assert.equal(created.identifier, "LOCAL-61");
 });
 
@@ -151,7 +155,10 @@ test("a partial append pull removes nothing and records the truncation warning",
     partial: true,
   });
   assert.equal(bySource("pa").length, 2);
-  assert.match(store.snapshot().syncWarning ?? "", /^pa pull was truncated/);
+  assert.match(
+    store.snapshot(DEFAULT_BOARD_KEY).syncWarning ?? "",
+    /^pa pull was truncated/,
+  );
 });
 
 test("a complete append pull clears a stale truncation warning", async () => {
@@ -160,12 +167,15 @@ test("a complete append pull clears a stale truncation warning", async () => {
     kind: "snapshot",
     partial: true,
   });
-  assert.match(store.snapshot().syncWarning ?? "", /^warn pull was truncated/);
+  assert.match(
+    store.snapshot(DEFAULT_BOARD_KEY).syncWarning ?? "",
+    /^warn pull was truncated/,
+  );
   await store.applyIssues([issue("w1")], SYNCED, {
     source: "clear",
     kind: "append",
   });
-  assert.equal(store.snapshot().syncWarning, null);
+  assert.equal(store.snapshot(DEFAULT_BOARD_KEY).syncWarning, null);
 });
 
 test("a legacy field larger than the map entry wins on load", async () => {
@@ -185,7 +195,7 @@ test("a legacy field larger than the map entry wins on load", async () => {
     [],
   );
   await store.load();
-  const created = await store.createLocalCard("y", "d");
+  const created = await store.createLocalCard(DEFAULT_BOARD_KEY, "y", "d");
   assert.equal(created.identifier, "LOCAL-71");
 });
 
@@ -225,7 +235,7 @@ test("a repeat pull with no changes emits no second sync_in and resets unreachab
   });
   store.off("activity", onActivity);
   assert.deepEqual(events, ["dedup1", "dedup1"]);
-  assert.equal(store.snapshot().syncUnreachable, false);
+  assert.equal(store.snapshot(DEFAULT_BOARD_KEY).syncUnreachable, false);
 });
 
 test("invalid counter entries are ignored and an unseen prefix starts at 1", async () => {
@@ -245,7 +255,7 @@ test("invalid counter entries are ignored and an unseen prefix starts at 1", asy
     [],
   );
   await store.load();
-  const created = await store.createLocalCard("fresh", "d");
+  const created = await store.createLocalCard(DEFAULT_BOARD_KEY, "fresh", "d");
   assert.equal(created.identifier, "LOCAL-1");
   const persisted = openBoardDb().readAll().meta;
   assert.equal(persisted.identifierCounters?.GROUP, undefined);
