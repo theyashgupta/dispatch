@@ -3,6 +3,8 @@ import type {
   ApplyChoice,
 } from "../../../../shared/types.js";
 
+export const DEFAULT_APPLY_CHOICE: ApplyChoice = "all";
+
 type CountedSession = Pick<AccountSessionEntry, "accountId" | "turn">;
 
 /**

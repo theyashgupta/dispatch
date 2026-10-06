@@ -25,7 +25,7 @@ export const activeBodySchema = z.object(
     id: accountOrDefaultIdSchema,
     applyToRunning: z
       .enum(["none", "idle", "all"], "invalid-apply")
-      .default("none"),
+      .default("all"),
   },
   "invalid-id",
 );

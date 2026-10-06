@@ -7,6 +7,7 @@ import type {
 import { AccountSwitchDialog } from "@/modules/accounts/components/AccountSwitchDialog";
 import { accountName } from "@/modules/accounts/domain/running-sessions";
 import {
+  DEFAULT_APPLY_CHOICE,
   resultNotice,
   switchCounts,
 } from "@/modules/accounts/domain/switch-counts";
@@ -27,7 +28,7 @@ export function AccountSwitchContainer({
   onClose,
   onCloseAutoFocus,
 }: AccountSwitchContainerProps) {
-  const [choice, setChoice] = useState<ApplyChoice>("idle");
+  const [choice, setChoice] = useState<ApplyChoice>(DEFAULT_APPLY_CHOICE);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const switchAccount = useSetActiveAccountMutation();
