@@ -201,18 +201,34 @@ const JSDOC_EXEMPT_PATTERNS = [
   { name: "Phase <number>", re: /\bphase\s+\d+\b/i },
 ];
 
+const LOOP_FORMAT_FILES = [
+  /^src\/server\/services\/domain\/loop-progress(\.test)?\.ts$/,
+  /^src\/server\/services\/orchestration\/loop-progress-reader(\.test)?\.ts$/,
+  /^src\/server\/services\/orchestration\/loop-progress-model\.test\.ts$/,
+  /^src\/server\/test-support\/loop-fixtures\.ts$/,
+];
+const LOOP_FORMAT_PATTERNS = new Set([
+  "ROADMAP",
+  ".planning/",
+  "Phase <number>",
+]);
+
 /**
  * Class 2 — scan every src/**\/*.{ts,tsx} line for planning-process vocabulary.
+ * @remarks Files in `LOOP_FORMAT_FILES` parse roadmap loop files, so `.planning/`, ROADMAP and phase lines are their input format and skip those patterns only.
  * @returns Violation report lines.
  */
 function checkPlanningVocabulary() {
   const violations = [];
   for (const file of walkTsFiles(SRC_DIR)) {
     const lines = readFileSync(file, "utf8").split("\n");
+    const loopFormat = LOOP_FORMAT_FILES.some((re) => re.test(file));
+    const applies = ({ name }) =>
+      !(loopFormat && LOOP_FORMAT_PATTERNS.has(name));
     let inDoc = false;
     lines.forEach((line, i) => {
       if (line.includes("/**")) inDoc = true;
-      for (const { name, re } of ALWAYS_PATTERNS) {
+      for (const { name, re } of ALWAYS_PATTERNS.filter(applies)) {
         if (re.test(line)) {
           violations.push(
             `${file}:${i + 1}: planning vocabulary "${name}" — ${line.trim()}`,
@@ -220,7 +236,7 @@ function checkPlanningVocabulary() {
         }
       }
       if (!inDoc) {
-        for (const { name, re } of JSDOC_EXEMPT_PATTERNS) {
+        for (const { name, re } of JSDOC_EXEMPT_PATTERNS.filter(applies)) {
           if (re.test(line)) {
             violations.push(
               `${file}:${i + 1}: planning vocabulary "${name}" — ${line.trim()}`,
