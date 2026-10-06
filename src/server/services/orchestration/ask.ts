@@ -5,6 +5,7 @@ import type { AskRequest } from "../../../shared/types.js";
 import { DISPATCH_DIR } from "../infra/paths.js";
 import { buildAskContext } from "../domain/ask-context.js";
 import { buildAskPrompt } from "../domain/ask-prompt.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 const ASK_TIMEOUT_MS = 180_000;
 const stopAll = new AbortController();
@@ -84,9 +85,9 @@ export async function answerAsk(
   request: AskRequest,
   signal: AbortSignal,
 ): Promise<string> {
-  const { syncedAt, enabledSources } = store.snapshot();
+  const { syncedAt, enabledSources } = store.snapshot(DEFAULT_BOARD_KEY);
   const context = buildAskContext(
-    store.listCards(),
+    store.listCards(DEFAULT_BOARD_KEY),
     store.wireItems(),
     { syncedAt, enabledSources: enabledSources ?? [] },
     new Date(),

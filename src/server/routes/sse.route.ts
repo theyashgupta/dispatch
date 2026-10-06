@@ -10,6 +10,7 @@ import {
   getTunnelState,
   tunnelEmitter,
 } from "../services/orchestration/tunnel.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 /** A connected SSE client's current Done-page window (`BOARD-08`). */
 interface ClientWindow {
@@ -77,7 +78,7 @@ export function sseHandler(req: Request, res: Response): void {
   res.flushHeaders();
 
   const doneLimit = parseDoneLimit(req.query.doneLimit) ?? DONE_PAGE_SIZE;
-  safeWrite(res, frame(store.snapshot({ doneLimit })));
+  safeWrite(res, frame(store.snapshot(DEFAULT_BOARD_KEY, { doneLimit })));
   safeWrite(res, tunnelFrame(getTunnelState()));
   clients.set(res, { doneLimit });
 
@@ -107,7 +108,9 @@ function broadcastChange(): void {
   for (const [client, window] of clients) {
     let payload = byLimit.get(window.doneLimit);
     if (payload == null) {
-      payload = frame(store.snapshot({ doneLimit: window.doneLimit }));
+      payload = frame(
+        store.snapshot(DEFAULT_BOARD_KEY, { doneLimit: window.doneLimit }),
+      );
       byLimit.set(window.doneLimit, payload);
     }
     if (!safeWrite(client, payload)) clients.delete(client);

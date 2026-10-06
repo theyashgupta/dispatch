@@ -27,7 +27,7 @@ before(async () => {
   mock.method(
     store,
     "createLocalCard",
-    (title: string, description: string) => {
+    (_board: string, title: string, description: string) => {
       created.push({ title, description });
       nextId += 1;
       return Promise.resolve({

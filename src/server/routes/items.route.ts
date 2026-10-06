@@ -12,6 +12,7 @@ import {
   snoozeBodySchema,
 } from "./items-schemas.js";
 import { parseOrThrow } from "./parse-input.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 export const itemsRouter = Router();
 
@@ -42,7 +43,11 @@ itemsRouter.post("/items/:id/snooze", async (req, res) => {
 
 itemsRouter.post("/items/:id/promote", async (req, res) => {
   const { context } = parseOrThrow(promoteBodySchema, req.body);
-  const result = await store.promoteItem(req.params.id, context);
+  const result = await store.promoteItem(
+    DEFAULT_BOARD_KEY,
+    req.params.id,
+    context,
+  );
   if (!result) throw new NotFoundError("unknown item");
   res
     .status(result.created ? 201 : 200)

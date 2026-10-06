@@ -6,6 +6,7 @@ import path from "node:path";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { run } from "../../adapters/exec.js";
 import { branchExists, worktreeAddNewBranch } from "../../adapters/git.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../../store/board.store.js");
@@ -35,7 +36,7 @@ void test("resetCard removes the workspace and branch, detaches the session, and
   await store.load();
   const { root, repo } = await tempRepo();
   try {
-    const card = await store.createLocalCard("reset me", "");
+    const card = await store.createLocalCard(DEFAULT_BOARD_KEY, "reset me", "");
     const ws = path.join(root, "ws", card.identifier);
     await store.setCardWorkspace(card.id, {
       folder: path.join(root, "ws"),
@@ -82,7 +83,7 @@ void test("resetCard refuses an unknown card, a pristine card, and a card mid-sa
     status: 404,
     error: "unknown card id: LOCAL-none",
   });
-  const plain = await store.createLocalCard("plain", "");
+  const plain = await store.createLocalCard(DEFAULT_BOARD_KEY, "plain", "");
   const pristine = await resetCard(plain.id);
   assert.equal(pristine.ok, false);
   if (!pristine.ok) assert.equal(pristine.status, 409);

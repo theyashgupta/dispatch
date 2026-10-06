@@ -13,6 +13,7 @@ import {
   type ScanInput,
   type SessionState,
 } from "./scan-decision.js";
+import { ALL_BOARDS } from "../../../shared/board-key.js";
 
 /**
  * Per-session flip-back state, keyed by tmux session name. In-memory only (NOT persisted) —
@@ -281,7 +282,7 @@ async function scanSession(
 function reapDeadSessions(): void {
   const liveSessions = new Set(
     store
-      .sessionsWithTmux()
+      .sessionsWithTmux(ALL_BOARDS)
       .map((pair) => pair.session.tmuxSession)
       .filter(Boolean),
   );
@@ -320,7 +321,7 @@ function reapDeadSessions(): void {
 export function startMarkerWatcher(statusChannel: StatusChannel): void {
   async function tick(): Promise<void> {
     try {
-      for (const { card, session } of store.sessionsWithTmux()) {
+      for (const { card, session } of store.sessionsWithTmux(ALL_BOARDS)) {
         await scanSession(card, session, statusChannel);
       }
       reapDeadSessions();

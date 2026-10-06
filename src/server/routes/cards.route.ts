@@ -80,6 +80,7 @@ import {
 import { httpErrorHandler } from "./error-handler.js";
 import { parseOrThrow } from "./parse-input.js";
 import { forceBodySchema } from "./schema-primitives.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 export const cardsRouter = Router();
 
@@ -544,7 +545,11 @@ async function createGroupHandler(req: Request, res: Response): Promise<void> {
     });
   }
 
-  const groupResult = await store.createGroupCard(title, memberIds);
+  const groupResult = await store.createGroupCard(
+    DEFAULT_BOARD_KEY,
+    title,
+    memberIds,
+  );
   if (!groupResult.ok) {
     throw new ConflictError(
       "some selected cards are no longer eligible to be grouped",
@@ -756,7 +761,11 @@ cardsRouter.post("/cards", async (req, res) => {
     console.warn("[cards] attachment write failed:", (err as Error).message);
     throw new InternalError("attachment-write-failed");
   }
-  const card = await store.createLocalCard(title, fullDescription);
+  const card = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    title,
+    fullDescription,
+  );
   if (staged !== null) {
     try {
       await commitAttachments(staged, card.id);

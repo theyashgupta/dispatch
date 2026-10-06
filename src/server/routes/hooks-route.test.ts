@@ -1,6 +1,7 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { isolateEnv } from "../test-support/fixtures.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 const env = isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -13,7 +14,11 @@ const express = (await import("express")).default;
 
 setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
 await store.load();
-const created = await store.createLocalCard("hooks-route", "");
+const created = await store.createLocalCard(
+  DEFAULT_BOARD_KEY,
+  "hooks-route",
+  "",
+);
 await store.completeStart(created.id, undefined, {
   workspacePath: "/tmp/ws-hooks-route",
   tmuxSession: "dsp-hooks-route-none",
