@@ -1,6 +1,7 @@
 import type { Session, StatusChannel } from "../../../shared/types.js";
 import { store } from "../../store/board.store.js";
 import { capturePane, paneSize } from "../tmux.js";
+import { parseStatusLine } from "./status-line.js";
 import { killTtyd, trackedTtydSessions } from "../ttyd.js";
 import {
   agentOutputView,
@@ -85,6 +86,36 @@ const markerFreeTicks = new Map<string, number>();
  */
 const captureFailures = new Map<string, number>();
 
+const lastMeters = new Map<string, string>();
+
+/**
+ * Parse the pane's status line and write the meters to the session record when they changed.
+ *
+ * @remarks Runs before the channel gate so meters stay current on every status channel. Skips the
+ * store call when the parsed meters equal the last ones written for that tmux session; a refused
+ * or failed write clears that record so the next tick retries.
+ */
+export function recordSessionMeters(
+  cardId: string,
+  tmuxSession: string,
+  pane: string,
+): void {
+  const meters = parseStatusLine(pane);
+  if (meters === null) return;
+  const serialized = JSON.stringify(meters);
+  if (lastMeters.get(tmuxSession) === serialized) return;
+  void store
+    .setSessionMetersIfSession(cardId, tmuxSession, meters)
+    .then((written) => {
+      if (written) lastMeters.set(tmuxSession, serialized);
+      else lastMeters.delete(tmuxSession);
+    })
+    .catch((err: unknown) => {
+      lastMeters.delete(tmuxSession);
+      console.warn(`[watcher] meters write failed: ${(err as Error).message}`);
+    });
+}
+
 /**
  * Scan one session's visible pane and apply at most ONE decision this tick. This is the I/O SHELL:
  * it owns capture, the lazy `paneSize` fetch, the capture-failure dead-session detector, the
@@ -168,6 +199,8 @@ async function scanSession(
     }
     return;
   }
+
+  recordSessionMeters(card.id, tmuxName, pane);
 
   const paneRouted =
     channel === "pane" || (channel === "auto" && session.hookRoutedAt == null);
@@ -291,6 +324,7 @@ function reapDeadSessions(): void {
     ...warnedCaptures,
     ...markerFreeTicks.keys(),
     ...captureFailures.keys(),
+    ...lastMeters.keys(),
     ...agentViews.keys(),
     ...trackedTtydSessions(),
   ]);
@@ -300,6 +334,7 @@ function reapDeadSessions(): void {
     warnedCaptures.delete(session);
     markerFreeTicks.delete(session);
     captureFailures.delete(session);
+    lastMeters.delete(session);
     agentViews.delete(session);
     killTtyd(session);
   }
