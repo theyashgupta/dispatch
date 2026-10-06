@@ -34,6 +34,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Second Session Affordance](#second-session-affordance)
   - [Tmux Invocations](#tmux-invocations)
   - [Claude Accounts](#claude-accounts)
+  - [Session Account Move](#session-account-move)
   - [Orchestration Saga](#orchestration-saga)
   - [Exec Chokepoint](#exec-chokepoint)
   - [Repo Discovery](#repo-discovery)
@@ -2152,7 +2153,8 @@ a membership guarantee: the registry can be edited out of band. `resolveLaunchAc
 id is registered and its dir exists before `buildClaudeLaunch` produces the argv and env for
 `newSession`; an unresolvable pointer fails the start step with a value-free error and creates no
 tmux session. A resume launches on the account recorded on the session (`Session.claudeAccountId`),
-not on the current pointer, so switching never moves a live conversation. Both the hooks branch and
+not on the current pointer. A pointer change alone does not move a live session; only the
+[Session Account Move](#session-account-move) service changes the recorded account. Both the hooks branch and
 the no-hooks branch of every launch site pass the same env: the builder is the single place the
 variable is added, so one branch cannot drift.
 
@@ -2177,6 +2179,67 @@ subprocess adapters may import only themselves and `shared`.
 **Trust is pre-seeded per config dir.** `preSeedTrust(workspacePath, configDir)` writes into
 `<configDir>/.claude.json` for an added account and into the home file for Default, since Claude
 Code reads the trust map from the config dir it runs under.
+
+### Session Account Move
+
+**Record (2026-10-05, LOCAL-80).** This record replaces the earlier rule, under which an account
+switch left each live session on its old account. A switch can now move a live session to a
+different account. The move keeps the conversation. The move occurs only at a safe point.
+
+**One service moves a session.** `session-account-move.ts#moveSessionAccount` is the only code that
+moves a session. The switch route, the one session route, the pending move, the stale restart and
+the continue action all call it. The service holds the Run Claude card lock
+(`run-claude.ts#withCardLock`) and does these steps in this order:
+
+1. Refuse a session with no tmux session (`no-session`) or with no shell marker (`legacy`).
+2. Return `same` when the session is already on the account and is not stale. Else refuse an account
+   that does not resolve (`account`).
+3. If Claude runs, type `/exit` only when the turn state is idle and the last lines of the pane show
+   the input footer, then
+   wait up to 15 s for the shell prompt. Else return `busy` and change no account state.
+4. Set or unset `CLAUDE_CONFIG_DIR` in the tmux session environment, and type the same export or
+   unset line into the shell.
+5. Seed the workspace trust for the new config dir.
+6. Record `claudeAccountId` on the session before the launch, and record one `account_moved`
+   activity row that names both accounts and the cause.
+7. Type the launch line from the shared launch builder. It resumes the recorded conversation id, or
+   starts a new conversation when no id is recorded, as Run Claude does. `steps.ts#typeLaunchLine`
+   first clears the screen and waits up to 3 s until no old input footer or resume refusal shows, so
+   the readiness check reads only the new REPL.
+8. Wait for the new REPL.
+
+**The safe point.** `session-turn.ts` keeps the turn state of each session in memory.
+`UserPromptSubmit` sets busy, `Stop` sets idle, and a `StopFailure` with a rate limit sets limit. A
+pane check adds to the hook state: `esc to interrupt` sets busy, and a limit surface sets limit.
+After a server restart the state is unknown until the next hook event, and the pane check decides.
+A session is at a safe point when its state is idle or limit. The service treats an unknown state
+as busy.
+
+**A limit surface is cleared before the move.** `limit-surface.ts` holds the limit surface
+patterns. On the auto-continue line, the service sends Escape. On the options menu, it sends only the
+keys that select the stop option, or the wait option when no stop option shows. It never selects an
+option that matches `CREDITS_OPTION`. When the menu shows no stop option and no wait option, it sends
+no key and returns `limit-unknown`.
+
+**A busy session gets a pending move.** The service never interrupts a turn.
+`session-account-apply.ts#moveOrQueue` writes `pendingClaudeAccountId` on a busy session. The move
+runs on the next `Stop` hook of that session and on a 30 s sweep that uses the pane check. The
+pending move stays after a server restart. It clears when any move of that session settles (every
+outcome except `busy` and `limit-unknown`), when its target account is removed, and when a later
+switch selects a different account.
+
+**The apply choice.** `PUT /accounts/active` takes `applyToRunning`. An absent value means `all`, so
+a switch reaches every running session. `none` writes the pointer only. `idle` moves the idle and
+limit sessions now and leaves busy sessions alone. `all` moves the idle and limit sessions now and
+queues each busy session. The switch dialog preselects `all` and shows the running session count.
+`session-account-plan.ts#planApply` skips sessions already on the target, lost sessions and legacy
+sessions. `POST /cards/:id/session/account` moves one session and returns 202 `queued` for a busy
+session.
+
+**A Default identity change marks sessions stale.** `default-identity-watch.ts` compares the home
+login email and organization id after each Default usage refresh and on a 5 minute timer. On a
+change it marks each live session on Default stale. The restart of a stale session is a move to the
+same account through the same service.
 
 ### Orchestration Saga
 

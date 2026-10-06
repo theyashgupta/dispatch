@@ -1,6 +1,7 @@
 import type { EventEmitter } from "node:events";
 import type { CardSearchResult } from "../../shared/search.js";
 import type {
+  AccountEventType,
   ActivityEvent,
   ArchiveBoardResult,
   ArchivedGroup,
@@ -127,6 +128,19 @@ export interface BoardRepository {
     sessionId: string | undefined,
     sid: string,
   ): Promise<void>;
+  setSessionAccount(
+    id: string,
+    sessionId: string,
+    accountId: string,
+  ): Promise<void>;
+  markAccountStale(id: string, sessionId: string): Promise<void>;
+  setPendingAccount(
+    id: string,
+    sessionId: string,
+    accountId: string | undefined,
+  ): Promise<void>;
+  clearPendingAccountsFor(accountId: string): Promise<void>;
+  clearPendingAccountsExcept(accountId: string): Promise<void>;
   setOutputChanged(id: string, iso: string): Promise<void>;
   setPrsIfSession(id: string, session: string, prs: PrInfo[]): Promise<void>;
   setPreviewsIfSession(
@@ -176,6 +190,11 @@ export interface BoardRepository {
   >;
   deleteArchived(archiveId: string): Promise<boolean>;
   recordArchiveDeleteBlocked(archiveId: string, reason: string): Promise<void>;
+  recordAccountEvent(
+    type: AccountEventType,
+    reason: string,
+    cardId?: string | null,
+  ): Promise<void>;
   listArchive(board: BoardKey): ArchivedGroup[];
   getArchived(archiveId: string): ArchivedGroup | undefined;
   archiveDueForDelete(

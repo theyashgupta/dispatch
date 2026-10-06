@@ -20,6 +20,8 @@ import {
   withState,
 } from "./items.js";
 import type {
+  AccountActivityEvent,
+  AccountEventType,
   ActivityEvent,
   ArchiveBoardResult,
   Board,
@@ -239,6 +241,7 @@ export function redactCard(card: Card): Card {
         s.workspace == null ? undefined : path.basename(s.workspace.folder),
       lastMarker: s.lastMarker,
       claudeAccountId: s.claudeAccountId,
+      claudeAccountStale: s.claudeAccountStale,
       cleanupBlocked: s.cleanupBlocked,
       prs: s.prs,
       prsUnknown: s.prsUnknown,
@@ -891,14 +894,16 @@ class BoardStore extends EventEmitter {
    * `store.snapshot(board, { doneLimit })` itself, once per distinct window.
    * @see docs/ARCHITECTURE.md#single-writer-store
    */
-  private enqueue(mutator: () => Omit<ActivityEvent, "id">[]): Promise<void> {
+  private enqueue(
+    mutator: () => Omit<ActivityEvent | AccountActivityEvent, "id">[],
+  ): Promise<void> {
     this.queue = this.queue
       .then(async () => {
         const events = mutator();
         const itemUpserts = this.pendingItemUpserts;
         this.pendingItemUpserts = [];
         await this.db.backupTick();
-        let broadcast: ActivityEvent[] = [];
+        let broadcast: (ActivityEvent | AccountActivityEvent)[] = [];
         try {
           const ids = this.db.persist(
             [...this.cards.values()],
@@ -1884,6 +1889,100 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Record the Claude account a session now runs on and clear its stale mark.
+   *
+   * @remarks A session launched on an account runs on that account's current login.
+   */
+  setSessionAccount(
+    id: string,
+    sessionId: string,
+    accountId: string,
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card?.sessions?.some((s) => s.id === sessionId)) {
+        this.setActiveSession(
+          card,
+          { claudeAccountId: accountId, claudeAccountStale: undefined },
+          sessionId,
+        );
+      }
+      return [];
+    });
+  }
+
+  /** Mark a session stale after its Default login changed under it. */
+  markAccountStale(id: string, sessionId: string): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card?.sessions?.some((s) => s.id === sessionId)) {
+        this.setActiveSession(card, { claudeAccountStale: true }, sessionId);
+      }
+      return [];
+    });
+  }
+
+  /** Set or clear the account a session's queued move will take it to. */
+  setPendingAccount(
+    id: string,
+    sessionId: string,
+    accountId: string | undefined,
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card?.sessions?.some((s) => s.id === sessionId)) {
+        this.setActiveSession(
+          card,
+          { pendingClaudeAccountId: accountId },
+          sessionId,
+        );
+      }
+      return [];
+    });
+  }
+
+  /**
+   * Clear every queued move that targets `accountId`, on any card.
+   */
+  clearPendingAccountsFor(accountId: string): Promise<void> {
+    return this.enqueue(() => {
+      for (const card of this.cards.values()) {
+        for (const session of card.sessions ?? []) {
+          if (session.pendingClaudeAccountId === accountId) {
+            this.setActiveSession(
+              card,
+              { pendingClaudeAccountId: undefined },
+              session.id,
+            );
+          }
+        }
+      }
+      return [];
+    });
+  }
+
+  /**
+   * Clear every queued move that targets an account other than `accountId`, on any card.
+   */
+  clearPendingAccountsExcept(accountId: string): Promise<void> {
+    return this.enqueue(() => {
+      for (const card of this.cards.values()) {
+        for (const session of card.sessions ?? []) {
+          const pending = session.pendingClaudeAccountId;
+          if (pending !== undefined && pending !== accountId) {
+            this.setActiveSession(
+              card,
+              { pendingClaudeAccountId: undefined },
+              session.id,
+            );
+          }
+        }
+      }
+      return [];
+    });
+  }
+
+  /**
    * Record the ISO timestamp of the last observed ⏺-view divergence for a live session
    * (ATTN-02 unseen-activity dot). Mirrors setStatusReason exactly: a single-field enqueue.
    * This is a SEPARATE logical event from a column move — it does NOT touch `column`, so it
@@ -2473,6 +2572,25 @@ class BoardStore extends EventEmitter {
       this.db.upsertArchive(row);
       return [];
     });
+  }
+
+  /** Append one account activity row; `cardId` is null when the event names no card. */
+  recordAccountEvent(
+    type: AccountEventType,
+    reason: string,
+    cardId: string | null = null,
+  ): Promise<void> {
+    return this.enqueue(() => [
+      {
+        type,
+        ts: new Date().toISOString(),
+        cardId,
+        fromCol: null,
+        toCol: null,
+        reason,
+        source: "accounts",
+      },
+    ]);
   }
 
   /** Synchronous archive read, newest first (the `listEvents` precedent: not enqueued). */

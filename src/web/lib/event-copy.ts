@@ -1,6 +1,11 @@
 import { COLUMN_LABELS } from "../../shared/column-labels.js";
 import { LINEAR_PUSH_FAILED_PREFIX } from "../../shared/linear-state-map.js";
-import type { ActivityEvent, Column } from "../../shared/types.js";
+import type {
+  AccountEventType,
+  ActivityEvent,
+  Column,
+  EventType,
+} from "../../shared/types.js";
 
 export { COLUMN_LABELS };
 
@@ -27,11 +32,13 @@ function describeUnknownEvent(type: never): string {
 
 /**
  * Render one `ActivityEvent` as its plain-text verb phrase only — no identifier, no timestamp,
- * no markup. The exhaustive `switch` over `EventType` makes a future event kind a compile error
- * rather than a silent default string; `{from}`/`{to}` resolve through Title Case `COLUMN_LABELS`
- * and degrade to the bare verb when either column is absent.
+ * no markup. The exhaustive `switch` over `EventType` and `AccountEventType` makes a future event
+ * kind a compile error rather than a silent default string; `{from}`/`{to}` resolve through Title
+ * Case `COLUMN_LABELS` and degrade to the bare verb when either column is absent.
  */
-export function describeEvent(event: ActivityEvent): string {
+export function describeEvent(
+  event: Omit<ActivityEvent, "type"> & { type: EventType | AccountEventType },
+): string {
   switch (event.type) {
     case "sync_in":
       return "synced in from Linear";
@@ -81,6 +88,16 @@ export function describeEvent(event: ActivityEvent): string {
       return event.reason?.startsWith(LINEAR_PUSH_FAILED_PREFIX)
         ? event.reason.slice(LINEAR_PUSH_FAILED_PREFIX.length)
         : `Linear state set to ${event.reason ?? "a new state"}`;
+    case "account_moved":
+      return event.reason
+        ? `Claude account moved: ${event.reason}`
+        : "Claude account moved";
+    case "account_login_changed":
+      return "home Claude login changed";
+    case "account_login_failed":
+      return event.reason
+        ? `Claude login failed: ${event.reason}`
+        : "Claude login failed";
     default:
       return describeUnknownEvent(event.type);
   }

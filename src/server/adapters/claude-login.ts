@@ -31,11 +31,16 @@ export function extractLoginUrl(text: string): string | null {
 }
 
 /**
- * Whether the CLI rejected a pasted code. It re-prompts instead of exiting, so the caller must end
- * the login itself.
+ * Return whether the CLI rejected a pasted code.
+ *
+ * @remarks A code without `#` gets `Invalid code` and a new prompt, so the caller must end the
+ * login itself. A wrong, stale or reused code passes that check and fails the token exchange with
+ * HTTP 400 (CLI 2.1.289), after which the CLI exits 1 by itself.
  */
 export function hasInvalidCode(text: string): boolean {
-  return /Invalid code/.test(text);
+  return /Invalid code|Login failed: Request failed with status code 400/.test(
+    text,
+  );
 }
 
 /**

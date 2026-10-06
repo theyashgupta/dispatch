@@ -11,3 +11,5 @@ export { markSlotStyle, sourceMark } from "./source-mark.js";
 export { TeamCycleText } from "./TeamCycleText.js";
 export { UnknownProbeBadge } from "./UnknownProbeBadge.js";
 export { unknownProbeCopy } from "./unknown-probe-copy.js";
+export { SessionAccountLabel } from "./SessionAccountLabel.js";
+export { StaleBadge } from "./StaleBadge.js";
