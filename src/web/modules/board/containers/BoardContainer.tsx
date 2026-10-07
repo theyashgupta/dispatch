@@ -110,6 +110,7 @@ function isColumn(id: unknown): id is ColumnId {
 export function BoardContainer({ search }: BoardContainerProps) {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
+  const boardKey = useAppStore(appStore, (s) => s.board);
   const doneLimit = useAppStore(appStore, (s) => s.doneLimit);
   const storeSelectedId = useAppStore(appStore, (s) => s.selectedCardId);
   const pinned = useAppStore(appStore, (s) => s.pinned);
@@ -118,9 +119,9 @@ export function BoardContainer({ search }: BoardContainerProps) {
     appStore,
     (s) => s.selectionResetToken,
   );
-  const query = useBoardSnapshotQuery(doneLimit);
+  const query = useBoardSnapshotQuery(boardKey, doneLimit);
   const [lastBoard, setLastBoard] = useState<BoardSnapshot | null>(null);
-  const board = latestBoard(query.data, lastBoard);
+  const board = latestBoard(query.data, lastBoard, boardKey);
   if (board !== lastBoard) setLastBoard(board);
   const cards = board?.cards ?? NO_CARDS;
   const selectedCardId =

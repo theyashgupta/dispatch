@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { DONE_PAGE_SIZE } from "../../shared/done-limit.js";
 import type { PinnedCard } from "../../shared/pinned-card.js";
 import type { CardSearchResult } from "../../shared/search.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 import type { Card, SetupChecks } from "../../shared/types.js";
 import { IDLE_TOAST } from "../../shared/undo-toast.js";
 import { createAppStore, type AppState } from "./app-store.js";
@@ -10,6 +11,7 @@ import { createAppStore, type AppState } from "./app-store.js";
 function card(id: string, extra: Partial<Card> = {}): Card {
   return {
     id,
+    boardKey: DEFAULT_BOARD_KEY,
     identifier: id.toUpperCase(),
     title: id,
     column: "todo",

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import { DEFAULT_BOARD_KEY as LOCAL } from "../../shared/board-key.js";
+import type { BoardKey } from "../../shared/types.js";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import {
   cleanupCard,
@@ -20,6 +22,7 @@ import {
   syncCardToLinearMutationOptions,
 } from "./cards-queries.js";
 
+const ACME = "ACME" as BoardKey;
 const realFetch = globalThis.fetch;
 const calls: { url: string; init?: RequestInit }[] = [];
 
@@ -146,14 +149,14 @@ test("generateGroupTitle rejects on a network failure", async () => {
 
 test("startGroup resolves the created card on a 202", async () => {
   reply(202, { card }, "Accepted");
-  assert.deepEqual(await startGroup(groupInput), { ok: true, card });
+  assert.deepEqual(await startGroup(LOCAL, groupInput), { ok: true, card });
   assert.equal(calls[0]?.url, "/api/cards/group");
   assert.equal(calls[0]?.init?.body, JSON.stringify(groupInput));
 });
 
 test("startGroup keeps the config variant on a 400", async () => {
   reply(400, { error: "no repo", variant: "config" }, "Bad Request");
-  assert.deepEqual(await startGroup(groupInput), {
+  assert.deepEqual(await startGroup(LOCAL, groupInput), {
     ok: false,
     error: "no repo",
     variant: "config",
@@ -162,7 +165,7 @@ test("startGroup keeps the config variant on a 400", async () => {
 
 test("startGroup keeps the playbook variant on a 400", async () => {
   reply(400, { error: "bad playbook", variant: "playbook" }, "Bad Request");
-  assert.deepEqual(await startGroup(groupInput), {
+  assert.deepEqual(await startGroup(LOCAL, groupInput), {
     ok: false,
     error: "bad playbook",
     variant: "playbook",
@@ -171,7 +174,7 @@ test("startGroup keeps the playbook variant on a 400", async () => {
 
 test("startGroup drops an unknown variant on a 400", async () => {
   reply(400, { error: "x", variant: "ineligible" }, "Bad Request");
-  assert.deepEqual(await startGroup(groupInput), {
+  assert.deepEqual(await startGroup(LOCAL, groupInput), {
     ok: false,
     error: "x",
     variant: undefined,
@@ -180,7 +183,7 @@ test("startGroup drops an unknown variant on a 400", async () => {
 
 test("startGroup falls back to Start failed. on a 400 with no error", async () => {
   reply(400, {}, "Bad Request");
-  assert.deepEqual(await startGroup(groupInput), {
+  assert.deepEqual(await startGroup(LOCAL, groupInput), {
     ok: false,
     error: "Start failed.",
     variant: undefined,
@@ -189,7 +192,7 @@ test("startGroup falls back to Start failed. on a 400 with no error", async () =
 
 test("startGroup reports the ineligible ids on a 409", async () => {
   reply(409, { error: "moved on", ineligibleIds: ["b"] }, "Conflict");
-  assert.deepEqual(await startGroup(groupInput), {
+  assert.deepEqual(await startGroup(LOCAL, groupInput), {
     ok: false,
     error: "moved on",
     variant: "ineligible",
@@ -199,7 +202,7 @@ test("startGroup reports the ineligible ids on a 409", async () => {
 
 test("startGroup falls back to the eligibility copy and an empty id list on a 409", async () => {
   reply(409, {}, "Conflict");
-  assert.deepEqual(await startGroup(groupInput), {
+  assert.deepEqual(await startGroup(LOCAL, groupInput), {
     ok: false,
     error: "Some selected tickets are no longer eligible.",
     variant: "ineligible",
@@ -210,7 +213,7 @@ test("startGroup falls back to the eligibility copy and an empty id list on a 40
 test("startGroup throws on any other failure status", async () => {
   reply(500, {}, "Internal Server Error");
   await assert.rejects(
-    startGroup(groupInput),
+    startGroup(LOCAL, groupInput),
     new Error("startGroup failed: 500 Internal Server Error"),
   );
 });
@@ -218,7 +221,7 @@ test("startGroup throws on any other failure status", async () => {
 test("startGroup throws on a 2xx that is not a 202", async () => {
   reply(200, { card }, "OK");
   await assert.rejects(
-    startGroup(groupInput),
+    startGroup(LOCAL, groupInput),
     /^Error: startGroup failed: 200/,
   );
 });
@@ -314,7 +317,10 @@ test("generateTicketDraft rejects on a network failure", async () => {
 
 test("createLocalTicket resolves the created card on a 201", async () => {
   reply(201, card, "Created");
-  assert.deepEqual(await createLocalTicket("T", "D"), { ok: true, card });
+  assert.deepEqual(await createLocalTicket(LOCAL, "T", "D"), {
+    ok: true,
+    card,
+  });
   assert.equal(calls[0]?.url, "/api/cards");
   assert.equal(
     calls[0]?.init?.body,
@@ -324,7 +330,7 @@ test("createLocalTicket resolves the created card on a 201", async () => {
 
 test("createLocalTicket returns the error code on a 400", async () => {
   reply(400, { error: "title-required" }, "Bad Request");
-  assert.deepEqual(await createLocalTicket("", "D"), {
+  assert.deepEqual(await createLocalTicket(LOCAL, "", "D"), {
     ok: false,
     error: "title-required",
   });
@@ -332,7 +338,7 @@ test("createLocalTicket returns the error code on a 400", async () => {
 
 test("createLocalTicket answers a null error on a 400 with no error", async () => {
   reply(400, {}, "Bad Request");
-  assert.deepEqual(await createLocalTicket("", "D"), {
+  assert.deepEqual(await createLocalTicket(LOCAL, "", "D"), {
     ok: false,
     error: null,
   });
@@ -340,7 +346,7 @@ test("createLocalTicket answers a null error on a 400 with no error", async () =
 
 test("createLocalTicket answers a null error on any other status", async () => {
   reply(500, { error: "boom" }, "Internal Server Error");
-  assert.deepEqual(await createLocalTicket("T", "D"), {
+  assert.deepEqual(await createLocalTicket(LOCAL, "T", "D"), {
     ok: false,
     error: null,
   });
@@ -348,10 +354,25 @@ test("createLocalTicket answers a null error on any other status", async () => {
 
 test("createLocalTicket answers a null error on a network failure", async () => {
   globalThis.fetch = () => Promise.reject(new TypeError("Failed to fetch"));
-  assert.deepEqual(await createLocalTicket("T", "D"), {
+  assert.deepEqual(await createLocalTicket(LOCAL, "T", "D"), {
     ok: false,
     error: null,
   });
+});
+
+test("createLocalTicket and startGroup for ACME post with the board parameter", async () => {
+  reply(201, card);
+  await createLocalTicket(ACME, "T", "D");
+  assert.equal(calls[0]?.url, "/api/cards?board=ACME");
+  reply(202, { card }, "Accepted");
+  await startGroup(ACME, groupInput);
+  assert.equal(calls[1]?.url, "/api/cards/group?board=ACME");
+});
+
+test("createLocalTicket for LOCAL keeps the URL of today", async () => {
+  reply(201, card);
+  await createLocalTicket(LOCAL, "T", "D");
+  assert.equal(calls[0]?.url, "/api/cards");
 });
 
 function run<V, R>(
@@ -456,7 +477,7 @@ test("the draft mutation rejects when the request aborts", async () => {
 
 test("the create mutation posts the ticket and resolves the card", async () => {
   reply(201, card);
-  const result = await run(createLocalTicketMutationOptions(), {
+  const result = await run(createLocalTicketMutationOptions(LOCAL), {
     title: "T",
     description: "D",
     images: ["img"],
@@ -472,7 +493,7 @@ test("the create mutation posts the ticket and resolves the card", async () => {
 test("the create mutation resolves the code on a 400", async () => {
   reply(400, { error: "invalid-title" }, "Bad Request");
   assert.deepEqual(
-    await run(createLocalTicketMutationOptions(), {
+    await run(createLocalTicketMutationOptions(LOCAL), {
       title: "T",
       description: "D",
     }),
@@ -484,7 +505,7 @@ for (const status of [409, 502]) {
   test(`the create mutation resolves a null error on a ${status}`, async () => {
     reply(status, { error: "x" });
     assert.deepEqual(
-      await run(createLocalTicketMutationOptions(), {
+      await run(createLocalTicketMutationOptions(LOCAL), {
         title: "T",
         description: "D",
       }),
@@ -560,7 +581,7 @@ test("the start group mutation posts the group and resolves the card", async () 
     playbook: "GSD",
     extraDirection: "go",
   };
-  assert.deepEqual(await run(startGroupMutationOptions(), input), {
+  assert.deepEqual(await run(startGroupMutationOptions(LOCAL), input), {
     ok: true,
     card,
   });
@@ -571,7 +592,7 @@ test("the start group mutation posts the group and resolves the card", async () 
 test("the start group mutation resolves the ineligible ids on a 409", async () => {
   reply(409, { error: "no", ineligibleIds: ["a"] }, "Conflict");
   assert.deepEqual(
-    await run(startGroupMutationOptions(), {
+    await run(startGroupMutationOptions(LOCAL), {
       title: "T",
       memberIds: ["a"],
       folder: "/work",
@@ -648,5 +669,5 @@ test("resetCard returns the server reason for a refusal and throws without one",
 
 test("the draft and create mutations drop their variables at once", () => {
   assert.equal(generateTicketDraftMutationOptions().gcTime, 0);
-  assert.equal(createLocalTicketMutationOptions().gcTime, 0);
+  assert.equal(createLocalTicketMutationOptions(LOCAL).gcTime, 0);
 });

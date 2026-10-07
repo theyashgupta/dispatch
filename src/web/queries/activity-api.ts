@@ -1,4 +1,5 @@
-import type { ActivityEvent } from "../../shared/types.js";
+import { withBoard } from "../../shared/board-select.js";
+import type { ActivityEvent, BoardKey } from "../../shared/types.js";
 import { http, httpError } from "@/lib/http";
 
 /**
@@ -9,6 +10,7 @@ import { http, httpError } from "@/lib/http";
  * failure.
  */
 export async function fetchEvents(
+  board: BoardKey,
   cardId?: string,
   limit?: number,
 ): Promise<ActivityEvent[]> {
@@ -17,7 +19,7 @@ export async function fetchEvents(
   if (limit !== undefined) params.set("limit", String(limit));
   const query = params.toString();
   const result = await http<{ events: ActivityEvent[] }>(
-    `/api/events${query ? `?${query}` : ""}`,
+    withBoard(`/api/events${query ? `?${query}` : ""}`, board),
   );
   if (!result.ok) {
     throw httpError("fetchEvents", result);

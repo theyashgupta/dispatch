@@ -29,3 +29,24 @@ test("nothing stored and no hash lands on the board", () => {
 test("an unknown current hash is normalized to the board, not left as is", () => {
   assert.equal(initialHash("#/nope", "#/inbox", null), "#/board");
 });
+
+test("a current hash keeps its board query", () => {
+  assert.equal(
+    initialHash("#/board?board=ACME", null, null),
+    "#/board?board=ACME",
+  );
+});
+
+test("a current hash with an id keeps the id and the query", () => {
+  assert.equal(
+    initialHash("#/inbox/abc?board=ACME", "#/activity", null),
+    "#/inbox/abc?board=ACME",
+  );
+});
+
+test("an unknown page with a query maps to the board with the same query", () => {
+  assert.equal(
+    initialHash("#/nope?board=ACME", "#/inbox", null),
+    "#/board?board=ACME",
+  );
+});

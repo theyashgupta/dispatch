@@ -1,3 +1,4 @@
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -39,6 +40,7 @@ void test("createWorktrees skips a saved repo entry that is a worktree of an ear
     fs.mkdirSync(workspacePath, { recursive: true });
     const card: Card = {
       id: "LOCAL-54",
+      boardKey: DEFAULT_BOARD_KEY,
       issueId: "LOCAL-54",
       identifier: "LOCAL-54",
       title: "t",

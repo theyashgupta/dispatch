@@ -1,3 +1,4 @@
+import { DEFAULT_BOARD_KEY } from "../shared/board-key.js";
 import { StrictMode, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { toast } from "sonner";
@@ -199,6 +200,7 @@ const ROWS = Array.from({ length: 24 }, (_, index) => `Row ${index + 1}`);
 function boardCard(overrides: Partial<BoardCard>): BoardCard {
   return {
     id: "gallery-todo",
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: "gallery-todo",
     identifier: "G13-1",
     title: "Plain ticket with a title long enough to wrap onto two lines",

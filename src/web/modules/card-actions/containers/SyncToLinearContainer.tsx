@@ -78,7 +78,10 @@ export function SyncToLinearContainer({
 
 export function SyncToLinearRequestContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
-  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const board = useBoardSnapshot(
+    useAppStore(appStore, (s) => s.board),
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
   const syncCardId = useAppStore(appStore, (s) => s.syncCardId);
   const card = board?.cards.find((c) => c.id === syncCardId);
   if (card == null) return null;

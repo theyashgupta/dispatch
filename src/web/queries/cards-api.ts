@@ -1,5 +1,7 @@
+import { withBoard } from "../../shared/board-select.js";
 import type {
   ArchivedGroupSummary,
+  BoardKey,
   Card,
   Column,
   UnwindDestination,
@@ -34,12 +36,13 @@ export async function moveCard(id: string, column: Column): Promise<void> {
  * every other status resolve `{ ok: false, error: null }`.
  */
 export async function createLocalTicket(
+  board: BoardKey,
   title: string,
   description: string,
   images: readonly string[] = [],
 ): Promise<{ ok: true; card: Card } | { ok: false; error: string | null }> {
   try {
-    const result = await http<Card>("/api/cards", {
+    const result = await http<Card>(withBoard("/api/cards", board), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title, description, images }),
@@ -124,19 +127,25 @@ export type StartGroupResult =
  * and a 409 resolves the server's re-validated `ineligibleIds`, because the server is the source
  * of truth for eligibility. Any other status throws.
  */
-export async function startGroup(input: {
-  title: string;
-  memberIds: string[];
-  folder: string;
-  repos: { path: string; base: string }[];
-  playbook?: string;
-  extraDirection?: string;
-}): Promise<StartGroupResult> {
-  const result = await http<{ card: Card }>("/api/cards/group", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
+export async function startGroup(
+  board: BoardKey,
+  input: {
+    title: string;
+    memberIds: string[];
+    folder: string;
+    repos: { path: string; base: string }[];
+    playbook?: string;
+    extraDirection?: string;
+  },
+): Promise<StartGroupResult> {
+  const result = await http<{ card: Card }>(
+    withBoard("/api/cards/group", board),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
   if (result.ok && result.status === 202) {
     return { ok: true, card: result.data.card };
   }

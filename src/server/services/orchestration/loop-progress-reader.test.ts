@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import type { Card, Column, LoopProgress } from "../../../shared/types.js";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { fakeBoardRepository } from "../../test-support/fake-board-repository.js";
@@ -71,6 +72,7 @@ async function waitFor(
 function groupCard(root: string, column: Column, source = "group"): Card {
   return {
     id: "card-1",
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: "card-1",
     identifier: "GROUP-1",
     title: "Group",
@@ -97,7 +99,11 @@ function installRepo(
   setBoardRepository(
     fakeBoardRepository({
       listBoards: () => [{ key: "board-1" }] as never,
-      snapshot: () => ({ cards: [getCard()], syncedAt: null }),
+      snapshot: () => ({
+        boardKey: DEFAULT_BOARD_KEY,
+        cards: [getCard()],
+        syncedAt: null,
+      }),
       getCard: () => {
         const stored = recorded.at(-1)?.progress;
         return stored ? { ...getCard(), loopProgress: stored } : getCard();

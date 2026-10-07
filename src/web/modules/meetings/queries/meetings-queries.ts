@@ -1,5 +1,5 @@
 import { queryOptions, useMutation, useQuery } from "@tanstack/react-query";
-import type { Card } from "../../../../shared/types.js";
+import type { BoardKey, Card } from "../../../../shared/types.js";
 import { moveCard } from "@/queries/cards-api";
 import { promoteItem } from "@/queries/item-actions-api";
 import type { MeetingDraft } from "@/modules/meetings/domain/draft-rows";
@@ -51,19 +51,21 @@ export const createMeetingMutationOptions = {
   }) => createMeetingItems(vars.meeting, vars.drafts, vars.notes),
 };
 
-export const runAgentMutationOptions = {
-  mutationFn: async (vars: {
-    itemId: string;
-  }): Promise<{ card: Card; moved: boolean }> => {
-    const { card } = await promoteItem(vars.itemId);
-    try {
-      await moveCard(card.id, "todo");
-    } catch {
-      return { card, moved: false };
-    }
-    return { card, moved: true };
-  },
-};
+export function runAgentMutationOptions(board: BoardKey) {
+  return {
+    mutationFn: async (vars: {
+      itemId: string;
+    }): Promise<{ card: Card; moved: boolean }> => {
+      const { card } = await promoteItem(board, vars.itemId);
+      try {
+        await moveCard(card.id, "todo");
+      } catch {
+        return { card, moved: false };
+      }
+      return { card, moved: true };
+    },
+  };
+}
 
 /**
  * Draft action items from pasted notes.
@@ -95,6 +97,6 @@ export function useCreateMeetingItemsMutation(
  * @remarks
  * A failed move still resolves, with `moved` false, because the card exists and the caller names it.
  */
-export function useRunMeetingAgentMutation() {
-  return useMutation(runAgentMutationOptions);
+export function useRunMeetingAgentMutation(board: BoardKey) {
+  return useMutation(runAgentMutationOptions(board));
 }

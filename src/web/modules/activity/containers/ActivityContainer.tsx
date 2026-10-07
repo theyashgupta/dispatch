@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import type { ActivityEvent } from "../../../../shared/types.js";
 import { cardIdentifiers } from "../../../../shared/card-identifiers.js";
@@ -17,18 +16,19 @@ import {
 } from "@/modules/activity/domain/activity-groups";
 import { useActivityFilter } from "@/modules/activity/hooks/use-activity-filter";
 import { useTickingNow } from "@/modules/activity/hooks/use-ticking-now";
-import { activityFeedQueryOptions } from "@/queries/activity-queries";
+import { useActivityFeedQuery } from "@/queries/activity-queries";
 import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 
 const NO_EVENTS: ActivityEvent[] = [];
 
 export function ActivityContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
-  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
-  const { data } = useQuery({
-    ...activityFeedQueryOptions(),
-    refetchOnMount: false,
-  });
+  const boardKey = useAppStore(appStore, (s) => s.board);
+  const board = useBoardSnapshot(
+    boardKey,
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
+  const { data } = useActivityFeedQuery(boardKey, { refetchOnMount: false });
   const events = data ?? NO_EVENTS;
   const identifiers = cardIdentifiers(board?.cards ?? []);
   const [filter] = useActivityFilter();

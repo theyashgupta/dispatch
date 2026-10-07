@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouteContext, useRouter } from "@tanstack/react-router";
+import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import { routeHash } from "../../../../shared/route.js";
 import type { Card } from "../../../../shared/types.js";
 import { GroupStartDialog } from "@/modules/card-actions/components/GroupStartDialog";
@@ -32,7 +33,8 @@ export function GroupStartContainer({
   onEditPlaybooks,
 }: GroupStartContainerProps) {
   const { open, requestClose, onOpenChange } = useDialogClose(onClose);
-  const startGroup = useStartGroupMutation();
+  const board = members[0]?.boardKey ?? DEFAULT_BOARD_KEY;
+  const startGroup = useStartGroupMutation(board);
   const { mutateAsync: generateTitle } = useGenerateGroupTitleMutation();
   const titleRef = useRef<HTMLInputElement>(null);
   const userHasEditedRef = useRef(false);
@@ -40,6 +42,7 @@ export function GroupStartContainer({
   const [extraDirection, setExtraDirection] = useState("");
 
   const flow = useStartFlow({
+    board,
     open,
     requestClose,
     pending: startGroup.isPending,

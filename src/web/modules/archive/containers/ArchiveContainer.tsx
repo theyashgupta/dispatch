@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { useRouteContext } from "@tanstack/react-router";
 import { ARCHIVE_RETENTION_MAX_DAYS } from "../../../../shared/types.js";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { NumberSettingSection } from "@/components/NumberSettingSection";
 import { PageHeaderCount } from "@/components/PageHeaderCount";
 import { ArchiveSection } from "@/modules/archive/components/ArchiveSection";
@@ -15,7 +17,8 @@ import {
 import { useArchiveRetentionDraft } from "@/queries/archive-retention-queries";
 
 export function ArchiveContainer() {
-  const archive = useArchiveQuery();
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const archive = useArchiveQuery(useAppStore(appStore, (s) => s.board));
   const restore = useRestoreArchivedMutation();
   const remove = useDeleteArchivedMutation();
   const retention = useArchiveRetentionDraft();
@@ -82,6 +85,8 @@ export function ArchiveContainer() {
 }
 
 export function ArchiveHeaderContainer() {
-  const count = useArchiveQuery().data?.length;
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const count = useArchiveQuery(useAppStore(appStore, (s) => s.board)).data
+    ?.length;
   return count != null ? <PageHeaderCount count={count} /> : null;
 }

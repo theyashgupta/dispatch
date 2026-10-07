@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
+import { DEFAULT_BOARD_KEY as LOCAL } from "../../../../shared/board-key.js";
+import type { BoardKey } from "../../../../shared/types.js";
 import { getWorkspaces } from "./workspaces-api.js";
 import { openWorkspaceEditorMutationOptions } from "./workspaces-queries.js";
 
+const ACME = "ACME" as BoardKey;
 const realFetch = globalThis.fetch;
 const calls: { url: string; init?: RequestInit }[] = [];
 
@@ -32,14 +35,22 @@ afterEach(() => {
 
 test("getWorkspaces requests the inventory", async () => {
   reply(200, { rows: [] });
-  await getWorkspaces(false);
+  await getWorkspaces(LOCAL, false);
   assert.equal(calls[0]?.url, "/api/workspaces");
 });
 
 test("getWorkspaces with fresh requests the fresh inventory", async () => {
   reply(200, { rows: [] });
-  await getWorkspaces(true);
+  await getWorkspaces(LOCAL, true);
   assert.equal(calls[0]?.url, "/api/workspaces?fresh=1");
+});
+
+test("getWorkspaces for ACME adds the board parameter to both URLs", async () => {
+  reply(200, { rows: [] });
+  await getWorkspaces(ACME, false);
+  await getWorkspaces(ACME, true);
+  assert.equal(calls[0]?.url, "/api/workspaces?board=ACME");
+  assert.equal(calls[1]?.url, "/api/workspaces?fresh=1&board=ACME");
 });
 
 test("openWorkspaceEditorMutationOptions posts the editor to the card", async () => {

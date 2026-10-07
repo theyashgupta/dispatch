@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import { DEFAULT_BOARD_KEY as LOCAL } from "../../../../shared/board-key.js";
+import type { BoardKey } from "../../../../shared/types.js";
 import {
   CALENDAR_POLL_MS,
   calendarPollQueryOptions,
@@ -10,6 +12,7 @@ import {
   calendarStatusQueryOptions,
 } from "@/queries/calendar-status-queries";
 
+const ACME = "ACME" as BoardKey;
 const realFetch = globalThis.fetch;
 const calls: { url: string; init?: RequestInit }[] = [];
 
@@ -52,7 +55,7 @@ test("the shared calendar status query does not poll", () => {
 test("prepareTicketMutationOptions posts the ticket and resolves the card", async () => {
   const card = { id: "c1" };
   reply(201, card);
-  const result = await prepareTicketMutationOptions.mutationFn({
+  const result = await prepareTicketMutationOptions(LOCAL).mutationFn({
     title: "Prepare: Sync",
     description: "Brief",
   });
@@ -68,10 +71,19 @@ test("prepareTicketMutationOptions posts the ticket and resolves the card", asyn
   );
 });
 
+test("prepareTicketMutationOptions for ACME posts to the ACME board", async () => {
+  reply(201, { id: "c1" });
+  await prepareTicketMutationOptions(ACME).mutationFn({
+    title: "T",
+    description: "D",
+  });
+  assert.equal(calls[0]?.url, "/api/cards?board=ACME");
+});
+
 test("prepareTicketMutationOptions resolves ok false on a failed status and a network error", async () => {
   reply(500, {});
   assert.deepEqual(
-    await prepareTicketMutationOptions.mutationFn({
+    await prepareTicketMutationOptions(LOCAL).mutationFn({
       title: "T",
       description: "D",
     }),
@@ -79,7 +91,7 @@ test("prepareTicketMutationOptions resolves ok false on a failed status and a ne
   );
   globalThis.fetch = () => Promise.reject(new Error("offline"));
   assert.deepEqual(
-    await prepareTicketMutationOptions.mutationFn({
+    await prepareTicketMutationOptions(LOCAL).mutationFn({
       title: "T",
       description: "D",
     }),

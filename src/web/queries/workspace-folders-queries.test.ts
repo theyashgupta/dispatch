@@ -7,6 +7,8 @@ import {
   QueryClient,
   QueryClientProvider,
 } from "@tanstack/react-query";
+import { DEFAULT_BOARD_KEY as LOCAL } from "../../shared/board-key.js";
+import type { BoardKey } from "../../shared/types.js";
 import {
   addWorkspaceFolder,
   browseDirectory,
@@ -25,6 +27,7 @@ import {
   workspaceFoldersQueryOptions,
 } from "./workspace-folders-queries.js";
 
+const ACME = "ACME" as BoardKey;
 const realFetch = globalThis.fetch;
 const calls: { url: string; init?: RequestInit }[] = [];
 
@@ -53,7 +56,22 @@ afterEach(() => {
 
 test("workspaceFoldersKeys has the documented shape", () => {
   assert.deepEqual(workspaceFoldersKeys.all, ["workspaces"]);
-  assert.deepEqual(workspaceFoldersKeys.folders, ["workspaces", "folders"]);
+  assert.deepEqual(workspaceFoldersKeys.folders(LOCAL), [
+    "workspaces",
+    "folders",
+    LOCAL,
+  ]);
+  assert.deepEqual(workspaceFoldersKeys.folders(ACME), [
+    "workspaces",
+    "folders",
+    ACME,
+  ]);
+  assert.deepEqual(workspaceFoldersKeys.discover(ACME, "/w"), [
+    "workspaces",
+    "discover",
+    ACME,
+    "/w",
+  ]);
   assert.deepEqual(workspaceFoldersKeys.browse("/w"), [
     "workspaces",
     "browse",
@@ -67,8 +85,8 @@ test("workspaceFoldersKeys has the documented shape", () => {
 });
 
 test("workspaceFoldersQueryOptions requests the folder registry", async () => {
-  const options = workspaceFoldersQueryOptions();
-  assert.deepEqual(options.queryKey, ["workspaces", "folders"]);
+  const options = workspaceFoldersQueryOptions(LOCAL);
+  assert.deepEqual(options.queryKey, ["workspaces", "folders", LOCAL]);
   reply(200, { folders: ["/w"], lastUsed: null });
   assert.deepEqual(await newClient().fetchQuery(options), {
     folders: ["/w"],
@@ -90,7 +108,7 @@ test("browseDirectoryQueryOptions requests the listing with and without a path",
 test("getWorkspaceFolders throws on a failure status", async () => {
   reply(502, {}, "Bad Gateway");
   await assert.rejects(
-    getWorkspaceFolders(),
+    getWorkspaceFolders(LOCAL),
     new Error("getWorkspaceFolders failed: 502 Bad Gateway"),
   );
 });
@@ -105,7 +123,7 @@ test("browseDirectory throws on a failure status", async () => {
 
 test("addWorkspaceFolder resolves the discovered repos on a 200", async () => {
   reply(200, { repos: [{ path: "/w/a" }] }, "OK");
-  assert.deepEqual(await addWorkspaceFolder("/w"), {
+  assert.deepEqual(await addWorkspaceFolder(LOCAL, "/w"), {
     ok: true,
     repos: [{ path: "/w/a" }],
   });
@@ -116,7 +134,7 @@ test("addWorkspaceFolder resolves the discovered repos on a 200", async () => {
 
 test("addWorkspaceFolder carries the validation error on a 400", async () => {
   reply(400, { error: "not a directory" }, "Bad Request");
-  assert.deepEqual(await addWorkspaceFolder("/w"), {
+  assert.deepEqual(await addWorkspaceFolder(LOCAL, "/w"), {
     ok: false,
     error: "not a directory",
   });
@@ -124,7 +142,7 @@ test("addWorkspaceFolder carries the validation error on a 400", async () => {
 
 test("addWorkspaceFolder falls back to the add-folder copy on a 400 with no error", async () => {
   reply(400, {}, "Bad Request");
-  assert.deepEqual(await addWorkspaceFolder("/w"), {
+  assert.deepEqual(await addWorkspaceFolder(LOCAL, "/w"), {
     ok: false,
     error: "Couldn't add folder.",
   });
@@ -133,14 +151,14 @@ test("addWorkspaceFolder falls back to the add-folder copy on a 400 with no erro
 test("addWorkspaceFolder throws on any other failure status", async () => {
   reply(500, {}, "Internal Server Error");
   await assert.rejects(
-    addWorkspaceFolder("/w"),
+    addWorkspaceFolder(LOCAL, "/w"),
     new Error("addWorkspaceFolder failed: 500 Internal Server Error"),
   );
 });
 
 test("removeWorkspaceFolder sends DELETE with the path and resolves on a 200", async () => {
   reply(200, {}, "OK");
-  await removeWorkspaceFolder("/w");
+  await removeWorkspaceFolder(LOCAL, "/w");
   assert.equal(calls[0]?.url, "/api/workspace-folders");
   assert.equal(calls[0]?.init?.method, "DELETE");
   assert.equal(calls[0]?.init?.body, JSON.stringify({ path: "/w" }));
@@ -149,14 +167,14 @@ test("removeWorkspaceFolder sends DELETE with the path and resolves on a 200", a
 test("removeWorkspaceFolder throws on a failure status", async () => {
   reply(502, {}, "Bad Gateway");
   await assert.rejects(
-    removeWorkspaceFolder("/w"),
+    removeWorkspaceFolder(LOCAL, "/w"),
     new Error("removeWorkspaceFolder failed: 502 Bad Gateway"),
   );
 });
 
 function seededFolders(): QueryClient {
   const client = newClient();
-  client.setQueryData(workspaceFoldersKeys.folders, {
+  client.setQueryData(workspaceFoldersKeys.folders(LOCAL), {
     folders: ["/w"],
     lastUsed: null,
   });
@@ -168,9 +186,9 @@ test("an accepted add appends the typed path to the cached folders", async () =>
   reply(200, { repos: [] });
   await new MutationObserver(
     client,
-    addWorkspaceFolderMutationOptions(client),
+    addWorkspaceFolderMutationOptions(client, LOCAL),
   ).mutate("/v");
-  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders), {
+  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders(LOCAL)), {
     folders: ["/w", "/v"],
     lastUsed: null,
   });
@@ -181,9 +199,9 @@ test("an add of a folder already cached keeps the list as it is", async () => {
   reply(200, { repos: [] });
   await new MutationObserver(
     client,
-    addWorkspaceFolderMutationOptions(client),
+    addWorkspaceFolderMutationOptions(client, LOCAL),
   ).mutate("/w");
-  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders), {
+  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders(LOCAL)), {
     folders: ["/w"],
     lastUsed: null,
   });
@@ -194,10 +212,10 @@ test("a refused add resolves the message and leaves the cache alone", async () =
   reply(400, { error: "not a directory" }, "Bad Request");
   const result = await new MutationObserver(
     client,
-    addWorkspaceFolderMutationOptions(client),
+    addWorkspaceFolderMutationOptions(client, LOCAL),
   ).mutate("/v");
   assert.deepEqual(result, { ok: false, error: "not a directory" });
-  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders), {
+  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders(LOCAL)), {
     folders: ["/w"],
     lastUsed: null,
   });
@@ -209,11 +227,11 @@ test("a failed add rejects and leaves the cache alone", async () => {
   await assert.rejects(
     new MutationObserver(
       client,
-      addWorkspaceFolderMutationOptions(client),
+      addWorkspaceFolderMutationOptions(client, LOCAL),
     ).mutate("/v"),
     new Error("addWorkspaceFolder failed: 500 Internal Server Error"),
   );
-  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders), {
+  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders(LOCAL)), {
     folders: ["/w"],
     lastUsed: null,
   });
@@ -224,9 +242,9 @@ test("a remove drops the folder from the cache and sends DELETE", async () => {
   reply(200, {});
   await new MutationObserver(
     client,
-    removeWorkspaceFolderMutationOptions(client),
+    removeWorkspaceFolderMutationOptions(client, LOCAL),
   ).mutate("/w");
-  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders), {
+  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders(LOCAL)), {
     folders: [],
     lastUsed: null,
   });
@@ -239,11 +257,11 @@ test("a failed remove rejects and keeps the folder out of the cache", async () =
   await assert.rejects(
     new MutationObserver(
       client,
-      removeWorkspaceFolderMutationOptions(client),
+      removeWorkspaceFolderMutationOptions(client, LOCAL),
     ).mutate("/w"),
     new Error("removeWorkspaceFolder failed: 502 Bad Gateway"),
   );
-  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders), {
+  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders(LOCAL)), {
     folders: [],
     lastUsed: null,
   });
@@ -281,19 +299,64 @@ void test("closing with no target leaves it unset", () => {
   assert.equal(browseTargetOnOpenChange(false, undefined), undefined);
 });
 
+test("the folder requests for ACME carry the board and LOCAL keeps today's URLs", async () => {
+  reply(200, { folders: [], lastUsed: null, repos: [] });
+  await getWorkspaceFolders(ACME);
+  await addWorkspaceFolder(ACME, "/w");
+  await removeWorkspaceFolder(ACME, "/w");
+  await discoverWorkspaceFolder(ACME, "/w");
+  await discoverWorkspaceFolder(LOCAL, "/w");
+  assert.deepEqual(
+    calls.map((c) => c.url),
+    [
+      "/api/workspace-folders?board=ACME",
+      "/api/workspace-folders?board=ACME",
+      "/api/workspace-folders?board=ACME",
+      "/api/workspace-folders/discover?path=%2Fw&board=ACME",
+      "/api/workspace-folders/discover?path=%2Fw",
+    ],
+  );
+});
+
+test("an add for ACME writes the ACME registry and not the LOCAL one", async () => {
+  const client = newClient();
+  client.setQueryData(workspaceFoldersKeys.folders(ACME), {
+    folders: [],
+    lastUsed: null,
+  });
+  client.setQueryData(workspaceFoldersKeys.folders(LOCAL), {
+    folders: [],
+    lastUsed: null,
+  });
+  reply(200, { repos: [] });
+  await new MutationObserver(
+    client,
+    addWorkspaceFolderMutationOptions(client, ACME),
+  ).mutate("/v");
+  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders(ACME)), {
+    folders: ["/v"],
+    lastUsed: null,
+  });
+  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders(LOCAL)), {
+    folders: [],
+    lastUsed: null,
+  });
+});
+
 const discovered = [{ path: "/w/a b/api", name: "api", base: "main" }];
 
 test("the discover query keys on the folder path", () => {
-  assert.deepEqual(discoverWorkspaceFolderQueryOptions("/w").queryKey, [
+  assert.deepEqual(discoverWorkspaceFolderQueryOptions(LOCAL, "/w").queryKey, [
     "workspaces",
     "discover",
+    LOCAL,
     "/w",
   ]);
 });
 
 test("discoverWorkspaceFolder encodes the path in the query string", async () => {
   reply(200, { repos: discovered });
-  assert.deepEqual(await discoverWorkspaceFolder("/w/a b&c"), {
+  assert.deepEqual(await discoverWorkspaceFolder(LOCAL, "/w/a b&c"), {
     repos: discovered,
   });
   assert.equal(
@@ -305,7 +368,7 @@ test("discoverWorkspaceFolder encodes the path in the query string", async () =>
 test("discoverWorkspaceFolder throws on a non-2xx status", async () => {
   reply(500, { error: "down" }, "Internal Server Error");
   await assert.rejects(
-    discoverWorkspaceFolder("/w"),
+    discoverWorkspaceFolder(LOCAL, "/w"),
     new Error("discoverWorkspaceFolder failed: 500 Internal Server Error"),
   );
 });
@@ -313,19 +376,22 @@ test("discoverWorkspaceFolder throws on a non-2xx status", async () => {
 test("an accepted add writes the discovered repos and the folder to the cache", async () => {
   reply(200, { repos: discovered });
   const client = newClient();
-  client.setQueryData(workspaceFoldersKeys.folders, {
+  client.setQueryData(workspaceFoldersKeys.folders(LOCAL), {
     folders: ["/w"],
     lastUsed: "/w",
   });
   const result = await new MutationObserver(
     client,
-    addWorkspaceFolderMutationOptions(client),
+    addWorkspaceFolderMutationOptions(client, LOCAL),
   ).mutate("/x");
   assert.deepEqual(result, { ok: true, repos: discovered });
-  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.discover("/x")), {
-    repos: discovered,
-  });
-  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders), {
+  assert.deepEqual(
+    client.getQueryData(workspaceFoldersKeys.discover(LOCAL, "/x")),
+    {
+      repos: discovered,
+    },
+  );
+  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders(LOCAL)), {
     folders: ["/w", "/x"],
     lastUsed: "/w",
   });
@@ -336,11 +402,11 @@ test("a refused add leaves the discovered repos cache alone", async () => {
   const client = newClient();
   const result = await new MutationObserver(
     client,
-    addWorkspaceFolderMutationOptions(client),
+    addWorkspaceFolderMutationOptions(client, LOCAL),
   ).mutate("/x");
   assert.deepEqual(result, { ok: false, error: "not a directory" });
   assert.equal(
-    client.getQueryData(workspaceFoldersKeys.discover("/x")),
+    client.getQueryData(workspaceFoldersKeys.discover(LOCAL, "/x")),
     undefined,
   );
 });

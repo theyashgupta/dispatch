@@ -12,8 +12,8 @@ import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useItems } from "@/components/ui/hooks/use-items";
 import { copyText } from "@/queries/action-services";
 import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
-import { moveCard } from "@/queries/cards-api";
-import { promoteItem, setItemState } from "@/queries/item-actions-api";
+import { actionApi } from "@/queries/action-services";
+import { setItemState } from "@/queries/item-actions-api";
 import { SlackList } from "@/modules/slack/components/SlackList";
 import { SlackDetailContainer } from "./SlackDetailContainer";
 import {
@@ -37,7 +37,11 @@ interface SlackPageProps {
 export function SlackContainer({ selectedId }: { selectedId: string | null }) {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
-  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const boardKey = useAppStore(appStore, (s) => s.board);
+  const board = useBoardSnapshot(
+    boardKey,
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
   const errorsInFeeds = useAppStore(appStore, (s) => s.errorsInFeeds);
   const items = useItems(board);
   const enabledSources = board?.enabledSources;
@@ -68,8 +72,7 @@ export function SlackContainer({ selectedId }: { selectedId: string | null }) {
       onStartAgent={(target, prompt) =>
         startAgentFor(
           {
-            promoteItem,
-            moveCard,
+            ...actionApi(boardKey),
             openStart: appStore.openStart,
             notice: appStore.notice,
           },

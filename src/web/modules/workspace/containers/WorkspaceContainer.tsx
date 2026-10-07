@@ -40,7 +40,10 @@ function readStoredChoice<T extends string>(choice: StoredChoice<T>): T {
 
 export function WorkspaceContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
-  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const board = useBoardSnapshot(
+    useAppStore(appStore, (s) => s.board),
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
   const selectedId = useAppStore(appStore, (s) => s.selectedCardId);
   const pinned = useAppStore(appStore, (s) => s.pinned);
   if (board == null) return null;

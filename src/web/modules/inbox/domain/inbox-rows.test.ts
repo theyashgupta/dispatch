@@ -1,6 +1,8 @@
+import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Card, Item } from "../../../../shared/types.js";
+import { isInboxWaiting } from "../../../../shared/inbox-count.js";
+import type { BoardKey, Card, Item } from "../../../../shared/types.js";
 import {
   filterInboxRows,
   groupInboxRows,
@@ -35,6 +37,7 @@ function item(id: string, extra: Partial<Item> = {}): Item {
 function card(id: string, extra: Partial<Card> = {}): Card {
   return {
     id,
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: id,
     identifier: id,
     title: `Card ${id}`,
@@ -45,6 +48,24 @@ function card(id: string, extra: Partial<Card> = {}): Card {
     ...extra,
   };
 }
+
+test("global items and the Inbox cards of one board merge into one list", () => {
+  const acme = "ACME" as BoardKey;
+  const cards = [
+    card("ACME-1", { boardKey: acme, priority: 2 }),
+    card("ACME-2", { boardKey: acme, priority: 3 }),
+    card("ACME-3", { boardKey: acme, column: "todo" }),
+  ];
+  const rows = mergeInboxRows(
+    [item("a", { priority: 90 }), item("b", { priority: 10 })],
+    cards.filter(isInboxWaiting),
+    {},
+  );
+  assert.deepEqual(
+    rows.map((r) => r.id),
+    ["fake:a", "ACME-1", "ACME-2", "fake:b"],
+  );
+});
 
 test("an item at 80 sorts above a priority-2 card and below a priority-1 card", () => {
   const rows = mergeInboxRows(

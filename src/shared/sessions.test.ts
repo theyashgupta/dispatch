@@ -1,3 +1,4 @@
+import { DEFAULT_BOARD_KEY } from "./board-key.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Card, SessionSummary } from "./types.js";
@@ -29,6 +30,7 @@ function summary(
 function card(id: string, extra: Partial<Card> = {}): Card {
   return {
     id,
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: id,
     identifier: id,
     title: `Card ${id}`,

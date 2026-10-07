@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouteContext } from "@tanstack/react-router";
 import { pinFromBoard } from "../../../../shared/pinned-card.js";
 import type {
+  BoardKey,
   BoardSnapshot,
   WorktreeRow as WorktreeRowModel,
 } from "../../../../shared/types.js";
@@ -30,6 +31,7 @@ import {
 } from "@/modules/workspaces/queries/workspaces-queries";
 
 interface WorkspacesContainerProps {
+  boardKey: BoardKey;
   board: BoardSnapshot;
   onSummaryChange: (summary: WorkspacesSummary | undefined) => void;
   onOpenCard: (row: WorktreeRowModel) => void;
@@ -38,7 +40,11 @@ interface WorkspacesContainerProps {
 
 export function WorkspacesContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
-  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const boardKey = useAppStore(appStore, (s) => s.board);
+  const board = useBoardSnapshot(
+    boardKey,
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
   const [, setSummary] = useWorkspacesSummary();
   if (board == null) return null;
 
@@ -60,6 +66,8 @@ export function WorkspacesContainer() {
   };
   return (
     <WorkspacesPage
+      key={boardKey}
+      boardKey={boardKey}
       board={board}
       onSummaryChange={setSummary}
       onOpenCard={openCard}
@@ -88,13 +96,16 @@ export function WorkspacesHeaderContainer() {
 }
 
 function WorkspacesPage({
+  boardKey,
   board,
   onSummaryChange,
   onOpenCard,
   onCleanupRequest,
 }: WorkspacesContainerProps) {
-  const { inventory, loading, error, refresh, reload } =
-    useWorkspaceInventory(board);
+  const { inventory, loading, error, refresh, reload } = useWorkspaceInventory(
+    boardKey,
+    board,
+  );
   const openEditor = useOpenWorkspaceEditorMutation();
   const narrow = useIsMobile();
   const [sortKey, setSortKey] = useState<WorktreeSortKey>("due");
@@ -159,6 +170,7 @@ function WorkspacesPage({
       </WorkspaceSection>
       <WorkspaceSection title="Folders" count={inventory?.folders.length ?? 0}>
         <WorkspaceFoldersContainer
+          board={boardKey}
           folders={inventory?.folders ?? []}
           onChanged={reload}
           onActionError={setActionError}

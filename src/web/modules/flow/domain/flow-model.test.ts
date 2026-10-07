@@ -1,3 +1,4 @@
+import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOKEN_CAP } from "../../../../shared/flow-geometry.js";
@@ -44,6 +45,7 @@ function card(
 ): Card {
   return {
     id,
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: id,
     identifier: id,
     title: id,

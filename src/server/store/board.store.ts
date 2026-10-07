@@ -1216,7 +1216,7 @@ class BoardStore extends EventEmitter {
    * `hookToken` (the restart-time registry rebuild reads it back from disk). Persist-only:
    * every payload that leaves the process goes through snapshot(), which redacts.
    */
-  private persistSnapshot(): BoardSnapshot {
+  private persistSnapshot(): Omit<BoardSnapshot, "boardKey"> {
     const all = [...this.cards.values()];
     const todo = all.filter((c) => c.column === "todo").sort(compareTodoOrder);
     const rest = all.filter((c) => c.column !== "todo");
@@ -4885,11 +4885,11 @@ class BoardStore extends EventEmitter {
       const now = new Date().toISOString();
       const card = buildPromotedCard(
         current,
+        board,
         this.nextIdentifier(board),
         now,
         context,
       );
-      card.boardKey = board;
       this.cards.set(card.id, card);
       this.stageItem({ ...withState(current, "done"), cardId: card.id });
       result = { card, created: true };
@@ -4964,6 +4964,7 @@ class BoardStore extends EventEmitter {
         opts.tracked,
         Date.now(),
         this.pushesInFlight,
+        (identifier) => this.boardForNewCard(src, identifier),
       );
       const applied: string[] = [];
       const syncedIn: string[] = [];

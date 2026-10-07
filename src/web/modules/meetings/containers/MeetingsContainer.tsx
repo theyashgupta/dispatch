@@ -35,7 +35,10 @@ export function MeetingsContainer({
 }) {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
-  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const board = useBoardSnapshot(
+    useAppStore(appStore, (s) => s.board),
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
   const items = useItems(board);
   const meetingItems = useMemo(
     () => items.filter((item) => item.source === "meeting"),

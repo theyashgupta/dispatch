@@ -7,7 +7,10 @@ import { resetCard as resetCardApi } from "@/queries/cards-api";
 
 export function ResetContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
-  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const board = useBoardSnapshot(
+    useAppStore(appStore, (s) => s.board),
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
   const resetCardId = useAppStore(appStore, (s) => s.resetCardId);
   const pinned = useAppStore(appStore, (s) => s.pinned);
   const resetCard =

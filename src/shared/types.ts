@@ -201,7 +201,7 @@ export interface Item {
 export interface Card {
   /** Internal card id (can equal issueId in Phase 1). */
   id: string;
-  boardKey?: BoardKey;
+  boardKey: BoardKey;
   /** Linear issue id — the upsert key for the poller. */
   issueId: string;
   /** Human-readable Linear identifier, e.g. "PROP-123". */
@@ -819,7 +819,7 @@ export interface SessionFields {
  */
 export interface BoardSnapshot {
   cards: Card[];
-  boardKey?: BoardKey;
+  boardKey: BoardKey;
   syncedAt: string | null;
   /** Non-fatal sync problem from the last poll cycle (e.g. truncated pull); null when healthy. */
   syncWarning?: string | null;
@@ -1748,6 +1748,23 @@ export type NewBoard = Pick<
 export type BoardPatch = Partial<
   Pick<Board, "name" | "workspaceRoot" | "repositories" | "linearTeamKeys">
 >;
+
+export interface BoardList {
+  boards: Board[];
+  knownLinearTeamKeys: string[];
+}
+
+export interface BoardCount {
+  key: BoardKey;
+  running: number;
+  openGroups: number;
+  attention: number;
+}
+
+export interface BoardCounts {
+  counts: BoardCount[];
+  at: string;
+}
 
 export type CreateBoardResult =
   | { ok: true; board: Board }

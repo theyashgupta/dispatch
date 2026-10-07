@@ -9,13 +9,19 @@ import {
   type ComponentType,
   type ReactNode,
 } from "react";
-import { useQuery } from "@tanstack/react-query";
 import {
   useLocation,
   useRouteContext,
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
+import { toast } from "sonner";
+import {
+  boardSearch,
+  shouldPollCounts,
+  staleCountsLabel,
+} from "../../../../shared/board-select.js";
+import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import { inboxFeed, isListedError } from "../../../../shared/feed-items.js";
 import { nowMs } from "../../../../shared/format-age.js";
 import { inboxWaitingCount } from "../../../../shared/inbox-count.js";
@@ -35,14 +41,17 @@ import {
 import { flattenSessions } from "../../../../shared/sessions.js";
 import {
   BOARD_SHORTCUTS,
-  GLOBAL_SHORTCUTS,
   INBOX_SHORTCUTS,
   SESSIONS_SHORTCUTS,
   bindShortcuts,
 } from "../../../../shared/shortcuts.js";
 import { slackRows } from "../../../../shared/slack-rows.js";
 import { startTarget } from "../../../../shared/start-request.js";
-import type { ActivityEvent, BoardSnapshot } from "../../../../shared/types.js";
+import type {
+  ActivityEvent,
+  BoardKey,
+  BoardSnapshot,
+} from "../../../../shared/types.js";
 import { isUnseen } from "../../../../shared/unseen-activity.js";
 import { BootScreen } from "@/components/BootScreen";
 import { PageErrorBoundary } from "@/components/PageErrorBoundary";
@@ -61,8 +70,15 @@ import { useShortcuts } from "@/components/ui/hooks/use-shortcuts";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { ActivityDrawer } from "@/modules/shell/components/ActivityDrawer";
+import type { BoardSwitcherData } from "@/modules/shell/components/BoardSwitcher";
 import { CheatSheet } from "@/modules/shell/components/CheatSheet";
 import { ShellFrame } from "@/modules/shell/components/ShellFrame";
+import {
+  showSwitcher,
+  switcherItems,
+  switcherShortcuts,
+} from "@/modules/shell/domain/board-switcher";
+import { boardPageTitle } from "@/modules/shell/domain/board-title";
 import { buildCommands } from "@/modules/shell/domain/commands";
 import { NAV_ITEMS, visibleNavItems } from "../../../../shared/nav-items.js";
 import { sidebarOpen } from "@/modules/shell/domain/nav-open";
@@ -72,8 +88,12 @@ import { useUndoToast } from "@/modules/shell/hooks/use-undo-toast";
 import { useViewportNav } from "@/modules/shell/hooks/use-viewport-nav";
 import { CommandPaletteContainer } from "@/modules/shell/containers/CommandPaletteContainer";
 import { UpdateBannerContainer } from "@/modules/shell/containers/UpdateBannerContainer";
-import { ACTION_API } from "@/queries/action-services";
-import { activityFeedQueryOptions } from "@/queries/activity-queries";
+import {
+  useBoardCountsQuery,
+  useBoardListQuery,
+} from "@/queries/board-list-queries";
+import { actionApi } from "@/queries/action-services";
+import { useActivityFeedQuery } from "@/queries/activity-queries";
 import {
   latestBoard,
   useBoardLiveUpdates,
@@ -91,8 +111,7 @@ export interface ShellContainerProps {
   children?: ReactNode;
 }
 
-const SHORTCUT_GROUPS = [
-  { title: "Global", rows: GLOBAL_SHORTCUTS },
+const SHORTCUT_GROUPS_AFTER_GLOBAL = [
   { title: "Board", rows: BOARD_SHORTCUTS },
   { title: "Inbox", rows: INBOX_SHORTCUTS },
   { title: "Sessions", rows: SESSIONS_SHORTCUTS },
@@ -106,6 +125,7 @@ const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
   "archive",
   "ask",
   "flow",
+  "boards",
 ]);
 
 const PAGE_TITLES: Record<Page, string> = {
@@ -129,6 +149,7 @@ const PAGE_TITLES: Record<Page, string> = {
   workspaces: "Workspaces",
   ask: "Ask",
   flow: "Flow",
+  boards: "Boards",
 };
 
 const NO_EVENTS: ActivityEvent[] = [];
@@ -153,6 +174,7 @@ export function ShellContainer({
   const { theme } = useThemeState();
   const { preference, setPreference } = useNavPreference();
   const { carousel } = useViewportNav();
+  const boardKey = useAppStore(appStore, (s) => s.board);
   const doneLimit = useAppStore(appStore, (s) => s.doneLimit);
   const soundEnabled = useAppStore(appStore, (s) => s.soundEnabled);
   const errorsInFeeds = useAppStore(appStore, (s) => s.errorsInFeeds);
@@ -160,7 +182,21 @@ export function ShellContainer({
   const setupWizardOpen = useAppStore(appStore, (s) => s.setupWizard != null);
   const selectedCardId = useAppStore(appStore, (s) => s.selectedCardId);
   const pinned = useAppStore(appStore, (s) => s.pinned);
-  const { data: events = NO_EVENTS } = useQuery(activityFeedQueryOptions());
+  const { data: events = NO_EVENTS } = useActivityFeedQuery(boardKey);
+  const list = useBoardListQuery();
+  const boardList = list.data;
+  const listFailed =
+    list.isError || (boardList === undefined && list.errorUpdateCount > 0);
+  const showBoards = showSwitcher(boardList?.boards, listFailed, boardKey);
+  const counts = useBoardCountsQuery(
+    shouldPollCounts(boardList?.boards ?? [], route.page === "boards"),
+  );
+  const boardItems =
+    showBoards && boardList !== undefined
+      ? switcherItems(boardList.boards, counts.data?.counts, boardKey)
+      : null;
+  const boardName = boardItems?.find((item) => item.selected)?.name ?? null;
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -175,19 +211,84 @@ export function ShellContainer({
     [router],
   );
 
-  const { connection } = useBoardLiveUpdates(doneLimit, {
+  const switchBoard = useCallback(
+    (key: BoardKey) => {
+      void router.navigate({
+        to: ".",
+        search: (prev) => ({ ...prev, ...boardSearch(key) }),
+      });
+    },
+    [router],
+  );
+
+  const newBoard = useCallback(() => {
+    void router.navigate({
+      to: "/boards/{-$id}",
+      search: { ...boardSearch(boardKey), dialog: "new" as const },
+    });
+  }, [router, boardKey]);
+
+  const [liveBoard, setLiveBoard] = useState<BoardSnapshot | null>(null);
+  const { connection } = useBoardLiveUpdates(boardKey, doneLimit, {
     onTunnelState: appStore.setTunnelState,
-    onBoardUpdate: (snapshot) => appStore.boardUpdated(snapshot.cards),
+    onBoardUpdate: (snapshot, fresh) => {
+      appStore.boardUpdated(snapshot.cards);
+      if (fresh) setLiveBoard(snapshot);
+    },
   });
-  const boardQuery = useBoardSnapshotQuery(doneLimit);
+  const boardQuery = useBoardSnapshotQuery(boardKey, doneLimit);
   const [lastBoard, setLastBoard] = useState<BoardSnapshot | null>(null);
-  const board = latestBoard(boardQuery.data, lastBoard);
-  if (board !== lastBoard) setLastBoard(board);
+  const current = latestBoard(boardQuery.data, lastBoard, boardKey);
+  if (current !== null && current !== lastBoard) setLastBoard(current);
+  const board = current ?? lastBoard;
+
+  const { refetch: refetchBoard } = boardQuery;
+  const boardLoadError =
+    boardQuery.data === undefined && boardQuery.fetchStatus === "idle"
+      ? boardQuery.error
+      : null;
+  const neverLoaded = board === null;
+  const hasBoardData = boardQuery.data !== undefined;
+  const toastedBoard = useRef<BoardKey | null>(null);
+  useEffect(() => {
+    if (hasBoardData) toastedBoard.current = null;
+  }, [hasBoardData]);
+  useEffect(() => {
+    if (boardLoadError === null || toastedBoard.current === boardKey) return;
+    toastedBoard.current = boardKey;
+    if (neverLoaded && boardKey !== DEFAULT_BOARD_KEY) {
+      const failed = boardKey;
+      toast(`Board ${failed} could not be loaded.`, {
+        action: { label: "Try again", onClick: () => switchBoard(failed) },
+      });
+      void router.navigate({
+        to: ".",
+        search: (prev) => ({ ...prev, ...boardSearch(DEFAULT_BOARD_KEY) }),
+        replace: true,
+      });
+      return;
+    }
+    toast(`Board ${boardKey} could not be loaded.`, {
+      action: { label: "Try again", onClick: () => void refetchBoard() },
+    });
+  }, [
+    boardLoadError,
+    boardKey,
+    refetchBoard,
+    neverLoaded,
+    router,
+    switchBoard,
+  ]);
 
   const selectCard = (id: string | null) =>
     appStore.selectCard(id, pinFromBoard(id, board?.cards ?? []));
 
-  useTransitionNotifications(board, connection, selectCard, soundEnabled);
+  useTransitionNotifications(
+    liveBoard,
+    connection,
+    appStore.openPushCard,
+    soundEnabled,
+  );
   useUndoToast(appStore);
 
   useEffect(() => {
@@ -236,13 +337,19 @@ export function ShellContainer({
   );
 
   useShortcuts(
-    bindShortcuts(GLOBAL_SHORTCUTS, {
+    bindShortcuts(switcherShortcuts(showBoards), {
       "meta+k": () => openOverlay(appStore, () => setPaletteOpen(true)),
       n: () => openOverlay(appStore, appStore.openCreateTicket),
       "?": () => openOverlay(appStore, () => setShortcutsOpen(true)),
+      b: () => setSwitcherOpen(true),
     }),
     {
-      menuOpen: activityOpen || sheetOpen || board === null || setupWizardOpen,
+      menuOpen:
+        activityOpen ||
+        sheetOpen ||
+        switcherOpen ||
+        board === null ||
+        setupWizardOpen,
       scopeId: "root",
     },
   );
@@ -297,14 +404,30 @@ export function ShellContainer({
       meetingNotes: () => openOverlay(appStore, appStore.openMeetingNotes),
       syncNow: () =>
         void syncSources(
-          ACTION_API,
+          actionApi(boardKey),
           board.enabledSources ?? [],
           appStore.notice,
         ),
+      switchBoard,
+      newBoard,
     },
     navItems,
     selectedCardOf(board.cards, selectedCardId, pinned),
+    boardItems,
   );
+  const switcher: BoardSwitcherData | undefined = showBoards
+    ? {
+        selected: boardKey,
+        items: boardItems ?? [],
+        failed: boardList === undefined,
+        staleLabel: staleCountsLabel(counts),
+        open: switcherOpen,
+        onOpenChange: setSwitcherOpen,
+        onSelect: switchBoard,
+        onManage: () => navigate("boards"),
+        onRetry: () => void list.refetch(),
+      }
+    : undefined;
 
   return (
     <SidebarProvider
@@ -346,7 +469,12 @@ export function ShellContainer({
         activityUnseen={isUnseen(events[0]?.ts, lastOpened["__feed__"])}
         activityOpen={activityOpen}
         carousel={carousel}
-        pageTitle={PAGE_TITLES[route.page]}
+        switcher={switcher}
+        pageTitle={boardPageTitle(
+          route.page,
+          PAGE_TITLES[route.page],
+          boardName,
+        )}
         pageCount={pageCounts[route.page]}
         headerView={
           HeaderView ? (
@@ -373,7 +501,10 @@ export function ShellContainer({
         {children}
         {shortcutsOpen && (
           <CheatSheet
-            groups={SHORTCUT_GROUPS}
+            groups={[
+              { title: "Global", rows: switcherShortcuts(showBoards) },
+              ...SHORTCUT_GROUPS_AFTER_GLOBAL,
+            ]}
             onClose={() =>
               closeOverlay(appStore, () => setShortcutsOpen(false))
             }

@@ -12,8 +12,8 @@ const routes = [
   ),
 ];
 
-test("the route tree lists 20 page routes", () => {
-  expect(routes).toHaveLength(20);
+test("the route tree lists 21 page routes", () => {
+  expect(routes).toHaveLength(21);
 });
 
 for (const theme of ["dark", "light"] as const) {

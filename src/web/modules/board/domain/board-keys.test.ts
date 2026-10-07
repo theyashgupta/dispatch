@@ -1,3 +1,4 @@
+import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Card } from "../../../../shared/types.js";
@@ -31,6 +32,7 @@ test("h and l skip empty columns, clamp the row index and stay put at the board 
 test("board lanes follow the column order, drop grouped cards and list Done cards awaiting cleanup first", () => {
   const card = (id: string, extra: Partial<Card>): Card => ({
     id,
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: id,
     identifier: id,
     title: id,

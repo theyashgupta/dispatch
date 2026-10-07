@@ -1,12 +1,14 @@
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Card } from "../../shared/types.js";
+import type { BoardKey, Card } from "../../shared/types.js";
 import { issue } from "../test-support/fake-source.js";
 import { reconcile } from "./mapping.js";
 
 function card(id: string, extra: Partial<Card> = {}): Card {
   return {
     id,
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: id,
     identifier: id.toUpperCase(),
     title: `Issue ${id}`,
@@ -30,6 +32,27 @@ test("a new issue becomes an Inbox card stamped with the source id", () => {
   assert.equal(r.upserts[0]?.source, "linear");
   assert.equal(r.upserts[0]?.goneFromLinear, false);
   assert.deepEqual([r.removeIds, r.goneIds, r.reappearedIds], [[], [], []]);
+});
+
+test("a new issue takes the board that boardForNewCard picks for its identifier", () => {
+  const acme = "ACME" as BoardKey;
+  const picked: string[] = [];
+  const r = reconcile(
+    [issue("a")],
+    current(),
+    new Set(),
+    "linear",
+    undefined,
+    Date.now(),
+    new Set(),
+    (identifier) => {
+      picked.push(identifier);
+      return acme;
+    },
+  );
+  assert.equal(r.upserts[0]?.column, "inbox");
+  assert.equal(r.upserts[0]?.boardKey, acme);
+  assert.deepEqual(picked, [issue("a").identifier]);
 });
 
 test("existing todo and inbox cards refresh in place and clear the gone flag", () => {

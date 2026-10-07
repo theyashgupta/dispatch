@@ -1,10 +1,12 @@
 import { useEffect, useRef } from "react";
+import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import type {
   BoardSnapshot,
   Column,
   ConnectionStatus,
 } from "../../../../shared/types.js";
 import { playChime } from "@/components/ui/hooks/chime";
+import { needsSeed } from "@/modules/shell/domain/transition-seed";
 
 const LABEL: Partial<Record<Column, string>> = {
   needs_input: "Needs Input",
@@ -23,8 +25,8 @@ function isAttentionColumn(col: Column): col is "needs_input" | "agent_done" {
 /**
  * Fire one desktop notification per card that moves into an attention column, and at most one chime per batch.
  *
- * @remarks ATTN-01: the first snapshot after every connect only seeds the previous columns, so a
- * reconnect that re-sends the whole board never notifies. PUSH-05: the `tag: card.id` and the
+ * @remarks ATTN-01: the first snapshot after every connect or board change only seeds the previous
+ * columns, so a reconnect or a switch to another board never notifies. PUSH-05: the `tag: card.id` and the
  * hyphen title must match the service worker push, so a tab and a push coalesce into one
  * notification.
  * @see docs/ARCHITECTURE.md#attention-routing
@@ -36,7 +38,7 @@ export function useTransitionNotifications(
   soundEnabled: boolean,
 ): void {
   const prevCols = useRef(new Map<string, Column>());
-  const seeded = useRef(false);
+  const seededBoard = useRef<string | null>(null);
 
   useEffect(() => {
     if ("Notification" in window && Notification.permission === "default") {
@@ -45,7 +47,7 @@ export function useTransitionNotifications(
   }, []);
 
   useEffect(() => {
-    if (connection !== "connected") seeded.current = false;
+    if (connection !== "connected") seededBoard.current = null;
   }, [connection]);
 
   useEffect(() => {
@@ -54,9 +56,9 @@ export function useTransitionNotifications(
       board.cards.map((c) => [c.id, c.column]),
     );
 
-    if (!seeded.current) {
+    if (needsSeed(seededBoard.current, board)) {
       prevCols.current = next;
-      seeded.current = true;
+      seededBoard.current = board.boardKey ?? DEFAULT_BOARD_KEY;
       return;
     }
 

@@ -10,8 +10,8 @@ import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useItems } from "@/components/ui/hooks/use-items";
 import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
-import { moveCard } from "@/queries/cards-api";
-import { promoteItem, setItemState } from "@/queries/item-actions-api";
+import { actionApi } from "@/queries/action-services";
+import { setItemState } from "@/queries/item-actions-api";
 import { ErrorList } from "@/modules/errors/components/ErrorList";
 import { ErrorDetailContainer } from "./ErrorDetailContainer";
 import {
@@ -38,7 +38,11 @@ export function ErrorsContainer({
 }) {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
-  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const boardKey = useAppStore(appStore, (s) => s.board);
+  const board = useBoardSnapshot(
+    boardKey,
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
   const items = useItems(board);
   if (board == null) return null;
   return (
@@ -57,8 +61,7 @@ export function ErrorsContainer({
       onStartAgent={(row, prompt, context) =>
         void startAgentFor(
           {
-            promoteItem,
-            moveCard,
+            ...actionApi(boardKey),
             openStart: appStore.openStart,
             notice: appStore.notice,
           },

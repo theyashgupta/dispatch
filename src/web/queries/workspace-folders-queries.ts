@@ -6,6 +6,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
+import type { BoardKey } from "../../shared/types.js";
 import {
   addWorkspaceFolder,
   browseDirectory,
@@ -16,23 +17,27 @@ import {
 
 export const workspaceFoldersKeys = {
   all: ["workspaces"] as const,
-  folders: ["workspaces", "folders"] as const,
-  discover: (path: string) => ["workspaces", "discover", path] as const,
+  folders: (board: BoardKey) => ["workspaces", "folders", board] as const,
+  discover: (board: BoardKey, path: string) =>
+    ["workspaces", "discover", board, path] as const,
   browse: (path?: string) => ["workspaces", "browse", path ?? null] as const,
 };
 
-export function workspaceFoldersQueryOptions() {
+export function workspaceFoldersQueryOptions(board: BoardKey) {
   return queryOptions({
-    queryKey: workspaceFoldersKeys.folders,
-    queryFn: getWorkspaceFolders,
+    queryKey: workspaceFoldersKeys.folders(board),
+    queryFn: () => getWorkspaceFolders(board),
   });
 }
 
 /** Build the query options that read the repos of a registered folder. */
-export function discoverWorkspaceFolderQueryOptions(path: string) {
+export function discoverWorkspaceFolderQueryOptions(
+  board: BoardKey,
+  path: string,
+) {
   return queryOptions({
-    queryKey: workspaceFoldersKeys.discover(path),
-    queryFn: () => discoverWorkspaceFolder(path),
+    queryKey: workspaceFoldersKeys.discover(board, path),
+    queryFn: () => discoverWorkspaceFolder(board, path),
   });
 }
 
@@ -50,9 +55,9 @@ export function browseDirectoryQueryOptions(path?: string) {
  * Settings shows the registry as the server holds it each time it opens, so a cached read from an
  * earlier visit never stands in for it.
  */
-export function useWorkspaceFoldersQuery() {
+export function useWorkspaceFoldersQuery(board: BoardKey) {
   return useQuery({
-    ...workspaceFoldersQueryOptions(),
+    ...workspaceFoldersQueryOptions(board),
     refetchOnMount: "always",
   });
 }
@@ -63,9 +68,13 @@ export function useWorkspaceFoldersQuery() {
  * @remarks
  * Every pick is read fresh, because a repo can vanish from disk between two picks. The key is shared with the workspaces module's discovery, so both read one cache entry. `seeded` skips the read for a folder whose repos a just-finished add put in the cache, as legacy did.
  */
-export function useDiscoverFolderQuery(path: string | null, seeded = false) {
+export function useDiscoverFolderQuery(
+  board: BoardKey,
+  path: string | null,
+  seeded = false,
+) {
   return useQuery({
-    ...discoverWorkspaceFolderQueryOptions(path ?? ""),
+    ...discoverWorkspaceFolderQueryOptions(board, path ?? ""),
     enabled: path !== null && !seeded,
     staleTime: 0,
   });
@@ -135,19 +144,22 @@ export function useFolderBrowser() {
  * registry list did before, and caches the repos the add discovered. A refusal (400) resolves
  * `{ ok: false }` with the server's message.
  */
-export function addWorkspaceFolderMutationOptions(queryClient: QueryClient) {
+export function addWorkspaceFolderMutationOptions(
+  queryClient: QueryClient,
+  board: BoardKey,
+) {
   return {
-    mutationFn: (path: string) => addWorkspaceFolder(path),
+    mutationFn: (path: string) => addWorkspaceFolder(board, path),
     onSuccess: (
       result: Awaited<ReturnType<typeof addWorkspaceFolder>>,
       path: string,
     ) => {
       if (!result.ok) return;
-      queryClient.setQueryData(workspaceFoldersKeys.discover(path), {
+      queryClient.setQueryData(workspaceFoldersKeys.discover(board, path), {
         repos: result.repos,
       });
       queryClient.setQueryData(
-        workspaceFoldersKeys.folders,
+        workspaceFoldersKeys.folders(board),
         (old: Awaited<ReturnType<typeof getWorkspaceFolders>> | undefined) =>
           old && !old.folders.includes(path)
             ? { ...old, folders: [...old.folders, path] }
@@ -157,9 +169,9 @@ export function addWorkspaceFolderMutationOptions(queryClient: QueryClient) {
   };
 }
 
-export function useAddWorkspaceFolderMutation() {
+export function useAddWorkspaceFolderMutation(board: BoardKey) {
   const queryClient = useQueryClient();
-  return useMutation(addWorkspaceFolderMutationOptions(queryClient));
+  return useMutation(addWorkspaceFolderMutationOptions(queryClient, board));
 }
 
 /**
@@ -169,12 +181,15 @@ export function useAddWorkspaceFolderMutation() {
  * The folder leaves the cached registry before the request answers and stays out if the request
  * fails, as in the legacy picker.
  */
-export function removeWorkspaceFolderMutationOptions(queryClient: QueryClient) {
+export function removeWorkspaceFolderMutationOptions(
+  queryClient: QueryClient,
+  board: BoardKey,
+) {
   return {
-    mutationFn: (path: string) => removeWorkspaceFolder(path),
+    mutationFn: (path: string) => removeWorkspaceFolder(board, path),
     onMutate: (path: string) => {
       queryClient.setQueryData(
-        workspaceFoldersKeys.folders,
+        workspaceFoldersKeys.folders(board),
         (old: Awaited<ReturnType<typeof getWorkspaceFolders>> | undefined) =>
           old && { ...old, folders: old.folders.filter((f) => f !== path) },
       );
@@ -182,7 +197,7 @@ export function removeWorkspaceFolderMutationOptions(queryClient: QueryClient) {
   };
 }
 
-export function useRemoveWorkspaceFolderMutation() {
+export function useRemoveWorkspaceFolderMutation(board: BoardKey) {
   const queryClient = useQueryClient();
-  return useMutation(removeWorkspaceFolderMutationOptions(queryClient));
+  return useMutation(removeWorkspaceFolderMutationOptions(queryClient, board));
 }

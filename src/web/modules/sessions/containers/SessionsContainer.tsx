@@ -64,12 +64,17 @@ const ELAPSED_TICK_MS = 1000;
 export function SessionsContainer({ scopeId }: { scopeId: string }) {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
-  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const boardKey = useAppStore(appStore, (s) => s.board);
+  const board = useBoardSnapshot(
+    boardKey,
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
   const selectedId = useAppStore(appStore, (s) => s.selectedCardId);
   const pinned = useAppStore(appStore, (s) => s.pinned);
   const services = useMemo(
     () =>
       actionServices({
+        board: boardKey,
         showUndo: appStore.showUndo,
         notice: appStore.notice,
         openStart: appStore.openStart,
@@ -78,7 +83,7 @@ export function SessionsContainer({ scopeId }: { scopeId: string }) {
             href: routeHash({ page: "ask", id: question }).slice(1),
           }),
       }),
-    [appStore, router],
+    [appStore, router, boardKey],
   );
   if (board == null) return null;
   return (

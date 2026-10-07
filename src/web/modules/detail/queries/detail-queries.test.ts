@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { DEFAULT_BOARD_KEY as LOCAL } from "../../../../shared/board-key.js";
 import {
   assignCardToMe,
   ensureTerminal,
@@ -93,8 +94,8 @@ test("cardCommentsQueryOptions requests the comments route and resolves the list
 });
 
 test("cardEventsQueryOptions requests one card's events and refetches on every mount", async () => {
-  const options = cardEventsQueryOptions("c1");
-  assert.deepEqual(options.queryKey, ["detail", "card", "c1", "events"]);
+  const options = cardEventsQueryOptions(LOCAL, "c1");
+  assert.deepEqual(options.queryKey, ["detail", "card", "c1", "events", LOCAL]);
   assert.equal(options.staleTime, 0);
   reply(200, { events: [{ id: 3 }] });
   assert.deepEqual(await newClient().fetchQuery(options), [{ id: 3 }]);

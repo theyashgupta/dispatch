@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { attentionTitle, errorCopy, needsAttention } from "./card-attention.js";
+import { DEFAULT_BOARD_KEY } from "./board-key.js";
 import type { Card } from "./types.js";
 
 function card(extra: Partial<Card> = {}): Card {
   return {
     id: "c1",
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: "i1",
     identifier: "LOCAL-1",
     title: "A card",

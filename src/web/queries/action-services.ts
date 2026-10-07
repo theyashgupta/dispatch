@@ -3,6 +3,7 @@ import {
   type ActionApi,
   type ActionServices,
 } from "../../shared/item-actions.js";
+import type { BoardKey } from "../../shared/types.js";
 import type { StartRequest } from "../../shared/start-request.js";
 import { isWebUrl } from "../../shared/web-url.js";
 import {
@@ -15,17 +16,20 @@ import { promoteItem, setItemState, snoozeItem } from "./item-actions-api.js";
 import { getSlackThread } from "./slack-thread-api.js";
 import { pollSource } from "./source-poll-api.js";
 
-export const ACTION_API: ActionApi = {
-  promoteItem,
-  setItemState,
-  snoozeItem,
-  moveCard,
-  cleanupCard,
-  switchSession,
-  resumeCard,
-  pollSource,
-  getSlackThread,
-};
+/** Build the item action API with `promoteItem` bound to a board. */
+export function actionApi(board: BoardKey): ActionApi {
+  return {
+    promoteItem: (id, context) => promoteItem(board, id, context),
+    setItemState,
+    snoozeItem,
+    moveCard,
+    cleanupCard,
+    switchSession,
+    resumeCard,
+    pollSource,
+    getSlackThread,
+  };
+}
 
 /** Copy text to the clipboard, refusing where the page has no clipboard (plain http). */
 export function copyText(text: string): Promise<void> {
@@ -41,13 +45,15 @@ export function copyText(text: string): Promise<void> {
  * with the same calls and copy.
  */
 export function actionServices(deps: {
+  board: BoardKey;
   showUndo: (label: string, undo: () => Promise<void>) => void;
   notice: (text: string) => void;
   openStart: (request: StartRequest) => void;
   askAbout: (question: string) => void;
 }): ActionServices {
+  const api = actionApi(deps.board);
   return {
-    api: ACTION_API,
+    api,
     showUndo: deps.showUndo,
     notice: deps.notice,
     openUrl: (url) => {
@@ -56,7 +62,7 @@ export function actionServices(deps: {
     copyText,
     startAgent: (target, extraDirection) =>
       startAgentFor(
-        { ...ACTION_API, openStart: deps.openStart, notice: deps.notice },
+        { ...api, openStart: deps.openStart, notice: deps.notice },
         target,
         extraDirection,
       ),

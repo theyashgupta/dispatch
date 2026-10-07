@@ -49,7 +49,10 @@ function rideToken(row: FlowRow, id: string, speed: Speed): FlowToken {
 export function FlowContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
-  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const board = useBoardSnapshot(
+    useAppStore(appStore, (s) => s.board),
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
   if (board == null) return null;
   return (
     <FlowPage

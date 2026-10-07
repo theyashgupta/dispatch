@@ -1,3 +1,4 @@
+import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Card } from "../../../../shared/types.js";
@@ -10,6 +11,7 @@ import {
 function card(extra: Partial<Card> = {}): Card {
   return {
     id: "c1",
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: "c1",
     identifier: "LOCAL-18",
     title: "t",

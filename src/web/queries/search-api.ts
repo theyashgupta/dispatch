@@ -1,4 +1,6 @@
+import { withBoard } from "../../shared/board-select.js";
 import type { CardSearchResult } from "../../shared/search.js";
+import type { BoardKey } from "../../shared/types.js";
 import { http, httpError } from "@/lib/http";
 
 /**
@@ -9,11 +11,12 @@ import { http, httpError } from "@/lib/http";
  * rejects with `AbortError` for the caller's catch to ignore. Throws on any non-2xx.
  */
 export async function searchCards(
+  board: BoardKey,
   q: string,
   signal?: AbortSignal,
 ): Promise<{ results: CardSearchResult[]; total: number }> {
   const result = await http<{ results: CardSearchResult[]; total: number }>(
-    `/api/search?q=${encodeURIComponent(q)}`,
+    withBoard(`/api/search?q=${encodeURIComponent(q)}`, board),
     { signal },
   );
   if (!result.ok) {
