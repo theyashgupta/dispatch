@@ -9,6 +9,7 @@ import {
 import type {
   Board,
   BoardKey,
+  BoardPolicy,
   BoardWorkspaceRepo,
   Card,
   Column,
@@ -292,6 +293,16 @@ export async function listBoards(
 /** One board as the API shows it, or the typed 404 `unknown-board`. */
 export function getBoard(key: BoardKey): Board {
   return viewOf(resolveBoard(key));
+}
+
+/** Store a board policy and answer the board as the API shows it, or the typed 404 `unknown-board`. */
+export async function setBoardPolicy(
+  key: BoardKey,
+  policy: BoardPolicy,
+): Promise<Board> {
+  const board = await store.setBoardPolicy(key, policy);
+  if (!board) throw new BoardNotFoundError("unknown-board");
+  return viewOf(board);
 }
 
 /**
