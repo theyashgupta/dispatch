@@ -3,6 +3,7 @@ import { boardRouter } from "./board.route.js";
 import { boardsRouter } from "./boards.route.js";
 import { boardPolicyRouter } from "./board-policy.route.js";
 import { cardsRouter } from "./cards.route.js";
+import { decisionsRouter } from "./decisions.route.js";
 import { eventsRouter } from "./events.route.js";
 import { sessionsRouter } from "./sessions.route.js";
 import { sseRouter } from "./sse.route.js";
@@ -29,19 +30,30 @@ import { meetingsRouter } from "./meetings.route.js";
 import { calendarRouter } from "./calendar.route.js";
 import { workspacesRouter } from "./workspaces.route.js";
 import { askRouter } from "./ask.route.js";
+import { httpErrorHandler } from "./error-handler.js";
+import {
+  orchestratorRouter,
+  refuseOrchestratorTokenOnUserRoute,
+} from "./orchestrator.route.js";
 
 /**
- * Plain composition of the sub-routers — no nested gate here. The single enforcement point for
- * every `/api/*` request is the hoisted `remoteAuthRouter`, mounted as the FIRST `app.use()` in
- * `bootstrap/index.ts`, ahead of this router's mount.
+ * Composition of the sub-routers.
+ *
+ * @remarks The single enforcement point for every `/api/*` request is the hoisted
+ * `remoteAuthRouter`, mounted as the FIRST `app.use()` in `bootstrap/index.ts`, ahead of this
+ * router's mount. The one gate here only refuses an orchestrator token on a state-changing user
+ * route.
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
 export const apiRouter = Router();
 
+apiRouter.use(refuseOrchestratorTokenOnUserRoute, httpErrorHandler);
+apiRouter.use("/orchestrator", orchestratorRouter);
 apiRouter.use(boardRouter);
 apiRouter.use(boardsRouter);
 apiRouter.use(boardPolicyRouter);
 apiRouter.use(cardsRouter);
+apiRouter.use(decisionsRouter);
 apiRouter.use(eventsRouter);
 apiRouter.use(sessionsRouter);
 apiRouter.use(sseRouter);
