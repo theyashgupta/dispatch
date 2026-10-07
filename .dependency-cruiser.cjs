@@ -1,7 +1,4 @@
-const legacyCycleFiles = [
-  "^src/web/features/vault/(VaultPage|VaultKeyRow|VaultValueEditor|VaultImportConfirm|VaultAddForm)\\.tsx$",
-  "^src/web/features/board/(index\\.ts|Board\\.tsx)$",
-];
+const legacyCycleFiles = ["^src/web/features/board/(index\\.ts|Board\\.tsx)$"];
 
 const serviceDirection = (name, from, to) => ({
   name,

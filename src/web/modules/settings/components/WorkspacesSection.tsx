@@ -2,6 +2,7 @@ import type { ComponentProps } from "react";
 import { FolderGit2, Trash2 } from "lucide-react";
 import { WorkspaceAdd } from "@/components/WorkspaceAdd";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import { Button } from "@/components/ui/button";
 import { Item, ItemContent, ItemMedia } from "@/components/ui/item";
 
@@ -37,11 +38,9 @@ export function WorkspacesSection({
       )}
 
       {!loading && loadError && (
-        <Alert variant="destructive">
-          <AlertDescription className="font-semibold">
-            Couldn't load workspaces. Reopen settings to retry.
-          </AlertDescription>
-        </Alert>
+        <ErrorAlert>
+          Couldn't load workspaces. Reopen settings to retry.
+        </ErrorAlert>
       )}
 
       {!loading && !loadError && folders.length === 0 && (

@@ -8,7 +8,7 @@ import {
 import { LoadingButton } from "@/components/LoadingButton";
 import { AppearanceSection } from "@/modules/settings/components/AppearanceSection";
 import { SettingsPanelLayout } from "@/components/SettingsPanelLayout";
-import { shouldSeedDraft } from "@/modules/settings/domain/draft-seed";
+import { shouldSeedDraft } from "../../../../shared/draft-seed.js";
 import {
   useSaveTerminalAppearanceMutation,
   useTerminalAppearanceQuery,

@@ -49,8 +49,10 @@ import {
 } from "../shared/route.js";
 import { AppStateProvider, type AppPages } from "./components/AppState.js";
 import { useTheme } from "./hooks/useTheme.js";
-import { UsageChip } from "./features/accounts/index.js";
-import { useClaudeAccounts } from "./hooks/useClaudeAccounts.js";
+import {
+  AccountChipView,
+  accountsQueryOptions,
+} from "./modules/accounts/index.js";
 import { Glyph, wordmarkStyle } from "./components/icons/Glyph.js";
 import {
   actionablePinnedCard,
@@ -98,12 +100,12 @@ import {
   INBOX_SHORTCUTS,
   SESSIONS_SHORTCUTS,
   bindShortcuts,
-} from "./lib/shortcuts.js";
+} from "../shared/shortcuts.js";
 import { useShortcuts } from "./hooks/useShortcuts.js";
 import { useItems } from "./hooks/useItems.js";
-import { buildPrRows } from "./lib/pr-rows.js";
-import { feedItems, isListedError } from "./lib/feed-items.js";
-import { slackRows } from "./lib/slack-rows.js";
+import { buildPrRows } from "../shared/pr-rows.js";
+import { feedItems, isListedError } from "../shared/feed-items.js";
+import { slackRows } from "./modules/slack/domain/slack-rows.js";
 import { nowMs } from "../shared/format-age.js";
 import { flattenSessions } from "./lib/sessions.js";
 import { askAboutQuestion } from "./lib/ask.js";
@@ -126,9 +128,8 @@ import {
 import { playChime } from "./lib/chime.js";
 import { refreshPushSubscription } from "./lib/push.js";
 import type { StartRequest } from "./lib/start-request.js";
-import { meetingNotice } from "./lib/meetings.js";
-import { formatSize } from "./lib/format-size.js";
-import type { WorkspacesSummary } from "./features/workspaces/index.js";
+import { meetingNotice } from "./modules/meetings/domain/meetings.js";
+import { formatSize } from "../shared/format-size.js";
 import type {
   BoardSnapshot,
   ConnectionStatus,
@@ -143,9 +144,9 @@ import { isTicketCard } from "../shared/linear-state.js";
 
 type ActivityFilter = ComponentProps<typeof ActivityFilterView>["filter"];
 
-const MeetingNotesModal = lazy(() =>
-  import("./features/meetings/index.js").then((m) => ({
-    default: m.MeetingNotesModal,
+const MeetingNotesView = lazy(() =>
+  import("./modules/meetings/index.js").then((m) => ({
+    default: m.MeetingNotesView,
   })),
 );
 
@@ -269,6 +270,10 @@ export function BootScreen({ connection }: { connection: ConnectionStatus }) {
   );
 }
 
+type WorkspacesSummary = Parameters<
+  AppPages["workspaces"]["onSummaryChange"]
+>[0];
+
 function useCommittedRoute(): Route {
   const leaf = useRouterState({ select: (s) => s.matches.at(-1) });
   const pathname = useLocation({ select: (l) => l.pathname });
@@ -278,7 +283,7 @@ function useCommittedRoute(): Route {
 export function App() {
   const { data: activityData } = useQuery(activityFeedQueryOptions());
   const events = activityData ?? [];
-  const claudeAccounts = useClaudeAccounts();
+  const { data: claudeAccounts } = useQuery(accountsQueryOptions());
   const { data: askConversation } = useQuery(askConversationQueryOptions());
   const router = useRouter();
   const route = useCommittedRoute();
@@ -778,15 +783,8 @@ export function App() {
     return <BootScreen connection={connection} />;
   }
 
-  const accountSlot = claudeAccounts.loaded ? (
-    <UsageChip
-      accounts={claudeAccounts.accounts}
-      activeId={claudeAccounts.activeId}
-      compact
-      onSwitch={claudeAccounts.switchAccount}
-      onRefresh={claudeAccounts.refreshUsage}
-      onOpenSettings={() => navigate("accounts")}
-    />
+  const accountSlot = claudeAccounts ? (
+    <AccountChipView onOpenSettings={() => navigate("accounts")} />
   ) : null;
 
   const inboxCount = inboxWaitingCount(board.cards, inboxRows);
@@ -811,7 +809,7 @@ export function App() {
     activity: { title: "Activity", count: events.length },
     accounts: {
       title: "Accounts and Usage",
-      count: claudeAccounts.loaded ? claudeAccounts.accounts.length : undefined,
+      count: claudeAccounts?.accounts.length,
     },
     playbooks: { title: "Playbooks", count: playbookCount },
     vault: { title: "Vault", count: vaultCount },
@@ -875,7 +873,10 @@ export function App() {
         void setItemState(id, "read").catch(() =>
           showNotice("Couldn't mark it read."),
         ),
-      services: actionServices,
+      onNotice: showNotice,
+      onShowUndo: showUndo,
+      onCopyText: actionServices.copyText,
+      onStartAgent: (target, prompt) => startAgent(target, prompt),
     },
     inbox: {
       board,
@@ -913,7 +914,7 @@ export function App() {
       filter: activityFilter,
       onSelectCard: selectCard,
     },
-    accounts: { claudeAccounts },
+    accounts: {},
     sessions: {
       board,
       selectedCardId: selectedCard ? selectedCardId : null,
@@ -937,7 +938,8 @@ export function App() {
       items: meetingItems,
       onSelect: (id) => navigate("meetings", id ?? undefined),
       onOpenMeetingNotes: openOverlay(setMeetingNotesOpen),
-      services: actionServices,
+      onNotice: showNotice,
+      onShowUndo: showUndo,
       onStartPromoted: (cardId) => setStartRequest({ cardId }),
     },
     workspaces: {
@@ -1081,7 +1083,7 @@ export function App() {
         }
         detail={
           <DetailPanel
-            accounts={claudeAccounts.accounts}
+            accounts={claudeAccounts?.accounts}
             card={selectedCard}
             hydrating={pinnedHydrating && !selectedCardInWindow}
             pinFetchError={pinFetchErrorKind}
@@ -1157,6 +1159,7 @@ export function App() {
           <CreateTicketView
             onClose={closeOverlay(setCreateTicketOpen)}
             onFromMeetingNotes={() => {
+              overlayReturnRef.current?.focus();
               setCreateTicketOpen(false);
               setMeetingNotesOpen(true);
             }}
@@ -1164,7 +1167,7 @@ export function App() {
         )}
         {meetingNotesOpen && (
           <Suspense fallback={null}>
-            <MeetingNotesModal
+            <MeetingNotesView
               onClose={closeOverlay(setMeetingNotesOpen)}
               onCreated={(result) => showNotice(meetingNotice(result))}
             />

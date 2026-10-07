@@ -2,7 +2,7 @@ import type { ArchivedGroupSummary } from "../../../../shared/types.js";
 import { http, httpError } from "@/lib/http";
 
 /**
- * Every archived group, newest first: GET /api/archive.
+ * Fetch every archived group, newest first: GET /api/archive.
  *
  * @remarks
  * Throws on any non-2xx.

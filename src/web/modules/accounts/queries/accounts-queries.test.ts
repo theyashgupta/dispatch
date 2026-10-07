@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { QueryClient } from "@tanstack/react-query";
+import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import {
   cancelLogin,
   getAccounts,
@@ -12,9 +12,17 @@ import {
   submitLoginCode,
 } from "./accounts-api.js";
 import {
+  ACCOUNTS_REFETCH_MS,
+  LOGIN_POLL_MS,
   accountsKeys,
   accountsQueryOptions,
+  cancelLoginMutationOptions,
   loginStateQueryOptions,
+  refreshAccountUsageMutationOptions,
+  removeAccountMutationOptions,
+  setActiveAccountMutationOptions,
+  startLoginMutationOptions,
+  submitLoginCodeMutationOptions,
 } from "./accounts-queries.js";
 
 const realFetch = globalThis.fetch;
@@ -52,10 +60,11 @@ test("accountsKeys has the documented shape", () => {
 test("accountsQueryOptions requests the account list", async () => {
   const options = accountsQueryOptions();
   assert.deepEqual(options.queryKey, ["accounts", "list"]);
-  reply(200, { activeId: "a", accounts: [] });
+  reply(200, { activeId: "a", accounts: [], sessions: [] });
   assert.deepEqual(await newClient().fetchQuery(options), {
     activeId: "a",
     accounts: [],
+    sessions: [],
   });
   assert.equal(calls[0]?.url, "/api/accounts");
 });
@@ -84,17 +93,32 @@ test("getLoginState throws on a failure status", async () => {
   );
 });
 
-test("setActiveAccount resolves ok on a 200", async () => {
-  reply(200, {});
-  assert.deepEqual(await setActiveAccount("a"), { ok: true });
+const ref = (n: number) => ({ cardId: `c${n}`, sessionId: `s${n}` });
+
+test("setActiveAccount sends the apply choice and resolves the counts on a 200", async () => {
+  reply(200, {
+    activeId: "a",
+    moved: [ref(1), ref(2)],
+    queued: [ref(3)],
+    skipped: [{ ...ref(4), reason: "legacy" }],
+  });
+  assert.deepEqual(await setActiveAccount("a", "all"), {
+    ok: true,
+    moved: 2,
+    queued: 1,
+    skipped: 1,
+  });
   assert.equal(calls[0]?.url, "/api/accounts/active");
   assert.equal(calls[0]?.init?.method, "PUT");
-  assert.equal(calls[0]?.init?.body, JSON.stringify({ id: "a" }));
+  assert.equal(
+    calls[0]?.init?.body,
+    JSON.stringify({ id: "a", applyToRunning: "all" }),
+  );
 });
 
 test("setActiveAccount reads a 404 as an unregistered account", async () => {
   reply(404, {});
-  assert.deepEqual(await setActiveAccount("a"), {
+  assert.deepEqual(await setActiveAccount("a", "idle"), {
     ok: false,
     error: "That account is no longer registered.",
   });
@@ -102,7 +126,7 @@ test("setActiveAccount reads a 404 as an unregistered account", async () => {
 
 test("setActiveAccount reads any other status as a switch failure", async () => {
   reply(500, {});
-  assert.deepEqual(await setActiveAccount("a"), {
+  assert.deepEqual(await setActiveAccount("a", "none"), {
     ok: false,
     error: "Couldn't switch the Claude account.",
   });
@@ -258,4 +282,221 @@ test("removeAccount reads any other status as a remove failure", async () => {
     ok: false,
     error: "Couldn't remove the account.",
   });
+});
+
+function isStale(client: QueryClient, key: readonly unknown[]): boolean {
+  return client.getQueryState(key)?.isInvalidated === true;
+}
+
+function seededClient(): QueryClient {
+  const client = newClient();
+  client.setQueryData(accountsKeys.list, { activeId: "a", accounts: [] });
+  client.setQueryData(accountsKeys.login, { state: "idle" });
+  return client;
+}
+
+test("the accounts query refetches every minute and on every focus, never on mount", () => {
+  const options = accountsQueryOptions();
+  assert.equal(ACCOUNTS_REFETCH_MS, 60_000);
+  assert.equal(options.refetchInterval, 60_000);
+  assert.equal(options.refetchOnWindowFocus, "always");
+  assert.equal(options.refetchOnMount, false);
+  assert.equal(options.refetchIntervalInBackground, true);
+});
+
+test("the login state is dropped as soon as no dialog reads it", () => {
+  assert.equal(loginStateQueryOptions().gcTime, 0);
+});
+
+test("the login state query polls every second until the login is done or failed", () => {
+  const fn = loginStateQueryOptions().refetchInterval;
+  assert.equal(LOGIN_POLL_MS, 1_000);
+  assert.equal(typeof fn, "function");
+  if (typeof fn !== "function") return;
+  const interval = (data?: unknown) => fn({ state: { data } } as never);
+  assert.equal(interval(), 1_000);
+  assert.equal(interval({ state: "idle" }), 1_000);
+  assert.equal(interval({ state: "starting", accountId: "a" }), 1_000);
+  assert.equal(
+    interval({ state: "awaiting-code", accountId: "a", url: "u" }),
+    1_000,
+  );
+  assert.equal(interval({ state: "finishing", accountId: "a" }), 1_000);
+  assert.equal(interval({ state: "done", account: { id: "a" } }), false);
+  assert.equal(interval({ state: "error", message: "x" }), false);
+});
+
+test("an accepted account switch marks the list stale", async () => {
+  const client = seededClient();
+  reply(200, { activeId: "b", moved: [ref(1)], queued: [], skipped: [] });
+  const result = await new MutationObserver(
+    client,
+    setActiveAccountMutationOptions(client),
+  ).mutate({ id: "b", applyToRunning: "idle" });
+  assert.deepEqual(result, { ok: true, moved: 1, queued: 0, skipped: 0 });
+  assert.equal(calls[0]?.url, "/api/accounts/active");
+  assert.equal(calls[0]?.init?.method, "PUT");
+  assert.equal(
+    calls[0]?.init?.body,
+    JSON.stringify({ id: "b", applyToRunning: "idle" }),
+  );
+  assert.equal(isStale(client, accountsKeys.list), true);
+});
+
+test("a refused account switch resolves the message and still marks the list stale", async () => {
+  const client = seededClient();
+  reply(404, {}, "Not Found");
+  const result = await new MutationObserver(
+    client,
+    setActiveAccountMutationOptions(client),
+  ).mutate({ id: "b", applyToRunning: "none" });
+  assert.deepEqual(result, {
+    ok: false,
+    error: "That account is no longer registered.",
+  });
+  assert.equal(isStale(client, accountsKeys.list), true);
+});
+
+test("an accepted usage refresh marks the list stale", async () => {
+  const client = seededClient();
+  reply(200, { usage: { state: "ok" } });
+  const result = await new MutationObserver(
+    client,
+    refreshAccountUsageMutationOptions(client),
+  ).mutate("b");
+  assert.deepEqual(result, { ok: true, usage: { state: "ok" } });
+  assert.equal(calls[0]?.url, "/api/accounts/b/usage/refresh");
+  assert.equal(isStale(client, accountsKeys.list), true);
+});
+
+test("a rate-limited usage refresh resolves the wait notice and still marks the list stale", async () => {
+  const client = seededClient();
+  reply(429, {}, "Too Many Requests");
+  const result = await new MutationObserver(
+    client,
+    refreshAccountUsageMutationOptions(client),
+  ).mutate("b");
+  assert.deepEqual(result, {
+    ok: false,
+    error: "Wait 30 seconds between refreshes.",
+  });
+  assert.equal(isStale(client, accountsKeys.list), true);
+});
+
+test("an accepted login start marks the login state stale", async () => {
+  const client = seededClient();
+  reply(200, { state: "starting", accountId: "n1" });
+  const result = await new MutationObserver(
+    client,
+    startLoginMutationOptions(client),
+  ).mutate(undefined);
+  assert.deepEqual(result, { ok: true, accountId: "n1" });
+  assert.equal(calls[0]?.url, "/api/accounts/login");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.equal(isStale(client, accountsKeys.login), true);
+  assert.equal(isStale(client, accountsKeys.list), false);
+});
+
+test("a refused login start resolves the in-flight flag and leaves the cache alone", async () => {
+  const client = seededClient();
+  reply(409, {}, "Conflict");
+  const result = await new MutationObserver(
+    client,
+    startLoginMutationOptions(client),
+  ).mutate(undefined);
+  assert.deepEqual(result, {
+    ok: false,
+    error: "A Claude login is already in progress.",
+    inFlight: true,
+  });
+  assert.equal(isStale(client, accountsKeys.login), false);
+});
+
+test("an accepted login code marks the login state stale", async () => {
+  const client = seededClient();
+  reply(200, {});
+  const result = await new MutationObserver(
+    client,
+    submitLoginCodeMutationOptions(client),
+  ).mutate("abc");
+  assert.deepEqual(result, { ok: true });
+  assert.equal(calls[0]?.url, "/api/accounts/login/code");
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ code: "abc" }));
+  assert.equal(isStale(client, accountsKeys.login), true);
+});
+
+test("a refused login code resolves the message and leaves the cache alone", async () => {
+  const client = seededClient();
+  reply(409, {}, "Conflict");
+  const result = await new MutationObserver(
+    client,
+    submitLoginCodeMutationOptions(client),
+  ).mutate("abc");
+  assert.deepEqual(result, {
+    ok: false,
+    error: "No login is waiting for a code.",
+  });
+  assert.equal(isStale(client, accountsKeys.login), false);
+});
+
+test("a cancelled login marks the login state stale even when the request fails", async () => {
+  const client = seededClient();
+  reply(500, {}, "Internal Server Error");
+  const result = await new MutationObserver(
+    client,
+    cancelLoginMutationOptions(client),
+  ).mutate();
+  assert.equal(result, undefined);
+  assert.equal(calls[0]?.url, "/api/accounts/login");
+  assert.equal(calls[0]?.init?.method, "DELETE");
+  assert.equal(isStale(client, accountsKeys.login), true);
+});
+
+test("a removed account marks the list stale", async () => {
+  const client = seededClient();
+  reply(200, {});
+  const result = await new MutationObserver(
+    client,
+    removeAccountMutationOptions(client),
+  ).mutate("b");
+  assert.deepEqual(result, { ok: true });
+  assert.equal(calls[0]?.url, "/api/accounts/b");
+  assert.equal(calls[0]?.init?.method, "DELETE");
+  assert.equal(isStale(client, accountsKeys.list), true);
+});
+
+test("a refused account removal resolves the message and leaves the list alone", async () => {
+  const client = seededClient();
+  reply(400, {}, "Bad Request");
+  const result = await new MutationObserver(
+    client,
+    removeAccountMutationOptions(client),
+  ).mutate("default");
+  assert.deepEqual(result, {
+    ok: false,
+    error: "The Default account cannot be removed.",
+  });
+  assert.equal(isStale(client, accountsKeys.list), false);
+});
+
+test("every login start still waiting for an answer counts under the start key", async () => {
+  const pending: ((res: Response) => void)[] = [];
+  globalThis.fetch = () =>
+    new Promise<Response>((resolve) => {
+      pending.push(resolve);
+    });
+  const client = newClient();
+  const first = new MutationObserver(client, startLoginMutationOptions(client));
+  const second = new MutationObserver(
+    client,
+    startLoginMutationOptions(client),
+  );
+  const runs = [first.mutate(undefined), second.mutate(undefined)];
+  await Promise.resolve();
+  assert.equal(client.isMutating({ mutationKey: accountsKeys.start }), 2);
+  for (const resolve of pending) {
+    resolve(new Response(JSON.stringify({ state: "idle" }), { status: 202 }));
+  }
+  await Promise.all(runs);
+  assert.equal(client.isMutating({ mutationKey: accountsKeys.start }), 0);
 });

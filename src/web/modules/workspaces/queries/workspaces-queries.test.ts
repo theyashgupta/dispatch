@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { QueryClient } from "@tanstack/react-query";
-import {
-  discoverFolderQueryOptions,
-  workspacesKeys,
-  workspacesQueryOptions,
-} from "./workspaces-queries.js";
+import { MutationObserver, QueryClient } from "@tanstack/react-query";
+import { getWorkspaces } from "./workspaces-api.js";
+import { openWorkspaceEditorMutationOptions } from "./workspaces-queries.js";
 
 const realFetch = globalThis.fetch;
 const calls: { url: string; init?: RequestInit }[] = [];
@@ -33,46 +30,35 @@ afterEach(() => {
   calls.length = 0;
 });
 
-test("workspacesKeys has the documented shape", () => {
-  assert.deepEqual(workspacesKeys.all, ["workspaces"]);
-  assert.deepEqual(workspacesKeys.inventory(false), [
-    "workspaces",
-    "inventory",
-    false,
-  ]);
-  assert.deepEqual(workspacesKeys.folders, ["workspaces", "folders"]);
-  assert.deepEqual(workspacesKeys.discover("/w"), [
-    "workspaces",
-    "discover",
-    "/w",
-  ]);
-  assert.deepEqual(workspacesKeys.browse("/w"), ["workspaces", "browse", "/w"]);
-  assert.deepEqual(workspacesKeys.browse(), ["workspaces", "browse", null]);
-});
-
-test("workspacesQueryOptions requests the inventory and keys on fresh", async () => {
-  const options = workspacesQueryOptions();
-  assert.deepEqual(options.queryKey, ["workspaces", "inventory", false]);
-  assert.deepEqual(workspacesQueryOptions(true).queryKey, [
-    "workspaces",
-    "inventory",
-    true,
-  ]);
+test("getWorkspaces requests the inventory", async () => {
   reply(200, { rows: [] });
-  await newClient().fetchQuery(options);
+  await getWorkspaces(false);
   assert.equal(calls[0]?.url, "/api/workspaces");
 });
 
-test("workspacesQueryOptions with fresh requests the fresh inventory", async () => {
+test("getWorkspaces with fresh requests the fresh inventory", async () => {
   reply(200, { rows: [] });
-  await newClient().fetchQuery(workspacesQueryOptions(true));
+  await getWorkspaces(true);
   assert.equal(calls[0]?.url, "/api/workspaces?fresh=1");
 });
 
-test("discoverFolderQueryOptions keys on the path and requests discover", async () => {
-  const options = discoverFolderQueryOptions("/a b");
-  assert.deepEqual(options.queryKey, ["workspaces", "discover", "/a b"]);
-  reply(200, { repos: [] });
-  await newClient().fetchQuery(options);
-  assert.equal(calls[0]?.url, "/api/workspace-folders/discover?path=%2Fa%20b");
+test("openWorkspaceEditorMutationOptions posts the editor to the card", async () => {
+  reply(204, null);
+  await new MutationObserver(
+    newClient(),
+    openWorkspaceEditorMutationOptions(),
+  ).mutate({ cardId: "c/1", editor: "cursor" });
+  assert.equal(calls[0]?.url, "/api/cards/c%2F1/open-editor");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ editor: "cursor" }));
+});
+
+test("openWorkspaceEditorMutationOptions rejects on a non-2xx answer", async () => {
+  reply(500, "boom", "Server Error");
+  await assert.rejects(
+    new MutationObserver(
+      newClient(),
+      openWorkspaceEditorMutationOptions(),
+    ).mutate({ cardId: "c1", editor: "code" }),
+  );
 });

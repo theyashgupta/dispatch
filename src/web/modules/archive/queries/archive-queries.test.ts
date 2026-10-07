@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { QueryClient } from "@tanstack/react-query";
+import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import { deleteArchived, listArchive, restoreArchived } from "./archive-api.js";
-import { archiveKeys, archiveQueryOptions } from "./archive-queries.js";
+import {
+  archiveKeys,
+  archiveQueryOptions,
+  deleteArchivedMutationOptions,
+  restoreArchivedMutationOptions,
+} from "./archive-queries.js";
 
 const realFetch = globalThis.fetch;
 const calls: { url: string; init?: RequestInit }[] = [];
@@ -125,4 +130,85 @@ test("deleteArchived throws on any other failure status", async () => {
     deleteArchived("g1", false),
     new Error("deleteArchived failed: 500 Internal Server Error"),
   );
+});
+
+function listIsStale(client: QueryClient): boolean {
+  return client.getQueryState(archiveKeys.list)?.isInvalidated === true;
+}
+
+function seededClient(): QueryClient {
+  const client = newClient();
+  client.setQueryData(archiveKeys.list, [{ id: "g1" }]);
+  return client;
+}
+
+function restore(client: QueryClient) {
+  return new MutationObserver(
+    client,
+    restoreArchivedMutationOptions(client),
+  ).mutate("g1");
+}
+
+function remove(client: QueryClient) {
+  return new MutationObserver(
+    client,
+    deleteArchivedMutationOptions(client),
+  ).mutate({ id: "g1", force: true });
+}
+
+test("a restored group marks the list stale", async () => {
+  const client = seededClient();
+  reply(200, {});
+  assert.deepEqual(await restore(client), { ok: true });
+  assert.equal(calls[0]?.url, "/api/archive/g1/restore");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.equal(listIsStale(client), true);
+});
+
+test("a refused restore resolves the reason and leaves the list alone", async () => {
+  const client = seededClient();
+  reply(409, { error: "member moved on" }, "Conflict");
+  assert.deepEqual(await restore(client), {
+    ok: false,
+    error: "member moved on",
+  });
+  assert.equal(listIsStale(client), false);
+});
+
+test("a failed restore rejects and leaves the list alone", async () => {
+  const client = seededClient();
+  reply(500, {}, "Internal Server Error");
+  await assert.rejects(restore(client));
+  assert.equal(listIsStale(client), false);
+});
+
+test("a deleted group marks the list stale", async () => {
+  const client = seededClient();
+  reply(200, {});
+  assert.deepEqual(await remove(client), { ok: true });
+  assert.equal(calls[0]?.url, "/api/archive/g1");
+  assert.equal(calls[0]?.init?.method, "DELETE");
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ force: true }));
+  assert.equal(listIsStale(client), true);
+});
+
+test("a refused delete resolves the reason and still marks the list stale", async () => {
+  const client = seededClient();
+  reply(409, { error: "worktree is dirty" }, "Conflict");
+  assert.deepEqual(await remove(client), {
+    ok: false,
+    error: "worktree is dirty",
+  });
+  assert.equal(listIsStale(client), true);
+});
+
+test("a failed delete rejects and leaves the list alone", async () => {
+  const client = seededClient();
+  reply(500, {}, "Internal Server Error");
+  await assert.rejects(remove(client));
+  assert.equal(listIsStale(client), false);
+});
+
+test("the archive list is dropped once the page closes, so every open reads it fresh", () => {
+  assert.equal(archiveQueryOptions().gcTime, 0);
 });

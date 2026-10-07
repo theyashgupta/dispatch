@@ -55,7 +55,7 @@ import {
   type BoardDirection,
 } from "./board-keys.js";
 import { useShortcuts } from "../../hooks/useShortcuts.js";
-import { BOARD_SHORTCUTS, bindShortcuts } from "../../lib/shortcuts.js";
+import { BOARD_SHORTCUTS, bindShortcuts } from "../../../shared/shortcuts.js";
 import { modalDepth } from "../../primitives/Modal.js";
 
 interface BoardProps {

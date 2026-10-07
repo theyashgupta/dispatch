@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { QueryClient } from "@tanstack/react-query";
+import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import {
   addVaultKey,
   deleteVaultKey,
@@ -12,6 +12,11 @@ import {
   setVaultValue,
 } from "./vault-api.js";
 import {
+  addVaultKeyMutationOptions,
+  deleteVaultKeyMutationOptions,
+  editVaultPurposeMutationOptions,
+  importFromEnvVaultMutationOptions,
+  setVaultValueMutationOptions,
   vaultKeys,
   vaultKeysQueryOptions,
   vaultPreviousQueryOptions,
@@ -240,4 +245,147 @@ test("deleteVaultKey resolves ok false on a 404", async () => {
 test("deleteVaultKey resolves ok false on a 500", async () => {
   reply(500, {});
   assert.deepEqual(await deleteVaultKey("A"), { ok: false });
+});
+
+function listIsStale(client: QueryClient): boolean {
+  return client.getQueryState(vaultKeys.list)?.isInvalidated === true;
+}
+
+function seededClient(): QueryClient {
+  const client = newClient();
+  client.setQueryData(vaultKeys.list, { keys: [], envVaultAvailable: false });
+  return client;
+}
+
+const vaultWrites = [
+  {
+    name: "add",
+    run: (client: QueryClient) =>
+      new MutationObserver(client, addVaultKeyMutationOptions(client)).mutate({
+        name: "API_KEY",
+        purpose: "for the api",
+      }),
+    url: "/api/vault",
+    method: "POST",
+  },
+  {
+    name: "set value",
+    run: (client: QueryClient) =>
+      new MutationObserver(client, setVaultValueMutationOptions(client)).mutate(
+        { name: "API_KEY", value: "v1" },
+      ),
+    url: "/api/vault/API_KEY/value",
+    method: "PUT",
+  },
+  {
+    name: "edit purpose",
+    run: (client: QueryClient) =>
+      new MutationObserver(
+        client,
+        editVaultPurposeMutationOptions(client),
+      ).mutate({ name: "API_KEY", purpose: "new purpose" }),
+    url: "/api/vault/API_KEY",
+    method: "PATCH",
+  },
+];
+
+for (const write of vaultWrites) {
+  test(`an accepted vault ${write.name} marks the list stale`, async () => {
+    const client = seededClient();
+    reply(200, {});
+    assert.deepEqual(await write.run(client), { ok: true });
+    assert.equal(calls[0]?.url, write.url);
+    assert.equal(calls[0]?.init?.method, write.method);
+    assert.equal(listIsStale(client), true);
+  });
+
+  test(`a refused vault ${write.name} resolves the code and leaves the list alone`, async () => {
+    const client = seededClient();
+    reply(400, { error: "invalid-name" }, "Bad Request");
+    assert.deepEqual(await write.run(client), {
+      ok: false,
+      error: "invalid-name",
+    });
+    assert.equal(listIsStale(client), false);
+  });
+}
+
+test("a deleted vault key marks the list stale", async () => {
+  const client = seededClient();
+  reply(200, {});
+  const result = await new MutationObserver(
+    client,
+    deleteVaultKeyMutationOptions(client),
+  ).mutate("API_KEY");
+  assert.deepEqual(result, { ok: true });
+  assert.equal(calls[0]?.url, "/api/vault/API_KEY");
+  assert.equal(calls[0]?.init?.method, "DELETE");
+  assert.equal(listIsStale(client), true);
+});
+
+test("a refused vault delete resolves ok false and leaves the list alone", async () => {
+  const client = seededClient();
+  reply(404, {}, "Not Found");
+  const result = await new MutationObserver(
+    client,
+    deleteVaultKeyMutationOptions(client),
+  ).mutate("API_KEY");
+  assert.deepEqual(result, { ok: false });
+  assert.equal(listIsStale(client), false);
+});
+
+test("an env vault import marks the list stale", async () => {
+  const client = seededClient();
+  reply(200, { imported: ["A"], skipped: ["B"] });
+  const result = await new MutationObserver(
+    client,
+    importFromEnvVaultMutationOptions(client),
+  ).mutate();
+  assert.deepEqual(result, { ok: true, imported: ["A"], skipped: ["B"] });
+  assert.equal(calls[0]?.url, "/api/vault/import");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.equal(listIsStale(client), true);
+});
+
+test("a refused env vault import resolves the code and leaves the list alone", async () => {
+  const client = seededClient();
+  reply(500, { error: "vault-write-failed" }, "Internal Server Error");
+  const result = await new MutationObserver(
+    client,
+    importFromEnvVaultMutationOptions(client),
+  ).mutate();
+  assert.deepEqual(result, { ok: false, error: "vault-write-failed" });
+  assert.equal(listIsStale(client), false);
+});
+
+test("a vault value travels only in the request body, never in a URL or a query key", async () => {
+  const secret = "s3cret-value-for-the-key-test";
+  reply(200, { ok: true });
+  const client = newClient();
+  await new MutationObserver(
+    client,
+    setVaultValueMutationOptions(client),
+  ).mutate({ name: "API_KEY", value: secret });
+  const put = calls.find((c) => c.init?.method === "PUT");
+  assert.ok(put, "the set value request was sent");
+  assert.equal(put.url.includes(secret), false);
+  const body = typeof put.init?.body === "string" ? put.init.body : "";
+  assert.equal(body.includes(secret), true);
+  const keys = [
+    vaultKeys.all,
+    vaultKeys.list,
+    vaultKeys.value("API_KEY"),
+    vaultKeys.previous("API_KEY"),
+    vaultValueQueryOptions("API_KEY").queryKey,
+    vaultPreviousQueryOptions("API_KEY").queryKey,
+  ];
+  for (const key of keys)
+    assert.equal(JSON.stringify(key).includes(secret), false);
+  for (const query of client.getQueryCache().getAll()) {
+    assert.equal(JSON.stringify(query.queryKey).includes(secret), false);
+  }
+});
+
+test("the vault key list is dropped once the page closes, so every open reads it fresh", () => {
+  assert.equal(vaultKeysQueryOptions().gcTime, 0);
 });

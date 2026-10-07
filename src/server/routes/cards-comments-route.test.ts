@@ -4,6 +4,7 @@ import express from "express";
 import type { Server } from "node:http";
 import { isolateEnv } from "../test-support/fixtures.js";
 import { issue } from "../test-support/fake-source.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -53,7 +54,7 @@ test("GET /cards/:id/comments answers 200 with the stored comments of a Linear c
 });
 
 test("GET /cards/:id/comments answers 200 with an empty list for a local card", async () => {
-  const local = await store.createLocalCard("local", "");
+  const local = await store.createLocalCard(DEFAULT_BOARD_KEY, "local", "");
   const res = await fetch(`${base}/cards/${local.id}/comments`);
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { comments: [] });

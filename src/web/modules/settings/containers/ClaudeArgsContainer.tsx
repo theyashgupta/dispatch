@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ClaudeArgsSection } from "@/modules/settings/components/ClaudeArgsSection";
-import { shouldSeedDraft } from "@/modules/settings/domain/draft-seed";
+import { shouldSeedDraft } from "../../../../shared/draft-seed.js";
 import {
   useClaudeArgsQuery,
   useSaveClaudeArgsMutation,

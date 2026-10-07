@@ -1,0 +1,859 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dashboard sketch</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="sketch.css" />
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var theme = new URLSearchParams(location.search).get("theme");
+        if (theme === "light") root.setAttribute("data-theme", "light");
+        else if (theme === "dark") root.removeAttribute("data-theme");
+        document.addEventListener("DOMContentLoaded", function () {
+          var button = document.getElementById("theme-toggle");
+          function sync() {
+            button.textContent =
+              root.getAttribute("data-theme") === "light"
+                ? "Dark theme"
+                : "Light theme";
+          }
+          sync();
+          button.addEventListener("click", function () {
+            if (root.getAttribute("data-theme") === "light")
+              root.removeAttribute("data-theme");
+            else root.setAttribute("data-theme", "light");
+            sync();
+          });
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="sketch-bar">
+      <p>Dashboard, populated state</p>
+      <button type="button" id="theme-toggle" class="btn btn-outline">
+        Light theme
+      </button>
+    </div>
+
+    <section class="frame" aria-labelledby="f1">
+      <h2 class="frame-title" id="f1">
+        Frame 1: Dashboard with six sections (1440 px and 390 px)
+      </h2>
+      <div class="frame-box">
+        <div class="shell">
+          <aside class="sidebar" aria-label="Sidebar">
+            <div class="sidebar-head">
+              <div class="brand">
+                <span class="brand-glyph" aria-hidden="true">◆</span>
+                <span class="brand-word">DISPATCH</span>
+              </div>
+              <div class="switcher">
+                <button
+                  type="button"
+                  class="switch-trigger"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                  aria-label="Switch board, current board Dispatch"
+                >
+                  <span>Dispatch</span>
+                  <span aria-hidden="true">▾</span>
+                </button>
+              </div>
+            </div>
+            <nav class="nav" aria-label="Main">
+              <div class="nav-label">Home</div>
+              <a class="nav-row" href="#">Today</a>
+              <a class="nav-row" href="#">Inbox</a>
+              <a class="nav-row" href="#">Ask</a>
+              <div class="nav-label">Work</div>
+              <a class="nav-row" href="#">Board</a>
+              <a class="nav-row" href="#" aria-current="page">Dashboard</a>
+              <a class="nav-row" href="#">Sessions</a>
+              <a class="nav-row" href="#">Workspace</a>
+              <a class="nav-row" href="#">Activity</a>
+            </nav>
+          </aside>
+
+          <div class="main">
+            <header class="page-header">
+              <div class="page-title">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-icon menu-btn"
+                  aria-label="Open menu"
+                >
+                  ☰
+                </button>
+                <h1>Dashboard · Dispatch</h1>
+              </div>
+            </header>
+
+            <div class="content">
+              <div class="dash">
+                <section class="dash-section" aria-labelledby="s1">
+                  <div class="dash-head">
+                    <h2 class="dash-title" id="s1">Attention queue</h2>
+                    <span class="badge" aria-label="4 items">4</span>
+                  </div>
+                  <div class="panel">
+                    <ul class="item-list">
+                      <li class="item">
+                        <div class="item-main">
+                          <div class="item-line">
+                            <span class="group-id">GROUP-13</span>
+                            <span class="muted">g12-modules-a</span>
+                            <span class="badge badge-warn"
+                              ><span aria-hidden="true">?</span> Needs
+                              input</span
+                            >
+                          </div>
+                          <p class="quote">
+                            Phase 4 needs the base branch of LOCAL-72. Use
+                            feat/LOCAL-71-unit-1-settings or main?
+                          </p>
+                          <div class="field">
+                            <label class="sr-only" for="reply-13"
+                              >Reply to GROUP-13</label
+                            >
+                            <div class="reply-row">
+                              <textarea
+                                class="textarea"
+                                id="reply-13"
+                                placeholder="Reply to GROUP-13"
+                              ></textarea>
+                              <button type="button" class="btn btn-outline">
+                                Send reply
+                              </button>
+                            </div>
+                            <p class="help">
+                              0 of 500 characters. A longer reply goes as a
+                              file.
+                            </p>
+                          </div>
+                          <div class="item-line">
+                            <a class="btn btn-link" href="#">Open terminal</a>
+                          </div>
+                        </div>
+                        <span class="wait">waiting 34 min</span>
+                      </li>
+
+                      <li class="item">
+                        <div class="item-main">
+                          <div class="item-line">
+                            <span class="group-id">GROUP-12</span>
+                            <span class="muted">g11-skeleton</span>
+                            <span class="badge badge-warn"
+                              ><span aria-hidden="true">⊘</span> Permission
+                              prompt</span
+                            >
+                          </div>
+                          <div class="term">
+                            <div class="term-bar">Prompt from the pane</div>
+                            <div class="term-lines">
+                              <span class="term-prompt"
+                                >Allow WebFetch: docs.github.com?</span
+                              >
+                            </div>
+                          </div>
+                          <p class="help">
+                            Answer this prompt in the terminal.
+                          </p>
+                          <div class="item-line">
+                            <a class="btn btn-link" href="#">Open terminal</a>
+                          </div>
+                        </div>
+                        <span class="wait">waiting 21 min</span>
+                      </li>
+
+                      <li class="item">
+                        <div class="item-main">
+                          <div class="item-line">
+                            <span class="group-id">GROUP-14</span>
+                            <span class="muted">g13-modules-b</span>
+                            <span class="badge badge-warn"
+                              ><span aria-hidden="true">?</span> Needs
+                              input</span
+                            >
+                          </div>
+                          <p>
+                            Stopped at the usage limit. The limit resets at
+                            05:30.
+                          </p>
+                          <div class="item-line">
+                            <button type="button" class="btn btn-outline">
+                              Resume loop
+                            </button>
+                          </div>
+                        </div>
+                        <span class="wait">waiting 13 min</span>
+                      </li>
+
+                      <li class="item">
+                        <div class="item-main">
+                          <div class="item-line">
+                            <span class="group-id">GROUP-14</span>
+                            <span class="muted">g13-modules-b</span>
+                            <span class="badge">Decision</span>
+                          </div>
+                          <p class="decision-q">
+                            Retry the Phase 7 gate now, or send GROUP-14 a fix
+                            instruction first?
+                          </p>
+                          <p class="help">
+                            GROUP-14, asked by Extra orchestrator 1 12 min ago
+                          </p>
+                          <div class="opt-list">
+                            <button
+                              type="button"
+                              class="btn btn-outline opt-btn"
+                            >
+                              <span>Retry the gate now</span>
+                              <span class="badge">Recommended</span>
+                            </button>
+                            <button
+                              type="button"
+                              class="btn btn-outline opt-btn"
+                            >
+                              <span>Send GROUP-14 a fix instruction first</span>
+                            </button>
+                            <button
+                              type="button"
+                              class="btn btn-outline opt-btn"
+                            >
+                              <span>Park GROUP-14</span>
+                            </button>
+                          </div>
+                          <div class="field">
+                            <label class="sr-only" for="other-14"
+                              >Your answer to Retry the Phase 7 gate now, or
+                              send GROUP-14 a fix instruction first?</label
+                            >
+                            <div class="reply-row">
+                              <textarea
+                                class="textarea"
+                                id="other-14"
+                                placeholder="Or type an answer"
+                              ></textarea>
+                              <button type="button" class="btn btn-outline">
+                                Send answer
+                              </button>
+                            </div>
+                            <p class="help">
+                              0 of 500 characters. A longer reply goes as a
+                              file.
+                            </p>
+                          </div>
+                        </div>
+                        <span class="wait">waiting 12 min</span>
+                      </li>
+                    </ul>
+                  </div>
+                </section>
+
+                <section class="dash-section" aria-labelledby="s2">
+                  <div class="dash-head">
+                    <h2 class="dash-title" id="s2">Progress per group</h2>
+                    <span class="badge" aria-label="2 groups">2</span>
+                  </div>
+                  <div class="panel">
+                    <ul class="item-list">
+                      <li class="group-row">
+                        <div class="item-line">
+                          <span class="group-id">GROUP-13</span>
+                          <span class="muted">g12-modules-a</span>
+                          <span class="badge badge-warn"
+                            ><span aria-hidden="true">?</span> Needs input</span
+                          >
+                          <span class="badge">Context 64%</span>
+                        </div>
+                        <span class="seg-label">Unit 2 of 3, phase 4 of 9</span>
+                        <ol class="seg-bar" aria-label="Units of GROUP-13">
+                          <li
+                            class="seg"
+                            data-seg="done"
+                            aria-label="Unit 1: Settings, Connections and Setup modules, done"
+                            title="Unit 1: Settings, Connections and Setup modules, done"
+                          >
+                            <span class="seg-fill"></span>
+                            <span class="seg-cap"
+                              ><span aria-hidden="true">✓</span> Unit 1
+                              <span class="seg-state">done</span></span
+                            >
+                          </li>
+                          <li
+                            class="seg"
+                            data-seg="current"
+                            aria-label="Unit 2: Playbooks, Vault, Archive, Accounts and Workspaces modules, current"
+                            title="Unit 2: Playbooks, Vault, Archive, Accounts and Workspaces modules, current"
+                          >
+                            <span class="seg-fill"></span>
+                            <span class="seg-cap"
+                              ><span aria-hidden="true">▶</span> Unit 2
+                              <span class="seg-state">current</span></span
+                            >
+                          </li>
+                          <li
+                            class="seg"
+                            data-seg="pending"
+                            aria-label="Unit 3: Tickets, Pull Requests, Errors, Slack, Meetings and Calendar modules, pending"
+                            title="Unit 3: Tickets, Pull Requests, Errors, Slack, Meetings and Calendar modules, pending"
+                          >
+                            <span class="seg-fill"></span>
+                            <span class="seg-cap"
+                              ><span aria-hidden="true">○</span> Unit 3
+                              <span class="seg-state">pending</span></span
+                            >
+                          </li>
+                        </ol>
+                        <p class="muted">Phase 3 gate passed 12:41</p>
+                      </li>
+
+                      <li class="group-row">
+                        <div class="item-line">
+                          <span class="group-id">GROUP-14</span>
+                          <span class="muted">g13-modules-b</span>
+                          <span class="badge badge-warn"
+                            ><span aria-hidden="true">?</span> Needs input</span
+                          >
+                          <span class="badge">Context 38%</span>
+                        </div>
+                        <span class="seg-label"
+                          >Unit 1 of 4, phase 7 of 12</span
+                        >
+                        <ol class="seg-bar" aria-label="Units of GROUP-14">
+                          <li
+                            class="seg"
+                            data-seg="failed"
+                            aria-label="Unit 1: Inbox, Today, Ask, Activity, Flow and card action modules, failed gate"
+                            title="Unit 1: Inbox, Today, Ask, Activity, Flow and card action modules, failed gate"
+                          >
+                            <span class="seg-fill"></span>
+                            <span class="seg-cap"
+                              ><span aria-hidden="true">✕</span> Unit 1
+                              <span class="seg-state">failed gate</span></span
+                            >
+                          </li>
+                          <li
+                            class="seg"
+                            data-seg="pending"
+                            aria-label="Unit 2: Board module on dnd-kit, pending"
+                            title="Unit 2: Board module on dnd-kit, pending"
+                          >
+                            <span class="seg-fill"></span>
+                            <span class="seg-cap"
+                              ><span aria-hidden="true">○</span> Unit 2
+                              <span class="seg-state">pending</span></span
+                            >
+                          </li>
+                          <li
+                            class="seg"
+                            data-seg="pending"
+                            aria-label="Unit 3: Detail panel, Sessions and Workspace modules, pending"
+                            title="Unit 3: Detail panel, Sessions and Workspace modules, pending"
+                          >
+                            <span class="seg-fill"></span>
+                            <span class="seg-cap"
+                              ><span aria-hidden="true">○</span> Unit 3
+                              <span class="seg-state">pending</span></span
+                            >
+                          </li>
+                          <li
+                            class="seg"
+                            data-seg="pending"
+                            aria-label="Unit 4: Cutover, legacy deletion, global lint scope and screenshot suite, pending"
+                            title="Unit 4: Cutover, legacy deletion, global lint scope and screenshot suite, pending"
+                          >
+                            <span class="seg-fill"></span>
+                            <span class="seg-cap"
+                              ><span aria-hidden="true">○</span> Unit 4
+                              <span class="seg-state">pending</span></span
+                            >
+                          </li>
+                        </ol>
+                        <p class="muted">
+                          Phase 7 gate failed 13:05, attempt 1 of 2
+                        </p>
+                      </li>
+                    </ul>
+                    <div class="dash-foot">
+                      <ul class="legend" aria-label="Segment states">
+                        <li data-seg="done">
+                          <span class="seg-fill"></span>
+                          <span aria-hidden="true">✓</span> done
+                        </li>
+                        <li data-seg="current">
+                          <span class="seg-fill"></span>
+                          <span aria-hidden="true">▶</span> current
+                        </li>
+                        <li data-seg="pending">
+                          <span class="seg-fill"></span>
+                          <span aria-hidden="true">○</span> pending
+                        </li>
+                        <li data-seg="failed">
+                          <span class="seg-fill"></span>
+                          <span aria-hidden="true">✕</span> failed gate
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="dash-section" aria-labelledby="s3">
+                  <div class="dash-head">
+                    <h2 class="dash-title" id="s3">Tickets by column</h2>
+                    <span class="badge" aria-label="21 cards">21</span>
+                    <div class="dash-head-end">
+                      <a class="btn btn-link" href="#">Open board</a>
+                    </div>
+                  </div>
+                  <div class="panel for-wide">
+                    <table class="table">
+                      <caption class="sr-only">
+                        Cards per column
+                      </caption>
+                      <thead>
+                        <tr>
+                          <th scope="col">Column</th>
+                          <th scope="col">Cards</th>
+                          <th scope="col">By orchestrator</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td>To Do</td>
+                          <td>5</td>
+                          <td>
+                            2
+                            <span class="badge">By orchestrator</span>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td>In Progress</td>
+                          <td>3</td>
+                          <td>0</td>
+                        </tr>
+                        <tr>
+                          <td>Needs Input</td>
+                          <td>2</td>
+                          <td>0</td>
+                        </tr>
+                        <tr>
+                          <td>Agent Done</td>
+                          <td>1</td>
+                          <td>0</td>
+                        </tr>
+                        <tr>
+                          <td>In Review</td>
+                          <td>2</td>
+                          <td>
+                            1
+                            <span class="badge">By orchestrator</span>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td>Parked</td>
+                          <td>1</td>
+                          <td>0</td>
+                        </tr>
+                        <tr>
+                          <td>Done</td>
+                          <td>7</td>
+                          <td>0</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="panel for-narrow">
+                    <ul class="item-list">
+                      <li class="item">
+                        <div class="item-main">
+                          <span>To Do</span>
+                          <div class="item-line">
+                            <span class="badge">2 By orchestrator</span>
+                          </div>
+                        </div>
+                        <span class="wait">5 cards</span>
+                      </li>
+                      <li class="item">
+                        <div class="item-main"><span>In Progress</span></div>
+                        <span class="wait">3 cards</span>
+                      </li>
+                      <li class="item">
+                        <div class="item-main"><span>Needs Input</span></div>
+                        <span class="wait">2 cards</span>
+                      </li>
+                      <li class="item">
+                        <div class="item-main"><span>Agent Done</span></div>
+                        <span class="wait">1 card</span>
+                      </li>
+                      <li class="item">
+                        <div class="item-main">
+                          <span>In Review</span>
+                          <div class="item-line">
+                            <span class="badge">1 By orchestrator</span>
+                          </div>
+                        </div>
+                        <span class="wait">2 cards</span>
+                      </li>
+                      <li class="item">
+                        <div class="item-main"><span>Parked</span></div>
+                        <span class="wait">1 card</span>
+                      </li>
+                      <li class="item">
+                        <div class="item-main"><span>Done</span></div>
+                        <span class="wait">7 cards</span>
+                      </li>
+                    </ul>
+                  </div>
+                </section>
+
+                <section class="dash-section" aria-labelledby="s4">
+                  <div class="dash-head">
+                    <h2 class="dash-title" id="s4">Activity log</h2>
+                    <span class="badge" aria-label="24 events">24</span>
+                  </div>
+                  <div class="panel">
+                    <ul>
+                      <li class="log-row">
+                        <span class="log-time">13:06</span>
+                        <span class="log-text"
+                          ><span class="log-actor">Extra orchestrator 1:</span>
+                          <span class="mono">create_decision_item</span> for
+                          GROUP-14</span
+                        >
+                      </li>
+                      <li class="log-row">
+                        <span class="log-time">13:05</span>
+                        <span class="log-text"
+                          ><span class="log-actor">Supervisor</span> selected
+                          wait at the usage limit dialog</span
+                        >
+                      </li>
+                      <li class="log-row">
+                        <span class="log-time">12:52</span>
+                        <span class="log-text"
+                          ><span class="log-actor">Supervisor</span> sent one
+                          continue prompt to GROUP-14</span
+                        >
+                      </li>
+                      <li class="log-row">
+                        <span class="log-time">12:44</span>
+                        <span class="log-text"
+                          ><span class="log-actor">Orchestrator:</span>
+                          <span class="mono">send_input</span> to GROUP-13:
+                          confirmed</span
+                        >
+                      </li>
+                      <li class="log-row">
+                        <span class="log-time">12:41</span>
+                        <span class="log-text"
+                          ><span class="log-actor">Supervisor:</span> phase 3
+                          gate passed on GROUP-13</span
+                        >
+                      </li>
+                      <li class="log-row">
+                        <span class="log-time">12:20</span>
+                        <span class="log-text"
+                          ><span class="log-actor">You:</span> Resume loop on
+                          GROUP-12</span
+                        >
+                      </li>
+                    </ul>
+                    <div class="dash-foot">
+                      <button type="button" class="btn btn-outline">
+                        Show more
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="dash-section" aria-labelledby="s5">
+                  <div class="dash-head">
+                    <h2 class="dash-title" id="s5">PRs and merge order</h2>
+                    <span class="badge" aria-label="1 group">1</span>
+                  </div>
+                  <div class="panel">
+                    <div class="pr-head">
+                      <span class="group-id">GROUP-12</span>
+                      <span class="muted">g11-skeleton</span>
+                      <span class="badge"
+                        ><span aria-hidden="true">▶</span> Running</span
+                      >
+                    </div>
+                    <div class="for-wide">
+                      <table class="table">
+                        <caption class="sr-only">
+                          Branches of GROUP-12 in merge order
+                        </caption>
+                        <thead>
+                          <tr>
+                            <th scope="col">Order</th>
+                            <th scope="col">Branch</th>
+                            <th scope="col">PR</th>
+                            <th scope="col">Ship state</th>
+                            <th scope="col">Checks</th>
+                            <th scope="col">Author</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td>1</td>
+                            <td class="mono">feat/LOCAL-68-unit-1</td>
+                            <td>#177</td>
+                            <td>
+                              <span class="badge badge-ok"
+                                ><span aria-hidden="true">✓</span> Merged</span
+                              >
+                            </td>
+                            <td><span aria-hidden="true">✓</span> Passing</td>
+                            <td>Author verified</td>
+                          </tr>
+                          <tr>
+                            <td>2</td>
+                            <td class="mono">feat/LOCAL-69-unit-2</td>
+                            <td>#178</td>
+                            <td>
+                              <span class="badge badge-ok"
+                                ><span aria-hidden="true">✓</span> Merged</span
+                              >
+                            </td>
+                            <td><span aria-hidden="true">✓</span> Passing</td>
+                            <td>Author verified</td>
+                          </tr>
+                          <tr>
+                            <td>3</td>
+                            <td class="mono">
+                              feat/LOCAL-70-unit-3-shadcn-shell
+                            </td>
+                            <td>#179</td>
+                            <td>
+                              <span class="badge"
+                                ><span aria-hidden="true">⌛</span> Waiting for
+                                checks</span
+                              >
+                            </td>
+                            <td><span aria-hidden="true">⌛</span> Pending</td>
+                            <td class="muted">Not checked yet</td>
+                          </tr>
+                          <tr>
+                            <td>4</td>
+                            <td class="mono">test/g11-skeleton-specs</td>
+                            <td>#180</td>
+                            <td>
+                              <span class="badge"
+                                ><span aria-hidden="true">○</span> Queued</span
+                              >
+                            </td>
+                            <td>
+                              <span aria-hidden="true">○</span> Not started
+                            </td>
+                            <td class="muted">Not checked yet</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <ul class="item-list for-narrow">
+                      <li class="item">
+                        <div class="item-main">
+                          <div class="item-line">
+                            <span class="muted">1</span>
+                            <span class="mono">feat/LOCAL-68-unit-1</span>
+                          </div>
+                          <div class="item-line">
+                            <span>#177</span>
+                            <span class="badge badge-ok"
+                              ><span aria-hidden="true">✓</span> Merged</span
+                            >
+                            <span
+                              ><span aria-hidden="true">✓</span> Passing</span
+                            >
+                          </div>
+                          <span class="muted">Author verified</span>
+                        </div>
+                      </li>
+                      <li class="item">
+                        <div class="item-main">
+                          <div class="item-line">
+                            <span class="muted">2</span>
+                            <span class="mono">feat/LOCAL-69-unit-2</span>
+                          </div>
+                          <div class="item-line">
+                            <span>#178</span>
+                            <span class="badge badge-ok"
+                              ><span aria-hidden="true">✓</span> Merged</span
+                            >
+                            <span
+                              ><span aria-hidden="true">✓</span> Passing</span
+                            >
+                          </div>
+                          <span class="muted">Author verified</span>
+                        </div>
+                      </li>
+                      <li class="item">
+                        <div class="item-main">
+                          <div class="item-line">
+                            <span class="muted">3</span>
+                            <span class="mono"
+                              >feat/LOCAL-70-unit-3-shadcn-shell</span
+                            >
+                          </div>
+                          <div class="item-line">
+                            <span>#179</span>
+                            <span class="badge"
+                              ><span aria-hidden="true">⌛</span> Waiting for
+                              checks</span
+                            >
+                            <span
+                              ><span aria-hidden="true">⌛</span> Pending</span
+                            >
+                          </div>
+                          <span class="muted">Not checked yet</span>
+                        </div>
+                      </li>
+                      <li class="item">
+                        <div class="item-main">
+                          <div class="item-line">
+                            <span class="muted">4</span>
+                            <span class="mono">test/g11-skeleton-specs</span>
+                          </div>
+                          <div class="item-line">
+                            <span>#180</span>
+                            <span class="badge"
+                              ><span aria-hidden="true">○</span> Queued</span
+                            >
+                            <span
+                              ><span aria-hidden="true">○</span> Not
+                              started</span
+                            >
+                          </div>
+                          <span class="muted">Not checked yet</span>
+                        </div>
+                      </li>
+                    </ul>
+                  </div>
+                </section>
+
+                <section class="dash-section" aria-labelledby="s6">
+                  <div class="dash-head">
+                    <h2 class="dash-title" id="s6">Cost and usage</h2>
+                    <span class="badge" aria-label="3 groups">3</span>
+                  </div>
+                  <div class="panel">
+                    <p class="dash-sub">Cost per group, budget $20.00</p>
+                    <ul>
+                      <li class="meter">
+                        <div class="item-line">
+                          <span class="group-id">GROUP-13</span>
+                          <span class="muted">g12-modules-a</span>
+                        </div>
+                        <div
+                          class="bar pct-62"
+                          role="progressbar"
+                          aria-valuemin="0"
+                          aria-valuemax="100"
+                          aria-valuenow="62"
+                          aria-label="GROUP-13 cost against budget"
+                          title="GROUP-13: $12.40 of $20.00, 62%"
+                        >
+                          <span class="bar-fill"></span>
+                        </div>
+                        <div class="meter-value">$12.40 of $20.00, 62%</div>
+                      </li>
+                      <li class="meter">
+                        <div class="item-line">
+                          <span class="group-id">GROUP-14</span>
+                          <span class="muted">g13-modules-b</span>
+                        </div>
+                        <div
+                          class="bar bar-stale pct-86"
+                          role="progressbar"
+                          aria-valuemin="0"
+                          aria-valuemax="100"
+                          aria-valuenow="86"
+                          aria-label="GROUP-14 cost against budget"
+                          title="GROUP-14: $17.10 of $20.00, 86%, near budget"
+                        >
+                          <span class="bar-fill"></span>
+                        </div>
+                        <div class="meter-value">
+                          <span>$17.10 of $20.00, 86%</span>
+                          <span class="badge badge-stale"
+                            ><span class="glyph-stale" aria-hidden="true"
+                              >⚠</span
+                            >
+                            near budget</span
+                          >
+                        </div>
+                      </li>
+                      <li class="meter">
+                        <div class="item-line">
+                          <span class="group-id">GROUP-12</span>
+                          <span class="muted">g11-skeleton</span>
+                        </div>
+                        <div
+                          class="bar pct-49"
+                          role="progressbar"
+                          aria-valuemin="0"
+                          aria-valuemax="100"
+                          aria-valuenow="49"
+                          aria-label="GROUP-12 cost against budget"
+                          title="GROUP-12: $9.80 of $20.00, 49%"
+                        >
+                          <span class="bar-fill"></span>
+                        </div>
+                        <div class="meter-value">$9.80 of $20.00, 49%</div>
+                      </li>
+                    </ul>
+                    <p class="dash-sub">Account usage</p>
+                    <ul>
+                      <li class="meter">
+                        <div class="item-line">
+                          <span>Current window</span>
+                        </div>
+                        <div
+                          class="bar pct-23"
+                          role="progressbar"
+                          aria-valuemin="0"
+                          aria-valuemax="100"
+                          aria-valuenow="23"
+                          aria-label="Window usage"
+                          title="Window 23%, resets 18:00"
+                        >
+                          <span class="bar-fill"></span>
+                        </div>
+                        <div class="meter-value">Window 23%, resets 18:00</div>
+                      </li>
+                      <li class="meter">
+                        <div class="item-line">
+                          <span>Current week</span>
+                        </div>
+                        <div
+                          class="bar pct-41"
+                          role="progressbar"
+                          aria-valuemin="0"
+                          aria-valuemax="100"
+                          aria-valuenow="41"
+                          aria-label="Week usage"
+                          title="Week 41%, resets Mon 05:30"
+                        >
+                          <span class="bar-fill"></span>
+                        </div>
+                        <div class="meter-value">
+                          Week 41%, resets Mon 05:30
+                        </div>
+                      </li>
+                    </ul>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </body>
+</html>

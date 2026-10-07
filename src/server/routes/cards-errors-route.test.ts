@@ -11,6 +11,7 @@ import {
   queueLinearFetch,
   restoreFetch,
 } from "../test-support/linear-fetch.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 const env = isolateEnv();
 fs.writeFileSync(
@@ -144,12 +145,15 @@ function craft(t: TestContext, over: Partial<Card>): string {
 }
 
 const local = async (title = "local") =>
-  (await store.createLocalCard(title, "")).id;
+  (await store.createLocalCard(DEFAULT_BOARD_KEY, title, "")).id;
 
 async function group(): Promise<{ g: string; a: string; b: string }> {
   const a = await local("member a");
   const b = await local("member b");
-  const minted = await store.createGroupCard("group", [a, b]);
+  const minted = await store.createGroupCard(DEFAULT_BOARD_KEY, "group", [
+    a,
+    b,
+  ]);
   assert.ok(minted.ok);
   return { g: minted.card.id, a, b };
 }

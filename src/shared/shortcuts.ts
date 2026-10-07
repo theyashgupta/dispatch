@@ -1,5 +1,5 @@
 import { COLUMNS } from "./types.js";
-import { COLUMN_LABELS } from "./event-copy.js";
+import { COLUMN_LABELS } from "./column-labels.js";
 
 export interface ShortcutEntry {
   key: string;
@@ -57,14 +57,6 @@ export const INBOX_SHORTCUTS: readonly ShortcutEntry[] = [
   { key: "o", label: "Open link" },
   { key: "u", label: "Toggle read" },
   { key: "a", label: "Ask about this" },
-];
-
-export const TICKETS_BINDINGS: readonly { key: string; label: string }[] = [
-  { key: "j", label: "Next row" },
-  { key: "k", label: "Previous row" },
-  { key: "Enter", label: "Open" },
-  { key: "e", label: "Done" },
-  { key: "o", label: "Open link" },
 ];
 
 export const SESSIONS_SHORTCUTS: readonly ShortcutEntry[] = [

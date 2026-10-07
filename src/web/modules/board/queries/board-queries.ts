@@ -8,7 +8,8 @@ import {
 } from "@tanstack/react-query";
 import type { BoardSnapshot, Column } from "../../../../shared/types.js";
 import { boardSnapshotKeys } from "@/queries/board-snapshot-queries";
-import { getCard, getCardComments, moveCard } from "./board-api.js";
+import { moveCard } from "@/queries/cards-api";
+import { getCard, getCardComments } from "./board-api.js";
 
 export const boardKeys = {
   all: ["board"] as const,

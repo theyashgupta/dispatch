@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { Column } from "../../shared/types.js";
 import { isolateEnv } from "../test-support/fixtures.js";
 import { issue } from "../test-support/fake-source.js";
+import { ALL_BOARDS } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("./board.store.js");
@@ -34,11 +35,13 @@ test("the tracked set holds only this source's cards past To Do that the pull mi
     ["t5", "parked"],
   ]);
   await seedAll("other", [["o1", "in_review"]]);
-  assert.deepEqual(store.trackedIssueIds("linear", new Set(["t5"])), [
-    "t3",
-    "t4",
+  assert.deepEqual(
+    store.trackedIssueIds(ALL_BOARDS, "linear", new Set(["t5"])),
+    ["t3", "t4"],
+  );
+  assert.deepEqual(store.trackedIssueIds(ALL_BOARDS, "other", new Set()), [
+    "o1",
   ]);
-  assert.deepEqual(store.trackedIssueIds("other", new Set()), ["o1"]);
 });
 
 test("the tracked set orders active, active gone, Done, Done gone, newest first, and honors the cap", async () => {
@@ -56,14 +59,14 @@ test("the tracked set orders active, active gone, Done, Done gone, newest first,
   );
   assert.equal(store.getCard("parked-gone")?.goneFromLinear, true);
   assert.equal(store.getCard("done-gone")?.goneFromLinear, true);
-  assert.deepEqual(store.trackedIssueIds("tier", new Set()), [
+  assert.deepEqual(store.trackedIssueIds(ALL_BOARDS, "tier", new Set()), [
     "review",
     "parked-gone",
     "done-new",
     "done-old",
     "done-gone",
   ]);
-  assert.deepEqual(store.trackedIssueIds("tier", new Set(), 2), [
+  assert.deepEqual(store.trackedIssueIds(ALL_BOARDS, "tier", new Set(), 2), [
     "review",
     "parked-gone",
   ]);
@@ -74,7 +77,7 @@ test("a grouped card past To Do is in the tracked set", async () => {
   const card = store.getCard("g1");
   assert.ok(card);
   card.groupId = "GROUP-9";
-  assert.deepEqual(store.trackedIssueIds("grp", new Set()), ["g1"]);
+  assert.deepEqual(store.trackedIssueIds(ALL_BOARDS, "grp", new Set()), ["g1"]);
 });
 
 test("a display-only refresh that clears a gone flag writes no sync_in event", async () => {
@@ -110,5 +113,7 @@ test("a To Do card with a fresh pending hold is tracked; an expired one is not",
     id: "st-progress",
     at: new Date(Date.now() - 300_000).toISOString(),
   };
-  assert.deepEqual(store.trackedIssueIds("pend", new Set()), ["fresh"]);
+  assert.deepEqual(store.trackedIssueIds(ALL_BOARDS, "pend", new Set()), [
+    "fresh",
+  ]);
 });

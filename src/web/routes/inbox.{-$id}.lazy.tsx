@@ -1,5 +1,5 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { SlackThread } from "@/features/slack";
+import { SlackThreadView } from "@/modules/slack";
 import { InboxView } from "@/modules/inbox";
 import { useAppState } from "@/components/AppState";
 
@@ -12,7 +12,7 @@ function InboxRoute() {
   return (
     <InboxView
       {...props}
-      renderSlackThread={(args) => <SlackThread {...args} />}
+      renderSlackThread={(args) => <SlackThreadView {...args} />}
     />
   );
 }

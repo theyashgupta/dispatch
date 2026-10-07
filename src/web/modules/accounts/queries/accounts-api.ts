@@ -1,4 +1,7 @@
 import type {
+  AccountSessionEntry,
+  AccountSwitchResponse,
+  ApplyChoice,
   ClaudeAccountSummary,
   ClaudeLoginView,
   ClaudeUsageSnapshot,
@@ -6,7 +9,7 @@ import type {
 import { http, httpError } from "@/lib/http";
 
 /**
- * Every Claude account with its usage snapshot plus the active pointer: GET /api/accounts.
+ * Fetch every Claude account with its usage snapshot plus the active pointer: GET /api/accounts.
  *
  * @remarks
  * Throws on any non-2xx.
@@ -14,10 +17,12 @@ import { http, httpError } from "@/lib/http";
 export async function getAccounts(): Promise<{
   activeId: string;
   accounts: ClaudeAccountSummary[];
+  sessions: AccountSessionEntry[];
 }> {
   const result = await http<{
     activeId: string;
     accounts: ClaudeAccountSummary[];
+    sessions: AccountSessionEntry[];
   }>("/api/accounts");
   if (!result.ok) {
     throw httpError("getAccounts", result);
@@ -27,16 +32,31 @@ export async function getAccounts(): Promise<{
 
 /**
  * Make an account the one new sessions launch on: PUT /api/accounts/active.
+ *
+ * @remarks
+ * `applyToRunning` picks which running sessions follow. A success reports how many moved now,
+ * how many wait for the end of their turn and how many the server skipped.
  */
 export async function setActiveAccount(
   id: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const result = await http("/api/accounts/active", {
+  applyToRunning: ApplyChoice,
+): Promise<
+  | { ok: true; moved: number; queued: number; skipped: number }
+  | { ok: false; error: string }
+> {
+  const result = await http<AccountSwitchResponse>("/api/accounts/active", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({ id, applyToRunning }),
   });
-  if (result.ok) return { ok: true };
+  if (result.ok) {
+    return {
+      ok: true,
+      moved: result.data.moved.length,
+      queued: result.data.queued.length,
+      skipped: result.data.skipped.length,
+    };
+  }
   if (result.status === 404) {
     return { ok: false, error: "That account is no longer registered." };
   }
@@ -109,7 +129,7 @@ export async function startLogin(
 }
 
 /**
- * The login state machine's current view: GET /api/accounts/login.
+ * Fetch the login state machine's current view: GET /api/accounts/login.
  */
 export async function getLoginState(): Promise<ClaudeLoginView> {
   const result = await http<ClaudeLoginView>("/api/accounts/login");
