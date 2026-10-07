@@ -30,6 +30,7 @@ import type {
   BoardSnapshot,
   Card,
   CreateBoardResult,
+  DecisionItem,
   NewBoard,
   Column,
   ColumnChange,
@@ -46,7 +47,9 @@ import type {
   SourceKind,
   TrackedRefresh,
   Item,
+  LinearComment,
   LoopProgress,
+  ShipFlow,
   OrchestrationEvent,
   SettableItemState,
   StartError,
@@ -62,6 +65,7 @@ import type { CardSearchResult } from "../../shared/search.js";
 import {
   type BoardDb,
   type BoardMeta,
+  type OrchestratorTokenRow,
   type PushSubscriptionRow,
   STORE_SCHEMA_VERSION,
   assertSchemaOpenable,
@@ -1527,6 +1531,16 @@ class BoardStore extends EventEmitter {
     return this.db.listEvents(board, cardId, limit);
   }
 
+  /** Activity events of one board with `id > sinceId`, oldest first, at most `limit`. */
+  listEventsSince(
+    board: BoardKey,
+    cardId: string | null,
+    sinceId: number,
+    limit: number,
+  ): ActivityEvent[] {
+    return this.db.listEventsSince(board, cardId, sinceId, limit);
+  }
+
   /**
    * Store a group card's loop progress, writing only when it differs from the stored value.
    *
@@ -1576,6 +1590,65 @@ class BoardStore extends EventEmitter {
     limit: number,
   ): OrchestrationEvent[] {
     return this.db.listOrchestrationEvents(board, sinceId, limit);
+  }
+
+  /** Store a token hash as the only live token of one orchestrator, revoking any earlier one. */
+  replaceOrchestratorToken(
+    tokenHash: string,
+    boardKey: BoardKey,
+    orchestratorId: string,
+  ): void {
+    this.db.replaceOrchestratorToken({
+      tokenHash,
+      boardKey,
+      orchestratorId,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  /** Revoke every live token of one orchestrator and return how many were revoked. */
+  revokeOrchestratorTokens(boardKey: BoardKey, orchestratorId: string): number {
+    return this.db.revokeOrchestratorTokens(
+      boardKey,
+      orchestratorId,
+      new Date().toISOString(),
+    );
+  }
+
+  /** The token row stored under one SHA-256 hash, live or revoked, or undefined. */
+  findOrchestratorToken(tokenHash: string): OrchestratorTokenRow | undefined {
+    return this.db.findOrchestratorToken(tokenHash);
+  }
+
+  /** Store one new decision item. */
+  insertDecisionItem(item: DecisionItem): void {
+    this.db.insertDecisionItem(item);
+  }
+
+  /** One decision item by id, or undefined. */
+  getDecisionItem(id: string): DecisionItem | undefined {
+    return this.db.getDecisionItem(id);
+  }
+
+  /** Decision items of one board, oldest first, only those in `state` when given. */
+  listDecisionItems(
+    boardKey: BoardKey,
+    state?: DecisionItem["state"],
+  ): DecisionItem[] {
+    return this.db.listDecisionItems(boardKey, state);
+  }
+
+  /** Answer one open decision item and return it; null when it is unknown or already answered. */
+  answerDecisionItem(
+    id: string,
+    answer: NonNullable<DecisionItem["answer"]>,
+  ): DecisionItem | null {
+    return this.db.answerDecisionItem(id, answer, new Date().toISOString());
+  }
+
+  /** Mark one answered decision item used; false when it is unknown, open or already used. */
+  consumeDecisionItem(id: string): boolean {
+    return this.db.consumeDecisionItem(id, new Date().toISOString());
   }
 
   /**
@@ -4176,6 +4249,61 @@ class BoardStore extends EventEmitter {
       if (queue.dependsOn !== undefined) card.dependsOn = [...queue.dependsOn];
       return [];
     });
+  }
+
+  /** Store the orchestrator that created a card and the launch values of a held group start. */
+  setOrchestratorFields(
+    id: string,
+    fields: Pick<Card, "createdByOrchestrator" | "launch">,
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      if (fields.createdByOrchestrator !== undefined) {
+        card.createdByOrchestrator = fields.createdByOrchestrator;
+      }
+      if (fields.launch !== undefined) card.launch = { ...fields.launch };
+      return [];
+    });
+  }
+
+  /** Store the ship flow of a group card; an unknown card is a no-op. */
+  setShipFlow(id: string, flow: ShipFlow): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      card.shipFlow = structuredClone(flow);
+      return [];
+    });
+  }
+
+  /** Change the title or description of a local card; false for an unknown or non-local card. */
+  updateLocalCardText(
+    id: string,
+    patch: { title?: string; description?: string },
+  ): Promise<boolean> {
+    let updated = false;
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card?.source !== "local") return [];
+      if (patch.title !== undefined) card.title = patch.title;
+      if (patch.description !== undefined) card.description = patch.description;
+      card.updatedAt = new Date().toISOString();
+      updated = true;
+      return [];
+    }).then(() => updated);
+  }
+
+  /** Append a comment entry to a local card; false for an unknown or non-local card. */
+  addLocalComment(id: string, comment: LinearComment): Promise<boolean> {
+    let added = false;
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card?.source !== "local") return [];
+      card.comments = [...(card.comments ?? []), { ...comment }];
+      added = true;
+      return [];
+    }).then(() => added);
   }
 
   /** Archive or restore a board; the default board cannot be archived. */
