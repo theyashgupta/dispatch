@@ -122,6 +122,7 @@ Global bans:
 
 - Each non-test domain file and each `*-queries.ts` file, in a module or in `src/web/queries/`, has a colocated `node:test` file named `<subject>.test.ts`. The `*-queries.ts` tests cover the `*-api.ts` glue.
 - The repo has no `.tsx` test runner. Check views, containers and components in a browser.
+- The screenshot suite in `tests/visual/` (Playwright) compares seven screens in the light and the dark theme, at desktop and phone width, with committed baselines per platform, and opens every route to fail on a console or page error. It runs locally and in the CI `visual` job after the `check` job. A changed pixel fails it.
 
 ## The only-shadcn rule
 

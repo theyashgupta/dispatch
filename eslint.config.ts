@@ -778,7 +778,7 @@ export default tseslint.config(
   },
 
   {
-    files: [".claude/**/*.mjs"],
+    files: [".claude/**/*.mjs", "tests/**/*.mjs"],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: { globals: globals.node },
   },
