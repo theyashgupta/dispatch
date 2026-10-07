@@ -1,0 +1,11 @@
+import { useEffect, useState } from "react";
+
+/** Return the current time in milliseconds, refreshed every `intervalMs`. */
+export function useNow(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  return now;
+}

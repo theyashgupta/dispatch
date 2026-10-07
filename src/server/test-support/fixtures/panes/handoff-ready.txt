@@ -1,0 +1,7 @@
+  - Handoff doc: /Users/yash/dispatch-workspaces/GROUP-9/dispatch/.planning/2026-09-29-g9-ui-revamp-unit-1-phase-4-session-handoff.md
+  HANDOFF_READY g9-ui-revamp
+✻ Sautéed for 2h 34m 33s · done 10:26 PM
+❯ 
+  Fable 5.1 · high  │  ████████░░   79%  792k/1.0M
+  dispatch  │  feat/LOCAL-55-unit-1-tokens-v2-themes  │  thinking  │  Attention-kind  │  5h 61%  │  7d 14%  │  2h38m  │  +3379/-15  │  $96.14
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

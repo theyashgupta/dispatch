@@ -35,6 +35,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Tmux Invocations](#tmux-invocations)
   - [Claude Accounts](#claude-accounts)
   - [Session Account Move](#session-account-move)
+  - [Account Chain](#account-chain)
   - [Orchestration Saga](#orchestration-saga)
   - [Exec Chokepoint](#exec-chokepoint)
   - [Repo Discovery](#repo-discovery)
@@ -58,6 +59,9 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
 - [Known Residuals](#known-residuals)
 - [Verification Gates](#verification-gates)
 - [Orchestration Initiative](#orchestration-initiative)
+  - [Loop Progress](#loop-progress)
+  - [Session Supervisor](#session-supervisor)
+  - [Orchestrator Control Surface](#orchestrator-control-surface)
 
 ## System Overview
 
@@ -2108,6 +2112,19 @@ phase's own plan summaries mis-generalized as "never use `=` for `send-keys`/`ca
   `capturePane(`=${tmuxName}:`, ...)` is the one call site in this codebase already shipping the
   correct colon-qualified form.
 
+**The supervisor sends text through one function (`SHELL-01`, LOCAL-89).** Every text that
+the supervisor types into a running Claude session goes through
+`services/orchestration/supervisor-send.ts#sendConfirmed`. The one exception is the fixed
+`/clear` of the handoff, which writes no transcript entry to confirm; it is typed only after the
+same ready check. The ready check (`supervisor-state.ts#paneReady`) waits up to 60 s for the input
+box with no `warming up` row and no dialog or menu open under it, because a key typed into a
+dialog would pick a row, and with the prompt line as the input box row, so a box left in bash
+mode does not run the line. The send replaces control characters in the line with spaces, sends
+`C-u`, the line with `sendLiteral` and a separate `Enter` after 1.5 s, and then reads the
+transcript for the line. Text over 500 characters goes to a file under
+`<session root>/.dispatch-input/`, and the typed line is a pointer to that file. The targets use
+the `=<name>:` form of contract 5. Do not add a second typed surface for the supervisor.
+
 **Closed (Phase 96 plan 11, R2): `steps.ts`'s own kickoff-sending calls now use the colon-qualified
 form too.** `capturePane`/`sendKeys`/`pasteBuffer` inside `awaitReplReady`/`sendKickoff` (`steps.ts`)
 used to pass the bare, unprefixed session name. Live-reproduced by Phase 94 plan 07: with the exact
@@ -2198,7 +2215,10 @@ the continue action all call it. The service holds the Run Claude card lock
    that does not resolve (`account`).
 3. If Claude runs, type `/exit` only when the turn state is idle and the last lines of the pane show
    the input footer, then
-   wait up to 15 s for the shell prompt. Else return `busy` and change no account state.
+   wait up to 15 s for the shell prompt. Else return `busy` and change no account state. When the
+   CLI instead shows its "Background work is running" exit menu (a background subagent or task
+   outlived the turn), press Escape to stay, so no work stops; the pending move runs at the next
+   turn end.
 4. Set or unset `CLAUDE_CONFIG_DIR` in the tmux session environment, and type the same export or
    unset line into the shell.
 5. Seed the workspace trust for the new config dir.
@@ -2208,7 +2228,8 @@ the continue action all call it. The service holds the Run Claude card lock
    starts a new conversation when no id is recorded, as Run Claude does. `steps.ts#typeLaunchLine`
    first clears the screen and waits up to 3 s until no old input footer or resume refusal shows, so
    the readiness check reads only the new REPL.
-8. Wait for the new REPL.
+8. Wait for the new REPL. A trust dialog that focuses "No, exit" (CLI 2.1.291 lists it first) gets
+   Down before Enter.
 
 **The safe point.** `session-turn.ts` keeps the turn state of each session in memory.
 `UserPromptSubmit` sets busy, `Stop` sets idle, and a `StopFailure` with a rate limit sets limit. A
@@ -2242,6 +2263,138 @@ session.
 login email and organization id after each Default usage refresh and on a 5 minute timer. On a
 change it marks each live session on Default stale. The restart of a stale session is a move to the
 same account through the same service.
+
+### Account Chain
+
+**Record (2026-10-06, LOCAL-94).** The accounts form an ordered chain. When the account in use
+reaches its limit, the server moves the sessions to the next account that has allowance. After the
+reset of a higher account, the server moves the sessions back to it. Automatic moves are off by
+default. Anthropic's terms do not address automatic moves between the accounts of one person, so
+the user must turn them on.
+
+**Storage.** `accounts.json` is version 2. Each added account has a `position`, and Default has
+`defaultPosition`. The migration from version 1 puts Default first and the added accounts after it
+by creation time. The runtime state is in `chain-state.json` next to it
+(`account-chain-state.ts`): the state, buckets and `limitedUntil` of each account, `inUseSince`, the
+exhausted record and the last 50 moves. A corrupt file reads as empty and does not stop the boot.
+The settings are in `config.json` under `claudeAccounts`: `autoMove` (default false),
+`thresholdPercent` (default 100, range 50 to 100) and `minDwellMinutes` (default 15, range 0 to 240).
+
+**States.** `account-state.ts#deriveAccountState` gives each account one state. The first
+rule that applies sets the state:
+
+- `login-expired`: the token read failed (401, 403 or no token) and the folder is logged out.
+- `limited`: a bucket is at or above the threshold, or a limit signal arrived. `limitedUntil` is the
+  latest reset of the full buckets, so a full 7 day bucket holds the account until the 7 day reset.
+- `unknown`: no good read exists, a 401 or 403 read comes from a logged in folder, or a good read
+  has no buckets.
+- `near-limit`: a bucket is at 80 percent or more.
+- `available`: all other cases.
+
+**The selection rule.** `account-selection.ts#selectAccount` takes the chain in position order and
+selects the first account whose state is `available`, `near-limit` or `unknown` and whose
+`limitedUntil` is not in the future. When no account qualifies, the chain is exhausted and the
+result is the earliest `limitedUntil`. The selection never takes a `login-expired` account.
+
+**Triggers.** `account-chain.ts` is the controller. It runs one task at a time in a queue. A manual
+switch through `PUT /accounts/active` runs in the same queue, so it never overlaps a chain move. A
+failover starts on these signals for the account in use:
+
+1. A usage read at or above the threshold.
+2. A limit surface on the screen of a session of the account in use. A pane scan each 30 s finds
+   the surface also when no hooks run. The signal fires once, when the session enters the limit
+   state. A pane check does not signal from a hook `limit` when the screen shows no surface. A session marked stale does
+   not signal. The controller then reads the usage of the account. It fails over only when that
+   read is at the threshold or is not a good read. A reset time read from the screen is capped at
+   5 hours from now.
+3. A `StopFailure` hook with a rate limit. This trigger needs no usage read.
+
+A limit surface whose printed time passed in the last 5 hours is a stale surface when a later good
+read shows every bucket below the threshold. The controller ignores it
+(`account-state.ts#isStaleSurface`).
+
+**Cadence.** `claude-usage.ts` reads each account at boot and each 15 minutes. While a bucket of the
+account in use is above 80 percent, it reads that account each 2 minutes. A 429 response uses the
+`Retry-After` backoff.
+
+**Stability.** After a chain move, a usage trigger does not move the sessions again for
+`minDwellMinutes`. Triggers 2 and 3 are hard signals and override the dwell. A limited account stays
+limited until its `limitedUntil`, also when a read before that time is below the threshold. A manual switch through `PUT /accounts/active` ends a running dwell and does not start a new one.
+
+**Failover.** With `autoMove` true, the controller sets the pointer, records the move and starts a
+new dwell. Then `session-account-apply.ts#applyAutomaticMove` changes the pending moves. Each
+pending move to the old account now goes to the new account. A pending move on a pinned session
+does not change. A pending move that the chain queued stays a chain move. The function does not
+change other pending moves, so a manual pending move to a different account still runs. Only a
+manual switch through `PUT /accounts/active` removes the pending moves to other accounts. Then the
+function moves the sessions of the old account through the session move service (see Session
+Account Move): idle and limit sessions now, busy sessions as pending moves. It skips pinned
+sessions and sessions that have a pending move to a different account. A session whose move fails
+goes into the skipped list, and the other sessions still move. The controller records the move
+also when a session fails. A moved session gets the prompt `Continue.` only when the move left a
+limit surface that was on the screen (`session-account-apply.ts#continueAfterMove`). The server
+types the prompt only when the pane shows the ready input footer, is not busy and shows no limit
+surface. With `autoMove` false, the controller moves nothing and sends one offer. It does not send
+the same offer again until an offer of a different kind or for a different pair of accounts goes
+out, a move runs, an account leaves `limited` or the server restarts. When `autoMove` changes from
+true to false, the controller removes each pending move that it queued.
+
+**Return.** Each limited account has a timer at `limitedUntil` plus 2 minutes, or 15 minutes from
+now when the time is unknown or past. The timer reads the usage again. The controller accepts only
+a good read that it took after the timer fired. If the read is not good, or the account is
+`unknown` or `login-expired`, the timer is set again 15 minutes on. If the account is no longer limited and ranks
+above the account in use, the sessions return to it with the failover policy. If it is still
+limited, the timer is set again. A usage read that clears the account does not cancel the timer,
+so a usage read never starts a return.
+
+**Timers.** A timer task that fails runs again 15 minutes later. The 30 s scan also runs each timer
+whose time is past, because a timer does not count the time while the computer sleeps. A delay is
+at most 24 days. At boot, the controller sets each timer again from `chain-state.json`, and a timer
+whose time is already past fires at once. At boot it also checks a return at once for the account
+that the last chain move left, when the work is still on that move's target and the account is no
+longer limited. The last chain move counts only while no manual switch or Switch now came after it, so a manual pick is never undone at boot. Removing an account removes its chain
+entry and its timer.
+
+**Exhausted chain.** When no account qualifies, the controller moves nothing, records the earliest
+reset and sends one notification. A timer at that reset plus 2 minutes reads every account again.
+The controller accepts only good reads that it took after the timer fired. Then it runs the
+selection again. If the selected account has no such read, the timer is set again 15 minutes on. If
+it selects another account, the sessions move to it when `autoMove` is true, and the controller
+sends an offer when `autoMove` is false. If it selects the account in use, each of its sessions that
+still shows a limit surface continues: on the automatic continue line the server sends Escape and
+then `Continue.`; on the options menu it selects the stop option, or the wait option when no stop
+option shows, and then sends `Continue.`. A session with no limit surface on the screen gets no
+key. No key path selects a credits option.
+
+**Pin.** `accountPinned` on a session keeps it on its account. Automatic moves and "Switch now" skip
+it. A manual move still moves it: `POST /cards/:id/session/account`, and `PUT /accounts/active`
+with `applyToRunning`. `PUT /cards/:id/session/account-pin` sets the pin. Setting the pin removes
+the pending move of the session, and a pending move that the chain queued checks the pin again
+before it runs.
+
+**Routes.** `GET /accounts` returns each account in chain order with `position`, `state`,
+`buckets`, `limitedUntil` and `inUse`, the sessions with `pinned`, and `chain` with the settings, the
+exhausted record, the history (newest first) and `inUseSince`. `PUT /accounts/chain/order` takes
+every account id once and returns 400 `invalid-order` otherwise. `PUT /accounts/chain/settings`
+returns 400 `invalid-settings` for a value out of range. `POST /accounts/chain/switch-now` returns
+200 with `to` and `moves`, or 409 `no-eligible-account` when no other account qualifies.
+
+**Failover function for LOCAL-89.** `account-chain.ts#requestFailover` moves the sessions of the
+account in use now to the first qualifying account in chain order, other than the account in use. It ignores `autoMove` and the dwell, starts
+a new dwell and skips pinned sessions. It returns `{ ok: false, error: "no-eligible-account" }`
+when no other account qualifies. "Switch now" calls it.
+
+**Records.** `account-chain-records.ts#recordChainEvent` writes one activity row and sends one push
+notification for each failover, return and exhausted chain. The kinds are `account_failover`,
+`account_return` and `account_chain_exhausted`. For a failover or a return, the row `reason` is the
+JSON text of `src/shared/account-chain.ts#buildChainReason`. It holds the trigger, the labels of the
+two accounts and the number of sessions. The trigger is `usage`, `surface`, `rate-limit`, `reset`,
+`switch-now` or `held`. A `held` row is an offer that `autoMove` false holds back, and its number
+is 0. For a move, the number is the sessions moved plus the sessions queued. It is null when the
+move step failed. `parseChainReason` reads the row. It also reads an older row in the form
+`<from> to <to>`, which has no number. `describeChainMove` writes the text of the activity feed
+and of the push body, so the two are the same. `push-send.ts#sendPush` sends a push with or
+without a card. A chain push has no card, and the notification opens the Accounts page.
 
 ### Orchestration Saga
 
@@ -3976,6 +4129,14 @@ is a behavior change, not a refactor.
    there are no external consumers to keep compatible; a future reader must not "fix" a missing
    version field. Keep the file location and every field name. `Card.boardKey` and
    `BoardSnapshot.boardKey` name the board of the card and of the snapshot.
+   A group card stores `Card.loopProgress` (LOCAL-88, see [Loop Progress](#loop-progress)). A
+   `Session` record stores the status line meters `contextPercent`, `model`, `cost`, `usage` and
+   `metersAt`. The card fields `contextPercent`, `model`, `cost` and `usage` are wire-only:
+   `redactCard` copies them from the active session, and `board.json` never stores them on the card.
+   A `Session` record also stores the supervisor fields `state`, `stateReason`, `stateSince` and
+   `transcriptPath` (LOCAL-89, see [Session Supervisor](#session-supervisor)); `redactCard`
+   copies them from the active session onto the wire card. A group card stores `dependsOn` and
+   `startQueued`.
 2. **SSE frame format.** `data: ${JSON.stringify(BoardSnapshot)}\n\n`; named heartbeat
    `event: ping\ndata: 1\n\n`; headers incl. `X-Accel-Buffering: no`; **server `KEEPALIVE_MS` (15s)
    must stay in lockstep with client `HEARTBEAT_MS`** (watchdog trips at 3×). No compression on
@@ -4000,6 +4161,32 @@ is a behavior change, not a refactor.
 real membership directly, independent of windowing` below for the full envelope contract. Each
    collection route takes the optional `board` query parameter, and the board routes live under
    `/api/boards` (see Board API).
+   `POST /api/loops/report` (LOCAL-88) answers `202`, `401` for a missing or unknown
+   `x-dispatch-token`, and `400` for a token of a card that is not a group or for a body outside
+   the schema.
+   `PUT /api/boards/:key/policy` (LOCAL-89) answers `200` with `{ board }`, `400` for an invalid
+   board key or a body outside the strict policy schema (an unknown field, `usageLimit` other than
+   `wait` or `stop`, a value out of range, `handoffHardPercent` below `handoffPercent`) and `404`
+   for an unknown board.
+   The orchestrator routes (LOCAL-90, see
+   [Orchestrator Control Surface](#orchestrator-control-surface)) all sit under `/api/orchestrator/`
+   and answer `401` for a missing or bad token, `403` for a card of another board or a policy
+   refusal (`policy-refused`, `done-not-own-card`), `400`, `404` or `409` for a refusal, and `502`
+   when Linear refuses an `add_comment`. Their success codes: `200` for `GET /cards`, `GET /cards/:id`,
+   `GET /sessions`, `GET /groups/:id/progress`, `GET /sessions/:cardId/pane`, `GET /events`,
+   `GET /policy`, `PATCH /tickets/:id`, `POST /tickets/:id/move`, `POST /sessions/:cardId/input`,
+   `POST /sessions/:cardId/resume`, `POST /sessions/:cardId/stop`,
+   `POST /groups/:cardId/approve-roadmap`, `POST /events/wait` and `GET /groups/:cardId/ship`;
+   `201` for `POST /tickets`, `POST /tickets/:id/comments`, `POST /base-branches`,
+   `POST /groups` and `POST /decisions`; `202` for `POST /groups/:id/start`,
+   `POST /sessions/:cardId/handoff` and `POST /groups/:cardId/ship`.
+   `GET /api/decisions` answers `200` with `{ items }`, and the optional `?state=` is `open` or
+   `answered`. `POST /api/decisions/:id/answer` takes `{ optionId, note? }` and answers `200` with
+   `{ item }`, `400` for an unknown option or a bad body, `404` for an unknown item and `409`
+   `already-answered`.
+   `GET /api/events` takes `?since=<event id>` (digits only). With it the route answers the rows
+   after that id, oldest first, in the same `{ events }` envelope, and a value that is not a
+   safe integer answers `400`.
 4. **Persistence format + location.** `~/.dispatch/{board.json,config.json}`; `board.json` ===
    `BoardSnapshot` JSON; atomic writes via `write-file-atomic`; config at mode `0600`; the `"//"`-keyed
    config template. Pasted ticket images live under `~/.dispatch/attachments/<cardId>/<sha256-16>.<ext>`
@@ -4718,3 +4905,240 @@ The orchestration initiative (LOCAL-83 to LOCAL-93) adds one board per project, 
 - `docs/standards/orchestration-design.md`: the glossary and the decision records D-1 to D-9 (board model, card identifiers, supervisor and orchestrator duties, control surface, progress protocol, policy, more than one orchestrator, ship flow, never list), with the scope change for each later ticket.
 
 Term rule: "orchestrator" is a Claude session that belongs to one board, and "supervisor" is the server code that watches sessions. The [Orchestration Saga](#orchestration-saga) is the session start saga and keeps its name.
+
+### Loop Progress
+
+LOCAL-88 makes the server the one reader of roadmap loop progress (decision record D-5).
+
+**Sources.** For each tracked group card, `loop-progress-reader.ts` reads files under the session
+root (`card.workspacePath`): the one `.roadmap/<slug>/progress.md`, the roadmap file at the root
+that `progress.md` line 1 names (else the only `ROADMAP*.md`), the loop engine file
+`.claude/ralph-loop.local.md` (else its `.done` copy), and for each unit its PRD and the
+`state.md` and `attempts.md` files of `<repo>/.planning/<slug>-unit-<n>/`. The pure parsers are in
+`loop-progress.ts`. The result is `Card.loopProgress`. A tracked card is a group card that is not
+in Done and has a `workspacePath`.
+
+**Refresh.** The reader reads a tracked card when a watched folder changes (300 ms debounce per
+card) and every 60 s. The watched folders are the session root, `.claude/`, `.roadmap/<slug>/`
+and the phase folder of the current unit. The reader updates the watches after each read of a
+card, and the 60 s read also removes the watches of cards that left. The store
+writes the card only when the model, without `readAt`, changes.
+
+**Tolerance.** A path from file text must stay inside the session root, also after the reader
+follows symlinks. Else the reader skips it with the warning `<path>: outside the session root`.
+The reader reads at most 1 MiB per file (`<path>: larger than 1 MiB`). A missing or damaged file
+adds a warning to `loopProgress.warnings`, and the rest of the model still fills. A root with no
+loop files gives no model, and the card keeps its last stored model. The reader never writes a
+loop file, and no reader error stops the server.
+
+**Report call.** A loop can report a gate result, so that the board shows it at once. A session
+has the variables `DISPATCH_HOOK_PORT` and `DISPATCH_HOOK_TOKEN`. Run this command after each gate
+line (pass or RED attempt) and after each unit boundary commit (`"kind":"unit"`, no `phase`):
+
+```bash
+[ -n "$DISPATCH_HOOK_PORT" ] && [ -n "$DISPATCH_HOOK_TOKEN" ] && curl -s -m 5 -o /dev/null -X POST -H "content-type: application/json" -H "x-dispatch-token: $DISPATCH_HOOK_TOKEN" -d '{"kind":"phase","unit":2,"phase":5,"result":"pass"}' "http://127.0.0.1:${DISPATCH_HOOK_PORT}/api/loops/report" || true
+```
+
+The body is strict: `kind` (`phase` or `unit`), `unit` (1 to 99), `phase` (1 to 99, required for
+`phase`), `result` (`pass` or `fail`) and an optional `note` (at most 500 characters). The server
+takes the card and the session from the token, records one `loop_gate` row in the
+`orchestration_events` table, and starts a read of that card. The row append does not go through
+the store queue, because the table is append-only and changes no card (the push subscription
+write is the precedent). It answers `202`. The report never
+writes progress: the loop files stay the only source. `loops.route.ts` holds the route and
+`loop-report.ts` the service.
+
+**Session meters.** On each pane capture, on every status channel, the marker watcher parses the
+two status line rows that `~/.claude/statusline.sh` draws (`status-line.ts`). When the meters of a
+session change, `setSessionMetersIfSession` writes `contextPercent`, `model`, `cost`, `usage` and
+`metersAt` (the time of the last change) on that session record. `redactCard` copies the active session meters onto the wire
+card and into `sessionSummaries`. A status line of another format gives no meters.
+
+**Vocabulary check.** `check-doc-drift.mjs` skips its `ROADMAP`, `.planning/` and
+`Phase <number>` patterns for the loop file modules only, because those words are their input
+format.
+
+### Session Supervisor
+
+LOCAL-89 adds the supervisor: server code that watches each Claude session of a board and does
+the fixed duties of decision record D-3. The session root is the session `workspacePath` (else
+the card one), where claude runs and the loop files live; it is never `workspace.folder`, the
+parent folder of the source repositories. It runs only on a board whose policy has
+`supervisor: on`. With `off`, it reads no state, writes no event, sends no key and holds no
+power child; the status line meters still run.
+
+**Transcript.** The supervisor reads the transcript path that the hooks report; else the file
+named by the Claude session id, else the newest `.jsonl`, in the project folder
+`<config dir>/projects/<session root with each character that is not a letter or a digit
+replaced by ->`.
+
+**Feed.** The marker watcher calls the pane sink (`setPaneSink`) after each pane capture. The
+supervisor uses that capture and adds no second capture loop. The registry
+(`supervisor-registry.ts`) keeps one watcher per tmux session name.
+
+**States.** `supervisor-state.ts` (pure) reads the pane, the transcript tail and the loop
+progress and gives one of 12 states: `working`, `idle`, `needs_input`, `permission_prompt`,
+`handoff_ready`, `roadmap_complete`, `usage_limit_dialog`, `usage_limit_wait`, `api_error`,
+`stale`, `lost` and `shell_prompt`. A dialog state needs two captures that agree, and `idle`
+needs three equal samples 60 s apart. Each change is one `supervisor_state` row in
+`orchestration_events` and sets `state`, `stateReason` and `stateSince` on the session. A
+`needs_input` state moves the card to the Needs input column.
+
+**Duties.** `supervisor-plan.ts` (pure) plans the actions for one state change, and
+`supervisor-actions.ts` runs them. An action that sends a key or changes the state writes a
+`supervisor_action` row; an unconfirmed send and a move to `needs_input` add their own rows. An
+action that finds nothing to do, such as an `Escape` already sent, writes no row.
+
+- Restart: an idle group loop with an active engine file gets one continue prompt per unit and
+  phase. The next stop in the same phase sets `needs_input` with `supervisor_gave_up`.
+- API error and sleep cut: one continue prompt per phase. These two share one budget; the
+  restart has its own.
+- Prompts: the dangerous delete prompt and the held peer message are declined. Any other
+  permission prompt gets no key.
+- Loop close: at `roadmap_complete` the engine file is renamed to its `.done` copy.
+- Lost session and shell prompt: a pane whose shell owns the foreground is relaunched with
+  `runClaude`; any other case runs the resume saga. The resume prompt is typed only after claude
+  takes the foreground, within 60 s. A failed relaunch, a lost session that stays gone, or claude
+  that does not start sets `resume_failed`; an unconfirmed resume prompt is recorded as
+  unconfirmed.
+- Handoff (`supervisor-handoff.ts`): at `handoffPercent` the session gets the handoff request
+  once per crossing, and once more at `handoffHardPercent`; the hard request tells the loop to
+  hand off now. At `handoff_ready` the supervisor waits until the pane is ready and not busy (a
+  "Waiting for N background" line counts as busy), types `/clear`, checks the pane again before
+  its `Enter`, sends the resume prompt, and waits up to 80 s for the engine file to name the new
+  transcript. The session keeps its old transcript path until the engine names the new one.
+- Usage limit (`supervisor-limit.ts`): both policies select the stop and wait row, else the wait
+  here row, and never a credits row. Before each `Enter` the supervisor reads the menu again and
+  never presses `Enter` on a credits row. Then policy `stop` sets `needs_input` with
+  `usage_stop`. Policy `wait` continues after the reset time plus 2 minutes; when the engine file
+  says `handoff-pending`, it sends `Escape` at the auto continue notice and starts a fresh session
+  after the reset instead. The timer re-checks at that time that the session is live, has no stop
+  reason, and that its board still has `supervisor: on` and `usageLimit: wait`. A timer delay is
+  capped at the Node timer maximum (2^31 - 1 ms).
+- The 60 s pass (`supervisor-pass.ts`): it holds the keep awake child, records a
+  `machine_wake` row when its timer fires more than 30 s late, records a `pr_state` row for each
+  change of the PR list of a group, starts a queued group when each group in `dependsOn` is done
+  and the board is under `concurrencyCap`, and sets `needs_input` with `budget` at the next gate
+  change after the cost of a group reaches `budgetPerGroup`. The cost of a session is a running
+  total: when its status line meter drops (a claude relaunch starts it at 0), the pass adds the
+  last value. The total lives in server memory.
+
+**Hold.** A `needs_input` that the supervisor set with a `stateReason` stays until a busy sign,
+a permission prompt, a lost session or a shell prompt shows. Quiet samples do not plan again.
+Two reasons hold longer. A `budget` stop sends no key, so only a lost session or a shell prompt
+releases it; the 60 s pass clears its reason when a raised or removed budget allows the cost. A
+`resume_failed` hold releases only on a busy sign, so a failed resume is not planned again on
+every sample.
+
+**Keep awake.** `adapters/power.ts` holds one `caffeinate -is -w <server pid>` child while a
+session of a supervised board is live. It spawns the child through `adapters/exec.ts`. The `-w`
+flag ends the child with the server, and shutdown ends it at once.
+
+**Fixed values.** These are not policy fields: idle after three equal samples 60 s apart, stale
+after 15 minutes with a busy sign and no transcript growth, one continue prompt per stop per
+phase, send waits of 1.5 s, 10 s and 10 s, a ready wait of 60 s, and a reset wait plus 2 minutes.
+
+**Policy route.** `PUT /api/boards/:key/policy` writes the D-6 policy fields of a board. It is a
+user route; no orchestrator route or tool changes a policy.
+
+### Orchestrator Control Surface
+
+LOCAL-90 gives an orchestrator a fixed set of server calls (decision records D-4 and D-9). The
+tool and route reference is the Tool reference of `docs/standards/orchestration-design.md`; this
+section holds the parts that span files.
+
+**Router.** `routes/orchestrator.route.ts` holds every route under `/api/orchestrator/`, and
+`routes/orchestrator.handlers.ts` holds their handlers. The router's `tool()` wrapper
+authenticates the `x-orchestrator-token` header first, runs the handler and
+appends one `tool_call` row to `orchestration_events` for each call, accepted or refused. The row
+is written when the response closes, so a refusal that the error handler answers later carries its
+final status. A close before the response finished is recorded as `client-closed`. A call with no
+token or an unknown token goes under board `-`, which no board read lists; a revoked token is
+recorded on its own board. The row keeps the params, query and
+body apart, with every string cut to 4096 characters.
+
+**Tokens.** `orchestrator-tokens.ts` mints a 256-bit token and stores only its SHA-256 hash in the
+`orchestrator_tokens` table. A new token revokes the earlier live token of the same orchestrator,
+so there is one live token for each orchestrator. Only the user routes
+`POST` and `DELETE /api/boards/:key/orchestrators/:id/token` mint and revoke. A revoked token still
+resolves, so its refused call is recorded on its board.
+
+**Board scope.** Each call acts on the board of its token. `checkScope` in
+`services/domain/orchestrator-scope.ts` refuses a card of another board with 403 `other-board`.
+`refuseOrchestratorTokenOnUserRoute` is mounted first on the API router and answers 403
+`orchestrator-token-on-user-route` for an orchestrator token on any state changing user route,
+the token mint route included. The `/sessions` terminal proxy lies outside `/api` and is not
+covered; the tool allowlist of Unit 4 closes that path.
+
+**Policy.** `services/domain/orchestrator-policy.ts` holds the pure checks: `checkCap` (running
+loops against `concurrencyCap`), `checkBudget` (group cost against `budgetPerGroup`) and
+`checkShipRights` (`shipRights` is not `none`). A refused check is the 403 `policy-refused` with a
+`reason`. Each tool runs its checks before its first write. `start_group` starts the session in
+the tick of its cap check, so two overlapping calls cannot both take the last slot, and waits for
+the start: a failed start restores the queue flag, records a `supervisor_action` event and answers
+409 `start-failed`.
+
+**Session tools.** `orchestrator-sessions.ts` holds `send_input`, `approve_roadmap`,
+`request_handoff`, `resume_loop` and `stop_session`. Each refuses the four keyless states
+(`permission_prompt`, `usage_limit_dialog`, `usage_limit_wait`, `shell_prompt`) with 409
+`session-state-refused`, and refuses a session that stopped on `budget` or `usage_stop` with 403
+`user must resume`; `resume_loop` checks only the stop. A per card in-memory lock answers 409
+`session-busy` for a second session tool on a card, and a running ship flow of the card answers
+409 `ship-running`. `send_input` refuses a text whose typed line starts with `!`, `/`, `#`, `&` or
+`@` with 400 `invalid-text`, because Claude Code reads those as input modes, and a text whose
+typed line is empty. The typed line comes from `typedLine` in `supervisor-send.ts`, the same
+helper `sendConfirmed` types with, so a leading control character cannot hide the mode key.
+`sendLiteral` passes the end of options separator before the text and puts a backslash before a
+trailing semicolon, so a text that starts with a hyphen or ends with a semicolon types as written.
+The ready check refuses a pane whose input box row (the first row between its last two rule lines)
+is not the prompt line, such as a box left in bash, memory or background mode.
+`approve_roadmap` under `roadmapApproval: ask` marks the approve item used in the store write
+that checks it, so one answer approves one plan.
+The budget checks use `groupCost` in `orchestrator-read.ts`, the running total that the supervisor
+budget stop also reads, so a claude relaunch does not reset it. Every typed text goes through
+`supervisor-send.ts#sendConfirmed`, and `stop_session` presses `Escape` once and sets
+`needs_input` with `stop_session`; nothing is killed.
+
+**Decision items and the wait.** `decision-items.ts` stores an open item and records
+`decision_raised`; a `roadmap_approval` item always gets the server options `approve` and
+`reject`. Only the user route `POST /api/decisions/:id/answer` answers an item, and it
+records `decision_answered`. `orchestrator-wait.ts` answers `wait_for_event` from the table first,
+then listens to the store `orchestration` event until a match or the time limit, which is 1 to
+540 seconds. A `tool_call` row never ends a wait unless `kinds` names it, because every call,
+the wait call included, writes one. An aborted request ends the wait and leaves no listener.
+
+**Ship flow.** `ship-flow.ts` runs the D-8 steps for the branches of a finished group in stack
+order. The branch states are `queued`, `merging_main`, `checking`, `pushing`, `waiting_checks`,
+`waiting_merge` (with `open_prs`) or `merging` (with `merge`), `verifying`, `merged` and `failed`.
+Each branch must be a loop unit branch or `test/<slug>-specs`, with a local `refs/heads/<name>`,
+and never `main`, `master`, `HEAD`, a full ref name or the repository base. The first step checks
+that the worktree is clean, then runs `git fetch origin`, a checkout with the no-guess option and
+a merge of `origin/main` with no edit, and records the merged commit as `checked`. The check
+runs on that commit, the push uses the refspec `<checked>:refs/heads/<name>`, and the merge
+passes gh's match head commit option with it; a resumed flow whose HEAD moved stops. Each gh
+call names the repository of the `origin` remote (`repo` on the flow; null unless the host is
+`github.com` or `ssh.github.com`, so an SSH host alias, another host or a local path gives none), and
+an open PR is reused only from the same repository, into `main`, at the checked commit. The
+admin merge retry runs only when every violation clause of the merge error (lines split on
+sentence ends, commas and semicolons) matches the signature rule wording `must have verified
+signatures`.
+The flow never rebases and never edits code. Every git and gh call has a time limit (120 s, 300 s
+for fetch and push, 30 min for the check command) and a 64 MiB output buffer, and the diffs run
+with fixed color, prefix and path settings. The runner reads the board policy before each step
+and poll: `none` stops the flow and `open_prs` stops the merges. The runner keeps its board key,
+and a card that is gone stops it with no write; unwind refuses a group whose flow runs with 409
+`ship-running`. A thrown runner is stored as stopped. A refused move to Done after the last merge
+keeps the flow done and raises a `ship_failure` item for a manual move. A conflict, a failed check or an identity mismatch stops the flow
+and raises one `ship_failure` decision item. The identity stop compares the author and message of
+the new `origin/main` tip with the `git config` identity that the flow read at its start. One flow
+runs on a board at a time. A flow in the state `running` is started again at boot by
+`resumeShipFlows`, and a stopped flow is replaced by a new `start_ship` call.
+
+**MCP server.** `dispatch mcp` serves the 23 tools over stdio. `bootstrap/cli.ts` reads and checks
+`DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
+`bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
+cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`
+or `sources` in both files, so they never import the app they call. The server uses `node:http` with no client
+timeout, because `wait_for_event` can hold a response for 540 seconds before any header, and a
+cancelled tool call aborts its request. `src/server/test-support/orchestrator-client.ts` is a
+scripted client that starts this server and replays a manual run on a sandbox.

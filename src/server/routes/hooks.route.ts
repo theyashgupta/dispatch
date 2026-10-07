@@ -19,6 +19,7 @@ const hookBodySchema = z.preprocess(
     tool_name: z.unknown().optional(),
     tool_use_id: z.unknown().optional(),
     error: z.unknown().optional(),
+    transcript_path: z.unknown().optional(),
   }),
 );
 

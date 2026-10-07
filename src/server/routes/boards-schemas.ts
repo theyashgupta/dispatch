@@ -5,6 +5,7 @@ import {
   isReservedBoardKey,
   parseBoardKey,
 } from "../../shared/board-key.js";
+import { TEAM_KEY_RE } from "../../shared/orchestrator-limits.js";
 import type { BoardKey } from "../../shared/types.js";
 import { hasControlByte } from "../services/domain/claude-launch.js";
 import { BoardValidationError } from "../services/domain/errors.js";
@@ -12,7 +13,6 @@ import { fieldsOf } from "./schema-primitives.js";
 
 const INVALID_BOARD = "invalid-board";
 const CHECK_COMMAND_MAX = 500;
-const TEAM_KEY_RE = /^[A-Z][A-Z0-9]{0,9}$/;
 
 /**
  * True when `ref` follows the git ref name rules that matter for a base branch.

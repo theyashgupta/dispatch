@@ -1,0 +1,8 @@
+   │ grep -ciE 'resend|nodemailer|sendEmail|novu|smtp' $REPO/src/server/services/orchestration/granola-round.ts $REPO/src/server/routes/meetings.route.ts
+   │ curl -s "$BASE/items?source=meeting" | head -c 200; echo
+   Preflight: stop, reset sandbox, restart
+ │ Dangerous rm operation on possibly-empty variable path: $SB/*.out in `rm -f $SB/*.out` (rewrite it as "${SB:?}"/*.out or use a literal path)
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+ Esc to cancel · Tab to amend

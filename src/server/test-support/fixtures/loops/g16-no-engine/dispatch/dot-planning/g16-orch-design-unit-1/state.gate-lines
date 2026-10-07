@@ -1,0 +1,9 @@
+phase 1 Branch and re-verify Dispatch today GREEN 2026-10-05T16:57:47Z gate=pass
+phase 2 Analyse the manual run GREEN 2026-10-05T17:10:04Z gate=pass
+phase 3 Product survey GREEN 2026-10-05T17:10:04Z gate=pass
+phase 4 Write the research document GREEN 2026-10-05T18:02:12Z gate=pass
+phase 5 Glossary and decision records D-1 to D-5 GREEN 2026-10-05T18:02:16Z gate=pass
+phase 6 Records D-6 to D-9, scope changes and the tool stub GREEN 2026-10-05T18:02:23Z gate=pass
+phase 7 ARCHITECTURE pointer GREEN 2026-10-05T18:06:36Z gate=pass
+phase 8 Gap Analysis GREEN 2026-10-05T18:29:14Z gate=pass
+phase 9 Test Suite + Real E2E Workflows GREEN 2026-10-05T18:34:43Z gate=pass

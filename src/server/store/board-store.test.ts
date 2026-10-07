@@ -538,6 +538,14 @@ void test("redactCard emits one widened summary for a single-session card, activ
       prsUnknown: undefined,
       previews: undefined,
       previewsUnknown: undefined,
+      contextPercent: undefined,
+      model: undefined,
+      cost: undefined,
+      usage: undefined,
+      state: undefined,
+      stateReason: undefined,
+      stateSince: undefined,
+      transcriptPath: undefined,
     },
   ]);
   const json = JSON.stringify(wire);

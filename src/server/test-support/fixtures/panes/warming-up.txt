@@ -1,0 +1,5 @@
+❯ 
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Opus 5.5 (1M context) · high  │  ░░░░░░░░░░  warming up
+  GROUP-4  │  thinking  │  Attention-kind  │  5h 64%  │  7d 64%  │  0s
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

@@ -1,3 +1,7 @@
+import {
+  ITEM_DESCRIPTION_MAX,
+  ITEM_TITLE_MAX,
+} from "../../shared/orchestrator-limits.js";
 import type {
   BoardKey,
   Card,
@@ -5,6 +9,8 @@ import type {
   SettableItemState,
   SourceKind,
 } from "../../shared/types.js";
+
+export { ITEM_DESCRIPTION_MAX, ITEM_TITLE_MAX };
 
 export interface ItemUpsertOptions {
   source: string;
@@ -116,9 +122,6 @@ export function redactItem(item: Item): Item {
     ...(item.cardId !== undefined ? { cardId: item.cardId } : {}),
   };
 }
-
-export const ITEM_TITLE_MAX = 300;
-export const ITEM_DESCRIPTION_MAX = 20000;
 
 /**
  * Build the local Inbox card a promoted item becomes.

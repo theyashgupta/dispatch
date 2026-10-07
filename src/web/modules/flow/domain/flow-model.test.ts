@@ -1,8 +1,10 @@
 import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { TOKEN_CAP } from "../../../../shared/flow-geometry.js";
 import type { Card, Item } from "../../../../shared/types.js";
 import {
+  admitAll,
   diffArrivals,
   flowRows,
   latestRow,
@@ -10,6 +12,7 @@ import {
   ridePath,
   sourceNodes,
   syncLine,
+  syncOutcome,
   trayCounts,
   trayOf,
   type FlowRow,
@@ -244,4 +247,55 @@ void test("no latest row when no date parses", () => {
     ]),
     null,
   );
+});
+
+void test("admitAll skips a duplicate id and keeps the order", () => {
+  const next = admitAll([{ id: "a" }], [{ id: "a" }, { id: "b" }]);
+  assert.deepEqual(next, [{ id: "a" }, { id: "b" }]);
+});
+
+void test("admitAll admits exactly the cap and drops the rest in order", () => {
+  const incoming = Array.from({ length: TOKEN_CAP + 10 }, (_, i) => ({
+    id: `t${i}`,
+  }));
+  assert.deepEqual(admitAll([], incoming), incoming.slice(0, TOKEN_CAP));
+});
+
+void test("admitAll counts the running tokens against the cap and de-duplicates", () => {
+  const current = Array.from({ length: TOKEN_CAP - 2 }, (_, i) => ({
+    id: `c${i}`,
+  }));
+  const next = admitAll(current, [
+    { id: "c0" },
+    { id: "n1" },
+    { id: "n1" },
+    { id: "n2" },
+    { id: "n3" },
+  ]);
+  assert.deepEqual(next, [...current, { id: "n1" }, { id: "n2" }]);
+});
+
+void test("syncOutcome lists the started sources and each failure", () => {
+  const { started, notice } = syncOutcome(
+    ["github", "linear", "slack"],
+    [
+      { status: "fulfilled", value: undefined },
+      { status: "rejected", reason: new Error("boom") },
+      { status: "rejected", reason: "x" },
+    ],
+  );
+  assert.deepEqual(started, ["github"]);
+  assert.equal(
+    notice,
+    "Syncing github. linear: boom. slack: server unreachable",
+  );
+});
+
+void test("syncOutcome with every poll failed has no started source", () => {
+  const { started, notice } = syncOutcome(
+    ["github"],
+    [{ status: "rejected", reason: new Error("down") }],
+  );
+  assert.deepEqual(started, []);
+  assert.equal(notice, "github: down");
 });

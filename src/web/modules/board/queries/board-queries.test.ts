@@ -158,6 +158,35 @@ test("the optimistic write is visible before the request resolves", async () => 
   await pending;
 });
 
+test("the optimistic write lands before mutate returns", async () => {
+  const client = seededClient();
+  reply(200, {}, "OK");
+  const pending = moveWith(client);
+  assert.equal(columnIn(client, 20), "in_progress");
+  assert.equal(columnIn(client, 40), "in_progress");
+  await pending;
+});
+
+test("a snapshot fetch in flight at the move neither reverts nor overwrites the optimistic write", async () => {
+  const client = seededClient();
+  let releaseSnapshot: (snapshot: BoardSnapshot) => void = () => undefined;
+  const fetching = client.fetchQuery({
+    queryKey: boardSnapshotKeys.detail(20),
+    queryFn: () =>
+      new Promise<BoardSnapshot>((resolve) => {
+        releaseSnapshot = resolve;
+      }),
+    staleTime: 0,
+  });
+  reply(200, {}, "OK");
+  const pending = moveWith(client);
+  assert.equal(columnIn(client, 20), "in_progress");
+  releaseSnapshot(snapshotOf("todo"));
+  await pending;
+  await fetching;
+  assert.equal(columnIn(client, 20), "in_progress");
+});
+
 test("a 409 rejects and restores the moved card's column without touching other cards", async () => {
   const client = seededClient();
   const other = { id: "c2", title: "Other", column: "todo" } as unknown as Card;
@@ -187,6 +216,25 @@ test("a 409 rejects and restores the moved card's column without touching other 
   );
   assert.equal(after?.cards.find((c) => c.id === "c1")?.column, "todo");
   assert.equal(after?.cards.find((c) => c.id === "c2")?.column, "in_review");
+  assert.equal(columnIn(client, 40), "todo");
+});
+
+test("a 409 rollback leaves the card alone once the stream has moved it out of the target column", async () => {
+  const client = seededClient();
+  let release: (res: Response) => void = () => undefined;
+  globalThis.fetch = () =>
+    new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+  const settled = assert.rejects(
+    moveWith(client),
+    new Error("moveCard failed: 409 Conflict"),
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  client.setQueryData(boardSnapshotKeys.detail(20), snapshotOf("in_review"));
+  release(new Response("{}", { status: 409, statusText: "Conflict" }));
+  await settled;
+  assert.equal(columnIn(client, 20), "in_review");
   assert.equal(columnIn(client, 40), "todo");
 });
 

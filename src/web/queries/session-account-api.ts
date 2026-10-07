@@ -1,8 +1,5 @@
 import { http } from "@/lib/http";
-
-type MoveSessionAccountResult =
-  | { ok: true; outcome: "moved" | "same" | "queued" }
-  | { ok: false; error: string; message: string };
+import type { MoveSessionAccountResult } from "../../shared/session-account-view.js";
 
 const MESSAGES: Record<string, string> = {
   "not-found": "That card or account no longer exists.",

@@ -1,7 +1,8 @@
+import type { ContinueAction } from "../../shared/types.js";
 import { LoadingButton } from "@/components/LoadingButton";
 
 interface SessionContinueButtonProps {
-  action: "available" | "usage-unknown";
+  action: ContinueAction;
   pending: boolean;
   disabled?: boolean;
   onContinue: () => void;

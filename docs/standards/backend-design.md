@@ -65,7 +65,7 @@ The v2 rules below add to the sections above. The sections above stay in force. 
 
 ## Errors
 
-1. `src/server/services/domain/errors.ts` defines `HttpError` (fields `status`, `code`, `details`) and five classes: `ValidationError` (400), `NotFoundError` (404), `ConflictError` (409), `UpstreamError` (502) and `InternalError` (500). For another status, throw `new HttpError(status, code, details)`. Add a named class only when a third route needs that status.
+1. `src/server/services/domain/errors.ts` defines `HttpError` (fields `status`, `code`, `details`) and five classes: `ValidationError` (400), `NotFoundError` (404), `ConflictError` (409), `UpstreamError` (502) and `InternalError` (500). For another status, throw `new HttpError(status, code, details)`. Add a named class only when a third route needs that status. The orchestrator routes also use `UnauthorizedError` (401), `ForbiddenError` (403) and `PolicyError` (403, with `reason`).
 2. `src/server/routes/error-handler.ts` (`httpErrorHandler`) is the last middleware in `src/server/bootstrap/index.ts`. It writes the status and the body `{ "error": "<code>", ...details }`.
 3. The `error` field is always the first key, and a `details` field never replaces it. The web client reads `body.error` as a string. A board error puts its UI copy in `error` and its variant in `code`.
 4. `details` carries the extra fields that an error response sends today, for any status.
@@ -89,7 +89,7 @@ On 2026-09-30, ticket 18 moved 18 files: 15 did not obey this direction, and 3 m
 ## Naming
 
 - A service file has a kebab-case singular name, for example `playbook-generate.ts`.
-- A route file has a plural resource name, for example `playbooks.route.ts`.
+- A route file has a plural resource name, for example `playbooks.route.ts`. The orchestrator files, such as `orchestrator.route.ts` and `orchestrator-groups.ts`, keep the singular name of the one `orchestrator` resource.
 - Put a test file next to its subject and name it `<subject>.test.ts`. Name a route test `<resource>-route.test.ts`.
 
 ## Tests

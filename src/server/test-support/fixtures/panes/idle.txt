@@ -1,0 +1,10 @@
+  2 → A background poll checks GROUP-12's branch every 15 minutes for their router commit (src/web/routes/__root.tsx). When it lands, I get re-invoked, arm the engine at the session
+  root, confirm it's armed, and start Phase 1 with the merge.
+  3 → I arm the engine after the wait, not before. Armed now, it would re-fire every turn while idle and burn the iteration budget on nothing.
+  → No Pushover notifications. Neither credential exists in the shell or the env-vault. Blocking stops will show up only as DISPATCH_STATUS lines. To turn Pushover on, add
+  PUSHOVER_APP_TOKEN and PUSHOVER_USER_KEY to the env-vault; the note is in todo.md.
+✻ Crunched for 1m 1s · done 9:24 PM · 1 shell still running
+❯ 
+  Opus 5.5 · high  │  █████░░░░░   46%  464k/1.0M
+  dispatch  │  feat/LOCAL-71-unit-1-settings-connections  │  thinking  │  Attention-kind  │  5h 17%  │  7d 85%  │  35m  │  +1328/-1  │  $14.22
+  ⏵⏵ bypass permissions on · 1 shell · ← for agents

@@ -6,12 +6,12 @@ import type { BoardKey, Card, Item } from "../../../../shared/types.js";
 import {
   filterInboxRows,
   groupInboxRows,
+  isInboxRange,
   mergeInboxRows,
   priorityDotKey,
   rowSourceOptions,
   visibleUnreadIds,
 } from "./inbox-rows.js";
-import { humanizeType } from "../../../../shared/inbox-row.js";
 
 const NOW = new Date(2026, 8, 24, 12, 0).getTime();
 
@@ -133,10 +133,14 @@ test("a card row carries the mapped priority, project, url and Ticket type; an i
   assert.equal(c?.typeLabel, "Ticket");
   assert.equal(c?.source, "linear");
   assert.equal(i?.typeLabel, "PR review");
-  assert.equal(humanizeType("ci_failure"), "CI failure");
-  assert.equal(humanizeType(""), "");
-  assert.equal(humanizeType("dm"), "DM");
-  assert.equal(humanizeType("mention"), "Mention");
+});
+
+test("only the four range names pass the range guard", () => {
+  for (const range of ["all", "today", "3d", "week"]) {
+    assert.equal(isInboxRange(range), true);
+  }
+  assert.equal(isInboxRange(""), false);
+  assert.equal(isInboxRange("month"), false);
 });
 
 const base = {

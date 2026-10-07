@@ -46,9 +46,10 @@ case "$1" in
     if [ -f "$state/after.$name" ]; then mv "$state/after.$name" "$state/pane.$name"; fi
     ;;
   send-keys)
-    if [ "$2" = "-l" ] && [ "$5" = "/exit" ] && [ ! -f "$state/stuck" ]; then touch "$state/at-prompt.$pid"; fi
+    for lit in "$@"; do :; done
+    if [ "$2" = "-l" ] && [ "$lit" = "/exit" ] && [ ! -f "$state/stuck" ]; then touch "$state/at-prompt.$pid"; fi
     if [ "$2" = "-l" ]; then
-      case "$5" in
+      case "$lit" in
         *"'--resume' 'missing-"*) echo "No conversation found with session ID" > "$state/pane.$name"; rm -f "$state/cleared.$name" ;;
         *"'--resume'"*|*"'--dangerously-skip-permissions'"*)
           [ -f "$FAKE_TRUST_PROBE" ] && cp "$FAKE_TRUST_PROBE" "$state/trust-at-launch"

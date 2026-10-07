@@ -4,11 +4,12 @@ import type {
   ClaudeAccountSummary,
 } from "../../../../shared/types.js";
 import {
-  RunningSessionsList,
+  accountName,
   type SessionNote,
-} from "@/modules/accounts/components/RunningSessionsList";
-import { accountName } from "@/modules/accounts/domain/running-sessions";
-import { useMoveSessionAccountMutation } from "@/queries/session-account-queries";
+} from "../../../../shared/session-account-view.js";
+import { RunningSessionsList } from "@/modules/accounts/components/RunningSessionsList";
+import { useSetSessionPinMutation } from "@/modules/accounts/queries/accounts-queries";
+import { useSessionAccountMove } from "@/queries/session-account-queries";
 import { useSingleFlight } from "@/queries/single-flight";
 
 interface RunningSessionsContainerProps {
@@ -22,38 +23,30 @@ export function RunningSessionsContainer({
   accounts,
   activeId,
 }: RunningSessionsContainerProps) {
-  const move = useMoveSessionAccountMutation();
-  const moveOnce = useSingleFlight(move.mutate);
-  const [notes, setNotes] = useState<Record<string, SessionNote>>({});
-  const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
+  const { notes, pending, move } = useSessionAccountMove();
+  const pin = useSetSessionPinMutation();
+  const pinOnce = useSingleFlight(pin.mutate);
+  const [pinNotes, setPinNotes] = useState<Record<string, SessionNote>>({});
+  const [pinPending, setPinPending] = useState<string | null>(null);
 
-  const run = (
-    session: AccountSessionEntry,
-    accountId: string,
-    movedText: string,
-  ) => {
-    const note = (next: SessionNote) =>
-      setNotes((prev) => ({ ...prev, [session.sessionId]: next }));
-    setPendingSessionId(session.sessionId);
-    moveOnce(
+  const changePin = (session: AccountSessionEntry, pinned: boolean) => {
+    const { sessionId } = session;
+    const note = (next: SessionNote | null) =>
+      setPinNotes((prev) => {
+        const rest = Object.fromEntries(
+          Object.entries(prev).filter(([id]) => id !== sessionId),
+        );
+        return next ? { ...rest, [sessionId]: next } : rest;
+      });
+    setPinPending(sessionId);
+    pinOnce(
+      { cardId: session.cardId, sessionId, pinned },
       {
-        cardId: session.cardId,
-        accountId,
-        sessionId: session.sessionId,
-      },
-      {
-        onSuccess: (result) => {
-          if (!result.ok) {
-            note({ tone: "error", text: result.message });
-          } else if (result.outcome === "queued") {
-            note({ tone: "info", text: "Queued" });
-          } else {
-            note({ tone: "info", text: movedText });
-          }
-        },
+        onSuccess: (result) =>
+          note(result.ok ? null : { tone: "error", text: result.error }),
         onError: () =>
-          note({ tone: "error", text: "Couldn't move the session." }),
-        onSettled: () => setPendingSessionId(null),
+          note({ tone: "error", text: "Couldn't change the pin." }),
+        onSettled: () => setPinPending(null),
       },
     );
   };
@@ -62,11 +55,34 @@ export function RunningSessionsContainer({
     <RunningSessionsList
       sessions={sessions}
       accounts={accounts}
-      notes={notes}
-      pendingSessionId={pendingSessionId}
-      onRestart={(session) => run(session, session.accountId, "Restarted")}
+      notes={{ ...notes, ...pinNotes }}
+      pending={
+        pending ?? (pinPending ? { key: pinPending, kind: "pin" } : null)
+      }
+      onPinChange={changePin}
+      onRestart={(session) =>
+        move(
+          session.sessionId,
+          "restart",
+          {
+            cardId: session.cardId,
+            accountId: session.accountId,
+            sessionId: session.sessionId,
+          },
+          "Restarted",
+        )
+      }
       onContinue={(session) =>
-        run(session, activeId, `Moved to ${accountName(accounts, activeId)}`)
+        move(
+          session.sessionId,
+          "continue",
+          {
+            cardId: session.cardId,
+            accountId: activeId,
+            sessionId: session.sessionId,
+          },
+          `Moved to ${accountName(accounts, activeId)}`,
+        )
       }
     />
   );
