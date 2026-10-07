@@ -14,9 +14,11 @@ import { createAppStore } from "./lib/app-store.js";
 import { routeTree } from "./routeTree.gen.js";
 import { Splash } from "./components/splash/Splash.js";
 import { queryClient } from "./lib/query-client.js";
+import { boardListKeys } from "./queries/board-list-queries.js";
 import { initialHash, rememberedHash } from "../shared/route.js";
 
 const ROUTE_KEY = "dsp.route";
+const BOARD_STORAGE_KEY = "dsp.board";
 const LEGACY_VIEW_KEY = "dsp.view";
 const SOUND_KEY = "dsp.sound";
 const ERRORS_IN_FEEDS_KEY = "dsp.errorsInFeeds";
@@ -34,6 +36,7 @@ function readStorage(key: string): string | null {
   }
 }
 
+const bareEntry = ["", "#", "#/"].includes(window.location.hash);
 const start = initialHash(
   window.location.hash,
   readStorage(ROUTE_KEY),
@@ -86,7 +89,11 @@ const router = createRouter({
   routeTree,
   caseSensitive: true,
   history: createHashHistory(),
-  context: { queryClient, appStore },
+  context: {
+    queryClient,
+    appStore,
+    rememberedBoard: bareEntry ? readStorage(BOARD_STORAGE_KEY) : null,
+  },
   defaultPendingComponent: PageFallback,
   defaultPendingMs: 0,
   defaultPendingMinMs: 0,
@@ -99,6 +106,9 @@ declare module "@tanstack/react-router" {
 }
 
 router.subscribe("onResolved", () => {
+  if (queryClient.getQueryData(boardListKeys.list) !== undefined) {
+    writeStorage(BOARD_STORAGE_KEY, appStore.getState().board);
+  }
   const { pathname } = router.state.location;
   if (pathname === "" || pathname === "/") return;
   writeStorage(ROUTE_KEY, rememberedHash(`#${pathname}`));

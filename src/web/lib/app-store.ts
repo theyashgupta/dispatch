@@ -1,10 +1,16 @@
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 import { DONE_PAGE_SIZE } from "../../shared/done-limit.js";
 import { pinFromBoard, type PinnedCard } from "../../shared/pinned-card.js";
 import type { Page } from "../../shared/route.js";
 import type { CardSearchResult } from "../../shared/search.js";
 import { stubToCard } from "../../shared/search-stub.js";
 import type { StartRequest } from "../../shared/start-request.js";
-import type { Card, SetupChecks, TunnelState } from "../../shared/types.js";
+import type {
+  BoardKey,
+  Card,
+  SetupChecks,
+  TunnelState,
+} from "../../shared/types.js";
 import {
   IDLE_TOAST,
   reduceUndoToast,
@@ -18,6 +24,7 @@ export interface AppState {
   pinnedHydrating: boolean;
   pinFetchError: { id: string; kind: "not-found" | "network" } | null;
   pinFetch: { id: string; gen: number } | null;
+  board: BoardKey;
   doneLimit: number;
   start: StartRequest | null;
   groupStart: Card[] | null;
@@ -44,6 +51,7 @@ const DEFAULT_STATE: AppState = {
   pinnedHydrating: false,
   pinFetchError: null,
   pinFetch: null,
+  board: DEFAULT_BOARD_KEY,
   doneLimit: DONE_PAGE_SIZE,
   start: null,
   groupStart: null,
@@ -117,7 +125,11 @@ export function createAppStore(initial: Partial<AppState> = {}) {
           ? { selectedCardId: result.id, pinned: null, pinnedHydrating: false }
           : {
               selectedCardId: result.id,
-              pinned: { card: stubToCard(result), kind: "stub", members: [] },
+              pinned: {
+                card: stubToCard(result, state.board),
+                kind: "stub",
+                members: [],
+              },
               pinnedHydrating: true,
               pinFetch: nextPinFetch(result.id),
             },
@@ -179,6 +191,13 @@ export function createAppStore(initial: Partial<AppState> = {}) {
         ...(page !== "workspace" ? CLOSED_PANEL : {}),
         ...(page !== "board" ? { groupStart: null } : {}),
       }),
+
+    setBoard: (board: BoardKey): void =>
+      set(
+        board === state.board
+          ? { board }
+          : { board, doneLimit: DONE_PAGE_SIZE },
+      ),
 
     loadMoreDone: (): void =>
       set({ doneLimit: state.doneLimit + DONE_PAGE_SIZE }),
