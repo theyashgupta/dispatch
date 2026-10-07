@@ -1334,13 +1334,15 @@ export interface SessionRef {
   sessionId: string;
 }
 
+export type ContinueAction = "available" | "usage-unknown";
+
 export interface AccountSessionEntry extends SessionRef {
   cardTitle: string;
   accountId: string;
   turn: SessionTurnState;
   stale: boolean;
   pendingAccountId?: string;
-  continueAction?: "available" | "usage-unknown";
+  continueAction?: ContinueAction;
 }
 
 export interface AccountApplyResult {

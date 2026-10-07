@@ -9,10 +9,8 @@ import { AccountChipFrame } from "@/modules/accounts/components/AccountChipFrame
 import { AccountPopover } from "@/modules/accounts/components/AccountPopover";
 import { UsageChip } from "@/modules/accounts/components/UsageChip";
 import { chipState } from "@/modules/accounts/domain/usage-format";
-import {
-  useAccountsQuery,
-  useRefreshAccountUsageMutation,
-} from "@/modules/accounts/queries/accounts-queries";
+import { useRefreshAccountUsageMutation } from "@/modules/accounts/queries/accounts-queries";
+import { useAccountsQuery } from "@/queries/accounts-queries";
 
 export function AccountChipContainer() {
   const router = useRouter();

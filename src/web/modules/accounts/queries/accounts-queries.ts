@@ -16,7 +16,7 @@ import {
   startLogin,
   submitLoginCode,
 } from "./accounts-api.js";
-import { accountsKeys, accountsQueryOptions } from "@/queries/accounts-queries";
+import { accountsKeys } from "@/queries/accounts-queries";
 
 export const LOGIN_POLL_MS = 1_000;
 
@@ -41,10 +41,6 @@ export function loginStateQueryOptions() {
     refetchIntervalInBackground: true,
     gcTime: 0,
   });
-}
-
-export function useAccountsQuery() {
-  return useQuery(accountsQueryOptions());
 }
 
 /**

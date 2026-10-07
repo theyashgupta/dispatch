@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import { getAccounts } from "./accounts-api.js";
 
 export const accountsKeys = {
@@ -27,4 +27,9 @@ export function accountsQueryOptions() {
     refetchOnWindowFocus: "always",
     refetchOnMount: false,
   });
+}
+
+/** Read the accounts list with the shared polling options. */
+export function useAccountsQuery() {
+  return useQuery(accountsQueryOptions());
 }
