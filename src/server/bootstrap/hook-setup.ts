@@ -419,6 +419,7 @@ function hookSettingsJson(): string {
     permissions: {
       deny: [`Read(/${VAULT_VALUES_PATH})`],
     },
+    crossSessionInbound: "refuse",
     hooks: {
       Stop: entry,
       UserPromptSubmit: entry,
