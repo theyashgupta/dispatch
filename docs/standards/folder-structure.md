@@ -41,12 +41,11 @@ src/web/
 ├── App.tsx         # shell
 ├── primitives/     # reusable presentational design-system parts: Button, IconButton, Notice, Modal, Field, Markdown
 ├── features/       # feature folders: kebab-case directories, PascalCase components inside
-│   ├── board/      # Board, Column, Card, CardView, EmptyState
 │   ├── detail/     # DetailPanel, PanelHeader, ReferenceBlocks, SessionLostSection, TerminalRegion
 │   ├── settings/   # SettingsScreen (full-screen, sidebar-nav), PlaybookEditorModal
 │   ├── slack/      # SlackPage, SlackList, SlackDetail, SlackThread (the Inbox row reuses SlackThread through the barrel)
 ├── hooks/          # data/effect hooks: useUnseenActivity, useTransitionNotifications, useResumeFeedback, useMediaQuery
-├── lib/            # non-UI helpers: api.ts, card-badges.ts, resume-feedback.ts, start-request.ts, meetings.ts, calendar.ts
+├── lib/            # non-UI helpers: api.ts, meetings.ts, calendar.ts
 └── styles/         # tokens.css — the design-token source of truth, survives unchanged
 ```
 
@@ -59,7 +58,7 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. The new t
 | Artifact                                                                                                                                      | Home                               |
 | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
 | `main.tsx`, `App.tsx`                                                                                                                         | web root (entry + shell)           |
-| `Board.tsx`, `Column.tsx`, `Card.tsx`, `CardView.tsx`, `EmptyState.tsx`                                                                       | `features/board/`                  |
+| `BoardView.tsx`, `BoardContainer.tsx`, `CardView.tsx`, `EmptyState.tsx`                                                                       | `modules/board/`                   |
 | `DetailPanel.tsx`, `PanelHeader.tsx`, `ReferenceBlocks.tsx`, `SessionLostSection.tsx`, `TerminalRegion.tsx`                                   | `features/detail/`                 |
 | `AppSidebar.tsx`, `NavIcon.tsx`, `SyncStatus.tsx`, `PageHeader.tsx`, `TopBar.tsx`                                                             | `modules/shell/components/`        |
 | `StartDialog.tsx`, `GroupStartDialog.tsx`, `CleanupDialog.tsx`                                                                                | `modules/card-actions/components/` |
@@ -77,7 +76,8 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. The new t
 | `AskPage.tsx`, `AskComposer.tsx`, `AskMessage.tsx`                                                                                            | `features/ask/`                    |
 | `FlowPage.tsx`, `FlowToolbar.tsx`, `FlowDiagram.tsx`, `FlowNarrow.tsx`, `flow-model.ts`                                                       | `features/flow/`                   |
 | `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts`                                           | `hooks/`                           |
-| `api.ts`, `card-badges.ts`, `format-age.ts`, `resume-feedback.ts`, `start-request.ts`, `meetings.ts`, `calendar.ts`                           | `lib/`                             |
+| `api.ts`, `format-age.ts`, `meetings.ts`, `calendar.ts`                                                                                       | `lib/`                             |
+| `card-badges.ts`, `resume-feedback.ts`, `start-request.ts`                                                                                    | `src/shared/`                      |
 | `Button` / `IconButton` / `Notice` / `Modal` / `Field` / `Markdown` / `FlowStage` (`SplitPane`, `ListGroup`, `DetailPaneBody`: `components/`) | `primitives/`                      |
 | `tokens.css`                                                                                                                                  | `styles/`                          |
 

@@ -1,5 +1,3 @@
-const legacyCycleFiles = ["^src/web/features/board/(index\\.ts|Board\\.tsx)$"];
-
 const serviceDirection = (name, from, to) => ({
   name,
   severity: "error",
@@ -17,7 +15,7 @@ module.exports = {
       name: "no-circular",
       severity: "error",
       comment: "Import cycles are not allowed.",
-      from: { pathNot: legacyCycleFiles },
+      from: {},
       to: { circular: true },
     },
     {

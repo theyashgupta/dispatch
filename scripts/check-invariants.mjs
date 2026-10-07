@@ -80,14 +80,14 @@ const SKIP_DIR = join("src", "web", "dist");
 const DOCS_PATH = join("docs", "ARCHITECTURE.md");
 const BASELINE_PATH = join("scripts", "invariant-baseline.txt");
 const TOKENS_PATH = join("src", "web", "styles", "tokens.css");
-const BOARD_DIR = join("src", "web", "features", "board");
+const BOARD_DIR = join("src", "web", "modules", "board");
 const WEB_DIR = join("src", "web");
 const COLUMN_META_PATH = join(
   "src",
   "web",
-  "features",
-  "board",
-  "column-meta.ts",
+  "components",
+  "badges",
+  "column-accent.ts",
 );
 const PRIORITY_DOT_PATH = join(
   "src",
@@ -108,13 +108,7 @@ const TERMINAL_CLIENT_PATHS = [
   join("src", "web", "terminal.html"),
 ];
 const BOARD_STORE_PATH = join("src", "server", "store", "board.store.ts");
-const CARD_ATTENTION_PATH = join(
-  "src",
-  "web",
-  "features",
-  "board",
-  "card-attention.ts",
-);
+const CARD_ATTENTION_PATH = join("src", "shared", "card-attention.ts");
 
 /**
  * The three `Card` fields the attention predicate is composed of. An ATTENTION CLAIM is a boolean
@@ -348,12 +342,12 @@ function checkBoardReadingRhythm() {
       const stripped = line.replaceAll('"', "").replaceAll("'", "");
       if (stripped.includes("reading-surface")) {
         violations.push(
-          `${file}:${i + 1}: retired pattern NEW-19 — the .reading-surface class is barred from src/web/features/board/`,
+          `${file}:${i + 1}: retired pattern NEW-19: the .reading-surface class is barred from src/web/modules/board/`,
         );
       }
       if (stripped.includes("--line-body:")) {
         violations.push(
-          `${file}:${i + 1}: retired pattern NEW-19 — a local --line-body redefinition is barred from src/web/features/board/`,
+          `${file}:${i + 1}: retired pattern NEW-19: a local --line-body redefinition is barred from src/web/modules/board/`,
         );
       }
     });
@@ -508,7 +502,7 @@ function checkAttentionSingleSource() {
     }
   }
 
-  for (const file of walkSrc(WEB_DIR)) {
+  for (const file of [...walkSrc(WEB_DIR), ...walkSrc(join("src", "shared"))]) {
     if (file === CARD_ATTENTION_PATH) continue;
     const content = readFileSync(file, "utf8");
 
@@ -1113,9 +1107,9 @@ function checkSourceAccentMechanism() {
  * array scans all of `src/**`, hardcodes its literals, and this gate's subject is `src/web` with a
  * denylist derived from {@link TOKENS_PATH} at run time, not a fixed literal list.
  * @remarks Asserts the MECHANISM as well as the literal, the same discipline `NEW-22`'s own
- * JSDoc argues for: `COLUMN_ACCENT` (`column-meta.ts`) and `PRIORITY_DOT`
+ * JSDoc argues for: `COLUMN_ACCENT` (`column-accent.ts`) and `PRIORITY_DOT`
  * (`priority-dot.ts`) are each the single definition of "which colour a column or priority renders",
- * consumed by `Column.tsx`, `SearchBox.tsx` and `StatusPillSwitcher.tsx` (columns) and `CardView.tsx`
+ * consumed by `ColumnHeader.tsx`, `SearchField.tsx` and `StatusPillSwitcher.tsx` (columns) and `CardView.tsx`
  * itself (priority). A gate that only fenced literals would pass unchanged against a build that
  * deleted either map and inlined its `var()` strings by hand.
  * @remarks All twenty {@link STATUS_COLOR_PALETTE_TOKENS} names must be present in `tokens.css`

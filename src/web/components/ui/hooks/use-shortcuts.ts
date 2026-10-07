@@ -7,7 +7,7 @@ import {
 const EDITABLE_SELECTOR =
   '[role="combobox"], [role="listbox"], [contenteditable="true"]';
 
-const MODAL_SELECTOR =
+export const MODAL_SELECTOR =
   '[aria-modal="true"], [data-slot="dialog-content"], [data-slot="alert-dialog-content"]';
 
 /**

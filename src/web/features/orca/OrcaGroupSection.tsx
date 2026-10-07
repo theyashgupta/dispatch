@@ -1,6 +1,6 @@
 import type { Column } from "../../../shared/types.js";
 import { dataInk } from "../../primitives/data-ink.js";
-import { SINGLE_LINE_COPY } from "../board/index.js";
+import { SINGLE_LINE_COPY } from "../../../shared/column-empty-copy.js";
 import type { GroupDimension, WorkspaceGroup } from "./orca-selectors.js";
 import { OrcaNavRow } from "./OrcaNavRow.js";
 import { OrcaSubgroupSection } from "./OrcaSubgroupSection.js";

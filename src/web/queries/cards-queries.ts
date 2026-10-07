@@ -3,6 +3,7 @@ import {
   createLocalTicket,
   generateGroupTitle,
   generateTicketDraft,
+  resumeCard,
   startCard,
   startGroup,
   syncCardToLinear,
@@ -47,6 +48,10 @@ interface StartGroupVariables {
   repos: { path: string; base: string }[];
   playbook?: string;
   extraDirection?: string;
+}
+
+interface ResumeCardVariables {
+  id: string;
 }
 
 interface GenerateGroupTitleVariables {
@@ -161,4 +166,23 @@ export function useStartGroupMutation() {
 
 export function useGenerateGroupTitleMutation() {
   return useMutation(generateGroupTitleMutationOptions());
+}
+
+/**
+ * Build the mutation options that resume a dead In Review session.
+ *
+ * @remarks
+ * A non-2xx resolves `{ ok: false, status }` and a network failure resolves
+ * `{ ok: false, status: null }`, so the caller can tell a 409 from the rest. The card update
+ * arrives over the board stream, so no cache is written.
+ */
+export function resumeCardMutationOptions() {
+  return {
+    mutationFn: ({ id }: ResumeCardVariables) => resumeCard(id),
+  };
+}
+
+/** Resume a dead In Review session. */
+export function useResumeCardMutation() {
+  return useMutation(resumeCardMutationOptions());
 }

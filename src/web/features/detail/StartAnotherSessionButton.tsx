@@ -1,6 +1,6 @@
 import { Plus } from "lucide-react";
 import type { Card as CardModel } from "../../../shared/types.js";
-import type { StartRequest } from "../../lib/start-request.js";
+import type { StartRequest } from "../../../shared/start-request.js";
 import { Button } from "../../primitives/Button.js";
 import { useMediaQuery } from "../../hooks/useMediaQuery.js";
 

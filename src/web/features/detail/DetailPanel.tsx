@@ -8,7 +8,7 @@ import type {
   UnwindDestination,
 } from "../../../shared/types.js";
 import { ensureTerminal } from "../../lib/api.js";
-import type { StartRequest } from "../../lib/start-request.js";
+import type { StartRequest } from "../../../shared/start-request.js";
 import { stampLastOpened } from "../../hooks/useUnseenActivity.js";
 import { CAROUSEL_QUERY, useMediaQuery } from "../../hooks/useMediaQuery.js";
 import {

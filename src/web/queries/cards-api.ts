@@ -291,3 +291,28 @@ export async function resetCard(
     return { ok: false, status: result.status, error: body.error };
   throw httpError("resetCard", result);
 }
+
+export type ResumeResult = { ok: true } | { ok: false; status: number | null };
+
+/**
+ * Resume a dead In Review session: POST /api/cards/:id/resume.
+ *
+ * @remarks
+ * Resolves `{ ok: true }` on 2xx and `{ ok: false, status }` on a non-2xx so the caller can tell a
+ * 409 conflict from other failures, with `status` null on a network failure. The client sends only
+ * the card id, because the worktree path is server-owned.
+ */
+export async function resumeCard(id: string): Promise<ResumeResult> {
+  try {
+    const result = await http(`/api/cards/${encodeURIComponent(id)}/resume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (result.ok) {
+      return { ok: true };
+    }
+    return { ok: false, status: result.status };
+  } catch {
+    return { ok: false, status: null };
+  }
+}

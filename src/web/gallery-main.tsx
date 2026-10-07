@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import "./styles/tokens.css";
 import "./styles/globals.css";
 import "./styles/gallery.css";
+import type { Card as BoardCard } from "../shared/types.js";
+import type { CardSearchResult } from "../shared/search.js";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -149,6 +151,15 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { CardView } from "@/modules/board/components/CardView";
+import { ColumnHeader } from "@/modules/board/components/ColumnHeader";
+import { ColumnResizeHandle } from "@/modules/board/components/ColumnResizeHandle";
+import { EmptyState } from "@/modules/board/components/EmptyState";
+import { FailedMoveAlert } from "@/modules/board/components/FailedMoveAlert";
+import { GroupPrRow } from "@/modules/board/components/GroupPrRow";
+import { SearchField } from "@/modules/board/components/SearchField";
+import { SelectionBar } from "@/modules/board/components/SelectionBar";
+import { StatusPillSwitcher } from "@/modules/board/components/StatusPillSwitcher";
 
 type Theme = "dark" | "light";
 
@@ -184,6 +195,81 @@ const BADGE_TONES = [
 ] as const;
 
 const ROWS = Array.from({ length: 24 }, (_, index) => `Row ${index + 1}`);
+
+function boardCard(overrides: Partial<BoardCard>): BoardCard {
+  return {
+    id: "gallery-todo",
+    issueId: "gallery-todo",
+    identifier: "G13-1",
+    title: "Plain ticket with a title long enough to wrap onto two lines",
+    description: null,
+    priority: 2,
+    column: "todo",
+    updatedAt: "2026-10-06T09:00:00.000Z",
+    source: "linear",
+    ...overrides,
+  };
+}
+
+const TODO_CARD = boardCard({});
+const PROGRESS_CARD = boardCard({
+  id: "gallery-progress",
+  issueId: "gallery-progress",
+  identifier: "G13-2",
+  column: "in_progress",
+});
+const ATTENTION_CARD = boardCard({
+  id: "gallery-attention",
+  issueId: "gallery-attention",
+  identifier: "G13-3",
+  column: "in_review",
+  startError: {
+    step: "creating worktrees",
+    stderr: "fatal: not a git repository",
+  },
+});
+const DONE_CARD = boardCard({
+  id: "gallery-done",
+  issueId: "gallery-done",
+  identifier: "G13-4",
+  column: "done",
+});
+const GROUP_CARD = boardCard({
+  id: "gallery-group",
+  issueId: "gallery-group",
+  identifier: "GROUP-1",
+  source: "group",
+  column: "in_progress",
+  prs: [
+    {
+      number: 12,
+      url: "https://example.com/pull/12",
+      title: "Board components",
+      state: "open",
+      isDraft: false,
+      ci: "pass",
+      repo: "dispatch",
+    },
+  ],
+});
+const SEARCH_RESULTS: CardSearchResult[] = [
+  {
+    id: "gallery-todo",
+    identifier: "G13-1",
+    title: "Plain ticket",
+    column: "todo",
+  },
+  {
+    id: "gallery-progress",
+    identifier: "G13-2",
+    title: "Running ticket",
+    column: "in_progress",
+  },
+];
+
+function noop(): void {
+  return undefined;
+}
 
 function readInitialTheme(): Theme {
   return document.documentElement.dataset.theme === "light" ? "light" : "dark";
@@ -661,6 +747,294 @@ function Gallery() {
                   </PaginationItem>
                 </PaginationContent>
               </Pagination>
+            </div>
+          </Demo>
+        </Section>
+
+        <Section title="Board">
+          <Demo title="Card states" wide>
+            <div id="gallery-board-cards" className="flex flex-wrap gap-4">
+              <div data-gallery-card="rest" className="w-64">
+                <CardView
+                  card={TODO_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={false}
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="restAttention" className="w-64">
+                <CardView
+                  card={ATTENTION_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={false}
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="restCompactDone" className="w-64">
+                <CardView
+                  card={DONE_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={false}
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="hover" className="w-64">
+                <CardView
+                  card={TODO_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={true}
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="hoverAttention" className="w-64">
+                <CardView
+                  card={ATTENTION_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={true}
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="pressed" className="w-64">
+                <CardView
+                  card={TODO_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={false}
+                  pressed
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="pressedHover" className="w-64">
+                <CardView
+                  card={TODO_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={true}
+                  pressed
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="multiSelected" className="w-64">
+                <CardView
+                  card={TODO_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={false}
+                  multiSelected
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="multiSelectedHover" className="w-64">
+                <CardView
+                  card={TODO_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={true}
+                  multiSelected
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="selected" className="w-64">
+                <CardView
+                  card={PROGRESS_CARD}
+                  selected={true}
+                  showDot={false}
+                  showGone={false}
+                  hover={false}
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="selectedAttention" className="w-64">
+                <CardView
+                  card={ATTENTION_CARD}
+                  selected={true}
+                  showDot={false}
+                  showGone={false}
+                  hover={false}
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="draggedSource" className="w-64">
+                <CardView
+                  card={PROGRESS_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={false}
+                  dimmed
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="dragOverlay" className="w-64">
+                <CardView
+                  card={PROGRESS_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={false}
+                  elevated
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="focused" className="w-64">
+                <CardView
+                  card={TODO_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={false}
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="focusedAttention" className="w-64">
+                <CardView
+                  card={ATTENTION_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={false}
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="focusedMulti" className="w-64">
+                <CardView
+                  card={TODO_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={false}
+                  multiSelected
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="elevatedAttention" className="w-64">
+                <CardView
+                  card={ATTENTION_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={false}
+                  elevated
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+              <div data-gallery-card="elevatedMulti" className="w-64">
+                <CardView
+                  card={TODO_CARD}
+                  selected={false}
+                  showDot={false}
+                  showGone={false}
+                  hover={false}
+                  multiSelected
+                  elevated
+                  domProps={{ tabIndex: 0 }}
+                />
+              </div>
+            </div>
+          </Demo>
+          <Demo title="Move picker">
+            <div data-gallery-demo="move-picker" className="w-64">
+              <CardView
+                card={PROGRESS_CARD}
+                selected={false}
+                showDot={false}
+                showGone={false}
+                hover={false}
+                isCarousel
+                onMoveTo={noop}
+              />
+            </div>
+          </Demo>
+          <Demo title="Group PR row">
+            <div data-gallery-demo="group-pr-row">
+              <GroupPrRow card={GROUP_CARD} />
+            </div>
+          </Demo>
+          <Demo title="Empty state, To Do">
+            <div data-gallery-demo="empty-todo">
+              <EmptyState column="todo" inboxCount={2} onOpenInbox={noop} />
+            </div>
+          </Demo>
+          <Demo title="Empty state, In Progress">
+            <div data-gallery-demo="empty-in-progress">
+              <EmptyState column="in_progress" />
+            </div>
+          </Demo>
+          <Demo title="Status pills" wide>
+            <div data-gallery-demo="pills">
+              <StatusPillSwitcher
+                cards={[TODO_CARD, PROGRESS_CARD, ATTENTION_CARD, DONE_CARD]}
+                active="in_progress"
+                onSelect={noop}
+              />
+            </div>
+          </Demo>
+          <Demo title="Column header">
+            <div
+              data-gallery-demo="column-header"
+              className="flex flex-col gap-2"
+            >
+              <ColumnHeader
+                column="in_progress"
+                count={3}
+                manualEntryBlocked={false}
+              />
+              <ColumnHeader column="agent_done" count={3} manualEntryBlocked />
+            </div>
+          </Demo>
+          <Demo title="Column resize handle">
+            <div data-gallery-demo="resize-handle" className="relative h-24">
+              <ColumnResizeHandle
+                column="in_progress"
+                width={300}
+                disabled={false}
+                resizing={false}
+                onResizeStart={noop}
+                onResizeKey={noop}
+                onReset={noop}
+              />
+            </div>
+          </Demo>
+          <Demo title="Selection bar">
+            <div
+              data-gallery-demo="selection-bar"
+              className="relative h-24 transform-gpu"
+            >
+              <SelectionBar count={3} onStartGroup={noop} onClear={noop} />
+            </div>
+          </Demo>
+          <Demo title="Failed move alert">
+            <div
+              data-gallery-demo="failed-move-alert"
+              className="relative h-24 transform-gpu"
+            >
+              <FailedMoveAlert count={3} onDismiss={noop} />
+            </div>
+          </Demo>
+          <Demo title="Search field">
+            <div data-gallery-demo="search-field">
+              <SearchField
+                isCarousel={false}
+                status="ready"
+                results={SEARCH_RESULTS}
+                total={SEARCH_RESULTS.length}
+                onTermChange={noop}
+                onSelectResult={noop}
+              />
             </div>
           </Demo>
         </Section>

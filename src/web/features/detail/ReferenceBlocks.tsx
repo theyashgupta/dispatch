@@ -1,7 +1,7 @@
 import { RotateCw } from "lucide-react";
 import type { Card as CardModel } from "../../../shared/types.js";
 import { cleanupCard } from "../../lib/api.js";
-import { MemberRow } from "../board/index.js";
+import { MemberRow } from "./MemberRow.js";
 import { Button } from "../../primitives/Button.js";
 import { Field } from "../../primitives/Field.js";
 import { Markdown } from "../../primitives/Markdown.js";

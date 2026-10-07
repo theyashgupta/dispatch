@@ -1,5 +1,5 @@
 import { createContext, useContext, type ComponentProps } from "react";
-import type { Board } from "@/features/board";
+import type { BoardView } from "@/modules/board";
 import type { OrcaView } from "@/features/orca";
 import type { TodayView } from "@/modules/today";
 import type { InboxView } from "@/modules/inbox";
@@ -41,7 +41,7 @@ export interface AppPages extends Record<Page, object> {
   workspaces: ComponentProps<typeof WorkspacesView>;
   ask: Omit<ComponentProps<typeof AskView>, "prefill">;
   flow: ComponentProps<typeof FlowView>;
-  board: ComponentProps<typeof Board>;
+  board: ComponentProps<typeof BoardView>;
 }
 
 const AppStateContext = createContext<AppPages | null>(null);

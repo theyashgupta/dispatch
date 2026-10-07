@@ -1,6 +1,6 @@
 import { ExternalLink } from "lucide-react";
 import type { Card, PrInfo } from "../../../shared/types.js";
-import { cardPrs } from "../board/index.js";
+import { cardPrs } from "../../../shared/card-prs.js";
 import { unknownProbeCopy } from "../../components/badges/index.js";
 import {
   prCiDotColor,
