@@ -5,12 +5,15 @@ import path from "node:path";
 import { after, before, mock, test } from "node:test";
 import express from "express";
 import type { Server } from "node:http";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 import type { Card } from "../../shared/types.js";
 
 process.env.HOME = await fsp.mkdtemp(path.join(os.tmpdir(), "dsp-att-"));
 const { cardsRouter } = await import("./cards.route.js");
 const { store } = await import("../store/board.store.js");
+const { BoardUnavailableError } = await import("../store/board-repository.js");
 const { attachmentsDir } = await import("../services/infra/paths.js");
+await store.load();
 
 const PNG = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -22,12 +25,14 @@ let server: Server;
 let base = "";
 let created: { title: string; description: string }[] = [];
 let nextId = 0;
+let rejectCreate: Error | null = null;
 
 before(async () => {
   mock.method(
     store,
     "createLocalCard",
-    (title: string, description: string) => {
+    (_board: string, title: string, description: string) => {
+      if (rejectCreate) return Promise.reject(rejectCreate);
       created.push({ title, description });
       nextId += 1;
       return Promise.resolve({
@@ -122,6 +127,53 @@ test("create answers a JSON 500 and mints no card when the attachment root canno
     assert.equal(created.length, 0);
   } finally {
     await fsp.rm(root, { force: true });
+  }
+});
+
+test("create removes the staged folder when the board is archived before the card is minted", async () => {
+  const root = path.dirname(attachmentsDir("x"));
+  await fsp.mkdir(root, { recursive: true });
+  const stagedBefore = (await fsp.readdir(root)).filter((n) =>
+    n.startsWith(".staging-"),
+  );
+  rejectCreate = new BoardUnavailableError(DEFAULT_BOARD_KEY);
+  try {
+    const res = await create({ title: "t", description: "d", images: [PNG] });
+    assert.equal(res.status, 409);
+    assert.equal(created.length, 0);
+  } finally {
+    rejectCreate = null;
+  }
+  const stagedAfter = (await fsp.readdir(root)).filter((n) =>
+    n.startsWith(".staging-"),
+  );
+  assert.deepEqual(stagedAfter, stagedBefore);
+});
+
+test("a failing staged cleanup is logged and the board error still answers", async () => {
+  const root = path.dirname(attachmentsDir("x"));
+  await fsp.mkdir(root, { recursive: true });
+  const rm = mock.method(fsp, "rm", () => Promise.reject(new Error("busy")));
+  const warn = mock.method(console, "warn", () => undefined);
+  rejectCreate = new BoardUnavailableError(DEFAULT_BOARD_KEY);
+  try {
+    const res = await create({ title: "t", description: "d", images: [PNG] });
+    assert.equal(res.status, 409);
+    assert.deepEqual(await res.json(), {
+      error: "board-archived",
+      code: "board-archived",
+    });
+    assert.equal(rm.mock.callCount(), 1);
+    assert.equal(warn.mock.callCount(), 1);
+  } finally {
+    rejectCreate = null;
+    rm.mock.restore();
+    warn.mock.restore();
+    for (const name of await fsp.readdir(root)) {
+      if (name.startsWith(".staging-")) {
+        await fsp.rm(path.join(root, name), { recursive: true, force: true });
+      }
+    }
   }
 });
 

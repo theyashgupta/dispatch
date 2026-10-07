@@ -7,6 +7,7 @@ import {
   makeFakeSource,
 } from "../test-support/fake-source.js";
 import type { SourceIssue } from "../../shared/types.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -70,7 +71,7 @@ function controllable(id: string, pollIntervalMs: number) {
 
 function cardsOf(source: string): string[] {
   return store
-    .snapshot()
+    .snapshot(DEFAULT_BOARD_KEY)
     .cards.filter((c) => c.source === source)
     .map((c) => c.id)
     .sort();
@@ -283,7 +284,7 @@ test("a transport failure keeps the loop on its base interval and flags the boar
   }
   assert.ok(calls >= 3, `loop kept ticking (${calls})`);
   assert.equal(pollerDiagnostics()[0]?.backoffMs, 10);
-  assert.equal(store.snapshot().syncUnreachable, true);
+  assert.equal(store.snapshot(DEFAULT_BOARD_KEY).syncUnreachable, true);
   await store.setSyncUnreachable(false);
 });
 
@@ -327,7 +328,10 @@ test("a truncated pull through the poller applies upserts only and records the w
   stopPollers();
   assert.ok(call >= 2, `polled ${call} times`);
   assert.deepEqual(cardsOf("trunc"), ["tr1", "tr2"]);
-  assert.match(store.snapshot().syncWarning ?? "", /^trunc pull was truncated/);
+  assert.match(
+    store.snapshot(DEFAULT_BOARD_KEY).syncWarning ?? "",
+    /^trunc pull was truncated/,
+  );
   await store.applyIssues(
     [issue("tr1"), issue("tr2")],
     "2026-09-24T10:00:00.000Z",
@@ -354,7 +358,7 @@ test("a plain error keeps the loop on its base interval and leaves the board rea
   }
   assert.ok(calls >= 3, `loop kept ticking (${calls})`);
   assert.equal(pollerDiagnostics()[0]?.backoffMs, 10);
-  assert.equal(store.snapshot().syncUnreachable, false);
+  assert.equal(store.snapshot(DEFAULT_BOARD_KEY).syncUnreachable, false);
 });
 
 test("restarting with a new source object swaps the fetch and the interval", async () => {
@@ -511,11 +515,13 @@ test("a source that returns no items field touches no item rows", async () => {
 test("startEnabledPollers stamps the enabled source ids on the snapshot, and clears them when none is enabled", () => {
   buildRegistry({ linearApiKey: "lin_test", pollIntervalMs: 60_000 });
   startEnabledPollers();
-  assert.deepEqual(store.snapshot().enabledSources, ["linear"]);
+  assert.deepEqual(store.snapshot(DEFAULT_BOARD_KEY).enabledSources, [
+    "linear",
+  ]);
   stopPollers();
   buildRegistry({ linearApiKey: "", pollIntervalMs: 60_000 });
   startEnabledPollers();
-  assert.deepEqual(store.snapshot().enabledSources, []);
+  assert.deepEqual(store.snapshot(DEFAULT_BOARD_KEY).enabledSources, []);
   stopPollers();
 });
 
@@ -667,7 +673,7 @@ test("an items-only source leaves the board sync status alone on success, partia
     kind: "snapshot",
   });
   await store.setSyncUnreachable(true);
-  const before = store.snapshot();
+  const before = store.snapshot(DEFAULT_BOARD_KEY);
   let call = 0;
   const src = makeFakeSource({
     id: "itemsonly",
@@ -689,7 +695,7 @@ test("an items-only source leaves the board sync status alone on success, partia
   }
   stopPollers();
   assert.ok(call >= 4, `polled ${call} times`);
-  const after = store.snapshot();
+  const after = store.snapshot(DEFAULT_BOARD_KEY);
   assert.equal(after.syncedAt, before.syncedAt);
   assert.equal(after.syncWarning, before.syncWarning);
   assert.equal(after.syncUnreachable, true);

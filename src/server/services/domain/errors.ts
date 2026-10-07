@@ -6,7 +6,8 @@ export class HttpError extends Error {
   /**
    * Build an error that the HTTP error handler turns into a response.
    *
-   * @remarks `message` equals `code`. `details` fields go into the response body beside `error`.
+   * @remarks `message` equals `code`. `details` fields go into the response body beside `error`. A
+   * board error puts the UI copy in `code` and the variant in `details.code`.
    */
   constructor(status: number, code: string, details?: Record<string, unknown>) {
     super(code);
@@ -32,6 +33,38 @@ export class NotFoundError extends HttpError {
 export class ConflictError extends HttpError {
   constructor(code: string, details?: Record<string, unknown>) {
     super(409, code, details);
+  }
+}
+
+export class BoardValidationError extends ValidationError {
+  /**
+   * Build a board refusal that names its variant beside the client copy.
+   *
+   * @remarks `error` carries the copy the form shows as is, and `code` carries the variant a client
+   * switches on. A variant with no UI copy uses the variant as the copy.
+   */
+  constructor(
+    variant: string,
+    copy: string = variant,
+    details?: Record<string, unknown>,
+  ) {
+    super(copy, { code: variant, ...details });
+  }
+}
+
+export class BoardNotFoundError extends NotFoundError {
+  constructor(variant: string) {
+    super(variant, { code: variant });
+  }
+}
+
+export class BoardConflictError extends ConflictError {
+  constructor(
+    variant: string,
+    copy: string = variant,
+    details?: Record<string, unknown>,
+  ) {
+    super(copy, { code: variant, ...details });
   }
 }
 

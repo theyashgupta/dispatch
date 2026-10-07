@@ -5,7 +5,7 @@ import {
   type Request,
   type Response,
 } from "express";
-import type { Card, Column } from "../../shared/types.js";
+import type { BoardKey, Card, Column } from "../../shared/types.js";
 import { isDemoteEligible } from "../../shared/demote-eligibility.js";
 import {
   redactArchivedGroup,
@@ -26,6 +26,7 @@ import { cleanupWorkspace } from "../services/orchestration/cleanup.js";
 import { unwindGroup } from "../services/orchestration/unwind.js";
 import { resetCard } from "../services/orchestration/reset.js";
 import { runClaude } from "../services/orchestration/run-claude.js";
+import { moveOrQueue } from "../services/orchestration/session-account-apply.js";
 import { editorPath, launchEditor } from "../adapters/editors.js";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
 import { restatRepos } from "../services/orchestration/workspaces.js";
@@ -59,11 +60,13 @@ import {
 import {
   stageAttachments,
   commitAttachments,
+  discardStaged,
 } from "../services/infra/attachments.js";
 import { attachmentsDir } from "../services/infra/paths.js";
 import { enabledSource } from "../adapters/source-gateway.js";
 import {
   attachmentParamsSchema,
+  cardListQuerySchema,
   commentBodySchema,
   createCardBodySchema,
   createGroupBodySchema,
@@ -72,6 +75,7 @@ import {
   linearStateBodySchema,
   moveBodySchema,
   openEditorBodySchema,
+  sessionAccountBodySchema,
   sessionBodySchema,
   startBodySchema,
   syncBodySchema,
@@ -80,6 +84,14 @@ import {
 import { httpErrorHandler } from "./error-handler.js";
 import { parseOrThrow } from "./parse-input.js";
 import { forceBodySchema } from "./schema-primitives.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
+import {
+  listBoardCards,
+  mapBoardUnavailable,
+  resolveBoard,
+  resolveBoardForCreate,
+} from "../services/orchestration/boards.js";
+import { parseBoardParam } from "./boards-schemas.js";
 
 export const cardsRouter = Router();
 
@@ -171,6 +183,13 @@ function getCardById(req: Request<{ id: string }>, res: Response): void {
 }
 
 cardsRouter.get("/cards/:id", getCardById);
+
+cardsRouter.get("/cards", (req, res) => {
+  const { key } = resolveBoard(parseBoardParam(req.query));
+  res
+    .status(200)
+    .json(listBoardCards(key, parseOrThrow(cardListQuerySchema, req.query)));
+});
 
 cardsRouter.get("/cards/:id/comments", (req, res) => {
   const card = store.getCard(req.params.id);
@@ -378,6 +397,25 @@ cardsRouter.post("/cards/:id/run-claude", async (req, res) => {
   res.status(202).json({ launched: true });
 });
 
+cardsRouter.post("/cards/:id/session/account", async (req, res) => {
+  const { accountId, sessionId } = parseOrThrow(
+    sessionAccountBodySchema,
+    req.body,
+  );
+  if (!store.getCard(req.params.id)) throw new NotFoundError("not-found");
+  const outcome = await moveOrQueue(req.params.id, accountId, sessionId);
+  if (outcome === "account") throw new NotFoundError("not-found");
+  if (outcome === "queued") {
+    res.status(202).json({ outcome });
+    return;
+  }
+  if (outcome === "moved" || outcome === "same") {
+    res.status(200).json({ outcome });
+    return;
+  }
+  throw new ConflictError(outcome);
+});
+
 cardsRouter.post("/cards/:id/session", async (req, res) => {
   const { id } = req.params;
 
@@ -475,8 +513,12 @@ async function runCleanupFanOut(id: string, force: boolean): Promise<void> {
  * id's reason via the caller's loop) since the route must collect every offending id for the 409
  * `ineligibleIds` list, not just fail fast on the first.
  */
-function memberIneligibleReason(card: Card | undefined): string | null {
+function memberIneligibleReason(
+  card: Card | undefined,
+  board: BoardKey,
+): string | null {
   if (!card) return "unknown card id";
+  if ((card.boardKey ?? DEFAULT_BOARD_KEY) !== board) return "on another board";
   if (card.column !== "todo") return "not in To Do";
   if (card.groupId != null) return "already grouped";
   if (card.source === "group") return "is itself a group";
@@ -504,9 +546,10 @@ function memberIneligibleReason(card: Card | undefined): string | null {
 async function createGroupHandler(req: Request, res: Response): Promise<void> {
   const { title, memberIds, playbook, extraDirection, workspace } =
     parseOrThrow(createGroupBodySchema, req.body);
+  const { key: board } = resolveBoardForCreate(parseBoardParam(req.query));
 
   const ineligibleIds = memberIds.filter(
-    (id) => memberIneligibleReason(store.getCard(id)) != null,
+    (id) => memberIneligibleReason(store.getCard(id), board) != null,
   );
   if (ineligibleIds.length > 0) {
     throw new ConflictError(
@@ -544,7 +587,11 @@ async function createGroupHandler(req: Request, res: Response): Promise<void> {
     });
   }
 
-  const groupResult = await store.createGroupCard(title, memberIds);
+  const groupResult = await store
+    .createGroupCard(board, title, memberIds)
+    .catch((err: unknown) => {
+      throw mapBoardUnavailable(err);
+    });
   if (!groupResult.ok) {
     throw new ConflictError(
       "some selected cards are no longer eligible to be grouped",
@@ -748,6 +795,7 @@ cardsRouter.post("/cards", async (req, res) => {
     createCardBodySchema,
     req.body,
   );
+  const { key: board } = resolveBoardForCreate(parseBoardParam(req.query));
 
   let staged: string | null;
   try {
@@ -756,7 +804,19 @@ cardsRouter.post("/cards", async (req, res) => {
     console.warn("[cards] attachment write failed:", (err as Error).message);
     throw new InternalError("attachment-write-failed");
   }
-  const card = await store.createLocalCard(title, fullDescription);
+  const card = await store
+    .createLocalCard(board, title, fullDescription)
+    .catch(async (err: unknown) => {
+      if (staged !== null) {
+        await discardStaged(staged).catch((cleanup: unknown) => {
+          console.warn(
+            "[cards] staged attachment cleanup failed:",
+            (cleanup as Error).message,
+          );
+        });
+      }
+      throw mapBoardUnavailable(err);
+    });
   if (staged !== null) {
     try {
       await commitAttachments(staged, card.id);

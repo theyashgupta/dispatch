@@ -67,7 +67,7 @@ The v2 rules below add to the sections above. The sections above stay in force. 
 
 1. `src/server/services/domain/errors.ts` defines `HttpError` (fields `status`, `code`, `details`) and five classes: `ValidationError` (400), `NotFoundError` (404), `ConflictError` (409), `UpstreamError` (502) and `InternalError` (500). For another status, throw `new HttpError(status, code, details)`. Add a named class only when a third route needs that status.
 2. `src/server/routes/error-handler.ts` (`httpErrorHandler`) is the last middleware in `src/server/bootstrap/index.ts`. It writes the status and the body `{ "error": "<code>", ...details }`.
-3. The `error` field is always the first key, and a `details` field never replaces it. The web client reads `body.error` as a string.
+3. The `error` field is always the first key, and a `details` field never replaces it. The web client reads `body.error` as a string. A board error puts its UI copy in `error` and its variant in `code`.
 4. `details` carries the extra fields that an error response sends today, for any status.
 5. The handler sends every other error to the next handler. Routes that answer errors by hand keep their old responses.
 6. Throw a typed error outside any `try` block whose `catch` maps unexpected errors to `InternalError`.

@@ -8,6 +8,7 @@ import {
   queueLinearFetch,
   restoreFetch,
 } from "../test-support/linear-fetch.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -83,7 +84,7 @@ test("each refused body answers 400 with no Linear call", async () => {
 test("404 for an unknown card and 409 for a local card, with no Linear call", async () => {
   const sent = stubLinear(200, {});
   assert.equal((await post("nope", "hi")).status, 404);
-  const local = await store.createLocalCard("local", "");
+  const local = await store.createLocalCard(DEFAULT_BOARD_KEY, "local", "");
   const res = await post(local.id, "hi");
   assert.equal(res.status, 409);
   assert.deepEqual(await res.json(), { error: "source cannot comment" });

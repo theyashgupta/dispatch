@@ -1,4 +1,5 @@
 import type {
+  BoardKey,
   DiscoveredRepo,
   WorkspacesInventory,
 } from "../../../shared/types.js";
@@ -9,6 +10,7 @@ import { createTtlCache, type TtlCache } from "../infra/ttl-cache.js";
 import { buildWorktreeRows } from "../domain/workspace-inventory.js";
 import { discoverRepos } from "./workspaces.js";
 import { worktreePath } from "../domain/workspace-paths.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 const SIZE_TTL_MS = 5 * 60_000;
 const COMMIT_TTL_MS = 60_000;
@@ -94,7 +96,7 @@ async function newestCommit(
  * @see docs/ARCHITECTURE.md#workspaces-inventory
  */
 export async function buildInventory(
-  opts: { fresh: boolean },
+  opts: { fresh: boolean; board?: BoardKey },
   probes: InventoryProbes = REAL_PROBES,
 ): Promise<WorkspacesInventory> {
   if (opts.fresh) {
@@ -102,8 +104,9 @@ export async function buildInventory(
     commits.clear();
     discoveries.clear();
   }
-  const cards = store.listCards();
-  const { folders } = store.getWorkspaceFolders();
+  const board = opts.board ?? DEFAULT_BOARD_KEY;
+  const cards = store.listCards(board);
+  const { folders } = store.getWorkspaceFolders(board);
   const rows = buildWorktreeRows(cards);
   const limit = createLimiter(MAX_IN_FLIGHT);
 
