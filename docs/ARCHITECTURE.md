@@ -3976,6 +3976,10 @@ is a behavior change, not a refactor.
    there are no external consumers to keep compatible; a future reader must not "fix" a missing
    version field. Keep the file location and every field name. `Card.boardKey` and
    `BoardSnapshot.boardKey` name the board of the card and of the snapshot.
+   A group card stores `Card.loopProgress` (LOCAL-88, see [Loop Progress](#loop-progress)). A
+   `Session` record stores the status line meters `contextPercent`, `model`, `cost`, `usage` and
+   `metersAt`. The card fields `contextPercent`, `model`, `cost` and `usage` are wire-only:
+   `redactCard` copies them from the active session, and `board.json` never stores them on the card.
 2. **SSE frame format.** `data: ${JSON.stringify(BoardSnapshot)}\n\n`; named heartbeat
    `event: ping\ndata: 1\n\n`; headers incl. `X-Accel-Buffering: no`; **server `KEEPALIVE_MS` (15s)
    must stay in lockstep with client `HEARTBEAT_MS`** (watchdog trips at 3×). No compression on
@@ -4000,6 +4004,9 @@ is a behavior change, not a refactor.
 real membership directly, independent of windowing` below for the full envelope contract. Each
    collection route takes the optional `board` query parameter, and the board routes live under
    `/api/boards` (see Board API).
+   `POST /api/loops/report` (LOCAL-88) answers `202`, `401` for a missing or unknown
+   `x-dispatch-token`, and `400` for a token of a card that is not a group or for a body outside
+   the schema.
 4. **Persistence format + location.** `~/.dispatch/{board.json,config.json}`; `board.json` ===
    `BoardSnapshot` JSON; atomic writes via `write-file-atomic`; config at mode `0600`; the `"//"`-keyed
    config template. Pasted ticket images live under `~/.dispatch/attachments/<cardId>/<sha256-16>.<ext>`
@@ -4718,3 +4725,55 @@ The orchestration initiative (LOCAL-83 to LOCAL-93) adds one board per project, 
 - `docs/standards/orchestration-design.md`: the glossary and the decision records D-1 to D-9 (board model, card identifiers, supervisor and orchestrator duties, control surface, progress protocol, policy, more than one orchestrator, ship flow, never list), with the scope change for each later ticket.
 
 Term rule: "orchestrator" is a Claude session that belongs to one board, and "supervisor" is the server code that watches sessions. The [Orchestration Saga](#orchestration-saga) is the session start saga and keeps its name.
+
+### Loop Progress
+
+LOCAL-88 makes the server the one reader of roadmap loop progress (decision record D-5).
+
+**Sources.** For each tracked group card, `loop-progress-reader.ts` reads files under the session
+root (`card.workspacePath`): the one `.roadmap/<slug>/progress.md`, the roadmap file at the root
+that `progress.md` line 1 names (else the only `ROADMAP*.md`), the loop engine file
+`.claude/ralph-loop.local.md` (else its `.done` copy), and for each unit its PRD and the
+`state.md` and `attempts.md` files of `<repo>/.planning/<slug>-unit-<n>/`. The pure parsers are in
+`loop-progress.ts`. The result is `Card.loopProgress`. A tracked card is a group card that is not
+in Done and has a `workspacePath`.
+
+**Refresh.** The reader reads a tracked card when a watched folder changes (300 ms debounce per
+card) and every 60 s. The watched folders are the session root, `.claude/`, `.roadmap/<slug>/`
+and the phase folder of the current unit. The reader updates the watches after each read of a
+card, and the 60 s read also removes the watches of cards that left. The store
+writes the card only when the model, without `readAt`, changes.
+
+**Tolerance.** A path from file text must stay inside the session root, also after the reader
+follows symlinks. Else the reader skips it with the warning `<path>: outside the session root`.
+The reader reads at most 1 MiB per file (`<path>: larger than 1 MiB`). A missing or damaged file
+adds a warning to `loopProgress.warnings`, and the rest of the model still fills. A root with no
+loop files gives no model, and the card keeps its last stored model. The reader never writes a
+loop file, and no reader error stops the server.
+
+**Report call.** A loop can report a gate result, so that the board shows it at once. A session
+has the variables `DISPATCH_HOOK_PORT` and `DISPATCH_HOOK_TOKEN`. Run this command after each gate
+line (pass or RED attempt) and after each unit boundary commit (`"kind":"unit"`, no `phase`):
+
+```bash
+[ -n "$DISPATCH_HOOK_PORT" ] && [ -n "$DISPATCH_HOOK_TOKEN" ] && curl -s -m 5 -o /dev/null -X POST -H "content-type: application/json" -H "x-dispatch-token: $DISPATCH_HOOK_TOKEN" -d '{"kind":"phase","unit":2,"phase":5,"result":"pass"}' "http://127.0.0.1:${DISPATCH_HOOK_PORT}/api/loops/report" || true
+```
+
+The body is strict: `kind` (`phase` or `unit`), `unit` (1 to 99), `phase` (1 to 99, required for
+`phase`), `result` (`pass` or `fail`) and an optional `note` (at most 500 characters). The server
+takes the card and the session from the token, records one `loop_gate` row in the
+`orchestration_events` table, and starts a read of that card. The row append does not go through
+the store queue, because the table is append-only and changes no card (the push subscription
+write is the precedent). It answers `202`. The report never
+writes progress: the loop files stay the only source. `loops.route.ts` holds the route and
+`loop-report.ts` the service.
+
+**Session meters.** On each pane capture, on every status channel, the marker watcher parses the
+two status line rows that `~/.claude/statusline.sh` draws (`status-line.ts`). When the meters of a
+session change, `setSessionMetersIfSession` writes `contextPercent`, `model`, `cost`, `usage` and
+`metersAt` (the time of the last change) on that session record. `redactCard` copies the active session meters onto the wire
+card and into `sessionSummaries`. A status line of another format gives no meters.
+
+**Vocabulary check.** `check-doc-drift.mjs` skips its `ROADMAP`, `.planning/` and
+`Phase <number>` patterns for the loop file modules only, because those words are their input
+format.

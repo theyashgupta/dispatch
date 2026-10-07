@@ -72,6 +72,7 @@ import {
 } from "../services/orchestration/update.js";
 import { startCleanupScheduler } from "../services/orchestration/cleanup-scheduler.js";
 import { startPendingMoveSweep } from "../services/orchestration/session-account-apply.js";
+import { startLoopProgressReader } from "../services/orchestration/loop-progress-reader.js";
 import { healServicePlist } from "../services/orchestration/service.js";
 import type { ActivityEvent } from "../../shared/types.js";
 import {
@@ -233,6 +234,7 @@ function handleUpgrade(
 }
 
 const SHUTDOWN_WAIT_MS = 6_000;
+let stopLoopProgressReader: (() => void) | undefined;
 
 /**
  * The FIRST `process.on("SIGINT"/"SIGTERM", ...)` handler in this codebase — every other
@@ -249,6 +251,7 @@ const SHUTDOWN_WAIT_MS = 6_000;
  */
 function shutdown(signal: NodeJS.Signals): void {
   console.log(`[shutdown] ${signal} received, tearing down remote access`);
+  stopLoopProgressReader?.();
   disableTunnel();
   stopAskRuns();
   setTimeout(() => process.exit(0), SHUTDOWN_WAIT_MS).unref();
@@ -433,6 +436,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   startEnabledPollers();
   startGranolaRound();
   startMarkerWatcher(statusChannel);
+  stopLoopProgressReader = startLoopProgressReader();
   store.on("activity", (event: ActivityEvent) => {
     if (event.type !== "status_needs_input" || event.cardId == null) return;
     const card = store.getCard(event.cardId);
