@@ -25,12 +25,14 @@ import type {
   ActivityEvent,
   ArchiveBoardResult,
   Board,
+  BoardPolicy,
   BoardKey,
   BoardPatch,
   BoardScope,
   BoardSnapshot,
   Card,
   CreateBoardResult,
+  DecisionItem,
   NewBoard,
   Column,
   ColumnChange,
@@ -40,10 +42,17 @@ import type {
   ProbeUnknown,
   Session,
   SessionFields,
+  SessionMeters,
+  SupervisorState,
+  SupervisorStateReason,
   SourceIssue,
   SourceKind,
   TrackedRefresh,
   Item,
+  LinearComment,
+  LoopProgress,
+  ShipFlow,
+  OrchestrationEvent,
   SettableItemState,
   StartError,
   TerminalError,
@@ -58,6 +67,7 @@ import type { CardSearchResult } from "../../shared/search.js";
 import {
   type BoardDb,
   type BoardMeta,
+  type OrchestratorTokenRow,
   type PushSubscriptionRow,
   STORE_SCHEMA_VERSION,
   assertSchemaOpenable,
@@ -210,10 +220,23 @@ export function redactCard(card: Card): Card {
     wireCard.lastCommentId = card.comments.at(-1)?.id;
   }
   delete wireCard.comments;
-  const activeAccount = card.sessions?.find(
+  const activeSession = card.sessions?.find(
     (s) => s.id === card.activeSessionId,
-  )?.claudeAccountId;
+  );
+  const activeAccount = activeSession?.claudeAccountId;
   if (activeAccount !== undefined) wireCard.claudeAccountId = activeAccount;
+  if (activeSession?.contextPercent !== undefined)
+    wireCard.contextPercent = activeSession.contextPercent;
+  if (activeSession?.model !== undefined) wireCard.model = activeSession.model;
+  if (activeSession?.cost !== undefined) wireCard.cost = activeSession.cost;
+  if (activeSession?.usage !== undefined) wireCard.usage = activeSession.usage;
+  if (activeSession?.state !== undefined) wireCard.state = activeSession.state;
+  if (activeSession?.stateReason !== undefined)
+    wireCard.stateReason = activeSession.stateReason;
+  if (activeSession?.stateSince !== undefined)
+    wireCard.stateSince = activeSession.stateSince;
+  if (activeSession?.transcriptPath !== undefined)
+    wireCard.transcriptPath = activeSession.transcriptPath;
   const hasMultipleSessions = (card.sessions?.length ?? 0) >= 2;
   wireCard.sessionCount = hasMultipleSessions
     ? card.sessions!.length
@@ -247,6 +270,14 @@ export function redactCard(card: Card): Card {
       prsUnknown: s.prsUnknown,
       previews: s.previews,
       previewsUnknown: s.previewsUnknown,
+      contextPercent: s.contextPercent,
+      model: s.model,
+      cost: s.cost,
+      usage: s.usage,
+      state: s.state,
+      stateReason: s.stateReason,
+      stateSince: s.stateSince,
+      transcriptPath: s.transcriptPath,
       ...(resolvedParentOrdinal != null
         ? { parentOrdinal: resolvedParentOrdinal }
         : {}),
@@ -913,7 +944,10 @@ class BoardStore extends EventEmitter {
             [...this.boards.values()],
           );
           if (ids.length === events.length) {
-            broadcast = events.map((e, i) => ({ ...e, id: ids[i] }));
+            broadcast = events.map(
+              (e, i) =>
+                ({ ...e, id: ids[i] }) as ActivityEvent | AccountActivityEvent,
+            );
           }
         } catch (err) {
           const requeued = new Map(
@@ -1505,6 +1539,126 @@ class BoardStore extends EventEmitter {
     return this.db.listEvents(board, cardId, limit);
   }
 
+  /** Activity events of one board with `id > sinceId`, oldest first, at most `limit`. */
+  listEventsSince(
+    board: BoardKey,
+    cardId: string | null,
+    sinceId: number,
+    limit: number,
+  ): ActivityEvent[] {
+    return this.db.listEventsSince(board, cardId, sinceId, limit);
+  }
+
+  /**
+   * Store a group card's loop progress, writing only when it differs from the stored value.
+   *
+   * @remarks The compare runs before the queue because every `enqueue` persists all cards and emits
+   * `change`, so a poll that re-reads identical progress must not enter it. An unknown card id is a
+   * no-op.
+   */
+  setLoopProgress(cardId: string, progress: LoopProgress): Promise<void> {
+    const card = this.cards.get(cardId);
+    if (card === undefined) return Promise.resolve();
+    const stable = (p: LoopProgress | undefined) =>
+      JSON.stringify(p === undefined ? null : { ...p, readAt: "" });
+    if (stable(card.loopProgress) === stable(progress))
+      return Promise.resolve();
+    return this.enqueue(() => {
+      const current = this.cards.get(cardId);
+      if (current) current.loopProgress = progress;
+      return [];
+    });
+  }
+
+  /**
+   * Append one orchestration event and broadcast it on the `orchestration` channel.
+   *
+   * @remarks The write is synchronous and bypasses the queue because the log is append-only and
+   * touches no card.
+   */
+  appendOrchestrationEvent(
+    e: Omit<OrchestrationEvent, "id">,
+  ): OrchestrationEvent {
+    let id: number;
+    try {
+      id = this.db.appendOrchestrationEvent(e);
+    } catch (err) {
+      console.error("[store] orchestration event append failed:", err);
+      throw err;
+    }
+    const event: OrchestrationEvent = { ...e, id };
+    this.emit("orchestration", event);
+    return event;
+  }
+
+  /** Orchestration events of one board after `sinceId`, oldest first. */
+  listOrchestrationEvents(
+    board: BoardKey,
+    sinceId: number,
+    limit: number,
+  ): OrchestrationEvent[] {
+    return this.db.listOrchestrationEvents(board, sinceId, limit);
+  }
+
+  /** Store a token hash as the only live token of one orchestrator, revoking any earlier one. */
+  replaceOrchestratorToken(
+    tokenHash: string,
+    boardKey: BoardKey,
+    orchestratorId: string,
+  ): void {
+    this.db.replaceOrchestratorToken({
+      tokenHash,
+      boardKey,
+      orchestratorId,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  /** Revoke every live token of one orchestrator and return how many were revoked. */
+  revokeOrchestratorTokens(boardKey: BoardKey, orchestratorId: string): number {
+    return this.db.revokeOrchestratorTokens(
+      boardKey,
+      orchestratorId,
+      new Date().toISOString(),
+    );
+  }
+
+  /** The token row stored under one SHA-256 hash, live or revoked, or undefined. */
+  findOrchestratorToken(tokenHash: string): OrchestratorTokenRow | undefined {
+    return this.db.findOrchestratorToken(tokenHash);
+  }
+
+  /** Store one new decision item. */
+  insertDecisionItem(item: DecisionItem): void {
+    this.db.insertDecisionItem(item);
+  }
+
+  /** One decision item by id, or undefined. */
+  getDecisionItem(id: string): DecisionItem | undefined {
+    return this.db.getDecisionItem(id);
+  }
+
+  /** Decision items of one board, oldest first, only those in `state` when given. */
+  listDecisionItems(
+    boardKey: BoardKey,
+    state?: DecisionItem["state"],
+  ): DecisionItem[] {
+    return this.db.listDecisionItems(boardKey, state);
+  }
+
+  /** Answer one open decision item and return it; null when it is unknown or already answered. */
+  answerDecisionItem(
+    id: string,
+    answer: NonNullable<DecisionItem["answer"]>,
+  ): DecisionItem | null {
+    return this.db.answerDecisionItem(id, answer, new Date().toISOString());
+  }
+
+  /** Mark one answered decision item used; false when it is unknown, open or already used. */
+  consumeDecisionItem(id: string): boolean {
+    return this.db.consumeDecisionItem(id, new Date().toISOString());
+  }
+
   /**
    * Upsert a push subscription row. A pure synchronous write delegated to the BoardDb surface
    * (listEvents precedent) so the route never imports node:sqlite; not enqueued.
@@ -1942,6 +2096,32 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Pin or unpin a session so automatic account moves leave it on its account.
+   *
+   * @remarks A pin also drops the session's queued move, so a move queued before the pin never
+   * runs.
+   */
+  setAccountPinned(
+    id: string,
+    sessionId: string,
+    pinned: boolean,
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card?.sessions?.some((s) => s.id === sessionId)) {
+        this.setActiveSession(
+          card,
+          pinned
+            ? { accountPinned: true, pendingClaudeAccountId: undefined }
+            : { accountPinned: undefined },
+          sessionId,
+        );
+      }
+      return [];
+    });
+  }
+
+  /**
    * Clear every queued move that targets `accountId`, on any card.
    */
   clearPendingAccountsFor(accountId: string): Promise<void> {
@@ -2023,6 +2203,78 @@ class BoardStore extends EventEmitter {
       } else if (card.tmuxSession === session) {
         card.prs = value;
       }
+      return [];
+    });
+  }
+
+  /**
+   * Write the status-line meters onto the session record that owns `tmuxSession`.
+   *
+   * @remarks An unknown card or a session the card does not own resolves false before the queue, because every enqueue saves all cards and emits `change`. The same guard repeats inside the queue like `setPrsIfSession`.
+   */
+  setSessionMetersIfSession(
+    id: string,
+    tmuxSession: string,
+    meters: SessionMeters,
+  ): Promise<boolean> {
+    const owns = () =>
+      this.cards.get(id)?.sessions?.find((s) => s.tmuxSession === tmuxSession);
+    if (!owns()) return Promise.resolve(false);
+    let written = false;
+    return this.enqueue(() => {
+      const target = owns();
+      if (!target) return [];
+      target.contextPercent = meters.contextPercent;
+      target.model = meters.model;
+      target.cost = meters.cost;
+      target.usage = meters.usage;
+      target.metersAt = new Date().toISOString();
+      written = true;
+      return [];
+    }).then(() => written);
+  }
+
+  /**
+   * Write the supervisor state onto one session record and stamp `stateSince`.
+   *
+   * @remarks Resolves false for an unknown card or session before the queue, like `setSessionMetersIfSession`. The reason is cleared when none is given, so an old reason never outlives its state.
+   */
+  setSessionStateIfSession(
+    id: string,
+    sessionId: string,
+    state: SupervisorState,
+    reason?: SupervisorStateReason,
+  ): Promise<boolean> {
+    const owns = () =>
+      this.cards.get(id)?.sessions?.find((s) => s.id === sessionId);
+    if (!owns()) return Promise.resolve(false);
+    let written = false;
+    return this.enqueue(() => {
+      const target = owns();
+      if (!target) return [];
+      target.state = state;
+      target.stateSince = new Date().toISOString();
+      if (reason === undefined) delete target.stateReason;
+      else target.stateReason = reason;
+      written = true;
+      return [];
+    }).then(() => written);
+  }
+
+  /** Store the transcript file of one session; a same value skips the queue. */
+  setTranscriptPath(
+    id: string,
+    sessionId: string,
+    transcriptPath: string,
+  ): Promise<void> {
+    const find = () =>
+      this.cards.get(id)?.sessions?.find((s) => s.id === sessionId);
+    const peek = find();
+    if (!peek || peek.transcriptPath === transcriptPath)
+      return Promise.resolve();
+    return this.enqueue(() => {
+      const target = find();
+      if (target) target.transcriptPath = transcriptPath;
       return [];
     });
   }
@@ -4114,6 +4366,91 @@ class BoardStore extends EventEmitter {
       updated = board;
       return [];
     }).then(() => updated);
+  }
+
+  /** Replace the policy of one board; resolves undefined for an unknown board. */
+  setBoardPolicy(
+    key: BoardKey,
+    policy: BoardPolicy,
+  ): Promise<Board | undefined> {
+    let updated: Board | undefined;
+    return this.enqueue(() => {
+      const board = this.boards.get(key);
+      if (board) {
+        board.policy = { ...policy };
+        updated = board;
+      }
+      return [];
+    }).then(() => updated);
+  }
+
+  /** Set the start hold of a group card and, when given, the groups it waits on. */
+  setGroupQueue(
+    id: string,
+    queue: { startQueued: boolean; dependsOn?: string[] },
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      card.startQueued = queue.startQueued;
+      if (queue.dependsOn !== undefined) card.dependsOn = [...queue.dependsOn];
+      return [];
+    });
+  }
+
+  /** Store the orchestrator that created a card and the launch values of a held group start. */
+  setOrchestratorFields(
+    id: string,
+    fields: Pick<Card, "createdByOrchestrator" | "launch">,
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      if (fields.createdByOrchestrator !== undefined) {
+        card.createdByOrchestrator = fields.createdByOrchestrator;
+      }
+      if (fields.launch !== undefined) card.launch = { ...fields.launch };
+      return [];
+    });
+  }
+
+  /** Store the ship flow of a group card; an unknown card is a no-op. */
+  setShipFlow(id: string, flow: ShipFlow): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      card.shipFlow = structuredClone(flow);
+      return [];
+    });
+  }
+
+  /** Change the title or description of a local card; false for an unknown or non-local card. */
+  updateLocalCardText(
+    id: string,
+    patch: { title?: string; description?: string },
+  ): Promise<boolean> {
+    let updated = false;
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card?.source !== "local") return [];
+      if (patch.title !== undefined) card.title = patch.title;
+      if (patch.description !== undefined) card.description = patch.description;
+      card.updatedAt = new Date().toISOString();
+      updated = true;
+      return [];
+    }).then(() => updated);
+  }
+
+  /** Append a comment entry to a local card; false for an unknown or non-local card. */
+  addLocalComment(id: string, comment: LinearComment): Promise<boolean> {
+    let added = false;
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card?.source !== "local") return [];
+      card.comments = [...(card.comments ?? []), { ...comment }];
+      added = true;
+      return [];
+    }).then(() => added);
   }
 
   /** Archive or restore a board; the default board cannot be archived. */

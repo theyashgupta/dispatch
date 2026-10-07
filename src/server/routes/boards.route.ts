@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { z } from "zod";
 import { ValidationError } from "../services/domain/errors.js";
+import type { OrchestratorIdentity } from "../services/domain/orchestrator-scope.js";
 import {
   archiveBoard,
   boardCounts,
@@ -9,15 +10,22 @@ import {
   getBoard,
   isStaticBoardVariant,
   listBoards,
+  resolveBoard,
   restoreBoard,
   updateBoard,
 } from "../services/orchestration/boards.js";
+import {
+  mintOrchestratorToken,
+  revokeOrchestratorToken,
+} from "../services/orchestration/orchestrator-tokens.js";
 import {
   createBoardBodySchema,
   parseBoardKeyParam,
   patchBoardBodySchema,
 } from "./boards-schemas.js";
 import { httpErrorHandler } from "./error-handler.js";
+import { orchestratorIdSchema } from "./orchestrator-schemas.js";
+import { parseOrThrow } from "./parse-input.js";
 
 export const boardsRouter = Router({ caseSensitive: true });
 
@@ -68,6 +76,29 @@ boardsRouter.post("/boards/:key/restore", async (req, res) => {
   res
     .status(200)
     .json({ board: await restoreBoard(parseBoardKeyParam(req.params.key)) });
+});
+
+/** The `{ boardKey, orchestratorId }` a token route names, or the typed 400 or 404. */
+function orchestratorOf(params: {
+  key: string;
+  id: string;
+}): OrchestratorIdentity {
+  const boardKey = parseBoardKeyParam(params.key);
+  const orchestratorId = parseOrThrow(orchestratorIdSchema, params.id);
+  resolveBoard(boardKey);
+  return { boardKey, orchestratorId };
+}
+
+boardsRouter.post("/boards/:key/orchestrators/:id/token", (req, res) => {
+  res
+    .status(201)
+    .json({ token: mintOrchestratorToken(orchestratorOf(req.params)) });
+});
+
+boardsRouter.delete("/boards/:key/orchestrators/:id/token", (req, res) => {
+  res
+    .status(200)
+    .json({ revoked: revokeOrchestratorToken(orchestratorOf(req.params)) });
 });
 
 boardsRouter.use(httpErrorHandler);

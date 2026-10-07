@@ -11,13 +11,15 @@ import {
 } from "../../adapters/claude-login.js";
 import {
   accountDir,
+  isExternalAccountDir,
   materializeConfigDir,
+  readChainOrder,
   readRegistry,
   removeConfigDir,
   upsertAccount,
   type ClaudeAccountRecord,
 } from "./claude-accounts.js";
-import { getUsage, refreshUsage } from "./claude-usage.js";
+import { getUsage, refreshUsage, usageBuckets } from "./claude-usage.js";
 import { boardRepository } from "../../store/board-repository.js";
 
 const LOGIN_TIMEOUT_MS = 600_000;
@@ -172,6 +174,7 @@ async function settle(
   };
   await upsertAccount(record);
   await refreshUsage(record.id).catch(() => undefined);
+  const usage = getUsage(record.id);
   view = {
     state: "done",
     account: {
@@ -181,7 +184,12 @@ async function settle(
       subscriptionType: record.subscriptionType,
       isDefault: false,
       lastLoginAt: record.lastLoginAt,
-      usage: getUsage(record.id),
+      usage,
+      position: (await readChainOrder()).indexOf(record.id),
+      state: "unknown",
+      buckets: usageBuckets(usage),
+      limitedUntil: null,
+      inUse: false,
     },
   };
 }
@@ -225,6 +233,9 @@ export async function startLogin(
   accountId?: string,
 ): Promise<{ ok: true } | { ok: false; error: "in-flight" | "not-found" }> {
   if (inFlight()) return { ok: false, error: "in-flight" };
+  if (accountId !== undefined && isExternalAccountDir(accountId)) {
+    return { ok: false, error: "not-found" };
+  }
   const isNew = accountId === undefined;
   const id = accountId ?? randomUUID();
   view = { state: "starting", accountId: id };

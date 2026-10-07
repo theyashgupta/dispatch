@@ -1,0 +1,12 @@
+phase 1 Branch, origin/main merge and re-verify GREEN 2026-10-01T05:56:24Z gate=pass
+phase 3 Shared pure helpers, NEW-24 path and shared card queries GREEN 2026-10-01T15:19:42Z gate=pass
+phase 4 Inbox module GREEN 2026-10-01T20:00:31Z gate=pass
+phase 5 Today module GREEN 2026-10-01T20:44:23Z gate=pass
+phase 6 Ask module GREEN 2026-10-01T21:41:21Z gate=pass
+phase 7 Activity module GREEN 2026-10-02T01:10:52Z gate=pass
+phase 8 Flow module GREEN 2026-10-02T02:13:41Z gate=pass
+phase 9 Card action dialogs except Start GREEN 2026-10-02T12:11:39Z gate=pass
+phase 10 G12 Unit 1 merge, Start dialog and legacy deletion GREEN 2026-10-02T16:45:33Z gate=pass
+phase 11 Gap Analysis GREEN 2026-10-03T05:46:48Z gate=pass
+phase 12 Test Suite plus Real E2E GREEN 2026-10-05T20:19:21Z gate=pass
+phase 2 Parity build and legacy behaviour record GREEN 2026-10-05T20:43:03Z gate=pass

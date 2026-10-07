@@ -1,6 +1,7 @@
 import type {
   AccountSwitchResponse,
   ApplyChoice,
+  ClaudeAccountsSettings,
   ClaudeLoginView,
   ClaudeUsageSnapshot,
 } from "../../../../shared/types.js";
@@ -165,4 +166,103 @@ export async function removeAccount(
     return { ok: false, error: "The Default account cannot be removed." };
   }
   return { ok: false, error: "Couldn't remove the account." };
+}
+
+/**
+ * Save the full chain order: PUT /api/accounts/chain/order.
+ *
+ * @remarks
+ * The body always carries every account id once. A 400 means the list no longer matches the
+ * registered accounts.
+ */
+export async function setChainOrder(
+  order: string[],
+): Promise<{ ok: true; order: string[] } | { ok: false; error: string }> {
+  const result = await http<{ order: string[] }>("/api/accounts/chain/order", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ order }),
+  });
+  if (result.ok) return { ok: true, order: result.data.order };
+  if (result.status === 400) {
+    return {
+      ok: false,
+      error: "The accounts changed. Reload and try the move again.",
+    };
+  }
+  return { ok: false, error: "Couldn't save the account order." };
+}
+
+/**
+ * Save part of the chain settings: PUT /api/accounts/chain/settings.
+ *
+ * @remarks
+ * A 400 means a value was out of range.
+ */
+export async function setChainSettings(
+  patch: Partial<ClaudeAccountsSettings>,
+): Promise<
+  { ok: true; settings: ClaudeAccountsSettings } | { ok: false; error: string }
+> {
+  const result = await http<ClaudeAccountsSettings>(
+    "/api/accounts/chain/settings",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
+  if (result.ok) return { ok: true, settings: result.data };
+  if (result.status === 400) {
+    return { ok: false, error: "That value is out of range." };
+  }
+  return { ok: false, error: "Couldn't save the setting." };
+}
+
+/**
+ * Move to the next eligible account now: POST /api/accounts/chain/switch-now.
+ *
+ * @remarks
+ * A 409 with the code `no-eligible-account` means every other account is limited or signed out.
+ */
+export async function switchNow(): Promise<
+  { ok: true; to: string } | { ok: false; error: string }
+> {
+  const result = await http<{ to: string }>("/api/accounts/chain/switch-now", {
+    method: "POST",
+  });
+  if (result.ok) return { ok: true, to: result.data.to };
+  if (result.status === 409 && result.error === "no-eligible-account") {
+    return {
+      ok: false,
+      error: "No other account can take over right now.",
+    };
+  }
+  return { ok: false, error: "Couldn't switch the account." };
+}
+
+/**
+ * Pin a session to its account or release it: PUT /api/cards/:id/session/account-pin.
+ *
+ * @remarks
+ * A pinned session stays on its account when the chain moves.
+ */
+export async function setSessionPin(
+  cardId: string,
+  sessionId: string,
+  pinned: boolean,
+): Promise<{ ok: true; pinned: boolean } | { ok: false; error: string }> {
+  const result = await http<{ pinned: boolean }>(
+    `/api/cards/${encodeURIComponent(cardId)}/session/account-pin`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, pinned }),
+    },
+  );
+  if (result.ok) return { ok: true, pinned: result.data.pinned };
+  if (result.status === 404 || result.status === 400) {
+    return { ok: false, error: "That session is no longer running." };
+  }
+  return { ok: false, error: "Couldn't change the pin." };
 }

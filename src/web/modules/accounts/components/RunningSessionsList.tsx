@@ -13,15 +13,18 @@ import { StaleBadge } from "@/components/badges/StaleBadge";
 import { SessionContinueButton } from "@/components/SessionContinueButton";
 import { SessionRestartButton } from "@/components/SessionRestartButton";
 import { Item } from "@/components/ui/item";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { turnLabel } from "@/modules/accounts/domain/running-sessions";
 
 interface RunningSessionsListProps {
   sessions: AccountSessionEntry[];
   accounts: ClaudeAccountSummary[];
   notes: Record<string, SessionNote>;
-  pending: { key: string; kind: "restart" | "continue" } | null;
+  pending: { key: string; kind: "restart" | "continue" | "pin" } | null;
   onRestart: (session: AccountSessionEntry) => void;
   onContinue: (session: AccountSessionEntry) => void;
+  onPinChange: (session: AccountSessionEntry, pinned: boolean) => void;
 }
 
 export function RunningSessionsList({
@@ -31,6 +34,7 @@ export function RunningSessionsList({
   pending,
   onRestart,
   onContinue,
+  onPinChange,
 }: RunningSessionsListProps) {
   return (
     <section
@@ -94,31 +98,44 @@ export function RunningSessionsList({
                   )}
                   {note && <SessionNoteText note={note} />}
                 </div>
-                {(session.stale || session.continueAction !== undefined) && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    {session.stale && (
-                      <SessionRestartButton
-                        pending={
-                          pending?.key === session.sessionId &&
-                          pending.kind === "restart"
-                        }
-                        disabled={busy}
-                        onRestart={() => onRestart(session)}
-                      />
-                    )}
-                    {session.continueAction !== undefined && (
-                      <SessionContinueButton
-                        action={session.continueAction}
-                        pending={
-                          pending?.key === session.sessionId &&
-                          pending.kind === "continue"
-                        }
-                        disabled={busy}
-                        onContinue={() => onContinue(session)}
-                      />
-                    )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id={`pin-${session.sessionId}`}
+                      checked={session.pinned}
+                      disabled={busy}
+                      onCheckedChange={(pinned) => onPinChange(session, pinned)}
+                      data-testid="session-pin"
+                    />
+                    <Label
+                      htmlFor={`pin-${session.sessionId}`}
+                      className="text-xs text-muted-foreground"
+                    >
+                      Pin to account
+                    </Label>
                   </div>
-                )}
+                  {session.stale && (
+                    <SessionRestartButton
+                      pending={
+                        pending?.key === session.sessionId &&
+                        pending.kind === "restart"
+                      }
+                      disabled={busy}
+                      onRestart={() => onRestart(session)}
+                    />
+                  )}
+                  {session.continueAction !== undefined && (
+                    <SessionContinueButton
+                      action={session.continueAction}
+                      pending={
+                        pending?.key === session.sessionId &&
+                        pending.kind === "continue"
+                      }
+                      disabled={busy}
+                      onContinue={() => onContinue(session)}
+                    />
+                  )}
+                </div>
               </Item>
             </li>
           );

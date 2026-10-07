@@ -18,6 +18,7 @@ const { resolveBinaryPath } = await import("../../adapters/resolve-binary.js");
 const { setHooksRuntime } = await import("../infra/config-holder.js");
 setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
 
+const END_OF_OPTIONS = "-".repeat(2);
 const ACCOUNT_A = "11111111-1111-4111-8111-111111111111";
 await upsertAccount({
   id: ACCOUNT_A,
@@ -68,7 +69,7 @@ function restartCalls(s: string, envCalls: string[][]) {
     ["has-session", "-t", `=${s}`],
     ["show-environment", "-t", `=${s}`, "DISPATCH_SHELL_SESSION"],
     ["capture-pane", "-p", "-t", `=${s}:`],
-    ["send-keys", "-l", "-t", `=${s}:`, "/exit"],
+    ["send-keys", "-l", "-t", `=${s}:`, END_OF_OPTIONS, "/exit"],
     ["send-keys", "-t", `=${s}:`, "Enter"],
     ...envCalls,
     ["send-keys", "-t", `=${s}:`, "C-u", "C-l"],
@@ -78,6 +79,7 @@ function restartCalls(s: string, envCalls: string[][]) {
       "-l",
       "-t",
       `=${s}:`,
+      END_OF_OPTIONS,
       `'${CLAUDE}' '--resume' 'conv-1' '--dangerously-skip-permissions'`,
     ],
     ["send-keys", "-t", `=${s}:`, "Enter"],
@@ -102,7 +104,14 @@ void test("a stale Default session moved to Default is the restart: full sequenc
     restartCalls(s, [
       ["set-environment", "-u", "-t", `=${s}`, "CLAUDE_CONFIG_DIR"],
       ["send-keys", "-t", `=${s}:`, "C-u"],
-      ["send-keys", "-l", "-t", `=${s}:`, "unset CLAUDE_CONFIG_DIR"],
+      [
+        "send-keys",
+        "-l",
+        "-t",
+        `=${s}:`,
+        END_OF_OPTIONS,
+        "unset CLAUDE_CONFIG_DIR",
+      ],
       ["send-keys", "-t", `=${s}:`, "Enter"],
     ]),
   );

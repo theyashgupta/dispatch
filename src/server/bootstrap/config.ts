@@ -15,6 +15,7 @@ import type {
   UserProfile,
 } from "../../shared/types.js";
 import {
+  CLAUDE_ACCOUNTS_BOUNDS,
   DEFAULT_CLAUDE_ARGS,
   DEFAULT_CLEANUP_DELAY_DAYS,
   DEFAULT_ARCHIVE_RETENTION_DAYS,
@@ -167,6 +168,31 @@ function readActiveClaudeAccountId(
     parsed.activeClaudeAccountId.trim() !== ""
     ? parsed.activeClaudeAccountId
     : undefined;
+}
+
+/**
+ * Read the `claudeAccounts` settings block, keeping only keys of the right type.
+ *
+ * @remarks An absent or wrong-typed key is left out, so it resolves to its default at read time.
+ * A number out of range is clamped to the bounds the settings route enforces.
+ */
+function readClaudeAccounts(
+  parsed: Record<string, unknown>,
+): Config["claudeAccounts"] {
+  const raw = parsed.claudeAccounts;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return undefined;
+  }
+  const block = raw as Record<string, unknown>;
+  const out: NonNullable<Config["claudeAccounts"]> = {};
+  if (typeof block.autoMove === "boolean") out.autoMove = block.autoMove;
+  for (const key of ["thresholdPercent", "minDwellMinutes"] as const) {
+    const value = block[key];
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    const { min, max } = CLAUDE_ACCOUNTS_BOUNDS[key];
+    out[key] = Math.min(max, Math.max(min, value));
+  }
+  return out;
 }
 
 /**
@@ -482,6 +508,7 @@ export function loadConfig(): Config {
       : DEFAULT_WORKSPACE_ROOT;
 
   const activeClaudeAccountId = readActiveClaudeAccountId(parsed);
+  const claudeAccounts = readClaudeAccounts(parsed);
   const stateMap = readNestedStateMap(parsed);
   const config: Config = {
     linearApiKey: rawKey,
@@ -524,6 +551,7 @@ export function loadConfig(): Config {
     ),
     claudeArgs: readClaudeArgs(parsed),
     ...(activeClaudeAccountId !== undefined ? { activeClaudeAccountId } : {}),
+    ...(claudeAccounts ? { claudeAccounts } : {}),
     terminal: readTerminal(parsed),
   };
   const profile = readProfile(parsed);

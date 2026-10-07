@@ -163,3 +163,18 @@ test("UserPromptSubmit, Stop and StopFailure posts reach the turn state with the
   assert.equal(res.status, 204);
   assert.equal(recordedTurnState(card.id, sessionId), "limit");
 });
+
+test("a valid transcript_path passes the route schema and lands on the session", async () => {
+  const transcript = "/Users/someone/.claude/projects/-tmp-ws/conv-t.jsonl";
+  const res = await post(TOKEN, {
+    hook_event_name: "Unknown",
+    transcript_path: transcript,
+  });
+
+  assert.equal(res.status, 204);
+  assert.equal(
+    store.getCard(card.id)!.sessions!.find((s) => s.id === sessionId)!
+      .transcriptPath,
+    transcript,
+  );
+});

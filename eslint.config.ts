@@ -975,7 +975,7 @@ export default tseslint.config(
     rules: {
       "check-file/filename-naming-convention": [
         "error",
-        { "src/server/routes/**/*.ts": `${KEBAB}?(.route)?(.test)` },
+        { "src/server/routes/**/*.ts": `${KEBAB}?(.route|.handlers)?(.test)` },
         { ignoreMiddleExtensions: false },
       ],
     },

@@ -83,6 +83,7 @@
     "test:visual:update": "playwright test --update-snapshots"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
     "express": "5.2.1",
     "uqr": "0.1.3",
     "write-file-atomic": "8.0.0",

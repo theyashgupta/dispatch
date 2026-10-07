@@ -17,6 +17,8 @@ import type {
   EventType,
   ArchivedGroup,
   Item,
+  OrchestrationEvent,
+  DecisionItem,
   SourceCursor,
 } from "../../shared/types.js";
 
@@ -125,6 +127,44 @@ export interface BoardDb {
     cardId: string | null,
     limit: number,
   ): ActivityEvent[];
+  /** Activity events of one board with `id > sinceId`, oldest first. */
+  listEventsSince(
+    board: BoardKey,
+    cardId: string | null,
+    sinceId: number,
+    limit: number,
+  ): ActivityEvent[];
+  appendOrchestrationEvent(e: Omit<OrchestrationEvent, "id">): number;
+  listOrchestrationEvents(
+    board: BoardKey,
+    sinceId: number,
+    limit: number,
+  ): OrchestrationEvent[];
+  /** Revoke every live token of one orchestrator, then store the new token hash as its only live token. */
+  replaceOrchestratorToken(row: Omit<OrchestratorTokenRow, "revokedAt">): void;
+  /** Revoke every live token of one orchestrator and return how many were revoked. */
+  revokeOrchestratorTokens(
+    boardKey: BoardKey,
+    orchestratorId: string,
+    revokedAt: string,
+  ): number;
+  /** The token row stored under one SHA-256 hash, live or revoked, or undefined. */
+  findOrchestratorToken(tokenHash: string): OrchestratorTokenRow | undefined;
+  insertDecisionItem(item: DecisionItem): void;
+  getDecisionItem(id: string): DecisionItem | undefined;
+  /** Decision items of one board, oldest first, only those in `state` when given. */
+  listDecisionItems(
+    boardKey: BoardKey,
+    state?: DecisionItem["state"],
+  ): DecisionItem[];
+  /** Answer one open decision item and return it; null when it is unknown or already answered. */
+  answerDecisionItem(
+    id: string,
+    answer: NonNullable<DecisionItem["answer"]>,
+    answeredAt: string,
+  ): DecisionItem | null;
+  /** Mark one answered, unused item used; whether this call marked it. */
+  consumeDecisionItem(id: string, consumedAt: string): boolean;
   /** Write or replace one archived group row (LOCAL-17); the row id is the group card id. */
   upsertArchive(row: ArchivedGroup): void;
   /** Drop one archived group row; false when no row had that id. */
@@ -210,6 +250,48 @@ interface EventRow {
   board_key: string;
 }
 
+function toActivityEvent(r: EventRow): ActivityEvent {
+  return {
+    id: r.id,
+    cardId: r.card_id,
+    type: r.type as EventType,
+    fromCol: r.from_col as Column | null,
+    toCol: r.to_col as Column | null,
+    reason: r.reason,
+    source: r.source,
+    ts: r.ts,
+    boardKey: r.board_key as BoardKey,
+  };
+}
+
+interface OrchestrationEventRow {
+  id: number;
+  board_key: string;
+  card_id: string | null;
+  session_id: string | null;
+  kind: string;
+  data: string;
+  ts: string;
+}
+
+/**
+ * Parse an orchestration event data cell, falling back to an empty object.
+ *
+ * @remarks A cell edited by hand or truncated must not break a whole event listing.
+ */
+function parseEventData(raw: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 interface BoardRow {
   key: string;
   name: string;
@@ -229,6 +311,14 @@ export interface PushSubscriptionRow {
   auth: string;
   origin: string;
   createdAt: string;
+}
+
+export interface OrchestratorTokenRow {
+  tokenHash: string;
+  boardKey: BoardKey;
+  orchestratorId: string;
+  createdAt: string;
+  revokedAt: string | null;
 }
 
 /** Slot path for the Nth snapshot backup in the `.bak.N` chain. */
@@ -754,6 +844,30 @@ export function openBoardDb(): BoardDb {
       data   TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_items_source_state ON items(source, state);
+    CREATE TABLE IF NOT EXISTS orchestration_events (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      board_key  TEXT NOT NULL,
+      card_id    TEXT,
+      session_id TEXT,
+      kind       TEXT NOT NULL,
+      data       TEXT NOT NULL,
+      ts         TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_orchestration_events_board_id ON orchestration_events(board_key, id);
+    CREATE TABLE IF NOT EXISTS orchestrator_tokens (
+      token_hash      TEXT PRIMARY KEY,
+      board_key       TEXT NOT NULL,
+      orchestrator_id TEXT NOT NULL,
+      created_at      TEXT NOT NULL,
+      revoked_at      TEXT
+    );
+    CREATE TABLE IF NOT EXISTS decision_items (
+      id        TEXT PRIMARY KEY,
+      board_key TEXT NOT NULL,
+      state     TEXT NOT NULL,
+      data      TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_decision_items_board_state ON decision_items(board_key, state);
   `);
   try {
     assertSchemaOpenable(persistedSchemaVersion(db) ?? 0);
@@ -790,6 +904,55 @@ export function openBoardDb(): BoardDb {
   const selectEventsByCard = db.prepare(
     `SELECT id, card_id, type, from_col, to_col, reason, source, ts, board_key
        FROM events WHERE board_key = ? AND card_id = ? ORDER BY id DESC LIMIT ?`,
+  );
+  const selectEventsSince = db.prepare(
+    `SELECT id, card_id, type, from_col, to_col, reason, source, ts, board_key
+       FROM events WHERE board_key = ? AND (? IS NULL OR card_id = ?) AND id > ? ORDER BY id ASC LIMIT ?`,
+  );
+  const insertOrchestrationEvent = db.prepare(
+    `INSERT INTO orchestration_events (board_key, card_id, session_id, kind, data, ts)
+     VALUES (@boardKey, @cardId, @sessionId, @kind, @data, @ts)`,
+  );
+  const selectOrchestrationEvents = db.prepare(
+    `SELECT id, board_key, card_id, session_id, kind, data, ts
+       FROM orchestration_events WHERE board_key = ? AND id > ? ORDER BY id ASC LIMIT ?`,
+  );
+  const insertOrchestratorToken = db.prepare(
+    `INSERT INTO orchestrator_tokens (token_hash, board_key, orchestrator_id, created_at, revoked_at)
+     VALUES (@tokenHash, @boardKey, @orchestratorId, @createdAt, NULL)`,
+  );
+  const revokeOrchestratorTokens = db.prepare(
+    `UPDATE orchestrator_tokens SET revoked_at = @revokedAt
+      WHERE board_key = @boardKey AND orchestrator_id = @orchestratorId AND revoked_at IS NULL`,
+  );
+  const selectOrchestratorToken = db.prepare(
+    `SELECT token_hash AS tokenHash, board_key AS boardKey,
+            orchestrator_id AS orchestratorId, created_at AS createdAt,
+            revoked_at AS revokedAt
+       FROM orchestrator_tokens WHERE token_hash = ?`,
+  );
+  const insertDecisionItem = db.prepare(
+    `INSERT INTO decision_items (id, board_key, state, data)
+     VALUES (@id, @boardKey, @state, @data)`,
+  );
+  const selectDecisionItem = db.prepare(
+    `SELECT data FROM decision_items WHERE id = ?`,
+  );
+  const selectDecisionItems = db.prepare(
+    `SELECT data FROM decision_items
+      WHERE board_key = @boardKey AND (@state IS NULL OR state = @state) ORDER BY rowid`,
+  );
+  const decisionItem = (id: string): DecisionItem | undefined => {
+    const row = selectDecisionItem.get(id) as { data: string } | undefined;
+    return row ? (JSON.parse(row.data) as DecisionItem) : undefined;
+  };
+  const answerDecisionItem = db.prepare(
+    `UPDATE decision_items SET state = 'answered', data = @data
+      WHERE id = @id AND state = 'open'`,
+  );
+  const consumeDecisionItem = db.prepare(
+    `UPDATE decision_items SET data = json_set(data, '$.consumedAt', @consumedAt)
+      WHERE id = @id AND state = 'answered' AND json_extract(data, '$.consumedAt') IS NULL`,
   );
   const evictExcessPushSubscriptions = db.prepare(
     `DELETE FROM push_subscriptions
@@ -946,24 +1109,104 @@ export function openBoardDb(): BoardDb {
       persistTxn(cards, toMeta(parsed), []);
     },
     listEvents(board, cardId, limit) {
-      const rows = (cardId == null
-        ? selectEvents.all(board, limit)
-        : selectEventsByCard.all(
-            board,
-            cardId,
-            limit,
-          )) as unknown as EventRow[];
+      return (
+        cardId == null
+          ? selectEvents.all(board, limit)
+          : selectEventsByCard.all(board, cardId, limit)
+      ).map((r) => toActivityEvent(r as unknown as EventRow));
+    },
+    listEventsSince(board, cardId, sinceId, limit) {
+      return selectEventsSince
+        .all(board, cardId, cardId, sinceId, limit)
+        .map((r) => toActivityEvent(r as unknown as EventRow));
+    },
+    appendOrchestrationEvent(e) {
+      const info = insertOrchestrationEvent.run({
+        boardKey: e.boardKey,
+        cardId: e.cardId,
+        sessionId: e.sessionId,
+        kind: e.kind,
+        data: JSON.stringify(e.data),
+        ts: e.ts,
+      });
+      return Number(info.lastInsertRowid);
+    },
+    listOrchestrationEvents(board, sinceId, limit) {
+      const rows = selectOrchestrationEvents.all(
+        board,
+        sinceId,
+        limit,
+      ) as unknown as OrchestrationEventRow[];
       return rows.map((r) => ({
         id: r.id,
-        cardId: r.card_id,
-        type: r.type as EventType,
-        fromCol: r.from_col as Column | null,
-        toCol: r.to_col as Column | null,
-        reason: r.reason,
-        source: r.source,
-        ts: r.ts,
         boardKey: r.board_key as BoardKey,
+        cardId: r.card_id,
+        sessionId: r.session_id,
+        kind: r.kind as OrchestrationEvent["kind"],
+        data: parseEventData(r.data),
+        ts: r.ts,
       }));
+    },
+    replaceOrchestratorToken(row) {
+      withTxn(db, () => {
+        revokeOrchestratorTokens.run({
+          boardKey: row.boardKey,
+          orchestratorId: row.orchestratorId,
+          revokedAt: row.createdAt,
+        });
+        insertOrchestratorToken.run({
+          tokenHash: row.tokenHash,
+          boardKey: row.boardKey,
+          orchestratorId: row.orchestratorId,
+          createdAt: row.createdAt,
+        });
+      });
+    },
+    revokeOrchestratorTokens(boardKey, orchestratorId, revokedAt) {
+      const info = revokeOrchestratorTokens.run({
+        boardKey,
+        orchestratorId,
+        revokedAt,
+      });
+      return Number(info.changes);
+    },
+    findOrchestratorToken(tokenHash) {
+      return selectOrchestratorToken.get(tokenHash) as
+        OrchestratorTokenRow | undefined;
+    },
+    insertDecisionItem(item) {
+      insertDecisionItem.run({
+        id: item.id,
+        boardKey: item.boardKey,
+        state: item.state,
+        data: JSON.stringify(item),
+      });
+    },
+    getDecisionItem: decisionItem,
+    listDecisionItems(boardKey, state) {
+      const rows = selectDecisionItems.all({
+        boardKey,
+        state: state ?? null,
+      }) as { data: string }[];
+      return rows.map((r) => JSON.parse(r.data) as DecisionItem);
+    },
+    answerDecisionItem(id, answer, answeredAt) {
+      const item = decisionItem(id);
+      if (item?.state !== "open") return null;
+      const answered: DecisionItem = {
+        ...item,
+        state: "answered",
+        answer,
+        answeredAt,
+      };
+      const info = answerDecisionItem.run({
+        id,
+        data: JSON.stringify(answered),
+      });
+      return Number(info.changes) > 0 ? answered : null;
+    },
+    consumeDecisionItem(id, consumedAt) {
+      return Number(consumeDecisionItem.run({ id, consumedAt }).changes) > 0;
     },
     backupTick(force?: boolean): Promise<void> {
       try {
