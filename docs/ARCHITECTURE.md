@@ -5003,5 +5003,4 @@ runs on a board at a time. A flow in the state `running` is started again at boo
 cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`
 or `sources` in both files, so they never import the app they call. The server uses `node:http` with no client
 timeout, because `wait_for_event` can hold a response for 540 seconds before any header, and a
-cancelled tool call aborts its request. `src/server/test-support/orchestrator-client.ts` is a
-scripted client that starts this server and replays a manual run on a sandbox.
+cancelled tool call aborts its request.
