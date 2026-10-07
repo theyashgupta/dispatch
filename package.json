@@ -56,7 +56,7 @@
     "doc-drift": "node scripts/check-doc-drift.mjs",
     "invariants": "node scripts/check-invariants.mjs",
     "check-hooks": "node scripts/check-hooks.mjs",
-    "check:static": "scripts/check-lock.sh npm run check:static:unlocked",
+    "check:static": "bash scripts/check-lock.sh npm run check:static:unlocked",
     "check:static:unlocked": "npm run format:check && npm run lint && npm run typecheck && npm run depcruise && npm run deadcode",
     "selection-guard": "tsx scripts/terminal-selection-guard.ts",
     "sim": "node scripts/fresh-env-sim.mjs",
@@ -76,7 +76,7 @@
     "contrast-113": "node scripts/contrast-113.mjs",
     "panel-114": "node scripts/panel-114.mjs",
     "panel-115": "node scripts/panel-115.mjs",
-    "check": "scripts/check-lock.sh npm run check:unlocked",
+    "check": "bash scripts/check-lock.sh npm run check:unlocked",
     "check:unlocked": "npm run format:check && npm run lint && npm run depcruise && npm run typecheck && npm run test && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants && npm run check-hooks",
     "prepack": "npm run build"
   },
