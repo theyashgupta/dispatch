@@ -4,7 +4,12 @@ import {
   accountOptions,
   type SessionRow,
 } from "../../../../shared/sessions.js";
-import { bulkEligibility, filterSessionRows } from "./sessions-filters.js";
+import {
+  applyFilterEdit,
+  bulkEligibility,
+  filterSessionRows,
+  ticketLabels,
+} from "./sessions-filters.js";
 
 const row = (key: string, extra: Partial<SessionRow> = {}): SessionRow => ({
   key,
@@ -113,4 +118,34 @@ test("resume refuses a lost sibling on a card whose active session is live", () 
     bulkEligibility([row("c:s", { lost: true, cardLive: false })]).resume,
     true,
   );
+});
+
+test("ticket labels list each ticket once and name the sibling count only for a cleanup", () => {
+  const targets = [
+    row("x:1", { identifier: "LOCAL-1", siblings: 2 }),
+    row("x:2", { identifier: "LOCAL-1", siblings: 2 }),
+    row("y", { identifier: "LOCAL-2" }),
+  ];
+  assert.deepEqual(ticketLabels(targets, "Clean up"), [
+    "LOCAL-1 (all 2 sessions)",
+    "LOCAL-2",
+  ]);
+  assert.deepEqual(ticketLabels(targets, "Resume"), ["LOCAL-1", "LOCAL-2"]);
+});
+
+test("a toolbar edit keeps a vanished account in state and an account pick replaces it", () => {
+  const current = { ...none, account: "gone" };
+  const shown = { ...none, account: "" };
+  assert.deepEqual(applyFilterEdit({ ...shown, query: "x" }, shown, current), {
+    ...current,
+    query: "x",
+  });
+  assert.deepEqual(
+    applyFilterEdit({ ...shown, account: "acct-a" }, shown, current),
+    { ...shown, account: "acct-a" },
+  );
+  assert.deepEqual(applyFilterEdit({ ...none, liveOnly: true }, none, none), {
+    ...none,
+    liveOnly: true,
+  });
 });
