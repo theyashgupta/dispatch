@@ -203,6 +203,8 @@ const JSDOC_EXEMPT_PATTERNS = [
 
 const LOOP_FORMAT_FILES = [
   /^src\/server\/services\/domain\/loop-progress(\.test)?\.ts$/,
+  /^src\/server\/services\/domain\/supervisor-state(\.test)?\.ts$/,
+  /^src\/server\/services\/orchestration\/supervisor-actions\.test\.ts$/,
   /^src\/server\/services\/orchestration\/loop-progress-reader(\.test)?\.ts$/,
   /^src\/server\/services\/orchestration\/loop-progress-model\.test\.ts$/,
   /^src\/server\/test-support\/loop-fixtures\.ts$/,
