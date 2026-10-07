@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { QueryClient } from "@tanstack/react-query";
+import { DEFAULT_BOARD_KEY as LOCAL } from "../../../../shared/board-key.js";
 import { createMeetingItems, getMeetingTranscript } from "./meetings-api.js";
 import {
   createMeetingMutationOptions,
@@ -207,7 +208,9 @@ test("createMeetingMutationOptions resolves a typed failure for a refused create
 
 test("runAgentMutationOptions promotes the item and moves its card to To Do", async () => {
   reply(200, { card: { id: "c1", identifier: "DSP-1" } });
-  const result = await runAgentMutationOptions.mutationFn({ itemId: "i1" });
+  const result = await runAgentMutationOptions(LOCAL).mutationFn({
+    itemId: "i1",
+  });
   assert.deepEqual(result, {
     card: { id: "c1", identifier: "DSP-1" },
     moved: true,
@@ -228,16 +231,19 @@ test("runAgentMutationOptions resolves moved false when the move is refused", as
         : new Response("{}", { status: 500 }),
     );
   };
-  assert.deepEqual(await runAgentMutationOptions.mutationFn({ itemId: "i1" }), {
-    card: { id: "c1", identifier: "D" },
-    moved: false,
-  });
+  assert.deepEqual(
+    await runAgentMutationOptions(LOCAL).mutationFn({ itemId: "i1" }),
+    {
+      card: { id: "c1", identifier: "D" },
+      moved: false,
+    },
+  );
 });
 
 test("runAgentMutationOptions rejects with the server reason when the promote is refused", async () => {
   reply(409, { error: "promoted" });
   await assert.rejects(
-    runAgentMutationOptions.mutationFn({ itemId: "i1" }),
+    runAgentMutationOptions(LOCAL).mutationFn({ itemId: "i1" }),
     new Error("promoted"),
   );
   assert.equal(calls.length, 1);

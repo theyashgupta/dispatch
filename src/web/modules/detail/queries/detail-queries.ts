@@ -1,5 +1,5 @@
 import { queryOptions, useMutation, useQuery } from "@tanstack/react-query";
-import type { Column } from "../../../../shared/types.js";
+import type { BoardKey, Column } from "../../../../shared/types.js";
 import { fetchEvents } from "@/queries/activity-api";
 import {
   cleanupCard,
@@ -23,7 +23,8 @@ export const detailKeys = {
     commentCount: number | undefined,
     lastCommentId: string | undefined,
   ) => ["detail", "card", id, "comments", commentCount, lastCommentId] as const,
-  events: (id: string) => ["detail", "card", id, "events"] as const,
+  events: (board: BoardKey, id: string) =>
+    ["detail", "card", id, "events", board] as const,
 };
 
 /**
@@ -54,10 +55,10 @@ export function cardCommentsQueryOptions(
  *
  * @remarks Every mount refetches, as the legacy timeline did; a failed read leaves the list empty.
  */
-export function cardEventsQueryOptions(id: string) {
+export function cardEventsQueryOptions(board: BoardKey, id: string) {
   return queryOptions({
-    queryKey: detailKeys.events(id),
-    queryFn: () => fetchEvents(id),
+    queryKey: detailKeys.events(board, id),
+    queryFn: () => fetchEvents(board, id),
     staleTime: 0,
   });
 }
@@ -72,8 +73,8 @@ export function useCardCommentsQuery(
 }
 
 /** Read the event backfill of one card's timeline. */
-export function useCardEventsQuery(id: string) {
-  return useQuery(cardEventsQueryOptions(id));
+export function useCardEventsQuery(board: BoardKey, id: string) {
+  return useQuery(cardEventsQueryOptions(board, id));
 }
 
 /** Ensure a ttyd terminal for a card's live session. */

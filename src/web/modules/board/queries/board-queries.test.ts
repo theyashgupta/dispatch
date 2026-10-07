@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
+import { DEFAULT_BOARD_KEY as LOCAL } from "../../../../shared/board-key.js";
 import type { BoardSnapshot, Card } from "../../../../shared/types.js";
 import {
   boardSnapshotKeys,
@@ -106,20 +107,22 @@ function snapshotOf(column: string): BoardSnapshot {
   return {
     cards: [{ ...movedCard, column } as Card],
     syncedAt: null,
+    boardKey: LOCAL,
   };
 }
 
 function seededClient(): QueryClient {
   const client = newClient();
-  client.setQueryData(boardSnapshotKeys.detail(20), snapshotOf("todo"));
-  client.setQueryData(boardSnapshotKeys.detail(40), snapshotOf("todo"));
+  client.setQueryData(boardSnapshotKeys.detail(LOCAL, 20), snapshotOf("todo"));
+  client.setQueryData(boardSnapshotKeys.detail(LOCAL, 40), snapshotOf("todo"));
   client.setQueryData(tunnelKeys.state, { state: "up" });
   return client;
 }
 
 function columnIn(client: QueryClient, doneLimit: number): string | undefined {
-  return client.getQueryData<BoardSnapshot>(boardSnapshotKeys.detail(doneLimit))
-    ?.cards[0]?.column;
+  return client.getQueryData<BoardSnapshot>(
+    boardSnapshotKeys.detail(LOCAL, doneLimit),
+  )?.cards[0]?.column;
 }
 
 function moveWith(client: QueryClient, column = "in_progress") {
@@ -170,7 +173,7 @@ test("a 409 rejects and restores the moved card's column without touching other 
   );
   await new Promise((resolve) => setImmediate(resolve));
   client.setQueryData<BoardSnapshot>(
-    boardSnapshotKeys.detail(20),
+    boardSnapshotKeys.detail(LOCAL, 20),
     (old) =>
       old && {
         ...old,
@@ -180,7 +183,7 @@ test("a 409 rejects and restores the moved card's column without touching other 
   release(new Response("{}", { status: 409, statusText: "Conflict" }));
   await settled;
   const after = client.getQueryData<BoardSnapshot>(
-    boardSnapshotKeys.detail(20),
+    boardSnapshotKeys.detail(LOCAL, 20),
   );
   assert.equal(after?.cards.find((c) => c.id === "c1")?.column, "todo");
   assert.equal(after?.cards.find((c) => c.id === "c2")?.column, "in_review");
@@ -190,13 +193,17 @@ test("a 409 rejects and restores the moved card's column without touching other 
 test("a 409 rollback leaves a snapshot entry without the card exactly as it was", async () => {
   const client = seededClient();
   const other = { id: "c2", title: "Other", column: "in_review" } as Card;
-  const withoutCard: BoardSnapshot = { cards: [other], syncedAt: "s" };
-  client.setQueryData(boardSnapshotKeys.detail(40), withoutCard);
+  const withoutCard: BoardSnapshot = {
+    cards: [other],
+    syncedAt: "s",
+    boardKey: LOCAL,
+  };
+  client.setQueryData(boardSnapshotKeys.detail(LOCAL, 40), withoutCard);
   reply(409, {}, "Conflict");
   await moveWith(client).catch(() => undefined);
   assert.equal(columnIn(client, 20), "todo");
   assert.deepEqual(
-    client.getQueryData(boardSnapshotKeys.detail(40)),
+    client.getQueryData(boardSnapshotKeys.detail(LOCAL, 40)),
     withoutCard,
   );
 });
@@ -204,7 +211,7 @@ test("a 409 rollback leaves a snapshot entry without the card exactly as it was"
 test("a 409 rollback does not touch a card that reached an entry after the move began", async () => {
   const client = seededClient();
   const late = { id: "c1", title: "A card", column: "in_review" } as Card;
-  client.setQueryData(boardSnapshotKeys.detail(40), {
+  client.setQueryData(boardSnapshotKeys.detail(LOCAL, 40), {
     cards: [],
     syncedAt: null,
   });
@@ -218,9 +225,10 @@ test("a 409 rollback does not touch a card that reached an entry after the move 
     new Error("moveCard failed: 409 Conflict"),
   );
   await new Promise((resolve) => setImmediate(resolve));
-  client.setQueryData<BoardSnapshot>(boardSnapshotKeys.detail(40), {
+  client.setQueryData<BoardSnapshot>(boardSnapshotKeys.detail(LOCAL, 40), {
     cards: [late],
     syncedAt: null,
+    boardKey: LOCAL,
   });
   release(new Response("{}", { status: 409, statusText: "Conflict" }));
   await settled;
@@ -255,7 +263,8 @@ for (const status of [200, 409] as const) {
     await moveWith(client).catch(() => undefined);
     for (const limit of [20, 40]) {
       assert.equal(
-        client.getQueryState(boardSnapshotKeys.detail(limit))?.isInvalidated,
+        client.getQueryState(boardSnapshotKeys.detail(LOCAL, limit))
+          ?.isInvalidated,
         false,
       );
     }

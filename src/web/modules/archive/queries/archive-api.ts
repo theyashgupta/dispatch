@@ -1,4 +1,8 @@
-import type { ArchivedGroupSummary } from "../../../../shared/types.js";
+import { withBoard } from "../../../../shared/board-select.js";
+import type {
+  ArchivedGroupSummary,
+  BoardKey,
+} from "../../../../shared/types.js";
 import { http, httpError } from "@/lib/http";
 
 /**
@@ -7,9 +11,11 @@ import { http, httpError } from "@/lib/http";
  * @remarks
  * Throws on any non-2xx.
  */
-export async function listArchive(): Promise<ArchivedGroupSummary[]> {
+export async function listArchive(
+  board: BoardKey,
+): Promise<ArchivedGroupSummary[]> {
   const result = await http<{ archived: ArchivedGroupSummary[] }>(
-    "/api/archive",
+    withBoard("/api/archive", board),
   );
   if (!result.ok) {
     throw httpError("listArchive", result);

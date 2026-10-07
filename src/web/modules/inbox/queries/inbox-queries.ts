@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import type { SettableItemState } from "../../../../shared/types.js";
+import type { BoardKey, SettableItemState } from "../../../../shared/types.js";
 import {
   promoteItem,
   setItemState,
@@ -41,10 +41,10 @@ export function snoozeItemMutationOptions() {
 }
 
 /** Build the mutation options that promote an item to a local Inbox card. */
-export function promoteItemMutationOptions() {
+export function promoteItemMutationOptions(board: BoardKey) {
   return {
     mutationFn: ({ id, context }: PromoteItemVariables) =>
-      promoteItem(id, context),
+      promoteItem(board, id, context),
   };
 }
 
@@ -56,6 +56,6 @@ export function useSnoozeItemMutation() {
   return useMutation(snoozeItemMutationOptions());
 }
 
-export function usePromoteItemMutation() {
-  return useMutation(promoteItemMutationOptions());
+export function usePromoteItemMutation(board: BoardKey) {
+  return useMutation(promoteItemMutationOptions(board));
 }

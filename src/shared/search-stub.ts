@@ -1,4 +1,4 @@
-import type { Card } from "./types.js";
+import type { BoardKey, Card } from "./types.js";
 import type { CardSearchResult } from "./search.js";
 
 /**
@@ -9,9 +9,10 @@ import type { CardSearchResult } from "./search.js";
  * `DetailPanel`, which keeps those values out of the DOM. This is the only construction site for a
  * synthetic card.
  */
-export function stubToCard(stub: CardSearchResult): Card {
+export function stubToCard(stub: CardSearchResult, boardKey: BoardKey): Card {
   return {
     id: stub.id,
+    boardKey,
     identifier: stub.identifier,
     title: stub.title,
     column: stub.column,

@@ -1,4 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
+import type { BoardKey } from "../../shared/types.js";
 import {
   createLocalTicket,
   generateGroupTitle,
@@ -81,11 +82,11 @@ export function generateTicketDraftMutationOptions() {
 }
 
 /** Build the mutation options that persist a reviewed ticket draft as a local card. */
-export function createLocalTicketMutationOptions() {
+export function createLocalTicketMutationOptions(board: BoardKey) {
   return {
     gcTime: 0,
     mutationFn: ({ title, description, images }: CreateLocalTicketVariables) =>
-      createLocalTicket(title, description, images),
+      createLocalTicket(board, title, description, images),
   };
 }
 
@@ -97,8 +98,8 @@ export function useGenerateTicketDraftMutation() {
   return useMutation(generateTicketDraftMutationOptions());
 }
 
-export function useCreateLocalTicketMutation() {
-  return useMutation(createLocalTicketMutationOptions());
+export function useCreateLocalTicketMutation(board: BoardKey) {
+  return useMutation(createLocalTicketMutationOptions(board));
 }
 
 /**
@@ -134,9 +135,9 @@ export function startCardMutationOptions() {
  *
  * @remarks A 400 and a 409 resolve `{ ok: false }` with the server's variant and the ineligible ids; any other status rejects.
  */
-export function startGroupMutationOptions() {
+export function startGroupMutationOptions(board: BoardKey) {
   return {
-    mutationFn: (input: StartGroupVariables) => startGroup(input),
+    mutationFn: (input: StartGroupVariables) => startGroup(board, input),
   };
 }
 
@@ -156,8 +157,8 @@ export function useStartCardMutation() {
   return useMutation(startCardMutationOptions());
 }
 
-export function useStartGroupMutation() {
-  return useMutation(startGroupMutationOptions());
+export function useStartGroupMutation(board: BoardKey) {
+  return useMutation(startGroupMutationOptions(board));
 }
 
 export function useGenerateGroupTitleMutation() {

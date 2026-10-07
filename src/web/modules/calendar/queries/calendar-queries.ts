@@ -1,4 +1,5 @@
 import { queryOptions, useMutation, useQuery } from "@tanstack/react-query";
+import type { BoardKey } from "../../../../shared/types.js";
 import { calendarStatusQueryOptions } from "@/queries/calendar-status-queries";
 import { createLocalTicket } from "@/queries/cards-api";
 
@@ -25,10 +26,12 @@ export function useCalendarPollQuery() {
   return useQuery(calendarPollQueryOptions());
 }
 
-export const prepareTicketMutationOptions = {
-  mutationFn: (vars: { title: string; description: string }) =>
-    createLocalTicket(vars.title, vars.description),
-};
+export function prepareTicketMutationOptions(board: BoardKey) {
+  return {
+    mutationFn: (vars: { title: string; description: string }) =>
+      createLocalTicket(board, vars.title, vars.description),
+  };
+}
 
 /**
  * Run the prepare ticket mutation and hand the result to `onResult`.
@@ -38,7 +41,11 @@ export const prepareTicketMutationOptions = {
  * user leaves the page before the request settles.
  */
 export function usePrepareTicketMutation(
+  board: BoardKey,
   onResult: (result: Awaited<ReturnType<typeof createLocalTicket>>) => void,
 ) {
-  return useMutation({ ...prepareTicketMutationOptions, onSuccess: onResult });
+  return useMutation({
+    ...prepareTicketMutationOptions(board),
+    onSuccess: onResult,
+  });
 }

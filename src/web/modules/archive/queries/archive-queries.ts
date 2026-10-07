@@ -5,12 +5,13 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
+import type { BoardKey } from "../../../../shared/types.js";
 import { restoreArchived } from "@/queries/archive-api";
 import { deleteArchived, listArchive } from "./archive-api.js";
 
 export const archiveKeys = {
   all: ["archive"] as const,
-  list: ["archive", "list"] as const,
+  list: (board: BoardKey) => ["archive", "list", board] as const,
 };
 
 /**
@@ -20,16 +21,16 @@ export const archiveKeys = {
  * The legacy page read on mount and showed nothing until the read answered; a cached list would show
  * rows that a write made elsewhere (an unwind, an undo, another tab) already removed.
  */
-export function archiveQueryOptions() {
+export function archiveQueryOptions(board: BoardKey) {
   return queryOptions({
-    queryKey: archiveKeys.list,
-    queryFn: listArchive,
+    queryKey: archiveKeys.list(board),
+    queryFn: () => listArchive(board),
     gcTime: 0,
   });
 }
 
-export function useArchiveQuery() {
-  return useQuery(archiveQueryOptions());
+export function useArchiveQuery(board: BoardKey) {
+  return useQuery(archiveQueryOptions(board));
 }
 
 /**
@@ -44,7 +45,7 @@ export function restoreArchivedMutationOptions(queryClient: QueryClient) {
     mutationFn: (id: string) => restoreArchived(id),
     onSuccess: (result: Awaited<ReturnType<typeof restoreArchived>>) => {
       if (result.ok) {
-        return queryClient.invalidateQueries({ queryKey: archiveKeys.list });
+        return queryClient.invalidateQueries({ queryKey: archiveKeys.all });
       }
     },
   };
@@ -67,7 +68,7 @@ export function deleteArchivedMutationOptions(queryClient: QueryClient) {
     mutationFn: (vars: { id: string; force: boolean }) =>
       deleteArchived(vars.id, vars.force),
     onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: archiveKeys.list }),
+      queryClient.invalidateQueries({ queryKey: archiveKeys.all }),
   };
 }
 

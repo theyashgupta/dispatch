@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
+import { DEFAULT_BOARD_KEY as LOCAL } from "../../../../shared/board-key.js";
+import type { BoardKey } from "../../../../shared/types.js";
 import { restoreArchived } from "@/queries/archive-api";
 import { deleteArchived, listArchive } from "./archive-api.js";
 import {
@@ -10,6 +12,7 @@ import {
   restoreArchivedMutationOptions,
 } from "./archive-queries.js";
 
+const ACME = "ACME" as BoardKey;
 const realFetch = globalThis.fetch;
 const calls: { url: string; init?: RequestInit }[] = [];
 
@@ -38,21 +41,30 @@ afterEach(() => {
 
 test("archiveKeys has the documented shape", () => {
   assert.deepEqual(archiveKeys.all, ["archive"]);
-  assert.deepEqual(archiveKeys.list, ["archive", "list"]);
+  assert.deepEqual(archiveKeys.list(LOCAL), ["archive", "list", LOCAL]);
+  assert.deepEqual(archiveKeys.list(ACME), ["archive", "list", ACME]);
 });
 
 test("archiveQueryOptions requests the archive list", async () => {
-  const options = archiveQueryOptions();
-  assert.deepEqual(options.queryKey, ["archive", "list"]);
+  const options = archiveQueryOptions(LOCAL);
+  assert.deepEqual(options.queryKey, ["archive", "list", LOCAL]);
   reply(200, { archived: [{ id: "g1" }] });
   assert.deepEqual(await newClient().fetchQuery(options), [{ id: "g1" }]);
   assert.equal(calls[0]?.url, "/api/archive");
 });
 
+test("archiveQueryOptions for ACME carries the board in the key and the URL", async () => {
+  const options = archiveQueryOptions(ACME);
+  assert.deepEqual(options.queryKey, ["archive", "list", ACME]);
+  reply(200, { archived: [] });
+  await newClient().fetchQuery(options);
+  assert.equal(calls[0]?.url, "/api/archive?board=ACME");
+});
+
 test("listArchive throws on a failure status", async () => {
   reply(500, {}, "Internal Server Error");
   await assert.rejects(
-    listArchive(),
+    listArchive(LOCAL),
     new Error("listArchive failed: 500 Internal Server Error"),
   );
 });
@@ -134,12 +146,12 @@ test("deleteArchived throws on any other failure status", async () => {
 });
 
 function listIsStale(client: QueryClient): boolean {
-  return client.getQueryState(archiveKeys.list)?.isInvalidated === true;
+  return client.getQueryState(archiveKeys.list(LOCAL))?.isInvalidated === true;
 }
 
 function seededClient(): QueryClient {
   const client = newClient();
-  client.setQueryData(archiveKeys.list, [{ id: "g1" }]);
+  client.setQueryData(archiveKeys.list(LOCAL), [{ id: "g1" }]);
   return client;
 }
 
@@ -211,5 +223,5 @@ test("a failed delete rejects and leaves the list alone", async () => {
 });
 
 test("the archive list is dropped once the page closes, so every open reads it fresh", () => {
-  assert.equal(archiveQueryOptions().gcTime, 0);
+  assert.equal(archiveQueryOptions(LOCAL).gcTime, 0);
 });

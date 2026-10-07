@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import { DEFAULT_BOARD_KEY as LOCAL } from "../../shared/board-key.js";
+import type { BoardKey } from "../../shared/types.js";
 import {
   createLocalTicket,
   generateTicketDraft,
@@ -8,6 +10,7 @@ import {
   syncCardToLinear,
 } from "./cards-api.js";
 
+const ACME = "ACME" as BoardKey;
 const realFetch = globalThis.fetch;
 const calls: { url: string; init?: RequestInit }[] = [];
 
@@ -105,14 +108,14 @@ const groupInput = {
 
 test("startGroup resolves the created card on a 202", async () => {
   reply(202, { card }, "Accepted");
-  assert.deepEqual(await startGroup(groupInput), { ok: true, card });
+  assert.deepEqual(await startGroup(LOCAL, groupInput), { ok: true, card });
   assert.equal(calls[0]?.url, "/api/cards/group");
   assert.equal(calls[0]?.init?.body, JSON.stringify(groupInput));
 });
 
 test("startGroup keeps the config variant on a 400", async () => {
   reply(400, { error: "no repo", variant: "config" }, "Bad Request");
-  assert.deepEqual(await startGroup(groupInput), {
+  assert.deepEqual(await startGroup(LOCAL, groupInput), {
     ok: false,
     error: "no repo",
     variant: "config",
@@ -121,7 +124,7 @@ test("startGroup keeps the config variant on a 400", async () => {
 
 test("startGroup keeps the playbook variant on a 400", async () => {
   reply(400, { error: "bad playbook", variant: "playbook" }, "Bad Request");
-  assert.deepEqual(await startGroup(groupInput), {
+  assert.deepEqual(await startGroup(LOCAL, groupInput), {
     ok: false,
     error: "bad playbook",
     variant: "playbook",
@@ -130,7 +133,7 @@ test("startGroup keeps the playbook variant on a 400", async () => {
 
 test("startGroup drops an unknown variant on a 400", async () => {
   reply(400, { error: "x", variant: "ineligible" }, "Bad Request");
-  assert.deepEqual(await startGroup(groupInput), {
+  assert.deepEqual(await startGroup(LOCAL, groupInput), {
     ok: false,
     error: "x",
     variant: undefined,
@@ -139,7 +142,7 @@ test("startGroup drops an unknown variant on a 400", async () => {
 
 test("startGroup falls back to Start failed. on a 400 with no error", async () => {
   reply(400, {}, "Bad Request");
-  assert.deepEqual(await startGroup(groupInput), {
+  assert.deepEqual(await startGroup(LOCAL, groupInput), {
     ok: false,
     error: "Start failed.",
     variant: undefined,
@@ -148,7 +151,7 @@ test("startGroup falls back to Start failed. on a 400 with no error", async () =
 
 test("startGroup reports the ineligible ids on a 409", async () => {
   reply(409, { error: "moved on", ineligibleIds: ["b"] }, "Conflict");
-  assert.deepEqual(await startGroup(groupInput), {
+  assert.deepEqual(await startGroup(LOCAL, groupInput), {
     ok: false,
     error: "moved on",
     variant: "ineligible",
@@ -158,7 +161,7 @@ test("startGroup reports the ineligible ids on a 409", async () => {
 
 test("startGroup falls back to the eligibility copy and an empty id list on a 409", async () => {
   reply(409, {}, "Conflict");
-  assert.deepEqual(await startGroup(groupInput), {
+  assert.deepEqual(await startGroup(LOCAL, groupInput), {
     ok: false,
     error: "Some selected tickets are no longer eligible.",
     variant: "ineligible",
@@ -169,7 +172,7 @@ test("startGroup falls back to the eligibility copy and an empty id list on a 40
 test("startGroup throws on any other failure status", async () => {
   reply(500, {}, "Internal Server Error");
   await assert.rejects(
-    startGroup(groupInput),
+    startGroup(LOCAL, groupInput),
     new Error("startGroup failed: 500 Internal Server Error"),
   );
 });
@@ -177,7 +180,7 @@ test("startGroup throws on any other failure status", async () => {
 test("startGroup throws on a 2xx that is not a 202", async () => {
   reply(200, { card }, "OK");
   await assert.rejects(
-    startGroup(groupInput),
+    startGroup(LOCAL, groupInput),
     /^Error: startGroup failed: 200/,
   );
 });
@@ -273,7 +276,10 @@ test("generateTicketDraft rejects on a network failure", async () => {
 
 test("createLocalTicket resolves the created card on a 201", async () => {
   reply(201, card, "Created");
-  assert.deepEqual(await createLocalTicket("T", "D"), { ok: true, card });
+  assert.deepEqual(await createLocalTicket(LOCAL, "T", "D"), {
+    ok: true,
+    card,
+  });
   assert.equal(calls[0]?.url, "/api/cards");
   assert.equal(
     calls[0]?.init?.body,
@@ -283,7 +289,7 @@ test("createLocalTicket resolves the created card on a 201", async () => {
 
 test("createLocalTicket returns the error code on a 400", async () => {
   reply(400, { error: "title-required" }, "Bad Request");
-  assert.deepEqual(await createLocalTicket("", "D"), {
+  assert.deepEqual(await createLocalTicket(LOCAL, "", "D"), {
     ok: false,
     error: "title-required",
   });
@@ -291,7 +297,7 @@ test("createLocalTicket returns the error code on a 400", async () => {
 
 test("createLocalTicket answers a null error on a 400 with no error", async () => {
   reply(400, {}, "Bad Request");
-  assert.deepEqual(await createLocalTicket("", "D"), {
+  assert.deepEqual(await createLocalTicket(LOCAL, "", "D"), {
     ok: false,
     error: null,
   });
@@ -299,7 +305,7 @@ test("createLocalTicket answers a null error on a 400 with no error", async () =
 
 test("createLocalTicket answers a null error on any other status", async () => {
   reply(500, { error: "boom" }, "Internal Server Error");
-  assert.deepEqual(await createLocalTicket("T", "D"), {
+  assert.deepEqual(await createLocalTicket(LOCAL, "T", "D"), {
     ok: false,
     error: null,
   });
@@ -307,8 +313,23 @@ test("createLocalTicket answers a null error on any other status", async () => {
 
 test("createLocalTicket answers a null error on a network failure", async () => {
   globalThis.fetch = () => Promise.reject(new TypeError("Failed to fetch"));
-  assert.deepEqual(await createLocalTicket("T", "D"), {
+  assert.deepEqual(await createLocalTicket(LOCAL, "T", "D"), {
     ok: false,
     error: null,
   });
+});
+
+test("createLocalTicket and startGroup for ACME post with the board parameter", async () => {
+  reply(201, card);
+  await createLocalTicket(ACME, "T", "D");
+  assert.equal(calls[0]?.url, "/api/cards?board=ACME");
+  reply(202, { card }, "Accepted");
+  await startGroup(ACME, groupInput);
+  assert.equal(calls[1]?.url, "/api/cards/group?board=ACME");
+});
+
+test("createLocalTicket for LOCAL keeps the URL of today", async () => {
+  reply(201, card);
+  await createLocalTicket(LOCAL, "T", "D");
+  assert.equal(calls[0]?.url, "/api/cards");
 });

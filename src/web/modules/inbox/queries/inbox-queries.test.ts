@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import { DEFAULT_BOARD_KEY as LOCAL } from "../../../../shared/board-key.js";
 import type { Card } from "../../../../shared/types.js";
 import {
   promoteItem,
@@ -64,7 +65,7 @@ test("snoozeItem rejects with a status message when the body has no error", asyn
 test("promoteItem sends the context and resolves the card", async () => {
   const card = { id: "c1" } as Card;
   reply(200, { card });
-  assert.deepEqual(await promoteItem("i1", "ctx"), { card });
+  assert.deepEqual(await promoteItem(LOCAL, "i1", "ctx"), { card });
   assert.equal(calls[0]?.url, "/api/items/i1/promote");
   assert.equal(calls[0]?.init?.method, "POST");
   assert.equal(calls[0]?.init?.body, JSON.stringify({ context: "ctx" }));
@@ -72,6 +73,6 @@ test("promoteItem sends the context and resolves the card", async () => {
 
 test("promoteItem sends no body when there is no context", async () => {
   reply(200, { card: { id: "c1" } });
-  await promoteItem("i1");
+  await promoteItem(LOCAL, "i1");
   assert.equal(calls[0]?.init?.body, undefined);
 });

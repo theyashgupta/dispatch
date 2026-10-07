@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { QueryClient } from "@tanstack/react-query";
-import type { ActivityEvent } from "../../shared/types.js";
+import { DEFAULT_BOARD_KEY as LOCAL } from "../../shared/board-key.js";
+import type { ActivityEvent, BoardKey } from "../../shared/types.js";
+import { fetchEvents } from "./activity-api.js";
 import {
   activityFeedQueryOptions,
   activityKeys,
   mergeActivity,
 } from "./activity-queries.js";
+
+const ACME = "ACME" as BoardKey;
 
 function ev(id: number, reason: string | null = null): ActivityEvent {
   return { id, reason } as ActivityEvent;
@@ -40,15 +44,32 @@ afterEach(() => {
 
 test("activityKeys has the documented shape", () => {
   assert.deepEqual(activityKeys.all, ["activity"]);
-  assert.deepEqual(activityKeys.feed, ["activity", "feed"]);
+  assert.deepEqual(activityKeys.feed(LOCAL), ["activity", "feed", LOCAL]);
+  assert.deepEqual(activityKeys.feed(ACME), ["activity", "feed", ACME]);
 });
 
-test("activityFeedQueryOptions has the feed key and requests /api/events unscoped", async () => {
-  const options = activityFeedQueryOptions();
-  assert.deepEqual(options.queryKey, ["activity", "feed"]);
+test("activityFeedQueryOptions has the feed key and requests /api/events unscoped for LOCAL", async () => {
+  const options = activityFeedQueryOptions(LOCAL);
+  assert.deepEqual(options.queryKey, ["activity", "feed", LOCAL]);
   reply(200, { events: [{ id: "e1" }] });
   assert.deepEqual(await newClient().fetchQuery(options), [{ id: "e1" }]);
   assert.equal(calls[0]?.url, "/api/events");
+});
+
+test("activityFeedQueryOptions for ACME carries the board in the key and the URL", async () => {
+  const options = activityFeedQueryOptions(ACME);
+  assert.deepEqual(options.queryKey, ["activity", "feed", ACME]);
+  reply(200, { events: [] });
+  await newClient().fetchQuery(options);
+  assert.equal(calls[0]?.url, "/api/events?board=ACME");
+});
+
+test("fetchEvents adds the board after the card id and limit", async () => {
+  reply(200, { events: [] });
+  await fetchEvents(ACME, "c1", 5);
+  await fetchEvents(LOCAL, "c1", 5);
+  assert.equal(calls[0]?.url, "/api/events?cardId=c1&limit=5&board=ACME");
+  assert.equal(calls[1]?.url, "/api/events?cardId=c1&limit=5");
 });
 
 test("mergeActivity unions by id, the existing entry wins, newest id first", () => {
@@ -72,9 +93,9 @@ test("mergeActivity caps at 200 and drops the oldest", () => {
 
 test("the feed query function merges fetched events with a cached entry, the cached entry wins", async () => {
   const client = newClient();
-  client.setQueryData(activityKeys.feed, [ev(3), ev(1)]);
+  client.setQueryData(activityKeys.feed(LOCAL), [ev(3), ev(1)]);
   reply(200, { events: [ev(3, "fetched"), ev(2)] });
-  assert.deepEqual(await client.fetchQuery(activityFeedQueryOptions()), [
+  assert.deepEqual(await client.fetchQuery(activityFeedQueryOptions(LOCAL)), [
     ev(3),
     ev(2),
     ev(1),
@@ -85,9 +106,9 @@ test("a seeded feed still requests /api/events because the options set staleTime
   const client = new QueryClient({
     defaultOptions: { queries: { staleTime: 30_000, gcTime: Infinity } },
   });
-  client.setQueryData(activityKeys.feed, [ev(1)]);
+  client.setQueryData(activityKeys.feed(LOCAL), [ev(1)]);
   reply(200, { events: [ev(2)] });
-  assert.deepEqual(await client.fetchQuery(activityFeedQueryOptions()), [
+  assert.deepEqual(await client.fetchQuery(activityFeedQueryOptions(LOCAL)), [
     ev(2),
     ev(1),
   ]);
