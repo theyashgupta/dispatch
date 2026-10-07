@@ -1,0 +1,10 @@
+---
+active: true
+iteration: 38
+session_id: 16578a12-fbec-4493-bf15-9d84d04dc16c
+max_iterations: 130
+completion_promise: "ROADMAP COMPLETE g13-modules-b"
+started_at: "2026-10-01T05:51:13Z"
+---
+
+Execute the roadmap at /Users/yash/dispatch-workspaces/GROUP-14/ROADMAP.md per the roadmap-loop skill, slug g13-modules-b. Read .roadmap/g13-modules-b/progress.md, take the lowest incomplete unit, and continue from its recorded position. The trailing specs branch for this roadmap is test/g13-module-specs (R-01). When and only when every unit's status in progress.md is committed, the trailing test/g13-module-specs branch exists with the specs committed, and the roadmap's every unit row says built, awaiting /ship, output the phrase ROADMAP COMPLETE g13-modules-b wrapped in promise tags. Keep the DISPATCH_STATUS rule: whenever you stop to wait for a human, end that message with its own line DISPATCH_STATUS: NEEDS_INPUT - <reason>; when the roadmap is finished and handed back, end with DISPATCH_STATUS: DONE - <summary>.

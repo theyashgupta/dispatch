@@ -192,3 +192,25 @@ test("delete answers 409 with the cleanup failure and blocked false when the wor
     fs.rmSync(parent, { recursive: true, force: true });
   }
 });
+
+test("unwind answers 409 ship-running while the group's ship flow runs", async () => {
+  const { g } = await startedGroup(store);
+  await store.setShipFlow(g.id, {
+    state: "running",
+    rights: "merge",
+    repository: "/tmp/repo",
+    repo: null,
+    orchestratorId: "orc-a",
+    identity: { name: "a", email: "a@example.com" },
+    branches: [],
+    failedStep: null,
+    reason: null,
+    decisionId: null,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+  });
+  const res = await call("POST", `/cards/${g.id}/unwind`, {});
+  assert.equal(res.status, 409);
+  assert.equal(res.text, '{"error":"ship-running"}');
+  assert.ok(store.getCard(g.id));
+});
