@@ -122,7 +122,7 @@ test("the promote mutation resolves the card and sends no body without context",
   const card = { id: "c1" } as Card;
   reply(200, { card });
   assert.deepEqual(
-    await promoteItemMutationOptions.mutationFn({ itemId: "i1" }),
+    await promoteItemMutationOptions(LOCAL).mutationFn({ itemId: "i1" }),
     { card },
   );
   assert.equal(calls[0]?.url, "/api/items/i1/promote");
@@ -132,7 +132,10 @@ test("the promote mutation resolves the card and sends no body without context",
 test("the promote mutation rejects with the server reason on a 409", async () => {
   reply(409, { error: "already promoted" }, "Conflict");
   await assert.rejects(
-    promoteItemMutationOptions.mutationFn({ itemId: "i1", context: "ctx" }),
+    promoteItemMutationOptions(LOCAL).mutationFn({
+      itemId: "i1",
+      context: "ctx",
+    }),
     new Error("already promoted"),
   );
 });

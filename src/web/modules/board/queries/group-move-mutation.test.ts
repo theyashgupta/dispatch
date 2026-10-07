@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, mock, test } from "node:test";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import type { BoardSnapshot, Card, Column } from "../../../../shared/types.js";
+import { DEFAULT_BOARD_KEY as LOCAL } from "../../../../shared/board-key.js";
 import { boardSnapshotKeys } from "@/queries/board-snapshot-queries";
 import type { FailedMoveEvent } from "@/modules/board/domain/failed-move-notice";
 import type { GroupMove } from "@/modules/board/domain/group-move";
@@ -63,16 +64,17 @@ function seeded(): QueryClient {
   });
   const snapshot: BoardSnapshot = {
     cards: [card("a", "todo"), card("b", "todo"), card("c", "todo")],
+    boardKey: LOCAL,
     syncedAt: null,
   };
-  client.setQueryData(boardSnapshotKeys.detail(20), snapshot);
+  client.setQueryData(boardSnapshotKeys.detail(LOCAL, 20), snapshot);
   return client;
 }
 
 function columns(client: QueryClient): string[] {
   return (
     client
-      .getQueryData<BoardSnapshot>(boardSnapshotKeys.detail(20))
+      .getQueryData<BoardSnapshot>(boardSnapshotKeys.detail(LOCAL, 20))
       ?.cards.map((c) => c.column) ?? []
   );
 }
@@ -154,12 +156,14 @@ test("an older snapshot entry with a stale column for a card does not change the
   const client = new QueryClient({
     defaultOptions: { queries: { gcTime: Infinity } },
   });
-  client.setQueryData<BoardSnapshot>(boardSnapshotKeys.detail(50), {
+  client.setQueryData<BoardSnapshot>(boardSnapshotKeys.detail(LOCAL, 50), {
     cards: [card("a", "in_progress"), card("b", "todo")],
+    boardKey: LOCAL,
     syncedAt: null,
   });
-  client.setQueryData<BoardSnapshot>(boardSnapshotKeys.detail(100), {
+  client.setQueryData<BoardSnapshot>(boardSnapshotKeys.detail(LOCAL, 100), {
     cards: [card("a", "todo"), card("b", "todo")],
+    boardKey: LOCAL,
     syncedAt: null,
   });
   const moves: GroupMove[] = [
@@ -173,7 +177,7 @@ test("an older snapshot entry with a stale column for a card does not change the
   );
   assert.deepEqual(
     client
-      .getQueryData<BoardSnapshot>(boardSnapshotKeys.detail(100))
+      .getQueryData<BoardSnapshot>(boardSnapshotKeys.detail(LOCAL, 100))
       ?.cards.map((c) => c.column),
     ["todo", "todo"],
   );
@@ -247,8 +251,9 @@ test("a failed retry marks the notice stranded and still settles", async () => {
 test("a card the allowlist cannot return is stranded at once and gets no compensation request", async () => {
   failure = (id) => id === "b";
   const client = seeded();
-  client.setQueryData<BoardSnapshot>(boardSnapshotKeys.detail(20), {
+  client.setQueryData<BoardSnapshot>(boardSnapshotKeys.detail(LOCAL, 20), {
     cards: [card("a", "agent_done"), card("b", "todo"), card("c", "todo")],
+    boardKey: LOCAL,
     syncedAt: null,
   });
   const events: FailedMoveEvent[] = [];
@@ -390,8 +395,9 @@ test("an abort followed by a failed request still restores, compensates and retr
 test("a stranded card is restored in the cache and the stranded ids and target column are logged", async () => {
   failure = (id) => id === "b";
   const client = seeded();
-  client.setQueryData<BoardSnapshot>(boardSnapshotKeys.detail(20), {
+  client.setQueryData<BoardSnapshot>(boardSnapshotKeys.detail(LOCAL, 20), {
     cards: [card("a", "agent_done"), card("b", "todo"), card("c", "todo")],
+    boardKey: LOCAL,
     syncedAt: null,
   });
   await run(client, [], {

@@ -171,7 +171,7 @@ test("a snapshot fetch in flight at the move neither reverts nor overwrites the 
   const client = seededClient();
   let releaseSnapshot: (snapshot: BoardSnapshot) => void = () => undefined;
   const fetching = client.fetchQuery({
-    queryKey: boardSnapshotKeys.detail(20),
+    queryKey: boardSnapshotKeys.detail(LOCAL, 20),
     queryFn: () =>
       new Promise<BoardSnapshot>((resolve) => {
         releaseSnapshot = resolve;
@@ -231,7 +231,10 @@ test("a 409 rollback leaves the card alone once the stream has moved it out of t
     new Error("moveCard failed: 409 Conflict"),
   );
   await new Promise((resolve) => setImmediate(resolve));
-  client.setQueryData(boardSnapshotKeys.detail(20), snapshotOf("in_review"));
+  client.setQueryData(
+    boardSnapshotKeys.detail(LOCAL, 20),
+    snapshotOf("in_review"),
+  );
   release(new Response("{}", { status: 409, statusText: "Conflict" }));
   await settled;
   assert.equal(columnIn(client, 20), "in_review");

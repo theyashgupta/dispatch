@@ -27,6 +27,7 @@ afterEach(() => {
 function card(overrides: Partial<Card>): Card {
   return {
     id: "card-1",
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: "card-1",
     identifier: "GROUP-1",
     title: "Group",
