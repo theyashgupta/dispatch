@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { useRouteContext, useRouter } from "@tanstack/react-router";
+import { routeHash } from "../../../../shared/route.js";
 import type { Card } from "../../../../shared/types.js";
 import { GroupStartDialog } from "@/modules/card-actions/components/GroupStartDialog";
 import { useStartFlow } from "./use-start-flow";
@@ -9,13 +11,14 @@ import {
 } from "@/modules/card-actions/domain/group-title";
 import { groupStartFailure } from "@/modules/card-actions/domain/start-copy";
 import { buildStartGroupRequest } from "@/modules/card-actions/domain/start-request";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useDialogClose } from "@/components/ui/hooks/use-dialog-close";
 import {
   useGenerateGroupTitleMutation,
   useStartGroupMutation,
 } from "@/queries/cards-queries";
 
-export interface GroupStartContainerProps {
+interface GroupStartContainerProps {
   members: Card[];
   onClose: () => void;
   onStarted?: () => void;
@@ -107,6 +110,25 @@ export function GroupStartContainer({
       pending={startGroup.isPending}
       canStart={flow.canStart}
       onStart={() => void flow.start()}
+    />
+  );
+}
+
+export function GroupStartRequestContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const router = useRouter();
+  const members = useAppStore(appStore, (s) => s.groupStart);
+  if (members == null) return null;
+  return (
+    <GroupStartContainer
+      members={members}
+      onClose={appStore.closeGroupStart}
+      onStarted={appStore.groupStarted}
+      onEditPlaybooks={() =>
+        void router.navigate({
+          href: routeHash({ page: "playbooks" }).slice(1),
+        })
+      }
     />
   );
 }

@@ -1,21 +1,18 @@
 import { useEffect, useState } from "react";
+import { useRouteContext } from "@tanstack/react-router";
 import type { CardSearchResult } from "../../../../shared/search.js";
 import { SEARCH_QUERY_MIN } from "../../../../shared/search.js";
-import {
-  CAROUSEL_QUERY,
-  useMediaQuery,
-} from "@/components/ui/hooks/use-media-query";
+import { CAROUSEL_QUERY } from "../../../../shared/media-queries.js";
+import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
 import {
   SearchField,
   type SearchStatus,
 } from "@/modules/board/components/SearchField";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
+import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 import { useSearchCardsQuery } from "@/queries/search-queries";
 
 const DEBOUNCE_MS = 200;
-
-interface SearchContainerProps {
-  onSelectResult: (result: CardSearchResult) => void;
-}
 
 const IDLE: Shown = { status: "idle", results: [], total: 0 };
 
@@ -25,7 +22,14 @@ interface Shown {
   total: number;
 }
 
-export function SearchContainer({ onSelectResult }: SearchContainerProps) {
+export function SearchContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const onSelectResult = (result: CardSearchResult) =>
+    appStore.openSearchResult(
+      result,
+      board?.cards.some((card) => card.id === result.id) === true,
+    );
   const isCarousel = useMediaQuery(CAROUSEL_QUERY);
   const [term, setTerm] = useState("");
   const [debounced, setDebounced] = useState("");

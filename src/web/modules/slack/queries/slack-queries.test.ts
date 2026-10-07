@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { QueryClient } from "@tanstack/react-query";
-import { getSlackThread } from "./slack-api.js";
+import { getSlackThread } from "@/queries/slack-thread-api";
 import type { Item } from "../../../../shared/types.js";
 import {
   draftReplyMutationOptions,

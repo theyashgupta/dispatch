@@ -1,8 +1,5 @@
-import {
-  ActivityContainer,
-  type ActivityContainerProps,
-} from "@/modules/activity/containers/ActivityContainer";
+import { ActivityContainer } from "@/modules/activity/containers/ActivityContainer";
 
-export function ActivityView(props: ActivityContainerProps) {
-  return <ActivityContainer {...props} />;
+export function ActivityView() {
+  return <ActivityContainer />;
 }

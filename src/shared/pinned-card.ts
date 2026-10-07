@@ -1,3 +1,4 @@
+import { membersOf } from "./group-members.js";
 import type { Card as CardModel } from "./types.js";
 
 export type PinnedCard = {
@@ -11,7 +12,7 @@ export type PinnedCard = {
  *
  * @remarks
  * A stub's non-identity fields are filler (`search-stub.ts`), so only a hydrated pinned card is
- * actionable. Every click-time action derivation in `App.tsx` shares this guard so none can
+ * actionable. Every click-time action derivation shares this guard so none can
  * re-collapse the stub/hydrated distinction.
  */
 export function actionablePinnedCard(
@@ -36,4 +37,27 @@ export function actionablePinnedMembers(
   pinned: PinnedCard | null,
 ): boolean {
   return pinned != null && pinned.kind === "hydrated" && pinned.card.id === id;
+}
+
+/** The live board card for `id` as a hydrated pin with its members, or null when it is not in the window. */
+export function pinFromBoard(
+  id: string | null,
+  cards: CardModel[],
+): PinnedCard | null {
+  const live = id == null ? undefined : cards.find((card) => card.id === id);
+  return live == null
+    ? null
+    : { card: live, kind: "hydrated", members: membersOf(live, cards) };
+}
+
+/** The selected card: the live board card first, else the pinned card when it is the selection. */
+export function selectedCardOf(
+  cards: readonly CardModel[] | undefined,
+  selectedId: string | null,
+  pinned: PinnedCard | null,
+): CardModel | null {
+  return (
+    cards?.find((card) => card.id === selectedId) ??
+    (pinned?.card.id === selectedId ? pinned.card : null)
+  );
 }

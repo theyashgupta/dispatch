@@ -1,4 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouteContext, useRouter } from "@tanstack/react-router";
+import {
+  pinFromBoard,
+  selectedCardOf,
+} from "../../../../shared/pinned-card.js";
+import { routeHash } from "../../../../shared/route.js";
 import {
   bulkOutcomeCopy,
   runBulkCleanup,
@@ -22,6 +28,9 @@ import {
 import type { BoardSnapshot } from "../../../../shared/types.js";
 import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
 import { useShortcuts } from "@/components/ui/hooks/use-shortcuts";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
+import { actionServices } from "@/queries/action-services";
+import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 import { BulkConfirmModal } from "@/modules/sessions/components/BulkConfirmModal";
 import { SessionRow } from "@/modules/sessions/components/SessionRow";
 import { SessionsBulkBar } from "@/modules/sessions/components/SessionsBulkBar";
@@ -39,7 +48,7 @@ import {
   ticketLabels,
 } from "@/modules/sessions/domain/sessions-filters";
 
-export interface SessionsContainerProps {
+interface SessionsPageProps {
   board: BoardSnapshot;
   selectedCardId: string | null;
   onSelectCard: (id: string) => void;
@@ -49,13 +58,50 @@ export interface SessionsContainerProps {
 
 const ELAPSED_TICK_MS = 1000;
 
-export function SessionsContainer({
+export function SessionsContainer({ scopeId }: { scopeId: string }) {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const router = useRouter();
+  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const selectedId = useAppStore(appStore, (s) => s.selectedCardId);
+  const pinned = useAppStore(appStore, (s) => s.pinned);
+  const services = useMemo(
+    () =>
+      actionServices({
+        showUndo: appStore.showUndo,
+        notice: appStore.notice,
+        openStart: appStore.openStart,
+        askAbout: (question) =>
+          void router.navigate({
+            href: routeHash({ page: "ask", id: question }).slice(1),
+          }),
+      }),
+    [appStore, router],
+  );
+  if (board == null) return null;
+  return (
+    <SessionsPage
+      board={board}
+      selectedCardId={
+        selectedCardOf(board.cards, selectedId, pinned) != null
+          ? selectedId
+          : null
+      }
+      onSelectCard={(id) =>
+        appStore.selectCard(id, pinFromBoard(id, board.cards))
+      }
+      services={services}
+      scopeId={scopeId}
+    />
+  );
+}
+
+function SessionsPage({
   board,
   selectedCardId,
   onSelectCard,
   services,
   scopeId,
-}: SessionsContainerProps) {
+}: SessionsPageProps) {
   const narrow = useMediaQuery(NARROW_QUERY);
   const [now, setNow] = useState(nowMs);
   const [filter, setFilter] = useState<SessionFilter>({

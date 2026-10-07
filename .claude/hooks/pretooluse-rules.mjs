@@ -9,7 +9,7 @@ const REASONS = {
   hex: `Do not write a hex colour. Add a token to src/web/styles/tokens.css. Use the Tailwind class of that token. ${RULE_DOC}, The only-shadcn rule.`,
   radix: `Do not import Radix outside src/web/components/ui/. Use the shadcn primitive in components/ui. Add a missing primitive with npx shadcn@latest add. ${RULE_DOC}, The only-shadcn rule.`,
   newTsx: `Do not create a .tsx file in this folder. Put it in src/web/modules/<feature>/views/, containers/ or components/, in src/web/components/ or in src/web/routes/. ${RULE_DOC}, Layer definitions.`,
-  serverData: `Do not get server data outside a query file. A query file is in src/web/modules/<feature>/queries/ or src/web/queries/. Call fetch only in a query file or in src/web/lib/http.ts. Create an EventSource only in a query file. Import src/web/lib/http.ts only in a query file. Do not import src/web/lib/api.ts in the new tree. ${RULE_DOC}, Import matrix.`,
+  serverData: `Do not get server data outside a query file. A query file is in src/web/modules/<feature>/queries/ or src/web/queries/. Call fetch only in a query file or in src/web/lib/http.ts. Create an EventSource only in a query file. Import src/web/lib/http.ts only in a query file. ${RULE_DOC}, Import matrix.`,
   moduleShape: `Do not put this file here. A module holds only the folders views, containers, components, hooks, domain and queries, and the file index.ts. Move the file into one of these folders. ${RULE_DOC}, Layer definitions.`,
 };
 
@@ -23,10 +23,13 @@ const LAYERS = new Set([
 ]);
 const ENTRY_FILES = new Set([
   "src/web/main.tsx",
-  "src/web/App.tsx",
-  "src/web/AppShell.tsx",
   "src/web/viewer-main.tsx",
   "src/web/gallery-main.tsx",
+]);
+const HEX_FILES = new Set([
+  "src/web/styles/tokens.css",
+  "src/web/favicon.svg",
+  "src/web/public/manifest.json",
 ]);
 const HEX = /#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/;
 const STYLE = /\bstyle=\{/;
@@ -35,19 +38,20 @@ const EVENT_SOURCE =
   /\bnew\s+(?:(?:window|globalThis|self)\s*\.\s*)?EventSource\b/;
 const IMPORT_SPEC = /\b(?:from|import|require)\s*\(?\s*["'`]([^"'`]+)["'`]/g;
 const RADIX_SPEC = /^(?:@radix-ui\/|radix-ui(?:\/|$))/;
-const API_SPEC = /(?:^|\/)lib\/api(?:\.[cm]?[jt]sx?)?$/;
 const HTTP_SPEC = /(?:^|\/)lib\/http(?:\.[cm]?[jt]sx?)?$/;
 
 /**
- * Tell if a project-relative path is in the new frontend tree.
+ * Tell if a project-relative path is in the frontend tree that the rules cover.
  *
  * @remarks
- * The list is the new tree in the "Status and scope" section of the standard. The Radix rule and the new .tsx rule also cover the legacy tree.
+ * The viewer, the terminal entry and the HTML entries stay outside the rules. The Radix rule and the new .tsx rule cover them too.
  */
 function isNewTree(rel) {
   return (
-    /^src\/web\/(?:routes|modules|components|queries|styles)\//.test(rel) ||
-    /^src\/web\/lib\/(?:http|utils|query-client)\.ts$/.test(rel)
+    rel.startsWith("src/web/") &&
+    !/^src\/web\/(?:viewer\/|viewer-main\.tsx$|terminal-main\.ts$|[^/]+\.html$)/.test(
+      rel,
+    )
   );
 }
 
@@ -70,14 +74,14 @@ function denyReasons(rel, text, creates) {
 
   if (
     rel.endsWith(".tsx") &&
-    /^src\/web\/(?:modules|routes|components)\//.test(rel) &&
+    newTree &&
     !inUi &&
     !/^src\/web\/modules\/[^/]+\/components\/dnd\//.test(rel) &&
     STYLE.test(text)
   ) {
     reasons.push(REASONS.style);
   }
-  if (newTree && rel !== "src/web/styles/tokens.css" && HEX.test(text)) {
+  if (newTree && !HEX_FILES.has(rel) && HEX.test(text)) {
     reasons.push(REASONS.hex);
   }
   if (!inUi && specs.some((s) => RADIX_SPEC.test(s))) {
@@ -89,7 +93,7 @@ function denyReasons(rel, text, creates) {
     !/\.test\.tsx$/.test(rel) &&
     !ENTRY_FILES.has(rel) &&
     !/^src\/web\/modules\/[^/]+\/(?:views|containers|components)\//.test(rel) &&
-    !/^src\/web\/(?:components|routes|features|primitives)\//.test(rel)
+    !/^src\/web\/(?:components|routes)\//.test(rel)
   ) {
     reasons.push(REASONS.newTsx);
   }
@@ -97,7 +101,6 @@ function denyReasons(rel, text, creates) {
     newTree &&
     ((!inQuery && rel !== "src/web/lib/http.ts" && FETCH.test(text)) ||
       (!inQuery && EVENT_SOURCE.test(text)) ||
-      specs.some((s) => API_SPEC.test(s)) ||
       (!inQuery && specs.some((s) => HTTP_SPEC.test(s))))
   ) {
     reasons.push(REASONS.serverData);
@@ -134,19 +137,9 @@ function pointer(rel) {
       "Adapter/store layer: all subprocess calls go through adapters/exec.ts (run/runInherit); store writes go through the single writer, see docs/standards/backend-design.md and docs/standards/architecture.md (exec-chokepoint rulings).";
   } else if (rel.startsWith("src/server/") || rel.startsWith("src/shared/")) {
     text = "Backend layering rules: see docs/standards/backend-design.md.";
-  } else if (isNewTree(rel)) {
-    text =
-      "New frontend tree: layer folders, import matrix and the only-shadcn rule, see docs/standards/frontend-architecture.md.";
-  } else if (
-    rel.startsWith("src/web/primitives/") ||
-    rel.startsWith("src/web/hooks/") ||
-    rel.startsWith("src/web/lib/")
-  ) {
-    text =
-      "Import direction is primitives -> hooks/lib -> features -> App; lib/ stays React-free, see docs/standards/folder-structure.md.";
   } else if (rel.startsWith("src/web/")) {
     text =
-      "Cross-feature imports go through the feature's index.ts barrel; component anatomy per docs/standards/frontend-design-system.md, see docs/standards/folder-structure.md.";
+      "Frontend tree: layer folders, import matrix and the only-shadcn rule, see docs/standards/frontend-architecture.md.";
   }
   return text
     ? `${text} Comments: JSDoc-only, WHY not WHAT, see docs/standards/comments.md.`

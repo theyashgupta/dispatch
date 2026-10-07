@@ -3,7 +3,6 @@ import { afterEach, test } from "node:test";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import {
   cancelLogin,
-  getAccounts,
   getLoginState,
   refreshAccountUsage,
   removeAccount,
@@ -11,11 +10,9 @@ import {
   startLogin,
   submitLoginCode,
 } from "./accounts-api.js";
+import { accountsKeys } from "@/queries/accounts-queries";
 import {
-  ACCOUNTS_REFETCH_MS,
   LOGIN_POLL_MS,
-  accountsKeys,
-  accountsQueryOptions,
   cancelLoginMutationOptions,
   loginStateQueryOptions,
   refreshAccountUsageMutationOptions,
@@ -51,38 +48,12 @@ afterEach(() => {
   calls.length = 0;
 });
 
-test("accountsKeys has the documented shape", () => {
-  assert.deepEqual(accountsKeys.all, ["accounts"]);
-  assert.deepEqual(accountsKeys.list, ["accounts", "list"]);
-  assert.deepEqual(accountsKeys.login, ["accounts", "login"]);
-});
-
-test("accountsQueryOptions requests the account list", async () => {
-  const options = accountsQueryOptions();
-  assert.deepEqual(options.queryKey, ["accounts", "list"]);
-  reply(200, { activeId: "a", accounts: [], sessions: [] });
-  assert.deepEqual(await newClient().fetchQuery(options), {
-    activeId: "a",
-    accounts: [],
-    sessions: [],
-  });
-  assert.equal(calls[0]?.url, "/api/accounts");
-});
-
 test("loginStateQueryOptions requests the login state", async () => {
   const options = loginStateQueryOptions();
   assert.deepEqual(options.queryKey, ["accounts", "login"]);
   reply(200, { state: "idle" });
   assert.deepEqual(await newClient().fetchQuery(options), { state: "idle" });
   assert.equal(calls[0]?.url, "/api/accounts/login");
-});
-
-test("getAccounts throws on a failure status", async () => {
-  reply(500, {}, "Internal Server Error");
-  await assert.rejects(
-    getAccounts(),
-    new Error("getAccounts failed: 500 Internal Server Error"),
-  );
 });
 
 test("getLoginState throws on a failure status", async () => {
@@ -294,15 +265,6 @@ function seededClient(): QueryClient {
   client.setQueryData(accountsKeys.login, { state: "idle" });
   return client;
 }
-
-test("the accounts query refetches every minute and on every focus, never on mount", () => {
-  const options = accountsQueryOptions();
-  assert.equal(ACCOUNTS_REFETCH_MS, 60_000);
-  assert.equal(options.refetchInterval, 60_000);
-  assert.equal(options.refetchOnWindowFocus, "always");
-  assert.equal(options.refetchOnMount, false);
-  assert.equal(options.refetchIntervalInBackground, true);
-});
 
 test("the login state is dropped as soon as no dialog reads it", () => {
   assert.equal(loginStateQueryOptions().gcTime, 0);

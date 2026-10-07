@@ -1,12 +1,9 @@
-import {
-  WorkspaceContainer,
-  type WorkspaceContainerProps,
-} from "@/modules/workspace/containers/WorkspaceContainer";
+import { WorkspaceContainer } from "@/modules/workspace/containers/WorkspaceContainer";
 
-export function WorkspaceView(props: WorkspaceContainerProps) {
+export function WorkspaceView() {
   return (
     <div className="flex min-h-0 flex-auto">
-      <WorkspaceContainer {...props} />
+      <WorkspaceContainer />
     </div>
   );
 }

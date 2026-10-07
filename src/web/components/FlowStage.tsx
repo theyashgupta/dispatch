@@ -191,12 +191,13 @@ export function FlowBox({
   const className = cn(
     BOX_CLASS,
     accent !== undefined && "border-l-3 border-l-(color:--box-accent)",
-    dim && "opacity-(--box-opacity)",
+    dim &&
+      "border-(color:--box-tone)/45 text-muted-foreground [&_svg]:opacity-45",
+    dim && accent !== undefined && "border-l-(color:--box-accent)/45",
   );
   const vars = useCssVars({
     "--box-tone": tone,
     "--box-accent": accent,
-    "--box-opacity": dim ? String(DIM_OPACITY) : undefined,
   });
   if (onClick == null) {
     return (

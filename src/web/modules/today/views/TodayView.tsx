@@ -1,13 +1,10 @@
 import { PageBody } from "@/components/PageBody";
-import {
-  TodayContainer,
-  type TodayContainerProps,
-} from "@/modules/today/containers/TodayContainer";
+import { TodayContainer } from "@/modules/today/containers/TodayContainer";
 
-export function TodayView(props: TodayContainerProps) {
+export function TodayView() {
   return (
     <PageBody>
-      <TodayContainer {...props} />
+      <TodayContainer />
     </PageBody>
   );
 }

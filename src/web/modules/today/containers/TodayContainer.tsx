@@ -1,7 +1,12 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useRouteContext, useRouter } from "@tanstack/react-router";
+import { inboxFeed } from "../../../../shared/feed-items.js";
+import { pinFromBoard } from "../../../../shared/pinned-card.js";
 import { nowMs } from "../../../../shared/format-age.js";
-import type { Page } from "../../../../shared/route.js";
+import { routeHash, type Page } from "../../../../shared/route.js";
 import type { BoardSnapshot, Item } from "../../../../shared/types.js";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
+import { useItems } from "@/components/ui/hooks/use-items";
 import { Agenda } from "@/modules/today/components/Agenda";
 import { CountChips } from "@/modules/today/components/CountChips";
 import { Greeting } from "@/modules/today/components/Greeting";
@@ -16,20 +21,42 @@ import {
   longDate,
   visibleAgenda,
 } from "@/modules/today/domain/today-view";
+import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 
-export interface TodayContainerProps {
+interface TodayPageProps {
   board: BoardSnapshot;
   items: Item[];
   onSelectCard: (id: string) => void;
   onNavigate: (page: Page, id?: string) => void;
 }
 
-export function TodayContainer({
-  board,
-  items,
-  onSelectCard,
-  onNavigate,
-}: TodayContainerProps) {
+export function TodayContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const router = useRouter();
+  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const errorsInFeeds = useAppStore(appStore, (s) => s.errorsInFeeds);
+  const items = useItems(board);
+  const enabledSources = board?.enabledSources;
+  const feed = useMemo(
+    () => inboxFeed(items, errorsInFeeds, enabledSources ?? []),
+    [items, errorsInFeeds, enabledSources],
+  );
+  if (board == null) return null;
+  return (
+    <TodayPage
+      board={board}
+      items={feed}
+      onSelectCard={(id) =>
+        appStore.selectCard(id, pinFromBoard(id, board.cards))
+      }
+      onNavigate={(page, id) =>
+        void router.navigate({ href: routeHash({ page, id }).slice(1) })
+      }
+    />
+  );
+}
+
+function TodayPage({ board, items, onSelectCard, onNavigate }: TodayPageProps) {
   const [filter, setFilter] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const { range, setRange, count, setCount } = useP0Preferences();

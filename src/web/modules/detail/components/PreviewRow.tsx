@@ -1,5 +1,6 @@
 import { ExternalLink, Globe } from "lucide-react";
 import type { PreviewInfo } from "../../../../shared/types.js";
+import { isWebUrl } from "../../../../shared/web-url.js";
 import { previewEvidenceLine } from "@/components/badges/preview-evidence";
 import { Button } from "@/components/ui/button";
 import { Item } from "@/components/ui/item";
@@ -45,7 +46,8 @@ export function PreviewRow({ preview }: { preview: PreviewInfo }) {
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
-          window.open(preview.url, "_blank", "noopener,noreferrer");
+          if (isWebUrl(preview.url))
+            window.open(preview.url, "_blank", "noopener,noreferrer");
         }}
       >
         <ExternalLink className="size-3.5" aria-hidden="true" />

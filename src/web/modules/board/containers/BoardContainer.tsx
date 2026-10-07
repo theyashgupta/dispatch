@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useRouteContext, useRouter } from "@tanstack/react-router";
 import {
   DndContext,
   MouseSensor,
@@ -27,7 +28,15 @@ import {
   BOARD_SHORTCUTS,
   bindShortcuts,
 } from "../../../../shared/shortcuts.js";
-import type { StartRequest } from "../../../../shared/start-request.js";
+import {
+  pinFromBoard,
+  selectedCardOf,
+} from "../../../../shared/pinned-card.js";
+import { routeHash } from "../../../../shared/route.js";
+import {
+  startTarget,
+  type StartRequest,
+} from "../../../../shared/start-request.js";
 import { COLUMNS } from "../../../../shared/types.js";
 import type {
   BoardSnapshot,
@@ -37,9 +46,10 @@ import type {
 import {
   CAROUSEL_QUERY,
   NARROW_QUERY,
-  useMediaQuery,
-} from "@/components/ui/hooks/use-media-query";
+} from "../../../../shared/media-queries.js";
+import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
 import { useShortcuts } from "@/components/ui/hooks/use-shortcuts";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { BoardLayout } from "@/modules/board/components/BoardLayout";
 import { ColumnBody } from "@/modules/board/components/ColumnBody";
 import { FailedMoveAlert } from "@/modules/board/components/FailedMoveAlert";
@@ -86,16 +96,6 @@ import {
 } from "@/queries/cards-queries";
 
 export interface BoardContainerProps {
-  doneLimit: number;
-  doneTotal?: number;
-  onLoadMoreDone?: () => void;
-  selectedCardId?: string | null;
-  onSelectCard?: (id: string) => void;
-  onStartRequest?: (req: string | StartRequest) => void;
-  onOpenInbox?: () => void;
-  onGroupStartRequest: (members: Card[]) => void;
-  groupStartOpen: boolean;
-  selectionResetToken: number;
   search?: React.ReactNode;
 }
 
@@ -107,24 +107,35 @@ function isColumn(id: unknown): id is ColumnId {
   return typeof id === "string" && (COLUMNS as readonly string[]).includes(id);
 }
 
-export function BoardContainer({
-  doneLimit,
-  doneTotal,
-  onLoadMoreDone,
-  selectedCardId,
-  onSelectCard,
-  onStartRequest,
-  onOpenInbox,
-  onGroupStartRequest,
-  groupStartOpen,
-  selectionResetToken,
-  search,
-}: BoardContainerProps) {
+export function BoardContainer({ search }: BoardContainerProps) {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const router = useRouter();
+  const doneLimit = useAppStore(appStore, (s) => s.doneLimit);
+  const storeSelectedId = useAppStore(appStore, (s) => s.selectedCardId);
+  const pinned = useAppStore(appStore, (s) => s.pinned);
+  const groupStartOpen = useAppStore(appStore, (s) => s.groupStart != null);
+  const selectionResetToken = useAppStore(
+    appStore,
+    (s) => s.selectionResetToken,
+  );
   const query = useBoardSnapshotQuery(doneLimit);
   const [lastBoard, setLastBoard] = useState<BoardSnapshot | null>(null);
   const board = latestBoard(query.data, lastBoard);
   if (board !== lastBoard) setLastBoard(board);
   const cards = board?.cards ?? NO_CARDS;
+  const selectedCardId =
+    selectedCardOf(board?.cards, storeSelectedId, pinned) != null
+      ? storeSelectedId
+      : null;
+  const doneTotal = board?.doneCounts?.total;
+  const onLoadMoreDone = appStore.loadMoreDone;
+  const onSelectCard = (id: string) =>
+    appStore.selectCard(id, pinFromBoard(id, cards));
+  const onStartRequest = (req: string | StartRequest) =>
+    appStore.requestStart(req, startTarget(req, cards));
+  const onOpenInbox = () =>
+    void router.navigate({ href: routeHash({ page: "inbox" }).slice(1) });
+  const onGroupStartRequest = appStore.openGroupStart;
 
   const moveCard = useMoveCardMutation();
   const groupMove = useGroupMoveMutation();
@@ -255,7 +266,7 @@ export function BoardContainer({
 
   function handleSelectCard(id: string) {
     if (justDroppedRef.current) return;
-    onSelectCard?.(id);
+    onSelectCard(id);
   }
 
   function performMove(cardId: string, target: ColumnId): boolean {
@@ -263,7 +274,7 @@ export function BoardContainer({
     if (!card) return false;
 
     if (card.column === "todo" && target === "in_progress") {
-      onStartRequest?.({ cardId });
+      onStartRequest({ cardId });
       return false;
     }
 
@@ -375,7 +386,7 @@ export function BoardContainer({
           console.error("restart startCard failed", err);
         });
     } else {
-      onStartRequest?.(card.id);
+      onStartRequest(card.id);
     }
   }
 

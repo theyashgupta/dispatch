@@ -1,12 +1,6 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
 import { WorkspaceView } from "@/modules/workspace";
-import { useAppState } from "@/components/AppState";
 
 export const Route = createLazyFileRoute("/workspace/{-$id}")({
-  component: WorkspaceRoute,
+  component: WorkspaceView,
 });
-
-function WorkspaceRoute() {
-  const props = useAppState().workspace;
-  return <WorkspaceView {...props} />;
-}

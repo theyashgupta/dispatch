@@ -11,7 +11,7 @@ import {
   slackPills,
   type SlackGroup,
   type SlackRow,
-} from "@/modules/slack/domain/slack-rows";
+} from "../../../../shared/slack-rows.js";
 
 interface SlackListProps {
   groups: SlackGroup[];

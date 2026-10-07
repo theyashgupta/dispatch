@@ -95,6 +95,8 @@ The two `spawnInherit()` helper function bodies are **byte-identical**: same sig
 
 ## Violation triage
 
+This section is a dated record of the tree it audited. Unit 4 (LOCAL-77) deleted `App.tsx`, `features/` and `primitives/`; the paths below name files as they were then. The current layout is in `docs/standards/frontend-architecture.md`.
+
 Phase 53 Plan 01 extended `eslint.config.ts` with a `warn`-severity `boundaries/dependencies` rule covering `src/web/**` and captured every resulting warning to `.planning/phases/53-architecture-audit-baseline-enforcement/53-LINT-BASELINE.txt` (22 warnings, 0 errors added). Two buckets only, per the user-approved decision: **"restructure will fix"** (the Phase 54/55 moves/barrels eliminate it mechanically) vs **"genuine violation"** (needs a code change no restructure performs). A third "accepted permanent" bucket is explicitly **deferred to Phase 56** — it is not used here.
 
 ### Boundaries warnings (22 of 22 — matches the baseline file's TOTAL count line exactly)
@@ -234,6 +236,8 @@ Tier definition (verbatim, applies to every item below): **byte-identical** = th
 **Resolution:** Resolved (Phase 57-03) — the two `mode: "file"` descriptors migrated to `settings["boundaries/files"]` file categories with exactly the 3 policy rewrites enumerated above; identical before/after `npx eslint src` violation set (0 errors, 46 warnings both sides, byte-identical file:line rows) plus a routes→exec negative-control probe — commit `107c27f`; carve-out widening found in review restored to the original narrow rights (`checkInternals: true`) in `4692d8a`.
 
 ### Triage-derived layering-violation fixes (genuine violations from the boundaries table above)
+
+A dated record, like the triage table above: `primitives/ActivityItem.tsx` no longer exists.
 
 | Item                                                                                           | Tier           | Reason                                                                                                                                                                                  | Resolution                                                                                                                                                                                                                                    |
 | ---------------------------------------------------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

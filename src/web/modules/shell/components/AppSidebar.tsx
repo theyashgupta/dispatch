@@ -11,6 +11,7 @@ import {
   SidebarSeparator,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Wordmark } from "@/components/Wordmark";
 import { cn } from "@/lib/utils";
 import { NavRow } from "@/modules/shell/components/NavRow";
 import { SidebarFooterActions } from "@/modules/shell/components/SidebarFooterActions";
@@ -18,7 +19,7 @@ import {
   navGroups,
   type NavCounts,
   type NavItem,
-} from "@/modules/shell/domain/nav-items";
+} from "../../../../shared/nav-items.js";
 import type { SyncSnapshot } from "@/modules/shell/domain/sync-status";
 
 export interface AppSidebarProps {
@@ -65,11 +66,7 @@ export function AppSidebar({
           )}
         >
           <Glyph size={16} title={collapsed ? "Dispatch" : undefined} />
-          {collapsed ? null : (
-            <span className="text-(length:--font-display) font-semibold tracking-[0.18em]">
-              DISPATCH
-            </span>
-          )}
+          {collapsed ? null : <Wordmark />}
         </SidebarHeader>
 
         <SidebarContent className="gap-0 overflow-x-hidden p-2 group-data-[collapsible=icon]:overflow-y-auto">

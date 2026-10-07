@@ -7,9 +7,9 @@ import {
 } from "@/modules/connections/domain/linear-state-map";
 import {
   useLinearStateMapQuery,
-  useLinearWorkflowQuery,
   useSaveLinearStateMapMutation,
 } from "@/modules/connections/queries/connections-queries";
+import { useLinearWorkflowQuery } from "@/queries/linear-workflow-queries";
 
 export function LinearStateMapContainer() {
   const workflowQuery = useLinearWorkflowQuery();
@@ -17,8 +17,7 @@ export function LinearStateMapContainer() {
   const save = useSaveLinearStateMapMutation();
   const [edits, setEdits] = useState<LinearStateMap>({});
 
-  const workflow = workflowQuery.data;
-  const ready = workflow?.ok ? workflow.workflow : null;
+  const ready = workflowQuery.data ?? null;
   const draft =
     ready && savedQuery.data
       ? stateMapDraft(ready, savedQuery.data, edits)
@@ -35,7 +34,7 @@ export function LinearStateMapContainer() {
 
   return (
     <LinearStateMapRows
-      workflowError={workflow && !workflow.ok ? workflow.error : null}
+      workflowError={workflowQuery.isError ? workflowQuery.error.message : null}
       loadError={savedQuery.isError}
       teams={ready?.teams ?? null}
       draft={draft}

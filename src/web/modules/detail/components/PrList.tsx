@@ -2,6 +2,7 @@ import { ExternalLink } from "lucide-react";
 import type { Card, PrInfo } from "../../../../shared/types.js";
 import { cardPrs } from "../../../../shared/card-prs.js";
 import { formatAge, nowMs } from "../../../../shared/format-age.js";
+import { isWebUrl } from "../../../../shared/web-url.js";
 import {
   prCiDotColor,
   prStateLabel,
@@ -46,7 +47,8 @@ function PrListRow({ pr }: { pr: PrInfo }) {
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
-          window.open(pr.url, "_blank", "noopener,noreferrer");
+          if (isWebUrl(pr.url))
+            window.open(pr.url, "_blank", "noopener,noreferrer");
         }}
       >
         <ExternalLink className="size-3" aria-hidden="true" />

@@ -11,11 +11,11 @@
  *    a // body/line comment does NOT count as homed — that JSDoc-vs-body-comment
  *    distinction (Pattern 2 in 10-RESEARCH.md) is what keeps the gate meaningful
  *    while the original body comments still exist.
- * 2. Has any design literal this project deliberately retired come back into
- *    src/**\/*.{ts,tsx}? See RETIRED_PATTERNS below.
+ * 2. Do the scoped fences below (terminal client, panel contract, chokepoints,
+ *    attention and status colour single sources) still hold?
  *
  * Modes:
- *   node scripts/check-invariants.mjs               diff + exit 0 iff MISSING, ORPHAN, EXTRA, and RETIRED are ALL empty
+ *   node scripts/check-invariants.mjs               diff + exit 0 iff every leg below is empty
  *   node scripts/check-invariants.mjs --generate-baseline   print sorted labeled IDs (src + docs)
  *
  * The bare `⏺` protocol glyph is DELIBERATELY excluded from ID_RE: it is a
@@ -72,15 +72,17 @@ const ID_RE =
  * re-freeze (`NEW-24`), see docs/ARCHITECTURE.md#design-system-invariants.
  * @remarks Moved from 150 to 149 when `NEW-18` (the sync strip token cascades) retired with the
  * strip on 2026-09-23, see docs/ARCHITECTURE.md#app-shell-zones.
+ * @remarks Moved from 149 to 145 on 2026-10-07 when `NEW-15`, `NEW-16`, `NEW-17` and `NEW-19`
+ * retired for lint rules in eslint.config.ts: `retiredLiteralBan`, `designLiteralBan` and
+ * `boardZoneBan`, see docs/ARCHITECTURE.md#design-system-invariants.
  */
-const FROZEN_COUNT = 149;
+const FROZEN_COUNT = 145;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");
 const DOCS_PATH = join("docs", "ARCHITECTURE.md");
 const BASELINE_PATH = join("scripts", "invariant-baseline.txt");
 const TOKENS_PATH = join("src", "web", "styles", "tokens.css");
-const BOARD_DIR = join("src", "web", "modules", "board");
 const WEB_DIR = join("src", "web");
 const COLUMN_META_PATH = join("src", "shared", "column-accent.ts");
 const PRIORITY_DOT_PATH = join(
@@ -259,97 +261,6 @@ function walkSrc(dir, extRe = /\.(ts|tsx)$/) {
 }
 
 /**
- * Design literals this project deliberately retired during the Phase 84 design-system
- * migration, each replaced by a single named definition. `pattern` is a plain substring, not a
- * regex — every one of these literals contains regex metacharacters, and a substring
- * `includes()` check is both simpler and impossible to get subtly wrong.
- */
-const RETIRED_PATTERNS = [
-  {
-    id: "NEW-15",
-    pattern: "0 0 0 2px var(--accent)",
-    replacement: "focusRing() in src/web/primitives/focus-ring.ts",
-  },
-  {
-    id: "NEW-16",
-    pattern: "0 6px 16px rgba(0,0,0,0.45)",
-    replacement: "var(--shadow-float) in src/web/styles/tokens.css",
-  },
-  {
-    id: "NEW-17",
-    pattern: "fontWeight: 800",
-    replacement: "wordmarkStyle in src/web/components/icons/Glyph.tsx",
-  },
-];
-
-/**
- * Find every line under src/**\/*.{ts,tsx} that still contains a retired design literal.
- * @remarks Scans comments as well as code, deliberately: a comment that reproduces a retired
- * literal is exactly how the pattern gets copied back into real code by the next reader. Only
- * `.ts`/`.tsx` are scanned (via `walkSrc`), so `src/web/styles/tokens.css` can remain the
- * canonical home of the float-shadow value this gate otherwise forbids.
- * @returns Violation report lines, one per matching line.
- */
-function checkRetiredPatterns() {
-  const violations = [];
-  for (const file of walkSrc(SRC_DIR)) {
-    const lines = readFileSync(file, "utf8").split("\n");
-    lines.forEach((line, i) => {
-      for (const { id, pattern, replacement } of RETIRED_PATTERNS) {
-        if (line.includes(pattern)) {
-          violations.push(
-            `${file}:${i + 1}: retired pattern ${id} — use ${replacement}`,
-          );
-        }
-      }
-    });
-  }
-  return violations;
-}
-
-/**
- * Directory-scoped board reading-rhythm gate (`NEW-19`). Deliberately NOT a `RETIRED_PATTERNS`
- * entry: that array scans all of `src/**`, and `.reading-surface` is legitimately used outside
- * `board/` (`Modal.tsx`, `DetailPanel.tsx`) — a global scan would false-positive on both.
- * @remarks Quotes are stripped from each line before matching because a `.tsx` inline-style
- * override is written with a quoted custom-property key (`"--line-body": "1.6"`), so the raw
- * `--line-body:` declaration form never appears verbatim — stripping `"`/`'` first normalizes
- * that form to the same shape as a plain CSS declaration.
- * @remarks `var(--line-body)` CONSUMPTION is deliberately permitted, not fenced: the token
- * resolves to 1.5 globally and only the `.reading-surface` class lifts it to 1.6
- * (`src/web/styles/tokens.css`), and `docs/standards/design-contract.md`'s Typography table
- * names `--line-body` as the card title's own mandated line height — barring consumption would
- * force a card-height change, which criterion 2 forbids outright.
- * @see docs/ARCHITECTURE.md#design-system-invariants
- * @returns Violation report lines, one per matching line; a single line if the directory is missing.
- */
-function checkBoardReadingRhythm() {
-  if (!existsSync(BOARD_DIR)) {
-    return [
-      `${BOARD_DIR}: directory not found — NEW-19 cannot verify board surfaces`,
-    ];
-  }
-  const violations = [];
-  for (const file of walkSrc(BOARD_DIR)) {
-    const lines = readFileSync(file, "utf8").split("\n");
-    lines.forEach((line, i) => {
-      const stripped = line.replaceAll('"', "").replaceAll("'", "");
-      if (stripped.includes("reading-surface")) {
-        violations.push(
-          `${file}:${i + 1}: retired pattern NEW-19: the .reading-surface class is barred from src/web/modules/board/`,
-        );
-      }
-      if (stripped.includes("--line-body:")) {
-        violations.push(
-          `${file}:${i + 1}: retired pattern NEW-19: a local --line-body redefinition is barred from src/web/modules/board/`,
-        );
-      }
-    });
-  }
-  return violations;
-}
-
-/**
  * File-scoped embedded-terminal-client fence (`NEW-20`). The fenced subject is exactly
  * `TERMINAL_CLIENT_PATHS` — there is no terminal-client directory on disk, so this names paths
  * rather than a glob. `TerminalRegion.tsx` (the panel container that renders the terminal
@@ -484,7 +395,6 @@ const PANEL_CONTRACT = [
     join("src", "web", "components", "ui", "hooks", "use-shortcuts.ts"),
     '[role="checkbox"]',
   ],
-  [join("src", "web", "hooks", "useShortcuts.ts"), '[role="checkbox"]'],
   [
     join("src", "web", "components", "ui", "dialog.tsx"),
     'data-slot="dialog-content"',
@@ -586,7 +496,7 @@ function attentionClaims(sourceFile) {
  * the shared helper, so it was invisible; meanwhile a new surface that correctly IMPORTED the
  * single source turned the build red until someone widened the list — a check that fires on the
  * good event and stays silent on the bad one. Real sites it could not see were already present
- * (`card-badges.ts`, `DetailPanel.tsx`, `App.tsx`). This is the same shape as Phase 90's `NEW-21`,
+ * (`card-badges.ts`, `DetailPanel.tsx`, and `App.tsx`, now `lib/app-store.ts`). This is the same shape as Phase 90's `NEW-21`,
  * which shipped fenced against the wrong subject and reported PASS.
  * @remarks Consumers are deliberately UNRESTRICTED now. Importing the single source is the
  * behaviour this invariant wants, so it must never be what fails the build; the closed consumer
@@ -596,7 +506,7 @@ function attentionClaims(sourceFile) {
  * FAIL instead of silently exempting nothing. Conjunctions are NOT claims: `card.sessionLost !==
  * true && isUnseen(…)` (`card-badges.ts`, deriving an activity dot), `c.tmuxSession &&
  * !c.sessionLost` (`DetailPanel.tsx`, deriving liveness), and `card.column !== "todo" &&
- * card.sessionLost !== true` (`App.tsx`, gating start-eligibility) each narrow ONE attention field
+ * card.sessionLost !== true` (`lib/app-store.ts` `requestStart`, gating start-eligibility) each narrow ONE attention field
  * with unrelated state to make a different claim — a dot is not an attention ring — so fencing
  * them would be the cry-wolf failure in a new costume.
  * @remarks The definition half fences EXPORTED declarations only. `CardView.tsx` binds the shared
@@ -1230,9 +1140,8 @@ function checkSourceAccentMechanism() {
 }
 
 /**
- * Status-colour single-source fence (`NEW-24`). Deliberately NOT a `RETIRED_PATTERNS` entry: that
- * array scans all of `src/**`, hardcodes its literals, and this gate's subject is `src/web` with a
- * denylist derived from {@link TOKENS_PATH} at run time, not a fixed literal list.
+ * Status-colour single-source fence (`NEW-24`). Its subject is `src/web` with a denylist derived
+ * from {@link TOKENS_PATH} at run time, not a fixed literal list.
  * @remarks Asserts the MECHANISM as well as the literal, the same discipline `NEW-22`'s own
  * JSDoc argues for: `COLUMN_ACCENT` (`column-accent.ts`) and `PRIORITY_DOT`
  * (`priority-dot.ts`) are each the single definition of "which colour a column or priority renders",
@@ -1400,37 +1309,12 @@ function generateBaseline() {
 }
 
 /**
- * Run the invariant-home diff, the global retired-pattern scan, the
- * directory-scoped board reading-rhythm check, the
- * file-scoped terminal-client fence, the session-projection chokepoint check,
- * and the attention single-source census, then set the process exit code.
- * @remarks All seven diff legs gate the exit, not just MISSING: in a
- * frozen-baseline world an EXTRA (homed but unbaselined — a typo'd ID in docs
- * or an unratified new ID in JSDoc) and an ORPHAN (present in src but
- * unbaselined) are always defects, and an informational-only leg would let
- * them accumulate silently through the body-comment deletion phases. The
- * retired-pattern leg, the board reading-rhythm leg,
- * the terminal-fence leg, the session-projection chokepoint leg, and the
- * attention single-source leg are all independent of the ID-baseline
- * arithmetic above — a design literal coming back, the terminal-client
- * subject set changing, a flat session field being assigned outside its sole
- * chokepoint, or a second independent computation of "does this card need
- * attention" is a defect regardless of whether any invariant ID also moved.
- * The board reading-rhythm leg (`NEW-19`),
- * the terminal-fence leg (`NEW-20`), the session-projection chokepoint leg
- * (`NEW-21`), and the attention single-source leg (`NEW-22`) are all
- * deliberately scoped (file- or directory-scoped) rather than folded into
- * `RETIRED_PATTERNS`, since each pattern is legitimate outside its own scope.
- * The terminal-fence leg only proves the fenced SUBJECT SET is intact — it
- * cannot prove the fenced files' CONTENTS are unchanged; see
- * `checkTerminalFence`'s own JSDoc for the split. See
- * `checkSessionProjectionChokepoint`'s and `checkAttentionSingleSource`'s own
- * JSDoc for their respective two-tier fence/slice split and missing-subject
- * sentinels.
- * @returns Nothing; exits 0 iff MISSING, ORPHAN, EXTRA, RETIRED,
- * BOARD READING RHYTHM, TERMINAL FENCE, PANEL CONTRACT, SESSION PROJECTION
- * CHOKEPOINT, ATTENTION SINGLE SOURCE, LAUNCHCTL READ-ONLY, and STATUS COLOR
- * SINGLE SOURCE are all empty.
+ * Run the invariant-home diff and every scoped fence, then set the process exit code.
+ *
+ * @remarks Every leg gates the exit, not just MISSING: in a frozen-baseline world an EXTRA (an ID
+ * in docs or JSDoc that the baseline does not hold) and an ORPHAN (an ID in src that the baseline
+ * does not hold) are always defects. The fences are independent of the ID arithmetic; see each
+ * check's own JSDoc for its scope and missing-subject sentinel.
  */
 function run() {
   const home = new Set();
@@ -1448,8 +1332,6 @@ function run() {
   const missing = diffSorted(baseline, home);
   const orphan = diffSorted(present, baseline);
   const extra = diffSorted(home, baseline);
-  const retired = checkRetiredPatterns();
-  const boardReadingRhythm = checkBoardReadingRhythm();
   const terminalFence = checkTerminalFence();
   const panelContract = checkPanelContract();
   const sessionChokepoint = checkSessionProjectionChokepoint();
@@ -1461,8 +1343,6 @@ function run() {
   report("MISSING (baseline - home)", missing);
   report("ORPHAN  (present - baseline)", orphan);
   report("EXTRA   (home - baseline)", extra);
-  report("RETIRED (design literals that came back)", retired);
-  report("BOARD READING RHYTHM (NEW-19)", boardReadingRhythm);
   report("TERMINAL FENCE (NEW-20)", terminalFence);
   report("PANEL CONTRACT (PANEL-03)", panelContract);
   report("SESSION PROJECTION CHOKEPOINT (NEW-21)", sessionChokepoint);
@@ -1475,8 +1355,6 @@ function run() {
     missing.length +
     orphan.length +
     extra.length +
-    retired.length +
-    boardReadingRhythm.length +
     terminalFence.length +
     panelContract.length +
     sessionChokepoint.length +
@@ -1489,12 +1367,6 @@ function run() {
       (missing.length ? ` (${missing.length} missing a home)` : "") +
       (orphan.length || extra.length
         ? ` (${orphan.length} orphan, ${extra.length} extra — unbaselined IDs)`
-        : "") +
-      (retired.length
-        ? ` (${retired.length} retired pattern(s) reappeared)`
-        : "") +
-      (boardReadingRhythm.length
-        ? ` (${boardReadingRhythm.length} board reading-rhythm regression(s))`
         : "") +
       (terminalFence.length
         ? ` (${terminalFence.length} terminal-fence regression(s))`

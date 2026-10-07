@@ -5,6 +5,7 @@ import type {
   SettableItemState,
   SlackThread,
 } from "./types.js";
+import type { StartRequest } from "./start-request.js";
 import { isWebUrl } from "./web-url.js";
 import { draftReplyPrompt } from "./slack-prompt.js";
 import { askAboutQuestion, type AskAboutTarget } from "./ask.js";
@@ -344,4 +345,40 @@ export async function syncSources(
   );
   const refused = enabled.filter((_, i) => results[i]?.status === "rejected");
   if (refused.length > 0) notice(`Sync refused: ${refused.join(", ")}`);
+}
+
+export interface StartAgentDeps {
+  promoteItem: ActionApi["promoteItem"];
+  moveCard: ActionApi["moveCard"];
+  openStart: (request: StartRequest) => void;
+  notice: (text: string) => void;
+}
+
+/**
+ * Open the Start dialog for an item or a card, promoting an item to a To Do card first.
+ *
+ * @remarks A card target opens a new session at once; any failure shows one notice.
+ */
+export async function startAgentFor(
+  deps: StartAgentDeps,
+  target: { itemId?: string; cardId?: string },
+  extraDirection: string,
+  context?: string,
+): Promise<void> {
+  try {
+    if (target.cardId) {
+      deps.openStart({
+        cardId: target.cardId,
+        newSession: true,
+        extraDirection,
+      });
+      return;
+    }
+    if (!target.itemId) return;
+    const { card } = await deps.promoteItem(target.itemId, context);
+    if (card.column === "inbox") await deps.moveCard(card.id, "todo");
+    deps.openStart({ cardId: card.id, extraDirection });
+  } catch {
+    deps.notice("Couldn't start the agent. Try again.");
+  }
 }

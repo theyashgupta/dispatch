@@ -12,7 +12,7 @@ import {
 import { createRoot } from "react-dom/client";
 import "./styles/tokens.css";
 import "./viewer/viewer.css";
-import { useTheme } from "./hooks/useTheme.js";
+import { useTheme } from "./components/ui/hooks/use-theme.js";
 
 const ViewerDoc = lazy(() => import("./viewer/ViewerDoc.js"));
 

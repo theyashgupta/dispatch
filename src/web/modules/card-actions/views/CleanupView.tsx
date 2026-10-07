@@ -1,8 +1,5 @@
-import {
-  CleanupDialog,
-  type CleanupDialogProps,
-} from "@/modules/card-actions/components/CleanupDialog";
+import { CleanupContainer } from "@/modules/card-actions/containers/CleanupContainer";
 
-export function CleanupView(props: CleanupDialogProps) {
-  return <CleanupDialog {...props} />;
+export function CleanupView() {
+  return <CleanupContainer />;
 }

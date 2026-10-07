@@ -6,10 +6,6 @@ import {
   snoozeItem,
 } from "@/queries/item-actions-api";
 
-export const inboxKeys = {
-  all: ["inbox"] as const,
-};
-
 interface SetItemStateVariables {
   id: string;
   state: SettableItemState;
