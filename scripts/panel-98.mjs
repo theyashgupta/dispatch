@@ -1670,7 +1670,7 @@ async function checkA11y(cdp, sessionId, violations) {
     const outline = await readActiveOutline(cdp, sessionId);
     if (outline.outlineWidth !== "2px" || outline.outlineStyle !== "solid") {
       violations.push(
-        `a11y: detail panel PR link control expected a visible 2px solid focus ring (IconButton's themed focusRing()), measured ${JSON.stringify(outline)}`,
+        `a11y: detail panel PR link control expected a visible 2px solid focus ring (Button's outline focus classes), measured ${JSON.stringify(outline)}`,
       );
     }
   }

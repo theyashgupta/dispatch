@@ -272,38 +272,96 @@ export async function removeConfigDir(id: string): Promise<void> {
     .catch(() => undefined);
 }
 
-/**
- * Read the registry fresh on every call. A missing file is an empty registry; a malformed one
- * throws so a corrupt file surfaces as a 500 instead of hiding accounts that still have config
- * dirs and keychain items on disk.
- */
-export async function readRegistry(): Promise<ClaudeAccountRecord[]> {
+export interface DefaultIdentity {
+  email: string;
+  orgId: string;
+}
+
+interface RegistryFile {
+  accounts: ClaudeAccountRecord[];
+  defaultIdentity?: DefaultIdentity;
+}
+
+async function readRegistryFile(): Promise<RegistryFile> {
   let raw: string;
   try {
     raw = await fsp.readFile(CLAUDE_ACCOUNTS_REGISTRY_PATH, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return [];
+      return { accounts: [] };
     }
     throw err;
   }
-  const parsed: unknown = JSON.parse(raw);
-  const accounts = (parsed as { accounts?: unknown } | null)?.accounts;
+  const parsed = JSON.parse(raw) as {
+    accounts?: unknown;
+    defaultIdentity?: Partial<DefaultIdentity> | null;
+  } | null;
+  const accounts = parsed?.accounts;
   if (!Array.isArray(accounts) || !accounts.every(isAccountRecord)) {
     throw new Error("claude accounts registry is malformed");
   }
-  return accounts;
+  const identity = parsed?.defaultIdentity;
+  return typeof identity?.email === "string" &&
+    typeof identity.orgId === "string"
+    ? {
+        accounts,
+        defaultIdentity: { email: identity.email, orgId: identity.orgId },
+      }
+    : { accounts };
 }
 
-async function writeRegistry(accounts: ClaudeAccountRecord[]): Promise<void> {
+/**
+ * Read the registry fresh on every call.
+ *
+ * @remarks A missing file is an empty registry; a malformed one throws so a corrupt file surfaces
+ * as a 500 instead of hiding accounts that still have config dirs and keychain items on disk.
+ */
+export async function readRegistry(): Promise<ClaudeAccountRecord[]> {
+  return (await readRegistryFile()).accounts;
+}
+
+/**
+ * Read the last seen Default identity, `undefined` before the first recorded read.
+ */
+export async function readDefaultIdentity(): Promise<
+  DefaultIdentity | undefined
+> {
+  return (await readRegistryFile()).defaultIdentity;
+}
+
+async function writeRegistryFile(file: RegistryFile): Promise<void> {
   await fsp.mkdir(CLAUDE_ACCOUNTS_DIR, { recursive: true, mode: 0o700 });
   fs.chmodSync(CLAUDE_ACCOUNTS_DIR, 0o700);
   await writeFileAtomic(
     CLAUDE_ACCOUNTS_REGISTRY_PATH,
-    JSON.stringify({ version: 1, accounts }, null, 2) + "\n",
+    JSON.stringify({ version: 1, ...file }, null, 2) + "\n",
     { mode: 0o600 },
   );
   fs.chmodSync(CLAUDE_ACCOUNTS_REGISTRY_PATH, 0o600);
+}
+
+async function writeRegistry(accounts: ClaudeAccountRecord[]): Promise<void> {
+  const { defaultIdentity } = await readRegistryFile();
+  await writeRegistryFile({
+    accounts,
+    ...(defaultIdentity ? { defaultIdentity } : {}),
+  });
+}
+
+/**
+ * Persist the last seen Default identity next to the accounts.
+ *
+ * @remarks Stores the email and organisation id only, never a token. The write is serialized
+ * behind the module mutation chain.
+ */
+export function writeDefaultIdentity(identity: DefaultIdentity): Promise<void> {
+  return serialized(async () => {
+    const { accounts } = await readRegistryFile();
+    await writeRegistryFile({
+      accounts,
+      defaultIdentity: { email: identity.email, orgId: identity.orgId },
+    });
+  });
 }
 
 /**

@@ -1,12 +1,6 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { Board } from "@/features/board";
-import { useAppState } from "@/components/AppState";
+import { BoardView } from "@/modules/board";
 
 export const Route = createLazyFileRoute("/board/{-$id}")({
-  component: BoardRoute,
+  component: BoardView,
 });
-
-function BoardRoute() {
-  const props = useAppState().board;
-  return <Board {...props} />;
-}

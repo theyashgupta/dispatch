@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PAGES } from "../../../../shared/route.js";
 import { SOURCE_MARK } from "../../../components/badges/source-mark.js";
-import { NAV_ITEMS } from "../domain/nav-items.js";
+import { NAV_ITEMS } from "../../../../shared/nav-items.js";
 import { NAV_ICON } from "./NavIcon.js";
 
 test("every route page has an icon, including settings", () => {

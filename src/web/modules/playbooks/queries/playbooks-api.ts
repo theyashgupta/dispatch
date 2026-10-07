@@ -1,7 +1,4 @@
-import type {
-  Playbook,
-  PlaybookPickerResponse,
-} from "../../../../shared/types.js";
+import type { Playbook } from "../../../../shared/types.js";
 import { http, httpError, type ApiResult } from "@/lib/http";
 
 /**
@@ -17,21 +14,6 @@ export async function getPlaybooks(): Promise<Playbook[]> {
     throw httpError("getPlaybooks", result);
   }
   return result.data.playbooks;
-}
-
-/**
- * Fetch the data source of the StartModal picker: GET /api/playbooks/picker.
- *
- * @remarks
- * Read fresh on every modal open so malformed rows and the remembered default reflect the current
- * on-disk state. Throws on any non-2xx.
- */
-export async function getPickerPlaybooks(): Promise<PlaybookPickerResponse> {
-  const result = await http<PlaybookPickerResponse>("/api/playbooks/picker");
-  if (!result.ok) {
-    throw httpError("getPickerPlaybooks", result);
-  }
-  return result.data;
 }
 
 export type PlaybookWriteResult =

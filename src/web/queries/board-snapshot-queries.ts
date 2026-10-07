@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  keepPreviousData,
   queryOptions,
+  useQuery,
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
@@ -40,6 +42,48 @@ export function boardSnapshotQueryOptions(doneLimit: number) {
         : snapshot;
     },
   });
+}
+
+/** Read the board snapshot at a done limit, keeping the previous snapshot while a new limit loads. */
+export function useBoardSnapshotQuery(doneLimit: number) {
+  return useQuery({
+    ...boardSnapshotQueryOptions(doneLimit),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * Read the board snapshot for a reader that mounts with a page, keeping a board on screen while a new limit loads.
+ *
+ * @remarks
+ * The shell holds the always-mounted observer, so a page reader never refetches on mount and adds
+ * no request when it opens. A reader that mounts during a done-limit fetch has no previous data, so
+ * it starts from the newest cached board, as the legacy app-wide last board did.
+ */
+export function useBoardSnapshot(doneLimit: number): BoardSnapshot | null {
+  const queryClient = useQueryClient();
+  const { data } = useQuery({
+    ...boardSnapshotQueryOptions(doneLimit),
+    placeholderData: (previous) => previous ?? newestBoardSnapshot(queryClient),
+    refetchOnMount: false,
+  });
+  return data ?? null;
+}
+
+/** Return the most recently updated board snapshot in the cache, at any done limit. */
+export function newestBoardSnapshot(
+  queryClient: QueryClient,
+): BoardSnapshot | undefined {
+  let newest: { data: BoardSnapshot; at: number } | undefined;
+  for (const query of queryClient
+    .getQueryCache()
+    .findAll({ queryKey: boardSnapshotKeys.all })) {
+    const { data, dataUpdatedAt } = query.state;
+    if (data === undefined) continue;
+    if (newest === undefined || dataUpdatedAt > newest.at)
+      newest = { data: data as BoardSnapshot, at: dataUpdatedAt };
+  }
+  return newest?.data;
 }
 
 /**

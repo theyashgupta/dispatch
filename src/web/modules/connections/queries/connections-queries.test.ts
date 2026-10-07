@@ -27,11 +27,11 @@ import {
   saveLinearStateMapMutationOptions,
   saveSlackChannelsMutationOptions,
   linearStateMapQueryOptions,
-  linearWorkflowQueryOptions,
   savedSlackChannelsQueryOptions,
   slackChannelsQueryOptions,
 } from "./connections-queries.js";
 import { calendarStatusKeys } from "@/queries/calendar-status-queries";
+import { linearWorkflowKeys } from "@/queries/linear-workflow-queries";
 
 const realFetch = globalThis.fetch;
 const calls: { url: string; init?: RequestInit }[] = [];
@@ -89,11 +89,6 @@ test("connectionsKeys has the documented shape", () => {
     "options",
     "teams",
   ]);
-  assert.deepEqual(connectionsKeys.linearWorkflow, [
-    "connections",
-    "linear",
-    "workflow",
-  ]);
   assert.deepEqual(connectionsKeys.savedSlackChannels, [
     "connections",
     "slack",
@@ -134,32 +129,6 @@ test("linearStateMapQueryOptions keeps the settings key and requests the state m
   reply(200, { stateMap: { todo: "s1" } });
   assert.deepEqual(await newClient().fetchQuery(options), { todo: "s1" });
   assert.equal(calls[0]?.url, "/api/config/linear-state-map");
-});
-
-test("linearWorkflowQueryOptions requests the Linear workflow", async () => {
-  const options = linearWorkflowQueryOptions();
-  assert.deepEqual(options.queryKey, ["connections", "linear", "workflow"]);
-  reply(200, { viewer: {}, teams: [] });
-  await newClient().fetchQuery(options);
-  assert.equal(calls[0]?.url, "/api/sources/linear/workflow");
-});
-
-test("a loaded Linear workflow is read once per page load", async () => {
-  const client = newClient();
-  reply(200, { viewer: {}, teams: [] });
-  await client.fetchQuery(linearWorkflowQueryOptions());
-  await client.fetchQuery(linearWorkflowQueryOptions());
-  assert.equal(calls.length, 1);
-});
-
-test("a failed Linear workflow read is retried on the next read", async () => {
-  const client = newClient();
-  reply(502, { error: "Linear is down" });
-  const first = await client.fetchQuery(linearWorkflowQueryOptions());
-  assert.equal(first.ok, false);
-  reply(200, { viewer: {}, teams: [] });
-  await client.fetchQuery(linearWorkflowQueryOptions());
-  assert.equal(calls.length, 2);
 });
 
 test("savedSlackChannelsQueryOptions requests the saved Slack channels", async () => {
@@ -534,7 +503,7 @@ test("refreshLinearFilters marks the filters, every option list and the preview 
     connectionsKeys.linearFilters,
     connectionsKeys.linearOptions("assignees"),
     connectionsKeys.linearOptions("teams"),
-    connectionsKeys.linearWorkflow,
+    linearWorkflowKeys.all,
     connectionsKeys.linearPreview(filters),
   ];
   for (const key of keys) client.setQueryData(key, {});

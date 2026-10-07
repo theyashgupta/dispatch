@@ -9,6 +9,7 @@ import {
 import {
   addWorkspaceFolder,
   browseDirectory,
+  discoverWorkspaceFolder,
   getWorkspaceFolders,
   removeWorkspaceFolder,
 } from "./workspace-folders-api.js";
@@ -16,6 +17,7 @@ import {
 export const workspaceFoldersKeys = {
   all: ["workspaces"] as const,
   folders: ["workspaces", "folders"] as const,
+  discover: (path: string) => ["workspaces", "discover", path] as const,
   browse: (path?: string) => ["workspaces", "browse", path ?? null] as const,
 };
 
@@ -23,6 +25,14 @@ export function workspaceFoldersQueryOptions() {
   return queryOptions({
     queryKey: workspaceFoldersKeys.folders,
     queryFn: getWorkspaceFolders,
+  });
+}
+
+/** Build the query options that read the repos of a registered folder. */
+export function discoverWorkspaceFolderQueryOptions(path: string) {
+  return queryOptions({
+    queryKey: workspaceFoldersKeys.discover(path),
+    queryFn: () => discoverWorkspaceFolder(path),
   });
 }
 
@@ -44,6 +54,20 @@ export function useWorkspaceFoldersQuery() {
   return useQuery({
     ...workspaceFoldersQueryOptions(),
     refetchOnMount: "always",
+  });
+}
+
+/**
+ * Read the repos of a registered folder, idle while no folder is chosen.
+ *
+ * @remarks
+ * Every pick is read fresh, because a repo can vanish from disk between two picks. The key is shared with the workspaces module's discovery, so both read one cache entry. `seeded` skips the read for a folder whose repos a just-finished add put in the cache, as legacy did.
+ */
+export function useDiscoverFolderQuery(path: string | null, seeded = false) {
+  return useQuery({
+    ...discoverWorkspaceFolderQueryOptions(path ?? ""),
+    enabled: path !== null && !seeded,
+    staleTime: 0,
   });
 }
 
@@ -108,7 +132,8 @@ export function useFolderBrowser() {
  *
  * @remarks
  * An accepted add appends the typed path to the cached registry unless it is already there, as the
- * registry list did before. A refusal (400) resolves `{ ok: false }` with the server's message.
+ * registry list did before, and caches the repos the add discovered. A refusal (400) resolves
+ * `{ ok: false }` with the server's message.
  */
 export function addWorkspaceFolderMutationOptions(queryClient: QueryClient) {
   return {
@@ -118,6 +143,9 @@ export function addWorkspaceFolderMutationOptions(queryClient: QueryClient) {
       path: string,
     ) => {
       if (!result.ok) return;
+      queryClient.setQueryData(workspaceFoldersKeys.discover(path), {
+        repos: result.repos,
+      });
       queryClient.setQueryData(
         workspaceFoldersKeys.folders,
         (old: Awaited<ReturnType<typeof getWorkspaceFolders>> | undefined) =>
@@ -139,7 +167,7 @@ export function useAddWorkspaceFolderMutation() {
  *
  * @remarks
  * The folder leaves the cached registry before the request answers and stays out if the request
- * fails, because the stream snapshot reconciles the registry.
+ * fails, as in the legacy picker.
  */
 export function removeWorkspaceFolderMutationOptions(queryClient: QueryClient) {
   return {

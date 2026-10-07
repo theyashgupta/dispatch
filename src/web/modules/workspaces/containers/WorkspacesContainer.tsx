@@ -1,16 +1,24 @@
 import { useEffect, useState } from "react";
+import { useRouteContext } from "@tanstack/react-router";
+import { pinFromBoard } from "../../../../shared/pinned-card.js";
 import type {
   BoardSnapshot,
   WorktreeRow as WorktreeRowModel,
 } from "../../../../shared/types.js";
 import { nowMs } from "../../../../shared/format-age.js";
 import { ErrorAlert } from "@/components/ErrorAlert";
+import { PageHeaderActions } from "@/components/PageHeaderActions";
+import { PageHeaderCount } from "@/components/PageHeaderCount";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useIsMobile } from "@/components/ui/hooks/use-mobile";
 import { WorkspaceRepos } from "@/modules/workspaces/components/WorkspaceRepos";
 import { WorkspaceSection } from "@/modules/workspaces/components/WorkspaceSection";
+import { WorkspacesDiskSummary } from "@/modules/workspaces/components/WorkspacesDiskSummary";
 import { WorkspacesToolbar } from "@/modules/workspaces/components/WorkspacesToolbar";
 import { WorktreeList } from "@/modules/workspaces/components/WorktreeList";
 import { WorkspaceFoldersContainer } from "./WorkspaceFoldersContainer";
+import { useWorkspacesSummary } from "@/modules/workspaces/hooks/use-workspaces-summary";
+import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 import {
   sortWorktreeRows,
   type WorkspacesSummary,
@@ -28,7 +36,58 @@ interface WorkspacesContainerProps {
   onCleanupRequest: (row: WorktreeRowModel) => void;
 }
 
-export function WorkspacesContainer({
+export function WorkspacesContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const [, setSummary] = useWorkspacesSummary();
+  if (board == null) return null;
+
+  const inWindow = (id: string) => board.cards.some((card) => card.id === id);
+  const openCard = (row: WorktreeRowModel): void => {
+    if (inWindow(row.cardId)) {
+      appStore.selectCard(row.cardId, pinFromBoard(row.cardId, board.cards));
+      return;
+    }
+    appStore.openSearchResult(
+      {
+        id: row.cardId,
+        identifier: row.identifier,
+        title: row.title,
+        column: row.column,
+      },
+      false,
+    );
+  };
+  return (
+    <WorkspacesPage
+      board={board}
+      onSummaryChange={setSummary}
+      onOpenCard={openCard}
+      onCleanupRequest={(row) => {
+        if (inWindow(row.cardId)) appStore.openCleanup(row.cardId);
+        else openCard(row);
+      }}
+    />
+  );
+}
+
+export function WorkspacesHeaderContainer() {
+  const [summary] = useWorkspacesSummary();
+  if (summary == null) return null;
+  return (
+    <>
+      <PageHeaderCount count={summary.count} />
+      <PageHeaderActions>
+        <WorkspacesDiskSummary
+          totalKb={summary.totalKb}
+          unknownSizes={summary.unknownSizes}
+        />
+      </PageHeaderActions>
+    </>
+  );
+}
+
+function WorkspacesPage({
   board,
   onSummaryChange,
   onOpenCard,

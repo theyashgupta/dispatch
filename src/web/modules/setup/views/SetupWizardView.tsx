@@ -1,8 +1,6 @@
-import type { ComponentProps } from "react";
-import { SetupWizardContainer } from "@/modules/setup/containers/SetupWizardContainer";
+import type { ReactNode } from "react";
+import { SetupWizardRequestContainer } from "@/modules/setup/containers/SetupWizardContainer";
 
-export function SetupWizardView(
-  props: ComponentProps<typeof SetupWizardContainer>,
-) {
-  return <SetupWizardContainer {...props} />;
+export function SetupWizardView({ connections }: { connections: ReactNode }) {
+  return <SetupWizardRequestContainer connections={connections} />;
 }

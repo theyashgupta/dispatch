@@ -4,6 +4,7 @@ import {
   resolveShortcut,
 } from "../../../../shared/shortcuts.js";
 import type { Card } from "../../../../shared/types.js";
+import { isWebUrl } from "../../../../shared/web-url.js";
 import { ticketActionsFor } from "@/modules/tickets/domain/ticket-actions";
 import {
   isEditableRole,
@@ -60,7 +61,7 @@ function runsFor(options: TicketShortcutOptions) {
       if (ticketActionsFor(card).includes("done")) onDone(card);
     }),
     o: onVisibleCursor((card) => {
-      if (card.url && ticketActionsFor(card).includes("open"))
+      if (isWebUrl(card.url) && ticketActionsFor(card).includes("open"))
         window.open(card.url, "_blank", "noopener,noreferrer");
     }),
   };

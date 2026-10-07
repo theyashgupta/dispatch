@@ -660,7 +660,7 @@ async function waitForBoardRootLoaded(cdp, sessionId, identifiers) {
 
 /**
  * Flip the already-loaded page to Orca/docked mode via a real reload (never a synthetic React state
- * poke — `App.tsx`'s `viewMode` lazily reads `localStorage["dsp.view"]` once on mount, same
+ * poke: `main.tsx`'s `initialHash` reads `localStorage["dsp.view"]` once on load, same
  * technique density-91.mjs's `switchToOrcaView` established), then poll until the Orca nav renders
  * every identifier in `identifiers`.
  */

@@ -18,8 +18,20 @@ import {
   type ClaudeAccountRecord,
 } from "./claude-accounts.js";
 import { getUsage, refreshUsage } from "./claude-usage.js";
+import { boardRepository } from "../../store/board-repository.js";
 
-const LOGIN_TIMEOUT_MS = 180_000;
+const LOGIN_TIMEOUT_MS = 600_000;
+
+type LoginFailure =
+  | "code-rejected"
+  | "access-denied"
+  | "timeout"
+  | "cli-failed"
+  | "no-identity"
+  | "duplicate"
+  | "home-login"
+  | "save-failed"
+  | "cancelled";
 
 interface ActiveLogin {
   accountId: string;
@@ -28,6 +40,7 @@ interface ActiveLogin {
   timer: NodeJS.Timeout;
   finished: boolean;
   codeRejected: boolean;
+  timedOut: boolean;
   cancelRequested: boolean;
 }
 
@@ -54,9 +67,47 @@ async function cleanupNewDir(login: ActiveLogin): Promise<void> {
   if (login.isNew) await removeConfigDir(login.accountId);
 }
 
-async function fail(login: ActiveLogin, message: string): Promise<void> {
+function recordFailure(reason: LoginFailure): Promise<void> {
+  return boardRepository.recordAccountEvent("account_login_failed", reason);
+}
+
+async function fail(
+  login: ActiveLogin,
+  reason: LoginFailure,
+  message: string,
+): Promise<void> {
   await cleanupNewDir(login);
   view = { state: "error", message };
+  await recordFailure(reason);
+}
+
+function exitFailure(
+  login: ActiveLogin,
+  accessDenied: boolean,
+): [LoginFailure, string] {
+  if (login.codeRejected) {
+    return [
+      "code-rejected",
+      "Claude did not accept that code. Start again and paste the full code.",
+    ];
+  }
+  if (accessDenied) {
+    return ["access-denied", "Sign-in was denied on the Claude page."];
+  }
+  if (login.timedOut) {
+    return [
+      "timeout",
+      "The sign-in took too long and was stopped. Start again.",
+    ];
+  }
+  return ["cli-failed", "Claude login did not complete. Try again."];
+}
+
+function sameIdentity(
+  a: { email: string; orgId: string },
+  b: { email: string; orgId: string },
+): boolean {
+  return a.email === b.email && a.orgId === b.orgId;
 }
 
 async function settle(
@@ -65,14 +116,7 @@ async function settle(
   accessDenied: boolean,
 ): Promise<void> {
   if (code !== 0) {
-    await fail(
-      login,
-      login.codeRejected
-        ? "Claude did not accept that code. Start again and paste the full code."
-        : accessDenied
-          ? "Sign-in was denied on the Claude page."
-          : "Claude login did not complete. Try again.",
-    );
+    await fail(login, ...exitFailure(login, accessDenied));
     return;
   }
 
@@ -80,21 +124,29 @@ async function settle(
   const dir = accountDir(login.accountId);
   const identity = await readClaudeIdentity(dir);
   if (!identity.loggedIn || identity.email === "") {
-    await fail(login, "Claude reports no login for this account.");
+    await fail(
+      login,
+      "no-identity",
+      "Claude reports no login for this account.",
+    );
     return;
   }
 
+  const home = await readClaudeIdentity();
+  if (home.loggedIn && sameIdentity(home, identity)) {
+    await logoutClaudeConfigDir(dir);
+    await fail(login, "home-login", "This is already your home login");
+    return;
+  }
   const existing = await readRegistry();
   const duplicate = existing.find(
-    (a) =>
-      a.id !== login.accountId &&
-      a.email === identity.email &&
-      a.orgId === identity.orgId,
+    (a) => a.id !== login.accountId && sameIdentity(a, identity),
   );
   if (duplicate) {
     await logoutClaudeConfigDir(dir);
     await fail(
       login,
+      "duplicate",
       `${identity.email} is already added as a Claude account.`,
     );
     return;
@@ -103,6 +155,7 @@ async function settle(
     await logoutClaudeConfigDir(dir);
     await cleanupNewDir(login);
     view = { state: "idle" };
+    await recordFailure("cancelled");
     return;
   }
 
@@ -149,23 +202,24 @@ async function finish(
   try {
     await settle(login, code, accessDenied);
   } catch {
-    await fail(login, "Claude login could not be saved. Try again.").catch(
-      () => undefined,
-    );
+    await fail(
+      login,
+      "save-failed",
+      "Claude login could not be saved. Try again.",
+    ).catch(() => undefined);
   } finally {
     if (active === login) active = null;
   }
 }
 
 /**
- * Start a Claude login for a fresh account, or for an existing id to repair its token. Exactly one
- * login runs at a time; the browser is opened by the CLI itself and the url is also exposed for a
- * remote user.
+ * Start a Claude login for a fresh account, or for an existing id to repair its token.
+ *
  * @remarks The slot is reserved synchronously before the first await, otherwise two requests in
  * one tick both pass the in-flight check and spawn two CLI children (React's dev double-effect
- * did exactly that). A cancel that lands during the setup awaits is remembered and honoured right
- * after the spawn. A re-login logs the dir out first so the CLI does not short-circuit on the
- * stale token. The 180 second timer is the only thing that ends a login the user walked away from.
+ * did exactly that). A re-login logs the dir out first so the CLI does not short-circuit on the
+ * stale token. The 10 minute timer is the only thing that ends an abandoned login and leaves time
+ * to switch the Claude account in the browser, which 180 seconds did not.
  */
 export async function startLogin(
   accountId?: string,
@@ -206,9 +260,11 @@ export async function startLogin(
     isNew,
     finished: false,
     codeRejected: false,
+    timedOut: false,
     cancelRequested: false,
     timer: setTimeout(
       () => {
+        login.timedOut = true;
         login.process.kill();
       },
       Number(process.env.DISPATCH_LOGIN_TIMEOUT_MS) || LOGIN_TIMEOUT_MS,
@@ -250,9 +306,11 @@ export function submitLoginCode(
 }
 
 /**
- * Abort an in-flight login or clear a finished one back to idle. A fresh account's dir is removed.
- * A cancel during the setup awaits or during `finishing` is recorded and applied by the login
- * itself, so no child or registry record survives it.
+ * Abort an in-flight login or clear a finished one back to idle.
+ *
+ * @remarks A cancel during the setup awaits or during `finishing` is recorded and applied by the
+ * login itself, so no child or registry record survives it. Aborting a running CLI records a
+ * `cancelled` login failure, so a dialog closed by accident shows in the activity feed.
  */
 export async function cancelLogin(): Promise<void> {
   const login = active;
@@ -265,6 +323,7 @@ export async function cancelLogin(): Promise<void> {
       login.process.kill();
       await login.process.exited;
       await cleanupNewDir(login);
+      await recordFailure("cancelled");
     } else {
       return;
     }

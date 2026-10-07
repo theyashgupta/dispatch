@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { useRouteContext } from "@tanstack/react-router";
+import { closeOverlay } from "@/components/ui/hooks/overlay-return";
 import { useSingleFlight } from "@/queries/single-flight";
 import {
   MeetingNotesDialog,
@@ -14,13 +16,14 @@ import {
   toReviewRows,
   type ReviewRow,
 } from "@/modules/meetings/domain/draft-rows";
+import { meetingNotice } from "@/modules/meetings/domain/meetings";
 import { useMeetingName } from "@/modules/meetings/hooks/use-meeting-name";
 import {
   useCreateMeetingItemsMutation,
   useDraftMeetingItemsMutation,
 } from "@/modules/meetings/queries/meetings-queries";
 
-interface MeetingNotesContainerProps {
+interface MeetingNotesPageProps {
   onClose: () => void;
   onCreated: (result: {
     created: number;
@@ -29,10 +32,17 @@ interface MeetingNotesContainerProps {
   }) => void;
 }
 
-export function MeetingNotesContainer({
-  onClose,
-  onCreated,
-}: MeetingNotesContainerProps) {
+export function MeetingNotesContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  return (
+    <MeetingNotesPage
+      onClose={() => closeOverlay(appStore, appStore.closeMeetingNotes)}
+      onCreated={(result) => appStore.notice(meetingNotice(result))}
+    />
+  );
+}
+
+function MeetingNotesPage({ onClose, onCreated }: MeetingNotesPageProps) {
   const meetingRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);

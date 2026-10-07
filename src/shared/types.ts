@@ -547,6 +547,8 @@ export interface Session {
    * NON-SECRET: a uuid, rides `snapshot()` unredacted.
    */
   claudeAccountId?: string;
+  pendingClaudeAccountId?: string;
+  claudeAccountStale?: boolean;
   /**
    * Per-session hook-auth secret. NEVER serialized to the wire — the store's
    * `redactCard`/`snapshot()` chokepoint strips it from the card AND from every session copy,
@@ -715,6 +717,7 @@ export interface SessionSummary {
   lastMarker?: string;
   /** Mirrors `Session.claudeAccountId`; absent for sessions that predate account tagging. */
   claudeAccountId?: string;
+  claudeAccountStale?: boolean;
   /**
    * Mirrors {@link Session.cleanupBlocked} for THIS session. Absent when this session is not
    * blocked, the same absent-means-nothing-to-report idiom as `sessionCount`, which stays absent
@@ -1350,6 +1353,34 @@ export interface ClaudeAccountSummary {
   usage: ClaudeUsageSnapshot;
 }
 
+export type SessionTurnState = "idle" | "busy" | "limit" | "unknown";
+
+export type ApplyChoice = "none" | "idle" | "all";
+
+export interface SessionRef {
+  cardId: string;
+  sessionId: string;
+}
+
+export interface AccountSessionEntry extends SessionRef {
+  cardTitle: string;
+  accountId: string;
+  turn: SessionTurnState;
+  stale: boolean;
+  pendingAccountId?: string;
+  continueAction?: "available" | "usage-unknown";
+}
+
+export interface AccountApplyResult {
+  moved: SessionRef[];
+  queued: SessionRef[];
+  skipped: (SessionRef & { reason: string })[];
+}
+
+export interface AccountSwitchResponse extends AccountApplyResult {
+  activeId: string;
+}
+
 export type ClaudeLoginView =
   | { state: "idle" }
   | { state: "starting"; accountId: string }
@@ -1656,6 +1687,13 @@ export type CreateBoardResult =
 export type ArchiveBoardResult =
   | { ok: true; board: Board }
   | { ok: false; reason: "default-board" | "unknown-board" };
+
+export type AccountEventType =
+  "account_moved" | "account_login_changed" | "account_login_failed";
+
+export type AccountActivityEvent = Omit<ActivityEvent, "type"> & {
+  type: AccountEventType;
+};
 
 export type LoopUnitStatus =
   | "not started"

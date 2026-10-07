@@ -7,7 +7,8 @@
       "@/*": ["./*"]
     },
     "types": ["node"],
-    "moduleDetection": "force"
+    "moduleDetection": "force",
+    "tsBuildInfoFile": "../../node_modules/.cache/tsc/web.tsbuildinfo"
   },
   "include": [".", "../shared"],
   "exclude": []

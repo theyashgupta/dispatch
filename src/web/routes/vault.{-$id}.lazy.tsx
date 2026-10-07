@@ -1,12 +1,6 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
 import { VaultView } from "@/modules/vault";
-import { useAppState } from "@/components/AppState";
 
 export const Route = createLazyFileRoute("/vault/{-$id}")({
-  component: VaultRoute,
+  component: VaultView,
 });
-
-function VaultRoute() {
-  const props = useAppState().vault;
-  return <VaultView {...props} />;
-}

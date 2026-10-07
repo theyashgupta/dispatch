@@ -377,7 +377,7 @@ deny(
 `;
 
 /**
- * The `--settings` layer content: Stop + UserPromptSubmit + PostToolUse (unmatched, catch-all)
+ * Build the `--settings` layer content: Stop + StopFailure + UserPromptSubmit + PostToolUse (unmatched, catch-all)
  * plus a matched `PreToolUse` entry whose matcher is derived from {@link PAUSE_TOOL_NAMES} —
  * the single source of truth shared with hook-events' enter/flip-back branches, so extending the
  * pause-tool set can never half-wire (a hardcoded matcher edited out of sync would leave the
@@ -422,6 +422,7 @@ function hookSettingsJson(): string {
     crossSessionInbound: "refuse",
     hooks: {
       Stop: entry,
+      StopFailure: entry,
       UserPromptSubmit: entry,
       PostToolUse: entry,
       PreToolUse: [

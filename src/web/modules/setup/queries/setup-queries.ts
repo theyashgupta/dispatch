@@ -1,5 +1,6 @@
 import { queryOptions, useMutation } from "@tanstack/react-query";
-import { getSetup, runPrerequisiteInstall } from "./setup-api.js";
+import { getSetup } from "@/queries/setup-api";
+import { runPrerequisiteInstall } from "./setup-api.js";
 
 export const setupKeys = {
   all: ["setup"] as const,

@@ -2,37 +2,37 @@
 
 ## Status and scope
 
-This standard governs all new frontend code in `src/web/`. It starts on 2026-09-30. It supersedes the sections of `design-contract.md`, `frontend-design-system.md`, `folder-structure.md` and `code-review-rules.md` that the "Supersede records index" names.
+This standard governs all frontend code in `src/web/`. It started on 2026-09-30 for new code. Since 2026-10-07 (LOCAL-77) it governs the whole web tree. It supersedes the sections of `design-contract.md`, `folder-structure.md` and `code-review-rules.md` that the "Supersede records index" names. It also holds the one surviving rule of `frontend-design-system.md`, in the section "Focus versus selection".
 
 The module pattern, from the initiative brief:
 
 > `src/web/routes/` owns URLs and loaders; `src/web/modules/<feature>/{views,containers,components,hooks,domain,queries}` owns one feature each; `src/web/components/ui/` holds shadcn; `src/web/lib/` holds configured clients; modules never import sibling modules.
 
-The new tree is this list of paths. None of them exists yet, so this list marks each one (new). Later mentions do not repeat the marker.
+The web tree has these parts:
 
-- `src/web/routes/` (new)
-- `src/web/modules/` (new)
-- `src/web/components/ui/` (new), short form `components/ui`
-- `src/web/components/ui/hooks/` (new)
-- `src/web/components/` (new)
-- `src/web/queries/` (new)
-- `src/web/lib/http.ts` (new)
-- `src/web/lib/utils.ts` (new)
-- `src/web/lib/query-client.ts` (new)
-- `src/web/styles/globals.css` (new)
-- `components.json` (new) and the `@/` import alias for `src/web/` (new)
+- `src/web/routes/`
+- `src/web/modules/`
+- `src/web/components/ui/`, short form `components/ui`, with the app-wide hooks in `src/web/components/ui/hooks/`
+- `src/web/components/`
+- `src/web/queries/`
+- `src/web/lib/`
+- `src/web/styles/`
+- `components.json` and the `@/` import alias for `src/web/`
+- the web root entry files (`main.tsx`, `viewer-main.tsx`, `gallery-main.tsx` and `terminal-main.ts`) and the HTML entries
+- `src/web/viewer/`, which keeps one dated lint exception (U4-13)
 
-The legacy tree has these parts:
+One lint scope, one dependency rule set and one agent hook rule set cover the web tree.
 
-- `src/web/features/`, `src/web/primitives/` and `src/web/hooks/`
-- every other file in `src/web/lib/`, such as `api.ts` and the `format-*.ts` helpers. `route.ts` moved to `src/shared/route.ts`
-- `src/web/viewer/` and the web root entry files: `main.tsx`, `App.tsx`, `viewer-main.tsx` and the HTML entries
+Records, 2026-10-07 (LOCAL-77):
 
-The legacy tree stays until ticket 16. The section "Legacy tree during transition" gives its rules.
+- The legacy tree is deleted: the legacy feature, primitive and hook folders, the legacy helpers and barrels in `src/web/lib/`, and the root component. The section "Legacy tree during transition" is removed, because its rules applied only to the legacy tree.
+- This section no longer marks paths as new and no longer lists a legacy tree.
+- "Providers" no longer allows the transitional app state context (R-15). The app store replaces it (U4-06).
+- Route file names follow a lint pattern instead of the R-14 exemption (U4-14). The `useX.ts` hook file rule is removed.
 
 ## Layer definitions
 
-A module is one folder `src/web/modules/<feature>/`. A module has six layer folders. A route file is a seventh layer outside the module. The app shell is the root route `src/web/routes/__root.tsx`. The root route is exempt from the Route rules below. It renders the shell layout, the `Outlet`, the QueryClientProvider and the transitional providers. The module `index.ts` is the barrel, not a layer. A test file belongs to the layer of its subject.
+A module is one folder `src/web/modules/<feature>/`. A module has six layer folders. A route file is a seventh layer outside the module. The app shell is the root route `src/web/routes/__root.tsx`. The root route is exempt from the Route rules below. It renders the shell view with the `Outlet` and module views in its slots. `main.tsx` renders the providers (see "Providers"). The module `index.ts` is the barrel, not a layer. A test file belongs to the layer of its subject.
 
 - **Route.** A file under `src/web/routes/`.
   - Use it when: a URL needs an owner. The route owns the URL, the params and `validateSearch` with zod. Its loader calls `queryOptions` from a module barrel or from `src/web/queries/`. It renders exactly one view, or one shared layout component that gets module views as children.
@@ -41,7 +41,7 @@ A module is one folder `src/web/modules/<feature>/`. A module has six layer fold
   - Use it when: a route needs a page. The view composes containers and layout. It can set layout classes, such as flex, grid, gap and padding.
   - Never: import TanStack Query or call a query hook in a view.
 - **Container.** A component in `modules/<feature>/containers/`.
-  - Use it when: one region of a view needs data or behaviour. The container gets data through the module's query hooks or a shared query in `src/web/queries/`, for example the board snapshot. It owns mutations, selection state and editing state. It gives plain props to its child components. It is the only layer that calls a query hook, and it uses TanStack Query only through query hooks. A query hook is a wrapper that a `queries/` folder exports. Query files call TanStack `useQuery`, `useSuspenseQuery` and `useMutation` inside those wrappers. When one region fills the whole page, the view still renders that region as one container.
+  - Use it when: one region of a view needs data or behaviour. The container gets data through the module's query hooks or a shared query in `src/web/queries/`, for example the board snapshot. It owns mutations, selection state and editing state. It gives plain props to its child components. It is the only layer that calls a query hook, and it uses TanStack Query only through query hooks. A query hook is a wrapper that a `queries/` folder exports. Query files call TanStack `useQuery`, `useSuspenseQuery` and `useMutation` inside those wrappers. When one region fills the whole page, the view still renders that region as one container. A container-family hook file `use-<name>.ts` that composes query and mutation hooks for its module's containers may sit in `containers/`.
   - Never: render a host element that has a `className` in a container. A bare wrapper element without a `className` is allowed. A container renders components and `components/ui` primitives.
 - **Component.** A component in `modules/<feature>/components/`.
   - Use it when: UI code takes props and returns JSX. A component composes `components/ui` primitives. It can hold local UI state, such as hover, open or pressed. It can call third-party UI hooks, such as the dnd-kit hooks.
@@ -53,7 +53,7 @@ A module is one folder `src/web/modules/<feature>/`. A module has six layer fold
   - Use it when: code is a pure function, a constant or a type. A map from domain data to a `var()` token reference is a domain constant.
   - Never: import React, TanStack Query, TanStack Router or the HTTP client in a domain file, or use `fetch`, `window`, `document`, `localStorage` or `EventSource` in it.
 - **Query.** A file in `modules/<feature>/queries/`.
-  - Use it when: code reads or writes server data. A module `queries/` folder holds the key factory, `queryOptions`, the `useQuery`, `useSuspenseQuery` and `useMutation` wrappers, and the fetch or SSE glue. The `useMutation` wrapper owns optimistic updates and rollback. Only query files, in a module `queries/` folder or in `src/web/queries/`, import `src/web/lib/http.ts`. Return a response with status 400, 409 or 502 and the body `{ "error": "<code>" }` as typed data. Do not throw it. `src/web/lib/api.ts` does this today.
+  - Use it when: code reads or writes server data. A module `queries/` folder holds the key factory, `queryOptions`, the `useQuery`, `useSuspenseQuery` and `useMutation` wrappers, and the fetch or SSE glue. The `useMutation` wrapper owns optimistic updates and rollback. Only query files, in a module `queries/` folder or in `src/web/queries/`, import `src/web/lib/http.ts`. Return a response with status 400, 409 or 502 and the body `{ "error": "<code>" }` as typed data. Do not throw it. `http()` in `src/web/lib/http.ts` returns this typed result.
   - Never: render JSX in a query file.
 
 ## Shared tiers
@@ -62,13 +62,13 @@ A module is one folder `src/web/modules/<feature>/`. A module has six layer fold
   - Use it when: a visual primitive or an app-wide hook is necessary. A primitive file comes from `npx shadcn@latest add`. An app-wide hook, such as a media query, shortcut or local storage hook, goes in `components/ui/hooks/`.
   - Never: add a primitive by hand. Change a primitive only with a `cva` variant in its own file, or with an edit that "Primitive conventions" names.
 - **Shared components.** Files in `src/web/components/`, outside `ui/`.
-  - Use it when: two or more modules show the same composition, or a route places views of two modules in one layout. The layout gets the views as children. The folders `icons/` and `markdown/` and the files `AppState.tsx` and `ThemeProvider.tsx` also live here.
+  - Use it when: two or more modules show the same composition, or a route places views of two modules in one layout. The layout gets the views as children. The folders `icons/`, `markdown/` and `splash/` and the file `ThemeProvider.tsx` also live here.
   - Never: import a file of a module or TanStack Query in a shared component.
 - **Shared queries.** Files in `src/web/queries/`.
   - Use it when: two or more modules read the same server data. An example is the board snapshot and its SSE stream.
   - Never: put a query in this tier when only one module reads it.
-- **Configured clients.** The new files in `src/web/lib/`: `http.ts`, `query-client.ts` and `utils.ts`.
-  - Use it when: a third-party client needs one configured instance, or code outside `components/ui` needs `cn`. `utils.ts` re-exports `cn` for that code.
+- **Configured clients.** The files in `src/web/lib/`: `app-store.ts`, `http.ts`, `query-client.ts` and `utils.ts`. `md-links.ts` also stays in `src/web/lib/`, because only the fenced terminal client reads it (2026-10-07).
+  - Use it when: a third-party client needs one configured instance, cross-module UI state needs the app store (see "Providers"), or code outside `components/ui` needs `cn`. `utils.ts` re-exports `cn` for that code.
   - Never: import a module or a component in a configured client file, or hold React state in it.
 - **Styles.** Files in `src/web/styles/`.
   - Use it when: a value is a design token or a global stylesheet rule. `globals.css` maps shadcn names to tokens through `var()`.
@@ -90,7 +90,7 @@ The matrix covers project files only. The bans in each layer definition govern t
 
 Import a file in another folder of `src/web/` with the `@/` alias. Import a file in the same layer folder with a relative path. Import `src/shared/` with a relative path. A file can import other files in its own layer folder.
 
-- A route imports module barrels, `src/web/queries/`, `src/web/lib/query-client.ts`, `src/web/lib/utils.ts`, `components/ui` and shared components.
+- A route imports module barrels, `src/web/queries/`, `src/web/lib/app-store.ts` (a type), `src/web/lib/query-client.ts`, `src/web/lib/utils.ts`, `components/ui` and shared components.
 - A module barrel imports the views and query files of its module.
 - A view imports containers and components of its module, `components/ui`, shared components and `src/web/lib/utils.ts`.
 - A container imports components, hooks, query files and domain files of its module, `src/web/queries/`, `components/ui`, shared components and `src/web/lib/utils.ts`.
@@ -108,22 +108,21 @@ Global bans:
 
 1. Only query files and `src/web/lib/http.ts` call `fetch`. Only query files create an `EventSource`.
 2. A module does not import a sibling module. Compose modules in `src/web/routes/` or a shared layout component.
-3. A file in a layer folder does not import the legacy tree.
 
 ## Naming
 
 - Files in `components/ui/` are kebab-case `.tsx`, as the shadcn CLI writes them.
 - Every other `.tsx` file is PascalCase, except route files.
-- Every `.ts` file in the new tree is kebab-case. A file in a `hooks/` folder that exports a React hook is `use-<name>.ts`, for example `use-drag-reorder.ts` exports `useDragReorder`. A file that exports no React hook has no `use-` prefix. A `*-queries.ts` file keeps its name.
+- Every `.ts` file in `src/web/` is kebab-case. A file in a `hooks/` folder that exports a React hook is `use-<name>.ts`, for example `use-drag-reorder.ts` exports `useDragReorder`. A file that exports no React hook has no `use-` prefix. A `*-queries.ts` file keeps its name.
 - A view name ends in `View`, and no other name does. A container name ends in `Container`, and no other name does.
 - A module `queries/` folder holds `<feature>-api.ts` for the fetch glue and `<feature>-queries.ts` for the key factory, `queryOptions` and query hooks. `src/web/queries/` uses the same pattern with the data name, for example `board-api.ts` and `board-queries.ts`.
-- Routes use TanStack Router file-based routing. Route file names follow its conventions (`__root.tsx`, `index.tsx`, `$param.tsx`). Under `src/web/routes/` the forms are `__root.tsx` and `<page>.{-$id}.lazy.tsx` (the optional segment plus a lazy split file). The R-14 exemption lets these names skip the filename case rule until ticket 16 (2026-09-30). The generated file `src/web/routeTree.gen.ts` is exempt from naming and lint rules.
-- The legacy rule for `src/web/hooks/useX.ts` stays until ticket 16.
+- Routes use TanStack Router file-based routing. A file under `src/web/routes/` is `__root.tsx`, `<page>.{-$id}.tsx` or `<page>.{-$id}.lazy.tsx` (the optional id segment, and a lazy split file), with `<page>` in kebab-case. Since 2026-10-07 a lint pattern enforces these three forms (U4-14), so a file such as `index.tsx` or `$param.tsx` fails lint. The generated file `src/web/routeTree.gen.ts` is exempt from naming and lint rules.
 
 ## Tests
 
 - Each non-test domain file and each `*-queries.ts` file, in a module or in `src/web/queries/`, has a colocated `node:test` file named `<subject>.test.ts`. The `*-queries.ts` tests cover the `*-api.ts` glue.
 - The repo has no `.tsx` test runner. Check views, containers and components in a browser.
+- The screenshot suite in `tests/visual/` (Playwright) compares seven screens in the light and the dark theme, at desktop and phone width, with committed baselines per platform, and opens every route to fail on a console or page error. It runs locally and in the CI `visual` job after the `check` job. A changed pixel fails it.
 
 ## The only-shadcn rule
 
@@ -131,7 +130,7 @@ The rule, from the initiative brief:
 
 > every visual primitive is a shadcn-generated file under `src/web/components/ui/` or a composition of those files. Custom pieces (kanban card, terminal frame, flow stage, brand badge) live in a module's `components/` folder and compose shadcn primitives internally. Extend a primitive by adding a `cva` variant inside its shadcn file; never fork it and never hand-build a lookalike. No inline `style` objects, no hex outside `src/web/styles/tokens.css`.
 
-The inline style ban: a file in the new tree does not use the JSX `style` prop. The exceptions are `components/ui/` files, which set CSS variables through `style`, and `modules/<feature>/components/dnd/` files, which pass the dnd-kit transform through `style`. A DOM helper in a hook can set a CSS variable or a transform for an animation.
+The inline style ban: a file in `src/web/` does not use the JSX `style` prop. The exceptions are `components/ui/` files, which set CSS variables through `style`, `modules/<feature>/components/dnd/` files, which pass the dnd-kit transform through `style`, and the viewer, which keeps its style constants under the dated exception U4-13. A DOM helper in a hook can set a CSS variable or a transform for an animation. `components/ui/hooks/use-css-vars.ts` may also set static layout variables computed in code, such as the FlowStage geometry and the flow frame width, because the JSX `style` prop is banned.
 
 Primitive conventions. These are the only edits to a generated file other than a `cva` variant:
 
@@ -145,50 +144,56 @@ Theme facts:
 
 1. The shadcn name `accent` maps to the card hover surface. The shadcn name `ring` maps to the Dispatch accent token, the focus outline colour. The accent token in `tokens.css` keeps the jobs that `design-contract.md` lists for it.
 2. The Tailwind `dark` variant matches `[data-theme="dark"]`. One `:root` block maps each shadcn name to a token.
-3. The main app loads Tailwind without preflight until ticket 16 (R-17). The gallery page loads preflight for itself only.
+3. The main app loads Tailwind without preflight (R-17; U4-19 keeps this on 2026-10-07). The scoped base reset in `globals.css` applies only to elements with a `data-slot` attribute. The gallery page loads preflight for itself only.
 4. Forms use the shadcn Field component. Do not use the registry Form component.
+
+## Focus versus selection
+
+This rule moved here from `frontend-design-system.md` on 2026-10-07 (LOCAL-77, U4-28). `design-contract.md` authors it.
+
+**A keyboard focus ring must never look identical to selection.**
+
+- Show focus with an outline: the classes of "Primitive conventions" item 1, in the `ring` colour, which maps to the Dispatch accent token.
+- Selection and needs-attention use the card border and the card shadow ring (the `identity` variants in `components/ui/card.tsx`). They never use the focus outline.
+- Do not show focus with an accent box-shadow ring. It looks the same as the selection ring, and a keyboard user cannot see where focus is.
+- If an `overflow: hidden` ancestor clips the outline, set the offset to 0 at that call site. If the outline is still clipped at offset 0, draw it inside the element with a negative offset (`-outline-offset-2`), and keep the element inside the clipping ancestor. Menu and select items use this inset form, `focus-visible:-outline-offset-2`.
+- The accent row of the "Color roles" table in `design-contract.md` lists the jobs of the accent. That row wins on a conflict with this standard.
+- The UI font token in `tokens.css` names Inter first, but the app does not load Inter as a webfont: no `@font-face`, no webfont link and no bundled font file. The app renders in the OS system font. This is a deliberate decline (`design-contract.md`, "Deferred decisions" rows 8 and 9).
 
 ## Allowed custom families
 
 The only-shadcn rule does not apply to these families. All other visual code composes `components/ui` primitives.
 
-1. SVG assets in `src/web/components/icons/` or `modules/<feature>/components/icons/`: Glyph, WarningIcon, QrCode, ImageWithFallback, Splash, the brand marks and the SVG drawing inside FlowStage.
+1. SVG assets in `src/web/components/icons/` or `modules/<feature>/components/icons/`: Glyph, QrCode, ImageWithFallback, the brand marks in `icons/brands/` and the SVG drawing inside FlowStage.
 2. The dnd-kit board mechanics in `modules/<feature>/components/dnd/`: droppable columns, draggable card wrappers and the drag overlay. The drag context is in a container, because its handlers start mutations.
 3. The fenced terminal page: `terminal.html` and `terminal-main.ts` (invariant NEW-20).
 4. react-markdown output in `src/web/components/markdown/`, styled with Tailwind typography classes. Typography is not a shadcn registry item.
 
 ## Providers
 
-- Use `createContext` only in `components/ui/` files, `src/web/components/AppState.tsx` (the `AppState` context and its `useAppState` hook) and `src/web/components/ThemeProvider.tsx` (a theme context, if one exists). `__root.tsx` renders both providers. Ticket 9 can move the last two files. Ticket 9 then updates this list.
-- The app-level contexts are QueryClientProvider, RouterProvider and the theme context.
+- Use `createContext` only in `components/ui/` files and in `src/web/components/ThemeProvider.tsx`.
+- `main.tsx` renders the provider stack: QueryClientProvider, then ThemeProvider, then RouterProvider and the splash. ThemeProvider holds one theme instance that the shell toaster and Settings Appearance share (2026-10-07, U4-07).
 - A `components/ui` file can create a context, such as SidebarProvider or TooltipProvider.
-- From 2026-09-30, the app can use one transitional `AppState` context. Ticket 16 removes it.
+- Cross-module UI state is in the app store `src/web/lib/app-store.ts`, not in a context (U4-06). The store is plain TypeScript with one action per change. `main.tsx` creates it and puts it in the router context next to `queryClient`. A container gets it with `useRouteContext({ from: "__root__" })` and reads one field with `useAppStore` from `components/ui/hooks/use-app-store.ts`. State that one module owns stays in that module.
+- Record, 2026-10-07 (LOCAL-77): the transitional app state context (R-15) and its provider in the root route are deleted. The app store replaces them, and ThemeProvider moved from the root route to `main.tsx`.
 
 ## Invariants
 
 These invariants stay unchanged:
 
 - NEW-20: `terminal.html` and `terminal-main.ts` are the only `terminal*` files directly in `src/web/`.
-- NEW-22: the attention predicate has one definition, in `card-attention.ts`. If that file moves, update its path in `scripts/check-invariants.mjs` in the same change.
+- NEW-22: the attention predicate has one definition, in `src/shared/card-attention.ts`. If that file moves, update its path in `scripts/check-invariants.mjs` in the same change.
 - NEW-24: the palette hex values are only in `tokens.css`. Each accent map has one source.
 - PANEL-03: the ttyd iframe is one always-rendered element. Never give it a `key`.
 
-Ticket 16 replaces these invariant checks with lint rules:
+These invariant checks retired on 2026-10-07 (LOCAL-77). A lint rule in `eslint.config.ts` replaces each one:
 
-- NEW-15 (accent box-shadow focus): the outline-only focus classes in `components/ui`.
-- NEW-16 (raw float shadow) and NEW-17 (`fontWeight: 800`): the inline style ban and a ban on arbitrary shadow and weight classes.
-- NEW-19 (reading-surface in the board): a class name rule for the board module.
+- NEW-15 (accent box-shadow focus): `components/ui/focus-outline.test.ts`, the style ban, the shadow class ban in `designLiteralBan` and the focus shadow value in `retiredLiteralBan`.
+- NEW-16 (raw float shadow): the shadow class ban in `designLiteralBan` and the float shadow value in `retiredLiteralBan`.
+- NEW-17 (weight 800): the weight class ban in `designLiteralBan` and the `fontWeight` 800 property in `retiredLiteralBan`.
+- NEW-19 (reading rhythm in the board): `boardZoneBan` on `src/web/modules/board/**`.
 
-The design contract values stay: the density scale, source colors, contrast floors, elevation ladder and motion budget. The focus outline rule in `frontend-design-system.md` stays.
-
-## Legacy tree during transition
-
-1. The legacy tree keeps its own rules in `folder-structure.md`, `frontend-design-system.md`, `design-contract.md` and `code-review-rules.md` until ticket 16.
-2. Do not add a new feature to the legacy tree. Put new code in a module.
-3. Write a fix in a legacy file in the legacy style. Do not migrate part of a file.
-4. A migration ticket uses the layer definitions in this standard to map each legacy file to a layer.
-5. The lint rules and the agent hook rules for the new tree cover the new tree list in "Status and scope". Two hook rules also cover the legacy tree: the Radix import rule and the new `.tsx` file rule.
-6. A migration maps `Notice tone="muted"` with a `label` to `Alert variant="muted"`, and `Notice tone="destructive"` to `Alert variant="destructive"`. A `Notice tone="muted"` with no `label` is a status line: map it to a text element with `text-sm text-muted-foreground truncate`, not to `Alert`, because `Alert` has `role="alert"`.
+The design contract values stay: the density scale, source colors, contrast floors, elevation ladder and motion budget. The focus outline rule stays, in the section "Focus versus selection".
 
 ## Agent rules block
 
@@ -204,12 +209,11 @@ The design contract values stay: the density scale, source colors, contrast floo
 10. Build UI from `src/web/components/ui/` primitives, except the allowed custom families.
 11. Add a primitive with `npx shadcn@latest add`. Do not write a lookalike.
 12. Change a primitive with a `cva` variant in its own file, or with an edit that "Primitive conventions" names.
-13. Do not use the JSX `style` prop, except in `components/ui/` files and `modules/<feature>/components/dnd/` files. Use Tailwind token classes.
+13. Do not use the JSX `style` prop, except in `components/ui/` files, `modules/<feature>/components/dnd/` files, `src/web/viewer/` files and `src/web/viewer-main.tsx` (U4-13). Use Tailwind token classes.
 14. Do not write a colour value outside `src/web/styles/tokens.css`.
 15. Show focus with an outline, not a ring or a box-shadow.
 16. Name `.tsx` files in PascalCase, except in `components/ui/` and route files. Name `.ts` files in kebab-case.
 17. Put a `<subject>.test.ts` file next to each non-test domain file and each `*-queries.ts` file.
-18. Do not add a new feature to the legacy tree. Do not migrate part of a legacy file.
 
 ## Agent tooling
 
@@ -224,9 +228,9 @@ The design contract values stay: the density scale, source colors, contrast floo
 
 ## Supersede records index
 
-Each record has the date 2026-09-30 and names this document. The section names below are the start of each heading.
+Each record names this document. The section names below are the start of each heading.
 
-- `design-contract.md`: "Component library".
-- `frontend-design-system.md`: "The primitives", "Styling approach", "Component architecture", "Depth", "Component anatomy".
-- `folder-structure.md`: "Frontend target tree", "Component placement (frontend)", the Frontend paragraph of "Import direction", the web rows of "Naming convention".
-- `code-review-rules.md`: each legacy "Frontend:" section.
+- `design-contract.md`: "Component library" (2026-09-30).
+- `frontend-design-system.md`: the whole file (2026-10-07). The file holds only a redirect note. Its focus versus selection rule is in this standard.
+- `folder-structure.md`: "Frontend tree", the Frontend paragraph of "Import direction" and the web rows of "Naming convention" (2026-09-30). On 2026-10-07 each became a pointer to this standard.
+- `code-review-rules.md`: each legacy "Frontend:" section (2026-09-30). The sections were removed on 2026-10-07.

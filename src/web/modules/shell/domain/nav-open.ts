@@ -1,12 +1,12 @@
-export type NavPreference = "expanded" | "collapsed";
+import { CAROUSEL_MAX_WIDTH } from "../../../../shared/media-queries.js";
 
-export const CAROUSEL_MAX_WIDTH = 1023;
+export type NavPreference = "expanded" | "collapsed";
 
 /**
  * Classify a viewport width against the carousel breakpoint the shell reacts to.
  *
- * @remarks The carousel breakpoint matches `CAROUSEL_QUERY` in `hooks/useMediaQuery.ts`, which the
- * board carousel and the detail panel also switch on.
+ * @remarks The width comes from `src/shared/media-queries.ts`, the same source as the `CAROUSEL_QUERY` that
+ * the board carousel and the detail panel switch on.
  */
 export function viewportNav(width: number): { carousel: boolean } {
   return { carousel: width <= CAROUSEL_MAX_WIDTH };

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { cn } from "cn";
+import { cva, type VariantProps } from "class-variance-authority";
 import { XIcon } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
@@ -31,17 +32,43 @@ function DialogClose({
   return <DialogPrimitive.Close data-slot="dialog-close" {...props} />;
 }
 
+const dialogOverlayVariants = cva("fixed inset-0 bg-scrim", {
+  variants: {
+    frame: {
+      default:
+        "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0 z-50",
+      modal:
+        "z-20 data-[state=closed]:animate-[modal-fade-out_var(--motion-panel-close)_var(--easing-exit)_forwards] data-[state=open]:animate-[modal-fade-in_var(--motion-panel-open)_var(--easing-enter)_both]",
+    },
+  },
+  defaultVariants: { frame: "default" },
+});
+
+const dialogContentVariants = cva("", {
+  variants: {
+    frame: {
+      default:
+        "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-xl border bg-sidebar px-4 py-6 shadow-lg duration-(--motion-panel-open) outline-none sm:max-w-lg",
+      modal:
+        "pointer-events-auto flex w-120 max-w-[calc(100vw-32px)] flex-col gap-0 rounded-xl border bg-(--surface-column) p-0 shadow-lg outline-none data-[state=closed]:animate-[modal-out_var(--motion-panel-close)_var(--easing-exit)_forwards] data-[state=open]:animate-[modal-in_var(--motion-panel-open)_var(--easing-enter)_both]",
+    },
+  },
+  defaultVariants: { frame: "default" },
+});
+
+const dialogLayerClass =
+  "pointer-events-none fixed inset-0 z-21 flex items-center justify-center p-4 has-[>[data-slot=dialog-content][data-state=closed]]:animate-[modal-layer-hold_var(--motion-panel-close)_linear]";
+
 function DialogOverlay({
   className,
+  frame,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
+}: React.ComponentProps<typeof DialogPrimitive.Overlay> &
+  VariantProps<typeof dialogOverlayVariants>) {
   return (
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
-      className={cn(
-        "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-scrim",
-        className,
-      )}
+      className={cn(dialogOverlayVariants({ frame }), className)}
       {...props}
     />
   );
@@ -51,32 +78,40 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  frame,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Content> & {
-  showCloseButton?: boolean;
-}) {
+}: React.ComponentProps<typeof DialogPrimitive.Content> &
+  VariantProps<typeof dialogContentVariants> & {
+    showCloseButton?: boolean;
+  }) {
+  const content = (
+    <DialogPrimitive.Content
+      data-slot="dialog-content"
+      className={cn(dialogContentVariants({ frame }), className)}
+      {...props}
+    >
+      {children}
+      {showCloseButton && (
+        <DialogPrimitive.Close
+          data-slot="dialog-close"
+          className="absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+        >
+          <XIcon />
+          <span className="sr-only">Close</span>
+        </DialogPrimitive.Close>
+      )}
+    </DialogPrimitive.Content>
+  );
   return (
     <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay />
-      <DialogPrimitive.Content
-        data-slot="dialog-content"
-        className={cn(
-          "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-xl border bg-sidebar px-4 py-6 shadow-lg duration-(--motion-panel-open) outline-none sm:max-w-lg",
-          className,
-        )}
-        {...props}
-      >
-        {children}
-        {showCloseButton && (
-          <DialogPrimitive.Close
-            data-slot="dialog-close"
-            className="absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
-          >
-            <XIcon />
-            <span className="sr-only">Close</span>
-          </DialogPrimitive.Close>
-        )}
-      </DialogPrimitive.Content>
+      <DialogOverlay frame={frame} />
+      {frame === "modal" ? (
+        <div data-slot="dialog-layer" className={dialogLayerClass}>
+          {content}
+        </div>
+      ) : (
+        content
+      )}
     </DialogPortal>
   );
 }

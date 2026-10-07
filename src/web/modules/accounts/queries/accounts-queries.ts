@@ -6,10 +6,9 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import type { ClaudeLoginView } from "../../../../shared/types.js";
+import type { ApplyChoice, ClaudeLoginView } from "../../../../shared/types.js";
 import {
   cancelLogin,
-  getAccounts,
   getLoginState,
   refreshAccountUsage,
   removeAccount,
@@ -17,36 +16,9 @@ import {
   startLogin,
   submitLoginCode,
 } from "./accounts-api.js";
-
-export const accountsKeys = {
-  all: ["accounts"] as const,
-  list: ["accounts", "list"] as const,
-  login: ["accounts", "login"] as const,
-  start: ["accounts", "login", "start"] as const,
-};
-
-export const ACCOUNTS_REFETCH_MS = 60_000;
+import { accountsKeys, accountsQueryOptions } from "@/queries/accounts-queries";
 
 export const LOGIN_POLL_MS = 1_000;
-
-/**
- * Read the accounts, refetching every minute and whenever the tab regains focus.
- *
- * @remarks
- * The poll reads the local API, which serves the server's cached usage, so it costs nothing
- * against the usage budget. Focus always refetches and a new observer never does, so the page and
- * the chip read as often as the one legacy hook did, whatever the shared 30 s staleTime says.
- */
-export function accountsQueryOptions() {
-  return queryOptions({
-    queryKey: accountsKeys.list,
-    queryFn: getAccounts,
-    refetchInterval: ACCOUNTS_REFETCH_MS,
-    refetchIntervalInBackground: true,
-    refetchOnWindowFocus: "always",
-    refetchOnMount: false,
-  });
-}
 
 function loginPollInterval(view: ClaudeLoginView | undefined): number | false {
   return view?.state === "done" || view?.state === "error"
@@ -99,11 +71,13 @@ function invalidateLogin(queryClient: QueryClient) {
  *
  * @remarks
  * The list is marked stale after the call whether it was accepted or refused, as the header
- * popover always reloaded. A refusal resolves `{ ok: false, error }`.
+ * popover always reloaded. A refusal resolves `{ ok: false, error }`. `applyToRunning` rides in the
+ * body and a success resolves the moved, queued and skipped counts.
  */
 export function setActiveAccountMutationOptions(queryClient: QueryClient) {
   return {
-    mutationFn: (id: string) => setActiveAccount(id),
+    mutationFn: (vars: { id: string; applyToRunning: ApplyChoice }) =>
+      setActiveAccount(vars.id, vars.applyToRunning),
     onSuccess: () => invalidateAccounts(queryClient),
   };
 }

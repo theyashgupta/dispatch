@@ -1,3 +1,8 @@
+import type {
+  AccountSessionEntry,
+  ClaudeUsageSnapshot,
+} from "../../../shared/types.js";
+
 export type LimitSurface =
   { kind: "a" } | { kind: "b"; options: string[]; cursor: number };
 
@@ -98,4 +103,17 @@ export function planLimitKeys(surface: LimitSurface): string[] | null {
     ...Array.from({ length: Math.abs(index - cursor) }, () => arrow),
     "Enter",
   ];
+}
+
+/**
+ * Report whether the active account has allowance for a session at a limit.
+ *
+ * @remarks The result is `available` when every usage bucket is below 100 percent, `usage-unknown`
+ * with no windows, else `undefined`.
+ */
+export function continueActionFor(
+  usage: ClaudeUsageSnapshot,
+): AccountSessionEntry["continueAction"] {
+  if (usage.windows.length === 0) return "usage-unknown";
+  return usage.windows.every((w) => w.percent < 100) ? "available" : undefined;
 }

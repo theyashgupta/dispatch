@@ -3,7 +3,6 @@ import { afterEach, test } from "node:test";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import {
   cancelLogin,
-  getAccounts,
   getLoginState,
   refreshAccountUsage,
   removeAccount,
@@ -11,11 +10,9 @@ import {
   startLogin,
   submitLoginCode,
 } from "./accounts-api.js";
+import { accountsKeys } from "@/queries/accounts-queries";
 import {
-  ACCOUNTS_REFETCH_MS,
   LOGIN_POLL_MS,
-  accountsKeys,
-  accountsQueryOptions,
   cancelLoginMutationOptions,
   loginStateQueryOptions,
   refreshAccountUsageMutationOptions,
@@ -51,37 +48,12 @@ afterEach(() => {
   calls.length = 0;
 });
 
-test("accountsKeys has the documented shape", () => {
-  assert.deepEqual(accountsKeys.all, ["accounts"]);
-  assert.deepEqual(accountsKeys.list, ["accounts", "list"]);
-  assert.deepEqual(accountsKeys.login, ["accounts", "login"]);
-});
-
-test("accountsQueryOptions requests the account list", async () => {
-  const options = accountsQueryOptions();
-  assert.deepEqual(options.queryKey, ["accounts", "list"]);
-  reply(200, { activeId: "a", accounts: [] });
-  assert.deepEqual(await newClient().fetchQuery(options), {
-    activeId: "a",
-    accounts: [],
-  });
-  assert.equal(calls[0]?.url, "/api/accounts");
-});
-
 test("loginStateQueryOptions requests the login state", async () => {
   const options = loginStateQueryOptions();
   assert.deepEqual(options.queryKey, ["accounts", "login"]);
   reply(200, { state: "idle" });
   assert.deepEqual(await newClient().fetchQuery(options), { state: "idle" });
   assert.equal(calls[0]?.url, "/api/accounts/login");
-});
-
-test("getAccounts throws on a failure status", async () => {
-  reply(500, {}, "Internal Server Error");
-  await assert.rejects(
-    getAccounts(),
-    new Error("getAccounts failed: 500 Internal Server Error"),
-  );
 });
 
 test("getLoginState throws on a failure status", async () => {
@@ -92,17 +64,32 @@ test("getLoginState throws on a failure status", async () => {
   );
 });
 
-test("setActiveAccount resolves ok on a 200", async () => {
-  reply(200, {});
-  assert.deepEqual(await setActiveAccount("a"), { ok: true });
+const ref = (n: number) => ({ cardId: `c${n}`, sessionId: `s${n}` });
+
+test("setActiveAccount sends the apply choice and resolves the counts on a 200", async () => {
+  reply(200, {
+    activeId: "a",
+    moved: [ref(1), ref(2)],
+    queued: [ref(3)],
+    skipped: [{ ...ref(4), reason: "legacy" }],
+  });
+  assert.deepEqual(await setActiveAccount("a", "all"), {
+    ok: true,
+    moved: 2,
+    queued: 1,
+    skipped: 1,
+  });
   assert.equal(calls[0]?.url, "/api/accounts/active");
   assert.equal(calls[0]?.init?.method, "PUT");
-  assert.equal(calls[0]?.init?.body, JSON.stringify({ id: "a" }));
+  assert.equal(
+    calls[0]?.init?.body,
+    JSON.stringify({ id: "a", applyToRunning: "all" }),
+  );
 });
 
 test("setActiveAccount reads a 404 as an unregistered account", async () => {
   reply(404, {});
-  assert.deepEqual(await setActiveAccount("a"), {
+  assert.deepEqual(await setActiveAccount("a", "idle"), {
     ok: false,
     error: "That account is no longer registered.",
   });
@@ -110,7 +97,7 @@ test("setActiveAccount reads a 404 as an unregistered account", async () => {
 
 test("setActiveAccount reads any other status as a switch failure", async () => {
   reply(500, {});
-  assert.deepEqual(await setActiveAccount("a"), {
+  assert.deepEqual(await setActiveAccount("a", "none"), {
     ok: false,
     error: "Couldn't switch the Claude account.",
   });
@@ -279,15 +266,6 @@ function seededClient(): QueryClient {
   return client;
 }
 
-test("the accounts query refetches every minute and on every focus, never on mount", () => {
-  const options = accountsQueryOptions();
-  assert.equal(ACCOUNTS_REFETCH_MS, 60_000);
-  assert.equal(options.refetchInterval, 60_000);
-  assert.equal(options.refetchOnWindowFocus, "always");
-  assert.equal(options.refetchOnMount, false);
-  assert.equal(options.refetchIntervalInBackground, true);
-});
-
 test("the login state is dropped as soon as no dialog reads it", () => {
   assert.equal(loginStateQueryOptions().gcTime, 0);
 });
@@ -312,14 +290,18 @@ test("the login state query polls every second until the login is done or failed
 
 test("an accepted account switch marks the list stale", async () => {
   const client = seededClient();
-  reply(200, {});
+  reply(200, { activeId: "b", moved: [ref(1)], queued: [], skipped: [] });
   const result = await new MutationObserver(
     client,
     setActiveAccountMutationOptions(client),
-  ).mutate("b");
-  assert.deepEqual(result, { ok: true });
+  ).mutate({ id: "b", applyToRunning: "idle" });
+  assert.deepEqual(result, { ok: true, moved: 1, queued: 0, skipped: 0 });
   assert.equal(calls[0]?.url, "/api/accounts/active");
   assert.equal(calls[0]?.init?.method, "PUT");
+  assert.equal(
+    calls[0]?.init?.body,
+    JSON.stringify({ id: "b", applyToRunning: "idle" }),
+  );
   assert.equal(isStale(client, accountsKeys.list), true);
 });
 
@@ -329,7 +311,7 @@ test("a refused account switch resolves the message and still marks the list sta
   const result = await new MutationObserver(
     client,
     setActiveAccountMutationOptions(client),
-  ).mutate("b");
+  ).mutate({ id: "b", applyToRunning: "none" });
   assert.deepEqual(result, {
     ok: false,
     error: "That account is no longer registered.",

@@ -4,7 +4,7 @@ import { cn } from "cn";
 import { Slot } from "radix-ui";
 
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-[background-color,border-color,color] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-[background-color,border-color,color] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -14,7 +14,11 @@ const buttonVariants = cva(
           "bg-destructive-fill text-on-danger hover:bg-(--hover-button-danger) active:bg-(--pressed-button-danger)",
         outline:
           "shadow-xs border bg-background hover:bg-accent hover:text-accent-foreground active:bg-(--pressed-card-hover) dark:border-input dark:bg-input/30 dark:hover:bg-input/50 dark:active:bg-(--pressed-card-hover)",
+        surface:
+          "shadow-xs border border-border bg-card hover:bg-accent hover:text-accent-foreground active:bg-(--pressed-card-hover) dark:border-border dark:bg-card dark:hover:bg-input/50 dark:active:bg-(--pressed-card-hover)",
         secondary: "bg-secondary text-secondary-foreground hover:bg-accent",
+        "secondary-bordered":
+          "border border-border bg-secondary font-semibold text-secondary-foreground hover:bg-accent",
         ghost:
           "hover:bg-accent hover:text-accent-foreground active:bg-(--pressed-card-hover)",
         link: "text-(--accent-text) underline-offset-4 hover:underline",
@@ -28,9 +32,17 @@ const buttonVariants = cva(
         "icon-xs": "size-6 rounded-md [&_svg:not([class*='size-'])]:size-3",
         "icon-sm": "size-8",
         "icon-md": "size-7",
+        "icon-compact": "h-8 w-7.5",
         "icon-lg": "size-10",
       },
     },
+    compoundVariants: [
+      {
+        variant: "secondary-bordered",
+        size: "sm",
+        className: "px-2",
+      },
+    ],
     defaultVariants: {
       variant: "default",
       size: "default",
