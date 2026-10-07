@@ -82,6 +82,7 @@ import {
 } from "../services/orchestration/supervisor-registry.js";
 import { startSupervisorPass } from "../services/orchestration/supervisor-pass.js";
 import { resumeShipFlows } from "../services/orchestration/ship-flow.js";
+import { startAccountChain } from "../services/orchestration/account-chain.js";
 import { healServicePlist } from "../services/orchestration/service.js";
 import type { ActivityEvent } from "../../shared/types.js";
 import {
@@ -475,6 +476,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   if (config.updateCheck !== false) startUpdateCheckLoop(config);
   onDefaultUsageRefreshed(() => void checkDefaultIdentity());
   startDefaultIdentityWatch();
+  await startAccountChain();
   startUsagePollLoop();
   return { port };
 }

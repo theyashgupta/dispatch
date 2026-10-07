@@ -9,6 +9,8 @@ export type LimitSurface =
 export const CREDITS_OPTION =
   /credit|extra usage|upgrade|funds|pay|usage billing|switch to usage/i;
 
+export const CONTINUE_PROMPT = "Continue.";
+
 const AUTO_CONTINUE = /continuing automatically/i;
 const ESC_TO_CANCEL = /esc to cancel/i;
 const MENU_TITLE = /what do you want to do\?/i;

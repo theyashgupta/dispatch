@@ -74,6 +74,7 @@ import {
   openEditorBodySchema,
   sessionAccountBodySchema,
   sessionBodySchema,
+  sessionPinBodySchema,
   startBodySchema,
   syncBodySchema,
   unwindBodySchema,
@@ -335,6 +336,17 @@ cardsRouter.post("/cards/:id/session/account", async (req, res) => {
     return;
   }
   throw new ConflictError(outcome);
+});
+
+cardsRouter.put("/cards/:id/session/account-pin", async (req, res) => {
+  const { sessionId, pinned } = parseOrThrow(sessionPinBodySchema, req.body);
+  const card = store.getCard(req.params.id);
+  if (!card) throw new NotFoundError("not-found");
+  if (!card.sessions?.some((s) => s.id === sessionId)) {
+    throw new ValidationError("invalid sessionId");
+  }
+  await store.setAccountPinned(card.id, sessionId, pinned);
+  res.status(200).json({ pinned });
 });
 
 cardsRouter.post("/cards/:id/session", async (req, res) => {

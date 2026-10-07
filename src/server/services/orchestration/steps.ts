@@ -60,6 +60,7 @@ const IDENTIFIER_RE = /^[A-Za-z0-9]+-\d+$/;
 /** Trust dialog signatures (02-RESEARCH § "Pattern 3", captured on Claude Code v2.1.200). */
 const TRUST_DIALOG =
   /Yes, I trust this folder|Do you trust the files in this folder/;
+const TRUST_NO_FOCUSED = /❯\s*(?:\d+\.\s*)?No, exit/;
 /**
  * Bypass Permissions mode dialog (57-RESEARCH item 5, live-probed on Claude Code v2.1.214):
  * its default-focused option is "1. No, exit", not an accept — a blind Enter here would exit
@@ -402,6 +403,7 @@ const createWorktrees: SagaStep = {
  * @remarks (`NEW-13`, Phase 96 R2) `capturePane`/`sendKeys` are pane-level targets and require the
  * TRAILING-COLON exact-match form (`=<name>:`), built once here rather than at each call site, so
  * a suffixed sibling session can never be silently prefix-matched once the exact session is gone.
+ * Claude Code 2.1.291 lists "No, exit" first in the trust dialog, so a focused "No" gets Down first.
  * @see docs/ARCHITECTURE.md#tmux-invocations
  * @see docs/ARCHITECTURE.md#in-review-lifecycle
  */
@@ -421,6 +423,9 @@ export async function awaitReplReady(session: string): Promise<void> {
       resumeAccepted = true;
     }
     if (!trustAccepted && TRUST_DIALOG.test(lastPane)) {
+      if (TRUST_NO_FOCUSED.test(lastPane)) {
+        await sendKeys(paneTarget, ["Down"]);
+      }
       await sendKeys(paneTarget, ["Enter"]);
       trustAccepted = true;
     }
@@ -490,7 +495,7 @@ type LaunchHooks = { port: number; token: string; cardId: string } | null;
  */
 export async function launchClaude(input: LaunchClaudeInput): Promise<boolean> {
   const { cardId, sessionId, tmuxSession, cwd, leadingArgs, account } = input;
-  await preSeedTrust(cwd, account.configDir);
+  if (account.external !== true) await preSeedTrust(cwd, account.configDir);
   const created = !(await hasSession(`=${tmuxSession}`));
   const hooks = created
     ? await mintHooks(cardId, sessionId)

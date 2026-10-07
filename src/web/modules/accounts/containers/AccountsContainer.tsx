@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import type { ClaudeAccountSummary } from "../../../../shared/types.js";
 import { AccountsList } from "@/modules/accounts/components/AccountsList";
 import { AccountsStack } from "@/modules/accounts/components/AccountsStack";
+import { ChainContainer } from "./ChainContainer";
 import { AccountSwitchContainer } from "./AccountSwitchContainer";
 import { AddAccountContainer } from "./AddAccountContainer";
 import { RemoveAccountContainer } from "./RemoveAccountContainer";
@@ -36,6 +37,13 @@ export function AccountsContainer() {
         onRelogin={(account) => setAddTarget({ account })}
         onRemove={setRemoveTarget}
       />
+
+      {accounts.data && (
+        <ChainContainer
+          accounts={accounts.data.accounts}
+          chain={accounts.data.chain}
+        />
+      )}
 
       {accounts.data && (
         <RunningSessionsContainer

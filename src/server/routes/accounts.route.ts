@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { SWITCH_NOW_REASON } from "../../shared/account-chain.js";
 import {
   DEFAULT_CLAUDE_ACCOUNT_ID,
   type AccountSwitchResponse,
@@ -7,12 +8,21 @@ import {
   getActiveAccountId,
   readRegistry,
   setActiveAccount,
+  setChainOrder,
 } from "../services/orchestration/claude-accounts.js";
 import {
   listAccountSessions,
   listAccountSummaries,
+  readChainView,
   removeAccountAndLogout,
 } from "../services/orchestration/claude-account-ops.js";
+import {
+  requestFailover,
+  noteManualSwitch,
+  runInChainQueue,
+  updateChainSettings,
+} from "../services/orchestration/account-chain.js";
+import { getClaudeAccountsSettings } from "../services/infra/config-holder.js";
 import { applyAccountChoice } from "../services/orchestration/session-account-apply.js";
 import {
   cancelLogin,
@@ -25,10 +35,13 @@ import {
   ConflictError,
   HttpError,
   NotFoundError,
+  ValidationError,
 } from "../services/domain/errors.js";
 import {
   accountOrDefaultIdSchema,
   activeBodySchema,
+  chainOrderBodySchema,
+  chainSettingsBodySchema,
   loginBodySchema,
   loginCodeBodySchema,
   removableAccountIdSchema,
@@ -49,25 +62,54 @@ accountsRouter.get("/accounts", async (_req, res) => {
     activeId: getActiveAccountId(),
     accounts: await listAccountSummaries(),
     sessions: await listAccountSessions(),
+    chain: await readChainView(),
   }));
   res.status(200).json(body);
 });
 
 accountsRouter.put("/accounts/active", async (req, res) => {
   const { id, applyToRunning } = parseOrThrow(activeBodySchema, req.body);
-  const result = await orFail("accounts-write-failed", () =>
-    setActiveAccount(id),
-  );
-  if (!result.ok) throw new NotFoundError(result.error);
-  void refreshUsageManually(id).catch(() => undefined);
-  const applied = await orFail("accounts-apply-failed", () =>
-    applyAccountChoice(applyToRunning, id),
-  );
+  const outcome = await runInChainQueue(async () => {
+    const result = await orFail("accounts-write-failed", () =>
+      setActiveAccount(id),
+    );
+    if (!result.ok) return result;
+    await noteManualSwitch();
+    void refreshUsageManually(id).catch(() => undefined);
+    const applied = await orFail("accounts-apply-failed", () =>
+      applyAccountChoice(applyToRunning, id),
+    );
+    return { ok: true as const, applied };
+  });
+  if (!outcome.ok) throw new NotFoundError(outcome.error);
   const body: AccountSwitchResponse = {
     activeId: getActiveAccountId(),
-    ...applied,
+    ...outcome.applied,
   };
   res.status(200).json(body);
+});
+
+accountsRouter.put("/accounts/chain/order", async (req, res) => {
+  const { order } = parseOrThrow(chainOrderBodySchema, req.body);
+  const result = await orFail("accounts-write-failed", () =>
+    setChainOrder(order),
+  );
+  if (!result.ok) throw new ValidationError(result.error);
+  res.status(200).json({ order: result.order });
+});
+
+accountsRouter.put("/accounts/chain/settings", async (req, res) => {
+  const patch = parseOrThrow(chainSettingsBodySchema, req.body);
+  await orFail("settings-write-failed", () => updateChainSettings(patch));
+  res.status(200).json(getClaudeAccountsSettings());
+});
+
+accountsRouter.post("/accounts/chain/switch-now", async (_req, res) => {
+  const result = await orFail("switch-now-failed", () =>
+    requestFailover(SWITCH_NOW_REASON),
+  );
+  if (!result.ok) throw new ConflictError(result.error);
+  res.status(200).json({ to: result.to, moves: result.moves });
 });
 
 accountsRouter.get("/accounts/login", (_req, res) => {

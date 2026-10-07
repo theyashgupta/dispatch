@@ -1,4 +1,7 @@
-import { DEFAULT_CLAUDE_ACCOUNT_ID } from "../../../shared/types.js";
+import {
+  DEFAULT_CLAUDE_ACCOUNT_ID,
+  type Session,
+} from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { preSeedTrust } from "../../adapters/claude-trust.js";
 import { sleep } from "../../adapters/exec.js";
@@ -13,6 +16,7 @@ import {
 } from "../../adapters/tmux.js";
 import { accountEnvLine } from "../domain/claude-launch.js";
 import {
+  CONTINUE_PROMPT,
   CREDITS_OPTION,
   limitChoice,
   parseLimitSurface,
@@ -35,7 +39,8 @@ import {
   typeLaunchLine,
 } from "./steps.js";
 
-export type MoveCause = "switch" | "turn end" | "session action";
+export type MoveCause =
+  "switch" | "turn end" | "session action" | "automatic move";
 
 export type SessionMoveOutcome =
   | "moved"
@@ -46,7 +51,13 @@ export type SessionMoveOutcome =
   | "account"
   | "limit-unknown";
 
+export interface MoveSeen {
+  leftLimit?: boolean;
+  ready?: boolean;
+}
+
 const EXIT_TIMEOUT_MS = 15_000;
+const BACKGROUND_EXIT_MENU = /Background work is running/;
 const LIMIT_CLEAR_MS = 10_000;
 const LIMIT_POLL_MS = 200;
 const FOOTER_LINES = 5;
@@ -91,7 +102,7 @@ function footer(pane: string): string {
  * @remarks Falls back to the id for an account the registry no longer lists. Never reads a path
  * or a token.
  */
-async function accountLabel(id: string): Promise<string> {
+export async function accountLabel(id: string): Promise<string> {
   if (id === DEFAULT_CLAUDE_ACCOUNT_ID) return "Default";
   const record = (await readRegistry()).find((a) => a.id === id);
   return record?.email || id;
@@ -153,13 +164,76 @@ async function clearLimitSurface(
 }
 
 /**
+ * Read a session from the board, or `undefined` when its card or the session is gone.
+ */
+export function sessionOf(
+  cardId: string,
+  sessionId: string,
+): Session | undefined {
+  return store.getCard(cardId)?.sessions?.find((s) => s.id === sessionId);
+}
+
+/**
+ * Type `Continue.` into a session's Claude input and submit it; false when nothing was typed.
+ *
+ * @remarks A fresh capture must show the ready footer and no limit surface, so the prompt never
+ * lands in a shell, a dialog or a menu.
+ */
+export async function sendContinuePrompt(
+  cardId: string,
+  sessionId: string,
+): Promise<boolean> {
+  const tmuxSession = sessionOf(cardId, sessionId)?.tmuxSession;
+  if (tmuxSession === undefined) return false;
+  const paneTarget = `=${tmuxSession}:`;
+  const pane = await capturePane(paneTarget).catch(() => null);
+  if (
+    pane === null ||
+    !READY.test(footer(pane)) ||
+    paneTurnState(pane) === "busy" ||
+    parseLimitSurface(pane) !== null
+  ) {
+    return false;
+  }
+  await sendLiteral(paneTarget, CONTINUE_PROMPT);
+  await sendKeys(paneTarget, ["Enter"]);
+  return true;
+}
+
+/**
+ * Leave the limit surface of a session on its own account, then send `Continue.`.
+ *
+ * @remarks No key goes out unless the pane shows a surface and is not busy, so `none` means the CLI
+ * already continued; a credits option is never selected.
+ */
+export async function continueAtLimit(
+  cardId: string,
+  sessionId: string,
+): Promise<"continued" | "none" | "limit-unknown" | "no-session" | "busy"> {
+  const tmuxSession = sessionOf(cardId, sessionId)?.tmuxSession;
+  if (tmuxSession === undefined) return "no-session";
+  return withCardLock(cardId, async () => {
+    const paneTarget = `=${tmuxSession}:`;
+    if (await paneAtPrompt(paneTarget)) return "none";
+    const pane = await capturePane(paneTarget).catch(() => null);
+    if (pane === null || paneTurnState(pane) !== "limit") return "none";
+    if ((await clearLimitSurface(paneTarget, pane)) === null) {
+      return "limit-unknown";
+    }
+    return (await sendContinuePrompt(cardId, sessionId))
+      ? "continued"
+      : "limit-unknown";
+  });
+}
+
+/**
  * Move one live session of a card to another Claude account and resume the same conversation.
  *
- * @remarks Claude is stopped only at a safe point: idle with its input footer showing, never while
- * the pane shows `esc to interrupt`, and a limit surface is first left with keys that never select
- * a paid option. Every refusal returns before the first change, except the limit keys and a
- * `/exit` that does not reach the shell within 15 s. A stale session moved to its own account is
- * the restart; recording the account clears the stale mark.
+ * @remarks Claude stops only when idle with its input footer showing, and a limit surface is first
+ * left with keys that never select a paid option. Every refusal returns before the first change,
+ * except the limit keys and a `/exit` that does not reach the shell within 15 s; the exit menu for
+ * running background work then gets Escape (stay), so no work is stopped. `seen` reports
+ * `leftLimit` and `ready: false` to the caller.
  * @see docs/ARCHITECTURE.md#claude-accounts
  */
 export async function moveSessionAccount(
@@ -167,6 +241,7 @@ export async function moveSessionAccount(
   accountId: string,
   sessionId?: string,
   cause: MoveCause = "session action",
+  seen: MoveSeen = {},
 ): Promise<SessionMoveOutcome> {
   const card = store.getCard(cardId);
   const targetId = sessionId ?? card?.activeSessionId;
@@ -193,8 +268,10 @@ export async function moveSessionAccount(
       let pane = await capturePane(paneTarget);
       let turn = turnStateOf(card.id, session.id, pane);
       if (turn === "limit") {
+        const surfaced = parseLimitSurface(pane) !== null;
         const cleared = await clearLimitSurface(paneTarget, pane);
         if (cleared === null) return "limit-unknown";
+        if (surfaced) seen.leftLimit = true;
         pane = cleared;
         turn = paneTurnState(cleared);
       }
@@ -204,13 +281,17 @@ export async function moveSessionAccount(
       try {
         await awaitShellPrompt(tmuxSession, EXIT_TIMEOUT_MS);
       } catch {
+        const left = await capturePane(paneTarget).catch(() => "");
+        if (BACKGROUND_EXIT_MENU.test(left)) {
+          await sendKeys(paneTarget, ["Escape"]);
+        }
         return "busy";
       }
     }
 
     await setSessionEnv(sessionTarget, "CLAUDE_CONFIG_DIR", account.configDir);
     await typeAccountEnvLine(tmuxSession, envLine);
-    if (session.workspacePath) {
+    if (session.workspacePath && account.external !== true) {
       await preSeedTrust(session.workspacePath, account.configDir);
     }
     const from = await accountLabel(
@@ -235,6 +316,7 @@ export async function moveSessionAccount(
     try {
       await awaitReplReady(tmuxSession);
     } catch (err) {
+      seen.ready = false;
       if (
         attempted !== undefined &&
         err instanceof StartStepError &&
