@@ -214,10 +214,23 @@ const LOOP_FORMAT_PATTERNS = new Set([
   ".planning/",
   "Phase <number>",
 ]);
+const ROADMAP_TOOL_FILES = [
+  /^src\/server\/routes\/orchestrator\.route\.ts$/,
+  /^src\/server\/routes\/orchestrator-sessions-route\.test\.ts$/,
+  /^src\/server\/routes\/orchestrator-route-auth\.test\.ts$/,
+  /^src\/server\/routes\/orchestrator-route-table\.test\.ts$/,
+  /^src\/server\/services\/orchestration\/orchestrator-sessions\.test\.ts$/,
+  /^src\/server\/services\/orchestration\/orchestrator-sessions\.ts$/,
+  /^src\/server\/bootstrap\/mcp-tools\.ts$/,
+  /^src\/server\/bootstrap\/mcp-tools\.test\.ts$/,
+  /^src\/server\/services\/orchestration\/decision-items\.ts$/,
+  /^src\/server\/routes\/decisions-route\.test\.ts$/,
+];
 
 /**
  * Class 2 — scan every src/**\/*.{ts,tsx} line for planning-process vocabulary.
  * @remarks Files in `LOOP_FORMAT_FILES` parse roadmap loop files, so `.planning/`, ROADMAP and phase lines are their input format and skip those patterns only.
+ * Files in `ROADMAP_TOOL_FILES` serve the orchestrator's roadmap approval tool, whose route and texts name the roadmap, so they skip ROADMAP only.
  * @returns Violation report lines.
  */
 function checkPlanningVocabulary() {
@@ -225,8 +238,10 @@ function checkPlanningVocabulary() {
   for (const file of walkTsFiles(SRC_DIR)) {
     const lines = readFileSync(file, "utf8").split("\n");
     const loopFormat = LOOP_FORMAT_FILES.some((re) => re.test(file));
+    const roadmapTool = ROADMAP_TOOL_FILES.some((re) => re.test(file));
     const applies = ({ name }) =>
-      !(loopFormat && LOOP_FORMAT_PATTERNS.has(name));
+      !(loopFormat && LOOP_FORMAT_PATTERNS.has(name)) &&
+      !(roadmapTool && name === "ROADMAP");
     let inDoc = false;
     lines.forEach((line, i) => {
       if (line.includes("/**")) inDoc = true;
