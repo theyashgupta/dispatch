@@ -33,7 +33,10 @@ interface TodayPageProps {
 export function TodayContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
-  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const board = useBoardSnapshot(
+    useAppStore(appStore, (s) => s.board),
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
   const errorsInFeeds = useAppStore(appStore, (s) => s.errorsInFeeds);
   const items = useItems(board);
   const enabledSources = board?.enabledSources;

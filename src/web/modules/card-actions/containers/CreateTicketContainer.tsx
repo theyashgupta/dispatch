@@ -23,9 +23,12 @@ export function CreateTicketContainer({
   onClose,
   onFromMeetingNotes,
 }: CreateTicketContainerProps) {
+  const { appStore } = useRouteContext({ from: "__root__" });
   const { open, requestClose, onOpenChange } = useDialogClose(onClose);
   const draftMutation = useGenerateTicketDraftMutation();
-  const createMutation = useCreateLocalTicketMutation();
+  const createMutation = useCreateLocalTicketMutation(
+    useAppStore(appStore, (s) => s.board),
+  );
   const titleRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 

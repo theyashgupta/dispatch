@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { BoardKey } from "../../../../shared/types.js";
 import {
   useAddWorkspaceFolderMutation,
   useDiscoverFolderQuery,
@@ -35,10 +36,13 @@ export interface WorkspacePicker {
  * @remarks
  * The ticks and base overrides belong to the folder they were made in, so picking a folder, even the same one, starts them again and reads its repos again. `onInteraction` runs on every change the user makes, so a stale failure clears.
  */
-export function useWorkspacePicker(onInteraction: () => void): WorkspacePicker {
-  const foldersQuery = useWorkspaceFoldersQuery();
-  const addMutation = useAddWorkspaceFolderMutation();
-  const removeMutation = useRemoveWorkspaceFolderMutation();
+export function useWorkspacePicker(
+  board: BoardKey,
+  onInteraction: () => void,
+): WorkspacePicker {
+  const foldersQuery = useWorkspaceFoldersQuery(board);
+  const addMutation = useAddWorkspaceFolderMutation(board);
+  const removeMutation = useRemoveWorkspaceFolderMutation(board);
   const browser = useFolderBrowser();
   const [selection, setSelection] = useState<RepoSelection>(NO_SELECTION);
   const [seededFolder, setSeededFolder] = useState<string | null>(null);
@@ -50,6 +54,7 @@ export function useWorkspacePicker(onInteraction: () => void): WorkspacePicker {
     selection.folder,
   );
   const discover = useDiscoverFolderQuery(
+    board,
     selectedFolder,
     selectedFolder !== null && selectedFolder === seededFolder,
   );

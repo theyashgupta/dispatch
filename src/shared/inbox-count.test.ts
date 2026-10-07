@@ -1,3 +1,4 @@
+import { DEFAULT_BOARD_KEY } from "./board-key.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Card, Item } from "./types.js";
@@ -5,6 +6,7 @@ import { inboxWaitingCount, isInboxWaiting } from "./inbox-count.js";
 
 const card = (id: string, extra: Partial<Card> = {}): Card => ({
   id,
+  boardKey: DEFAULT_BOARD_KEY,
   issueId: id,
   identifier: id,
   title: id,

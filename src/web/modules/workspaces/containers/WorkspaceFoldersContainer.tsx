@@ -1,4 +1,4 @@
-import type { DiscoveredRepo } from "../../../../shared/types.js";
+import type { BoardKey, DiscoveredRepo } from "../../../../shared/types.js";
 import { WorkspaceFolders } from "@/modules/workspaces/components/WorkspaceFolders";
 import {
   useAddWorkspaceFolderMutation,
@@ -7,18 +7,20 @@ import {
 } from "@/queries/workspace-folders-queries";
 
 interface WorkspaceFoldersContainerProps {
+  board: BoardKey;
   folders: { path: string; repos: DiscoveredRepo[] }[];
   onChanged: () => void;
   onActionError: (message: string | null) => void;
 }
 
 export function WorkspaceFoldersContainer({
+  board,
   folders,
   onChanged,
   onActionError,
 }: WorkspaceFoldersContainerProps) {
-  const add = useAddWorkspaceFolderMutation();
-  const remove = useRemoveWorkspaceFolderMutation();
+  const add = useAddWorkspaceFolderMutation(board);
+  const remove = useRemoveWorkspaceFolderMutation(board);
   const browser = useFolderBrowser();
 
   const addFolder = async (path: string): Promise<string | null> => {

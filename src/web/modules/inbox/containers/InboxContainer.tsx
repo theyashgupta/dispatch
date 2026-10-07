@@ -23,7 +23,11 @@ import {
   bindShortcuts,
 } from "../../../../shared/shortcuts.js";
 import type { SnoozePreset } from "../../../../shared/snooze.js";
-import type { BoardSnapshot, Item } from "../../../../shared/types.js";
+import type {
+  BoardKey,
+  BoardSnapshot,
+  Item,
+} from "../../../../shared/types.js";
 import {
   stampLastOpened,
   useLastOpened,
@@ -59,6 +63,7 @@ import {
 } from "@/modules/inbox/queries/inbox-queries";
 
 interface InboxPageProps {
+  boardKey: BoardKey;
   board: BoardSnapshot;
   items: Item[];
   selectedCardId: string | null;
@@ -74,7 +79,11 @@ export function InboxContainer({
 }: Pick<InboxPageProps, "scopeId" | "renderSlackThread">) {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
-  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const boardKey = useAppStore(appStore, (s) => s.board);
+  const board = useBoardSnapshot(
+    boardKey,
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
   const errorsInFeeds = useAppStore(appStore, (s) => s.errorsInFeeds);
   const selectedId = useAppStore(appStore, (s) => s.selectedCardId);
   const pinned = useAppStore(appStore, (s) => s.pinned);
@@ -90,6 +99,7 @@ export function InboxContainer({
   const services = useMemo(
     () =>
       actionServices({
+        board: boardKey,
         showUndo: appStore.showUndo,
         notice: appStore.notice,
         openStart: appStore.openStart,
@@ -98,11 +108,12 @@ export function InboxContainer({
             href: routeHash({ page: "ask", id: question }).slice(1),
           }),
       }),
-    [appStore, router],
+    [appStore, router, boardKey],
   );
   if (board == null) return null;
   return (
     <InboxPage
+      boardKey={boardKey}
       board={board}
       items={rows}
       selectedCardId={
@@ -121,6 +132,7 @@ export function InboxContainer({
 }
 
 function InboxPage({
+  boardKey,
   board,
   items,
   selectedCardId,
@@ -132,7 +144,7 @@ function InboxPage({
   const lastOpened = useLastOpened();
   const { mutateAsync: setItemState } = useSetItemStateMutation();
   const { mutateAsync: snoozeItem } = useSnoozeItemMutation();
-  const { mutateAsync: promoteItem } = usePromoteItemMutation();
+  const { mutateAsync: promoteItem } = usePromoteItemMutation(boardKey);
   const [search, setSearch] = useState("");
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
   const [range, setRange] = useState<InboxRange>("all");

@@ -11,6 +11,11 @@ import type {
   Card as CardModel,
   UnwindDestination,
 } from "../../../../shared/types.js";
+import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
+import {
+  boardSearch,
+  cardBoardSwitch,
+} from "../../../../shared/board-select.js";
 import { askAboutQuestion } from "../../../../shared/ask.js";
 import { cardIdentifiers as identifiersOf } from "../../../../shared/card-identifiers.js";
 import { membersOf } from "../../../../shared/group-members.js";
@@ -25,7 +30,7 @@ import {
 } from "../../../../shared/start-request.js";
 import { undoToastCopy } from "../../../../shared/undo-toast.js";
 import { accountsQueryOptions } from "@/queries/accounts-queries";
-import { activityFeedQueryOptions } from "@/queries/activity-queries";
+import { useActivityFeedQuery } from "@/queries/activity-queries";
 import { restoreArchived } from "@/queries/archive-api";
 import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 import { getCard, unwindGroup } from "@/queries/cards-api";
@@ -80,15 +85,18 @@ export function DetailPanelContainer() {
   const leaf = useRouterState({ select: (s) => s.matches.at(-1) });
   const pathname = useLocation({ select: (l) => l.pathname });
   const docked = routeFromMatch(leaf, pathname).page === "workspace";
-  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const boardKey = useAppStore(appStore, (s) => s.board);
+  const board = useBoardSnapshot(
+    boardKey,
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
   const selectedCardId = useAppStore(appStore, (s) => s.selectedCardId);
   const pinned = useAppStore(appStore, (s) => s.pinned);
   const pinnedHydrating = useAppStore(appStore, (s) => s.pinnedHydrating);
   const pinFetchErrorState = useAppStore(appStore, (s) => s.pinFetchError);
   const pinFetch = useAppStore(appStore, (s) => s.pinFetch);
   const { data: accountsData } = useQuery(accountsQueryOptions());
-  const { data: activityEvents } = useQuery({
-    ...activityFeedQueryOptions(),
+  const { data: activityEvents } = useActivityFeedQuery(boardKey, {
     refetchOnMount: false,
   });
 
@@ -163,6 +171,23 @@ export function DetailPanelContainer() {
   }, [pinFetch, appStore]);
 
   const open = card != null;
+
+  const selectedBoardRef = useRef(boardKey);
+  useEffect(() => {
+    selectedBoardRef.current = boardKey;
+  });
+  const cardId = card?.id;
+  const cardBoard = card?.boardKey;
+  useEffect(() => {
+    if (cardId === undefined) return;
+    const target = cardBoardSwitch(cardBoard, selectedBoardRef.current);
+    if (target === null) return;
+    void router.navigate({
+      to: ".",
+      search: (prev) => ({ ...prev, ...boardSearch(target) }),
+      replace: true,
+    });
+  }, [cardId, cardBoard, router]);
 
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -312,6 +337,7 @@ export function DetailPanelContainer() {
       )}
       {c && (
         <CardTimelineContainer
+          board={c.boardKey ?? DEFAULT_BOARD_KEY}
           cardId={c.id}
           events={activityEvents ?? []}
           identifiers={cardIdentifiers}

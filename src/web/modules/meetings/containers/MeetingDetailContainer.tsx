@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+import { useRouteContext } from "@tanstack/react-router";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import type { Item } from "../../../../shared/types.js";
 import {
   SNOOZE_LABELS,
@@ -34,8 +36,10 @@ export function MeetingDetailContainer({
 }: MeetingDetailContainerProps) {
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
-  const promote = usePromoteItemMutation();
-  const runAgent = useRunMeetingAgentMutation();
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const board = useAppStore(appStore, (s) => s.board);
+  const promote = usePromoteItemMutation(board);
+  const runAgent = useRunMeetingAgentMutation(board);
   const setState = useSetItemStateMutation();
   const snooze = useSnoozeItemMutation();
   const prior = item.state === "unread" ? "unread" : "read";

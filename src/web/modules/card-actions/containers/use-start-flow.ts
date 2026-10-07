@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, type RefObject } from "react";
+import type { BoardKey } from "../../../../shared/types.js";
 import { usePlaybookPicker, type PlaybookPicker } from "./use-playbook-picker";
 import {
   useWorkspacePicker,
@@ -17,6 +18,7 @@ import {
 type StartOutcome = { ok: true } | ({ ok: false } & Refusal);
 
 interface StartFlowInput {
+  board: BoardKey;
   open: boolean;
   requestClose: () => void;
   pending: boolean;
@@ -47,6 +49,7 @@ interface StartFlow {
  */
 export function useStartFlow(input: StartFlowInput): StartFlow {
   const {
+    board,
     open,
     requestClose,
     pending,
@@ -60,7 +63,7 @@ export function useStartFlow(input: StartFlowInput): StartFlow {
   const submittingRef = useRef(false);
 
   const clearFailure = useCallback(() => setFailure(null), []);
-  const workspace = useWorkspacePicker(clearFailure);
+  const workspace = useWorkspacePicker(board, clearFailure);
   const playbook = usePlaybookPicker(clearFailure);
 
   const startable =

@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { useRouteContext } from "@tanstack/react-router";
+import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import { LINEAR_CONNECTION } from "../../../../shared/connection-meta.js";
 import {
   nextStep,
@@ -56,7 +57,7 @@ export function SetupWizardContainer({
   const [installState, setInstallState] = useState<RowInstalls>({});
   const linear = useSourceConnectionQuery(LINEAR_CONNECTION.source);
   const install = useRunPrerequisiteInstallMutation();
-  const addFolder = useAddWorkspaceFolderMutation();
+  const addFolder = useAddWorkspaceFolderMutation(DEFAULT_BOARD_KEY);
   const browser = useFolderBrowser();
   const linearSeenRef = useRef<LinearSeen>({ baseline: null, latest: null });
   const closedRef = useRef(false);

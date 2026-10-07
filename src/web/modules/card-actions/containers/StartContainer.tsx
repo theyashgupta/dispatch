@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useRouteContext, useRouter } from "@tanstack/react-router";
+import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import { actionablePinnedCard } from "../../../../shared/pinned-card.js";
 import { routeHash } from "../../../../shared/route.js";
 import type { Card } from "../../../../shared/types.js";
@@ -36,6 +37,7 @@ export function StartContainer({
   const [inherit, setInherit] = useState(false);
 
   const flow = useStartFlow({
+    board: card.boardKey ?? DEFAULT_BOARD_KEY,
     open,
     requestClose,
     pending: start.isPending,
@@ -82,7 +84,10 @@ export function StartContainer({
 export function StartRequestContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
-  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const board = useBoardSnapshot(
+    useAppStore(appStore, (s) => s.board),
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
   const request = useAppStore(appStore, (s) => s.start);
   const pinned = useAppStore(appStore, (s) => s.pinned);
   const card =
