@@ -58,6 +58,8 @@ const DANGEROUS_RM = /Dangerous rm operation/;
 const PEER_DELIVER = /Deliver this message to Claude/;
 const PEER_DENY = /^\s*❯\s*Deny\b/;
 const ESC_TO_CANCEL = /Esc to cancel/i;
+const RULE_LINE = /^\s*─{3,}/;
+const MODE_ROW = /^[!#&]/;
 const NEEDS_INPUT_MARKER = /^\s*DISPATCH_STATUS:\s*NEEDS_INPUT\b/;
 const HANDOFF_LINE = /^\s*(⏺\s*)?HANDOFF_READY\s+[\w.-]+\s*$/;
 const COMPLETE_PROMISE = /<promise>ROADMAP COMPLETE\b/;
@@ -171,16 +173,30 @@ function inputLineAt(lines: readonly string[]): number {
 }
 
 /**
- * Whether a typed line would land in the input box: an input line is drawn, nothing below it says
- * `warming up`, and no dialog or menu is open under it.
+ * Whether the input box row is the prompt line at `inputAt`, not a row left in an input mode.
+ *
+ * @remarks The box row is the first row between the last two rule lines. A capture with no such
+ * rules falls back to refusing a row that starts with `!`, `#` or `&` under the prompt line, as
+ * a box in bash, memory or background mode draws that character in place of the prompt.
+ */
+function promptIsInputRow(lines: readonly string[], inputAt: number): boolean {
+  const rules = lines.flatMap((l, i) => (RULE_LINE.test(l) ? [i] : []));
+  if (rules.length >= 2) return (rules.at(-2) ?? -1) + 1 === inputAt;
+  return !lines.slice(inputAt + 1).some((l) => MODE_ROW.test(l));
+}
+
+/**
+ * Whether a typed line would land in the input box: an input line is drawn as the box row, nothing
+ * below it says `warming up`, and no dialog or menu is open under it.
  *
  * @remarks A dialog draws under the input line, and an `Enter` or a digit typed into it would pick a
- * row, a credits row of the usage limit menu included.
+ * row, a credits row of the usage limit menu included. A box left in bash mode would run the line
+ * as a shell command.
  */
 export function paneReady(pane: string): boolean {
   const lines = pane.split("\n");
   const inputAt = inputLineAt(lines);
-  if (inputAt < 0) return false;
+  if (inputAt < 0 || !promptIsInputRow(lines, inputAt)) return false;
   const below = lines.slice(inputAt + 1);
   return (
     openDialog(below) === null &&

@@ -12,7 +12,12 @@ import {
 import { paneBusy, paneReady } from "../domain/supervisor-state.js";
 import { readLoopFile } from "./loop-progress-reader.js";
 import { giveUp, record, rootOf } from "./supervisor-record.js";
-import { sendConfirmed, SEND_TIMING, waitFor } from "./supervisor-send.js";
+import {
+  sendConfirmed,
+  SEND_TIMING,
+  waitFor,
+  type SendResult,
+} from "./supervisor-send.js";
 import { sessionTranscriptPath } from "./supervisor-transcript.js";
 
 export interface HandoffTiming {
@@ -97,18 +102,28 @@ export async function checkHandoffThreshold(
   const hard = percent >= policy.handoffHardPercent && !hardSent;
   if (crossings.has(session.id) && !hard) return;
   crossings.set(session.id, hardSent || hard);
-  const result = await sendConfirmed(
+  await sendHandoffRequest(card, session, progress.slug, hard, {
+    contextPercent: percent,
+  });
+}
+
+/** Send the handoff request of a loop and record its `handoff_request` row. */
+export async function sendHandoffRequest(
+  card: Card,
+  session: Session,
+  slug: string,
+  hard: boolean,
+  data: Record<string, unknown>,
+  send: typeof sendConfirmed = sendConfirmed,
+): Promise<SendResult> {
+  const result = await send(
     card,
     session,
-    handoffRequestText(progress.slug, rootOf(card, session), hard),
+    handoffRequestText(slug, rootOf(card, session), hard),
     hard ? "handoff-hard" : "handoff",
   );
-  record(card, session, {
-    action: "handoff_request",
-    hard,
-    contextPercent: percent,
-    result,
-  });
+  record(card, session, { action: "handoff_request", hard, ...data, result });
+  return result;
 }
 
 /**

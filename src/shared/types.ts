@@ -347,6 +347,8 @@ export interface Card {
   transcriptPath?: string;
   dependsOn?: string[];
   startQueued?: boolean;
+  createdByOrchestrator?: string;
+  launch?: { playbook?: string; direction: string };
   /**
    * The id of this card's ACTIVE session within `sessions` — the one the six flat fields mirror.
    * Paired 1:1 with `sessions` being present; absent on a card that has never carried session
@@ -388,6 +390,7 @@ export interface Card {
    */
   sessionSummaries?: SessionSummary[];
   loopProgress?: LoopProgress;
+  shipFlow?: ShipFlow;
   /**
    * Set when the card's `dsp-<identifier>` tmux session is gone — by boot reconcile (session
    * absent from the live `list-sessions` set after a reboot) AND by the Plan-02 watcher's
@@ -1759,12 +1762,58 @@ export interface LoopProgress {
   readAt: string;
 }
 
-export type OrchestrationEventKind =
-  | "loop_gate"
-  | "supervisor_state"
-  | "supervisor_action"
-  | "pr_state"
-  | "machine_wake";
+export type ShipBranchState =
+  | "queued"
+  | "merging_main"
+  | "checking"
+  | "pushing"
+  | "waiting_checks"
+  | "waiting_merge"
+  | "merging"
+  | "verifying"
+  | "merged"
+  | "failed";
+
+export interface ShipBranch {
+  name: string;
+  title: string;
+  body: string;
+  state: ShipBranchState;
+  pr: number | null;
+  checks: "pending" | "passed" | "failed" | null;
+  identity: "passed" | "failed" | null;
+  admin: boolean;
+  tip: string | null;
+  checked: string | null;
+}
+
+export interface ShipFlow {
+  state: "running" | "stopped" | "done";
+  rights: "open_prs" | "merge";
+  repository: string;
+  repo: string | null;
+  orchestratorId: string;
+  identity: { name: string; email: string };
+  branches: ShipBranch[];
+  failedStep: ShipBranchState | null;
+  reason: string | null;
+  decisionId: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export const ORCHESTRATION_EVENT_KINDS = [
+  "loop_gate",
+  "supervisor_state",
+  "supervisor_action",
+  "pr_state",
+  "machine_wake",
+  "tool_call",
+  "decision_raised",
+  "decision_answered",
+] as const;
+
+export type OrchestrationEventKind = (typeof ORCHESTRATION_EVENT_KINDS)[number];
 
 export type SupervisorState =
   | "working"
@@ -1795,6 +1844,29 @@ export interface OrchestrationEvent {
   kind: OrchestrationEventKind;
   data: Record<string, unknown>;
   ts: string;
+}
+
+export const DECISION_KINDS = [
+  "roadmap_approval",
+  "ruling",
+  "ship_failure",
+  "other",
+] as const;
+
+export interface DecisionItem {
+  id: string;
+  boardKey: BoardKey;
+  cardId: string | null;
+  orchestratorId: string;
+  kind: (typeof DECISION_KINDS)[number];
+  question: string;
+  options: { id: string; label: string }[];
+  recommendedOptionId: string | null;
+  state: "open" | "answered";
+  answer: { optionId: string; note: string | null } | null;
+  createdAt: string;
+  answeredAt: string | null;
+  consumedAt?: string;
 }
 
 export interface SessionMeters {

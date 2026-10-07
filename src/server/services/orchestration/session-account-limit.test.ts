@@ -85,7 +85,7 @@ function keysSent(): string[] {
     .map((l) => l.split("\t"))
     .filter((c) => c[0] === "send-keys")
     .map((c) =>
-      c[1] === "-l" ? `literal:${c.slice(4).join(" ")}` : c.slice(3).join(" "),
+      c[1] === "-l" ? `literal:${c.slice(5).join(" ")}` : c.slice(3).join(" "),
     );
 }
 

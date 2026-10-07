@@ -15,10 +15,13 @@ import type {
   Column,
   ColumnChange,
   CreateBoardResult,
+  DecisionItem,
   EventType,
   Item,
+  LinearComment,
   NewBoard,
   LoopProgress,
+  ShipFlow,
   OrchestrationEvent,
   PreviewInfo,
   PrInfo,
@@ -38,7 +41,7 @@ import type {
   UnwindDestination,
   WorkflowState,
 } from "../../shared/types.js";
-import type { PushSubscriptionRow } from "./board-db.js";
+import type { OrchestratorTokenRow, PushSubscriptionRow } from "./board-db.js";
 import { store, type ReservedSession } from "./board.store.js";
 
 export {
@@ -50,6 +53,7 @@ export {
 
 export interface BoardRepository {
   on: EventEmitter["on"];
+  off: EventEmitter["off"];
   setHookTokenReleaser(
     release: (
       token: string,
@@ -94,6 +98,12 @@ export interface BoardRepository {
     cardId: string | null,
     limit: number,
   ): ActivityEvent[];
+  listEventsSince(
+    board: BoardKey,
+    cardId: string | null,
+    sinceId: number,
+    limit: number,
+  ): ActivityEvent[];
   setLoopProgress(cardId: string, progress: LoopProgress): Promise<void>;
   appendOrchestrationEvent(
     e: Omit<OrchestrationEvent, "id">,
@@ -103,6 +113,24 @@ export interface BoardRepository {
     sinceId: number,
     limit: number,
   ): OrchestrationEvent[];
+  replaceOrchestratorToken(
+    tokenHash: string,
+    boardKey: BoardKey,
+    orchestratorId: string,
+  ): void;
+  revokeOrchestratorTokens(boardKey: BoardKey, orchestratorId: string): number;
+  findOrchestratorToken(tokenHash: string): OrchestratorTokenRow | undefined;
+  insertDecisionItem(item: DecisionItem): void;
+  getDecisionItem(id: string): DecisionItem | undefined;
+  listDecisionItems(
+    boardKey: BoardKey,
+    state?: DecisionItem["state"],
+  ): DecisionItem[];
+  answerDecisionItem(
+    id: string,
+    answer: NonNullable<DecisionItem["answer"]>,
+  ): DecisionItem | null;
+  consumeDecisionItem(id: string): boolean;
   addPushSubscription(sub: PushSubscriptionRow): boolean;
   removePushSubscription(endpoint: string): boolean;
   listPushSubscriptions(): PushSubscriptionRow[];
@@ -318,6 +346,16 @@ export interface BoardRepository {
     id: string,
     queue: { startQueued: boolean; dependsOn?: string[] },
   ): Promise<void>;
+  setOrchestratorFields(
+    id: string,
+    fields: Pick<Card, "createdByOrchestrator" | "launch">,
+  ): Promise<void>;
+  setShipFlow(id: string, flow: ShipFlow): Promise<void>;
+  updateLocalCardText(
+    id: string,
+    patch: { title?: string; description?: string },
+  ): Promise<boolean>;
+  addLocalComment(id: string, comment: LinearComment): Promise<boolean>;
   createLocalCard(
     board: BoardKey,
     title: string,

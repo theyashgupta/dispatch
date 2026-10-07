@@ -134,10 +134,39 @@ export function isLiveSessionCard(card: Card): boolean {
   );
 }
 
+/** True for a card that is not Done and has a live session, a provisioning step or a start in flight. */
+export function isRunningCard(card: Card): boolean {
+  return (
+    card.column !== "done" &&
+    (isLiveSessionCard(card) ||
+      card.provisioningStep != null ||
+      store.isStarting(card.id))
+  );
+}
+
+/** The number of running group loops on a board, without the card `exceptId` when given. */
+export function runningLoops(board: BoardKey, exceptId?: string): number {
+  return store
+    .listCards(board)
+    .filter(
+      (c) => c.source === "group" && c.id !== exceptId && isRunningCard(c),
+    ).length;
+}
+
+/** True for a dependency group in Done, or with at least one PR and every PR merged. */
+export function dependencyDone(id: string): boolean {
+  const dep = store.getCard(id);
+  if (!dep) return false;
+  if (dep.column === "done") return true;
+  const prs = dep.prs ?? [];
+  return prs.length > 0 && prs.every((pr) => pr.state === "merged");
+}
+
 interface CardListFilters {
   column?: Column;
   source?: string;
   hasSession?: boolean;
+  text?: string;
 }
 
 /**
@@ -158,10 +187,19 @@ export function listBoardCards(
         (filters.source === undefined ||
           (card.source ?? "linear") === filters.source) &&
         (filters.hasSession === undefined ||
-          hasSession(card) === filters.hasSession),
+          hasSession(card) === filters.hasSession) &&
+        (filters.text === undefined || matchesText(card, filters.text)),
     )
     .map(redactCard);
   return { cards, total: cards.length };
+}
+
+function matchesText(card: Card, text: string): boolean {
+  const needle = text.toLowerCase();
+  return (
+    card.title.toLowerCase().includes(needle) ||
+    card.identifier.toLowerCase().includes(needle)
+  );
 }
 
 function hasSession(card: Card): boolean {

@@ -21,6 +21,14 @@ export const boundedText = (max: number, code: string) =>
     .transform((raw) => raw.trim())
     .refine((text) => text !== "" && text.length <= max, code);
 
+/** Digit-only text as a safe integer, with `code` as the issue. */
+export const intText = (code: string) =>
+  z
+    .string(code)
+    .regex(/^\d+$/, code)
+    .transform(Number)
+    .refine(Number.isSafeInteger, code);
+
 /** A lenient `{ force }` body that never fails; only a boolean `true` is force. */
 export const forceBodySchema = z.preprocess(
   fieldsOf,

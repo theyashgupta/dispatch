@@ -30,6 +30,29 @@ export class NotFoundError extends HttpError {
   }
 }
 
+export class UnauthorizedError extends HttpError {
+  constructor(code: string, details?: Record<string, unknown>) {
+    super(401, code, details);
+  }
+}
+
+export class ForbiddenError extends HttpError {
+  constructor(code: string, details?: Record<string, unknown>) {
+    super(403, code, details);
+  }
+}
+
+export class PolicyError extends HttpError {
+  /**
+   * Build the 403 for a request that a board policy refuses.
+   *
+   * @remarks `reason` goes in `details`, so the error handler puts it in the body beside `error`.
+   */
+  constructor(reason: string, details?: Record<string, unknown>) {
+    super(403, "policy-refused", { ...details, reason });
+  }
+}
+
 export class ConflictError extends HttpError {
   constructor(code: string, details?: Record<string, unknown>) {
     super(409, code, details);
