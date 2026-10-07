@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { COLUMNS, type Column } from "../../shared/types.js";
+import { MOVABLE_COLUMNS } from "../../shared/orchestrator-limits.js";
 import { validateCommentBody } from "../../shared/comment-body.js";
 import { hasDispatchMarker } from "../services/infra/playbooks.js";
 import {
@@ -21,7 +21,6 @@ const MAX_DIRECTION_LEN = 10000;
 const MAX_GROUP_TITLE_MEMBERS = 50;
 const STATE_ID_CODE = "stateId must be a string of 1 to 200 characters";
 const MEMBER_IDS_CODE = "memberIds must be an array of >=2 distinct card ids";
-const MOVABLE_COLUMNS: readonly Column[] = [...COLUMNS, "inbox"];
 const COLUMN_CODE = `invalid column; must be one of: ${MOVABLE_COLUMNS.join(", ")}`;
 const EDITOR_CODE = "invalid editor; must be one of: code, cursor";
 
@@ -34,7 +33,7 @@ const optionalNonEmpty = z
   .catch(undefined);
 
 /** At least two distinct string ids, and at most `max`, with `code` as the issue. */
-const distinctIds = (max: number, code: string) =>
+export const distinctIds = (max: number, code: string) =>
   z
     .array(z.string(code), code)
     .refine(

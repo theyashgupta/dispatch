@@ -5,30 +5,34 @@ import {
   type Request,
   type Response,
 } from "express";
-import type { BoardKey, Card, Column } from "../../shared/types.js";
-import { isDemoteEligible } from "../../shared/demote-eligibility.js";
+import type { Card } from "../../shared/types.js";
 import {
   redactArchivedGroup,
   redactCard,
   boardRepository as store,
 } from "../store/board-repository.js";
-import {
-  blocksAgentDoneManualEntry,
-  blocksTodoToInProgressManualMove,
-  isManualMoveAllowed,
-} from "../../shared/column-transitions.js";
 import { startSession } from "../services/orchestration/start-session.js";
+import {
+  createGroup,
+  startGroup,
+} from "../services/orchestration/group-launch.js";
+import { restatRepos } from "../services/orchestration/workspaces.js";
+import { createTicket } from "../services/orchestration/ticket-create.js";
 import {
   reconnectTerminal,
   resumeSession,
 } from "../services/orchestration/resume-session.js";
 import { cleanupWorkspace } from "../services/orchestration/cleanup.js";
+import {
+  actionableCard,
+  groupedMemberError,
+  moveCard,
+} from "../services/orchestration/card-move.js";
 import { unwindGroup } from "../services/orchestration/unwind.js";
 import { resetCard } from "../services/orchestration/reset.js";
 import { runClaude } from "../services/orchestration/run-claude.js";
 import { editorPath, launchEditor } from "../adapters/editors.js";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
-import { restatRepos } from "../services/orchestration/workspaces.js";
 import {
   loadPlaybooks,
   hasDispatchMarker,
@@ -36,7 +40,6 @@ import {
 import {
   ConflictError,
   HttpError,
-  InternalError,
   NotFoundError,
   UpstreamError,
   ValidationError,
@@ -54,13 +57,7 @@ import {
   assignToMe,
   moveLinearState,
   postComment,
-  pushColumnChanges,
 } from "../services/orchestration/linear-outbound.js";
-import {
-  stageAttachments,
-  commitAttachments,
-  discardStaged,
-} from "../services/infra/attachments.js";
 import { attachmentsDir } from "../services/infra/paths.js";
 import { enabledSource } from "../adapters/source-gateway.js";
 import {
@@ -82,81 +79,14 @@ import {
 import { httpErrorHandler } from "./error-handler.js";
 import { parseOrThrow } from "./parse-input.js";
 import { forceBodySchema } from "./schema-primitives.js";
-import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 import {
   listBoardCards,
-  mapBoardUnavailable,
   resolveBoard,
   resolveBoardForCreate,
 } from "../services/orchestration/boards.js";
 import { parseBoardParam } from "./boards-schemas.js";
 
 export const cardsRouter = Router();
-
-/**
- * Server-side enforcement of the sanctioned inbox transitions, mirroring the client gates so one
- * curl can't bypass what the UI enforces (the same posture `/start` takes with its promote-first
- * 409): from the Inbox the ONLY legal move is promotion to To Do — anything else would skip the
- * promote-first rule and the `promotedAt` stamp, and could park a marker-reachable card in a view
- * with zero session affordances; INTO the Inbox only a To Do card that passes the shared
- * `isDemoteEligible` predicate (no session history, no start saga) may travel, and an in-flight
- * start additionally 409s via `store.isStarting` — the same guard `/resume` and `/cleanup` apply.
- * Board-to-board moves are deliberately untouched. Returns the 409 copy, or null when legal.
- */
-function inboxTransitionError(card: Card, column: Column): string | null {
-  if (card.column === "inbox" && column !== "todo")
-    return "inbox cards can only be promoted to To Do";
-  if (column !== "inbox") return null;
-  if (card.column !== "todo") return "only To Do cards can be moved to Inbox";
-  if (store.isStarting(card.id)) return "a start is in flight for this card";
-  if (!isDemoteEligible(card))
-    return "cards with session history cannot be moved to Inbox";
-  return null;
-}
-
-/**
- * `BOARD-07`'s route-side mirror: reads the SAME `isManualMoveAllowed` predicate
- * `moveCardManual` consults, so the 409 message and the store's silent guard can never disagree
- * about which pairs are blocked. The named predicates only choose which message applies; they are
- * never a second, independent decision.
- * @remarks The fallthrough is a REFUSAL, not a pass. `isManualMoveAllowed` is the growth point for
- * the blocked set, and the two named predicates below only exist to phrase the two pairs blocked
- * today. A rule added to the allowlist without a matching message here must still 409 — returning
- * `null` would hand the caller a 200 while `moveCardManual` silently no-ops, reinstating at the
- * route layer exactly the invisible refusal `BOARD-07` exists to remove.
- */
-function manualMoveTransitionError(card: Card, column: Column): string | null {
-  if (isManualMoveAllowed(card.column, column)) return null;
-  if (blocksAgentDoneManualEntry(column))
-    return "Agent Done is set automatically by a real agent completion signal. It is never a manual move target";
-  if (blocksTodoToInProgressManualMove(card.column, column))
-    return "starting a To Do card requires the start flow: drag it to In Progress (or use Start) rather than posting a bare move";
-  return `moving ${card.column} → ${column} is not an allowed manual transition`;
-}
-
-/**
- * GROUP-03 as a SERVER invariant, not a UI convention: a grouped member is never independently
- * progressable, including during the pre-start/failed-start window where it still sits in To Do
- * (session/workspace fields live only on the group card). Called at the top of every single-card
- * action handler, right after the card-exists lookup and before any other validation — the same
- * `isStarting`/inbox-guard 409 posture this file already uses. Returns `null` for an ungrouped card
- * (including the group card itself, which never carries `groupId`).
- */
-function groupedMemberError(card: Card): string | null {
-  if (card.groupId == null) return null;
-  return `card is grouped under ${card.groupId}, act on the group card`;
-}
-
-/**
- * The card a single-card action targets, or a 400 for an unknown id and a 409 for a grouped member.
- */
-function actionableCard(id: string): Card {
-  const card = store.getCard(id);
-  if (!card) throw new ValidationError(`unknown card id: ${id}`);
-  const groupError = groupedMemberError(card);
-  if (groupError != null) throw new ConflictError(groupError);
-  return card;
-}
 
 /**
  * `GET /api/cards/:id` — a single-card fetch for a search result outside the loaded window
@@ -216,17 +146,8 @@ cardsRouter.post("/cards/:id/linear-state", async (req, res) => {
 });
 
 cardsRouter.post("/cards/:id/move", async (req, res) => {
-  const { id } = req.params;
   const { column } = parseOrThrow(moveBodySchema, req.body);
-  const card = actionableCard(id);
-
-  const transitionError = inboxTransitionError(card, column);
-  if (transitionError != null) throw new ConflictError(transitionError);
-
-  const manualMoveError = manualMoveTransitionError(card, column);
-  if (manualMoveError != null) throw new ConflictError(manualMoveError);
-
-  void pushColumnChanges(await store.moveCardManual(id, column));
+  await moveCard(req.params.id, column);
   res.status(204).end();
 });
 
@@ -485,102 +406,23 @@ async function runCleanupFanOut(id: string, force: boolean): Promise<void> {
 }
 
 /**
- * Server-side re-validation for a `POST /cards/group` member id: the client's `GroupStartModal`
- * selection is a frozen snapshot, so every id is re-checked against the LIVE store at submit time,
- * never trusted (a TOCTOU defense — a member could be started/removed/grouped elsewhere between
- * selection and submit). Distinct from `inboxTransitionError`'s shape (returns the FIRST failing
- * id's reason via the caller's loop) since the route must collect every offending id for the 409
- * `ineligibleIds` list, not just fail fast on the first.
- */
-function memberIneligibleReason(
-  card: Card | undefined,
-  board: BoardKey,
-): string | null {
-  if (!card) return "unknown card id";
-  if ((card.boardKey ?? DEFAULT_BOARD_KEY) !== board) return "on another board";
-  if (card.column !== "todo") return "not in To Do";
-  if (card.groupId != null) return "already grouped";
-  if (card.source === "group") return "is itself a group";
-  return null;
-}
-
-/**
- * Atomic group create+start (Phase 63, GROUP-01/03/04): validates `title` (ITEM_TITLE_MAX +
- * marker screening, the `POST /cards` precedent) and `memberIds` (>=2, distinct, each
- * re-validated live via {@link memberIneligibleReason} as a fast pre-check AND re-checked a
- * second time INSIDE the store's mutation queue by `createGroupCard`, which refuses the whole
- * mint if any member was raced ineligible — all-or-nothing 409 per the ratified
- * ALL-OR-NOTHING posture, Open Question 3), replicates `/cards/:id/start`'s exact
- * playbook/workspace/base-branch/restatRepos checks (the workspace payload is REQUIRED here — a
- * brand-new group card has no prior `card.workspace` to fall back to), then mints the group card
- * and calls the UNMODIFIED `startSession` keyed by its id — the saga itself needs zero
- * group-awareness (it only ever reads `card.workspace`/`card.identifier`).
- * @remarks The 202 body passes the card through {@link redactCard}, never the live `Map` entry.
- * By the time this responds, `setCardWorkspace` has already minted the card's first session
- * record, so serializing the live object would put the whole `sessions` array on the wire — and
- * the per-session `hookToken` with it the moment `startSession`'s internal `await` placement
- * changes. A secret boundary must not depend on the scheduling of a `void`-ed promise in another
- * module, so every card-emitting route reaches the wire through the one redaction chokepoint.
+ * `POST /cards/group`: create a group card from To Do members and start its session.
+ *
+ * @remarks The 202 body passes the card through {@link redactCard}, never the live `Map` entry, so
+ * no session `hookToken` reaches the wire. The service owns every guard and their order.
  */
 async function createGroupHandler(req: Request, res: Response): Promise<void> {
   const { title, memberIds, playbook, extraDirection, workspace } =
     parseOrThrow(createGroupBodySchema, req.body);
   const { key: board } = resolveBoardForCreate(parseBoardParam(req.query));
-
-  const ineligibleIds = memberIds.filter(
-    (id) => memberIneligibleReason(store.getCard(id), board) != null,
-  );
-  if (ineligibleIds.length > 0) {
-    throw new ConflictError(
-      "some selected cards are no longer eligible to be grouped",
-      { ineligibleIds },
-    );
-  }
-
-  const config = getOrchestrationConfig();
-  if (!config) {
-    throw new ValidationError("orchestration config is not loaded", {
-      variant: "config",
-    });
-  }
-
-  if (playbook !== undefined) {
-    const known = (await loadPlaybooks()).some((p) => p.name === playbook);
-    if (!known) {
-      throw new ValidationError("unknown playbook", { variant: "playbook" });
-    }
-  }
-
-  if (!workspace) {
-    throw new ValidationError("No workspace selected for this group", {
-      variant: "config",
-    });
-  }
-
-  if (workspace.repos.some((r) => r.base.startsWith("-"))) {
-    throw new ValidationError("invalid base branch", { variant: "config" });
-  }
-  if (!(await restatRepos(workspace.repos))) {
-    throw new ValidationError("Can't start: a selected repo is missing", {
-      variant: "config",
-    });
-  }
-
-  const groupResult = await store
-    .createGroupCard(board, title, memberIds)
-    .catch((err: unknown) => {
-      throw mapBoardUnavailable(err);
-    });
-  if (!groupResult.ok) {
-    throw new ConflictError(
-      "some selected cards are no longer eligible to be grouped",
-      { ineligibleIds: groupResult.ineligibleIds },
-    );
-  }
-  const groupCard = groupResult.card;
-  await store.setCardWorkspace(groupCard.id, workspace);
-  void startSession(groupCard.id, extraDirection, config, { playbook });
-  res.status(202).json({ started: true, card: redactCard(groupCard) });
+  const card = await createGroup(board, {
+    title,
+    memberIds,
+    playbook,
+    workspace,
+  });
+  void startGroup(card.id, { extraDirection, playbook });
+  res.status(202).json({ started: true, card: redactCard(card) });
 }
 
 /**
@@ -776,37 +618,7 @@ cardsRouter.post("/cards", async (req, res) => {
   );
   const { key: board } = resolveBoardForCreate(parseBoardParam(req.query));
 
-  let staged: string | null;
-  try {
-    staged = await stageAttachments(images);
-  } catch (err) {
-    console.warn("[cards] attachment write failed:", (err as Error).message);
-    throw new InternalError("attachment-write-failed");
-  }
-  const card = await store
-    .createLocalCard(board, title, fullDescription)
-    .catch(async (err: unknown) => {
-      if (staged !== null) {
-        await discardStaged(staged).catch((cleanup: unknown) => {
-          console.warn(
-            "[cards] staged attachment cleanup failed:",
-            (cleanup as Error).message,
-          );
-        });
-      }
-      throw mapBoardUnavailable(err);
-    });
-  if (staged !== null) {
-    try {
-      await commitAttachments(staged, card.id);
-    } catch (err) {
-      console.warn(
-        `[cards] attachment commit failed for ${card.id}:`,
-        (err as Error).message,
-      );
-      throw new InternalError("attachment-write-failed");
-    }
-  }
+  const card = await createTicket(board, { title, fullDescription, images });
   res.status(201).json(redactCard(card));
 });
 
